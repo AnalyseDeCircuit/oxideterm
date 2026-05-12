@@ -240,12 +240,13 @@ impl client::Handler for NativeClientHandler {
         originator_port: u32,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        let Some(handler) = self.remote_forward_handler.read().clone() else {
+        let Some(registration) = self.remote_forward_handler.read().clone() else {
             let _ = channel.eof().await;
             return Ok(());
         };
 
         let event = RemoteForwardedTcpIp {
+            connection_id: registration.connection_id.clone(),
             connected_address: connected_address.to_string(),
             connected_port: connected_port as u16,
             originator_address: originator_address.to_string(),
@@ -253,7 +254,7 @@ impl client::Handler for NativeClientHandler {
             stream: Box::new(channel.into_stream()),
         };
         tokio::spawn(async move {
-            handler.handle_remote_forward(event).await;
+            registration.handler.handle_remote_forward(event).await;
         });
         Ok(())
     }

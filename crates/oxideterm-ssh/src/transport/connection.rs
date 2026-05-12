@@ -131,11 +131,7 @@ impl SshConnectionHandle {
             .tcpip_forward(bind_address, bind_port as u32)
             .await
             .map(|port| port as u16)
-            .map_err(|error| {
-                SshTransportError::ConnectionFailed(format!(
-                    "failed to request remote port forward {bind_address}:{bind_port}: {error}"
-                ))
-            })
+            .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))
     }
 
     pub async fn cancel_remote_tcpip_forward(
@@ -279,7 +275,10 @@ impl SshConnectionHandle {
                 "no active SSH connection is available for remote port forwarding".to_string(),
             ));
         };
-        *pooled.remote_forward_handler.write() = Some(handler);
+        *pooled.remote_forward_handler.write() = Some(RemoteForwardRegistration {
+            connection_id: self.connection_id().to_string(),
+            handler,
+        });
         Ok(())
     }
 

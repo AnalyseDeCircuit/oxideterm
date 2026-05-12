@@ -10,6 +10,13 @@ impl IdeSurface {
             .child(self.render_tabs(cx))
             .child(div().flex_1().min_h_0().child(match self.active_editor() {
                 Some(editor) => editor.into_any_element(),
+                None if self
+                    .workspace
+                    .active_tab()
+                    .is_some_and(|tab_id| self.loading_file_tabs.contains(&tab_id)) =>
+                {
+                    self.render_loading_file()
+                }
                 None => self.render_empty_editor(cx),
             }))
             .into_any_element()
@@ -31,6 +38,7 @@ impl IdeSurface {
         for tab in tabs {
             let active = Some(tab.id) == active_tab;
             let dirty = self.is_tab_dirty(tab.id, cx);
+            let loading = self.loading_file_tabs.contains(&tab.id);
             let tab_id = tab.id;
             let is_dragging = self
                 .tab_drag
@@ -118,7 +126,7 @@ impl IdeSurface {
                             .when(dirty, |this| this.italic())
                             .child(tab.title.clone()),
                     )
-                    .when(dirty, |this| {
+                    .when(dirty && !loading, |this| {
                         this.child(
                             div()
                                 .size(px(6.0))
@@ -126,7 +134,20 @@ impl IdeSurface {
                                 .bg(rgb(self.tokens.ui.accent)),
                         )
                     })
-                    .child(
+                    .child(if loading {
+                        div()
+                            .ml_1()
+                            .size(px(18.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(self.icon(
+                                "lucide/loader-circle.svg",
+                                12.0,
+                                self.tokens.ui.text_muted,
+                            ))
+                            .into_any_element()
+                    } else {
                         div()
                             .ml_1()
                             .size(px(18.0))
@@ -142,8 +163,9 @@ impl IdeSurface {
                                     this.close_tab(tab_id, cx);
                                     cx.stop_propagation();
                                 }),
-                            ),
-                    )
+                            )
+                            .into_any_element()
+                    })
                     .when(active, |this| {
                         this.child(
                             div()
@@ -310,6 +332,7 @@ impl IdeSurface {
             .y
             .min(f32::from(viewport.height) - IDE_TREE_CONTEXT_MENU_MAX_HEIGHT - 8.0)
             .max(8.0);
+        let remote_disabled = !self.remote_actions_ready();
 
         let popup = div()
             .w(px(IDE_TREE_CONTEXT_MENU_WIDTH))
@@ -324,10 +347,22 @@ impl IdeSurface {
                 self.labels.context_new_file.clone(),
                 None,
                 false,
-                cx.listener(|this, _event, _window, cx| {
-                    this.tree_context_menu = None;
-                    cx.stop_propagation();
-                    cx.notify();
+                remote_disabled,
+                cx.listener({
+                    let location = menu.location.clone();
+                    let name = menu.name.clone();
+                    let is_directory = menu.is_directory;
+                    move |this, _event, _window, cx| {
+                        this.request_tree_name_input(
+                            TreeNameInputKind::NewFile,
+                            location.clone(),
+                            name.clone(),
+                            is_directory,
+                            cx,
+                        );
+                        this.tree_context_menu = None;
+                        cx.stop_propagation();
+                    }
                 }),
             ))
             .child(self.render_tree_context_menu_item(
@@ -335,10 +370,22 @@ impl IdeSurface {
                 self.labels.context_new_folder.clone(),
                 None,
                 false,
-                cx.listener(|this, _event, _window, cx| {
-                    this.tree_context_menu = None;
-                    cx.stop_propagation();
-                    cx.notify();
+                remote_disabled,
+                cx.listener({
+                    let location = menu.location.clone();
+                    let name = menu.name.clone();
+                    let is_directory = menu.is_directory;
+                    move |this, _event, _window, cx| {
+                        this.request_tree_name_input(
+                            TreeNameInputKind::NewFolder,
+                            location.clone(),
+                            name.clone(),
+                            is_directory,
+                            cx,
+                        );
+                        this.tree_context_menu = None;
+                        cx.stop_propagation();
+                    }
                 }),
             ))
             .child(self.render_tree_context_menu_divider())
@@ -347,10 +394,22 @@ impl IdeSurface {
                 self.labels.context_rename.clone(),
                 Some("F2"),
                 false,
-                cx.listener(|this, _event, _window, cx| {
-                    this.tree_context_menu = None;
-                    cx.stop_propagation();
-                    cx.notify();
+                remote_disabled,
+                cx.listener({
+                    let location = menu.location.clone();
+                    let name = menu.name.clone();
+                    let is_directory = menu.is_directory;
+                    move |this, _event, _window, cx| {
+                        this.request_tree_name_input(
+                            TreeNameInputKind::Rename,
+                            location.clone(),
+                            name.clone(),
+                            is_directory,
+                            cx,
+                        );
+                        this.tree_context_menu = None;
+                        cx.stop_propagation();
+                    }
                 }),
             ))
             .child(self.render_tree_context_menu_item(
@@ -358,10 +417,16 @@ impl IdeSurface {
                 self.labels.context_delete.clone(),
                 None,
                 true,
-                cx.listener(|this, _event, _window, cx| {
-                    this.tree_context_menu = None;
-                    cx.stop_propagation();
-                    cx.notify();
+                remote_disabled,
+                cx.listener({
+                    let location = menu.location.clone();
+                    let name = menu.name.clone();
+                    let is_directory = menu.is_directory;
+                    move |this, _event, _window, cx| {
+                        this.request_delete_tree_item(location.clone(), name.clone(), is_directory, cx);
+                        this.tree_context_menu = None;
+                        cx.stop_propagation();
+                    }
                 }),
             ))
             .child(self.render_tree_context_menu_divider())
@@ -369,6 +434,7 @@ impl IdeSurface {
                 "lucide/copy.svg",
                 self.labels.context_copy_path.clone(),
                 None,
+                false,
                 false,
                 cx.listener({
                     let path = location_path(menu.location.clone());
@@ -385,6 +451,7 @@ impl IdeSurface {
                 self.labels.context_open_in_terminal.clone(),
                 None,
                 false,
+                remote_disabled,
                 cx.listener(|this, _event, _window, cx| {
                     this.tree_context_menu = None;
                     cx.stop_propagation();
@@ -431,6 +498,7 @@ impl IdeSurface {
         label: String,
         shortcut: Option<&'static str>,
         danger: bool,
+        disabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
         let text_color = if danger {
@@ -451,8 +519,10 @@ impl IdeSurface {
             .px_3()
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(text_color))
-            .cursor_pointer()
-            .hover(move |style| style.bg(hover_bg))
+            .opacity(if disabled { 0.5 } else { 1.0 })
+            .when(!disabled, |this| {
+                this.cursor_pointer().hover(move |style| style.bg(hover_bg))
+            })
             .child(
                 svg()
                     .path(icon)
@@ -470,7 +540,9 @@ impl IdeSurface {
                         .child(shortcut),
                 )
             })
-            .on_mouse_down(MouseButton::Left, listener)
+            .when(!disabled, |this| {
+                this.on_mouse_down(MouseButton::Left, listener)
+            })
             .into_any_element()
     }
 
@@ -504,6 +576,25 @@ impl IdeSurface {
                     .child(self.labels.no_open_files.clone()),
             )
             .child(self.labels.click_to_open.clone())
+            .into_any_element()
+    }
+
+    fn render_loading_file(&self) -> AnyElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .bg(self.ide_editor_content_bg(self.tokens.ui.bg))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(self.icon("lucide/loader-circle.svg", 24.0, self.tokens.ui.text_muted))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .child(self.labels.loading_file.clone()),
+            )
             .into_any_element()
     }
 

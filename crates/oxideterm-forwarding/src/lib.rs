@@ -26,6 +26,7 @@ pub use bridge::{
 };
 pub use detection::{DetectedPort, PortDetectionSnapshot, PortDetectionTracker};
 pub use error::ForwardingError;
+pub(crate) use error::{tauri_dynamic_bind_error, tauri_local_bind_error};
 pub use events::ForwardEvent;
 pub use manager::ForwardingManager;
 pub use model::{ForwardRule, ForwardStats, ForwardStatus, ForwardType, ForwardUpdate};

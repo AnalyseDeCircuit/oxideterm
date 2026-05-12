@@ -35,6 +35,8 @@ impl Render for IdeSurface {
                 }),
             )
             .on_key_down(cx.listener(|this, event, window, cx| {
+                this.handle_project_search_key(event, cx);
+                this.handle_tree_name_input_key(event, cx);
                 this.handle_folder_picker_key(event, window, cx);
             }));
 
@@ -60,6 +62,15 @@ impl Render for IdeSurface {
         }
         if self.folder_picker.open {
             root = root.child(self.render_folder_picker_dialog(cx));
+        }
+        if self.tree_name_input.is_some() {
+            root = root.child(self.render_tree_name_input_dialog(cx));
+        }
+        if self.search.open {
+            root = root.child(self.render_project_search_panel(cx));
+        }
+        if self.delete_confirm.is_some() {
+            root = root.child(self.render_delete_confirm_dialog(cx));
         }
         if let Some(menu) = self.tab_context_menu {
             root = root.child(self.render_tab_context_menu(menu, _window, cx));

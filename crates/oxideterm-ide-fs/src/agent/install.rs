@@ -11,8 +11,8 @@ async fn probe_remote_install(
     remote_path: &str,
 ) -> RemoteAgentInstallState {
     let command = format!(
-        "'{}' --version 2>/dev/null || echo 'NOT_FOUND'",
-        shell_single_quote(remote_path)
+        "{} --version 2>/dev/null || echo 'NOT_FOUND'",
+        shell_path_arg(remote_path)
     );
     match handle
         .run_command(&command, Duration::from_secs(5), 2048)
@@ -106,32 +106,51 @@ async fn upload_agent(
         .ok_or_else(|| AgentError::Ssh(format!("Invalid remote agent path: {remote_path}")))?;
     handle
         .run_command(
-            &format!("mkdir -p -- '{}'", shell_single_quote(remote_dir)),
+            &format!("mkdir -p -- {}", shell_path_arg(remote_dir)),
             Duration::from_secs(30),
             2048,
         )
         .await
-        .map_err(|error| AgentError::Ssh(error.to_string()))?;
+        .map_err(|error| AgentError::ExecFailed(error.to_string()))?;
 
     let sftp = router.acquire_sftp(node_id).await?;
     let sftp = sftp.lock().await;
     let binary = tokio::fs::read(binary_path)
         .await
         .map_err(|error| AgentError::LocalIo(error.to_string()))?;
-    sftp.write_content(remote_path, &binary).await?;
+    sftp.write_content(remote_path, &binary)
+        .await
+        .map_err(|error| AgentError::Upload(error.to_string()))?;
     handle
         .run_command(
-            &format!("chmod +x -- '{}'", shell_single_quote(remote_path)),
+            &format!("chmod +x -- {}", shell_path_arg(remote_path)),
             Duration::from_secs(30),
             2048,
         )
         .await
-        .map_err(|error| AgentError::Ssh(error.to_string()))?;
+        .map_err(|error| AgentError::ExecFailed(error.to_string()))?;
     Ok(())
 }
 
 fn shell_single_quote(value: &str) -> String {
     value.replace('\'', "'\\''")
+}
+
+fn shell_path_arg(value: &str) -> String {
+    if value == "~" {
+        "~".to_string()
+    } else if let Some(rest) = value.strip_prefix("~/") {
+        if rest.is_empty() {
+            "~".to_string()
+        } else {
+            // Preserve Tauri's HOME expansion for the fixed remote-agent path,
+            // but quote the suffix so a future path change cannot inject shell
+            // syntax into install/probe/chmod commands.
+            format!("~/'{}'", shell_single_quote(rest))
+        }
+    } else {
+        format!("'{}'", shell_single_quote(value))
+    }
 }
 
 async fn handshake_agent(transport: &AgentTransport) -> Result<SysInfoResult, AgentError> {

@@ -13,7 +13,7 @@ use tokio::{
 
 use crate::{
     BridgeStatsRecorder, DEFAULT_FORWARD_IDLE_TIMEOUT, ForwardRule, ForwardStats, ForwardStatus,
-    ForwardingError, bridge::bridge_tcp_to_ssh_stream,
+    ForwardingError, bridge::bridge_tcp_to_ssh_stream, tauri_dynamic_bind_error,
 };
 
 const SOCKS_VERSION_5: u8 = 0x05;
@@ -41,7 +41,9 @@ impl DynamicForward {
         ssh_connection: SshConnectionHandle,
     ) -> Result<Self, ForwardingError> {
         validate_dynamic_rule(&rule)?;
-        let listener = TcpListener::bind((rule.bind_address.as_str(), rule.bind_port)).await?;
+        let listener = TcpListener::bind((rule.bind_address.as_str(), rule.bind_port))
+            .await
+            .map_err(|error| tauri_dynamic_bind_error(&rule.bind_address, rule.bind_port, error))?;
         let bound_addr = listener.local_addr()?;
         rule.bind_address = bound_addr.ip().to_string();
         rule.bind_port = bound_addr.port();

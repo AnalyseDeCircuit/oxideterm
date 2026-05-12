@@ -10,7 +10,7 @@ use oxideterm_ssh::{
 };
 use russh::{
     Channel, ChannelId,
-    keys::{Algorithm, PrivateKey, ssh_key::rand_core::OsRng},
+    keys::{Algorithm, HashAlg, PrivateKey, ssh_key::rand_core::OsRng},
     server::{self, Msg, Session},
 };
 use tokio::{
@@ -23,7 +23,7 @@ use tokio::{
 async fn local_forward_moves_bytes_through_real_ssh_server() {
     let echo_addr = start_echo_service().await;
     let ssh = start_forwarding_ssh_server().await;
-    let handle = connect_test_client(ssh.port).await;
+    let handle = connect_test_client(&ssh).await;
     let manager = ForwardingManager::new("session-local", handle);
     let rule = manager
         .create_forward(ForwardRule::local(
@@ -50,7 +50,7 @@ async fn local_forward_moves_bytes_through_real_ssh_server() {
 async fn dynamic_forward_moves_socks5_bytes_through_real_ssh_server() {
     let echo_addr = start_echo_service().await;
     let ssh = start_forwarding_ssh_server().await;
-    let handle = connect_test_client(ssh.port).await;
+    let handle = connect_test_client(&ssh).await;
     let manager = ForwardingManager::new("session-dynamic", handle);
     let rule = manager
         .create_forward(ForwardRule::dynamic("127.0.0.1", 0))
@@ -82,7 +82,7 @@ async fn dynamic_forward_moves_socks5_bytes_through_real_ssh_server() {
 async fn remote_forward_moves_bytes_through_real_ssh_server() {
     let echo_addr = start_echo_service().await;
     let ssh = start_forwarding_ssh_server().await;
-    let handle = connect_test_client(ssh.port).await;
+    let handle = connect_test_client(&ssh).await;
     let manager = ForwardingManager::new("session-remote", handle);
     let rule = manager
         .create_forward(ForwardRule::remote(
@@ -100,9 +100,11 @@ async fn remote_forward_moves_bytes_through_real_ssh_server() {
     );
 }
 
-async fn connect_test_client(port: u16) -> SshConnectionHandle {
-    let mut config = SshConfig::password("127.0.0.1", port, "tester", "password");
+async fn connect_test_client(ssh: &TestSshServer) -> SshConnectionHandle {
+    let mut config = SshConfig::password("127.0.0.1", ssh.port, "tester", "password");
     config.timeout_secs = 5;
+    config.expected_host_key_fingerprint = Some(ssh.host_key_fingerprint.clone());
+    config.trust_host_key = Some(false);
     let registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
     let pty = SshTransportClient::new(config)
         .connect_shell_with_registry(
@@ -141,6 +143,7 @@ async fn start_echo_service() -> SocketAddr {
 
 struct TestSshServer {
     port: u16,
+    host_key_fingerprint: String,
     direct_tcpip_opens: Arc<Mutex<Vec<DirectTcpipOpen>>>,
 }
 
@@ -151,10 +154,15 @@ struct DirectTcpipOpen {
 }
 
 async fn start_forwarding_ssh_server() -> TestSshServer {
+    let host_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
+    let host_key_fingerprint = host_key
+        .public_key()
+        .fingerprint(HashAlg::Sha256)
+        .to_string();
     let config = Arc::new(russh::server::Config {
         auth_rejection_time: std::time::Duration::ZERO,
         auth_rejection_time_initial: Some(std::time::Duration::ZERO),
-        keys: vec![PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap()],
+        keys: vec![host_key],
         ..Default::default()
     });
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
@@ -181,6 +189,7 @@ async fn start_forwarding_ssh_server() -> TestSshServer {
 
     TestSshServer {
         port,
+        host_key_fingerprint,
         direct_tcpip_opens,
     }
 }

@@ -107,6 +107,49 @@ impl AgentSession {
         serde_json::from_value(value).map_err(|error| AgentError::Deserialize(error.to_string()))
     }
 
+    async fn grep(
+        &self,
+        pattern: &str,
+        path: &str,
+        case_sensitive: bool,
+        max_results: u32,
+    ) -> Result<Vec<AgentGrepMatch>, AgentError> {
+        let value = self
+            .transport
+            .call(
+                "search/grep",
+                serde_json::json!({
+                    "pattern": pattern,
+                    "path": path,
+                    "case_sensitive": case_sensitive,
+                    "max_results": max_results,
+                }),
+            )
+            .await?;
+        serde_json::from_value(value).map_err(|error| AgentError::Deserialize(error.to_string()))
+    }
+
+    async fn watch_start(&self, path: &str, ignore: Vec<String>) -> Result<(), AgentError> {
+        self.transport
+            .call(
+                "watch/start",
+                serde_json::json!({ "path": path, "ignore": ignore }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn watch_stop(&self, path: &str) -> Result<(), AgentError> {
+        self.transport
+            .call("watch/stop", serde_json::json!({ "path": path }))
+            .await?;
+        Ok(())
+    }
+
+    async fn take_watch_rx(&self) -> Option<mpsc::Receiver<AgentWatchEvent>> {
+        self.transport.take_watch_rx().await
+    }
+
     async fn shutdown(&self) {
         self.transport.shutdown().await;
     }

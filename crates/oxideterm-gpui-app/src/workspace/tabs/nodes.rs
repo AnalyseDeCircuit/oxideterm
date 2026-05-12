@@ -595,9 +595,18 @@ impl WorkspaceApp {
                     restored,
                     detail,
                     job_id,
+                    created_forwards,
+                    bindings,
                 } => {
                     if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id)) {
+                        self.release_stale_reconnect_forward_bindings(bindings);
+                        self.cleanup_stale_reconnect_forward_restores(created_forwards);
+                        changed = true;
                         continue;
+                    }
+                    self.reconnect_forward_restore_tokens.remove(&node_id);
+                    for binding in bindings {
+                        self.remember_forwarding_binding(Some(binding));
                     }
                     self.reconnect_forward_restore_totals
                         .insert(node_id.clone(), restored);
@@ -717,6 +726,7 @@ impl WorkspaceApp {
                         Some(&affected_children),
                         state.clone(),
                         reason.clone(),
+                        cx,
                     );
                 }
                 self.push_event_log_entry(
@@ -752,6 +762,7 @@ impl WorkspaceApp {
                     self.resolve_connection_notifications_for_node(&node_id);
                 }
                 if matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected) {
+                    self.mark_ide_interrupted_for_node(&node_id, cx);
                     let message = if matches!(state, NodeReadiness::Disconnected) {
                         "Connection closed".to_string()
                     } else {
@@ -815,12 +826,14 @@ impl WorkspaceApp {
                 if matches!(previous, Some(NodeReadiness::Ready))
                     && matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected)
                 {
+                    self.mark_ide_interrupted_for_node(&node_id, cx);
                     let affected_children =
                         self.cascade_connection_status_to_runtime_children(
                             &node_id,
                             None,
                             state.clone(),
                             reason.clone(),
+                            cx,
                         );
                     self.push_event_log_entry(
                         event_severity,
@@ -927,6 +940,7 @@ impl WorkspaceApp {
         affected_connection_ids: Option<&[String]>,
         state: NodeReadiness,
         reason: String,
+        cx: &mut Context<Self>,
     ) -> usize {
         let connection_state = match state {
             NodeReadiness::Error => ConnectionState::LinkDown,
@@ -956,6 +970,7 @@ impl WorkspaceApp {
             .unwrap_or_default();
         for affected_node_id in &affected {
             self.ensure_workspace_ssh_node_from_runtime(affected_node_id);
+            self.mark_ide_interrupted_for_node(affected_node_id, cx);
             if let Some(node) = self.ssh_nodes.get_mut(affected_node_id) {
                 node.readiness = state.clone();
             }
@@ -1177,20 +1192,54 @@ impl WorkspaceApp {
             .reconnect_orchestrator
             .advance(&node_id.0, ReconnectPhase::RestoreIde);
         self.log_reconnect_phase(node_id, ReconnectPhase::RestoreIde, None);
-        let restored_ide = self.restore_ide_for_reconnect(node_id, cx);
-        let _ = self.reconnect_orchestrator.complete_phase(
-            &node_id.0,
-            if restored_ide {
-                PhaseResult::Ok
-            } else {
-                PhaseResult::Skipped
-            },
-            Some(if restored_ide {
-                "restored IDE project and open files".to_string()
-            } else {
-                "no IDE snapshot for node".to_string()
-            }),
-        );
+        match self.restore_ide_for_reconnect(node_id, cx) {
+            super::ide::IdeReconnectRestoreStatus::Restored => {
+                self.pending_ide_restore_transfer_counts
+                    .insert(node_id.clone(), restored_transfers);
+                self.complete_pending_ide_reconnect_restore(
+                    node_id,
+                    PhaseResult::Ok,
+                    "restored IDE project and open files".to_string(),
+                );
+            }
+            super::ide::IdeReconnectRestoreStatus::Pending => {
+                self.pending_ide_restore_transfer_counts
+                    .insert(node_id.clone(), restored_transfers);
+            }
+            super::ide::IdeReconnectRestoreStatus::Skipped => {
+                self.pending_ide_restore_transfer_counts
+                    .insert(node_id.clone(), restored_transfers);
+                self.complete_pending_ide_reconnect_restore(
+                    node_id,
+                    PhaseResult::Skipped,
+                    "no IDE snapshot for node".to_string(),
+                );
+            }
+        }
+    }
+
+    pub(super) fn complete_pending_ide_reconnect_restore(
+        &mut self,
+        node_id: &NodeId,
+        result: PhaseResult,
+        detail: String,
+    ) {
+        if !self
+            .reconnect_orchestrator
+            .job(&node_id.0)
+            .is_some_and(|job| job.ended_at.is_none())
+        {
+            self.pending_ide_restore_transfer_counts.remove(node_id);
+            return;
+        }
+        let _ = self
+            .reconnect_orchestrator
+            .complete_phase(&node_id.0, result, Some(detail.clone()));
+        if result == PhaseResult::Failed {
+            self.pending_ide_restore_transfer_counts.remove(node_id);
+            self.finish_reconnect_job(node_id, Err(detail));
+            return;
+        }
         let _ = self
             .reconnect_orchestrator
             .advance(&node_id.0, ReconnectPhase::Verify);
@@ -1202,6 +1251,10 @@ impl WorkspaceApp {
         );
         let restored_forwards = self
             .reconnect_forward_restore_totals
+            .remove(node_id)
+            .unwrap_or_default();
+        let restored_transfers = self
+            .pending_ide_restore_transfer_counts
             .remove(node_id)
             .unwrap_or_default();
         self.finish_reconnect_job(node_id, Ok(1 + restored_forwards + restored_transfers));
@@ -1340,7 +1393,7 @@ impl WorkspaceApp {
             .iter()
             .flat_map(|entry| entry.rules.iter().map(|rule| rule.id.clone()))
             .collect::<Vec<_>>();
-        let ide_snapshot = self.ide_snapshot_for_node(node_id, cx);
+        let ide_snapshot = self.ide_snapshot_for_nodes(&affected_nodes, cx);
         let snapshot = ReconnectSnapshot {
             node_id: node_id.0.clone(),
             old_terminal_session_ids,
@@ -1559,6 +1612,7 @@ impl WorkspaceApp {
     }
 
     fn finish_reconnect_job(&mut self, node_id: &NodeId, result: Result<u32, String>) {
+        self.cancel_forward_restore_token(node_id);
         let notice = match &result {
             Ok(restored_count) => Some((
                 self.i18n_with(
@@ -1655,6 +1709,53 @@ impl WorkspaceApp {
         self.reconnect_orchestrator
             .job(&node_id.0)
             .is_some_and(|job| job.ended_at.is_none() && job.job_id == worker_job_id)
+    }
+
+    fn begin_forward_restore_token(&mut self, node_id: &NodeId) -> Arc<AtomicBool> {
+        self.cancel_forward_restore_token(node_id);
+        let token = Arc::new(AtomicBool::new(true));
+        self.reconnect_forward_restore_tokens
+            .insert(node_id.clone(), token.clone());
+        token
+    }
+
+    pub(super) fn cancel_forward_restore_token(&mut self, node_id: &NodeId) {
+        if let Some(token) = self.reconnect_forward_restore_tokens.remove(node_id) {
+            token.store(false, Ordering::Release);
+        }
+    }
+
+    fn cleanup_stale_reconnect_forward_restores(&self, created_forwards: Vec<(String, String)>) {
+        if created_forwards.is_empty() {
+            return;
+        }
+        let forwarding_registry = self.forwarding_registry.clone();
+        self.forwarding_runtime.spawn(async move {
+            for (session_id, rule_id) in created_forwards {
+                if let Some(manager) = forwarding_registry.get(&session_id) {
+                    let _ = manager.delete_forward(&rule_id).await;
+                }
+            }
+        });
+    }
+
+    fn release_stale_reconnect_forward_bindings(
+        &mut self,
+        bindings: Vec<(String, String, ConnectionConsumer)>,
+    ) {
+        for (session_id, connection_id, consumer) in bindings {
+            self.forwarding_registry.stop_port_profiler(&connection_id);
+            self.ssh_registry.release(&connection_id, &consumer);
+            if self
+                .forwarding_connection_consumers
+                .get(&session_id)
+                .is_some_and(|(stored_connection_id, stored_consumer)| {
+                    stored_connection_id == &connection_id && stored_consumer == &consumer
+                })
+            {
+                self.forwarding_connection_consumers.remove(&session_id);
+            }
+        }
     }
 
     fn drop_stale_node_connection(&mut self, node_id: &NodeId, connection_id: &str) {
@@ -2195,6 +2296,13 @@ impl WorkspaceApp {
 
         let job_id = job.job_id.clone();
         let snapshots = job.snapshot.forward_rules.clone();
+        let restore_token = self.begin_forward_restore_token(node_id);
+        let old_connection_ids_by_node = job
+            .snapshot
+            .old_connections_by_node
+            .iter()
+            .map(|entry| (entry.node_id.clone(), entry.old_connection_id.clone()))
+            .collect::<HashMap<_, _>>();
         let owner_connection_ids = snapshots
             .iter()
             .map(|entry| {
@@ -2208,14 +2316,22 @@ impl WorkspaceApp {
             .collect::<HashMap<_, _>>();
         let router = self.node_router.clone();
         let forwarding_registry = self.forwarding_registry.clone();
-        let forwarding_worker_tx = self.forwarding_worker_tx.clone();
         let runtime = self.forwarding_runtime.clone();
         let tx = self.reconnect_worker_tx.clone();
         let root_node_id = node_id.clone();
         runtime.spawn(async move {
             let mut restored = 0_u32;
             let mut failures = 0_u32;
+            let mut failure_details = Vec::<String>::new();
+            let mut created_forwards = Vec::<(String, String)>::new();
+            let mut bindings = Vec::<(String, String, ConnectionConsumer)>::new();
             for entry in snapshots {
+                if !restore_token.load(Ordering::Acquire) {
+                    cleanup_reconnect_created_forwards(&forwarding_registry, &created_forwards)
+                        .await;
+                    release_reconnect_forward_bindings(&router, &bindings);
+                    return;
+                }
                 let entry_node_id = NodeId::new(entry.node_id.clone());
                 let session_id = format!("{}{}", crate::workspace::forwards::FORWARDS_NODE_SESSION_PREFIX, entry.node_id);
                 let consumer = ConnectionConsumer::PortForward(session_id.clone());
@@ -2224,19 +2340,40 @@ impl WorkspaceApp {
                     .await
                 {
                     Ok(resolved) => resolved,
-                    Err(_) => {
+                    Err(error) => {
                         failures += entry.rules.len() as u32;
+                        for rule in &entry.rules {
+                            failure_details.push(format!(
+                                "{}: {}",
+                                forward_restore_failure_label(rule),
+                                error
+                            ));
+                        }
                         continue;
                     }
                 };
-                let _ = forwarding_worker_tx.send(ForwardingWorkerResult::Binding {
-                    binding: Some((
+                let binding = (
+                    session_id.clone(),
+                    resolved.connection_id.clone(),
+                    consumer.clone(),
+                );
+                if !restore_token.load(Ordering::Acquire) {
+                    router.release_consumer(&resolved.connection_id, &consumer);
+                    cleanup_reconnect_created_forwards(&forwarding_registry, &created_forwards)
+                        .await;
+                    release_reconnect_forward_bindings(&router, &bindings);
+                    return;
+                }
+                let manager = forwarding_registry
+                    .register_for_reconnect_restore(
                         session_id.clone(),
-                        resolved.connection_id.clone(),
-                        consumer.clone(),
-                    )),
-                });
-                let manager = forwarding_registry.register(session_id.clone(), resolved.handle);
+                        resolved.handle,
+                        old_connection_ids_by_node
+                            .get(&entry.node_id)
+                            .map(String::as_str),
+                    )
+                    .await;
+                bindings.push(binding);
                 let live_keys = manager
                     .list_forwards()
                     .into_iter()
@@ -2251,14 +2388,26 @@ impl WorkspaceApp {
                     if live_keys.contains(&key) {
                         continue;
                     }
+                    if !restore_token.load(Ordering::Acquire) {
+                        cleanup_reconnect_created_forwards(&forwarding_registry, &created_forwards)
+                            .await;
+                        release_reconnect_forward_bindings(&router, &bindings);
+                        return;
+                    }
+                    let failure_label = forward_restore_failure_label(&snapshot_rule);
                     let Some(rule) = forward_rule_from_reconnect_snapshot(&snapshot_rule) else {
                         failures += 1;
+                        failure_details.push(format!(
+                            "{failure_label}: unsupported forward type '{}'",
+                            snapshot_rule.forward_type
+                        ));
                         continue;
                     };
                     match manager.create_forward_with_health_check(rule, true).await {
                         Ok(created) => {
                             live_keys.insert(forward_restore_key_for_rule(&created));
                             restored += 1;
+                            created_forwards.push((session_id.clone(), created.id.clone()));
                             if let Some(owner_connection_id) =
                                 owner_connection_ids.get(&entry.node_id).cloned().flatten()
                             {
@@ -2271,15 +2420,14 @@ impl WorkspaceApp {
                                 );
                             }
                         }
-                        Err(_) => failures += 1,
+                        Err(error) => {
+                            failures += 1;
+                            failure_details.push(format!("{failure_label}: {error}"));
+                        }
                     }
                 }
             }
-            let detail = if failures == 0 {
-                format!("restored {restored} forward(s)")
-            } else {
-                format!("restored {restored} forward(s), {failures} failed")
-            };
+            let detail = forward_restore_result_detail(restored, failures, &failure_details);
             let _ = tx.send(ReconnectWorkerResult::ForwardRulesRestored {
                 node_id: root_node_id,
                 result: if failures == 0 {
@@ -2290,6 +2438,8 @@ impl WorkspaceApp {
                 restored,
                 detail,
                 job_id,
+                created_forwards,
+                bindings,
             });
         });
     }
@@ -2361,6 +2511,26 @@ impl WorkspaceApp {
     }
 }
 
+async fn cleanup_reconnect_created_forwards(
+    forwarding_registry: &ForwardingRegistry,
+    created_forwards: &[(String, String)],
+) {
+    for (session_id, rule_id) in created_forwards {
+        if let Some(manager) = forwarding_registry.get(session_id) {
+            let _ = manager.delete_forward(rule_id).await;
+        }
+    }
+}
+
+fn release_reconnect_forward_bindings(
+    router: &NodeRouter,
+    bindings: &[(String, String, ConnectionConsumer)],
+) {
+    for (_, connection_id, consumer) in bindings {
+        router.release_consumer(connection_id, consumer);
+    }
+}
+
 fn reconnect_forward_rule_from_rule(rule: ForwardRule) -> ReconnectForwardRule {
     ReconnectForwardRule {
         id: rule.id,
@@ -2422,6 +2592,43 @@ fn forward_restore_key_for_snapshot_rule(rule: &ReconnectForwardRule) -> String 
         rule.target_port.to_string(),
     ]
     .join(":")
+}
+
+fn forward_restore_failure_label(rule: &ReconnectForwardRule) -> String {
+    match rule.forward_type.as_str() {
+        "dynamic" => format!("dynamic {}:{}", rule.bind_address, rule.bind_port),
+        forward_type => format!(
+            "{forward_type} {}:{} -> {}:{}",
+            rule.bind_address, rule.bind_port, rule.target_host, rule.target_port
+        ),
+    }
+}
+
+fn forward_restore_result_detail(
+    restored: u32,
+    failures: u32,
+    failure_details: &[String],
+) -> String {
+    if failures == 0 {
+        return format!("restored {restored} forward(s)");
+    }
+
+    // Tauri surfaces forwarding failures as forwarding errors, while the native
+    // reconnect pipeline wraps phase results in a reconnect toast. Keep the
+    // phase wrapper but make the detail start with the failing subsystem so bind
+    // denied, port occupied, and remote-open failures do not look like generic
+    // reconnect verification drift.
+    let mut detail = format!("forward restore failed: restored {restored} forward(s), {failures} failed");
+    if !failure_details.is_empty() {
+        detail.push_str(": ");
+        let displayed = failure_details.iter().take(3).cloned().collect::<Vec<_>>();
+        detail.push_str(&displayed.join("; "));
+        let hidden = failure_details.len().saturating_sub(displayed.len());
+        if hidden > 0 {
+            detail.push_str(&format!("; +{hidden} more"));
+        }
+    }
+    detail
 }
 
 fn forward_type_to_snapshot(forward_type: ForwardType) -> &'static str {
@@ -2528,6 +2735,28 @@ mod tests {
         assert_eq!(restored.target_host, "0.0.0.0");
         assert_eq!(restored.target_port, 0);
         assert_eq!(restored.description, "socks");
+    }
+
+    #[test]
+    fn reconnect_forward_restore_failure_detail_keeps_forward_error_class() {
+        let rule = ReconnectForwardRule {
+            forward_type: "local".to_string(),
+            bind_address: "127.0.0.1".to_string(),
+            bind_port: 8080,
+            target_host: "localhost".to_string(),
+            target_port: 3000,
+            ..ReconnectForwardRule::default()
+        };
+        let details = vec![format!(
+            "{}: Connection failed: Port already in use: 127.0.0.1:8080",
+            forward_restore_failure_label(&rule)
+        )];
+
+        let detail = forward_restore_result_detail(0, 1, &details);
+
+        assert!(detail.starts_with("forward restore failed:"));
+        assert!(detail.contains("local 127.0.0.1:8080 -> localhost:3000"));
+        assert!(detail.contains("Port already in use"));
     }
 
     #[test]

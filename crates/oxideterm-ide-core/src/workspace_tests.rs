@@ -9,7 +9,7 @@ use crate::model::{
     DirtyCloseDecision, FileKind, FileTreeEntry, IdeLocation, OpenFileOutcome, ReloadError,
     RestoreSkipReason, RestoreSnapshotResult, SavedFileVersion,
 };
-use crate::workspace::IdeWorkspace;
+use crate::workspace::{IdeWorkspace, WorkspaceError};
 
 struct MemoryFs {
     data: IdeFileData,
@@ -291,6 +291,102 @@ fn close_all_tabs_stops_on_first_dirty_tab() {
 }
 
 #[test]
+fn delete_path_closes_clean_affected_tabs_like_tauri_store() {
+    let mut workspace = IdeWorkspace::new();
+    workspace.open_project(IdeLocation::remote("node-a", "/repo"), "repo");
+    let OpenFileOutcome::Opened(root_file) = workspace
+        .open_file(
+            IdeLocation::remote("node-a", "/repo/src/main.rs"),
+            "main",
+            SavedFileVersion::unknown(),
+        )
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    let OpenFileOutcome::Opened(other) = workspace
+        .open_file(
+            IdeLocation::remote("node-a", "/repo/README.md"),
+            "readme",
+            SavedFileVersion::unknown(),
+        )
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+
+    let closed = workspace
+        .close_clean_tabs_under(&IdeLocation::remote("node-a", "/repo/src"))
+        .unwrap();
+
+    assert_eq!(closed, vec![root_file]);
+    assert!(workspace.buffer(root_file).is_none());
+    assert!(workspace.buffer(other).is_some());
+}
+
+#[test]
+fn delete_path_refuses_dirty_affected_tabs_like_tauri_store() {
+    let mut workspace = IdeWorkspace::new();
+    workspace.open_project(IdeLocation::remote("node-a", "/repo"), "repo");
+    let OpenFileOutcome::Opened(tab_id) = workspace
+        .open_file(
+            IdeLocation::remote("node-a", "/repo/src/main.rs"),
+            "main",
+            SavedFileVersion::unknown(),
+        )
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    workspace.replace_buffer_text(tab_id, "dirty").unwrap();
+
+    let result = workspace.close_clean_tabs_under(&IdeLocation::remote("node-a", "/repo/src"));
+
+    assert!(matches!(result, Err(WorkspaceError::DirtyTabs(names)) if names == "main.rs"));
+    assert!(workspace.buffer(tab_id).is_some());
+}
+
+#[test]
+fn rename_path_retargets_open_tabs_without_clearing_dirty_text() {
+    let mut workspace = IdeWorkspace::new();
+    workspace.open_project(IdeLocation::remote("node-a", "/repo"), "repo");
+    let OpenFileOutcome::Opened(tab_id) = workspace
+        .open_file(
+            IdeLocation::remote("node-a", "/repo/src/main.rs"),
+            "main",
+            SavedFileVersion::unknown(),
+        )
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    workspace.replace_buffer_text(tab_id, "dirty").unwrap();
+
+    let renamed = workspace
+        .rename_tabs_under(
+            &IdeLocation::remote("node-a", "/repo/src"),
+            &IdeLocation::remote("node-a", "/repo/app"),
+        )
+        .unwrap();
+
+    assert_eq!(renamed, vec![tab_id]);
+    let tab = workspace
+        .tabs()
+        .iter()
+        .find(|tab| tab.id == tab_id)
+        .unwrap();
+    assert_eq!(tab.title, "main.rs");
+    assert_eq!(
+        tab.location,
+        IdeLocation::remote("node-a", "/repo/app/main.rs")
+    );
+    let buffer = workspace.buffer(tab_id).unwrap();
+    assert_eq!(buffer.location, tab.location);
+    assert_eq!(buffer.text, "dirty");
+    assert!(buffer.is_dirty());
+}
+
+#[test]
 fn file_tree_state_is_included_in_snapshot_restore() {
     let mut source = IdeWorkspace::new();
     let root = IdeLocation::remote("node-a", "/home/demo");
@@ -359,6 +455,64 @@ fn snapshot_restore_preserves_dirty_buffers_and_active_tab() {
     assert_eq!(restored.active_tab(), Some(second));
     assert_eq!(restored.buffer(first).unwrap().text, "dirty");
     assert!(restored.buffer(first).unwrap().is_dirty());
+}
+
+#[test]
+fn reconnect_restore_restores_open_file_without_clearing_dirty_buffer() {
+    let mut source = IdeWorkspace::new();
+    let location = IdeLocation::remote("node-a", "/home/demo/src/main.rs");
+    source.open_project(IdeLocation::remote("node-a", "/home/demo"), "demo");
+    let OpenFileOutcome::Opened(tab_id) = source
+        .open_file(location.clone(), "saved", SavedFileVersion::unknown())
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    source
+        .replace_buffer_text(tab_id, "dirty local edit")
+        .unwrap();
+
+    let snapshot = source.snapshot().unwrap();
+    let mut restored = IdeWorkspace::new();
+    assert_eq!(
+        restored.restore_snapshot(snapshot),
+        RestoreSnapshotResult::Restored { tab_count: 1 }
+    );
+
+    let buffer = restored.buffer(tab_id).unwrap();
+    assert_eq!(buffer.location, location);
+    assert_eq!(buffer.text, "dirty local edit");
+    assert!(buffer.is_dirty());
+}
+
+#[test]
+fn stale_reload_result_cannot_overwrite_newer_dirty_buffer() {
+    let mut workspace = IdeWorkspace::new();
+    workspace.open_project(IdeLocation::remote("node-a", "/home/demo"), "demo");
+    let OpenFileOutcome::Opened(tab_id) = workspace
+        .open_file(
+            IdeLocation::remote("node-a", "/home/demo/src/main.rs"),
+            "saved",
+            SavedFileVersion::unknown(),
+        )
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    workspace
+        .replace_buffer_text(tab_id, "newer dirty local edit")
+        .unwrap();
+
+    let stale_remote = MemoryFs::new("stale remote read", SavedFileVersion::unknown());
+    assert_eq!(
+        workspace.reload_tab_with(&stale_remote, tab_id),
+        Err(ReloadError::DirtyBuffer)
+    );
+    assert_eq!(
+        workspace.buffer(tab_id).unwrap().text,
+        "newer dirty local edit"
+    );
+    assert!(workspace.buffer(tab_id).unwrap().is_dirty());
 }
 
 #[test]

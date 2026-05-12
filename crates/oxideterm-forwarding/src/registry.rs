@@ -7,9 +7,9 @@ use dashmap::DashMap;
 use oxideterm_ssh::SshConnectionHandle;
 
 use crate::{
-    ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardRule, ForwardingManager,
-    PersistedForward, PortDetectionProfiler, PortDetectionSnapshot, SavedForwardError,
-    SavedForwardStore, SavedForwardsSyncSnapshot,
+    ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardRule, ForwardingError,
+    ForwardingManager, PersistedForward, PortDetectionProfiler, PortDetectionSnapshot,
+    SavedForwardError, SavedForwardStore, SavedForwardsSyncSnapshot,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -69,6 +69,72 @@ impl ForwardingRegistry {
         self.managers
             .get(session_id)
             .map(|manager| manager.value().clone())
+    }
+
+    pub async fn register_or_rebind(
+        &self,
+        session_id: impl Into<String>,
+        ssh_connection: SshConnectionHandle,
+    ) -> (
+        Arc<ForwardingManager>,
+        Vec<Result<ForwardRule, ForwardingError>>,
+    ) {
+        let session_id = session_id.into();
+        let existing_manager = self.get(&session_id);
+        let previous_connection_id = existing_manager.as_ref().and_then(|manager| {
+            let connection_id = manager.ssh_connection_handle().connection_id().to_string();
+            (connection_id != ssh_connection.connection_id()).then_some(connection_id)
+        });
+
+        if let (Some(manager), Some(connection_id)) =
+            (existing_manager.as_ref(), previous_connection_id.as_ref())
+        {
+            // Tauri replaces the forwarding manager with a fresh HandleController
+            // after reconnect. Native keeps the manager object so GPUI state stays
+            // stable, but active forward runners still captured the old SSH
+            // handle. Suspend first, then recreate against the newly acquired
+            // NodeRouter handle, so local/remote/dynamic forwards never keep
+            // terminal-era or stale reconnect liveness.
+            self.stop_port_profiler(connection_id);
+            let _ = manager.suspend_all_and_save_rules().await;
+        }
+
+        let manager = self.register(session_id, ssh_connection.clone());
+        let restored = if previous_connection_id.is_some() {
+            manager.restore_saved_forwards(ssh_connection).await
+        } else {
+            Vec::new()
+        };
+
+        (manager, restored)
+    }
+
+    pub async fn register_for_reconnect_restore(
+        &self,
+        session_id: impl Into<String>,
+        ssh_connection: SshConnectionHandle,
+        expected_previous_connection_id: Option<&str>,
+    ) -> Arc<ForwardingManager> {
+        let session_id = session_id.into();
+        if let Some(manager) = self.get(&session_id) {
+            let current_connection_id = manager.ssh_connection_handle().connection_id().to_string();
+            let should_replace = current_connection_id != ssh_connection.connection_id()
+                && expected_previous_connection_id
+                    .is_none_or(|expected| expected == current_connection_id);
+
+            if should_replace {
+                // Reconnect restore is driven by the Tauri-style snapshot phase:
+                // old active forwards are destroyed with the old node state and
+                // recreated through nodeCreateForward semantics below. The
+                // generic rebind path intentionally preserves suspended rules
+                // for UI acquisition, but using it here would resurrect stale
+                // listener ids before the reconnect job generation can decide
+                // whether this worker is still current.
+                let _ = self.remove(&session_id).await;
+            }
+        }
+
+        self.register(session_id, ssh_connection)
     }
 
     pub async fn remove(&self, session_id: &str) -> Option<Arc<ForwardingManager>> {
@@ -162,9 +228,13 @@ impl ForwardingRegistry {
         session_id: impl Into<String>,
         ssh_connection: SshConnectionHandle,
     ) -> Vec<Result<ForwardRule, crate::ForwardingError>> {
-        let session_id = session_id.into();
-        let manager = self.register(session_id, ssh_connection.clone());
-        manager.restore_saved_forwards(ssh_connection).await
+        let (manager, mut restored) = self.register_or_rebind(session_id, ssh_connection).await;
+        if restored.is_empty() {
+            restored = manager
+                .restore_saved_forwards(manager.ssh_connection_handle())
+                .await;
+        }
+        restored
     }
 
     pub async fn restore_port_forwards(
@@ -200,6 +270,10 @@ impl ForwardingRegistry {
         for manager in managers {
             manager.stop_all().await;
         }
+        // Tauri's global shutdown path drains every manager and then clears the
+        // registry map. Keep native from retaining stale manager -> SSH handle
+        // ownership after all listeners/profilers have been stopped.
+        self.managers.clear();
     }
 
     pub fn session_ids(&self) -> Vec<String> {
@@ -266,6 +340,16 @@ impl ForwardingRegistry {
             .unwrap_or_default()
     }
 
+    pub fn delete_owned_forwards(
+        &self,
+        owner_connection_id: &str,
+    ) -> Result<usize, SavedForwardError> {
+        let Some(store) = &self.saved_store else {
+            return Ok(0);
+        };
+        store.delete_owned_forwards(owner_connection_id)
+    }
+
     pub fn load_persisted_forwards(&self, session_id: &str) -> Vec<PersistedForward> {
         self.saved_store
             .as_ref()
@@ -306,5 +390,96 @@ impl ForwardingRegistry {
             return Ok(ApplySavedForwardsSyncSnapshotResult::default());
         };
         store.apply_snapshot(snapshot, valid_owner_connection_ids)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use oxideterm_ssh::{ConnectionConsumer, SshConfig, SshConnectionRegistry};
+
+    use super::*;
+
+    fn test_handle(host: &str, consumer: ConnectionConsumer) -> SshConnectionHandle {
+        SshConnectionRegistry::default()
+            .acquire(SshConfig::password(host, 22, "tester", "pw"), consumer)
+    }
+
+    #[tokio::test]
+    async fn register_or_rebind_keeps_manager_but_swaps_connection_handle() {
+        let registry = ForwardingRegistry::new();
+        let first = test_handle(
+            "first.example",
+            ConnectionConsumer::PortForward("node:a".into()),
+        );
+        let second = test_handle(
+            "second.example",
+            ConnectionConsumer::PortForward("node:a".into()),
+        );
+        let first_connection_id = first.connection_id().to_string();
+        let second_connection_id = second.connection_id().to_string();
+
+        let (manager, restored) = registry.register_or_rebind("node:a", first).await;
+        assert!(restored.is_empty());
+        assert_eq!(
+            manager.ssh_connection_handle().connection_id(),
+            first_connection_id
+        );
+
+        let (rebound, restored) = registry.register_or_rebind("node:a", second).await;
+        assert!(restored.is_empty());
+        assert!(Arc::ptr_eq(&manager, &rebound));
+        assert_eq!(
+            rebound.ssh_connection_handle().connection_id(),
+            second_connection_id
+        );
+    }
+
+    #[tokio::test]
+    async fn reconnect_restore_replaces_old_manager_instead_of_auto_restoring() {
+        let registry = ForwardingRegistry::new();
+        let first = test_handle(
+            "first.example",
+            ConnectionConsumer::PortForward("node:a".into()),
+        );
+        let second = test_handle(
+            "second.example",
+            ConnectionConsumer::PortForward("node:a".into()),
+        );
+        let first_connection_id = first.connection_id().to_string();
+        let second_connection_id = second.connection_id().to_string();
+
+        let manager = registry.register("node:a", first);
+        let restored = registry
+            .register_for_reconnect_restore("node:a", second, Some(&first_connection_id))
+            .await;
+
+        assert!(!Arc::ptr_eq(&manager, &restored));
+        assert_eq!(
+            restored.ssh_connection_handle().connection_id(),
+            second_connection_id
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_all_clears_managers_like_tauri_shutdown() {
+        let registry = ForwardingRegistry::new();
+        let first = test_handle(
+            "first.example",
+            ConnectionConsumer::PortForward("node:a".into()),
+        );
+        let second = test_handle(
+            "second.example",
+            ConnectionConsumer::PortForward("node:b".into()),
+        );
+
+        registry.register("node:a", first);
+        registry.register("node:b", second);
+        assert_eq!(registry.session_ids(), vec!["node:a", "node:b"]);
+
+        registry.stop_all().await;
+
+        assert!(registry.session_ids().is_empty());
     }
 }

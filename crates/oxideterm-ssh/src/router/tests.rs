@@ -352,4 +352,57 @@ mod tests {
         assert!(matches!(result, Err(RouteError::NotConnected(_))));
         assert_eq!(handle.state(), ConnectionState::LinkDown);
     }
+
+    #[test]
+    fn acquire_wait_follows_runtime_rebind_during_reconnect() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node.clone(), config.clone());
+        let old = registry.acquire(
+            config.clone(),
+            ConnectionConsumer::NodeRouter("node-a".into()),
+        );
+        router
+            .bind_connection(&node, old.connection_id().to_string())
+            .unwrap();
+        registry.mark_state(old.connection_id(), ConnectionState::LinkDown);
+        let old_connection_id = old.connection_id().to_string();
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rebound_router = router.clone();
+        let rebound_registry = registry.clone();
+        let rebound_node = node.clone();
+        runtime.spawn(async move {
+            sleep(Duration::from_millis(50)).await;
+            let _ = rebound_registry.retire_connection(&old_connection_id);
+            let new = rebound_registry.acquire(
+                config,
+                ConnectionConsumer::NodeRouter("node-a".into()),
+            );
+            new.set_physical(Arc::new(()));
+            rebound_registry.mark_state(new.connection_id(), ConnectionState::Active);
+            rebound_router
+                .bind_connection(&rebound_node, new.connection_id().to_string())
+                .unwrap();
+        });
+
+        let resolved = runtime
+            .block_on(router.acquire_connection_wait(
+                &node,
+                ConnectionConsumer::PortForward("node:a".into()),
+                Duration::from_millis(500),
+            ))
+            .unwrap();
+
+        assert_eq!(resolved.handle.state(), ConnectionState::Active);
+        assert_eq!(
+            resolved.handle.info().consumers,
+            vec![
+                ConnectionConsumer::NodeRouter("node-a".into()),
+                ConnectionConsumer::PortForward("node:a".into()),
+            ]
+        );
+    }
 }

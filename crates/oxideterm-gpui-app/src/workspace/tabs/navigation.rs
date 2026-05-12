@@ -235,6 +235,7 @@ impl WorkspaceApp {
             self.cancel_connection_trace_for_node(affected_node_id);
             self.abort_connection_chain_for_node(affected_node_id);
             self.reconnect_orchestrator.cancel(&affected_node_id.0);
+            self.cancel_forward_restore_token(affected_node_id);
             self.pending_reconnect_node_ids.remove(affected_node_id);
             self.reconnect_requeue_counts.remove(affected_node_id);
             self.pending_reconnect_cascade_nodes
@@ -257,13 +258,7 @@ impl WorkspaceApp {
             let forwarding_registry = self.forwarding_registry.clone();
             let forwarding_runtime = self.forwarding_runtime.clone();
             let forwarding_session_id = self.forwarding_session_id_for_node(affected_node_id);
-            if let Some((connection_id, consumer)) = self
-                .forwarding_connection_consumers
-                .remove(&forwarding_session_id)
-            {
-                forwarding_registry.stop_port_profiler(&connection_id);
-                self.ssh_registry.release(&connection_id, &consumer);
-            }
+            self.release_forwarding_binding_for_node(affected_node_id);
             forwarding_runtime.spawn(async move {
                 let _ = forwarding_registry.remove(&forwarding_session_id).await;
             });
@@ -347,7 +342,11 @@ impl WorkspaceApp {
         if let Some(node_id) = self.sftp_tab_nodes.remove(&tab.id) {
             self.release_sftp_session_for_node(&node_id);
         }
-        self.ide_tab_surfaces.remove(&tab.id);
+        if let Some(surface) = self.ide_tab_surfaces.remove(&tab.id) {
+            surface.update(cx, |surface, cx| {
+                surface.release_remote_session(cx);
+            });
+        }
         self.ide_surface_subscriptions.remove(&tab.id);
         if let Some(node_id) = self.ide_tab_nodes.remove(&tab.id) {
             // Tauri appStore.closeTab() calls ideStore.closeProject(true) when

@@ -69,6 +69,8 @@ pub(super) enum ReconnectWorkerResult {
         restored: u32,
         detail: String,
         job_id: String,
+        created_forwards: Vec<(String, String)>,
+        bindings: Vec<(String, String, ConnectionConsumer)>,
     },
     ActiveConnectionsProbed {
         changed: usize,

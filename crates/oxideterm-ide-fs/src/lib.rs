@@ -11,6 +11,6 @@ mod agent;
 mod local;
 mod node_sftp;
 
-pub use agent::{AgentStatus, NodeAgentIdeFileSystem, NodeAgentMode};
+pub use agent::{AgentStatus, IdeSearchMatch, NodeAgentIdeFileSystem, NodeAgentMode};
 pub use local::LocalIdeFileSystem;
 pub use node_sftp::NodeSftpIdeFileSystem;

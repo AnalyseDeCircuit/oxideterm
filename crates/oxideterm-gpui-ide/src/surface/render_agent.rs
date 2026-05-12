@@ -713,6 +713,8 @@ impl IdeSurface {
         self.fs.set_mode(NodeAgentMode::Enabled);
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
+        let generation = self.generation;
+        let expected_node_id = node_id.clone();
         cx.notify();
         cx.spawn(async move |weak, cx| {
             let status = backend_runtime
@@ -722,8 +724,14 @@ impl IdeSurface {
                     reason: error.to_string(),
                 });
             let _ = weak.update(cx, |this, cx| {
+                if this.generation != generation
+                    || this.node_id.as_deref() != Some(expected_node_id.as_str())
+                {
+                    return;
+                }
                 this.agent_action = None;
                 let _ = status;
+                this.start_agent_watch_if_ready(cx);
                 this.schedule_next_agent_status_poll(cx);
                 cx.notify();
             });
@@ -742,6 +750,8 @@ impl IdeSurface {
         self.agent_remove_confirm_open = false;
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
+        let generation = self.generation;
+        let expected_node_id = node_id.clone();
         cx.notify();
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(
@@ -749,6 +759,11 @@ impl IdeSurface {
             )
             .await;
             let _ = weak.update(cx, |this, cx| {
+                if this.generation != generation
+                    || this.node_id.as_deref() != Some(expected_node_id.as_str())
+                {
+                    return;
+                }
                 this.agent_action = None;
                 if let Err(error) = result {
                     this.last_error = Some(error.message);
@@ -774,15 +789,23 @@ impl IdeSurface {
         self.agent_action = Some(AgentActionKind::Refresh);
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
+        let generation = self.generation;
+        let expected_node_id = node_id.clone();
         cx.notify();
         cx.spawn(async move |weak, cx| {
             let _ = backend_runtime
                 .spawn(async move { fs.refresh_agent_status(node_id).await })
                 .await;
             let _ = weak.update(cx, |this, cx| {
+                if this.generation != generation
+                    || this.node_id.as_deref() != Some(expected_node_id.as_str())
+                {
+                    return;
+                }
                 if this.agent_action == Some(AgentActionKind::Refresh) {
                     this.agent_action = None;
                 }
+                this.start_agent_watch_if_ready(cx);
                 cx.notify();
             });
         })

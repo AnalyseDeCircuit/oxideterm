@@ -30,6 +30,8 @@ impl AgentRegistry {
 
 #[derive(Debug, thiserror::Error)]
 enum AgentError {
+    #[error("Architecture detection failed: {0}")]
+    ArchDetection(String),
     #[error("Agent channel closed")]
     ChannelClosed,
     #[error("Agent RPC timeout after {0}s")]
@@ -44,12 +46,18 @@ enum AgentError {
     Ssh(String),
     #[error("SFTP error: {0}")]
     Sftp(String),
+    #[error("Upload failed: {0}")]
+    Upload(String),
     #[error("Unsupported architecture: {0}")]
     UnsupportedArch(String),
     #[error("Agent binary not found: {0}")]
     BinaryNotFound(String),
     #[error("Local I/O error: {0}")]
     LocalIo(String),
+    #[error("Command execution failed: {0}")]
+    ExecFailed(String),
+    #[error("Agent start failed: {0}")]
+    StartFailed(String),
     #[error("Route error: {0}")]
     Route(String),
     #[error("Handshake failed: {0}")]
@@ -81,17 +89,26 @@ async fn detect_arch(handle: &SshConnectionHandle) -> Result<String, AgentError>
     let arch = handle
         .run_command("uname -m", Duration::from_secs(10), 512)
         .await
-        .map_err(|error| AgentError::Ssh(error.to_string()))?
+        .map_err(|error| AgentError::ArchDetection(error.to_string()))?
         .trim()
         .to_string();
     if arch.is_empty() {
-        Err(AgentError::UnsupportedArch("unknown".to_string()))
+        Err(AgentError::ArchDetection(
+            "uname -m returned empty output".to_string(),
+        ))
     } else {
         Ok(arch)
     }
 }
 
-async fn remote_agent_path(handle: &SshConnectionHandle) -> Result<String, AgentError> {
+fn remote_agent_path() -> String {
+    // Tauri exposes the deploy/status path as this literal home-relative path.
+    // Keep native UI/status payloads identical; only removal resolves $HOME for
+    // the destructive `rm` command.
+    AGENT_REMOTE_PATH.to_string()
+}
+
+async fn remote_agent_remove_path(handle: &SshConnectionHandle) -> Result<String, AgentError> {
     let home = handle
         .run_command("echo \"$HOME\"", Duration::from_secs(10), 1024)
         .await

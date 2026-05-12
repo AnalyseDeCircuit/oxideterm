@@ -482,11 +482,21 @@ impl WorkspaceApp {
                     }
                     match status {
                         ForwardStatus::Suspended => {
-                            self.forwarding_view.error =
-                                Some(self.i18n.t("forwards.toast.suspended_desc"));
+                            let description = self.i18n.t("forwards.toast.suspended_desc");
+                            self.forwarding_view.error = Some(description.clone());
+                            self.push_forward_status_notice(
+                                self.i18n.t("forwards.toast.suspended_title"),
+                                Some(description),
+                                TerminalNoticeVariant::Warning,
+                            );
                         }
                         ForwardStatus::Error => {
-                            self.forwarding_view.error = error;
+                            self.forwarding_view.error = error.clone();
+                            self.push_forward_status_notice(
+                                self.i18n.t("forwards.toast.error_title"),
+                                error,
+                                TerminalNoticeVariant::Error,
+                            );
                         }
                         _ => {}
                     }
@@ -540,6 +550,25 @@ impl WorkspaceApp {
         }
     }
 
+    fn push_forward_status_notice(
+        &self,
+        title: String,
+        description: Option<String>,
+        variant: TerminalNoticeVariant,
+    ) {
+        // Tauri's ForwardsView emits toast() for suspended/error status events
+        // while keeping create-form failures inline. Mirror that split so bind
+        // and remote-open classes remain visible without turning every failed
+        // form submission into a workspace toast.
+        let _ = self.terminal_notice_tx.send(TerminalNotice {
+            title,
+            description,
+            status_text: None,
+            progress: None,
+            variant,
+        });
+    }
+
     fn active_forwards_tab_matches_session(&self, session_id: &str) -> bool {
         let Some(tab_id) = self.active_tab_id else {
             return false;
@@ -577,6 +606,51 @@ impl WorkspaceApp {
                     .strip_prefix(FORWARDS_NODE_SESSION_PREFIX)
                     .map(|raw_node_id| NodeId(raw_node_id.to_string()))
             })
+    }
+
+    pub(super) fn release_forwarding_binding_for_node(
+        &mut self,
+        node_id: &NodeId,
+    ) -> Option<String> {
+        let session_id = self.forwarding_session_id_for_node(node_id);
+        self.release_forwarding_binding_for_session(&session_id, Some(node_id))
+    }
+
+    fn release_forwarding_binding_for_session(
+        &mut self,
+        session_id: &str,
+        node_id: Option<&NodeId>,
+    ) -> Option<String> {
+        let consumer = ConnectionConsumer::PortForward(session_id.to_string());
+        let connection_id = if let Some((connection_id, stored_consumer)) =
+            self.forwarding_connection_consumers.remove(session_id)
+        {
+            self.ssh_registry.release(&connection_id, &stored_consumer);
+            Some(connection_id)
+        } else if let Some(manager) = self.forwarding_registry.get(session_id) {
+            // Manual disconnect in Tauri tears down every affected forward
+            // manager even if the Forwards view is already gone. Native can see
+            // that same lifecycle while an async worker has registered the
+            // manager but its Binding result has not yet been polled into
+            // forwarding_connection_consumers, so release the known
+            // PortForward consumer from the manager's current node-owned
+            // connection as a fallback.
+            let connection_id = manager.ssh_connection_handle().connection_id().to_string();
+            self.ssh_registry.release(&connection_id, &consumer);
+            Some(connection_id)
+        } else if let Some(connection_id) =
+            node_id.and_then(|node_id| self.node_router.connection_id_for_node(node_id))
+        {
+            self.ssh_registry.release(&connection_id, &consumer);
+            Some(connection_id)
+        } else {
+            None
+        };
+
+        if let Some(connection_id) = connection_id.as_ref() {
+            self.forwarding_registry.stop_port_profiler(connection_id);
+        }
+        connection_id
     }
 
     fn apply_port_detection_result(
@@ -659,11 +733,30 @@ impl WorkspaceApp {
             .get(&self.forwarding_session_id_for_node(node_id))
     }
 
-    fn remember_forwarding_binding(
+    pub(super) fn remember_forwarding_binding(
         &mut self,
         binding: Option<(String, String, ConnectionConsumer)>,
     ) {
         if let Some((session_id, connection_id, consumer)) = binding {
+            if !self.forwarding_binding_is_current(&session_id, &connection_id) {
+                // Forwarding workers run off-thread. A manual disconnect can
+                // remove the node-owned manager before the worker result is
+                // polled; stale Binding results must release their registry
+                // consumer instead of re-populating forwarding_connection_consumers
+                // after Tauri-equivalent node teardown has completed.
+                self.forwarding_registry.stop_port_profiler(&connection_id);
+                self.ssh_registry.release(&connection_id, &consumer);
+                if self
+                    .forwarding_connection_consumers
+                    .get(&session_id)
+                    .is_some_and(|(stored_connection_id, stored_consumer)| {
+                        stored_connection_id == &connection_id && stored_consumer == &consumer
+                    })
+                {
+                    self.forwarding_connection_consumers.remove(&session_id);
+                }
+                return;
+            }
             if let Some((previous_connection_id, previous_consumer)) =
                 self.forwarding_connection_consumers.get(&session_id)
                 && (previous_connection_id != &connection_id || previous_consumer != &consumer)
@@ -680,6 +773,33 @@ impl WorkspaceApp {
             self.forwarding_connection_consumers
                 .insert(session_id, (connection_id, consumer));
         }
+    }
+
+    fn forwarding_binding_is_current(&self, session_id: &str, connection_id: &str) -> bool {
+        let manager_matches_connection = self
+            .forwarding_registry
+            .get(session_id)
+            .is_some_and(|manager| manager.ssh_connection_handle().connection_id() == connection_id);
+        if !manager_matches_connection {
+            return false;
+        }
+
+        if let Some(raw_node_id) = session_id.strip_prefix(FORWARDS_NODE_SESSION_PREFIX) {
+            let node_id = NodeId(raw_node_id.to_string());
+            if self
+                .ssh_nodes
+                .get(&node_id)
+                .is_some_and(|node| node.readiness == NodeReadiness::Disconnected)
+            {
+                return false;
+            }
+            return self
+                .node_router
+                .connection_id_for_node(&node_id)
+                .is_some_and(|current_connection_id| current_connection_id == connection_id);
+        }
+
+        true
     }
 
     async fn forwarding_manager_for_node_async(
@@ -702,11 +822,16 @@ impl WorkspaceApp {
             .await
             .map_err(|error| error.to_string())?;
         let connection_id = resolved.connection_id.clone();
-        let manager = registry.register(session_id.clone(), resolved.handle);
+        let (manager, _restored) = registry
+            .register_or_rebind(session_id.clone(), resolved.handle)
+            .await;
 
         // Existing managers may outlive a terminal pane. Always reacquire the
-        // node-owned handle and replace the manager connection before scanning
-        // or mutating rules, matching Tauri node_forwarding's pool-first owner.
+        // node-owned handle before scanning or mutating rules, matching Tauri
+        // node_forwarding's pool-first owner. register_or_rebind also
+        // suspends/restores active runners when a reconnect swapped the
+        // connection id, so no forward path keeps liveness through an old
+        // terminal/session handle.
         if let Some(owner_connection_id) = owner_connection_id.as_ref() {
             let _ = registry
                 .saved_store()

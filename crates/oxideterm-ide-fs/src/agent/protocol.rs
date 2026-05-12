@@ -1,4 +1,4 @@
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 struct AgentRequest {
     id: u64,
     method: String,
@@ -6,7 +6,7 @@ struct AgentRequest {
     params: serde_json::Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct AgentResponse {
     id: u64,
     #[serde(default)]
@@ -21,21 +21,21 @@ struct AgentRpcError {
     message: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct AgentNotification {
     method: String,
     #[serde(default)]
     params: serde_json::Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(untagged)]
 enum AgentMessage {
     Response(AgentResponse),
     Notification(AgentNotification),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 struct ReadFileResult {
     content: String,
     hash: String,
@@ -45,7 +45,7 @@ struct ReadFileResult {
     encoding: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 struct WriteFileResult {
     hash: String,
     size: u64,
@@ -89,6 +89,30 @@ struct SysInfoResult {
     pid: u32,
     #[serde(default)]
     capabilities: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AgentWatchEvent {
+    pub path: String,
+    pub kind: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub struct AgentGrepMatch {
+    pub path: String,
+    pub line: u32,
+    pub column: u32,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdeSearchMatch {
+    pub path: String,
+    pub line: u32,
+    pub column: u32,
+    pub preview: String,
+    pub match_start: usize,
+    pub match_end: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

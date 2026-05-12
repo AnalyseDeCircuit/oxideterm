@@ -38,6 +38,7 @@ impl RemoteForward {
         rule.bind_port = actual_port;
         rule.status = ForwardStatus::Active;
         router.register(
+            ssh_connection.connection_id().to_string(),
             rule.bind_address.clone(),
             rule.bind_port,
             rule.target_host.clone(),
@@ -89,6 +90,7 @@ impl RemoteForward {
 
 #[derive(Clone, Debug)]
 struct RemoteForwardTarget {
+    connection_id: String,
     local_host: String,
     local_port: u16,
     stats: BridgeStatsRecorder,
@@ -102,6 +104,7 @@ pub(crate) struct RemoteForwardRouter {
 impl RemoteForwardRouter {
     fn register(
         &self,
+        connection_id: String,
         remote_address: String,
         remote_port: u16,
         local_host: String,
@@ -114,6 +117,7 @@ impl RemoteForwardRouter {
                 port: remote_port,
             },
             RemoteForwardTarget {
+                connection_id,
                 local_host,
                 local_port,
                 stats,
@@ -128,16 +132,33 @@ impl RemoteForwardRouter {
         });
     }
 
-    async fn handle(&self, event: RemoteForwardedTcpIp) {
+    fn target_for(
+        &self,
+        remote_address: &str,
+        remote_port: u16,
+        connection_id: &str,
+    ) -> Option<RemoteForwardTarget> {
         let key = RemoteForwardKey {
-            address: event.connected_address.clone(),
-            port: event.connected_port,
+            address: remote_address.to_string(),
+            port: remote_port,
         };
-        let Some(target) = self.targets.get(&key).map(|target| target.clone()) else {
+        self.targets
+            .get(&key)
+            .map(|target| target.clone())
+            .filter(|target| target.connection_id == connection_id)
+    }
+
+    async fn handle(&self, event: RemoteForwardedTcpIp) {
+        let Some(target) = self.target_for(
+            &event.connected_address,
+            event.connected_port,
+            &event.connection_id,
+        ) else {
             tracing::warn!(
-                "no registered remote forward for {}:{}",
+                "no registered remote forward for {}:{} on connection {}",
                 event.connected_address,
-                event.connected_port
+                event.connected_port,
+                event.connection_id
             );
             return;
         };
@@ -220,6 +241,7 @@ mod tests {
     fn remote_router_keeps_other_ports_for_same_address() {
         let router = RemoteForwardRouter::default();
         router.register(
+            "connection-a".to_string(),
             "0.0.0.0".to_string(),
             9000,
             "localhost".to_string(),
@@ -227,6 +249,7 @@ mod tests {
             BridgeStatsRecorder::default(),
         );
         router.register(
+            "connection-a".to_string(),
             "0.0.0.0".to_string(),
             9001,
             "localhost".to_string(),
@@ -244,5 +267,29 @@ mod tests {
             address: "0.0.0.0".to_string(),
             port: 9000,
         }));
+    }
+
+    #[test]
+    fn remote_router_ignores_forwarded_tcpip_from_stale_connection() {
+        let router = RemoteForwardRouter::default();
+        router.register(
+            "new-connection".to_string(),
+            "0.0.0.0".to_string(),
+            9000,
+            "localhost".to_string(),
+            3000,
+            BridgeStatsRecorder::default(),
+        );
+
+        assert!(
+            router
+                .target_for("0.0.0.0", 9000, "old-connection")
+                .is_none()
+        );
+        assert!(
+            router
+                .target_for("0.0.0.0", 9000, "new-connection")
+                .is_some()
+        );
     }
 }

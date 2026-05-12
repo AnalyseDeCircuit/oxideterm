@@ -618,9 +618,10 @@ impl WorkspaceApp {
 
     fn finish_connection_trace_failed(&mut self, node_id: &NodeId, detail: Option<String>) {
         if self.connection_trace_nodes.contains_key(node_id) {
+            let stage = connection_trace_failure_stage(detail.as_deref());
             self.emit_connection_trace_event(
                 node_id,
-                ConnectionTraceStage::Authentication,
+                stage,
                 ConnectionTraceStatus::Failed,
                 100.0,
                 detail,
@@ -730,11 +731,14 @@ impl WorkspaceApp {
             {
                 cancelled = cancelled.saturating_add(1);
             }
+            self.cancel_forward_restore_token(&affected_node_id);
             self.pending_reconnect_node_ids.remove(&affected_node_id);
             self.reconnect_requeue_counts.remove(&affected_node_id);
             self.pending_reconnect_transfer_resumes.remove(&affected_node_id);
             self.reconnect_transfer_resume_totals.remove(&affected_node_id);
             self.reconnect_transfer_resume_successes
+                .remove(&affected_node_id);
+            self.pending_ide_restore_transfer_counts
                 .remove(&affected_node_id);
             self.reconnect_forward_restore_totals.remove(&affected_node_id);
             self.clear_reconnect_pipeline_active(&affected_node_id);
@@ -940,6 +944,46 @@ fn connection_error_is_proxy_hop_unsupported(error: &str) -> bool {
             || error.contains("unsupported auth"))
 }
 
+fn connection_trace_failure_stage(error: Option<&str>) -> ConnectionTraceStage {
+    let Some(error) = error else {
+        return ConnectionTraceStage::Authentication;
+    };
+    let error = error.to_ascii_lowercase();
+
+    if error.contains("node not found")
+        || error.contains("already connecting")
+        || error.contains("already connected")
+    {
+        return ConnectionTraceStage::Preparing;
+    }
+
+    if error.contains("parent node")
+        || error.contains("no ssh connection")
+        || error.contains("not connected")
+        || error.contains("connection refused")
+        || error.contains("connection failed")
+        || error.contains("dns")
+        || error.contains("network")
+        || error.contains("timeout")
+        || error.contains("timed out")
+    {
+        return ConnectionTraceStage::OpeningTransport;
+    }
+
+    if error.contains("host key")
+        || error.contains("known_hosts")
+        || error.contains("known hosts")
+        || error.contains("fingerprint")
+    {
+        return ConnectionTraceStage::HostKey;
+    }
+
+    // Tauri's backend emits most transport `connect()` failures after the
+    // authentication stage has started, so auth/proxy-agent failures keep the
+    // same terminal stage while the detailed error toast carries the class.
+    ConnectionTraceStage::Authentication
+}
+
 fn saved_origin_config(store: &ConnectionStore, origin: &NodeOrigin) -> Option<SshConfig> {
     match origin {
         NodeOrigin::Restored {
@@ -1005,5 +1049,38 @@ fn auth_without_runtime_secret(auth: &AuthMethod) -> bool {
             passphrase.is_none()
         }
         AuthMethod::Agent | AuthMethod::KeyboardInteractive => true,
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn trace_failure_stage_matches_tauri_pre_connect_errors() {
+        assert_eq!(
+            connection_trace_failure_stage(Some("Node abc is already connecting")),
+            ConnectionTraceStage::Preparing
+        );
+        assert_eq!(
+            connection_trace_failure_stage(Some("Parent node hop has no SSH connection")),
+            ConnectionTraceStage::OpeningTransport
+        );
+        assert_eq!(
+            connection_trace_failure_stage(Some("Connection failed: network unreachable")),
+            ConnectionTraceStage::OpeningTransport
+        );
+    }
+
+    #[test]
+    fn trace_failure_stage_keeps_host_key_and_auth_classes() {
+        assert_eq!(
+            connection_trace_failure_stage(Some("Host key changed for example.com")),
+            ConnectionTraceStage::HostKey
+        );
+        assert_eq!(
+            connection_trace_failure_stage(Some("Authentication failed: permission denied")),
+            ConnectionTraceStage::Authentication
+        );
     }
 }

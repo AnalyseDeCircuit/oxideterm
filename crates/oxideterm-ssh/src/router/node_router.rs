@@ -175,28 +175,12 @@ impl NodeRouter {
         consumer: ConnectionConsumer,
         max_wait: Duration,
     ) -> Result<ResolvedConnection, RouteError> {
-        let runtime = self
-            .runtime
-            .snapshot(node_id)
-            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        let connection_id = runtime
-            .connection_id
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        self.wait_for_active(&connection_id, max_wait).await?;
-        let handle = self
-            .registry
-            .acquire_consumer_for_connection(&connection_id, consumer)
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        let _ =
-            self.runtime
-                .update_connection_state(node_id, &handle.info(), "connection acquired");
+        self.resolve_connection_wait_inner(node_id, max_wait, Some(consumer))
+            .await
+    }
 
-        Ok(ResolvedConnection {
-            connection_id,
-            handle,
-            terminal_session_id: runtime.terminal_session_id,
-            sftp_session_id: runtime.sftp_session_id,
-        })
+    pub fn release_consumer(&self, connection_id: &str, consumer: &ConnectionConsumer) {
+        self.registry.release(connection_id, consumer);
     }
 
     pub fn bind_connection(
@@ -448,47 +432,53 @@ impl NodeRouter {
         node_id: &NodeId,
         max_wait: Duration,
     ) -> Result<ResolvedConnection, RouteError> {
-        let runtime = self
-            .runtime
-            .snapshot(node_id)
-            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        let connection_id = runtime
-            .connection_id
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-
-        self.wait_for_active(&connection_id, max_wait).await?;
-        let handle = self
-            .registry
-            .get(&connection_id)
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        Ok(ResolvedConnection {
-            connection_id,
-            handle,
-            terminal_session_id: runtime.terminal_session_id,
-            sftp_session_id: runtime.sftp_session_id,
-        })
+        self.resolve_connection_wait_inner(node_id, max_wait, None)
+            .await
     }
 
-    async fn wait_for_active(
+    async fn resolve_connection_wait_inner(
         &self,
-        connection_id: &str,
+        node_id: &NodeId,
         max_wait: Duration,
-    ) -> Result<(), RouteError> {
-        // This is the gate every node-first capability must pass. Do not relax
-        // it back to state-only checks: SFTP and forwarding can outlive all
-        // terminal panes, and a stale Active state with no live transport must
-        // drive connect_tree_node rebuild instead of leaking a closed handle to
-        // capability code.
-        let result = timeout(max_wait, async {
-            loop {
-                let Some(handle) = self.registry.get(connection_id) else {
-                    return Err(RouteError::NotConnected(connection_id.to_string()));
-                };
+        consumer: Option<ConnectionConsumer>,
+    ) -> Result<ResolvedConnection, RouteError> {
+        let started_at = Instant::now();
+        loop {
+            let runtime = self
+                .runtime
+                .snapshot(node_id)
+                .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+            let connection_id = runtime
+                .connection_id
+                .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+
+            if let Some(handle) = self.registry.get(&connection_id) {
                 match handle.state() {
                     ConnectionState::Active | ConnectionState::Idle => {
                         let transport_status = handle.transport_status().await;
                         match transport_status {
-                            ConnectionTransportStatus::Open => return Ok(()),
+                            ConnectionTransportStatus::Open => {
+                                let handle = if let Some(consumer) = consumer.clone() {
+                                    self.registry
+                                        .acquire_consumer_for_connection(&connection_id, consumer)
+                                        .ok_or_else(|| {
+                                            RouteError::NotConnected(node_id.0.clone())
+                                        })?
+                                } else {
+                                    handle
+                                };
+                                let _ = self.runtime.update_connection_state(
+                                    node_id,
+                                    &handle.info(),
+                                    "connection acquired",
+                                );
+                                return Ok(ResolvedConnection {
+                                    connection_id,
+                                    handle,
+                                    terminal_session_id: runtime.terminal_session_id,
+                                    sftp_session_id: runtime.sftp_session_id,
+                                });
+                            }
                             ConnectionTransportStatus::Closed
                             | ConnectionTransportStatus::Missing => {
                                 let detail = match transport_status {
@@ -496,16 +486,9 @@ impl NodeRouter {
                                     ConnectionTransportStatus::Missing => "transport is missing",
                                     ConnectionTransportStatus::Open => unreachable!(),
                                 };
-                                // The Tauri pool resolves node workflows from a
-                                // registry-owned physical SSH connection, not
-                                // from the last terminal shell. If native sees
-                                // Active/Idle with no usable transport, treat
-                                // it as stale pool state so SFTP/forwarding can
-                                // drive connect_tree_node instead of borrowing
-                                // a closed shell-owned handle.
                                 let _ = self
                                     .registry
-                                    .mark_state(connection_id, ConnectionState::LinkDown);
+                                    .mark_state(&connection_id, ConnectionState::LinkDown);
                                 return Err(RouteError::NotConnected(format!(
                                     "Connection {connection_id} is stale: {detail}"
                                 )));
@@ -516,26 +499,25 @@ impl NodeRouter {
                         return Err(RouteError::ConnectionError(error));
                     }
                     ConnectionState::Disconnecting | ConnectionState::Disconnected => {
-                        return Err(RouteError::NotConnected(connection_id.to_string()));
+                        return Err(RouteError::NotConnected(connection_id));
                     }
-                    ConnectionState::LinkDown => {
-                        return Err(RouteError::NotConnected(format!(
-                            "Connection {connection_id} is link_down"
-                        )));
-                    }
-                    ConnectionState::Connecting | ConnectionState::Reconnecting => {
-                        sleep(Duration::from_millis(200)).await;
-                    }
+                    ConnectionState::Connecting
+                    | ConnectionState::Reconnecting
+                    | ConnectionState::LinkDown => {}
                 }
             }
-        })
-        .await;
 
-        match result {
-            Ok(inner) => inner,
-            Err(_) => Err(RouteError::ConnectionTimeout(format!(
-                "Timed out waiting for connection {connection_id} to become active ({max_wait:?})"
-            ))),
+            if started_at.elapsed() >= max_wait {
+                return Err(RouteError::ConnectionTimeout(format!(
+                    "Timed out waiting for node {} connection {connection_id} to become active ({max_wait:?})",
+                    node_id.0
+                )));
+            }
+            // Re-read the node runtime each lap. Tauri reconnect restores child
+            // forwards after connectNodeWithAncestors has rebound the node to a
+            // fresh connection id; native must not keep waiting on the old
+            // link-down child id captured at the start of the restore phase.
+            sleep(Duration::from_millis(200)).await;
         }
     }
 

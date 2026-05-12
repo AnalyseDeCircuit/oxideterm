@@ -148,6 +148,7 @@ impl<T> SshForwardStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 pub type BoxedSshForwardStream = Box<dyn SshForwardStream>;
 
 pub struct RemoteForwardedTcpIp {
+    pub connection_id: String,
     pub connected_address: String,
     pub connected_port: u16,
     pub originator_address: String,
@@ -162,7 +163,13 @@ pub trait RemoteForwardHandler: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 }
 
-type RemoteForwardHandlerSlot = Arc<RwLock<Option<Arc<dyn RemoteForwardHandler>>>>;
+#[derive(Clone)]
+struct RemoteForwardRegistration {
+    connection_id: String,
+    handler: Arc<dyn RemoteForwardHandler>,
+}
+
+type RemoteForwardHandlerSlot = Arc<RwLock<Option<RemoteForwardRegistration>>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProxyChainPreflightChallenge {

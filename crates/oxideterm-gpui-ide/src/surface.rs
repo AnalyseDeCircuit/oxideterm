@@ -5,7 +5,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::Path,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use gpui::{
@@ -32,7 +32,7 @@ use oxideterm_ide_core::{
     IdeFileCheck, IdeFileError, IdeFileErrorKind, IdeLocation, IdeWorkspace, SavedFileVersion,
     WorkspaceSnapshot, WriteMode,
 };
-use oxideterm_ide_fs::{AgentStatus, NodeAgentIdeFileSystem, NodeAgentMode};
+use oxideterm_ide_fs::{AgentStatus, IdeSearchMatch, NodeAgentIdeFileSystem, NodeAgentMode};
 use oxideterm_ssh::{NodeRouter, ReconnectIdeSnapshot};
 use oxideterm_theme::ThemeTokens;
 
@@ -109,15 +109,27 @@ const IDE_AGENT_OPT_IN_ACCENT_BORDER_ALPHA: u32 = 0x33;
 const IDE_AGENT_POLL_READY_SECS: u64 = 5;
 const IDE_AGENT_POLL_DEPLOYING_SECS: u64 = 2;
 const IDE_AGENT_POLL_MANUAL_SECS: u64 = 10;
+const IDE_AGENT_WATCH_RETRY_SECS: u64 = 3;
+const IDE_SEARCH_DEBOUNCE_MS: u64 = 300;
+const IDE_SEARCH_CACHE_TTL_SECS: u64 = 60;
+const IDE_SEARCH_CACHE_MAX_ENTRIES: usize = 50;
+const IDE_SEARCH_MAX_RESULTS: u32 = 200;
 const TAILWIND_RED_400: u32 = 0xf87171;
 const TAILWIND_RED_500: u32 = 0xef4444;
 const TAILWIND_EMERALD_400: u32 = 0x34d399;
 const TAILWIND_AMBER_400: u32 = 0xfbbf24;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdeSurfaceEvent {
     RememberAgentMode(NodeAgentMode),
     ProjectOpened,
+    ReconnectRestoreProjectOpened {
+        reconnect_node_id: String,
+    },
+    ReconnectRestoreProjectFailed {
+        reconnect_node_id: String,
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -196,6 +208,31 @@ struct TreeRowsCache {
     rows: Arc<Vec<TreeRenderRow>>,
 }
 
+#[derive(Clone, Debug)]
+struct SearchResultGroup {
+    path: String,
+    matches: Vec<IdeSearchMatch>,
+}
+
+#[derive(Clone, Debug)]
+struct SearchCacheEntry {
+    results: Vec<SearchResultGroup>,
+    timestamp: Instant,
+    truncated: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ProjectSearchState {
+    open: bool,
+    query: String,
+    results: Vec<SearchResultGroup>,
+    searching: bool,
+    error: Option<String>,
+    expanded_paths: HashSet<String>,
+    truncated: bool,
+    generation: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TabContextMenu {
     tab_id: EditorTabId,
@@ -210,6 +247,34 @@ struct TreeContextMenu {
     name: String,
     x: f32,
     y: f32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TreeNameInputKind {
+    NewFile,
+    NewFolder,
+    Rename,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TreeNameInputState {
+    kind: TreeNameInputKind,
+    target: IdeLocation,
+    parent_path: String,
+    original_name: Option<String>,
+    value: String,
+    error: Option<String>,
+    submitting: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct DeleteConfirmState {
+    location: IdeLocation,
+    name: String,
+    is_directory: bool,
+    affected_tab_count: usize,
+    unsaved_tab_count: usize,
+    deleting: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -263,18 +328,27 @@ pub struct IdeSurface {
     generation: u64,
     editors: HashMap<EditorTabId, Entity<TextEditorView>>,
     loading_paths: HashSet<String>,
+    loading_file_tabs: HashSet<EditorTabId>,
     saving_tabs: HashSet<EditorTabId>,
     save_after_close: Option<CloseRequestId>,
     conflict_state: Option<ConflictState>,
     pending_restore_files: Vec<String>,
     pending_restore_dirty_contents: BTreeMap<String, String>,
+    pending_reconnect_restore_node_id: Option<String>,
+    pending_reconnect_restore_files_remaining: usize,
     last_error: Option<String>,
     folder_picker: FolderPickerState,
     folder_switch_confirm_open: bool,
     tree_rows_cache: Option<TreeRowsCache>,
     tree_scroll_handle: UniformListScrollHandle,
+    search: ProjectSearchState,
+    search_cache: HashMap<String, SearchCacheEntry>,
+    search_cache_order: Vec<String>,
+    pending_search_queries: BTreeMap<String, String>,
     tab_context_menu: Option<TabContextMenu>,
     tree_context_menu: Option<TreeContextMenu>,
+    tree_name_input: Option<TreeNameInputState>,
+    delete_confirm: Option<DeleteConfirmState>,
     tab_drag: Option<TabDrag>,
     agent_opt_in_open: bool,
     agent_opt_in_remember: bool,
@@ -283,6 +357,8 @@ pub struct IdeSurface {
     agent_remove_confirm_open: bool,
     agent_action: Option<AgentActionKind>,
     agent_poll_generation: u64,
+    agent_watch_generation: u64,
+    watched_root_path: Option<String>,
 }
 
 include!("surface/lifecycle.rs");

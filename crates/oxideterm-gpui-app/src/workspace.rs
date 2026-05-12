@@ -18,7 +18,10 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs,
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant, SystemTime},
 };
 
@@ -199,7 +202,9 @@ pub(crate) struct WorkspaceApp {
     pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
     reconnect_transfer_resume_totals: HashMap<NodeId, usize>,
     reconnect_transfer_resume_successes: HashMap<NodeId, usize>,
+    pending_ide_restore_transfer_counts: HashMap<NodeId, u32>,
     reconnect_forward_restore_totals: HashMap<NodeId, u32>,
+    reconnect_forward_restore_tokens: HashMap<NodeId, Arc<AtomicBool>>,
     event_log_entries: VecDeque<WorkspaceEventLogEntry>,
     event_log_next_id: u64,
     event_log_unread_count: u32,

@@ -3,11 +3,18 @@ use oxideterm_gpui_ide::{
     IdeLabels, IdeRuntimeSettings, IdeSurface, IdeSurfaceEvent, NodeAgentMode,
 };
 use oxideterm_settings::IdeAgentMode;
-use oxideterm_ssh::{NodeId, ReconnectIdeSnapshot};
+use oxideterm_ssh::{NodeId, PhaseResult, ReconnectIdeSnapshot};
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use std::time::SystemTime;
 
 use super::WorkspaceApp;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum IdeReconnectRestoreStatus {
+    Skipped,
+    Restored,
+    Pending,
+}
 
 impl WorkspaceApp {
     pub(super) fn open_ide_folder_picker_tab(&mut self, node_id: NodeId, cx: &mut Context<Self>) {
@@ -76,16 +83,16 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn ide_snapshot_for_node(
+    pub(super) fn ide_snapshot_for_nodes(
         &mut self,
-        node_id: &NodeId,
+        node_ids: &[NodeId],
         cx: &mut Context<Self>,
     ) -> Option<ReconnectIdeSnapshot> {
-        let Some((tab_id, _)) = self
-            .ide_tab_nodes
-            .iter()
-            .find(|(_, existing_node_id)| existing_node_id.0 == node_id.0)
-        else {
+        let Some((tab_id, _)) = self.ide_tab_nodes.iter().find(|(_, existing_node_id)| {
+            node_ids
+                .iter()
+                .any(|node_id| existing_node_id.0 == node_id.0)
+        }) else {
             return None;
         };
         let Some(surface) = self.ide_tab_surfaces.get(tab_id) else {
@@ -100,50 +107,68 @@ impl WorkspaceApp {
         &mut self,
         node_id: &NodeId,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> IdeReconnectRestoreStatus {
         let Some(job) = self.reconnect_orchestrator.job(&node_id.0) else {
-            return false;
+            return IdeReconnectRestoreStatus::Skipped;
         };
         let Some(ide_snapshot) = job.snapshot.ide_snapshot else {
-            return false;
+            return IdeReconnectRestoreStatus::Skipped;
         };
+        let target_node_id = NodeId::new(ide_snapshot.connection_id.clone());
+        if !self.ssh_nodes.contains_key(&target_node_id) {
+            return IdeReconnectRestoreStatus::Skipped;
+        }
         if ide_restore_was_closed_after_snapshot(
-            self.ide_last_closed_at_by_node.get(node_id).copied(),
+            self.ide_last_closed_at_by_node
+                .get(&target_node_id)
+                .copied(),
             job.snapshot.snapshot_at,
         ) {
-            return false;
+            return IdeReconnectRestoreStatus::Skipped;
         }
         // Tauri's reconnect phase restores the IDE after SFTP has been brought
         // back. Re-open through the same node-first IDE owner so the restored
         // surface consumes NodeRouter/SFTP directly rather than a terminal pane.
-        self.open_ide_tab_with_reconnect_snapshot(node_id.clone(), ide_snapshot, cx)
+        self.open_ide_tab_with_reconnect_snapshot(node_id.clone(), target_node_id, ide_snapshot, cx)
     }
 
     fn open_ide_tab_with_reconnect_snapshot(
         &mut self,
-        node_id: NodeId,
+        reconnect_node_id: NodeId,
+        target_node_id: NodeId,
         ide_snapshot: ReconnectIdeSnapshot,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> IdeReconnectRestoreStatus {
         let node_title = self
             .ssh_nodes
-            .get(&node_id)
+            .get(&target_node_id)
             .map(|node| node.title.clone())
-            .unwrap_or_else(|| node_id.0.clone());
+            .unwrap_or_else(|| target_node_id.0.clone());
         let title = format!("IDE · {node_title}");
+        let same_project_open = self
+            .ide_tab_nodes
+            .iter()
+            .find(|(_, existing_node_id)| existing_node_id.0 == target_node_id.0)
+            .and_then(|(tab_id, _)| self.ide_tab_surfaces.get(tab_id))
+            .is_some_and(|surface| {
+                surface.update(cx, |surface: &mut IdeSurface, _cx| {
+                    surface.project_root_path().as_deref()
+                        == Some(ide_snapshot.project_path.as_str())
+                })
+            });
         let tab_id = if let Some((tab_id, _)) = self
             .ide_tab_nodes
             .iter()
-            .find(|(_, existing_node_id)| existing_node_id.0 == node_id.0)
+            .find(|(_, existing_node_id)| existing_node_id.0 == target_node_id.0)
         {
             let Some(surface) = self.ide_tab_surfaces.get(tab_id) else {
-                return false;
+                return IdeReconnectRestoreStatus::Skipped;
             };
             let restored = surface.update(cx, |surface: &mut IdeSurface, cx| {
-                surface.restore_reconnect_snapshot(ide_snapshot, cx)
+                surface.restore_reconnect_snapshot(ide_snapshot, reconnect_node_id.0.clone(), cx)
             });
             if !restored {
-                return false;
+                return IdeReconnectRestoreStatus::Skipped;
             }
             *tab_id
         } else {
@@ -164,10 +189,10 @@ impl WorkspaceApp {
                 )
             });
             let restored = surface.update(cx, |surface: &mut IdeSurface, cx| {
-                surface.restore_reconnect_snapshot(ide_snapshot, cx)
+                surface.restore_reconnect_snapshot(ide_snapshot, reconnect_node_id.0.clone(), cx)
             });
             if !restored {
-                return false;
+                return IdeReconnectRestoreStatus::Skipped;
             }
 
             self.tabs.push(Tab {
@@ -180,16 +205,65 @@ impl WorkspaceApp {
             });
             self.subscribe_ide_surface(tab_id, &surface, cx);
             self.ide_tab_surfaces.insert(tab_id, surface);
-            self.ide_tab_nodes.insert(tab_id, node_id.clone());
+            self.ide_tab_nodes.insert(tab_id, target_node_id.clone());
             tab_id
         };
 
         self.active_tab_id = Some(tab_id);
         self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
-        self.active_ssh_node_id = Some(node_id.clone());
-        self.expanded_ssh_nodes.insert(node_id);
+        self.active_ssh_node_id = Some(target_node_id.clone());
+        self.expanded_ssh_nodes.insert(target_node_id);
         cx.notify();
-        true
+        if same_project_open {
+            IdeReconnectRestoreStatus::Restored
+        } else {
+            IdeReconnectRestoreStatus::Pending
+        }
+    }
+
+    pub(super) fn mark_ide_interrupted_for_node(
+        &mut self,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let tab_ids = self
+            .ide_tab_nodes
+            .iter()
+            .filter_map(|(tab_id, existing_node_id)| {
+                (existing_node_id.0 == node_id.0).then_some(*tab_id)
+            })
+            .collect::<Vec<_>>();
+        for tab_id in tab_ids {
+            if let Some(surface) = self.ide_tab_surfaces.get(&tab_id) {
+                surface.update(cx, |surface: &mut IdeSurface, cx| {
+                    surface.mark_connection_interrupted(cx);
+                });
+            }
+        }
+    }
+
+    pub(super) fn release_ide_runtime_for_saved_connection(
+        &mut self,
+        saved_connection_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let affected_nodes = self
+            .ssh_nodes
+            .iter()
+            .filter_map(|(node_id, node)| {
+                (node.saved_connection_id.as_deref() == Some(saved_connection_id))
+                    .then_some(node_id.clone())
+            })
+            .collect::<Vec<_>>();
+
+        // Tauri removeNode closes node-scoped IDE tabs, while delete_connection
+        // removes persisted owner data. Native can still have open GPUI IDE
+        // surfaces for the saved node, so at minimum invalidate their remote
+        // runtime and release NodeRouter consumers before the owner disappears.
+        for node_id in &affected_nodes {
+            self.mark_ide_interrupted_for_node(node_id, cx);
+        }
+        self.saved_ssh_nodes.remove(saved_connection_id);
     }
 
     pub(super) fn render_ide_surface(&self, _cx: &mut Context<Self>) -> AnyElement {
@@ -332,6 +406,23 @@ impl WorkspaceApp {
                         // independent IDE surfaces for different nodes.
                         this.ide_last_closed_at_by_node.remove(&node_id);
                     }
+                }
+                IdeSurfaceEvent::ReconnectRestoreProjectOpened { reconnect_node_id } => {
+                    this.complete_pending_ide_reconnect_restore(
+                        &NodeId::new(reconnect_node_id.clone()),
+                        PhaseResult::Ok,
+                        "restored IDE project and open files".to_string(),
+                    );
+                }
+                IdeSurfaceEvent::ReconnectRestoreProjectFailed {
+                    reconnect_node_id,
+                    message,
+                } => {
+                    this.complete_pending_ide_reconnect_restore(
+                        &NodeId::new(reconnect_node_id.clone()),
+                        PhaseResult::Failed,
+                        message.clone(),
+                    );
                 }
             },
         );

@@ -21,6 +21,10 @@ pub enum WorkspaceError {
     UnknownTab,
     #[error("unknown close request")]
     UnknownCloseRequest,
+    #[error("open dirty tabs would be affected: {0}")]
+    DirtyTabs(String),
+    #[error("target location is already open")]
+    LocationAlreadyOpen,
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -162,6 +166,96 @@ impl IdeWorkspace {
 
     pub fn has_dirty_buffers(&self) -> bool {
         self.buffers.values().any(EditorBuffer::is_dirty)
+    }
+
+    pub fn affected_tabs_under(&self, location: &IdeLocation) -> Vec<EditorTabId> {
+        self.tabs
+            .iter()
+            .filter(|tab| location_is_under(&tab.location, location))
+            .map(|tab| tab.id)
+            .collect()
+    }
+
+    pub fn close_clean_tabs_under(
+        &mut self,
+        location: &IdeLocation,
+    ) -> Result<Vec<EditorTabId>, WorkspaceError> {
+        let affected = self.affected_tabs_under(location);
+        let dirty_titles = affected
+            .iter()
+            .filter_map(|tab_id| {
+                self.buffers
+                    .get(tab_id)
+                    .filter(|buffer| buffer.is_dirty())
+                    .and_then(|_| {
+                        self.tabs
+                            .iter()
+                            .find(|tab| tab.id == *tab_id)
+                            .map(|tab| tab.title.clone())
+                    })
+            })
+            .collect::<Vec<_>>();
+        if !dirty_titles.is_empty() {
+            return Err(WorkspaceError::DirtyTabs(dirty_titles.join(",")));
+        }
+
+        for tab_id in affected.iter().copied().rev() {
+            self.close_tab_now(tab_id);
+        }
+        Ok(affected)
+    }
+
+    pub fn rename_tabs_under(
+        &mut self,
+        old_location: &IdeLocation,
+        new_location: &IdeLocation,
+    ) -> Result<Vec<EditorTabId>, WorkspaceError> {
+        let affected = self.affected_tabs_under(old_location);
+        if affected.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let remapped = affected
+            .iter()
+            .filter_map(|tab_id| {
+                let tab = self.tabs.iter().find(|tab| tab.id == *tab_id)?;
+                let location = remap_location_under(&tab.location, old_location, new_location)?;
+                Some((*tab_id, location))
+            })
+            .collect::<Vec<_>>();
+
+        let affected_set = affected.iter().copied().collect::<HashSet<_>>();
+        for (tab_id, location) in &remapped {
+            if let Some(existing) = self.tab_by_location.get(&location.stable_key())
+                && *existing != *tab_id
+                && !affected_set.contains(existing)
+            {
+                return Err(WorkspaceError::LocationAlreadyOpen);
+            }
+        }
+
+        // Mirrors Tauri `renameItem`: remote rename happens first, then every
+        // open tab under the moved path is retargeted without touching dirty
+        // text. The file model owns the location rewrite so editor buffers and
+        // tab lookup keys cannot drift apart.
+        for (tab_id, location) in remapped {
+            let old_key = self
+                .buffers
+                .get(&tab_id)
+                .map(|buffer| buffer.location.stable_key());
+            if let Some(old_key) = old_key {
+                self.tab_by_location.remove(&old_key);
+            }
+            self.tab_by_location.insert(location.stable_key(), tab_id);
+            if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+                tab.location = location.clone();
+                tab.title = location.display_name();
+            }
+            if let Some(buffer) = self.buffers.get_mut(&tab_id) {
+                buffer.location = location;
+            }
+        }
+        Ok(affected)
     }
 
     pub fn open_file(
@@ -577,5 +671,102 @@ impl IdeWorkspace {
         if self.active_tab == Some(tab_id) {
             self.active_tab = self.tabs.last().map(|tab| tab.id);
         }
+    }
+}
+
+fn location_is_under(candidate: &IdeLocation, root: &IdeLocation) -> bool {
+    match (candidate, root) {
+        (
+            IdeLocation::Remote {
+                node_id: candidate_node,
+                path: candidate_path,
+            },
+            IdeLocation::Remote {
+                node_id: root_node,
+                path: root_path,
+            },
+        ) if candidate_node == root_node => path_is_under(candidate_path, root_path),
+        (IdeLocation::Local { path: candidate }, IdeLocation::Local { path: root }) => {
+            candidate == root || candidate.starts_with(root)
+        }
+        _ => false,
+    }
+}
+
+fn remap_location_under(
+    candidate: &IdeLocation,
+    old_root: &IdeLocation,
+    new_root: &IdeLocation,
+) -> Option<IdeLocation> {
+    match (candidate, old_root, new_root) {
+        (
+            IdeLocation::Remote {
+                node_id: candidate_node,
+                path: candidate_path,
+            },
+            IdeLocation::Remote {
+                node_id: old_node,
+                path: old_path,
+            },
+            IdeLocation::Remote {
+                node_id: new_node,
+                path: new_path,
+            },
+        ) if candidate_node == old_node && old_node == new_node => {
+            let suffix = path_suffix_under(candidate_path, old_path)?;
+            Some(IdeLocation::remote(
+                new_node.clone(),
+                append_remote_suffix(new_path, suffix),
+            ))
+        }
+        (
+            IdeLocation::Local { path: candidate },
+            IdeLocation::Local { path: old_path },
+            IdeLocation::Local { path: new_path },
+        ) if candidate == old_path || candidate.starts_with(old_path) => {
+            let suffix = candidate.strip_prefix(old_path).ok()?;
+            Some(IdeLocation::local(new_path.join(suffix)))
+        }
+        _ => None,
+    }
+}
+
+fn path_is_under(candidate: &str, root: &str) -> bool {
+    let candidate = normalize_remote_model_path(candidate);
+    let root = normalize_remote_model_path(root);
+    candidate == root || candidate.starts_with(&format!("{}/", root.trim_end_matches('/')))
+}
+
+fn path_suffix_under<'a>(candidate: &'a str, root: &str) -> Option<&'a str> {
+    if !path_is_under(candidate, root) {
+        return None;
+    }
+    let root_len = root.trim_end_matches('/').len();
+    Some(candidate.get(root_len..).unwrap_or_default())
+}
+
+fn append_remote_suffix(root: &str, suffix: &str) -> String {
+    if suffix.is_empty() {
+        normalize_remote_model_path(root)
+    } else {
+        format!(
+            "{}/{}",
+            normalize_remote_model_path(root).trim_end_matches('/'),
+            suffix.trim_start_matches('/')
+        )
+    }
+}
+
+fn normalize_remote_model_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        return "/".to_string();
+    }
+    let normalized = trimmed.replace('\\', "/");
+    let without_trailing = normalized.trim_end_matches('/');
+    if without_trailing.starts_with('/') {
+        without_trailing.to_string()
+    } else {
+        format!("/{without_trailing}")
     }
 }

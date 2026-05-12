@@ -490,8 +490,14 @@ impl TextEditorView {
         let result = self.buffer.with_text(|text| on_save(text, window, cx));
         match result {
             Ok(()) => {
-                self.buffer.mark_saved();
-                self.save_status = EditorSaveStatus::Saved;
+                // The IDE save path is asynchronous, matching Tauri's
+                // `saveFile`: dirty state clears only when the remote write
+                // resolves successfully and the owner calls `mark_saved_external`.
+                self.save_status = if self.buffer.is_dirty() {
+                    EditorSaveStatus::Dirty
+                } else {
+                    EditorSaveStatus::Saved
+                };
             }
             Err(message) => {
                 self.save_status = EditorSaveStatus::Failed(message);

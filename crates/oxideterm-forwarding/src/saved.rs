@@ -315,6 +315,35 @@ impl SavedForwardStore {
         Ok(count)
     }
 
+    pub fn delete_owned_forwards(
+        &self,
+        owner_connection_id: &str,
+    ) -> Result<usize, SavedForwardError> {
+        let mut data = self.lock_data();
+        let now = Utc::now();
+        let mut removed = Vec::new();
+        data.forwards.retain(|forward| {
+            if forward.owner_connection_id.as_deref() == Some(owner_connection_id) {
+                removed.push(forward.id.clone());
+                false
+            } else {
+                true
+            }
+        });
+        let count = removed.len();
+        for id in removed {
+            upsert_tombstone(
+                &mut data.tombstones,
+                DeletedPersistedForwardTombstone {
+                    id,
+                    deleted_at: now,
+                },
+            );
+        }
+        self.save_locked(&mut data)?;
+        Ok(count)
+    }
+
     pub fn export_snapshot(&self) -> Result<SavedForwardsSyncSnapshot, SavedForwardError> {
         let (forwards, tombstones) = self.load_sync_state();
         build_saved_forwards_sync_snapshot(forwards, tombstones)
@@ -691,6 +720,40 @@ mod tests {
         assert!(saved[0].auto_start);
         assert_eq!(saved[0].session_id, "session-2");
         assert_eq!(saved[0].rule.bind_port, 9090);
+    }
+
+    #[test]
+    fn delete_owned_forwards_tombstones_saved_connection_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SavedForwardStore::load(dir.path().join("forwards.json")).unwrap();
+        store
+            .sync_persisted_forward_rule(
+                "forward-1",
+                "node:prod",
+                Some("connection-1".to_string()),
+                sample_rule("forward-1", 8080),
+            )
+            .unwrap();
+        store
+            .sync_persisted_forward_rule(
+                "forward-2",
+                "node:dev",
+                Some("connection-2".to_string()),
+                sample_rule("forward-2", 9090),
+            )
+            .unwrap();
+
+        let deleted = store.delete_owned_forwards("connection-1").unwrap();
+        let (_forwards, tombstones) = store.load_sync_state();
+
+        assert_eq!(deleted, 1);
+        assert!(store.load_owned_forwards("connection-1").is_empty());
+        assert_eq!(store.load_owned_forwards("connection-2").len(), 1);
+        assert!(
+            tombstones
+                .iter()
+                .any(|tombstone| tombstone.id == "forward-1")
+        );
     }
 
     #[test]

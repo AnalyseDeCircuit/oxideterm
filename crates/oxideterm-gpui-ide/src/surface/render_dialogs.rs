@@ -289,6 +289,428 @@ impl IdeSurface {
         self.render_modal_overlay(dialog)
     }
 
+    fn render_tree_name_input_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(input) = self.tree_name_input.as_ref() else {
+            return div().into_any_element();
+        };
+        let tokens = &self.tokens;
+        let (title, description, confirm_label) = match input.kind {
+            TreeNameInputKind::NewFile => (
+                self.labels.context_new_file.clone(),
+                format!("Create in {}", input.parent_path),
+                self.labels.context_new_file.clone(),
+            ),
+            TreeNameInputKind::NewFolder => (
+                self.labels.context_new_folder.clone(),
+                format!("Create in {}", input.parent_path),
+                self.labels.context_new_folder.clone(),
+            ),
+            TreeNameInputKind::Rename => (
+                self.labels.context_rename.clone(),
+                input
+                    .original_name
+                    .as_ref()
+                    .map(|name| format!("Rename {name}"))
+                    .unwrap_or_else(|| self.labels.context_rename.clone()),
+                self.labels.context_rename.clone(),
+            ),
+        };
+        let can_submit = !input.submitting
+            && !input.value.trim().is_empty()
+            && validate_file_name(input.value.trim()).is_none();
+        let dialog = dialog_content(tokens)
+            .child(
+                dialog_header(tokens)
+                    .child(dialog_title(tokens, title))
+                    .child(dialog_description(tokens, description)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .h(px(36.0))
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .rounded(px(tokens.radii.sm))
+                            .border_1()
+                            .border_color(rgb(if input.error.is_some() {
+                                tokens.ui.error
+                            } else {
+                                tokens.ui.border
+                            }))
+                            .bg(rgb(tokens.ui.bg_sunken))
+                            .px_3()
+                            .text_color(rgb(tokens.ui.text))
+                            .child(if input.value.is_empty() {
+                                div()
+                                    .text_color(rgb(tokens.ui.text_muted))
+                                    .child("filename.ext")
+                                    .into_any_element()
+                            } else {
+                                div().child(input.value.clone()).into_any_element()
+                            }),
+                    )
+                    .when_some(input.error.clone(), |this, error| {
+                        this.child(
+                            div()
+                                .text_size(px(tokens.metrics.ui_text_xs))
+                                .text_color(rgb(tokens.ui.error))
+                                .child(error),
+                        )
+                    }),
+            )
+            .child(
+                dialog_footer(tokens)
+                    .child(
+                        button_with(
+                            tokens,
+                            self.labels.cancel.clone(),
+                            ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: input.submitting,
+                            },
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.cancel_tree_name_input(cx);
+                            }),
+                        ),
+                    )
+                    .child(
+                        button_with(
+                            tokens,
+                            if input.submitting {
+                                "Working...".to_string()
+                            } else {
+                                confirm_label
+                            },
+                            ButtonOptions {
+                                variant: ButtonVariant::Default,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: !can_submit,
+                            },
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.submit_tree_name_input(cx);
+                            }),
+                        ),
+                    ),
+            );
+
+        self.render_modal_overlay(dialog)
+    }
+
+    fn render_project_search_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = &self.tokens;
+        let result_count = self
+            .search
+            .results
+            .iter()
+            .map(|group| group.matches.len())
+            .sum::<usize>();
+        let panel = div()
+            .absolute()
+            .top(px(48.0))
+            .left(px(IDE_TREE_DEFAULT_WIDTH + 12.0))
+            .w(px(420.0))
+            .max_h(px(560.0))
+            .flex()
+            .flex_col()
+            .rounded(px(tokens.radii.md))
+            .border_1()
+            .border_color(rgb(tokens.ui.border))
+            .bg(rgb(tokens.ui.bg))
+            .shadow_lg()
+            .occlude()
+            .child(
+                div()
+                    .h(px(42.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(rgb(tokens.ui.border))
+                    .child(self.icon("lucide/search.svg", 15.0, tokens.ui.text_muted))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(28.0))
+                            .flex()
+                            .items_center()
+                            .rounded(px(tokens.radii.sm))
+                            .bg(rgb(tokens.ui.bg_sunken))
+                            .px_2()
+                            .text_size(px(tokens.metrics.ui_text_sm))
+                            .text_color(if self.search.query.is_empty() {
+                                rgb(tokens.ui.text_muted)
+                            } else {
+                                rgb(tokens.ui.text)
+                            })
+                            .child(if self.search.query.is_empty() {
+                                "Search".to_string()
+                            } else {
+                                self.search.query.clone()
+                            }),
+                    )
+                    .child(
+                        div()
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(tokens.radii.sm))
+                            .hover(|style| style.bg(rgb(tokens.ui.bg_hover)))
+                            .child(self.icon("lucide/x.svg", 14.0, tokens.ui.text_muted))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.close_project_search(cx);
+                                }),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(tokens.metrics.ui_text_xs))
+                    .text_color(rgb(tokens.ui.text_muted))
+                    .child(if self.search.searching {
+                        "Searching...".to_string()
+                    } else if self.search.query.trim().is_empty() {
+                        "Type to search project files".to_string()
+                    } else {
+                        format!("{result_count} result(s)")
+                    }),
+            )
+            .when_some(self.search.error.clone(), |panel, error| {
+                panel.child(
+                    div()
+                        .mx_3()
+                        .mb_2()
+                        .rounded(px(tokens.radii.sm))
+                        .bg(rgba((TAILWIND_RED_500 << 8) | 0x1a))
+                        .px_2()
+                        .py_1()
+                        .text_color(rgb(TAILWIND_RED_400))
+                        .text_size(px(tokens.metrics.ui_text_xs))
+                        .child(error),
+                )
+            })
+            .when(self.search.truncated, |panel| {
+                panel.child(
+                    div()
+                        .mx_3()
+                        .mb_2()
+                        .text_color(rgb(TAILWIND_AMBER_400))
+                        .text_size(px(tokens.metrics.ui_text_xs))
+                        .child("Results truncated. Refine your search."),
+                )
+            })
+            .child(self.render_project_search_results(cx))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+
+        popover_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_project_search(cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(panel)
+            .into_any_element()
+    }
+
+    fn render_project_search_results(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = &self.tokens;
+        let mut list = div()
+            .id("ide-project-search-results")
+            .h(px(450.0))
+            .overflow_y_scroll()
+            .px_2()
+            .pb_2()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+
+        if self.search.results.is_empty() {
+            return list
+                .child(
+                    div()
+                        .px_2()
+                        .py_3()
+                        .text_color(rgb(tokens.ui.text_muted))
+                        .text_size(px(tokens.metrics.ui_text_xs))
+                        .child(if self.search.query.trim().is_empty() {
+                            "No query".to_string()
+                        } else if self.search.searching {
+                            "Searching".to_string()
+                        } else {
+                            "No results".to_string()
+                        }),
+                )
+                .into_any_element();
+        }
+
+        for group in &self.search.results {
+            list = list.child(
+                div()
+                    .px_2()
+                    .pt_2()
+                    .text_size(px(tokens.metrics.ui_text_xs))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(rgb(tokens.ui.text))
+                    .child(group.path.clone()),
+            );
+            for hit in &group.matches {
+                let hit_for_click = hit.clone();
+                list = list.child(
+                    div()
+                        .rounded(px(tokens.radii.sm))
+                        .px_2()
+                        .py_1()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(tokens.ui.bg_hover)))
+                        .child(
+                            div()
+                                .text_color(rgb(tokens.ui.text_muted))
+                                .text_size(px(tokens.metrics.ui_text_xs))
+                                .child(format!("{}:{}", hit.line, hit.column)),
+                        )
+                        .child(
+                            div()
+                                .text_color(rgb(tokens.ui.text))
+                                .text_size(px(tokens.metrics.ui_text_xs))
+                                .child(hit.preview.clone()),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_search_match(hit_for_click.clone(), cx);
+                            }),
+                        ),
+                );
+            }
+        }
+
+        list.into_any_element()
+    }
+
+    fn render_delete_confirm_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(confirm) = self.delete_confirm.as_ref() else {
+            return div().into_any_element();
+        };
+        let tokens = &self.tokens;
+        let can_delete = confirm.unsaved_tab_count == 0 && !confirm.deleting;
+        let item_kind = if confirm.is_directory {
+            "folder"
+        } else {
+            "file"
+        };
+        let affected = confirm.affected_tab_count;
+        let unsaved = confirm.unsaved_tab_count;
+        let mut details = div().flex().flex_col().gap_2();
+        if confirm.is_directory {
+            details = details.child(
+                div()
+                    .text_color(rgb(TAILWIND_AMBER_400))
+                    .child("This will permanently delete all contents inside the folder."),
+            );
+        }
+        if affected > 0 && unsaved == 0 {
+            details = details.child(format!("{affected} open tab(s) will be closed."));
+        }
+        if unsaved > 0 {
+            details = details.child(
+                div()
+                    .text_color(rgb(TAILWIND_RED_400))
+                    .child(format!(
+                        "Cannot delete: {unsaved} file(s) have unsaved changes."
+                    )),
+            );
+        }
+
+        let dialog = dialog_content(tokens)
+            .child(
+                dialog_header(tokens)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(self.icon("lucide/alert-triangle.svg", 20.0, TAILWIND_RED_500))
+                            .child(dialog_title(tokens, "Confirm Delete".to_string())),
+                    )
+                    .child(dialog_description(
+                        tokens,
+                        format!("Delete {} \"{}\"?", item_kind, confirm.name),
+                    )),
+            )
+            .child(details)
+            .child(
+                dialog_footer(tokens)
+                    .child(
+                        button_with(
+                            tokens,
+                            self.labels.cancel.clone(),
+                            ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: confirm.deleting,
+                            },
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.cancel_delete_tree_item(cx);
+                            }),
+                        ),
+                    )
+                    .child(
+                        button_with(
+                            tokens,
+                            if confirm.deleting {
+                                "Deleting...".to_string()
+                            } else {
+                                self.labels.context_delete.clone()
+                            },
+                            ButtonOptions {
+                                variant: ButtonVariant::Destructive,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: !can_delete,
+                            },
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.confirm_delete_tree_item(cx);
+                            }),
+                        ),
+                    ),
+            );
+
+        self.render_modal_overlay(dialog)
+    }
+
     fn render_folder_picker_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
         let tokens = &self.tokens;
         let current_path = self.folder_picker.current_path.clone();

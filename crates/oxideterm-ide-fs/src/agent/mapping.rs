@@ -67,6 +67,104 @@ fn is_agent_conflict_parts(code: i32, message: &str) -> bool {
         || message.contains("modified externally")
 }
 
+fn ide_error_from_agent_error(error: AgentError) -> IdeFileError {
+    match error {
+        AgentError::Rpc { code, message } if is_agent_conflict_parts(code, &message) => {
+            IdeFileError::new(IdeFileErrorKind::Conflict, message)
+        }
+        AgentError::Rpc { message, .. } => ide_error_from_agent_message(message),
+        AgentError::Timeout(timeout) => IdeFileError::new(
+            IdeFileErrorKind::Timeout,
+            format!("Agent RPC timeout after {timeout}s"),
+        ),
+        AgentError::ChannelClosed => {
+            IdeFileError::new(IdeFileErrorKind::Disconnected, "Agent channel closed")
+        }
+        AgentError::Route(message)
+        | AgentError::Ssh(message)
+        | AgentError::Sftp(message)
+        | AgentError::Upload(message)
+        | AgentError::ExecFailed(message)
+        | AgentError::StartFailed(message)
+        | AgentError::Handshake(message)
+        | AgentError::ArchDetection(message)
+        | AgentError::LocalIo(message)
+        | AgentError::Serialize(message)
+        | AgentError::Deserialize(message)
+        | AgentError::UnsupportedArch(message)
+        | AgentError::BinaryNotFound(message) => ide_error_from_agent_message(message),
+    }
+}
+
+fn agent_error_log_label(error: &AgentError) -> &'static str {
+    match error {
+        AgentError::Rpc { code, message } if is_agent_conflict_parts(*code, message) => "conflict",
+        AgentError::Rpc { .. } => "rpc",
+        AgentError::Timeout(_) => "timeout",
+        AgentError::ChannelClosed => "channel_closed",
+        AgentError::Route(_) => "route",
+        AgentError::Ssh(_) => "ssh",
+        AgentError::Sftp(_) => "sftp",
+        AgentError::Upload(_) => "upload",
+        AgentError::UnsupportedArch(_) => "unsupported_arch",
+        AgentError::BinaryNotFound(_) => "binary_not_found",
+        AgentError::LocalIo(_) => "local_io",
+        AgentError::ExecFailed(_) => "exec_failed",
+        AgentError::StartFailed(_) => "start_failed",
+        AgentError::Handshake(_) => "handshake",
+        AgentError::ArchDetection(_) => "arch_detection",
+        AgentError::Serialize(_) => "serialize",
+        AgentError::Deserialize(_) => "deserialize",
+    }
+}
+
+fn ide_error_from_agent_message(message: impl Into<String>) -> IdeFileError {
+    let message = message.into();
+    let normalized = message.to_ascii_lowercase();
+    let kind = if normalized.contains("permission denied")
+        || normalized.contains("eacces")
+        || normalized.contains("operation not permitted")
+    {
+        IdeFileErrorKind::PermissionDenied
+    } else if normalized.contains("not found")
+        || normalized.contains("no such file")
+        || normalized.contains("enoent")
+    {
+        IdeFileErrorKind::NotFound
+    } else if normalized.contains("timeout") || normalized.contains("timed out") {
+        IdeFileErrorKind::Timeout
+    } else if [
+        "network",
+        "connection",
+        "disconnected",
+        "eof",
+        "broken pipe",
+        "reset by peer",
+        "channel closed",
+        "transport is closed",
+        "transport is missing",
+        "stale",
+        "link down",
+        "not connected",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+    {
+        IdeFileErrorKind::Disconnected
+    } else {
+        IdeFileErrorKind::Other
+    };
+    IdeFileError::new(kind, message)
+}
+
+fn should_write_via_agent(expected_version: Option<&SavedFileVersion>) -> bool {
+    // Tauri only uses the agent optimistic-lock path when the tab was opened
+    // with an agent hash. Buffers opened through SFTP carry only mtime/size and
+    // must keep SFTP's stat-before-write conflict check even if an agent later
+    // becomes available. `None` is the explicit conflict-overwrite path.
+    expected_version.is_none() || expected_version.and_then(|version| version.etag.as_ref()).is_some()
+}
+
 #[cfg(test)]
 fn file_tree_entry_from_sftp(node_id: &NodeId, entry: FileInfo) -> FileTreeEntry {
     FileTreeEntry {

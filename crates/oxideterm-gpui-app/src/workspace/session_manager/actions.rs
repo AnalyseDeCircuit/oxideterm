@@ -190,6 +190,14 @@ impl WorkspaceApp {
         if let Err(error) = self.connection_store.delete(id) {
             self.session_manager.status = Some(error.to_string());
         } else {
+            // Tauri deletes owner-bound saved forwards with the saved connection
+            // so sync/import cannot later resurrect forwards for a missing owner.
+            if let Err(error) = self.forwarding_registry.delete_owned_forwards(id) {
+                self.session_manager.status = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+            self.release_ide_runtime_for_saved_connection(id, cx);
             self.session_manager.selected_ids.remove(id);
             self.session_manager.status =
                 Some(self.i18n.t("sessionManager.toast.connection_deleted"));
@@ -207,6 +215,13 @@ impl WorkspaceApp {
         let mut deleted = 0;
         for id in ids {
             if self.connection_store.delete(&id).unwrap_or(false) {
+                // Keep batch delete aligned with the single-delete command path.
+                if let Err(error) = self.forwarding_registry.delete_owned_forwards(&id) {
+                    self.session_manager.status = Some(error.to_string());
+                    cx.notify();
+                    return;
+                }
+                self.release_ide_runtime_for_saved_connection(&id, cx);
                 deleted += 1;
             }
         }

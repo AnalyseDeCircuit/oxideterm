@@ -28,7 +28,9 @@ use oxideterm_ide_core::{
 #[cfg(test)]
 use oxideterm_sftp::{FileInfo, FileType};
 use oxideterm_sftp::{SftpError, SftpExecChannelOpener};
-use oxideterm_ssh::{NodeId, NodeRouter, SshConnectionHandle};
+use oxideterm_ssh::{
+    ConnectionConsumer, NodeId, NodeRouter, ResolvedConnection, RouteError, SshConnectionHandle,
+};
 use russh::ChannelMsg;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, mpsc, oneshot};
@@ -38,6 +40,7 @@ use crate::NodeSftpIdeFileSystem;
 
 const AGENT_REMOTE_DIR: &str = ".oxideterm";
 const AGENT_BINARY_NAME: &str = "oxideterm-agent";
+const AGENT_REMOTE_PATH: &str = "~/.oxideterm/oxideterm-agent";
 const AGENT_RPC_TIMEOUT_SECS: u64 = 30;
 const AGENT_COMPRESS_THRESHOLD: usize = 32 * 1024;
 const LEGACY_AGENT_COMPATIBILITY_VERSION: u32 = 1;
@@ -95,9 +98,20 @@ pub struct NodeAgentIdeFileSystem {
     router: NodeRouter,
     sftp: NodeSftpIdeFileSystem,
     registry: Arc<AgentRegistry>,
+    // Tauri's IDE is node-scoped: it can outlive terminal panes and should keep
+    // using the node connection until the IDE project/tab is closed. Native
+    // records that as an explicit registry consumer instead of borrowing
+    // liveness from SFTP channels or a terminal tab.
+    ide_consumers: Arc<DashMap<String, IdeConnectionLease>>,
     mode: NodeAgentMode,
     status: Arc<RwLock<AgentStatus>>,
     deploy_lock: Arc<Mutex<()>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct IdeConnectionLease {
+    connection_id: String,
+    consumer: ConnectionConsumer,
 }
 
 include!("agent/filesystem.rs");

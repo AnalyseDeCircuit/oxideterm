@@ -62,6 +62,24 @@ mod tests {
     }
 
     #[test]
+    fn sftp_opened_buffer_keeps_sftp_conflict_detection_when_agent_appears() {
+        let sftp_version = SavedFileVersion {
+            size_bytes: Some(3),
+            modified_millis: Some(1000),
+            etag: None,
+        };
+        let agent_version = SavedFileVersion {
+            size_bytes: Some(3),
+            modified_millis: Some(1000),
+            etag: Some("hash".to_string()),
+        };
+
+        assert!(!should_write_via_agent(Some(&sftp_version)));
+        assert!(should_write_via_agent(Some(&agent_version)));
+        assert!(should_write_via_agent(None));
+    }
+
+    #[test]
     fn maps_sftp_entries_like_tauri_file_info() {
         let node_id = NodeId::new("node-1");
         let entry = FileInfo {
@@ -87,9 +105,12 @@ mod tests {
         let registry = AgentRegistry::default();
         let (write_tx, _write_rx) = mpsc::channel::<String>(1);
         let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
+        let (watch_tx, watch_rx) = mpsc::channel::<AgentWatchEvent>(1);
         let transport = AgentTransport {
             write_tx,
             pending: Arc::new(Mutex::new(HashMap::new())),
+            watch_rx: Mutex::new(Some(watch_rx)),
+            _watch_tx: watch_tx,
             shutdown_tx,
             alive: Arc::new(AtomicBool::new(false)),
         };
@@ -130,5 +151,378 @@ mod tests {
                 compatibility_version: INVALID_AGENT_COMPATIBILITY_VERSION,
             })
         );
+    }
+
+    #[test]
+    fn agent_remote_path_matches_tauri_status_path() {
+        assert_eq!(remote_agent_path(), "~/.oxideterm/oxideterm-agent");
+        assert_eq!(
+            shell_path_arg(&remote_agent_path()),
+            "~/'.oxideterm/oxideterm-agent'"
+        );
+        assert_eq!(
+            shell_path_arg("~/agent dir/oxide'term-agent"),
+            "~/'agent dir/oxide'\\''term-agent'"
+        );
+        assert_eq!(
+            shell_path_arg("/home/me/.oxideterm/oxideterm-agent"),
+            "'/home/me/.oxideterm/oxideterm-agent'"
+        );
+    }
+
+    #[test]
+    fn agent_deploy_error_labels_match_tauri_bootstrap_classes() {
+        assert_eq!(
+            AgentError::ArchDetection("boom".into()).to_string(),
+            "Architecture detection failed: boom"
+        );
+        assert_eq!(
+            AgentError::Upload("denied".into()).to_string(),
+            "Upload failed: denied"
+        );
+        assert_eq!(
+            AgentError::ExecFailed("bad shell".into()).to_string(),
+            "Command execution failed: bad shell"
+        );
+        assert_eq!(
+            AgentError::StartFailed("missing libc".into()).to_string(),
+            "Agent start failed: missing libc"
+        );
+    }
+
+    #[test]
+    fn agent_errors_keep_remote_fs_error_classes() {
+        assert_eq!(
+            ide_error_from_agent_message("permission denied: /repo/secret").kind,
+            IdeFileErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            ide_error_from_agent_message("ENOENT: /repo/missing").kind,
+            IdeFileErrorKind::NotFound
+        );
+        assert_eq!(
+            ide_error_from_agent_error(AgentError::ChannelClosed).kind,
+            IdeFileErrorKind::Disconnected
+        );
+        assert_eq!(
+            ide_error_from_agent_error(AgentError::Timeout(30)).kind,
+            IdeFileErrorKind::Timeout
+        );
+    }
+
+    #[test]
+    fn permission_and_path_errors_map_to_tauri_ide_classes() {
+        for message in [
+            "permission denied: /repo/secret",
+            "EACCES: cannot open /repo/secret",
+            "operation not permitted: /repo/secret",
+        ] {
+            assert_eq!(
+                ide_error_from_agent_message(message).kind,
+                IdeFileErrorKind::PermissionDenied
+            );
+        }
+
+        for message in [
+            "path not found: /repo/missing",
+            "No such file or directory: /repo/missing",
+            "ENOENT: /repo/missing",
+        ] {
+            assert_eq!(
+                ide_error_from_agent_message(message).kind,
+                IdeFileErrorKind::NotFound
+            );
+        }
+    }
+
+    #[test]
+    fn agent_error_log_labels_do_not_include_remote_payloads() {
+        assert_eq!(
+            agent_error_log_label(&AgentError::Rpc {
+                code: -32000,
+                message: "permission denied: /srv/.env".to_string(),
+            }),
+            "rpc"
+        );
+        assert_eq!(
+            agent_error_log_label(&AgentError::Ssh(
+                "connection failed while running ~/.oxideterm/oxideterm-agent".to_string(),
+            )),
+            "ssh"
+        );
+    }
+
+    #[tokio::test]
+    async fn routes_agent_watch_notifications_to_receiver() {
+        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+        let (watch_tx, mut watch_rx) = mpsc::channel::<AgentWatchEvent>(1);
+
+        handle_agent_line(
+            &pending,
+            &watch_tx,
+            r#"{"method":"watch/event","params":{"path":"/srv/app/main.rs","kind":"modified"}}"#,
+        )
+        .await;
+
+        let event = watch_rx.recv().await.unwrap();
+        assert_eq!(event.path, "/srv/app/main.rs");
+        assert_eq!(event.kind, "modified");
+    }
+
+    #[test]
+    fn parses_exec_grep_output_like_tauri_search_fallback() {
+        let matches = parse_grep_output(
+            "./src/main.rs:12:let needle = true;\nREADME.md:2:Needle again\n",
+            "needle",
+            false,
+        );
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].path, "src/main.rs");
+        assert_eq!(matches[0].line, 12);
+        assert_eq!(matches[0].match_start, 4);
+        assert_eq!(matches[1].path, "README.md");
+    }
+
+    #[test]
+    fn grep_fallback_escapes_query_and_home_cwd_like_tauri() {
+        assert_eq!(regex_escape_for_basic_grep("a+b[0]"), "a\\+b\\[0\\]");
+        assert_eq!(shell_cd_arg("~"), "~");
+        assert_eq!(shell_cd_arg("~/my repo"), "~/'my repo'");
+        assert_eq!(shell_cd_arg("/srv/my repo"), "'/srv/my repo'");
+    }
+
+    #[tokio::test]
+    async fn ide_session_acquisition_registers_and_releases_ide_consumer() {
+        let registry = oxideterm_ssh::SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node_id = NodeId::new("node-ide");
+        let config = oxideterm_ssh::SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node_id.clone(), config.clone());
+
+        let handle = registry.acquire(
+            config.clone(),
+            oxideterm_ssh::ConnectionConsumer::NodeRouter("node-ide".to_string()),
+        );
+        handle.set_physical(Arc::new(()));
+        registry.mark_state(handle.connection_id(), oxideterm_ssh::ConnectionState::Active);
+        router
+            .bind_connection(&node_id, handle.connection_id().to_string())
+            .unwrap();
+
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+        fs.ensure_ide_session_for_node(&node_id).await.unwrap();
+
+        let info = handle.info();
+        assert!(info.consumers.contains(&ConnectionConsumer::Ide(
+            "node-ide".to_string()
+        )));
+
+        fs.release_ide_consumer("node-ide");
+        let info = handle.info();
+        assert!(!info.consumers.contains(&ConnectionConsumer::Ide(
+            "node-ide".to_string()
+        )));
+    }
+
+    #[tokio::test]
+    async fn stop_watch_without_active_ide_session_does_not_acquire_consumer() {
+        let registry = oxideterm_ssh::SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry);
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Ask);
+
+        fs.stop_watch_directory("node-ide", "/srv/app")
+            .await
+            .unwrap();
+
+        assert!(fs.ide_consumers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ide_session_on_proxy_child_consumes_child_connection() {
+        let registry = oxideterm_ssh::SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let parent_id = NodeId::new("jump");
+        let child_id = NodeId::new("target");
+        let parent_config = oxideterm_ssh::SshConfig::password("jump", 22, "me", "pw");
+        let child_config = oxideterm_ssh::SshConfig::password("target", 22, "me", "pw");
+        router.upsert_node(parent_id.clone(), parent_config.clone());
+        router
+            .runtime_store()
+            .upsert_child_node(parent_id.clone(), child_id.clone(), child_config.clone())
+            .unwrap();
+
+        let parent = registry.acquire(
+            parent_config,
+            oxideterm_ssh::ConnectionConsumer::NodeRouter("jump".to_string()),
+        );
+        parent.set_physical(Arc::new(()));
+        registry.mark_state(parent.connection_id(), oxideterm_ssh::ConnectionState::Active);
+        router
+            .bind_connection(&parent_id, parent.connection_id().to_string())
+            .unwrap();
+
+        let child = registry.acquire(
+            child_config,
+            oxideterm_ssh::ConnectionConsumer::NodeRouter("target".to_string()),
+        );
+        child.set_physical(Arc::new(()));
+        registry.mark_state(child.connection_id(), oxideterm_ssh::ConnectionState::Active);
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(parent.connection_id().to_string()),
+        );
+        router
+            .bind_connection(&child_id, child.connection_id().to_string())
+            .unwrap();
+
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+        fs.ensure_ide_session_for_node(&child_id).await.unwrap();
+
+        assert!(!parent.info().consumers.contains(&ConnectionConsumer::Ide(
+            "target".to_string()
+        )));
+        assert!(child.info().consumers.contains(&ConnectionConsumer::Ide(
+            "target".to_string()
+        )));
+    }
+
+    #[tokio::test]
+    async fn terminal_consumer_release_does_not_kill_ide_remote_fs() {
+        let registry = oxideterm_ssh::SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node_id = NodeId::new("node-ide");
+        let config = oxideterm_ssh::SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node_id.clone(), config.clone());
+
+        let handle = registry.acquire(
+            config.clone(),
+            oxideterm_ssh::ConnectionConsumer::NodeRouter("node-ide".to_string()),
+        );
+        handle.set_physical(Arc::new(()));
+        registry.mark_state(handle.connection_id(), oxideterm_ssh::ConnectionState::Active);
+        router
+            .bind_connection(&node_id, handle.connection_id().to_string())
+            .unwrap();
+
+        let terminal_consumer = ConnectionConsumer::Terminal("term-a".to_string());
+        let terminal = registry.acquire(config, terminal_consumer.clone());
+        assert_eq!(terminal.connection_id(), handle.connection_id());
+
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+        fs.ensure_ide_session_for_node(&node_id).await.unwrap();
+
+        registry.release(handle.connection_id(), &terminal_consumer);
+        let info = handle.info();
+        assert!(!info.consumers.contains(&terminal_consumer));
+        assert!(info
+            .consumers
+            .contains(&ConnectionConsumer::Ide("node-ide".to_string())));
+        assert_eq!(info.state, oxideterm_ssh::ConnectionState::Active);
+    }
+
+    #[tokio::test]
+    async fn parent_link_down_interrupts_child_ide_and_release_cleans_consumer() {
+        let registry = oxideterm_ssh::SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let parent_id = NodeId::new("jump");
+        let child_id = NodeId::new("target");
+        let parent_config = oxideterm_ssh::SshConfig::password("jump", 22, "me", "pw");
+        let child_config = oxideterm_ssh::SshConfig::password("target", 22, "me", "pw");
+        router.upsert_node(parent_id.clone(), parent_config.clone());
+        router
+            .runtime_store()
+            .upsert_child_node(parent_id.clone(), child_id.clone(), child_config.clone())
+            .unwrap();
+
+        let parent = registry.acquire(
+            parent_config,
+            oxideterm_ssh::ConnectionConsumer::NodeRouter("jump".to_string()),
+        );
+        parent.set_physical(Arc::new(()));
+        registry.mark_state(parent.connection_id(), oxideterm_ssh::ConnectionState::Active);
+        router
+            .bind_connection(&parent_id, parent.connection_id().to_string())
+            .unwrap();
+
+        let child = registry.acquire(
+            child_config,
+            oxideterm_ssh::ConnectionConsumer::NodeRouter("target".to_string()),
+        );
+        child.set_physical(Arc::new(()));
+        registry.mark_state(child.connection_id(), oxideterm_ssh::ConnectionState::Active);
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(parent.connection_id().to_string()),
+        );
+        router
+            .bind_connection(&child_id, child.connection_id().to_string())
+            .unwrap();
+
+        let fs = NodeAgentIdeFileSystem::new(router.clone(), NodeAgentMode::Disabled);
+        fs.ensure_ide_session_for_node(&child_id).await.unwrap();
+        assert!(child
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Ide("target".to_string())));
+
+        registry.mark_link_down_cascade(parent.connection_id());
+        assert_eq!(parent.state(), oxideterm_ssh::ConnectionState::LinkDown);
+        assert_eq!(child.state(), oxideterm_ssh::ConnectionState::LinkDown);
+        assert!(matches!(
+            router.acquire_connection(
+                &child_id,
+                ConnectionConsumer::Ide("target-reopen".to_string())
+            ),
+            Err(RouteError::NotConnected(_))
+        ));
+        assert!(!child
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Ide("target-reopen".to_string())));
+
+        fs.release_ide_consumer("target");
+        assert!(!child
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Ide("target".to_string())));
+    }
+
+    #[tokio::test]
+    async fn manual_disconnect_cleanup_does_not_revive_ide_session() {
+        let registry = oxideterm_ssh::SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node_id = NodeId::new("node-ide");
+        let config = oxideterm_ssh::SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node_id.clone(), config.clone());
+
+        let handle = registry.acquire(
+            config,
+            oxideterm_ssh::ConnectionConsumer::NodeRouter("node-ide".to_string()),
+        );
+        handle.set_physical(Arc::new(()));
+        registry.mark_state(handle.connection_id(), oxideterm_ssh::ConnectionState::Active);
+        router
+            .bind_connection(&node_id, handle.connection_id().to_string())
+            .unwrap();
+
+        let fs = NodeAgentIdeFileSystem::new(router.clone(), NodeAgentMode::Ask);
+        fs.ensure_ide_session_for_node(&node_id).await.unwrap();
+        fs.release_ide_consumer("node-ide");
+        router
+            .disconnect_node_runtime(&node_id, "manual disconnect")
+            .unwrap();
+
+        fs.stop_watch_directory("node-ide", "/srv/app")
+            .await
+            .unwrap();
+
+        assert!(!handle.info().consumers.contains(&ConnectionConsumer::Ide(
+            "node-ide".to_string()
+        )));
+        assert!(matches!(
+            router.acquire_connection(&node_id, ConnectionConsumer::Ide("node-ide".to_string())),
+            Err(RouteError::NotConnected(_))
+        ));
     }
 }

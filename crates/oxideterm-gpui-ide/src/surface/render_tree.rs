@@ -123,13 +123,50 @@ impl IdeSurface {
                             .child(div().truncate().child(snapshot.project.title.clone())),
                     )
                     .child({
+                        let remote_disabled = !self.remote_actions_ready();
                         let folder_disabled = self.workspace.has_dirty_buffers()
-                            || matches!(self.load_state, IdeLoadState::Loading);
-                        let refresh_disabled = matches!(self.load_state, IdeLoadState::Loading);
+                            || matches!(self.load_state, IdeLoadState::Loading)
+                            || remote_disabled;
+                        let refresh_disabled =
+                            matches!(self.load_state, IdeLoadState::Loading) || remote_disabled;
+                        let search_disabled =
+                            matches!(self.load_state, IdeLoadState::Loading) || remote_disabled;
                         div()
                             .flex()
                             .items_center()
                             .gap_1()
+                            .child(
+                                div()
+                                    .size(px(IDE_TREE_TOOLBAR_BUTTON_SIZE))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(self.tokens.radii.sm))
+                                    .opacity(if search_disabled { 0.5 } else { 1.0 })
+                                    .hover(|style| {
+                                        if search_disabled {
+                                            style
+                                        } else {
+                                            style.bg(rgba(
+                                                (self.tokens.ui.bg_hover << 8) | IDE_HOVER_ALPHA,
+                                            ))
+                                        }
+                                    })
+                                    .child(self.icon(
+                                        "lucide/search.svg",
+                                        IDE_TREE_TOOLBAR_ICON_SIZE,
+                                        self.tokens.ui.text_muted,
+                                    ))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            if !search_disabled {
+                                                this.open_project_search(cx);
+                                            }
+                                            cx.stop_propagation();
+                                        }),
+                                    ),
+                            )
                             .child(
                                 div()
                                     .size(px(IDE_TREE_TOOLBAR_BUTTON_SIZE))
@@ -188,7 +225,7 @@ impl IdeSurface {
                                         MouseButton::Left,
                                         cx.listener(move |this, _event, _window, cx| {
                                             if !refresh_disabled {
-                                                this.retry_open_project(cx);
+                                                this.refresh_project_tree_root(cx);
                                             }
                                             cx.stop_propagation();
                                         }),

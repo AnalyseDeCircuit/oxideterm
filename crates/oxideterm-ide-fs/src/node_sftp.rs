@@ -145,6 +145,84 @@ impl NodeSftpIdeFileSystem {
         .await
     }
 
+    pub async fn delete_item(
+        &self,
+        node_id: impl Into<String>,
+        path: impl Into<String>,
+        recursive: bool,
+    ) -> Result<(), IdeFileError> {
+        let node_id = NodeId::new(node_id);
+        let path = path.into();
+        self.with_sftp_retry(&node_id, |sftp| {
+            let path = path.clone();
+            Box::pin(async move {
+                let sftp = sftp.lock().await;
+                if recursive {
+                    sftp.delete_recursive(&path).await.map(|_| ())
+                } else {
+                    sftp.delete(&path).await
+                }
+                .map_err(map_sftp_error)
+            })
+        })
+        .await
+    }
+
+    pub async fn create_file(
+        &self,
+        node_id: impl Into<String>,
+        path: impl Into<String>,
+    ) -> Result<SavedFileVersion, IdeFileError> {
+        let location = IdeLocation::remote(node_id.into(), path.into());
+        self.write_file(&location, "", None, WriteMode::CreateNew)
+            .await
+    }
+
+    pub async fn create_folder(
+        &self,
+        node_id: impl Into<String>,
+        path: impl Into<String>,
+    ) -> Result<(), IdeFileError> {
+        let node_id = NodeId::new(node_id);
+        let path = path.into();
+        self.with_sftp_retry(&node_id, |sftp| {
+            let path = path.clone();
+            Box::pin(async move {
+                let sftp = sftp.lock().await;
+                sftp.mkdir(&path).await.map_err(map_sftp_error)
+            })
+        })
+        .await
+    }
+
+    pub async fn rename_item(
+        &self,
+        node_id: impl Into<String>,
+        old_path: impl Into<String>,
+        new_path: impl Into<String>,
+    ) -> Result<(), IdeFileError> {
+        let node_id = NodeId::new(node_id);
+        let old_path = old_path.into();
+        let new_path = new_path.into();
+        self.with_sftp_retry(&node_id, |sftp| {
+            let old_path = old_path.clone();
+            let new_path = new_path.clone();
+            Box::pin(async move {
+                let sftp = sftp.lock().await;
+                if sftp.stat(&new_path).await.is_ok() {
+                    return Err(IdeFileError::new(
+                        IdeFileErrorKind::Conflict,
+                        "ide.error.alreadyExists",
+                    ));
+                }
+                sftp.rename(&old_path, &new_path)
+                    .await
+                    .map_err(map_sftp_error)
+            })
+        })
+        .await
+    }
+
     async fn with_sftp_retry<T, F>(&self, node_id: &NodeId, operation: F) -> Result<T, IdeFileError>
     where
         F: for<'a> Fn(&'a SharedSftp) -> IdeOperationFuture<'a, T>,
@@ -395,7 +473,7 @@ fn remote_versions_conflict(expected: &SavedFileVersion, current: &SavedFileVers
         && expected.modified_millis != current.modified_millis
 }
 
-fn map_route_error(error: RouteError) -> IdeFileError {
+pub(crate) fn map_route_error(error: RouteError) -> IdeFileError {
     let message = error.to_string();
     let kind = match error {
         RouteError::ConnectionTimeout(_) => IdeFileErrorKind::Timeout,

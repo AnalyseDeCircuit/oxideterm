@@ -135,6 +135,17 @@ fn normalize_remote_path(path: &str) -> String {
     if trimmed.is_empty() {
         return "/".to_string();
     }
+    if trimmed == "~" {
+        return "~".to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        let rest = rest.trim_end_matches('/');
+        return if rest.is_empty() {
+            "~".to_string()
+        } else {
+            format!("~/{rest}")
+        };
+    }
     if trimmed == "/" {
         return "/".to_string();
     }
@@ -168,6 +179,97 @@ fn parent_remote_path(path: &str) -> String {
             }
         })
         .unwrap_or_else(|| "/".to_string())
+}
+
+fn group_search_matches(matches: Vec<IdeSearchMatch>) -> Vec<SearchResultGroup> {
+    let mut groups = Vec::<SearchResultGroup>::new();
+    for hit in matches {
+        if let Some(group) = groups.iter_mut().find(|group| group.path == hit.path) {
+            group.matches.push(hit);
+        } else {
+            groups.push(SearchResultGroup {
+                path: hit.path.clone(),
+                matches: vec![hit],
+            });
+        }
+    }
+    groups
+}
+
+fn is_absolute_search_path(path: &str) -> bool {
+    path.starts_with('/') || path.as_bytes().get(1) == Some(&b':')
+}
+
+fn resolve_search_match_path(root_path: &str, match_path: &str) -> String {
+    if is_absolute_search_path(match_path) {
+        normalize_remote_path(match_path)
+    } else {
+        join_remote_child(root_path, match_path)
+    }
+}
+
+fn validate_file_name(name: &str) -> Option<String> {
+    if name.trim().is_empty() {
+        return Some("ide.validation.nameEmpty".to_string());
+    }
+    if name.contains('/') {
+        return Some("ide.validation.nameContainsSlash".to_string());
+    }
+    if name == "." || name == ".." {
+        return Some("ide.validation.nameInvalid".to_string());
+    }
+    if name
+        .chars()
+        .any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*') || ch.is_control())
+    {
+        return Some("ide.validation.nameInvalidChars".to_string());
+    }
+    if name.len() > 255 {
+        return Some("ide.validation.nameTooLong".to_string());
+    }
+    None
+}
+
+fn watch_refresh_path(root_path: &str, event_path: &str) -> String {
+    let root_path = normalize_remote_path(root_path);
+    let event_path = normalize_remote_path(event_path);
+    if event_path == root_path {
+        root_path
+    } else {
+        parent_remote_path(&event_path)
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn watch_refresh_path_matches_tauri_parent_refresh() {
+        assert_eq!(watch_refresh_path("/srv/app", "/srv/app"), "/srv/app");
+        assert_eq!(
+            watch_refresh_path("/srv/app", "/srv/app/src/main.rs"),
+            "/srv/app/src"
+        );
+    }
+
+    #[test]
+    fn normalize_remote_path_preserves_home_expansion_inputs() {
+        assert_eq!(normalize_remote_path("~"), "~");
+        assert_eq!(normalize_remote_path("~/project/"), "~/project");
+    }
+
+    #[test]
+    fn search_match_path_resolution_matches_tauri_panel() {
+        assert_eq!(
+            resolve_search_match_path("/srv/app", "/srv/app/src/main.rs"),
+            "/srv/app/src/main.rs"
+        );
+        assert_eq!(
+            resolve_search_match_path("/srv/app", "src/main.rs"),
+            "/srv/app/src/main.rs"
+        );
+    }
 }
 
 fn language_for_location(location: &IdeLocation, source: &str) -> Option<LanguageId> {

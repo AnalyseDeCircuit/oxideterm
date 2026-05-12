@@ -240,6 +240,17 @@ impl SftpSession {
         }
         let path_to_resolve = if is_absolute_remote_path(path) {
             path.to_string()
+        } else if path == "~" || path.starts_with("~/") {
+            let home = self
+                .sftp
+                .canonicalize(".")
+                .await
+                .map_err(|error| self.map_sftp_error(error, "."))?;
+            if path == "~" {
+                home
+            } else {
+                join_remote_path(&home, &path[2..])
+            }
         } else {
             join_remote_path(&self.cwd, path)
         };
@@ -250,11 +261,25 @@ impl SftpSession {
     }
 
     async fn resolve_new_file_path(&self, path: &str) -> Result<String, SftpError> {
-        let (parent, filename) = if let Some((parent, filename)) = path.rsplit_once('/') {
+        let expanded = if path == "~" || path.starts_with("~/") {
+            let home = self
+                .sftp
+                .canonicalize(".")
+                .await
+                .map_err(|error| self.map_sftp_error(error, "."))?;
+            if path == "~" {
+                home
+            } else {
+                join_remote_path(&home, &path[2..])
+            }
+        } else {
+            path.to_string()
+        };
+        let (parent, filename) = if let Some((parent, filename)) = expanded.rsplit_once('/') {
             let parent = if parent.is_empty() { "/" } else { parent };
             (parent, filename)
         } else {
-            (self.cwd.as_str(), path)
+            (self.cwd.as_str(), expanded.as_str())
         };
         if filename.is_empty() {
             return Err(SftpError::InvalidPath(format!(

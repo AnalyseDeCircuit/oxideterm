@@ -1,6 +1,8 @@
 struct AgentTransport {
     write_tx: mpsc::Sender<String>,
     pending: PendingMap,
+    watch_rx: Mutex<Option<mpsc::Receiver<AgentWatchEvent>>>,
+    _watch_tx: mpsc::Sender<AgentWatchEvent>,
     shutdown_tx: mpsc::Sender<()>,
     alive: Arc<AtomicBool>,
 }
@@ -18,10 +20,12 @@ impl AgentTransport {
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));
         let (write_tx, mut write_rx) = mpsc::channel::<String>(256);
+        let (watch_tx, watch_rx) = mpsc::channel::<AgentWatchEvent>(1024);
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
         let pending_for_task = pending.clone();
         let alive_for_task = alive.clone();
+        let watch_tx_for_task = watch_tx.clone();
         tokio::spawn(async move {
             let mut buffer = String::new();
             loop {
@@ -43,13 +47,14 @@ impl AgentTransport {
                                     if line.is_empty() {
                                         continue;
                                     }
-                                    handle_agent_line(&pending_for_task, &line).await;
+                                    handle_agent_line(&pending_for_task, &watch_tx_for_task, &line).await;
                                 }
                             }
                             Some(ChannelMsg::ExtendedData { data, ext: 1 }) => {
-                                for line in String::from_utf8_lossy(&data).lines() {
-                                    debug!("[ide-agent-stderr] {line}");
-                                }
+                                debug!(
+                                    "[ide-agent-stderr] redacted {} byte(s) of agent diagnostic output",
+                                    data.len()
+                                );
                             }
                             Some(ChannelMsg::ExitStatus { exit_status }) => {
                                 info!("[ide-agent] exited with status {exit_status}");
@@ -76,6 +81,8 @@ impl AgentTransport {
         Ok(Self {
             write_tx,
             pending,
+            watch_rx: Mutex::new(Some(watch_rx)),
+            _watch_tx: watch_tx,
             shutdown_tx,
             alive,
         })
@@ -137,9 +144,17 @@ impl AgentTransport {
             .await;
         let _ = self.shutdown_tx.send(()).await;
     }
+
+    async fn take_watch_rx(&self) -> Option<mpsc::Receiver<AgentWatchEvent>> {
+        self.watch_rx.lock().await.take()
+    }
 }
 
-async fn handle_agent_line(pending: &PendingMap, line: &str) {
+async fn handle_agent_line(
+    pending: &PendingMap,
+    watch_tx: &mpsc::Sender<AgentWatchEvent>,
+    line: &str,
+) {
     match serde_json::from_str::<AgentMessage>(line) {
         Ok(AgentMessage::Response(response)) => {
             let mut pending = pending.lock().await;
@@ -153,11 +168,20 @@ async fn handle_agent_line(pending: &PendingMap, line: &str) {
             }
         }
         Ok(AgentMessage::Notification(notification)) => {
-            debug!(
-                "[ide-agent] notification {} {}",
-                notification.method, notification.params
-            );
+            if notification.method == "watch/event" {
+                if let Ok(event) = serde_json::from_value::<AgentWatchEvent>(notification.params) {
+                    let _ = watch_tx.send(event).await;
+                }
+            } else {
+                debug!(
+                    "[ide-agent] ignored notification {} with redacted params",
+                    notification.method
+                );
+            }
         }
-        Err(error) => debug!("[ide-agent] ignored non-JSON line: {line} ({error})"),
+        Err(error) => debug!(
+            "[ide-agent] ignored redacted non-JSON line ({} byte(s), {error})",
+            line.len()
+        ),
     }
 }
