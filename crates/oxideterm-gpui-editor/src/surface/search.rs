@@ -3,7 +3,7 @@
 
 use gpui::Context;
 use oxideterm_editor_core::{
-    BufferOffset, FindOptions, Selection, find_all, replace_all_transaction,
+    BufferOffset, FindOptions, Selection, find_all, replace_all_transaction, word_at,
 };
 
 use super::TextEditorView;
@@ -173,36 +173,5 @@ impl TextEditorView {
             case_sensitive: self.settings.find_case_sensitive,
             whole_word: self.settings.find_whole_word,
         }
-    }
-}
-
-fn word_at(source: &str, offset: BufferOffset) -> String {
-    let offset = offset.0.min(source.len());
-    let offset = super::coords::floor_char_boundary(source, offset);
-    let start = source[..offset]
-        .char_indices()
-        .rev()
-        .find(|(_, ch)| !is_word_char(*ch))
-        .map(|(index, ch)| index + ch.len_utf8())
-        .unwrap_or(0);
-    let end = source[offset..]
-        .char_indices()
-        .find(|(_, ch)| !is_word_char(*ch))
-        .map(|(index, _)| offset + index)
-        .unwrap_or(source.len());
-    source[start..end].to_string()
-}
-
-fn is_word_char(ch: char) -> bool {
-    ch == '_' || ch.is_alphanumeric()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn word_at_respects_unicode_boundaries() {
-        assert_eq!(word_at("let 名字 = value", BufferOffset(5)), "名字");
     }
 }

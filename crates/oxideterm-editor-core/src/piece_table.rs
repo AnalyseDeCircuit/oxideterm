@@ -1,14 +1,14 @@
 use std::ops::Range;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum PieceSource {
+pub(crate) enum PieceSource {
     Original,
     Add,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct Piece {
-    pub(super) source: PieceSource,
+pub(crate) struct Piece {
+    pub(crate) source: PieceSource,
     start: usize,
     len: usize,
 }
@@ -37,15 +37,15 @@ impl Piece {
 /// boundary APIs such as save, syntax, search, and IME; edits themselves keep
 /// the piece table as the source of truth.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct PieceTableTextBuffer {
-    pub(super) original: String,
-    pub(super) add: String,
-    pub(super) pieces: Vec<Piece>,
+pub(crate) struct PieceTableTextBuffer {
+    pub(crate) original: String,
+    pub(crate) add: String,
+    pub(crate) pieces: Vec<Piece>,
     len: usize,
 }
 
 impl PieceTableTextBuffer {
-    pub(super) fn new(original: String) -> Self {
+    pub(crate) fn new(original: String) -> Self {
         let len = original.len();
         let pieces = Piece::new(PieceSource::Original, 0, len)
             .into_iter()
@@ -58,11 +58,11 @@ impl PieceTableTextBuffer {
         }
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.len == 0
     }
 
@@ -73,7 +73,7 @@ impl PieceTableTextBuffer {
         }
     }
 
-    pub(super) fn to_text(&self) -> String {
+    pub(crate) fn to_text(&self) -> String {
         let mut text = String::with_capacity(self.len);
         for piece in self.pieces.iter().copied() {
             let source = self.source_text(piece.source);
@@ -82,7 +82,7 @@ impl PieceTableTextBuffer {
         text
     }
 
-    pub(super) fn slice_to_string(&self, range: Range<usize>) -> String {
+    pub(crate) fn slice_to_string(&self, range: Range<usize>) -> String {
         debug_assert!(range.start <= range.end);
         debug_assert!(range.end <= self.len);
         if range.is_empty() {
@@ -109,7 +109,7 @@ impl PieceTableTextBuffer {
         text
     }
 
-    pub(super) fn is_char_boundary(&self, offset: usize) -> bool {
+    pub(crate) fn is_char_boundary(&self, offset: usize) -> bool {
         if offset > self.len {
             return false;
         }
@@ -138,7 +138,7 @@ impl PieceTableTextBuffer {
         false
     }
 
-    pub(super) fn replace(&mut self, range: Range<usize>, replacement: &str) {
+    pub(crate) fn replace(&mut self, range: Range<usize>, replacement: &str) {
         debug_assert!(range.start <= range.end);
         debug_assert!(range.end <= self.len);
 
