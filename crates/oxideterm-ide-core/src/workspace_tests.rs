@@ -183,6 +183,87 @@ fn save_tab_with_clears_dirty_only_after_success() {
 }
 
 #[test]
+fn stale_save_completion_preserves_newer_dirty_text() {
+    let mut workspace = IdeWorkspace::new();
+    workspace.open_project(IdeLocation::local("/tmp/oxideterm"), "OxideTerm");
+    let OpenFileOutcome::Opened(tab_id) = workspace
+        .open_file(local_file("race.rs"), "old", SavedFileVersion::unknown())
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    workspace
+        .replace_buffer_text(tab_id, "saved request")
+        .unwrap();
+    let save_text = workspace.buffer(tab_id).unwrap().text.clone();
+    let save_revision = workspace.buffer(tab_id).unwrap().revision;
+
+    workspace
+        .replace_buffer_text(tab_id, "newer local edit")
+        .unwrap();
+    let clean = workspace
+        .complete_save_at_revision(
+            tab_id,
+            save_text,
+            save_revision,
+            SavedFileVersion {
+                size_bytes: Some(13),
+                modified_millis: Some(200),
+                etag: Some("saved-request".into()),
+            },
+        )
+        .unwrap();
+
+    let buffer = workspace.buffer(tab_id).unwrap();
+    assert!(!clean);
+    assert_eq!(buffer.text, "newer local edit");
+    assert_eq!(buffer.saved_text, "saved request");
+    assert_eq!(buffer.version.etag.as_deref(), Some("saved-request"));
+    assert!(buffer.is_dirty());
+}
+
+#[test]
+fn close_after_save_keeps_tab_open_when_newer_edit_arrives() {
+    let mut workspace = IdeWorkspace::new();
+    workspace.open_project(IdeLocation::local("/tmp/oxideterm"), "OxideTerm");
+    let OpenFileOutcome::Opened(tab_id) = workspace
+        .open_file(
+            local_file("close-race.rs"),
+            "old",
+            SavedFileVersion::unknown(),
+        )
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    workspace.replace_buffer_text(tab_id, "save me").unwrap();
+    let save_text = workspace.buffer(tab_id).unwrap().text.clone();
+    let save_revision = workspace.buffer(tab_id).unwrap().revision;
+    let request = workspace.request_close_tab(tab_id).unwrap().unwrap();
+
+    workspace.replace_buffer_text(tab_id, "keep me").unwrap();
+    let closed = workspace
+        .complete_dirty_close_after_save_at_revision(
+            request.id,
+            save_text,
+            save_revision,
+            SavedFileVersion {
+                size_bytes: Some(7),
+                modified_millis: Some(300),
+                etag: Some("saved-before-close".into()),
+            },
+        )
+        .unwrap();
+
+    let buffer = workspace.buffer(tab_id).unwrap();
+    assert!(!closed);
+    assert!(workspace.pending_close().is_none());
+    assert_eq!(buffer.text, "keep me");
+    assert_eq!(buffer.saved_text, "save me");
+    assert!(buffer.is_dirty());
+}
+
+#[test]
 fn reload_tab_with_refuses_dirty_buffers() {
     let mut workspace = IdeWorkspace::new();
     workspace.open_project(IdeLocation::local("/tmp/oxideterm"), "OxideTerm");

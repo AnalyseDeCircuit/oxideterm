@@ -1,0 +1,27 @@
+{
+  "launcher": {
+    "title": "Bảng khởi chạy",
+    "tabTitle": "Bảng khởi chạy",
+    "search": "Tìm kiếm kết nối…",
+    "refresh": "Làm mới",
+    "scanning": "Đang quét…",
+    "retry": "Thử lại",
+    "noResults": "Không tìm thấy kết nối phù hợp.",
+    "empty": "Không có kết nối nào. Thêm một kết nối để bắt đầu.",
+    "wslTitle": "Bản phân phối WSL",
+    "searchWsl": "Tìm kiếm bản phân phối WSL…",
+    "loadingWsl": "Đang tải bản phân phối WSL…",
+    "noWslResults": "Không tìm thấy bản phân phối WSL phù hợp.",
+    "noWsl": "Không có bản phân phối WSL nào. Hãy đảm bảo WSL đã được cài đặt.",
+    "consentTitle": "Bật trình khởi chạy ứng dụng",
+    "consentDescription": "Trình khởi chạy quét các ứng dụng đã cài đặt trên Mac và lưu biểu tượng của chúng ở địa phương để duyệt nhanh.",
+    "consentScan": "Quét /Applications và các thư mục khác để tìm các bundle .app đã cài đặt",
+    "consentCache": "Lưu biểu tượng ứng dụng dưới dạng tệp PNG trong thư mục:",
+    "consentPrivacy": "Tất cả dữ liệu được lưu trữ cục bộ — không gửi bất kỳ thứ gì lên máy chủ",
+    "consentEnable": "Bật trình khởi chạy",
+    "disable": "Tắt trình khởi chạy",
+    "disableConfirm": "Thao tác này sẽ xóa tất cả biểu tượng đã lưu cache và tắt trình khởi chạy. Bạn có thể bật lại bất cứ lúc nào.",
+    "disableCancel": "Hủy",
+    "disableAction": "Tắt"
+  }
+}

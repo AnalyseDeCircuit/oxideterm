@@ -179,6 +179,7 @@ impl WorkspaceApp {
             ide_tab_nodes: HashMap::new(),
             ide_last_closed_at_by_node: HashMap::new(),
             sftp_view: sftp::SftpViewState::default(),
+            launcher: LauncherState::new(settings.launcher.enabled),
             sftp_worker_tx,
             sftp_worker_rx,
             forwarding_worker_tx,
@@ -236,6 +237,7 @@ impl WorkspaceApp {
                             workspace.poll_node_events(cx);
                             workspace.poll_reconnect_worker_results(window, cx);
                             workspace.poll_sftp_worker_results(cx);
+                            workspace.poll_launcher_worker_results(cx);
                             workspace.maybe_start_sftp_remote_load(cx);
                             workspace.poll_forwarding_worker_results(cx);
                             workspace.poll_forwarding_events(cx);

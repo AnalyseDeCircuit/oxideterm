@@ -23,6 +23,7 @@ pub enum TabKind {
     LocalTerminal,
     SshTerminal,
     FileManager,
+    Launcher,
     Sftp,
     Ide,
     Forwards,

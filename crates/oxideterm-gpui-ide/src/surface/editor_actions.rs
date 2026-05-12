@@ -170,7 +170,10 @@ impl IdeSurface {
     }
 
     fn start_agent_watch_if_ready(&mut self, cx: &mut Context<Self>) {
-        if !matches!(self.fs.status(), AgentStatus::Ready { .. }) {
+        if !matches!(
+            self.fs.status_for_node(self.node_id.as_deref()),
+            AgentStatus::Ready { .. }
+        ) {
             self.stop_agent_watch(cx);
             return;
         }
@@ -200,8 +203,8 @@ impl IdeSurface {
             .await;
 
             match watch {
-                Ok(Some(mut rx)) => {
-                    while let Some(event) = rx.recv().await {
+                Ok(Some(mut subscription)) => {
+                    while let Some(event) = subscription.recv().await {
                         let refresh_path = watch_refresh_path(&root_path, &event.path);
                         let should_continue = weak
                             .update(cx, |this, cx| {
@@ -324,7 +327,13 @@ impl IdeSurface {
         let Some(root_path) = self.root_path.clone() else {
             return;
         };
-        let cache_key = format!("{}:{query}", normalize_remote_path(&root_path));
+        let search_query = IdeSearchQuery::tauri_literal_project_search(
+            query.clone(),
+            normalize_remote_path(&root_path),
+            IDE_SEARCH_MAX_RESULTS,
+            self.search.generation,
+        );
+        let cache_key = search_query.cache_key();
         if let Some(entry) = self.search_cache.get(&cache_key)
             && entry.timestamp.elapsed() < Duration::from_secs(IDE_SEARCH_CACHE_TTL_SECS)
         {
@@ -352,13 +361,8 @@ impl IdeSurface {
 
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(backend_runtime.spawn({
-                let query = query.clone();
-                let root_path = root_path.clone();
-                async move {
-                    fs.grep_project(node_id, query, root_path, false, IDE_SEARCH_MAX_RESULTS)
-                        .await
-                        .map(group_search_matches)
-                }
+                let search_query = search_query.clone();
+                async move { fs.search_project(node_id, search_query).await.map(group_search_matches) }
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {
@@ -1119,6 +1123,8 @@ impl IdeSurface {
         let backend_runtime = self.backend_runtime.clone();
         let generation = self.generation;
         let saved_location = buffer.location.clone();
+        let saved_text = buffer.text.clone();
+        let saved_revision = buffer.revision;
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
@@ -1170,15 +1176,30 @@ impl IdeSurface {
                 match result {
                     Ok(version) => {
                         this.clear_search_cache();
-                        if let Some(request_id) = close_request {
-                            let _ = this
-                                .workspace
-                                .complete_dirty_close_after_save(request_id, version.clone());
-                            this.editors.remove(&tab_id);
+                        let clean_after_save = if let Some(request_id) = close_request {
+                            this.workspace
+                                .complete_dirty_close_after_save_at_revision(
+                                    request_id,
+                                    saved_text,
+                                    saved_revision,
+                                    version.clone(),
+                                )
+                                .unwrap_or(false)
                         } else {
-                            let _ = this.workspace.mark_saved(tab_id, version);
-                        }
-                        if let Some(editor) = this.editors.get(&tab_id) {
+                            this.workspace
+                                .complete_save_at_revision(
+                                    tab_id,
+                                    saved_text,
+                                    saved_revision,
+                                    version,
+                                )
+                                .unwrap_or(false)
+                        };
+                        if close_request.is_some() && clean_after_save {
+                            this.editors.remove(&tab_id);
+                        } else if clean_after_save
+                            && let Some(editor) = this.editors.get(&tab_id)
+                        {
                             editor.update(cx, |editor, cx| editor.mark_saved_external(cx));
                         }
                     }
@@ -1242,6 +1263,8 @@ impl IdeSurface {
         let backend_runtime = self.backend_runtime.clone();
         let generation = self.generation;
         let conflict_location = buffer.location.clone();
+        let saved_text = buffer.text.clone();
+        let saved_revision = buffer.revision;
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
@@ -1273,15 +1296,30 @@ impl IdeSurface {
                     Ok(version) => {
                         this.clear_search_cache();
                         this.conflict_state = None;
-                        if let Some(request_id) = conflict.close_request {
-                            let _ = this
-                                .workspace
-                                .complete_dirty_close_after_save(request_id, version.clone());
-                            this.editors.remove(&conflict.tab_id);
+                        let clean_after_save = if let Some(request_id) = conflict.close_request {
+                            this.workspace
+                                .complete_dirty_close_after_save_at_revision(
+                                    request_id,
+                                    saved_text,
+                                    saved_revision,
+                                    version.clone(),
+                                )
+                                .unwrap_or(false)
                         } else {
-                            let _ = this.workspace.mark_saved(conflict.tab_id, version);
-                        }
-                        if let Some(editor) = this.editors.get(&conflict.tab_id) {
+                            this.workspace
+                                .complete_save_at_revision(
+                                    conflict.tab_id,
+                                    saved_text,
+                                    saved_revision,
+                                    version,
+                                )
+                                .unwrap_or(false)
+                        };
+                        if conflict.close_request.is_some() && clean_after_save {
+                            this.editors.remove(&conflict.tab_id);
+                        } else if clean_after_save
+                            && let Some(editor) = this.editors.get(&conflict.tab_id)
+                        {
                             editor.update(cx, |editor, cx| editor.mark_saved_external(cx));
                         }
                     }

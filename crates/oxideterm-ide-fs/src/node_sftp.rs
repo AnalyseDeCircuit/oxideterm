@@ -4,6 +4,9 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use futures_util::future::join_all;
+use oxideterm_backend_classification::{
+    BackendErrorClass, classify_io_error_kind, classify_message,
+};
 use oxideterm_ide_core::{
     AsyncIdeFileSystem, FileKind, FileStat, FileSystemCapabilities, FileTreeEntry, IdeFileCheck,
     IdeFileData, IdeFileError, IdeFileErrorKind, IdeFsFuture, IdeLocation, IdePathStat,
@@ -481,13 +484,21 @@ pub(crate) fn map_route_error(error: RouteError) -> IdeFileError {
             IdeFileErrorKind::Disconnected
         }
         RouteError::CapabilityUnavailable(_)
-            if is_network_error_message(&message) || is_session_dead_error_message(&message) =>
+            if matches!(
+                classify_message(&message),
+                BackendErrorClass::Disconnected | BackendErrorClass::Timeout
+            ) =>
         {
             IdeFileErrorKind::Disconnected
         }
         RouteError::CapabilityUnavailable(_) => IdeFileErrorKind::Unsupported,
         RouteError::NodeNotFound(_) => IdeFileErrorKind::NotFound,
-        RouteError::ConnectionError(_) if is_network_error_message(&message) => {
+        RouteError::ConnectionError(_)
+            if matches!(
+                classify_message(&message),
+                BackendErrorClass::Disconnected | BackendErrorClass::Timeout
+            ) =>
+        {
             IdeFileErrorKind::Disconnected
         }
         RouteError::ConnectionError(_) | RouteError::MaxDepthExceeded(_) => IdeFileErrorKind::Other,
@@ -501,16 +512,16 @@ fn map_sftp_error(error: SftpError) -> IdeFileError {
     let kind = match &error {
         SftpError::PermissionDenied(_) => IdeFileErrorKind::PermissionDenied,
         SftpError::FileNotFound(_) | SftpError::DirectoryNotFound(_) => IdeFileErrorKind::NotFound,
-        SftpError::IoError(io_error) if io_error.kind() == std::io::ErrorKind::TimedOut => {
-            IdeFileErrorKind::Timeout
-        }
-        SftpError::IoError(_) if is_network_error_message(&message) => {
-            IdeFileErrorKind::Disconnected
-        }
+        SftpError::IoError(io_error) => ide_kind_from_backend_class(
+            classify_io_error_kind(io_error.kind()).unwrap_or_else(|| classify_message(&message)),
+        ),
         SftpError::ChannelError(_)
         | SftpError::ProtocolError(_)
         | SftpError::SubsystemNotAvailable(_)
-            if is_network_error_message(&message) || recoverable =>
+            if matches!(
+                classify_message(&message),
+                BackendErrorClass::Disconnected | BackendErrorClass::Timeout
+            ) || recoverable =>
         {
             IdeFileErrorKind::Disconnected
         }
@@ -520,48 +531,36 @@ fn map_sftp_error(error: SftpError) -> IdeFileError {
         SftpError::TransferInterrupted(_) => IdeFileErrorKind::Disconnected,
         SftpError::NotInitialized(_) => IdeFileErrorKind::Disconnected,
         SftpError::TransferError(_) | SftpError::WriteError(_) | SftpError::StorageError(_) => {
-            if is_network_error_message(&message) {
+            if matches!(
+                classify_message(&message),
+                BackendErrorClass::Disconnected | BackendErrorClass::Timeout
+            ) {
                 IdeFileErrorKind::Disconnected
             } else {
                 IdeFileErrorKind::Other
             }
         }
-        SftpError::IoError(_) => IdeFileErrorKind::Other,
         SftpError::ChannelError(_) | SftpError::ProtocolError(_) => IdeFileErrorKind::Other,
     };
     IdeFileError::new(kind, message)
 }
 
-fn is_network_error_message(message: &str) -> bool {
-    let normalized = message.to_ascii_lowercase();
-    [
-        "network",
-        "connection",
-        "timeout",
-        "disconnected",
-        "eof",
-        "broken pipe",
-        "reset by peer",
-        "channel closed",
-    ]
-    .iter()
-    .any(|needle| normalized.contains(needle))
-}
-
-fn is_session_dead_error_message(message: &str) -> bool {
-    let normalized = message.to_ascii_lowercase();
-    [
-        "session not found",
-        "not initialized",
-        "no active ssh connection",
-        "transport is closed",
-        "transport is missing",
-        "stale",
-        "link_down",
-        "link down",
-    ]
-    .iter()
-    .any(|needle| normalized.contains(needle))
+fn ide_kind_from_backend_class(classification: BackendErrorClass) -> IdeFileErrorKind {
+    match classification {
+        BackendErrorClass::Conflict => IdeFileErrorKind::Conflict,
+        BackendErrorClass::Cancelled | BackendErrorClass::Disconnected => {
+            IdeFileErrorKind::Disconnected
+        }
+        BackendErrorClass::NotFound => IdeFileErrorKind::NotFound,
+        BackendErrorClass::PermissionDenied | BackendErrorClass::Auth => {
+            IdeFileErrorKind::PermissionDenied
+        }
+        BackendErrorClass::Timeout => IdeFileErrorKind::Timeout,
+        BackendErrorClass::Unsupported | BackendErrorClass::HostKey => {
+            IdeFileErrorKind::Unsupported
+        }
+        BackendErrorClass::PortInUse | BackendErrorClass::Other => IdeFileErrorKind::Other,
+    }
 }
 
 #[cfg(test)]

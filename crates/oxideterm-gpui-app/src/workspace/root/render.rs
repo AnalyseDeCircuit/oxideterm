@@ -27,7 +27,10 @@ impl Render for WorkspaceApp {
                 .is_some_and(|tab| {
                     !matches!(
                         tab.kind,
-                        TabKind::Settings | TabKind::SessionManager | TabKind::FileManager
+                        TabKind::Settings
+                            | TabKind::SessionManager
+                            | TabKind::FileManager
+                            | TabKind::Launcher
                     )
                 })
             && !self.search.visible
@@ -44,6 +47,7 @@ impl Render for WorkspaceApp {
             match (&tab.kind, &tab.root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
+                (TabKind::Launcher, _) => self.render_launcher_surface(cx),
                 (TabKind::Sftp, _) => self.render_sftp_surface(window, cx),
                 (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
@@ -126,6 +130,17 @@ impl Render for WorkspaceApp {
                         return;
                     }
                     let _ = this.handle_forwards_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this
+                    .active_tab()
+                    .is_some_and(|tab| tab.kind == TabKind::Launcher)
+                    && this.launcher.focused_input.is_some()
+                {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    let _ = this.handle_launcher_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
@@ -232,6 +247,9 @@ impl Render for WorkspaceApp {
                     this.finish_split_drag(cx);
                     this.finish_settings_slider_drag(cx);
                     this.finish_terminal_cast_seek_drag(cx);
+                    if this.launcher.pressed_app_path.take().is_some() {
+                        cx.notify();
+                    }
                 }),
             )
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| {

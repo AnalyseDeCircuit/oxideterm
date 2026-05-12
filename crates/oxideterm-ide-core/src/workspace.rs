@@ -321,16 +321,34 @@ impl IdeWorkspace {
         Ok(())
     }
 
+    pub fn complete_save_at_revision(
+        &mut self,
+        tab_id: EditorTabId,
+        saved_text: impl Into<String>,
+        saved_revision: u64,
+        version: SavedFileVersion,
+    ) -> Result<bool, WorkspaceError> {
+        let buffer = self
+            .buffers
+            .get_mut(&tab_id)
+            .ok_or(WorkspaceError::UnknownTab)?;
+        buffer.saved_text = saved_text.into();
+        buffer.saved_revision = saved_revision;
+        buffer.version = version;
+        Ok(!buffer.is_dirty())
+    }
+
     pub fn save_tab_with(
         &mut self,
         fs: &dyn IdeFileSystem,
         tab_id: EditorTabId,
     ) -> Result<SavedFileVersion, SaveError> {
-        let (location, text, expected_version) = {
+        let (location, text, revision, expected_version) = {
             let buffer = self.buffers.get(&tab_id).ok_or(SaveError::UnknownTab)?;
             (
                 buffer.location.clone(),
                 buffer.text.clone(),
+                buffer.revision,
                 buffer.version.clone(),
             )
         };
@@ -340,7 +358,7 @@ impl IdeWorkspace {
             WriteMode::CreateOrReplace
         };
         let version = fs.write_file(&location, &text, Some(&expected_version), mode)?;
-        self.mark_saved(tab_id, version.clone())
+        self.complete_save_at_revision(tab_id, text, revision, version.clone())
             .map_err(|_| SaveError::UnknownTab)?;
         Ok(version)
     }
@@ -350,11 +368,12 @@ impl IdeWorkspace {
         fs: &dyn AsyncIdeFileSystem,
         tab_id: EditorTabId,
     ) -> Result<SavedFileVersion, SaveError> {
-        let (location, text, expected_version) = {
+        let (location, text, revision, expected_version) = {
             let buffer = self.buffers.get(&tab_id).ok_or(SaveError::UnknownTab)?;
             (
                 buffer.location.clone(),
                 buffer.text.clone(),
+                buffer.revision,
                 buffer.version.clone(),
             )
         };
@@ -366,7 +385,7 @@ impl IdeWorkspace {
         let version = fs
             .write_file(&location, &text, Some(&expected_version), mode)
             .await?;
-        self.mark_saved(tab_id, version.clone())
+        self.complete_save_at_revision(tab_id, text, revision, version.clone())
             .map_err(|_| SaveError::UnknownTab)?;
         Ok(version)
     }
@@ -576,6 +595,27 @@ impl IdeWorkspace {
         self.pending_close = None;
         self.close_tab_now(request.tab_id);
         Ok(())
+    }
+
+    pub fn complete_dirty_close_after_save_at_revision(
+        &mut self,
+        request_id: CloseRequestId,
+        saved_text: impl Into<String>,
+        saved_revision: u64,
+        version: SavedFileVersion,
+    ) -> Result<bool, WorkspaceError> {
+        let request = self
+            .pending_close
+            .clone()
+            .filter(|request| request.id == request_id)
+            .ok_or(WorkspaceError::UnknownCloseRequest)?;
+        let is_clean =
+            self.complete_save_at_revision(request.tab_id, saved_text, saved_revision, version)?;
+        self.pending_close = None;
+        if is_clean {
+            self.close_tab_now(request.tab_id);
+        }
+        Ok(is_clean)
     }
 
     pub fn snapshot(&self) -> Result<WorkspaceSnapshot, WorkspaceError> {

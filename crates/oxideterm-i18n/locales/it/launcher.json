@@ -1,0 +1,27 @@
+{
+  "launcher": {
+    "title": "Pannello di avvio",
+    "tabTitle": "Pannello di avvio",
+    "search": "Cerca connessioni…",
+    "refresh": "Aggiorna",
+    "scanning": "Scansione in corso…",
+    "retry": "Riprova",
+    "noResults": "Nessuna connessione corrispondente trovata.",
+    "empty": "Nessuna connessione disponibile. Aggiungi una connessione per iniziare.",
+    "wslTitle": "Distribuzioni WSL",
+    "searchWsl": "Cerca distribuzioni WSL…",
+    "loadingWsl": "Caricamento distribuzioni WSL…",
+    "noWslResults": "Nessuna distribuzione WSL corrispondente trovata.",
+    "noWsl": "Nessuna distribuzione WSL disponibile. Assicurati che WSL sia installato.",
+    "consentTitle": "Attiva il launcher di app",
+    "consentDescription": "Il launcher analizza le applicazioni installate sul tuo Mac e memorizza le loro icone localmente per una navigazione rapida.",
+    "consentScan": "Analizza /Applications e altre directory per i bundle .app installati",
+    "consentCache": "Memorizza le icone delle app come file PNG nella directory:",
+    "consentPrivacy": "Tutti i dati restano locali — nulla viene inviato a nessun server",
+    "consentEnable": "Attiva il launcher",
+    "disable": "Disattiva il launcher",
+    "disableConfirm": "Tutte le icone memorizzate nella cache verranno eliminate e il launcher verrà disattivato. Puoi riattivarlo in qualsiasi momento.",
+    "disableCancel": "Annulla",
+    "disableAction": "Disattiva"
+  }
+}

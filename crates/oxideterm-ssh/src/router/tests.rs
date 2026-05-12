@@ -2,6 +2,24 @@
 mod tests {
     use super::*;
 
+    fn bind_active_node(
+        registry: &SshConnectionRegistry,
+        router: &NodeRouter,
+        node_id: &NodeId,
+        config: SshConfig,
+    ) -> SshConnectionHandle {
+        let handle = registry.acquire(
+            config,
+            ConnectionConsumer::NodeRouter(node_id.0.clone()),
+        );
+        handle.set_physical(Arc::new(()));
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+        router
+            .bind_connection(node_id, handle.connection_id().to_string())
+            .unwrap();
+        handle
+    }
+
     #[test]
     fn resolves_node_to_shared_connection() {
         let registry = SshConnectionRegistry::default();
@@ -404,5 +422,228 @@ mod tests {
                 ConnectionConsumer::PortForward("node:a".into()),
             ]
         );
+    }
+
+    #[test]
+    fn ssh_matrix_proxy_child_terminal_close_keeps_node_owned_liveness() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let parent_id = NodeId::new("jump");
+        let child_id = NodeId::new("target");
+        let parent_config = SshConfig::password("jump", 22, "me", "pw");
+        let child_config = SshConfig::password("target", 22, "me", "pw");
+        router.upsert_node(parent_id.clone(), parent_config.clone());
+        router
+            .runtime_store()
+            .upsert_child_node(parent_id.clone(), child_id.clone(), child_config.clone())
+            .unwrap();
+
+        let parent = bind_active_node(&registry, &router, &parent_id, parent_config);
+        let child = bind_active_node(&registry, &router, &child_id, child_config.clone());
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(parent.connection_id().to_string()),
+        );
+
+        let terminal_consumer = ConnectionConsumer::Terminal("term-target".to_string());
+        let terminal = registry.acquire(child_config, terminal_consumer.clone());
+        assert_eq!(terminal.connection_id(), child.connection_id());
+        router
+            .bind_terminal_endpoint(
+                &child_id,
+                TerminalEndpoint {
+                    ws_port: 0,
+                    ws_token: "native-terminal-term-target".to_string(),
+                    session_id: "term-target".to_string(),
+                },
+            )
+            .unwrap();
+
+        router
+            .unbind_terminal_session(&child_id, "term-target")
+            .unwrap();
+        registry.release(child.connection_id(), &terminal_consumer);
+
+        let sftp = router
+            .acquire_connection(&child_id, ConnectionConsumer::Sftp("target:sftp".to_string()))
+            .unwrap();
+        let forward = router
+            .acquire_connection(
+                &child_id,
+                ConnectionConsumer::PortForward("target:forward".to_string()),
+            )
+            .unwrap();
+
+        assert_eq!(sftp.connection_id, child.connection_id());
+        assert_eq!(forward.connection_id, child.connection_id());
+        assert!(parent.info().consumers.contains(&ConnectionConsumer::NodeRouter(
+            "jump".to_string()
+        )));
+        assert!(!parent
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Sftp("target:sftp".to_string())));
+    }
+
+    #[test]
+    fn ssh_matrix_parent_link_down_blocks_child_consumers_and_emits_affected_children() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let parent_id = NodeId::new("jump");
+        let child_id = NodeId::new("target");
+        let parent_config = SshConfig::password("jump", 22, "me", "pw");
+        let child_config = SshConfig::password("target", 22, "me", "pw");
+        router.upsert_node(parent_id.clone(), parent_config.clone());
+        router
+            .runtime_store()
+            .upsert_child_node(parent_id.clone(), child_id.clone(), child_config.clone())
+            .unwrap();
+
+        let parent = bind_active_node(&registry, &router, &parent_id, parent_config);
+        let child = bind_active_node(&registry, &router, &child_id, child_config);
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(parent.connection_id().to_string()),
+        );
+        let (tx, rx) = mpsc::channel();
+        router.emitter().subscribe(tx);
+
+        registry.mark_link_down_cascade(parent.connection_id());
+
+        assert_eq!(parent.state(), ConnectionState::LinkDown);
+        assert_eq!(child.state(), ConnectionState::LinkDown);
+        assert!(matches!(
+            router.acquire_connection(
+                &child_id,
+                ConnectionConsumer::PortForward("target:forward".to_string())
+            ),
+            Err(RouteError::NotConnected(_))
+        ));
+        assert!(!child
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::PortForward("target:forward".to_string())));
+
+        let events = rx.try_iter().collect::<Vec<_>>();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            NodeStateEvent::ConnectionStatusChanged {
+                connection_id,
+                status,
+                affected_children,
+                ..
+            } if connection_id == parent.connection_id()
+                && status == "link_down"
+                && affected_children == &vec![child.connection_id().to_string()]
+        )));
+    }
+
+    #[test]
+    fn ssh_matrix_manual_disconnect_subtree_prevents_reconnect_restore_acquire() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let parent_id = NodeId::new("jump");
+        let child_id = NodeId::new("target");
+        let parent_config = SshConfig::password("jump", 22, "me", "pw");
+        let child_config = SshConfig::password("target", 22, "me", "pw");
+        router.upsert_node(parent_id.clone(), parent_config.clone());
+        router
+            .runtime_store()
+            .upsert_child_node(parent_id.clone(), child_id.clone(), child_config.clone())
+            .unwrap();
+
+        let parent = bind_active_node(&registry, &router, &parent_id, parent_config);
+        let child = bind_active_node(&registry, &router, &child_id, child_config);
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(parent.connection_id().to_string()),
+        );
+        let affected = router.runtime_store().subtree_postorder(&parent_id);
+        assert_eq!(affected, vec![child_id.clone(), parent_id.clone()]);
+
+        for node_id in affected {
+            router
+                .disconnect_node_runtime(&node_id, "manual disconnect")
+                .unwrap();
+        }
+
+        assert!(matches!(
+            router.acquire_connection(&parent_id, ConnectionConsumer::Sftp("jump:sftp".into())),
+            Err(RouteError::NotConnected(_))
+        ));
+        assert!(matches!(
+            router.acquire_connection(
+                &child_id,
+                ConnectionConsumer::PortForward("target:forward".into())
+            ),
+            Err(RouteError::NotConnected(_))
+        ));
+        assert!(router.connection_id_for_node(&parent_id).is_none());
+        assert!(router.connection_id_for_node(&child_id).is_none());
+    }
+
+    #[test]
+    fn ssh_matrix_reconnect_restore_acquire_follows_proxy_child_rebind() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let parent_id = NodeId::new("jump");
+        let child_id = NodeId::new("target");
+        let parent_config = SshConfig::password("jump", 22, "me", "pw");
+        let child_config = SshConfig::password("target", 22, "me", "pw");
+        router.upsert_node(parent_id.clone(), parent_config.clone());
+        router
+            .runtime_store()
+            .upsert_child_node(parent_id.clone(), child_id.clone(), child_config.clone())
+            .unwrap();
+
+        let parent = bind_active_node(&registry, &router, &parent_id, parent_config);
+        let old_child = bind_active_node(&registry, &router, &child_id, child_config.clone());
+        registry.set_parent_connection_id(
+            old_child.connection_id(),
+            Some(parent.connection_id().to_string()),
+        );
+        registry.mark_state(old_child.connection_id(), ConnectionState::LinkDown);
+        let old_child_connection_id = old_child.connection_id().to_string();
+
+        let rebound_router = router.clone();
+        let rebound_registry = registry.clone();
+        let rebound_child_id = child_id.clone();
+        let parent_connection_id = parent.connection_id().to_string();
+        runtime.spawn(async move {
+            sleep(Duration::from_millis(50)).await;
+            let _ = rebound_registry.retire_connection(&old_child_connection_id);
+            let new_child = rebound_registry.acquire(
+                child_config,
+                ConnectionConsumer::NodeRouter("target".to_string()),
+            );
+            new_child.set_physical(Arc::new(()));
+            rebound_registry.mark_state(new_child.connection_id(), ConnectionState::Active);
+            rebound_registry
+                .set_parent_connection_id(new_child.connection_id(), Some(parent_connection_id));
+            rebound_router
+                .bind_connection(&rebound_child_id, new_child.connection_id().to_string())
+                .unwrap();
+        });
+
+        let resolved = runtime
+            .block_on(router.acquire_connection_wait(
+                &child_id,
+                ConnectionConsumer::PortForward("target:forward".into()),
+                Duration::from_millis(500),
+            ))
+            .unwrap();
+
+        assert_ne!(resolved.connection_id, old_child.connection_id());
+        assert_eq!(resolved.handle.state(), ConnectionState::Active);
+        assert_eq!(
+            resolved.handle.info().parent_connection_id.as_deref(),
+            Some(parent.connection_id())
+        );
+        assert!(resolved
+            .handle
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::PortForward("target:forward".into())));
     }
 }

@@ -49,7 +49,7 @@ impl IdeSurface {
     }
 
     fn render_agent_status_trigger(&self, cx: &mut Context<Self>) -> AnyElement {
-        let status = self.fs.status();
+        let status = self.fs.status_for_node(self.node_id.as_deref());
         let (icon, label, color, opacity) = self.agent_status_trigger_parts(&status);
         let entity = cx.entity();
         let trigger = div()
@@ -148,7 +148,7 @@ impl IdeSurface {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let status = self.fs.status();
+        let status = self.fs.status_for_node(self.node_id.as_deref());
         let manual = matches!(
             status,
             AgentStatus::ManualUploadRequired { .. } | AgentStatus::ManualUpdateRequired { .. }
@@ -838,7 +838,7 @@ impl IdeSurface {
     }
 
     fn agent_poll_delay(&self) -> Duration {
-        match self.fs.status() {
+        match self.fs.status_for_node(self.node_id.as_deref()) {
             AgentStatus::Deploying => Duration::from_secs(IDE_AGENT_POLL_DEPLOYING_SECS),
             AgentStatus::ManualUploadRequired { .. } | AgentStatus::ManualUpdateRequired { .. } => {
                 Duration::from_secs(IDE_AGENT_POLL_MANUAL_SECS)

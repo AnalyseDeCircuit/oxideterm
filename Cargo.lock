@@ -6456,6 +6456,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-backend-classification"
+version = "0.1.0"
+
+[[package]]
 name = "oxideterm-code-editor"
 version = "0.1.0"
 dependencies = [
@@ -6524,6 +6528,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dashmap",
+ "oxideterm-backend-classification",
  "oxideterm-ssh",
  "russh",
  "serde",
@@ -6551,6 +6556,7 @@ dependencies = [
  "objc2-av-foundation",
  "objc2-av-kit",
  "objc2-foundation",
+ "oxideterm-backend-classification",
  "oxideterm-code-editor",
  "oxideterm-connections",
  "oxideterm-forwarding",
@@ -6561,6 +6567,7 @@ dependencies = [
  "oxideterm-gpui-terminal",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
+ "oxideterm-launcher",
  "oxideterm-local-files",
  "oxideterm-preview",
  "oxideterm-render-policy",
@@ -6699,6 +6706,7 @@ dependencies = [
  "base64",
  "dashmap",
  "futures-util",
+ "oxideterm-backend-classification",
  "oxideterm-ide-core",
  "oxideterm-sftp",
  "oxideterm-ssh",
@@ -6709,6 +6717,13 @@ dependencies = [
  "tokio",
  "tracing",
  "zstd",
+]
+
+[[package]]
+name = "oxideterm-launcher"
+version = "0.1.0"
+dependencies = [
+ "oxideterm-settings",
 ]
 
 [[package]]

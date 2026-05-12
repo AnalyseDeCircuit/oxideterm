@@ -233,7 +233,7 @@ mod tests {
         APP_LANG_KEY, CUSTOM_THEMES_KEY, KEYBINDINGS_KEY, LAUNCHER_ENABLED_KEY,
         LEGACY_FOCUSED_NODE_KEY, LEGACY_TREE_EXPANDED_KEY, LEGACY_UI_STATE_KEY,
         NEW_CONNECTION_SAVE_KEY, RenderProfile, SETTINGS_STORAGE_KEY,
-        model::{FontFamily, Language, RendererType},
+        model::{ConflictAction, FontFamily, IdeAgentMode, Language, RendererType},
     };
 
     #[test]
@@ -252,7 +252,18 @@ mod tests {
         assert_eq!(settings.appearance.render_profile, RenderProfile::Auto);
         assert_eq!(settings.connection_defaults.username, "root");
         assert_eq!(settings.sidebar_ui.width, 300);
+        assert_eq!(settings.sftp.max_concurrent_transfers, 3);
+        assert_eq!(settings.sftp.directory_parallelism, 4);
+        assert_eq!(settings.sftp.conflict_action, ConflictAction::Ask);
+        assert_eq!(settings.ide.agent_mode, IdeAgentMode::Ask);
+        assert!(!settings.ide.auto_save);
+        assert!(settings.reconnect.enabled);
+        assert_eq!(settings.reconnect.max_attempts, 5);
+        assert_eq!(settings.reconnect.base_delay_ms, 1000);
+        assert_eq!(settings.reconnect.max_delay_ms, 15_000);
         assert_eq!(settings.connection_pool.idle_timeout_secs, 1800);
+        assert!(!settings.experimental.virtual_session_proxy);
+        assert!(!settings.experimental.gpu_canvas);
     }
 
     #[test]
@@ -269,6 +280,11 @@ mod tests {
         assert_eq!(value["appearance"]["uiDensity"], "comfortable");
         assert_eq!(value["appearance"]["renderProfile"], "auto");
         assert_eq!(value["sftp"]["conflictAction"], "ask");
+        assert_eq!(value["ide"]["agentMode"], "ask");
+        assert_eq!(value["reconnect"]["baseDelayMs"], 1000);
+        assert_eq!(value["reconnect"]["maxDelayMs"], 15_000);
+        assert_eq!(value["connectionPool"]["idleTimeoutSecs"], 1800);
+        assert_eq!(value["experimental"]["virtualSessionProxy"], false);
     }
 
     #[test]

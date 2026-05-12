@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
 oxideterm-ide-core = { path = "../oxideterm-ide-core" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }

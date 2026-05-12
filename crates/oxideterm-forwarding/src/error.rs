@@ -3,6 +3,8 @@
 
 use std::io;
 
+use oxideterm_backend_classification::{BackendErrorClass, classify_io_error_kind};
+
 #[derive(Debug, thiserror::Error)]
 pub enum ForwardingError {
     #[error("forward rule not found: {0}")]
@@ -61,18 +63,18 @@ fn tauri_bind_error(
     // directly. Keep native bind errors in the same user-visible class instead
     // of leaking raw std::io wording through the forwarding abstraction.
     let local_addr = format!("{bind_address}:{bind_port}");
-    let message = match error.kind() {
-        io::ErrorKind::AddrInUse => {
+    let message = match classify_io_error_kind(error.kind()) {
+        Some(BackendErrorClass::PortInUse) => {
             format!(
                 "Port already in use: {local_addr}. Another application may be using this port."
             )
         }
-        io::ErrorKind::PermissionDenied => {
+        Some(BackendErrorClass::PermissionDenied) => {
             format!(
                 "Permission denied binding to {local_addr}. Ports below 1024 require elevated privileges."
             )
         }
-        io::ErrorKind::AddrNotAvailable => {
+        _ if error.kind() == io::ErrorKind::AddrNotAvailable => {
             format!(
                 "Address not available: {local_addr}. The specified address is not valid on this system."
             )

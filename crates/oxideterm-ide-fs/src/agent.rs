@@ -12,7 +12,7 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{
-        Arc, RwLock,
+        Arc, Mutex as StdMutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
@@ -20,10 +20,11 @@ use std::{
 
 use base64::Engine;
 use dashmap::DashMap;
+use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_ide_core::{
     AsyncIdeFileSystem, FileKind, FileStat, FileSystemCapabilities, FileTreeEntry, IdeFileData,
     IdeFileError, IdeFileErrorKind, IdeFsFuture, IdeLocation, IdePathStat, IdeProjectInfo,
-    SavedFileVersion, WriteMode,
+    IdeSearchQuery, IdeWatchEvent, IdeWatchKey, SavedFileVersion, WriteMode,
 };
 #[cfg(test)]
 use oxideterm_sftp::{FileInfo, FileType};
@@ -33,7 +34,7 @@ use oxideterm_ssh::{
 };
 use russh::ChannelMsg;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use tracing::{debug, info, warn};
 
 use crate::NodeSftpIdeFileSystem;
@@ -99,12 +100,18 @@ pub struct NodeAgentIdeFileSystem {
     sftp: NodeSftpIdeFileSystem,
     registry: Arc<AgentRegistry>,
     // Tauri's IDE is node-scoped: it can outlive terminal panes and should keep
-    // using the node connection until the IDE project/tab is closed. Native
-    // records that as an explicit registry consumer instead of borrowing
-    // liveness from SFTP channels or a terminal tab.
-    ide_consumers: Arc<DashMap<String, IdeConnectionLease>>,
+    // using the node connection until the IDE project/tab is closed. Native now
+    // models that as an explicit remote session handle whose Drop releases the
+    // NodeRouter consumer, instead of relying on GPUI panes to remember every
+    // low-level release path.
+    ide_sessions: Arc<DashMap<String, Arc<IdeRemoteSessionInner>>>,
     mode: NodeAgentMode,
-    status: Arc<RwLock<AgentStatus>>,
+    // Tauri computes node_agent_status by resolving node_id to the current SSH
+    // connection id, then querying AgentRegistry by that connection. Keep the
+    // same shape here so one node's agent result cannot overwrite another's.
+    agent_statuses: Arc<DashMap<AgentStatusKey, AgentStatus>>,
+    latest_agent_status: Arc<DashMap<String, AgentStatusKey>>,
+    watch_subscriptions: Arc<DashMap<IdeWatchKey, Arc<IdeWatchShared>>>,
     deploy_lock: Arc<Mutex<()>>,
 }
 
@@ -112,6 +119,103 @@ pub struct NodeAgentIdeFileSystem {
 struct IdeConnectionLease {
     connection_id: String,
     consumer: ConnectionConsumer,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct AgentStatusKey {
+    node_id: String,
+    connection_id: String,
+}
+
+struct IdeWatchShared {
+    connection_id: String,
+    events_tx: broadcast::Sender<IdeWatchEvent>,
+}
+
+pub struct IdeWatchSubscription {
+    rx: broadcast::Receiver<IdeWatchEvent>,
+}
+
+impl IdeWatchSubscription {
+    pub async fn recv(&mut self) -> Option<IdeWatchEvent> {
+        loop {
+            match self.rx.recv().await {
+                Ok(event) => return Some(event),
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }
+}
+
+struct IdeRemoteSessionInner {
+    node_id: NodeId,
+    router: NodeRouter,
+    lease: StdMutex<Option<IdeConnectionLease>>,
+}
+
+impl IdeRemoteSessionInner {
+    fn new(node_id: NodeId, router: NodeRouter) -> Self {
+        Self {
+            node_id,
+            router,
+            lease: StdMutex::new(None),
+        }
+    }
+
+    async fn acquire_connection(&self) -> Result<ResolvedConnection, RouteError> {
+        let consumer = ConnectionConsumer::Ide(self.node_id.0.clone());
+        let resolved = self
+            .router
+            .acquire_connection_wait(&self.node_id, consumer.clone(), Duration::from_secs(15))
+            .await?;
+        let next = IdeConnectionLease {
+            connection_id: resolved.connection_id.clone(),
+            consumer,
+        };
+        let previous = {
+            let mut lease = self
+                .lease
+                .lock()
+                .expect("IDE remote session lease poisoned");
+            if lease.as_ref() == Some(&next) {
+                None
+            } else {
+                lease.replace(next)
+            }
+        };
+        if let Some(previous) = previous {
+            self.router
+                .release_consumer(&previous.connection_id, &previous.consumer);
+        }
+        Ok(resolved)
+    }
+
+    fn connection_id(&self) -> Option<String> {
+        self.lease
+            .lock()
+            .expect("IDE remote session lease poisoned")
+            .as_ref()
+            .map(|lease| lease.connection_id.clone())
+    }
+
+    fn close(&self) {
+        if let Some(lease) = self
+            .lease
+            .lock()
+            .expect("IDE remote session lease poisoned")
+            .take()
+        {
+            self.router
+                .release_consumer(&lease.connection_id, &lease.consumer);
+        }
+    }
+}
+
+impl Drop for IdeRemoteSessionInner {
+    fn drop(&mut self) {
+        self.close();
+    }
 }
 
 include!("agent/filesystem.rs");

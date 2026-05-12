@@ -105,12 +105,11 @@ mod tests {
         let registry = AgentRegistry::default();
         let (write_tx, _write_rx) = mpsc::channel::<String>(1);
         let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
-        let (watch_tx, watch_rx) = mpsc::channel::<AgentWatchEvent>(1);
+        let (watch_tx, _) = broadcast::channel::<AgentWatchEvent>(1);
         let transport = AgentTransport {
             write_tx,
             pending: Arc::new(Mutex::new(HashMap::new())),
-            watch_rx: Mutex::new(Some(watch_rx)),
-            _watch_tx: watch_tx,
+            watch_tx,
             shutdown_tx,
             alive: Arc::new(AtomicBool::new(false)),
         };
@@ -255,7 +254,8 @@ mod tests {
     #[tokio::test]
     async fn routes_agent_watch_notifications_to_receiver() {
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let (watch_tx, mut watch_rx) = mpsc::channel::<AgentWatchEvent>(1);
+        let (watch_tx, mut watch_rx) = broadcast::channel::<AgentWatchEvent>(1);
+        let mut second_watch_rx = watch_tx.subscribe();
 
         handle_agent_line(
             &pending,
@@ -267,6 +267,9 @@ mod tests {
         let event = watch_rx.recv().await.unwrap();
         assert_eq!(event.path, "/srv/app/main.rs");
         assert_eq!(event.kind, "modified");
+        let second_event = second_watch_rx.recv().await.unwrap();
+        assert_eq!(second_event.path, "/srv/app/main.rs");
+        assert_eq!(second_event.kind, "modified");
     }
 
     #[test]
@@ -335,7 +338,103 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(fs.ide_consumers.is_empty());
+        assert!(fs.ide_sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ide_remote_session_rebind_releases_previous_connection_consumer() {
+        let registry = oxideterm_ssh::SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node_id = NodeId::new("node-ide");
+        let config = oxideterm_ssh::SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node_id.clone(), config.clone());
+
+        let first = registry.acquire(
+            config.clone(),
+            oxideterm_ssh::ConnectionConsumer::NodeRouter("node-ide".to_string()),
+        );
+        first.set_physical(Arc::new(()));
+        registry.mark_state(first.connection_id(), oxideterm_ssh::ConnectionState::Active);
+        router
+            .bind_connection(&node_id, first.connection_id().to_string())
+            .unwrap();
+
+        let fs = NodeAgentIdeFileSystem::new(router.clone(), NodeAgentMode::Disabled);
+        fs.ensure_ide_session_for_node(&node_id).await.unwrap();
+        assert!(first.info().consumers.contains(&ConnectionConsumer::Ide(
+            "node-ide".to_string()
+        )));
+
+        registry.mark_state(first.connection_id(), oxideterm_ssh::ConnectionState::LinkDown);
+        let second_config = oxideterm_ssh::SshConfig::password("host2", 22, "me", "pw");
+        router.upsert_node(node_id.clone(), second_config.clone());
+        let second = registry.acquire(
+            second_config,
+            oxideterm_ssh::ConnectionConsumer::NodeRouter("node-ide".to_string()),
+        );
+        second.set_physical(Arc::new(()));
+        registry.mark_state(second.connection_id(), oxideterm_ssh::ConnectionState::Active);
+        router
+            .bind_connection(&node_id, second.connection_id().to_string())
+            .unwrap();
+
+        fs.ensure_ide_session_for_node(&node_id).await.unwrap();
+        assert!(!first.info().consumers.contains(&ConnectionConsumer::Ide(
+            "node-ide".to_string()
+        )));
+        assert!(second.info().consumers.contains(&ConnectionConsumer::Ide(
+            "node-ide".to_string()
+        )));
+
+        fs.close_ide_session("node-ide");
+        assert!(!second.info().consumers.contains(&ConnectionConsumer::Ide(
+            "node-ide".to_string()
+        )));
+    }
+
+    #[test]
+    fn agent_status_is_scoped_by_node_and_connection() {
+        let registry = oxideterm_ssh::SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry);
+        let first = NodeId::new("node-a");
+        let second = NodeId::new("node-b");
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Ask);
+
+        fs.set_status_for_node(
+            &first,
+            Some("conn-a"),
+            AgentStatus::Ready {
+                version: "1.0.0".into(),
+                arch: "x86_64".into(),
+                pid: 7,
+            },
+        );
+        fs.set_status_for_node(
+            &second,
+            Some("conn-b"),
+            AgentStatus::Failed {
+                reason: "boom".into(),
+            },
+        );
+
+        assert!(matches!(
+            fs.status_for_node(Some("node-a")),
+            AgentStatus::Ready { version, .. } if version == "1.0.0"
+        ));
+        assert!(matches!(
+            fs.status_for_node(Some("node-b")),
+            AgentStatus::Failed { reason } if reason == "boom"
+        ));
+
+        fs.set_status_for_node(&first, Some("conn-a2"), AgentStatus::SftpFallback);
+        assert_eq!(
+            fs.status_for_node(Some("node-a")),
+            AgentStatus::SftpFallback
+        );
+        assert!(fs.agent_statuses.contains_key(&AgentStatusKey {
+            node_id: "node-a".into(),
+            connection_id: "conn-a".into(),
+        }));
     }
 
     #[tokio::test]

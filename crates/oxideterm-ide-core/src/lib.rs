@@ -17,7 +17,8 @@ mod workspace_tests;
 
 pub use filesystem::{
     AsyncIdeFileSystem, FileStat, FileSystemCapabilities, IdeFileCheck, IdeFileData, IdeFileError,
-    IdeFileErrorKind, IdeFileSystem, IdeFsFuture, IdePathStat, IdeProjectInfo, WriteMode,
+    IdeFileErrorKind, IdeFileSystem, IdeFsFuture, IdePathStat, IdeProjectInfo, IdeSearchQuery,
+    IdeWatchEvent, IdeWatchKey, WriteMode, tauri_project_search_include_globs,
 };
 pub use model::{
     BufferSnapshot, CloseRequestId, DirtyCloseDecision, DirtyCloseRequest, EditorBuffer, EditorTab,

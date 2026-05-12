@@ -377,6 +377,10 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
+        if self.launcher.focused_input.take().is_some() {
+            self.ime_marked_text = None;
+            changed = true;
+        }
         if let Some(form) = self.new_connection_form.as_mut()
             && form.field_focused
         {

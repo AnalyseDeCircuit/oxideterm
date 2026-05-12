@@ -131,7 +131,7 @@ impl IdeSurface {
             && previous_node_id != node_id
         {
             self.stop_agent_watch(cx);
-            self.fs.release_ide_consumer(&previous_node_id);
+            self.fs.close_ide_session(&previous_node_id);
         } else if self.root_path.as_deref() != Some(root_path.as_str()) {
             self.stop_agent_watch(cx);
         }
@@ -209,9 +209,9 @@ impl IdeSurface {
         self.pending_reconnect_restore_node_id = None;
         self.pending_reconnect_restore_files_remaining = 0;
         if let Some(node_id) = self.node_id.take() {
-            self.fs.release_ide_consumer(&node_id);
+            self.fs.close_ide_session(&node_id);
         }
-        self.fs.release_all_ide_consumers();
+        self.fs.close_all_ide_sessions();
     }
 
     pub fn mark_connection_interrupted(&mut self, cx: &mut Context<Self>) {
@@ -223,7 +223,7 @@ impl IdeSurface {
         self.pending_reconnect_restore_node_id = None;
         self.pending_reconnect_restore_files_remaining = 0;
         if let Some(node_id) = self.node_id.as_deref() {
-            self.fs.release_ide_consumer(node_id);
+            self.fs.close_ide_session(node_id);
         }
         if matches!(self.load_state, IdeLoadState::Ready) {
             self.load_state = IdeLoadState::Disconnected;
@@ -290,6 +290,6 @@ impl Drop for IdeSurface {
         // `Context`. Mirror Tauri's closeProject/invalidateAgentCache ownership
         // boundary by releasing every NodeRouter IDE consumer here as a final
         // guard against shutdown-time orphan node liveness.
-        self.fs.release_all_ide_consumers();
+        self.fs.close_all_ide_sessions();
     }
 }

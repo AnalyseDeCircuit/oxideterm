@@ -120,41 +120,23 @@ fn agent_error_log_label(error: &AgentError) -> &'static str {
 
 fn ide_error_from_agent_message(message: impl Into<String>) -> IdeFileError {
     let message = message.into();
-    let normalized = message.to_ascii_lowercase();
-    let kind = if normalized.contains("permission denied")
-        || normalized.contains("eacces")
-        || normalized.contains("operation not permitted")
-    {
-        IdeFileErrorKind::PermissionDenied
-    } else if normalized.contains("not found")
-        || normalized.contains("no such file")
-        || normalized.contains("enoent")
-    {
-        IdeFileErrorKind::NotFound
-    } else if normalized.contains("timeout") || normalized.contains("timed out") {
-        IdeFileErrorKind::Timeout
-    } else if [
-        "network",
-        "connection",
-        "disconnected",
-        "eof",
-        "broken pipe",
-        "reset by peer",
-        "channel closed",
-        "transport is closed",
-        "transport is missing",
-        "stale",
-        "link down",
-        "not connected",
-    ]
-    .iter()
-    .any(|needle| normalized.contains(needle))
-    {
-        IdeFileErrorKind::Disconnected
-    } else {
-        IdeFileErrorKind::Other
-    };
-    IdeFileError::new(kind, message)
+    IdeFileError::new(ide_kind_from_backend_class(classify_message(&message)), message)
+}
+
+fn ide_kind_from_backend_class(classification: BackendErrorClass) -> IdeFileErrorKind {
+    match classification {
+        BackendErrorClass::Conflict => IdeFileErrorKind::Conflict,
+        BackendErrorClass::Cancelled | BackendErrorClass::Disconnected => {
+            IdeFileErrorKind::Disconnected
+        }
+        BackendErrorClass::NotFound => IdeFileErrorKind::NotFound,
+        BackendErrorClass::PermissionDenied | BackendErrorClass::Auth => {
+            IdeFileErrorKind::PermissionDenied
+        }
+        BackendErrorClass::Timeout => IdeFileErrorKind::Timeout,
+        BackendErrorClass::Unsupported | BackendErrorClass::HostKey => IdeFileErrorKind::Unsupported,
+        BackendErrorClass::PortInUse | BackendErrorClass::Other => IdeFileErrorKind::Other,
+    }
 }
 
 fn should_write_via_agent(expected_version: Option<&SavedFileVersion>) -> bool {

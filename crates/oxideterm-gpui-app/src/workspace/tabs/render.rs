@@ -39,6 +39,7 @@ impl WorkspaceApp {
                 TabKind::LocalTerminal => LucideIcon::Square,
                 TabKind::SshTerminal => LucideIcon::Terminal,
                 TabKind::FileManager => LucideIcon::FolderOpen,
+                TabKind::Launcher => LucideIcon::Monitor,
                 TabKind::Sftp => LucideIcon::FolderInput,
                 TabKind::Ide => LucideIcon::Code2,
                 TabKind::Forwards => LucideIcon::ArrowLeftRight,

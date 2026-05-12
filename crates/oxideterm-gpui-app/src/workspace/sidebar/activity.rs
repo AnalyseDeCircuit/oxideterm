@@ -231,6 +231,8 @@ impl WorkspaceApp {
                         let _ = this.create_local_terminal_tab(window, cx);
                     } else if section == SidebarSection::Files {
                         this.open_file_manager_tab(window, cx);
+                    } else if section == SidebarSection::Monitor && cfg!(target_os = "macos") {
+                        this.open_launcher_tab(window, cx);
                     } else if section == SidebarSection::Notifications {
                         this.active_surface = ActiveSurface::Terminal;
                         this.set_sidebar_section(section, cx);
@@ -255,6 +257,9 @@ impl WorkspaceApp {
             SidebarSection::Automation => self.i18n.t("sidebar.panels.activity"),
             SidebarSection::Workspace => self.i18n.t("sidebar.actions.new_local_terminal"),
             SidebarSection::Files => self.i18n.t("sidebar.panels.files"),
+            SidebarSection::Monitor if cfg!(target_os = "macos") => {
+                self.i18n.t("launcher.tabTitle")
+            }
             SidebarSection::Monitor => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Notifications => self.i18n.t("sidebar.panels.notifications"),
             SidebarSection::Settings => self.i18n.t("sidebar.tooltips.settings"),

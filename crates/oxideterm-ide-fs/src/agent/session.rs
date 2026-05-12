@@ -146,8 +146,8 @@ impl AgentSession {
         Ok(())
     }
 
-    async fn take_watch_rx(&self) -> Option<mpsc::Receiver<AgentWatchEvent>> {
-        self.transport.take_watch_rx().await
+    fn subscribe_watch_events(&self) -> broadcast::Receiver<AgentWatchEvent> {
+        self.transport.subscribe_watch_events()
     }
 
     async fn shutdown(&self) {
