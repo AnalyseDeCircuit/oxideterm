@@ -13,7 +13,9 @@ use oxideterm_gpui_ui::{
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
     text_input_anchor_probe,
 };
-use oxideterm_launcher::{self as launcher_core, LauncherAppEntry, LauncherListResponse};
+use oxideterm_launcher::{
+    self as launcher_core, LauncherAppEntry, LauncherListResponse, LauncherRuntimeState,
+};
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 
 use super::ime::WorkspaceImeTarget;
@@ -82,17 +84,10 @@ pub(super) enum LauncherWorkerResult {
 }
 
 pub(super) struct LauncherState {
-    pub(super) enabled: bool,
-    pub(super) apps: Vec<LauncherAppEntry>,
-    pub(super) icon_dir: Option<String>,
-    pub(super) search_query: String,
-    pub(super) loading: bool,
-    pub(super) error: Option<String>,
-    pub(super) show_disable_confirm: bool,
+    pub(super) core: LauncherRuntimeState,
     pub(super) focused_input: Option<LauncherInput>,
     pub(super) hovered_app_path: Option<String>,
     pub(super) pressed_app_path: Option<String>,
-    generation: u64,
     worker_tx: mpsc::Sender<LauncherWorkerResult>,
     worker_rx: mpsc::Receiver<LauncherWorkerResult>,
 }
@@ -101,17 +96,10 @@ impl LauncherState {
     pub(super) fn new(enabled: bool) -> Self {
         let (worker_tx, worker_rx) = mpsc::channel();
         Self {
-            enabled,
-            apps: Vec::new(),
-            icon_dir: None,
-            search_query: String::new(),
-            loading: false,
-            error: None,
-            show_disable_confirm: false,
+            core: LauncherRuntimeState::new(enabled),
             focused_input: None,
             hovered_app_path: None,
             pressed_app_path: None,
-            generation: 0,
             worker_tx,
             worker_rx,
         }
@@ -138,7 +126,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         self.launcher.focused_input = Some(LauncherInput::Search);
-        if self.launcher.enabled {
+        if self.launcher.core.enabled {
             self.start_launcher_load_if_needed(false);
         }
         window.focus(&self.focus_handle);
@@ -160,7 +148,7 @@ impl WorkspaceApp {
         }
 
         let has_background = self.launcher_background_active();
-        if !self.launcher.enabled {
+        if !self.launcher.core.enabled {
             return self.render_launcher_consent(has_background, cx);
         }
 
@@ -175,7 +163,7 @@ impl WorkspaceApp {
                 rgb(theme.bg)
             })
             .child(self.render_launcher_search_header(filtered_apps.len(), cx))
-            .when(self.launcher.show_disable_confirm, |surface| {
+            .when(self.launcher.core.show_disable_confirm, |surface| {
                 surface.child(self.render_launcher_disable_confirm(cx))
             })
             .child(self.render_launcher_content(filtered_apps, cx))
@@ -187,25 +175,9 @@ impl WorkspaceApp {
         while let Ok(result) = self.launcher.worker_rx.try_recv() {
             match result {
                 LauncherWorkerResult::ListApps { generation, result } => {
-                    if generation != self.launcher.generation {
-                        continue;
+                    if self.launcher.core.apply_list_result(generation, result) {
+                        changed = true;
                     }
-                    self.launcher.loading = false;
-                    match result {
-                        Ok(response) => {
-                            if self.launcher.enabled {
-                                self.launcher.apps = response.apps;
-                                self.launcher.icon_dir = response.icon_dir;
-                                self.launcher.error = None;
-                            }
-                        }
-                        Err(error) => {
-                            if self.launcher.enabled {
-                                self.launcher.error = Some(error);
-                            }
-                        }
-                    }
-                    changed = true;
                 }
             }
         }
@@ -226,14 +198,14 @@ impl WorkspaceApp {
         }
         match event.keystroke.key.as_str() {
             "escape" => {
-                self.launcher.search_query.clear();
+                self.launcher.core.search_query.clear();
                 self.launcher.focused_input = None;
                 self.ime_marked_text = None;
                 cx.notify();
                 true
             }
             "backspace" => {
-                self.launcher.search_query.pop();
+                self.launcher.core.search_query.pop();
                 self.ime_marked_text = None;
                 cx.notify();
                 true
@@ -244,13 +216,13 @@ impl WorkspaceApp {
 
     pub(super) fn launcher_input_value(&self, input: LauncherInput) -> &str {
         match input {
-            LauncherInput::Search => &self.launcher.search_query,
+            LauncherInput::Search => &self.launcher.core.search_query,
         }
     }
 
     pub(super) fn launcher_input_value_mut(&mut self, input: LauncherInput) -> &mut String {
         match input {
-            LauncherInput::Search => &mut self.launcher.search_query,
+            LauncherInput::Search => &mut self.launcher.core.search_query,
         }
     }
 
@@ -443,7 +415,7 @@ impl WorkspaceApp {
                         oxideterm_gpui_ui::text_input(
                             &self.tokens,
                             TextInputView {
-                                value: &self.launcher.search_query,
+                                value: &self.launcher.core.search_query,
                                 placeholder: self.i18n.t("launcher.search"),
                                 focused,
                                 caret_visible: self.new_connection_caret_visible,
@@ -494,13 +466,13 @@ impl WorkspaceApp {
                                     .text_color(rgba((theme.text_muted << 8) | 0x80))
                                     .child(launcher_core::count_label(
                                         filtered_count,
-                                        self.launcher.apps.len(),
+                                        self.launcher.core.apps.len(),
                                     )),
                             )
                             .child(self.render_launcher_icon_button(
                                 LucideIcon::RefreshCw,
                                 self.i18n.t("launcher.refresh"),
-                                self.launcher.loading,
+                                self.launcher.core.loading,
                                 LauncherHeaderAction::Refresh,
                                 cx,
                             ))
@@ -561,7 +533,7 @@ impl WorkspaceApp {
                     match action {
                         LauncherHeaderAction::Refresh => this.refresh_launcher(cx),
                         LauncherHeaderAction::Disable => {
-                            this.launcher.show_disable_confirm = true;
+                            this.launcher.core.show_disable_confirm = true;
                             cx.notify();
                         }
                     }
@@ -605,7 +577,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        this.launcher.show_disable_confirm = false;
+                        this.launcher.core.show_disable_confirm = false;
                         cx.notify();
                     }),
                 ),
@@ -637,7 +609,7 @@ impl WorkspaceApp {
         filtered_apps: Vec<LauncherAppEntry>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.launcher.loading && self.launcher.apps.is_empty() {
+        if self.launcher.core.loading && self.launcher.core.apps.is_empty() {
             return self.render_launcher_center_state(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("launcher.scanning"),
@@ -646,7 +618,7 @@ impl WorkspaceApp {
                 cx,
             );
         }
-        if let Some(error) = self.launcher.error.as_ref() {
+        if let Some(error) = self.launcher.core.error.as_ref() {
             return self.render_launcher_center_state(
                 LucideIcon::AlertCircle,
                 error.clone(),
@@ -656,7 +628,7 @@ impl WorkspaceApp {
             );
         }
         if filtered_apps.is_empty() {
-            let label = if self.launcher.search_query.trim().is_empty() {
+            let label = if self.launcher.core.search_query.trim().is_empty() {
                 self.i18n.t("launcher.empty")
             } else {
                 self.i18n.t("launcher.noResults")
@@ -862,13 +834,11 @@ impl WorkspaceApp {
     }
 
     fn filtered_launcher_apps(&self) -> Vec<LauncherAppEntry> {
-        launcher_core::filter_apps(&self.launcher.apps, &self.launcher.search_query)
+        self.launcher.core.filtered_apps()
     }
 
     fn enable_launcher(&mut self, cx: &mut Context<Self>) {
-        self.launcher.enabled = true;
-        self.launcher.error = None;
-        self.launcher.show_disable_confirm = false;
+        self.launcher.core.enable();
         self.settings_store.settings_mut().launcher.enabled = true;
         let _ = self.settings_store.save();
         self.start_launcher_load_if_needed(true);
@@ -876,15 +846,8 @@ impl WorkspaceApp {
     }
 
     fn disable_launcher(&mut self, cx: &mut Context<Self>) {
-        self.launcher.enabled = false;
-        self.launcher.apps.clear();
-        self.launcher.icon_dir = None;
-        self.launcher.search_query.clear();
-        self.launcher.error = None;
-        self.launcher.loading = false;
-        self.launcher.show_disable_confirm = false;
+        self.launcher.core.disable();
         self.launcher.focused_input = None;
-        self.launcher.generation = self.launcher.generation.saturating_add(1);
         self.settings_store.settings_mut().launcher.enabled = false;
         let _ = self.settings_store.save();
         let _ = launcher_core::clear_icon_cache();
@@ -892,24 +855,15 @@ impl WorkspaceApp {
     }
 
     fn refresh_launcher(&mut self, cx: &mut Context<Self>) {
-        self.launcher.apps.clear();
-        self.launcher.icon_dir = None;
-        self.launcher.error = None;
+        self.launcher.core.clear_for_refresh();
         self.start_launcher_load_if_needed(true);
         cx.notify();
     }
 
     fn start_launcher_load_if_needed(&mut self, force: bool) {
-        if !self.launcher.enabled || self.launcher.loading {
+        let Some(generation) = self.launcher.core.begin_load(force) else {
             return;
-        }
-        if !force && (!self.launcher.apps.is_empty() || self.launcher.error.is_some()) {
-            return;
-        }
-        self.launcher.loading = true;
-        self.launcher.error = None;
-        self.launcher.generation = self.launcher.generation.saturating_add(1);
-        let generation = self.launcher.generation;
+        };
         let tx = self.launcher.worker_tx.clone();
         thread::Builder::new()
             .name("oxideterm-launcher-scan".to_string())
@@ -922,7 +876,7 @@ impl WorkspaceApp {
 
     fn launch_app(&mut self, path: &str, cx: &mut Context<Self>) {
         if let Err(error) = launcher_core::launch_app(path) {
-            self.launcher.error = Some(error);
+            self.launcher.core.mark_launch_error(error);
         }
         cx.notify();
     }
