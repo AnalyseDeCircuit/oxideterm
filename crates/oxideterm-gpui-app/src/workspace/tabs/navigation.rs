@@ -339,6 +339,9 @@ impl WorkspaceApp {
         let old_active_tab_id = self.active_tab_id;
         let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
         let tab = self.tabs.remove(index);
+        if tab.kind == TabKind::Graphics {
+            self.shutdown_graphics_session();
+        }
         if let Some(node_id) = self.sftp_tab_nodes.remove(&tab.id) {
             self.release_sftp_session_for_node(&node_id);
         }

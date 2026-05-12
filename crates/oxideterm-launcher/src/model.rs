@@ -14,3 +14,22 @@ pub struct LauncherListResponse {
     pub apps: Vec<LauncherAppEntry>,
     pub icon_dir: Option<String>,
 }
+
+pub use oxideterm_wsl_graphics::WslDistro;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LauncherLoadResponse {
+    pub apps: Vec<LauncherAppEntry>,
+    pub icon_dir: Option<String>,
+    pub wsl_distros: Vec<WslDistro>,
+}
+
+impl From<LauncherListResponse> for LauncherLoadResponse {
+    fn from(response: LauncherListResponse) -> Self {
+        Self {
+            apps: response.apps,
+            icon_dir: response.icon_dir,
+            wsl_distros: Vec::new(),
+        }
+    }
+}

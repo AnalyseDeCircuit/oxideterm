@@ -34,7 +34,9 @@ oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-webview = { path = "../oxideterm-webview" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
+oxideterm-wsl-graphics = { path = "../oxideterm-wsl-graphics" }
 parking_lot.workspace = true
 regex.workspace = true
 serde.workspace = true
@@ -43,6 +45,7 @@ sysinfo.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 walkdir = "2"
+wry.workspace = true
 zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

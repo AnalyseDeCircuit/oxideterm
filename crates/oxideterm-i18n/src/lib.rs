@@ -16,6 +16,7 @@ const EN_PARTS: &[&str] = &[
     include_str!("../locales/en/ide.json"),
     include_str!("../locales/en/fileManager.json"),
     include_str!("../locales/en/launcher.json"),
+    include_str!("../locales/en/graphics.json"),
 ];
 const DE_PARTS: &[&str] = &[
     include_str!("../locales/de/common.json"),
@@ -31,6 +32,7 @@ const DE_PARTS: &[&str] = &[
     include_str!("../locales/de/ide.json"),
     include_str!("../locales/de/fileManager.json"),
     include_str!("../locales/de/launcher.json"),
+    include_str!("../locales/de/graphics.json"),
 ];
 const ES_ES_PARTS: &[&str] = &[
     include_str!("../locales/es-ES/common.json"),
@@ -46,6 +48,7 @@ const ES_ES_PARTS: &[&str] = &[
     include_str!("../locales/es-ES/ide.json"),
     include_str!("../locales/es-ES/fileManager.json"),
     include_str!("../locales/es-ES/launcher.json"),
+    include_str!("../locales/es-ES/graphics.json"),
 ];
 const FR_FR_PARTS: &[&str] = &[
     include_str!("../locales/fr-FR/common.json"),
@@ -61,6 +64,7 @@ const FR_FR_PARTS: &[&str] = &[
     include_str!("../locales/fr-FR/ide.json"),
     include_str!("../locales/fr-FR/fileManager.json"),
     include_str!("../locales/fr-FR/launcher.json"),
+    include_str!("../locales/fr-FR/graphics.json"),
 ];
 const IT_PARTS: &[&str] = &[
     include_str!("../locales/it/common.json"),
@@ -76,6 +80,7 @@ const IT_PARTS: &[&str] = &[
     include_str!("../locales/it/ide.json"),
     include_str!("../locales/it/fileManager.json"),
     include_str!("../locales/it/launcher.json"),
+    include_str!("../locales/it/graphics.json"),
 ];
 const JA_PARTS: &[&str] = &[
     include_str!("../locales/ja/common.json"),
@@ -91,6 +96,7 @@ const JA_PARTS: &[&str] = &[
     include_str!("../locales/ja/ide.json"),
     include_str!("../locales/ja/fileManager.json"),
     include_str!("../locales/ja/launcher.json"),
+    include_str!("../locales/ja/graphics.json"),
 ];
 const KO_PARTS: &[&str] = &[
     include_str!("../locales/ko/common.json"),
@@ -106,6 +112,7 @@ const KO_PARTS: &[&str] = &[
     include_str!("../locales/ko/ide.json"),
     include_str!("../locales/ko/fileManager.json"),
     include_str!("../locales/ko/launcher.json"),
+    include_str!("../locales/ko/graphics.json"),
 ];
 const PT_BR_PARTS: &[&str] = &[
     include_str!("../locales/pt-BR/common.json"),
@@ -121,6 +128,7 @@ const PT_BR_PARTS: &[&str] = &[
     include_str!("../locales/pt-BR/ide.json"),
     include_str!("../locales/pt-BR/fileManager.json"),
     include_str!("../locales/pt-BR/launcher.json"),
+    include_str!("../locales/pt-BR/graphics.json"),
 ];
 const VI_PARTS: &[&str] = &[
     include_str!("../locales/vi/common.json"),
@@ -136,6 +144,7 @@ const VI_PARTS: &[&str] = &[
     include_str!("../locales/vi/ide.json"),
     include_str!("../locales/vi/fileManager.json"),
     include_str!("../locales/vi/launcher.json"),
+    include_str!("../locales/vi/graphics.json"),
 ];
 const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/common.json"),
@@ -151,6 +160,7 @@ const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/ide.json"),
     include_str!("../locales/zh-CN/fileManager.json"),
     include_str!("../locales/zh-CN/launcher.json"),
+    include_str!("../locales/zh-CN/graphics.json"),
 ];
 const ZH_TW_PARTS: &[&str] = &[
     include_str!("../locales/zh-TW/common.json"),
@@ -166,6 +176,7 @@ const ZH_TW_PARTS: &[&str] = &[
     include_str!("../locales/zh-TW/ide.json"),
     include_str!("../locales/zh-TW/fileManager.json"),
     include_str!("../locales/zh-TW/launcher.json"),
+    include_str!("../locales/zh-TW/graphics.json"),
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

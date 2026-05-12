@@ -5,6 +5,7 @@ use std::{fs, path::PathBuf};
 
 use oxideterm_settings::default_settings_path;
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const CACHE_MAX_AGE_SECS: u64 = 7 * 86_400; // Tauri icon cache freshness.
 
 pub fn icon_cache_dir() -> PathBuf {

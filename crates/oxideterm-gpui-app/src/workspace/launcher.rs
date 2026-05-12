@@ -14,7 +14,7 @@ use oxideterm_gpui_ui::{
     text_input_anchor_probe,
 };
 use oxideterm_launcher::{
-    self as launcher_core, LauncherAppEntry, LauncherListResponse, LauncherRuntimeState,
+    self as launcher_core, LauncherAppEntry, LauncherLoadResponse, LauncherRuntimeState, WslDistro,
 };
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 
@@ -56,6 +56,21 @@ const LAUNCHER_RED_400: u32 = 0xf87171; // Tauri red-400.
 const LAUNCHER_RED_500: u32 = 0xef4444; // Tauri red-500.
 const LAUNCHER_RED_500_ALPHA_10: u32 = 0x1a; // Tauri red-500/10.
 const LAUNCHER_RED_500_ALPHA_20: u32 = 0x33; // Tauri red-500/20.
+const LAUNCHER_WSL_HEADER_PADDING_X: f32 = 16.0; // Tauri WSL header px-4.
+const LAUNCHER_WSL_HEADER_PADDING_Y: f32 = 12.0; // Tauri WSL header py-3.
+const LAUNCHER_WSL_SEARCH_PADDING_Y: f32 = 8.0; // Tauri WSL search py-2.
+const LAUNCHER_WSL_CONTENT_PADDING: f32 = 16.0; // Tauri WSL content p-4.
+const LAUNCHER_WSL_ROW_PADDING_X: f32 = 16.0; // Tauri WSL row px-4.
+const LAUNCHER_WSL_ROW_PADDING_Y: f32 = 12.0; // Tauri WSL row py-3.
+const LAUNCHER_WSL_ROW_GAP: f32 = 12.0; // Tauri WSL row/header gap-3.
+const LAUNCHER_WSL_BADGE_TEXT_SIZE: f32 = 10.0; // Tauri text-[10px].
+const LAUNCHER_WSL_DOT: f32 = 8.0; // Tauri w-2 h-2.
+const LAUNCHER_WSL_GREEN_500: u32 = 0x22c55e; // Tauri green-500.
+const LAUNCHER_WSL_BORDER_ALPHA_30: u32 = 0x4d; // Tauri border/30.
+const LAUNCHER_WSL_BORDER_ALPHA_50: u32 = 0x80; // Tauri border/50.
+const LAUNCHER_WSL_BG_HOVER_ALPHA_30: u32 = 0x4d; // Tauri bg-hover/30.
+const LAUNCHER_WSL_BG_HOVER_ALPHA_60: u32 = 0x99; // Tauri bg-hover/60.
+const LAUNCHER_WSL_ACCENT_ALPHA_20: u32 = 0x33; // Tauri accent/20.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum LauncherInput {
     Search,
@@ -77,9 +92,9 @@ impl LauncherInput {
 
 #[derive(Clone, Debug)]
 pub(super) enum LauncherWorkerResult {
-    ListApps {
+    LoadEntries {
         generation: u64,
-        result: Result<LauncherListResponse, String>,
+        result: Result<LauncherLoadResponse, String>,
     },
 }
 
@@ -87,6 +102,7 @@ pub(super) struct LauncherState {
     pub(super) core: LauncherRuntimeState,
     pub(super) focused_input: Option<LauncherInput>,
     pub(super) hovered_app_path: Option<String>,
+    pub(super) hovered_wsl_distro: Option<String>,
     pub(super) pressed_app_path: Option<String>,
     worker_tx: mpsc::Sender<LauncherWorkerResult>,
     worker_rx: mpsc::Receiver<LauncherWorkerResult>,
@@ -99,6 +115,7 @@ impl LauncherState {
             core: LauncherRuntimeState::new(enabled),
             focused_input: None,
             hovered_app_path: None,
+            hovered_wsl_distro: None,
             pressed_app_path: None,
             worker_tx,
             worker_rx,
@@ -126,7 +143,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         self.launcher.focused_input = Some(LauncherInput::Search);
-        if self.launcher.core.enabled {
+        if !launcher_requires_opt_in() || self.launcher.core.enabled {
             self.start_launcher_load_if_needed(false);
         }
         window.focus(&self.focus_handle);
@@ -136,6 +153,9 @@ impl WorkspaceApp {
 
     pub(super) fn render_launcher_surface(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        if cfg!(target_os = "windows") {
+            return self.render_launcher_wsl_surface(cx);
+        }
         if cfg!(not(target_os = "macos")) {
             return div()
                 .size_full()
@@ -170,12 +190,308 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    fn render_launcher_wsl_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let filtered_distros = self.launcher.core.filtered_wsl_distros();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(rgb(theme.bg))
+            .child(self.render_launcher_wsl_header(filtered_distros.len(), cx))
+            .child(self.render_launcher_wsl_search(cx))
+            .child(self.render_launcher_wsl_content(filtered_distros, cx))
+            .into_any_element()
+    }
+
+    fn render_launcher_wsl_header(
+        &self,
+        filtered_count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex()
+            .items_center()
+            .gap(px(LAUNCHER_WSL_ROW_GAP))
+            .px(px(LAUNCHER_WSL_HEADER_PADDING_X))
+            .py(px(LAUNCHER_WSL_HEADER_PADDING_Y))
+            .border_b_1()
+            .border_color(rgb(theme.border))
+            .flex_none()
+            .child(Self::render_lucide_icon(
+                LucideIcon::Terminal,
+                16.0,
+                rgb(theme.accent),
+            ))
+            .child(
+                div()
+                    .text_size(px(14.0))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text))
+                    .child(self.i18n.t("launcher.wslTitle")),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .font_family("monospace")
+                    .text_size(px(10.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(format!("{filtered_count} distros")),
+            )
+            .child(
+                div()
+                    .id("launcher-wsl-refresh")
+                    .size(px(28.0))
+                    .rounded(px(self.tokens.radii.sm))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .opacity(if self.launcher.core.loading {
+                        0.35
+                    } else {
+                        1.0
+                    })
+                    .cursor_pointer()
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::RefreshCw,
+                        14.0,
+                        rgb(theme.text_muted),
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if !this.launcher.core.loading {
+                                this.refresh_launcher(cx);
+                            }
+                        }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_launcher_wsl_search(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let focused = self.launcher.focused_input == Some(LauncherInput::Search);
+        let marked =
+            self.marked_text_for_target(WorkspaceImeTarget::Launcher(LauncherInput::Search));
+        let workspace = cx.entity();
+        div()
+            .px(px(LAUNCHER_WSL_HEADER_PADDING_X))
+            .py(px(LAUNCHER_WSL_SEARCH_PADDING_Y))
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | LAUNCHER_WSL_BORDER_ALPHA_50))
+            .flex_none()
+            .child(
+                div()
+                    .relative()
+                    .child(text_input_anchor_probe(
+                        WorkspaceImeTarget::Launcher(LauncherInput::Search).anchor_id(),
+                        oxideterm_gpui_ui::text_input(
+                            &self.tokens,
+                            TextInputView {
+                                value: &self.launcher.core.search_query,
+                                placeholder: self.i18n.t("launcher.searchWsl"),
+                                focused,
+                                caret_visible: self.new_connection_caret_visible,
+                                secret: false,
+                                selected_all: false,
+                                marked_text: marked,
+                            },
+                        )
+                        .h(px(LAUNCHER_SEARCH_H))
+                        .pl(px(32.0))
+                        .bg(rgba((theme.bg_hover << 8) | LAUNCHER_WSL_BG_HOVER_ALPHA_30))
+                        .border_color(rgba((theme.border << 8) | LAUNCHER_WSL_BORDER_ALPHA_50))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, window, cx| {
+                                this.launcher.focused_input = Some(LauncherInput::Search);
+                                this.new_connection_caret_visible = true;
+                                window.focus(&this.focus_handle);
+                                cx.notify();
+                            }),
+                        ),
+                        move |anchor, _window, cx| {
+                            let _ = workspace.update(cx, |this, cx| {
+                                this.update_text_input_anchor(anchor, cx);
+                            });
+                        },
+                    ))
+                    .child(div().absolute().left(px(10.0)).top(px(9.0)).child(
+                        Self::render_lucide_icon(LucideIcon::Search, 14.0, rgb(theme.text_muted)),
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_launcher_wsl_content(
+        &self,
+        filtered_distros: Vec<WslDistro>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if self.launcher.core.loading {
+            return self.render_launcher_center_state(
+                LucideIcon::LoaderCircle,
+                self.i18n.t("launcher.loadingWsl"),
+                self.tokens.ui.accent,
+                None,
+                cx,
+            );
+        }
+        if let Some(error) = self.launcher.core.error.as_ref() {
+            return self.render_launcher_center_state(
+                LucideIcon::AlertCircle,
+                error.clone(),
+                LAUNCHER_RED_400,
+                Some(self.i18n.t("launcher.retry")),
+                cx,
+            );
+        }
+        if filtered_distros.is_empty() {
+            let label = if self.launcher.core.search_query.trim().is_empty() {
+                self.i18n.t("launcher.noWsl")
+            } else {
+                self.i18n.t("launcher.noWslResults")
+            };
+            return self.render_launcher_center_state(
+                LucideIcon::Terminal,
+                label,
+                self.tokens.ui.text_muted,
+                None,
+                cx,
+            );
+        }
+
+        div()
+            .flex_1()
+            .min_h(px(0.0))
+            .overflow_y_scrollbar()
+            .p(px(LAUNCHER_WSL_CONTENT_PADDING))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .children(
+                filtered_distros
+                    .into_iter()
+                    .map(|distro| self.render_launcher_wsl_row(distro, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_launcher_wsl_row(&self, distro: WslDistro, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let distro_name = distro.name.clone();
+        let hovered = self.launcher.hovered_wsl_distro.as_deref() == Some(distro.name.as_str());
+        div()
+            .id((
+                "launcher-wsl-distro",
+                launcher_element_id_for_path(&distro.name),
+            ))
+            .flex()
+            .items_center()
+            .gap(px(LAUNCHER_WSL_ROW_GAP))
+            .px(px(LAUNCHER_WSL_ROW_PADDING_X))
+            .py(px(LAUNCHER_WSL_ROW_PADDING_Y))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | LAUNCHER_WSL_BORDER_ALPHA_30))
+            .bg(if hovered {
+                rgba((theme.bg_hover << 8) | LAUNCHER_WSL_BG_HOVER_ALPHA_60)
+            } else {
+                rgba(0x00000000)
+            })
+            .cursor_pointer()
+            .child(Self::render_lucide_icon(
+                LucideIcon::Terminal,
+                20.0,
+                rgb(theme.accent),
+            ))
+            .child(
+                div().flex_1().min_w(px(0.0)).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .text_size(px(14.0))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(theme.text))
+                        .overflow_hidden()
+                        .child(div().truncate().child(distro.name.clone()))
+                        .when(distro.is_default, |row| {
+                            row.child(
+                                div()
+                                    .ml(px(8.0))
+                                    .px(px(6.0))
+                                    .py(px(2.0))
+                                    .rounded(px(self.tokens.radii.sm))
+                                    .bg(rgba((theme.accent << 8) | LAUNCHER_WSL_ACCENT_ALPHA_20))
+                                    .font_family("monospace")
+                                    .text_size(px(LAUNCHER_WSL_BADGE_TEXT_SIZE))
+                                    .text_color(rgb(theme.accent))
+                                    .child("DEFAULT"),
+                            )
+                        }),
+                ),
+            )
+            .child(
+                div()
+                    .size(px(LAUNCHER_WSL_DOT))
+                    .rounded(px(LAUNCHER_WSL_DOT / 2.0))
+                    .bg(rgb(if distro.is_running {
+                        LAUNCHER_WSL_GREEN_500
+                    } else {
+                        theme.text_muted
+                    })),
+            )
+            .child(
+                div()
+                    .opacity(if hovered { 1.0 } else { 0.0 })
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::ExternalLink,
+                        14.0,
+                        rgb(theme.text_muted),
+                    )),
+            )
+            .on_mouse_move(cx.listener({
+                let distro_name = distro_name.clone();
+                move |this, _event: &MouseMoveEvent, _window, cx| {
+                    this.launcher.hovered_wsl_distro = Some(distro_name.clone());
+                    cx.notify();
+                }
+            }))
+            .on_hover(cx.listener({
+                let distro_name = distro_name.clone();
+                move |this, hovered: &bool, _window, cx| {
+                    if !*hovered
+                        && this.launcher.hovered_wsl_distro.as_deref() == Some(distro_name.as_str())
+                    {
+                        this.launcher.hovered_wsl_distro = None;
+                        cx.notify();
+                    }
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener({
+                    let distro_name = distro_name.clone();
+                    move |this, _event, _window, cx| {
+                        this.launch_wsl(&distro_name, cx);
+                    }
+                }),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn poll_launcher_worker_results(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
         while let Ok(result) = self.launcher.worker_rx.try_recv() {
             match result {
-                LauncherWorkerResult::ListApps { generation, result } => {
-                    if self.launcher.core.apply_list_result(generation, result) {
+                LauncherWorkerResult::LoadEntries { generation, result } => {
+                    if self.launcher.core.apply_load_result(
+                        generation,
+                        result,
+                        launcher_requires_opt_in(),
+                    ) {
                         changed = true;
                     }
                 }
@@ -861,15 +1177,19 @@ impl WorkspaceApp {
     }
 
     fn start_launcher_load_if_needed(&mut self, force: bool) {
-        let Some(generation) = self.launcher.core.begin_load(force) else {
+        let Some(generation) = self
+            .launcher
+            .core
+            .begin_load(force, launcher_requires_opt_in())
+        else {
             return;
         };
         let tx = self.launcher.worker_tx.clone();
         thread::Builder::new()
             .name("oxideterm-launcher-scan".to_string())
             .spawn(move || {
-                let result = launcher_core::list_apps();
-                let _ = tx.send(LauncherWorkerResult::ListApps { generation, result });
+                let result = launcher_core::load_entries();
+                let _ = tx.send(LauncherWorkerResult::LoadEntries { generation, result });
             })
             .ok();
     }
@@ -880,6 +1200,17 @@ impl WorkspaceApp {
         }
         cx.notify();
     }
+
+    fn launch_wsl(&mut self, distro: &str, cx: &mut Context<Self>) {
+        if let Err(error) = launcher_core::launch_wsl(distro) {
+            self.launcher.core.mark_launch_error(error);
+        }
+        cx.notify();
+    }
+}
+
+fn launcher_requires_opt_in() -> bool {
+    cfg!(target_os = "macos")
 }
 
 fn launcher_header_action_id(action: LauncherHeaderAction) -> u64 {

@@ -6551,6 +6551,7 @@ dependencies = [
  "gpui-component",
  "gstreamer",
  "gstreamer-video",
+ "lb-wry",
  "objc2",
  "objc2-app-kit",
  "objc2-av-foundation",
@@ -6577,7 +6578,9 @@ dependencies = [
  "oxideterm-terminal",
  "oxideterm-terminal-recording",
  "oxideterm-theme",
+ "oxideterm-webview",
  "oxideterm-workspace",
+ "oxideterm-wsl-graphics",
  "parking_lot",
  "raw-window-handle",
  "regex",
@@ -6724,6 +6727,7 @@ name = "oxideterm-launcher"
 version = "0.1.0"
 dependencies = [
  "oxideterm-settings",
+ "oxideterm-wsl-graphics",
 ]
 
 [[package]]
@@ -6906,6 +6910,22 @@ dependencies = [
 [[package]]
 name = "oxideterm-workspace"
 version = "0.1.0"
+
+[[package]]
+name = "oxideterm-wsl-graphics"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "futures-util",
+ "rand 0.8.6",
+ "serde",
+ "subtle",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "p256"
@@ -10530,6 +10550,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11060,6 +11092,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.8.6",
+ "sha1 0.10.6",
+ "thiserror 1.0.69",
+ "utf-8",
 ]
 
 [[package]]

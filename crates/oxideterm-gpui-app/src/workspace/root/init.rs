@@ -121,6 +121,7 @@ impl WorkspaceApp {
             ssh_registry,
             forwarding_registry,
             forwarding_runtime,
+            wsl_graphics: Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new()),
             forwarding_connection_consumers: HashMap::new(),
             sftp_connection_consumers: HashMap::new(),
             sftp_transfer_manager,
@@ -180,6 +181,7 @@ impl WorkspaceApp {
             ide_last_closed_at_by_node: HashMap::new(),
             sftp_view: sftp::SftpViewState::default(),
             launcher: LauncherState::new(settings.launcher.enabled),
+            graphics: GraphicsState::new(),
             sftp_worker_tx,
             sftp_worker_rx,
             forwarding_worker_tx,
@@ -238,6 +240,7 @@ impl WorkspaceApp {
                             workspace.poll_reconnect_worker_results(window, cx);
                             workspace.poll_sftp_worker_results(cx);
                             workspace.poll_launcher_worker_results(cx);
+                            workspace.poll_graphics_worker_results(window, cx);
                             workspace.maybe_start_sftp_remote_load(cx);
                             workspace.poll_forwarding_worker_results(cx);
                             workspace.poll_forwarding_events(cx);
@@ -253,6 +256,7 @@ impl WorkspaceApp {
                                 || workspace.focused_settings_input.is_some()
                                 || workspace.session_manager.focused_input.is_some()
                                 || workspace.sftp_view.focused_input.is_some()
+                                || workspace.graphics.focused_input.is_some()
                             {
                                 workspace.new_connection_caret_visible =
                                     !workspace.new_connection_caret_visible;

@@ -233,6 +233,8 @@ impl WorkspaceApp {
                         this.open_file_manager_tab(window, cx);
                     } else if section == SidebarSection::Monitor && cfg!(target_os = "macos") {
                         this.open_launcher_tab(window, cx);
+                    } else if section == SidebarSection::Monitor && cfg!(target_os = "windows") {
+                        this.open_graphics_tab(window, cx);
                     } else if section == SidebarSection::Notifications {
                         this.active_surface = ActiveSurface::Terminal;
                         this.set_sidebar_section(section, cx);
@@ -259,6 +261,9 @@ impl WorkspaceApp {
             SidebarSection::Files => self.i18n.t("sidebar.panels.files"),
             SidebarSection::Monitor if cfg!(target_os = "macos") => {
                 self.i18n.t("launcher.tabTitle")
+            }
+            SidebarSection::Monitor if cfg!(target_os = "windows") => {
+                self.i18n.t("graphics.tab_title")
             }
             SidebarSection::Monitor => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Notifications => self.i18n.t("sidebar.panels.notifications"),

@@ -4,6 +4,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::SshTerminal => "terminal",
         TabKind::FileManager => "file_manager",
         TabKind::Launcher => "launcher",
+        TabKind::Graphics => "graphics",
         TabKind::Sftp => "sftp",
         TabKind::Ide => "ide",
         TabKind::Forwards => "forwards",

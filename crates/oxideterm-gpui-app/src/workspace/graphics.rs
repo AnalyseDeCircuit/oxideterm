@@ -1,0 +1,1780 @@
+use std::{collections::HashMap, sync::mpsc};
+
+use gpui::Entity;
+use oxideterm_gpui_ui::{
+    TextInputView,
+    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
+    text_input_anchor_probe,
+};
+use oxideterm_webview::backend::webview::WebView as GpuiWebView;
+use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
+use oxideterm_wsl_graphics::{
+    GraphicsSessionMode, WSL_GRAPHICS_UNAVAILABLE, WslDistro, WslGraphicsError, WslGraphicsSession,
+    WslgStatus, wsl,
+};
+
+use super::ime::WorkspaceImeTarget;
+use super::*;
+
+const GRAPHICS_SELECTOR_MAX_W: f32 = 384.0; // Tauri max-w-sm.
+const GRAPHICS_SELECTOR_PADDING_X: f32 = 24.0; // Tauri px-6.
+const GRAPHICS_SELECTOR_GAP: f32 = 16.0; // Tauri gap-4.
+const GRAPHICS_WARNING_PADDING_X: f32 = 12.0; // Tauri px-3.
+const GRAPHICS_WARNING_PADDING_Y: f32 = 10.0; // Tauri py-2.5.
+const GRAPHICS_DISTRO_ROW_PADDING_X: f32 = 16.0; // Tauri px-4.
+const GRAPHICS_DISTRO_ROW_PADDING_Y: f32 = 12.0; // Tauri py-3.
+const GRAPHICS_DISTRO_ROW_GAP: f32 = 12.0; // Tauri gap-3.
+const GRAPHICS_BADGE_TEXT_SIZE: f32 = 11.0; // Tauri text-xs.
+const GRAPHICS_DOT_SIZE: f32 = 6.0; // Tauri w-1.5 h-1.5.
+const GRAPHICS_INPUT_H: f32 = 36.0; // Tauri shadcn Input default h-9.
+const GRAPHICS_TOOLBAR_TOP: f32 = 16.0; // Tauri top-4.
+const GRAPHICS_TOOLBAR_PADDING_X: f32 = 12.0; // Tauri px-3.
+const GRAPHICS_TOOLBAR_PADDING_Y: f32 = 8.0; // Tauri py-2.
+const GRAPHICS_TOOLBAR_GAP: f32 = 8.0; // Tauri gap-2.
+const GRAPHICS_STATUS_OVERLAY_BOTTOM: f32 = 16.0; // Tauri bottom-4.
+const GRAPHICS_STATUS_OVERLAY_PADDING_X: f32 = 16.0; // Tauri px-4.
+const GRAPHICS_STATUS_OVERLAY_PADDING_Y: f32 = 12.0; // Tauri py-3.
+const GRAPHICS_COMMON_APP_COL_GAP: f32 = 8.0; // Tauri gap-2.
+const GRAPHICS_AMBER_500: u32 = 0xf59e0b; // Tauri amber-500.
+const GRAPHICS_GREEN_500: u32 = 0x22c55e; // Tauri green-500.
+const GRAPHICS_RED_400: u32 = 0xf87171; // Tauri red-400.
+const GRAPHICS_RED_500: u32 = 0xef4444; // Tauri destructive.
+const GRAPHICS_ALPHA_10: u32 = 0x1a; // Tailwind /10.
+const GRAPHICS_ALPHA_20: u32 = 0x33; // Tailwind /20.
+const GRAPHICS_ALPHA_50: u32 = 0x80; // Tailwind /50.
+const GRAPHICS_ALPHA_90: u32 = 0xe6; // Tailwind /90.
+
+const COMMON_APPS: &[(&str, &str)] = &[
+    ("gedit", "gedit"),
+    ("Firefox", "firefox"),
+    ("Nautilus", "nautilus"),
+    ("VS Code", "code"),
+    ("xterm", "xterm"),
+    ("GIMP", "gimp"),
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(super) enum GraphicsInput {
+    AppCommand,
+}
+
+impl GraphicsInput {
+    pub(super) fn anchor_key(self) -> u64 {
+        match self {
+            Self::AppCommand => 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GraphicsStatus {
+    Idle,
+    Starting,
+    Active,
+    Disconnected,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GraphicsLaunchMode {
+    Desktop,
+    App,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum GraphicsWorkerResult {
+    ListSessions {
+        result: Result<Vec<WslGraphicsSession>, String>,
+    },
+    LoadDistros {
+        generation: u64,
+        result: Result<Vec<WslDistro>, String>,
+    },
+    DetectWslg {
+        generation: u64,
+        distro: String,
+        result: Result<WslgStatus, String>,
+    },
+    Start {
+        generation: u64,
+        result: Result<WslGraphicsSession, String>,
+    },
+    StartApp {
+        generation: u64,
+        result: Result<WslGraphicsSession, String>,
+    },
+    Stop {
+        generation: u64,
+        session_id: String,
+        result: Result<(), String>,
+    },
+    Reconnect {
+        generation: u64,
+        result: Result<WslGraphicsSession, String>,
+    },
+    WebviewEvent {
+        session_id: String,
+        event: String,
+    },
+}
+
+pub(super) struct GraphicsState {
+    distros: Vec<WslDistro>,
+    sessions: Vec<WslGraphicsSession>,
+    wslg_statuses: HashMap<String, WslgStatus>,
+    selected_distro: Option<String>,
+    launch_mode: GraphicsLaunchMode,
+    app_command: String,
+    status: GraphicsStatus,
+    error: Option<String>,
+    loading: bool,
+    generation: u64,
+    pub(super) focused_input: Option<GraphicsInput>,
+    session: Option<WslGraphicsSession>,
+    webview_session_id: Option<String>,
+    webview: Option<Entity<GpuiWebView>>,
+    worker_tx: mpsc::Sender<GraphicsWorkerResult>,
+    worker_rx: mpsc::Receiver<GraphicsWorkerResult>,
+}
+
+impl GraphicsState {
+    pub(super) fn new() -> Self {
+        let (worker_tx, worker_rx) = mpsc::channel();
+        Self {
+            distros: Vec::new(),
+            sessions: Vec::new(),
+            wslg_statuses: HashMap::new(),
+            selected_distro: None,
+            launch_mode: GraphicsLaunchMode::Desktop,
+            app_command: String::new(),
+            status: GraphicsStatus::Idle,
+            error: None,
+            loading: false,
+            generation: 0,
+            focused_input: None,
+            session: None,
+            webview_session_id: None,
+            webview: None,
+            worker_tx,
+            worker_rx,
+        }
+    }
+}
+
+impl WorkspaceApp {
+    pub(super) fn open_graphics_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Graphics) {
+            tab.id
+        } else {
+            let tab_id = self.alloc_tab_id();
+            self.tabs.push(Tab {
+                id: tab_id,
+                kind: TabKind::Graphics,
+                title: self.i18n.t("graphics.tab_title"),
+                title_source: TabTitleSource::I18nKey("graphics.tab_title"),
+                root_pane: None,
+                active_pane_id: None,
+            });
+            tab_id
+        };
+        self.active_tab_id = Some(tab_id);
+        self.active_surface = ActiveSurface::Terminal;
+        self.needs_active_pane_focus = false;
+        self.start_graphics_load_if_needed(false);
+        self.load_graphics_sessions();
+        window.focus(&self.focus_handle);
+        self.reveal_active_tab(window);
+        cx.notify();
+    }
+
+    pub(super) fn render_graphics_surface(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if self.graphics.session.is_some() || self.graphics.status != GraphicsStatus::Idle {
+            return self.render_graphics_active_surface(window, cx);
+        }
+        self.render_graphics_distro_selector(cx)
+    }
+
+    pub(super) fn poll_graphics_worker_results(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut changed = false;
+        while let Ok(result) = self.graphics.worker_rx.try_recv() {
+            match result {
+                GraphicsWorkerResult::ListSessions { result } => {
+                    if let Ok(mut sessions) = result {
+                        sessions.sort_by(|left, right| {
+                            left.distro
+                                .cmp(&right.distro)
+                                .then_with(|| left.desktop_name.cmp(&right.desktop_name))
+                                .then_with(|| left.id.cmp(&right.id))
+                        });
+                        self.graphics.sessions = sessions;
+                        changed = true;
+                    }
+                }
+                GraphicsWorkerResult::LoadDistros { generation, result } => {
+                    if generation != self.graphics.generation {
+                        continue;
+                    }
+                    self.graphics.loading = false;
+                    match result {
+                        Ok(distros) => {
+                            self.graphics.error = None;
+                            self.graphics.distros = distros;
+                            if self.graphics.selected_distro.is_none() {
+                                self.graphics.selected_distro = self
+                                    .graphics
+                                    .distros
+                                    .iter()
+                                    .find(|distro| distro.is_default)
+                                    .or_else(|| self.graphics.distros.first())
+                                    .map(|distro| distro.name.clone());
+                            }
+                            self.start_graphics_wslg_detection(generation);
+                            self.load_graphics_sessions();
+                        }
+                        Err(error) => {
+                            self.graphics.error = Some(normalize_graphics_error(error));
+                            self.graphics.distros.clear();
+                        }
+                    }
+                    changed = true;
+                }
+                GraphicsWorkerResult::DetectWslg {
+                    generation,
+                    distro,
+                    result,
+                } => {
+                    if generation != self.graphics.generation {
+                        continue;
+                    }
+                    if let Ok(status) = result {
+                        self.graphics.wslg_statuses.insert(distro, status);
+                        changed = true;
+                    }
+                }
+                GraphicsWorkerResult::Start { generation, result }
+                | GraphicsWorkerResult::StartApp { generation, result } => {
+                    if generation != self.graphics.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(session) => {
+                            self.graphics.error = None;
+                            self.graphics.status = GraphicsStatus::Active;
+                            self.graphics.webview = None;
+                            self.graphics.webview_session_id = None;
+                            self.graphics.session = Some(session);
+                            self.load_graphics_sessions();
+                        }
+                        Err(error) => {
+                            self.graphics.status = GraphicsStatus::Error;
+                            self.graphics.error = Some(normalize_graphics_error(error));
+                            self.graphics.session = None;
+                            self.graphics.webview = None;
+                            self.graphics.webview_session_id = None;
+                        }
+                    }
+                    changed = true;
+                }
+                GraphicsWorkerResult::Stop {
+                    generation,
+                    session_id,
+                    result,
+                } => {
+                    if generation != self.graphics.generation {
+                        continue;
+                    }
+                    if self
+                        .graphics
+                        .session
+                        .as_ref()
+                        .is_none_or(|session| session.id == session_id)
+                    {
+                        self.graphics.session = None;
+                        self.graphics.webview = None;
+                        self.graphics.webview_session_id = None;
+                        self.graphics.status = GraphicsStatus::Idle;
+                        self.load_graphics_sessions();
+                    }
+                    if let Err(error) = result {
+                        self.graphics.error = Some(normalize_graphics_error(error));
+                    }
+                    changed = true;
+                }
+                GraphicsWorkerResult::Reconnect { generation, result } => {
+                    if generation != self.graphics.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(session) => {
+                            self.graphics.error = None;
+                            self.graphics.status = GraphicsStatus::Active;
+                            self.graphics.webview = None;
+                            self.graphics.webview_session_id = None;
+                            self.graphics.session = Some(session);
+                            self.load_graphics_sessions();
+                        }
+                        Err(error) => {
+                            self.graphics.status = GraphicsStatus::Error;
+                            self.graphics.error = Some(normalize_graphics_error(error));
+                            self.graphics.webview = None;
+                            self.graphics.webview_session_id = None;
+                        }
+                    }
+                    changed = true;
+                }
+                GraphicsWorkerResult::WebviewEvent { session_id, event } => {
+                    if self
+                        .graphics
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| session.id == session_id)
+                    {
+                        self.apply_graphics_webview_event(event);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            self.ensure_graphics_webview(window, cx);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn handle_graphics_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.graphics.focused_input != Some(GraphicsInput::AppCommand)
+            || event.keystroke.modifiers.platform
+        {
+            return false;
+        }
+        match event.keystroke.key.as_str() {
+            "enter" => {
+                self.start_graphics_app();
+                cx.notify();
+                true
+            }
+            "escape" => {
+                self.graphics.focused_input = None;
+                self.ime_marked_text = None;
+                cx.notify();
+                true
+            }
+            "backspace" => {
+                self.graphics.app_command.pop();
+                self.ime_marked_text = None;
+                cx.notify();
+                true
+            }
+            _ => true,
+        }
+    }
+
+    pub(super) fn graphics_input_value(&self, input: GraphicsInput) -> &str {
+        match input {
+            GraphicsInput::AppCommand => &self.graphics.app_command,
+        }
+    }
+
+    pub(super) fn graphics_input_value_mut(&mut self, input: GraphicsInput) -> &mut String {
+        match input {
+            GraphicsInput::AppCommand => &mut self.graphics.app_command,
+        }
+    }
+
+    pub(super) fn shutdown_graphics_session(&mut self) {
+        let Some(session_id) = self
+            .graphics
+            .session
+            .as_ref()
+            .map(|session| session.id.clone())
+        else {
+            self.graphics.webview = None;
+            self.graphics.webview_session_id = None;
+            return;
+        };
+        self.graphics.generation = self.graphics.generation.saturating_add(1);
+        let generation = self.graphics.generation;
+        self.graphics.webview = None;
+        self.graphics.webview_session_id = None;
+        let tx = self.graphics.worker_tx.clone();
+        let backend = self.wsl_graphics.clone();
+        self.forwarding_runtime.spawn(async move {
+            let result = backend
+                .stop(&session_id)
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(GraphicsWorkerResult::Stop {
+                generation,
+                session_id,
+                result,
+            });
+        });
+    }
+
+    fn render_graphics_distro_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        if self.graphics.loading {
+            return self.render_graphics_center_state(
+                LucideIcon::LoaderCircle,
+                self.i18n.t("graphics.loading_distros"),
+                theme.accent,
+                None,
+                cx,
+            );
+        }
+
+        if let Some(error) = self.graphics.error.as_ref()
+            && error == WSL_GRAPHICS_UNAVAILABLE
+        {
+            return self.render_graphics_not_available(cx);
+        }
+
+        if self.graphics.distros.is_empty() && self.graphics.error.is_none() {
+            return self.render_graphics_center_state(
+                LucideIcon::Monitor,
+                self.i18n.t("graphics.no_distros"),
+                theme.text_muted,
+                None,
+                cx,
+            );
+        }
+
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(px(GRAPHICS_SELECTOR_PADDING_X))
+            .bg(rgb(theme.bg))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(GRAPHICS_SELECTOR_MAX_W))
+                    .flex()
+                    .flex_col()
+                    .gap(px(GRAPHICS_SELECTOR_GAP))
+                    .child(self.render_graphics_mode_tabs(cx))
+                    .child(
+                        div()
+                            .text_size(px(18.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.text))
+                            .child(self.i18n.t(match self.graphics.launch_mode {
+                                GraphicsLaunchMode::Desktop => "graphics.select_distro",
+                                GraphicsLaunchMode::App => "graphics.app_select_distro",
+                            })),
+                    )
+                    .when_some(self.graphics.error.as_ref(), |panel, error| {
+                        panel.child(self.render_graphics_error_box(error))
+                    })
+                    .child(self.render_graphics_launch_mode(cx))
+                    .when(!self.graphics.sessions.is_empty(), |panel| {
+                        panel.child(self.render_graphics_session_list(cx))
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_mode_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let desktop_active = self.graphics.launch_mode == GraphicsLaunchMode::Desktop;
+        let app_active = self.graphics.launch_mode == GraphicsLaunchMode::App;
+        div()
+            .grid()
+            .grid_cols(2)
+            .gap(px(2.0))
+            .p(px(2.0))
+            .rounded(px(self.tokens.radii.md))
+            .bg(rgb(theme.bg_panel))
+            .child(self.render_graphics_mode_tab(
+                "graphics.desktop_mode",
+                desktop_active,
+                GraphicsLaunchMode::Desktop,
+                cx,
+            ))
+            .child(self.render_graphics_mode_tab(
+                "graphics.app_mode",
+                app_active,
+                GraphicsLaunchMode::App,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_graphics_mode_tab(
+        &self,
+        label_key: &'static str,
+        active: bool,
+        mode: GraphicsLaunchMode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .h(px(32.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.sm))
+            .text_size(px(13.0))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(if active { theme.text } else { theme.text_muted }))
+            .bg(if active {
+                rgb(theme.bg)
+            } else {
+                rgba(0x00000000)
+            })
+            .cursor_pointer()
+            .child(self.i18n.t(label_key))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.graphics.launch_mode = mode;
+                    this.graphics.focused_input =
+                        (mode == GraphicsLaunchMode::App).then_some(GraphicsInput::AppCommand);
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_launch_mode(&self, cx: &mut Context<Self>) -> AnyElement {
+        match self.graphics.launch_mode {
+            GraphicsLaunchMode::Desktop => self.render_graphics_desktop_mode(cx),
+            GraphicsLaunchMode::App => self.render_graphics_app_mode(cx),
+        }
+    }
+
+    fn render_graphics_desktop_mode(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(self.render_graphics_warning(self.i18n.t("graphics.desktop_experimental"), None))
+            .children(
+                self.graphics
+                    .distros
+                    .iter()
+                    .cloned()
+                    .map(|distro| self.render_graphics_distro_row(distro, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_app_mode(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let selected_status = self
+            .graphics
+            .selected_distro
+            .as_ref()
+            .and_then(|name| self.graphics.wslg_statuses.get(name));
+        let can_start = self.graphics.selected_distro.is_some()
+            && !self.graphics.app_command.trim().is_empty()
+            && self.graphics.status != GraphicsStatus::Starting;
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(self.render_graphics_warning(
+                self.i18n.t("graphics.desktop_experimental"),
+                Some(self.i18n.t("graphics.app_experimental_note")),
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(self.render_graphics_label("graphics.app_distro_label"))
+                    .child(self.render_graphics_app_distro_selector(cx))
+                    .when_some(selected_status, |field, status| {
+                        field.child(self.render_graphics_wslg_badge(Some(status)))
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(self.render_graphics_label("graphics.app_command_label"))
+                    .child(self.render_graphics_app_command_input(cx)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("graphics.app_common_apps")),
+                    )
+                    .child(
+                        div()
+                            .grid()
+                            .grid_cols(2)
+                            .gap(px(GRAPHICS_COMMON_APP_COL_GAP))
+                            .children(COMMON_APPS.iter().map(|(label, command)| {
+                                self.render_graphics_common_app_button(label, command, cx)
+                            })),
+                    ),
+            )
+            .child(
+                button_with(
+                    &self.tokens,
+                    self.i18n.t("graphics.start_app"),
+                    ButtonOptions {
+                        variant: ButtonVariant::Default,
+                        size: ButtonSize::Default,
+                        radius: ButtonRadius::Md,
+                        disabled: !can_start,
+                    },
+                )
+                .w_full()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        if this.graphics.selected_distro.is_some()
+                            && !this.graphics.app_command.trim().is_empty()
+                        {
+                            this.start_graphics_app();
+                            cx.notify();
+                        }
+                    }),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_session_list(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(px(12.0))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("graphics.tab_title")),
+            )
+            .children(
+                self.graphics
+                    .sessions
+                    .iter()
+                    .cloned()
+                    .map(|session| self.render_graphics_session_row(session, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_session_row(
+        &self,
+        session: WslGraphicsSession,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let reconnect_session_id = session.id.clone();
+        let stop_session_id = session.id.clone();
+        div()
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .px(px(10.0))
+            .py(px(8.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(13.0))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(graphics_session_title(&session)),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(11.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(session.distro.clone()),
+                    ),
+            )
+            .child(
+                button_with(
+                    &self.tokens,
+                    self.i18n.t("graphics.reconnect"),
+                    ButtonOptions {
+                        variant: ButtonVariant::Outline,
+                        size: ButtonSize::Sm,
+                        radius: ButtonRadius::Md,
+                        disabled: false,
+                    },
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.reconnect_graphics_session_id(reconnect_session_id.clone());
+                        cx.notify();
+                    }),
+                ),
+            )
+            .child(
+                button_with(
+                    &self.tokens,
+                    self.i18n.t("graphics.stop"),
+                    ButtonOptions {
+                        variant: ButtonVariant::Outline,
+                        size: ButtonSize::Sm,
+                        radius: ButtonRadius::Md,
+                        disabled: false,
+                    },
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.stop_graphics_session_id(stop_session_id.clone());
+                        cx.notify();
+                    }),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_label(&self, key: &'static str) -> AnyElement {
+        div()
+            .text_size(px(13.0))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(self.tokens.ui.text))
+            .child(self.i18n.t(key))
+            .into_any_element()
+    }
+
+    fn render_graphics_distro_row(&self, distro: WslDistro, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let status = self.graphics.wslg_statuses.get(&distro.name);
+        let distro_name = distro.name.clone();
+        div()
+            .flex()
+            .items_center()
+            .gap(px(GRAPHICS_DISTRO_ROW_GAP))
+            .px(px(GRAPHICS_DISTRO_ROW_PADDING_X))
+            .py(px(GRAPHICS_DISTRO_ROW_PADDING_Y))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgba(0x00000000))
+            .cursor_pointer()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .text_size(px(14.0))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(div().truncate().child(distro.name.clone()))
+                            .when(distro.is_default, |name_row| {
+                                name_row.child(self.render_graphics_default_badge())
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .text_size(px(12.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(if distro.is_running {
+                                self.i18n.t("graphics.distro_running")
+                            } else {
+                                self.i18n.t("graphics.distro_stopped")
+                            })
+                            .child(self.render_graphics_wslg_badge(status)),
+                    ),
+            )
+            .child(Self::render_lucide_icon(
+                LucideIcon::ChevronRight,
+                16.0,
+                rgb(theme.text_muted),
+            ))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.start_graphics_desktop(distro_name.clone());
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_app_distro_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .children(self.graphics.distros.iter().cloned().map(|distro| {
+                let selected = self.graphics.selected_distro.as_deref() == Some(&distro.name);
+                let distro_name = distro.name.clone();
+                div()
+                    .h(px(34.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .rounded(px(self.tokens.radii.sm))
+                    .border_1()
+                    .border_color(rgb(if selected { theme.accent } else { theme.border }))
+                    .bg(if selected {
+                        rgba((theme.accent << 8) | GRAPHICS_ALPHA_10)
+                    } else {
+                        rgb(theme.bg)
+                    })
+                    .text_size(px(13.0))
+                    .text_color(rgb(theme.text))
+                    .cursor_pointer()
+                    .child(div().flex_1().truncate().child(format!(
+                        "{}{}{}",
+                        distro.name,
+                        if distro.is_default { " (Default)" } else { "" },
+                        if distro.is_running {
+                            String::new()
+                        } else {
+                            format!(" - {}", self.i18n.t("graphics.distro_stopped"))
+                        }
+                    )))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Check,
+                        14.0,
+                        rgb(if selected { theme.accent } else { theme.bg }),
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.graphics.selected_distro = Some(distro_name.clone());
+                            cx.notify();
+                        }),
+                    )
+            }))
+            .into_any_element()
+    }
+
+    fn render_graphics_app_command_input(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let focused = self.graphics.focused_input == Some(GraphicsInput::AppCommand);
+        let marked =
+            self.marked_text_for_target(WorkspaceImeTarget::Graphics(GraphicsInput::AppCommand));
+        let workspace = cx.entity();
+        div()
+            .relative()
+            .child(text_input_anchor_probe(
+                WorkspaceImeTarget::Graphics(GraphicsInput::AppCommand).anchor_id(),
+                oxideterm_gpui_ui::text_input(
+                    &self.tokens,
+                    TextInputView {
+                        value: &self.graphics.app_command,
+                        placeholder: self.i18n.t("graphics.app_command_placeholder"),
+                        focused,
+                        caret_visible: self.new_connection_caret_visible,
+                        secret: false,
+                        selected_all: false,
+                        marked_text: marked,
+                    },
+                )
+                .h(px(GRAPHICS_INPUT_H))
+                .bg(rgb(theme.bg))
+                .border_color(rgb(theme.border))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, window, cx| {
+                        this.graphics.focused_input = Some(GraphicsInput::AppCommand);
+                        this.new_connection_caret_visible = true;
+                        window.focus(&this.focus_handle);
+                        cx.notify();
+                    }),
+                ),
+                move |anchor, _window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.update_text_input_anchor(anchor, cx);
+                    });
+                },
+            ))
+            .into_any_element()
+    }
+
+    fn render_graphics_common_app_button(
+        &self,
+        label: &str,
+        command: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let command = command.to_string();
+        button_with(
+            &self.tokens,
+            label.to_string(),
+            ButtonOptions {
+                variant: ButtonVariant::Outline,
+                size: ButtonSize::Sm,
+                radius: ButtonRadius::Md,
+                disabled: false,
+            },
+        )
+        .justify_start()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                this.graphics.app_command = command.clone();
+                this.graphics.focused_input = Some(GraphicsInput::AppCommand);
+                cx.notify();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn render_graphics_active_surface(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        self.ensure_graphics_webview(window, cx);
+        let webview = self.graphics.webview.clone();
+        div()
+            .size_full()
+            .relative()
+            .overflow_hidden()
+            .bg(rgb(0x000000))
+            .child(match webview {
+                Some(webview) if self.graphics.status == GraphicsStatus::Active => {
+                    div().size_full().child(webview).into_any_element()
+                }
+                _ => div().size_full().into_any_element(),
+            })
+            .child(self.render_graphics_toolbar(window, cx))
+            .when(
+                self.graphics.status != GraphicsStatus::Active
+                    || self.graphics.error.is_some()
+                    || self.graphics.session.is_none(),
+                |surface| surface.child(self.render_graphics_status_overlay(cx)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .right(px(16.0))
+                    .bottom(px(16.0))
+                    .px(px(8.0))
+                    .py(px(4.0))
+                    .rounded(px(self.tokens.radii.sm))
+                    .bg(rgba((theme.bg_panel << 8) | GRAPHICS_ALPHA_90))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | GRAPHICS_ALPHA_50))
+                    .text_size(px(11.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.graphics_canvas_diagnostics_text()),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let session = self.graphics.session.as_ref();
+        div()
+            .absolute()
+            .top(px(GRAPHICS_TOOLBAR_TOP))
+            .left(px(GRAPHICS_TOOLBAR_TOP))
+            .right(px(GRAPHICS_TOOLBAR_TOP))
+            .flex()
+            .items_center()
+            .gap(px(GRAPHICS_TOOLBAR_GAP))
+            .px(px(GRAPHICS_TOOLBAR_PADDING_X))
+            .py(px(GRAPHICS_TOOLBAR_PADDING_Y))
+            .rounded(px(self.tokens.radii.md))
+            .bg(rgba((theme.bg_panel << 8) | GRAPHICS_ALPHA_90))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | GRAPHICS_ALPHA_50))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .child(
+                        div()
+                            .text_size(px(13.0))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .truncate()
+                            .child(session.map(graphics_session_title).unwrap_or_default()),
+                    )
+                    .when_some(session, |meta, session| {
+                        meta.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .text_size(px(11.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(session.distro.clone())
+                                .when(
+                                    matches!(session.mode, GraphicsSessionMode::App { .. }),
+                                    |row| row.child(self.i18n.t("graphics.app_mode")),
+                                )
+                                .child(self.i18n.t("graphics.desktop_experimental")),
+                        )
+                    }),
+            )
+            .child(self.render_graphics_toolbar_button(
+                "graphics.reconnect",
+                ButtonVariant::Secondary,
+                self.graphics.session.is_none(),
+                GraphicsToolbarAction::Reconnect,
+                window,
+                cx,
+            ))
+            .child(self.render_graphics_toolbar_button(
+                "graphics.fullscreen",
+                ButtonVariant::Secondary,
+                false,
+                GraphicsToolbarAction::Fullscreen,
+                window,
+                cx,
+            ))
+            .child(self.render_graphics_toolbar_button(
+                "graphics.stop",
+                ButtonVariant::Destructive,
+                self.graphics.session.is_none(),
+                GraphicsToolbarAction::Stop,
+                window,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_graphics_toolbar_button(
+        &self,
+        label_key: &'static str,
+        variant: ButtonVariant,
+        disabled: bool,
+        action: GraphicsToolbarAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        button_with(
+            &self.tokens,
+            self.i18n.t(label_key),
+            ButtonOptions {
+                variant,
+                size: ButtonSize::Sm,
+                radius: ButtonRadius::Md,
+                disabled,
+            },
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, window, cx| {
+                match action {
+                    GraphicsToolbarAction::Reconnect => {
+                        if this.graphics.session.is_some() {
+                            this.reconnect_graphics_session();
+                        }
+                    }
+                    GraphicsToolbarAction::Fullscreen => window.toggle_fullscreen(),
+                    GraphicsToolbarAction::Stop => this.stop_graphics_session(),
+                }
+                cx.notify();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn render_graphics_status_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let (icon, text, color) = match self.graphics.status {
+            GraphicsStatus::Starting => (
+                LucideIcon::LoaderCircle,
+                self.i18n.t("graphics.starting"),
+                theme.accent,
+            ),
+            GraphicsStatus::Disconnected => (
+                LucideIcon::WifiOff,
+                self.i18n.t("graphics.disconnected"),
+                GRAPHICS_AMBER_500,
+            ),
+            GraphicsStatus::Error => (
+                LucideIcon::AlertCircle,
+                self.graphics
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| self.i18n.t("graphics.error")),
+                GRAPHICS_RED_400,
+            ),
+            _ => (
+                LucideIcon::LoaderCircle,
+                self.i18n.t("graphics.starting"),
+                theme.accent,
+            ),
+        };
+        div()
+            .absolute()
+            .left(px(0.0))
+            .right(px(0.0))
+            .bottom(px(GRAPHICS_STATUS_OVERLAY_BOTTOM))
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .max_w(px(520.0))
+                    .px(px(GRAPHICS_STATUS_OVERLAY_PADDING_X))
+                    .py(px(GRAPHICS_STATUS_OVERLAY_PADDING_Y))
+                    .rounded(px(self.tokens.radii.md))
+                    .bg(rgba((theme.bg_panel << 8) | GRAPHICS_ALPHA_90))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | GRAPHICS_ALPHA_50))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(Self::render_lucide_icon(icon, 16.0, rgb(color)))
+                    .child(
+                        div()
+                            .text_size(px(13.0))
+                            .text_color(rgb(theme.text))
+                            .child(text),
+                    )
+                    .when(
+                        matches!(
+                            self.graphics.status,
+                            GraphicsStatus::Disconnected | GraphicsStatus::Error
+                        ) && self.graphics.session.is_some(),
+                        |overlay| {
+                            overlay.child(
+                                button_with(
+                                    &self.tokens,
+                                    self.i18n.t("graphics.reconnect"),
+                                    ButtonOptions {
+                                        variant: ButtonVariant::Outline,
+                                        size: ButtonSize::Sm,
+                                        radius: ButtonRadius::Md,
+                                        disabled: false,
+                                    },
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.reconnect_graphics_session();
+                                        cx.notify();
+                                    }),
+                                ),
+                            )
+                        },
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_center_state(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        color: u32,
+        action: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgb(self.tokens.ui.bg))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(12.0))
+                    .text_align(gpui::TextAlign::Center)
+                    .child(Self::render_lucide_icon(icon, 28.0, rgb(color)))
+                    .child(
+                        div()
+                            .max_w(px(GRAPHICS_SELECTOR_MAX_W))
+                            .text_size(px(14.0))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(label),
+                    )
+                    .when_some(action, |panel, label| {
+                        panel.child(
+                            button_with(
+                                &self.tokens,
+                                label,
+                                ButtonOptions {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.start_graphics_load_if_needed(true);
+                                    cx.notify();
+                                }),
+                            ),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_not_available(&self, _cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(px(GRAPHICS_SELECTOR_PADDING_X))
+            .bg(rgb(theme.bg))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(GRAPHICS_SELECTOR_MAX_W))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgba((GRAPHICS_AMBER_500 << 8) | GRAPHICS_ALPHA_20))
+                    .bg(rgba((GRAPHICS_AMBER_500 << 8) | GRAPHICS_ALPHA_10))
+                    .p(px(16.0))
+                    .flex()
+                    .gap(px(12.0))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::AlertTriangle,
+                        20.0,
+                        rgb(GRAPHICS_AMBER_500),
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                div()
+                                    .text_size(px(14.0))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text))
+                                    .child(self.i18n.t("graphics.not_available")),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(self.i18n.t("graphics.no_distros")),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_error_box(&self, error: &str) -> AnyElement {
+        div()
+            .px(px(GRAPHICS_WARNING_PADDING_X))
+            .py(px(GRAPHICS_WARNING_PADDING_Y))
+            .rounded(px(self.tokens.radii.md))
+            .bg(rgba((GRAPHICS_RED_500 << 8) | GRAPHICS_ALPHA_10))
+            .text_color(rgb(GRAPHICS_RED_400))
+            .text_size(px(13.0))
+            .child(error.to_string())
+            .into_any_element()
+    }
+
+    fn render_graphics_warning(&self, strong: String, detail: Option<String>) -> AnyElement {
+        div()
+            .px(px(GRAPHICS_WARNING_PADDING_X))
+            .py(px(GRAPHICS_WARNING_PADDING_Y))
+            .rounded(px(self.tokens.radii.md))
+            .bg(rgba((GRAPHICS_AMBER_500 << 8) | GRAPHICS_ALPHA_10))
+            .border_1()
+            .border_color(rgba((GRAPHICS_AMBER_500 << 8) | GRAPHICS_ALPHA_20))
+            .text_size(px(12.0))
+            .text_color(rgb(GRAPHICS_AMBER_500))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(strong))
+                    .when_some(detail, |line, detail| {
+                        line.child(div().ml(px(4.0)).child(detail))
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_graphics_default_badge(&self) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .ml(px(8.0))
+            .px(px(6.0))
+            .py(px(2.0))
+            .rounded(px(self.tokens.radii.sm))
+            .bg(rgba((theme.accent << 8) | GRAPHICS_ALPHA_10))
+            .text_size(px(11.0))
+            .text_color(rgb(theme.accent))
+            .child("Default")
+            .into_any_element()
+    }
+
+    fn render_graphics_wslg_badge(&self, status: Option<&WslgStatus>) -> AnyElement {
+        let Some(status) = status else {
+            return div()
+                .px(px(6.0))
+                .py(px(2.0))
+                .rounded(px(self.tokens.radii.sm))
+                .bg(rgba((self.tokens.ui.text_muted << 8) | GRAPHICS_ALPHA_10))
+                .text_size(px(GRAPHICS_BADGE_TEXT_SIZE))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child("WSLg N/A")
+                .into_any_element();
+        };
+        if !status.available {
+            return div()
+                .px(px(6.0))
+                .py(px(2.0))
+                .rounded(px(self.tokens.radii.sm))
+                .bg(rgba((self.tokens.ui.text_muted << 8) | GRAPHICS_ALPHA_10))
+                .text_size(px(GRAPHICS_BADGE_TEXT_SIZE))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child("WSLg N/A")
+                .into_any_element();
+        }
+        let label = match (status.wayland, status.x11) {
+            (true, true) => "Wayland + X11",
+            (true, false) => "Wayland",
+            (false, true) => "X11",
+            (false, false) => "WSLg",
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .rounded(px(self.tokens.radii.sm))
+                    .bg(rgba((GRAPHICS_GREEN_500 << 8) | GRAPHICS_ALPHA_10))
+                    .text_size(px(GRAPHICS_BADGE_TEXT_SIZE))
+                    .text_color(rgb(GRAPHICS_GREEN_500))
+                    .child(
+                        div()
+                            .size(px(GRAPHICS_DOT_SIZE))
+                            .rounded_full()
+                            .bg(rgb(GRAPHICS_GREEN_500)),
+                    )
+                    .child(label.to_string()),
+            )
+            .when(!status.has_openbox, |row| {
+                row.child(
+                    div()
+                        .px(px(6.0))
+                        .py(px(2.0))
+                        .rounded(px(self.tokens.radii.sm))
+                        .bg(rgba((GRAPHICS_AMBER_500 << 8) | GRAPHICS_ALPHA_10))
+                        .text_size(px(GRAPHICS_BADGE_TEXT_SIZE))
+                        .text_color(rgb(GRAPHICS_AMBER_500))
+                        .child(self.i18n.t("graphics.openbox_missing")),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn start_graphics_load_if_needed(&mut self, force: bool) {
+        if self.graphics.loading || (!force && !self.graphics.distros.is_empty()) {
+            return;
+        }
+        self.graphics.generation = self.graphics.generation.saturating_add(1);
+        let generation = self.graphics.generation;
+        self.graphics.loading = true;
+        self.graphics.error = None;
+        let tx = self.graphics.worker_tx.clone();
+        self.forwarding_runtime.spawn(async move {
+            let result = wsl::list_distros().map_err(|error| error.to_string());
+            let _ = tx.send(GraphicsWorkerResult::LoadDistros { generation, result });
+        });
+    }
+
+    fn load_graphics_sessions(&self) {
+        let tx = self.graphics.worker_tx.clone();
+        let backend = self.wsl_graphics.clone();
+        self.forwarding_runtime.spawn(async move {
+            let result = Ok::<_, String>(backend.list_sessions().await);
+            let _ = tx.send(GraphicsWorkerResult::ListSessions { result });
+        });
+    }
+
+    fn start_graphics_wslg_detection(&self, generation: u64) {
+        for distro in self
+            .graphics
+            .distros
+            .iter()
+            .filter(|distro| distro.is_running)
+        {
+            let tx = self.graphics.worker_tx.clone();
+            let backend = self.wsl_graphics.clone();
+            let distro_name = distro.name.clone();
+            self.forwarding_runtime.spawn(async move {
+                let result = backend
+                    .detect_wslg(&distro_name)
+                    .await
+                    .map_err(|error| error.to_string());
+                let _ = tx.send(GraphicsWorkerResult::DetectWslg {
+                    generation,
+                    distro: distro_name,
+                    result,
+                });
+            });
+        }
+    }
+
+    fn start_graphics_desktop(&mut self, distro: String) {
+        if self.graphics.status == GraphicsStatus::Starting {
+            return;
+        }
+        self.graphics.generation = self.graphics.generation.saturating_add(1);
+        let generation = self.graphics.generation;
+        self.graphics.status = GraphicsStatus::Starting;
+        self.graphics.error = None;
+        self.graphics.session = None;
+        self.graphics.webview = None;
+        self.graphics.webview_session_id = None;
+        let tx = self.graphics.worker_tx.clone();
+        let backend = self.wsl_graphics.clone();
+        self.forwarding_runtime.spawn(async move {
+            let result = backend
+                .start_desktop(distro)
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(GraphicsWorkerResult::Start { generation, result });
+        });
+    }
+
+    fn start_graphics_app(&mut self) {
+        if self.graphics.status == GraphicsStatus::Starting {
+            return;
+        }
+        let Some(distro) = self.graphics.selected_distro.clone() else {
+            return;
+        };
+        let argv = split_graphics_app_command(&self.graphics.app_command);
+        if argv.is_empty() {
+            return;
+        }
+        self.graphics.generation = self.graphics.generation.saturating_add(1);
+        let generation = self.graphics.generation;
+        self.graphics.status = GraphicsStatus::Starting;
+        self.graphics.error = None;
+        self.graphics.session = None;
+        self.graphics.webview = None;
+        self.graphics.webview_session_id = None;
+        let tx = self.graphics.worker_tx.clone();
+        let backend = self.wsl_graphics.clone();
+        self.forwarding_runtime.spawn(async move {
+            let result = backend
+                .start_app(distro, argv, None, None)
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(GraphicsWorkerResult::StartApp { generation, result });
+        });
+    }
+
+    fn stop_graphics_session(&mut self) {
+        if self.graphics.session.is_some() {
+            self.shutdown_graphics_session();
+        } else {
+            self.graphics.status = GraphicsStatus::Idle;
+            self.graphics.error = None;
+            self.graphics.webview = None;
+            self.graphics.webview_session_id = None;
+        }
+    }
+
+    fn stop_graphics_session_id(&mut self, session_id: String) {
+        if self
+            .graphics
+            .session
+            .as_ref()
+            .is_some_and(|session| session.id == session_id)
+        {
+            self.shutdown_graphics_session();
+            return;
+        }
+        let tx = self.graphics.worker_tx.clone();
+        let backend = self.wsl_graphics.clone();
+        self.forwarding_runtime.spawn(async move {
+            let result = backend
+                .stop(&session_id)
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(GraphicsWorkerResult::ListSessions {
+                result: result.map(|_| Vec::new()),
+            });
+            let sessions = backend.list_sessions().await;
+            let _ = tx.send(GraphicsWorkerResult::ListSessions {
+                result: Ok(sessions),
+            });
+        });
+    }
+
+    fn reconnect_graphics_session(&mut self) {
+        let Some(session_id) = self
+            .graphics
+            .session
+            .as_ref()
+            .map(|session| session.id.clone())
+        else {
+            return;
+        };
+        self.graphics.generation = self.graphics.generation.saturating_add(1);
+        let generation = self.graphics.generation;
+        self.graphics.status = GraphicsStatus::Starting;
+        self.graphics.error = None;
+        self.graphics.webview = None;
+        self.graphics.webview_session_id = None;
+        let tx = self.graphics.worker_tx.clone();
+        let backend = self.wsl_graphics.clone();
+        self.forwarding_runtime.spawn(async move {
+            let result = backend
+                .reconnect(&session_id)
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(GraphicsWorkerResult::Reconnect { generation, result });
+        });
+    }
+
+    fn reconnect_graphics_session_id(&mut self, session_id: String) {
+        self.graphics.generation = self.graphics.generation.saturating_add(1);
+        let generation = self.graphics.generation;
+        self.graphics.status = GraphicsStatus::Starting;
+        self.graphics.error = None;
+        self.graphics.webview = None;
+        self.graphics.webview_session_id = None;
+        let tx = self.graphics.worker_tx.clone();
+        let backend = self.wsl_graphics.clone();
+        self.forwarding_runtime.spawn(async move {
+            let result = backend
+                .reconnect(&session_id)
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(GraphicsWorkerResult::Reconnect { generation, result });
+        });
+    }
+
+    fn apply_graphics_webview_event(&mut self, event: String) {
+        match event.as_str() {
+            "connect" => {
+                self.graphics.status = GraphicsStatus::Active;
+                self.graphics.error = None;
+            }
+            "disconnect:clean" => {
+                self.graphics.status = GraphicsStatus::Idle;
+            }
+            "disconnect:dirty" => {
+                self.graphics.status = GraphicsStatus::Disconnected;
+            }
+            _ if event.starts_with("securityfailure:") => {
+                self.graphics.status = GraphicsStatus::Error;
+                self.graphics.error =
+                    Some(event.trim_start_matches("securityfailure:").to_string());
+            }
+            _ if event.starts_with("error:") => {
+                self.graphics.status = GraphicsStatus::Error;
+                self.graphics.error = Some(event.trim_start_matches("error:").to_string());
+            }
+            _ => {}
+        }
+    }
+
+    fn ensure_graphics_webview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.graphics.session.clone() else {
+            self.graphics.webview = None;
+            self.graphics.webview_session_id = None;
+            return;
+        };
+        if self.graphics.webview_session_id.as_deref() == Some(session.id.as_str())
+            && self.graphics.webview.is_some()
+        {
+            return;
+        }
+
+        let tx = self.graphics.worker_tx.clone();
+        let session_id = session.id.clone();
+        let html = graphics_novnc_html(&session, &self.tokens);
+        // Tauri mounts noVNC inside the GraphicsView DOM after a short timeout.
+        // GPUI has no DOM, so the closest one-to-one ownership is a child wry
+        // webview whose JS posts the same connect/disconnect/security events
+        // back into the native state machine.
+        match wry::WebViewBuilder::new()
+            .with_html(html)
+            .with_ipc_handler(move |request| {
+                let _ = tx.send(GraphicsWorkerResult::WebviewEvent {
+                    session_id: session_id.clone(),
+                    event: request.body().clone(),
+                });
+            })
+            .build_as_child(window)
+        {
+            Ok(webview) => {
+                let entity = cx.new(|cx| GpuiWebView::new(webview, window, cx));
+                self.graphics.webview = Some(entity);
+                self.graphics.webview_session_id = Some(session.id);
+            }
+            Err(error) => {
+                self.graphics.status = GraphicsStatus::Error;
+                self.graphics.error = Some(error.to_string());
+                self.graphics.webview = None;
+                self.graphics.webview_session_id = None;
+            }
+        }
+    }
+
+    fn graphics_canvas_diagnostics_text(&self) -> String {
+        let backend = if self.detected_graphics.driver_name.is_empty() {
+            format!("{:?}", self.detected_graphics.kind)
+        } else {
+            self.detected_graphics.driver_name.clone()
+        };
+        format!("{}: {backend}", self.i18n.t("graphics.gpu_canvas_backend"))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum GraphicsToolbarAction {
+    Reconnect,
+    Fullscreen,
+    Stop,
+}
+
+fn graphics_session_title(session: &WslGraphicsSession) -> String {
+    match &session.mode {
+        GraphicsSessionMode::Desktop => session.desktop_name.clone(),
+        GraphicsSessionMode::App { title, argv } => title
+            .clone()
+            .or_else(|| argv.first().cloned())
+            .unwrap_or_else(|| session.desktop_name.clone()),
+    }
+}
+
+fn split_graphics_app_command(command: &str) -> Vec<String> {
+    command
+        .split_whitespace()
+        .filter(|part| !part.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn normalize_graphics_error(error: String) -> String {
+    if error.contains("only available on Windows")
+        || error == WslGraphicsError::UnsupportedPlatform.to_string()
+    {
+        WSL_GRAPHICS_UNAVAILABLE.to_string()
+    } else {
+        error
+    }
+}
+
+fn graphics_novnc_html(session: &WslGraphicsSession, tokens: &ThemeTokens) -> String {
+    let url = serde_json::to_string(&format!(
+        "ws://127.0.0.1:{}?token={}",
+        session.ws_port, session.ws_token
+    ))
+    .unwrap_or_else(|_| "\"\"".to_string());
+    let bg = format!("#{:06x}", tokens.ui.bg);
+    let text = format!("#{:06x}", tokens.ui.text);
+    format!(
+        r##"<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html, body, #screen {{
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }}
+      #status {{
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: {text};
+        background: {bg};
+        font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }}
+    </style>
+  </head>
+  <body>
+    <div id="screen"></div>
+    <div id="status">Connecting...</div>
+    <script type="module">
+      import RFB from "https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js";
+      const post = (message) => {{
+        if (window.ipc && window.ipc.postMessage) window.ipc.postMessage(message);
+      }};
+      try {{
+        const rfb = new RFB(document.getElementById("screen"), {url}, {{ wsProtocols: ["binary"] }});
+        rfb.scaleViewport = true;
+        rfb.resizeSession = true;
+        rfb.clipViewport = false;
+        rfb.background = "#000000";
+        window.__oxideRfb = rfb;
+        rfb.addEventListener("connect", () => {{
+          const status = document.getElementById("status");
+          if (status) status.remove();
+          post("connect");
+        }});
+        rfb.addEventListener("disconnect", (event) => {{
+          post(event.detail && event.detail.clean ? "disconnect:clean" : "disconnect:dirty");
+        }});
+        rfb.addEventListener("securityfailure", (event) => {{
+          post("securityfailure:" + ((event.detail && event.detail.reason) || "Security failure"));
+        }});
+      }} catch (error) {{
+        post("error:" + (error && error.message ? error.message : String(error)));
+      }}
+    </script>
+  </body>
+</html>"##
+    )
+}

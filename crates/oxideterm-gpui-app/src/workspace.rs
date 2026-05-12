@@ -1,6 +1,7 @@
 mod actions;
 mod file_manager;
 mod forwards;
+mod graphics;
 mod ide;
 mod ime;
 mod launcher;
@@ -96,6 +97,7 @@ use oxideterm_workspace::{
 
 use self::actions::SearchBarState;
 use self::file_manager::FileManagerState;
+use self::graphics::GraphicsState;
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
 use self::launcher::LauncherState;
 use self::new_connection::{
@@ -180,6 +182,7 @@ pub(crate) struct WorkspaceApp {
     ssh_registry: SshConnectionRegistry,
     forwarding_registry: ForwardingRegistry,
     forwarding_runtime: Arc<tokio::runtime::Runtime>,
+    wsl_graphics: Arc<oxideterm_wsl_graphics::WslGraphicsState>,
     forwarding_connection_consumers: HashMap<String, (String, ConnectionConsumer)>,
     sftp_connection_consumers: HashMap<String, (String, ConnectionConsumer)>,
     sftp_transfer_manager: Arc<SftpTransferManager>,
@@ -236,6 +239,7 @@ pub(crate) struct WorkspaceApp {
     ide_last_closed_at_by_node: HashMap<NodeId, SystemTime>,
     sftp_view: sftp::SftpViewState,
     launcher: LauncherState,
+    graphics: GraphicsState,
     sftp_worker_tx: std::sync::mpsc::Sender<sftp::SftpWorkerResult>,
     sftp_worker_rx: std::sync::mpsc::Receiver<sftp::SftpWorkerResult>,
     forwarding_worker_tx: std::sync::mpsc::Sender<forwards::ForwardingWorkerResult>,

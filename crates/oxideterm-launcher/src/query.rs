@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::LauncherAppEntry;
+use crate::{LauncherAppEntry, WslDistro};
 
 pub fn count_label(filtered: usize, total: usize) -> String {
     if filtered != total {
@@ -24,6 +24,18 @@ pub fn filter_apps(apps: &[LauncherAppEntry], query: &str) -> Vec<LauncherAppEnt
                     .as_ref()
                     .is_some_and(|bundle_id| bundle_id.to_ascii_lowercase().contains(&query))
         })
+        .cloned()
+        .collect()
+}
+
+pub fn filter_wsl_distros(distros: &[WslDistro], query: &str) -> Vec<WslDistro> {
+    let query = query.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        return distros.to_vec();
+    }
+    distros
+        .iter()
+        .filter(|distro| distro.name.to_ascii_lowercase().contains(&query))
         .cloned()
         .collect()
 }
@@ -57,5 +69,23 @@ mod tests {
     fn count_label_matches_tauri_header() {
         assert_eq!(count_label(4, 10), "4/10");
         assert_eq!(count_label(10, 10), "10");
+    }
+
+    #[test]
+    fn filter_wsl_distros_matches_tauri_name_filter() {
+        let distros = vec![
+            WslDistro {
+                name: "Ubuntu".to_string(),
+                is_default: true,
+                is_running: true,
+            },
+            WslDistro {
+                name: "Debian".to_string(),
+                is_default: false,
+                is_running: false,
+            },
+        ];
+        assert_eq!(filter_wsl_distros(&distros, "ubu")[0].name, "Ubuntu");
+        assert!(filter_wsl_distros(&distros, "missing").is_empty());
     }
 }

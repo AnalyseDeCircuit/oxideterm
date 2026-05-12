@@ -8,6 +8,7 @@ impl Render for WorkspaceApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_tab_titles(cx);
         self.poll_forwarding_worker_results(cx);
+        self.poll_graphics_worker_results(window, cx);
         self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
         let title = self
@@ -31,6 +32,7 @@ impl Render for WorkspaceApp {
                             | TabKind::SessionManager
                             | TabKind::FileManager
                             | TabKind::Launcher
+                            | TabKind::Graphics
                     )
                 })
             && !self.search.visible
@@ -48,6 +50,7 @@ impl Render for WorkspaceApp {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
                 (TabKind::Launcher, _) => self.render_launcher_surface(cx),
+                (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
                 (TabKind::Sftp, _) => self.render_sftp_surface(window, cx),
                 (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
@@ -141,6 +144,17 @@ impl Render for WorkspaceApp {
                         return;
                     }
                     let _ = this.handle_launcher_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this
+                    .active_tab()
+                    .is_some_and(|tab| tab.kind == TabKind::Graphics)
+                    && this.graphics.focused_input.is_some()
+                {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    let _ = this.handle_graphics_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this

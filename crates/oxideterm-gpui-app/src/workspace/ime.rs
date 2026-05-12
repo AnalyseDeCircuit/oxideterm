@@ -8,6 +8,7 @@ use gpui::{
 use super::WorkspaceApp;
 use super::file_manager::FileManagerInput;
 use super::forwards::ForwardInput;
+use super::graphics::GraphicsInput;
 use super::launcher::LauncherInput;
 use super::new_connection::NewConnectionField;
 use super::quick_commands::QuickCommandInput;
@@ -27,6 +28,7 @@ pub(super) enum WorkspaceImeTarget {
     Forwards(ForwardInput),
     FileManager(FileManagerInput),
     Launcher(LauncherInput),
+    Graphics(GraphicsInput),
     Sftp(SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
@@ -44,6 +46,7 @@ impl WorkspaceImeTarget {
             Self::Forwards(input) => 1_700 + input.anchor_key(),
             Self::FileManager(input) => 1_800 + input.anchor_key(),
             Self::Launcher(input) => 1_850 + input.anchor_key(),
+            Self::Graphics(input) => 1_875 + input.anchor_key(),
             Self::Sftp(input) => 1_900 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
@@ -356,6 +359,14 @@ impl WorkspaceApp {
 
         if self
             .active_tab()
+            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Graphics)
+            && let Some(input) = self.graphics.focused_input
+        {
+            return Some(WorkspaceImeTarget::Graphics(input));
+        }
+
+        if self
+            .active_tab()
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Sftp)
             && let Some(input) = self.sftp_view.focused_input
         {
@@ -442,6 +453,13 @@ impl WorkspaceApp {
             WorkspaceImeTarget::Launcher(input) => {
                 if self.launcher.focused_input == Some(input) {
                     Some(self.launcher_input_value(input).to_string())
+                } else {
+                    None
+                }
+            }
+            WorkspaceImeTarget::Graphics(input) => {
+                if self.graphics.focused_input == Some(input) {
+                    Some(self.graphics_input_value(input).to_string())
                 } else {
                     None
                 }
@@ -610,6 +628,17 @@ impl WorkspaceApp {
                 if self.launcher.focused_input == Some(input) {
                     replace_utf16(
                         self.launcher_input_value_mut(input),
+                        replacement_range,
+                        text,
+                    );
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::Graphics(input) => {
+                if self.graphics.focused_input == Some(input) {
+                    replace_utf16(
+                        self.graphics_input_value_mut(input),
                         replacement_range,
                         text,
                     );

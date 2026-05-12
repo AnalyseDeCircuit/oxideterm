@@ -6,3 +6,4 @@ version.workspace = true
 
 [dependencies]
 oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-wsl-graphics = { path = "../oxideterm-wsl-graphics" }
