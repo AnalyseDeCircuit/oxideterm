@@ -14,11 +14,7 @@
 
 
 <p align="center">
-  <strong>OxideTerm là workspace SSH ưu tiên cục bộ, không chỉ là terminal.</strong>
-  <br>
-  <em>Mở một node từ xa (kết nối máy chủ) một lần, rồi làm việc quanh nó: shell, SFTP, chuyển tiếp cổng, trzsz, chỉnh sửa nhẹ và AI BYOK.</em>
-  <br>
-  <em>Mở một node SSH, rồi quản lý shell, tệp, cổng, editor và ngữ cảnh AI của nó từ một workspace cục bộ.</em>
+  <strong>Workspace SSH ưu tiên cục bộ: shell, SFTP, chuyển tiếp cổng, trzsz, chỉnh sửa nhẹ và AI BYOK quanh một node từ xa.</strong>
   <br>
   <strong>Không Electron. Không OpenSSL. Không telemetry. Không đăng ký ứng dụng. BYOK-first. SSH thuần Rust.</strong>
 </p>

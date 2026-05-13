@@ -14,11 +14,7 @@
 
 
 <p align="center">
-  <strong>OxideTerm 是本地優先的 SSH 工作區，不只是終端。</strong>
-  <br>
-  <em>開啟一次遠端節點（伺服器連線），就圍繞它使用 Shell、SFTP、連接埠轉發、trzsz、輕量編輯和 BYOK AI。</em>
-  <br>
-  <em>開啟一個 SSH 節點，就能在同一個本地工作區管理它的 Shell、檔案、連接埠、編輯器和 AI 上下文。</em>
+  <strong>本地優先的 SSH 工作區：圍繞一個遠端節點使用 Shell、SFTP、連接埠轉發、trzsz、輕量編輯和 BYOK AI。</strong>
   <br>
   <strong>零 Electron。零 OpenSSL。零遙測。零訂閱。BYOK 優先。純 Rust SSH。</strong>
 </p>

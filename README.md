@@ -14,11 +14,7 @@
 
 
 <p align="center">
-  <strong>OxideTerm is a local-first SSH workspace, not just a terminal.</strong>
-  <br>
-  <em>Open a remote node once, then work around it: shell, SFTP, port forwarding, trzsz, lightweight editing, and BYOK AI.</em>
-  <br>
-  <em>Open one SSH node, then manage its shell, files, ports, editor, and AI context from one local workspace.</em>
+  <strong>Local-first SSH workspace: shell, SFTP, port forwarding, trzsz, lightweight editing, and BYOK AI around one remote node.</strong>
   <br>
   <strong>Zero Electron. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust SSH.</strong>
 </p>

@@ -14,11 +14,7 @@
 
 
 <p align="center">
-  <strong>OxideTerm est un workspace SSH local-first, pas seulement un terminal.</strong>
-  <br>
-  <em>Ouvrez une fois un nœud distant (connexion serveur), puis travaillez autour de lui : shell, SFTP, redirection de ports, trzsz, édition légère et IA BYOK.</em>
-  <br>
-  <em>Ouvrez un nœud SSH, puis gérez son shell, ses fichiers, ses ports, son éditeur et son contexte IA depuis un workspace local.</em>
+  <strong>Workspace SSH local-first : shell, SFTP, redirection de ports, trzsz, édition légère et IA BYOK autour d'un nœud distant.</strong>
   <br>
   <strong>Zéro Electron. Zéro OpenSSL. Zéro télémétrie. Zéro abonnement. BYOK-first. SSH pur Rust.</strong>
 </p>

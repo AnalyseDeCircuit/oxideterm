@@ -14,11 +14,7 @@
 
 
 <p align="center">
-  <strong>OxideTerm は local-first な SSH ワークスペースであり、単なるターミナルではありません。</strong>
-  <br>
-  <em>リモートノード（サーバー接続）を一度開けば、その周りで shell、SFTP、ポートフォワーディング、trzsz、軽量編集、BYOK AI を使えます。</em>
-  <br>
-  <em>SSH ノードを 1 つ開けば、その shell、ファイル、ポート、エディタ、AI コンテキストを 1 つのローカルワークスペースで管理できます。</em>
+  <strong>local-first な SSH ワークスペース：1 つのリモートノードを中心に shell、SFTP、ポートフォワーディング、trzsz、軽量編集、BYOK AI を扱えます。</strong>
   <br>
   <strong>Electron ゼロ。OpenSSL ゼロ。テレメトリゼロ。サブスクゼロ。BYOK-first。純粋な Rust SSH。</strong>
 </p>
