@@ -37,5 +37,35 @@
       "confirm": "Conferma",
       "delete": "Elimina"
     }
+  },
+  "topology": {
+    "button_title": "Vista Topologia",
+    "title": "Matrice Connessioni",
+    "system_status": "STATO_SISTEMA: ONLINE",
+    "legend_title": "Stato Segnale",
+    "status_active": "Attiva",
+    "status_connecting": "Connessione",
+    "status_idle": "Inattiva",
+    "stats_single": "1 connessione attiva",
+    "stats_multiple": "{{count}} connessioni attive, profondità max: {{depth}}",
+    "page": {
+      "title": "Matrice Connessioni",
+      "description": "Topologia visuale dei tunnel SSH attivi e server di salto.",
+      "no_connections": "Nessuna connessione attiva",
+      "connect_hint": "Connettiti ai server per popolare la matrice."
+    },
+    "view": {
+      "no_matrix": "Nessuna Matrice Attiva",
+      "connect_to_populate": "Connettiti ai server per popolare"
+    },
+    "menu": {
+      "navigate_session": "Vai alla Sessione Attiva",
+      "new_terminal": "Nuovo Terminale",
+      "open_sftp": "Apri SFTP",
+      "close_hint": "Clicca fuori per chiudere"
+    },
+    "controls": {
+      "instructions": "Scorri per zoomare · Trascina per spostare · Doppio clic sul nodo per menu"
+    }
   }
 }

@@ -14,7 +14,9 @@
       "sftp": "SFTP",
       "forwards": "転送",
       "summary": "合計: {{total}}接続 • 参照: {{refs}}",
-      "live": "ライブ"
+      "live": "ライブ",
+      "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
+      "topology_roots_children": "{{roots}} roots / {{children}} children"
     }
   }
 }

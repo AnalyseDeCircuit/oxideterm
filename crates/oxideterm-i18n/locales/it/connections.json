@@ -14,7 +14,9 @@
       "sftp": "SFTP",
       "forwards": "Inoltri",
       "summary": "Totale: {{total}} connessioni • Ref: {{refs}}",
-      "live": "Live"
+      "live": "Live",
+      "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
+      "topology_roots_children": "{{roots}} roots / {{children}} children"
     }
   }
 }

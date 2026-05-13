@@ -14,7 +14,9 @@
       "sftp": "SFTP",
       "forwards": "포워딩",
       "summary": "총: {{total}} 연결 • 참조: {{refs}}",
-      "live": "실시간"
+      "live": "실시간",
+      "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
+      "topology_roots_children": "{{roots}} roots / {{children}} children"
     }
   }
 }

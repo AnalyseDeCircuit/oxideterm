@@ -35,7 +35,9 @@ impl Render for WorkspaceApp {
                             | TabKind::FileManager
                             | TabKind::Launcher
                             | TabKind::Graphics
+                            | TabKind::ConnectionPool
                             | TabKind::ConnectionMonitor
+                            | TabKind::Topology
                     )
                 })
             && !self.search.visible
@@ -54,7 +56,9 @@ impl Render for WorkspaceApp {
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
                 (TabKind::Launcher, _) => self.render_launcher_surface(cx),
                 (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
+                (TabKind::ConnectionPool, _) => self.render_connection_pool_surface(cx),
                 (TabKind::ConnectionMonitor, _) => self.render_connection_monitor_surface(cx),
+                (TabKind::Topology, _) => self.render_topology_surface(cx),
                 (TabKind::Sftp, _) => self.render_sftp_surface(window, cx),
                 (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),

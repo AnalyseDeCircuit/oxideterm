@@ -37,5 +37,35 @@
       "confirm": "確認",
       "delete": "刪除"
     }
+  },
+  "topology": {
+    "button_title": "拓撲檢視",
+    "title": "連線矩陣",
+    "system_status": "系統狀態：線上",
+    "legend_title": "訊號狀態",
+    "status_active": "使用中",
+    "status_connecting": "連線中",
+    "status_idle": "閒置",
+    "stats_single": "1 個使用中的連線",
+    "stats_multiple": "{{count}} 個使用中的連線，最大深度：{{depth}}",
+    "page": {
+      "title": "連線矩陣",
+      "description": "使用中的 SSH 通道和跳板伺服器的視覺化拓撲。",
+      "no_connections": "沒有使用中的連線",
+      "connect_hint": "連線至伺服器以填充矩陣。"
+    },
+    "view": {
+      "no_matrix": "沒有使用中的矩陣",
+      "connect_to_populate": "連線至伺服器以填充"
+    },
+    "menu": {
+      "navigate_session": "導覽至使用中的工作階段",
+      "new_terminal": "新增終端機",
+      "open_sftp": "開啟 SFTP",
+      "close_hint": "點擊外部以關閉"
+    },
+    "controls": {
+      "instructions": "捲動縮放 · 拖曳平移 · 雙擊節點開啟選單"
+    }
   }
 }

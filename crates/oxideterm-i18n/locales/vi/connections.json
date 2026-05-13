@@ -14,7 +14,9 @@
       "sftp": "SFTP",
       "forwards": "Chuyển tiếp",
       "summary": "Tổng: {{total}} kết nối • Tham chiếu: {{refs}}",
-      "live": "Trực tiếp"
+      "live": "Trực tiếp",
+      "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
+      "topology_roots_children": "{{roots}} roots / {{children}} children"
     }
   }
 }

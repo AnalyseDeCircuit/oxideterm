@@ -14,7 +14,9 @@
       "sftp": "SFTP",
       "forwards": "轉發",
       "summary": "總計：{{total}} 個連線 • 參照：{{refs}}",
-      "live": "即時"
+      "live": "即時",
+      "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
+      "topology_roots_children": "{{roots}} roots / {{children}} children"
     }
   }
 }

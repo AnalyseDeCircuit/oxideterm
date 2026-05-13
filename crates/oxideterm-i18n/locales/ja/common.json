@@ -37,5 +37,35 @@
       "confirm": "確認",
       "delete": "削除"
     }
+  },
+  "topology": {
+    "button_title": "トポロジビュー",
+    "title": "接続マトリックス",
+    "system_status": "システムステータス: オンライン",
+    "legend_title": "信号ステータス",
+    "status_active": "アクティブ",
+    "status_connecting": "接続中",
+    "status_idle": "アイドル",
+    "stats_single": "1件のアクティブな接続",
+    "stats_multiple": "{{count}}件のアクティブな接続、最大深度: {{depth}}",
+    "page": {
+      "title": "接続マトリックス",
+      "description": "アクティブなSSHトンネルとジャンプホストのビジュアルトポロジ。",
+      "no_connections": "アクティブな接続がありません",
+      "connect_hint": "サーバーに接続してマトリックスを表示します。"
+    },
+    "view": {
+      "no_matrix": "アクティブなマトリックスがありません",
+      "connect_to_populate": "サーバーに接続して表示"
+    },
+    "menu": {
+      "navigate_session": "アクティブセッションに移動",
+      "new_terminal": "新規ターミナル",
+      "open_sftp": "SFTPを開く",
+      "close_hint": "外側をクリックして閉じる"
+    },
+    "controls": {
+      "instructions": "スクロールでズーム · ドラッグでパン · ノードをダブルクリックでメニュー"
+    }
   }
 }

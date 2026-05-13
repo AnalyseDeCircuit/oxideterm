@@ -1,11 +1,15 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{MouseButton, PathBuilder, canvas, point};
+use gpui::{MouseButton, PathBuilder, canvas, fill, point, rgba};
 use gpui_component::scroll::ScrollableElement;
 use oxideterm_connection_monitor::{ProfilerState, ResourceSampler};
 use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::select::{select_option, select_trigger};
+use oxideterm_topology::{
+    ConnectionTopologyLayout, ConnectionTopologySnapshot, TOPOLOGY_NODE_HEIGHT,
+    TOPOLOGY_NODE_WIDTH, TopologyLayoutNode, TopologyViewStatus,
+};
 
 use super::*;
 
@@ -14,8 +18,6 @@ const MONITOR_SPARKLINE_POINTS: usize = 12;
 const MONITOR_CONTENT_MAX_WIDTH: f32 = 1024.0;
 const MONITOR_PAGE_PADDING: f32 = 32.0;
 const MONITOR_SECTION_GAP: f32 = 32.0;
-const MONITOR_CARD_RADIUS: f32 = 6.0;
-const MONITOR_POOL_CARD_RADIUS: f32 = 8.0;
 const MONITOR_SPARKLINE_HEIGHT: f32 = 28.0;
 const MONITOR_SPARKLINE_STROKE_WIDTH: f32 = 1.5;
 const MONITOR_SPARKLINE_STROKE_ALPHA: u32 = 0x99;
@@ -27,9 +29,63 @@ const MONITOR_EMERALD_DARK: u32 = 0x10b981;
 const MONITOR_AMBER: u32 = 0xf59e0b;
 const MONITOR_RED: u32 = 0xef4444;
 const MONITOR_BLUE: u32 = 0x3b82f6;
+const TOPOLOGY_BG_GRID_STEP: f32 = 40.0;
+const TOPOLOGY_BG_GRID_ALPHA: u32 = 0x1a;
+const TOPOLOGY_PANEL_BG_ALPHA_20: u32 = 0x33;
+const TOPOLOGY_PANEL_BORDER_ALPHA_50: u32 = 0x80;
+const TOPOLOGY_MUTED_TEXT_ALPHA_70: u32 = 0xb3;
+const TOPOLOGY_INSTRUCTION_ALPHA_60: u32 = 0x99;
+const TOPOLOGY_LINE_INACTIVE_ALPHA: u32 = 0x66;
+const TOPOLOGY_LINE_GLOW_ALPHA: u32 = 0x26;
+const TOPOLOGY_CONNECTED: u32 = 0x22c55e;
+const TOPOLOGY_CONNECTING: u32 = 0xeab308;
+const TOPOLOGY_FAILED: u32 = 0xef4444;
+const TOPOLOGY_DISCONNECTED: u32 = 0x71717a;
+const TOPOLOGY_PENDING: u32 = 0xf59e0b;
+const TOPOLOGY_ZOOM_INITIAL: f32 = 0.9;
+const TOPOLOGY_ZOOM_MIN: f32 = 0.3;
+const TOPOLOGY_ZOOM_MAX: f32 = 3.0;
+const TOPOLOGY_PAN_INITIAL_X: f32 = 0.0;
+const TOPOLOGY_PAN_INITIAL_Y: f32 = 50.0;
+const TOPOLOGY_MENU_WIDTH: f32 = 180.0;
+const TOPOLOGY_MENU_MAX_HEIGHT: f32 = 250.0;
+
+#[derive(Clone, Copy)]
+struct TopologyTransform {
+    x: f32,
+    y: f32,
+    k: f32,
+}
+
+impl Default for TopologyTransform {
+    fn default() -> Self {
+        Self {
+            x: TOPOLOGY_PAN_INITIAL_X,
+            y: TOPOLOGY_PAN_INITIAL_Y,
+            k: TOPOLOGY_ZOOM_INITIAL,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TopologyDragState {
+    last_x: f32,
+    last_y: f32,
+}
+
+#[derive(Clone)]
+struct TopologyNodeMenuState {
+    node_id: Option<NodeId>,
+    name: String,
+    host: String,
+    view_status: TopologyViewStatus,
+    x: f32,
+    y: f32,
+}
 
 pub(super) struct ConnectionMonitorState {
     pub(super) pool_stats: Option<ConnectionPoolMonitorStats>,
+    pub(super) topology_snapshot: Option<ConnectionTopologySnapshot>,
     pub(super) pool_error: Option<String>,
     pub(super) last_pool_refresh: Option<Instant>,
     pub(super) selected_connection_id: Option<String>,
@@ -38,6 +94,9 @@ pub(super) struct ConnectionMonitorState {
     pub(super) profiler_registry: ProfilerRegistry,
     pub(super) profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
     pub(super) profiler_update_rx: tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
+    topology_transform: TopologyTransform,
+    topology_drag: Option<TopologyDragState>,
+    topology_menu: Option<TopologyNodeMenuState>,
 }
 
 impl ConnectionMonitorState {
@@ -47,6 +106,7 @@ impl ConnectionMonitorState {
     ) -> Self {
         Self {
             pool_stats: None,
+            topology_snapshot: None,
             pool_error: None,
             last_pool_refresh: None,
             selected_connection_id: None,
@@ -55,6 +115,9 @@ impl ConnectionMonitorState {
             profiler_registry: ProfilerRegistry::new(),
             profiler_update_tx,
             profiler_update_rx,
+            topology_transform: TopologyTransform::default(),
+            topology_drag: None,
+            topology_menu: None,
         }
     }
 }
@@ -84,8 +147,53 @@ impl WorkspaceApp {
             tab_id
         };
         self.set_active_tab(tab_id, window, cx);
+        self.active_sidebar_section = SidebarSection::Activity;
         self.refresh_connection_monitor_pool_stats();
         self.sync_connection_monitor_selection(cx);
+    }
+
+    pub(super) fn open_connection_pool_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab_id = if let Some(tab) = self
+            .tabs
+            .iter()
+            .find(|tab| tab.kind == TabKind::ConnectionPool)
+        {
+            tab.id
+        } else {
+            let tab_id = self.alloc_tab_id();
+            self.tabs.push(Tab {
+                id: tab_id,
+                kind: TabKind::ConnectionPool,
+                title: self.i18n.t("sidebar.panels.connection_pool"),
+                title_source: TabTitleSource::I18nKey("sidebar.panels.connection_pool"),
+                root_pane: None,
+                active_pane_id: None,
+            });
+            tab_id
+        };
+        self.active_sidebar_section = SidebarSection::Terminal;
+        self.set_active_tab(tab_id, window, cx);
+        self.refresh_connection_monitor_pool_stats();
+    }
+
+    pub(super) fn open_topology_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Topology) {
+            tab.id
+        } else {
+            let tab_id = self.alloc_tab_id();
+            self.tabs.push(Tab {
+                id: tab_id,
+                kind: TabKind::Topology,
+                title: self.i18n.t("sidebar.panels.connection_matrix"),
+                title_source: TabTitleSource::I18nKey("sidebar.panels.connection_matrix"),
+                root_pane: None,
+                active_pane_id: None,
+            });
+            tab_id
+        };
+        self.active_sidebar_section = SidebarSection::Network;
+        self.set_active_tab(tab_id, window, cx);
+        self.refresh_connection_monitor_pool_stats();
     }
 
     pub(super) fn poll_connection_monitor_updates(&mut self, cx: &mut Context<Self>) {
@@ -100,10 +208,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn maybe_refresh_connection_monitor(&mut self, cx: &mut Context<Self>) {
-        if !self
-            .active_tab()
-            .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor)
-        {
+        if !self.active_tab().is_some_and(|tab| {
+            matches!(
+                tab.kind,
+                TabKind::ConnectionPool | TabKind::ConnectionMonitor | TabKind::Topology
+            )
+        }) {
             return;
         }
 
@@ -119,6 +229,8 @@ impl WorkspaceApp {
 
     fn refresh_connection_monitor_pool_stats(&mut self) {
         self.connection_monitor.pool_stats = Some(self.ssh_registry.monitor_stats());
+        self.connection_monitor.topology_snapshot =
+            Some(self.ssh_registry.connection_topology_snapshot());
         self.connection_monitor.pool_error = None;
         self.connection_monitor.last_pool_refresh = Some(Instant::now());
     }
@@ -264,6 +376,74 @@ impl WorkspaceApp {
                             )
                             .child(self.render_system_health_panel(cx)),
                     ),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_connection_pool_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .size_full()
+            .overflow_y_scrollbar()
+            .p(px(MONITOR_PAGE_PADDING))
+            .bg(rgb(theme.bg))
+            .text_color(rgb(theme.text))
+            .child(
+                div()
+                    .max_w(px(MONITOR_CONTENT_MAX_WIDTH))
+                    .mx_auto()
+                    .flex()
+                    .flex_col()
+                    .gap(px(MONITOR_SECTION_GAP))
+                    .child(
+                        div()
+                            .mb_6()
+                            .text_size(px(24.0))
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(rgb(theme.text))
+                            .child(self.i18n.t("sidebar.panels.connection_pool")),
+                    )
+                    .child(self.render_connection_pool_monitor(cx)),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_topology_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .bg(rgb(theme.bg))
+            .text_color(rgb(theme.text))
+            .child(
+                div()
+                    .p(px(24.0))
+                    .border_b_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.bg_panel))
+                    .child(
+                        div()
+                            .mb_2()
+                            .text_size(px(24.0))
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(rgb(theme.text_heading))
+                            .child(self.i18n.t("topology.page.title")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(14.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("topology.page.description")),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .relative()
+                    .overflow_hidden()
+                    .child(self.render_connection_topology(cx)),
             )
             .into_any_element()
     }
@@ -465,7 +645,7 @@ impl WorkspaceApp {
             rgba((color << 8) | MONITOR_TINT_ALPHA)
         };
         div()
-            .rounded(px(MONITOR_POOL_CARD_RADIUS))
+            .rounded(px(self.tokens.radii.lg))
             .bg(background)
             .p_3()
             .shadow_sm()
@@ -496,6 +676,580 @@ impl WorkspaceApp {
                     .child(value.to_string()),
             )
             .into_any_element()
+    }
+
+    fn render_connection_topology(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let Some(snapshot) = self.connection_monitor.topology_snapshot.as_ref() else {
+            return monitor_center_state(
+                &self.tokens,
+                LucideIcon::RefreshCw,
+                theme.text_muted,
+                self.i18n.t("connections.monitor.loading"),
+            );
+        };
+        let layout = ConnectionTopologyLayout::from_snapshot(snapshot);
+        if layout.nodes.is_empty() {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .text_color(rgb(theme.text_muted))
+                .child(
+                    div()
+                        .text_size(px(18.0))
+                        .child(self.i18n.t("topology.page.no_connections")),
+                )
+                .child(
+                    div()
+                        .mt_2()
+                        .text_size(px(14.0))
+                        .opacity(0.7)
+                        .child(self.i18n.t("topology.page.connect_hint")),
+                )
+                .into_any_element();
+        }
+
+        let edges = layout.edges.clone();
+        let transform = self.connection_monitor.topology_transform;
+        let mut graph = div()
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .bg(rgb(theme.bg))
+            .rounded(px(self.tokens.radii.lg))
+            .cursor(if self.connection_monitor.topology_drag.is_some() {
+                CursorStyle::ClosedHand
+            } else {
+                CursorStyle::OpenHand
+            })
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+                this.zoom_topology_graph(event);
+                this.connection_monitor.topology_menu = None;
+                cx.stop_propagation();
+                cx.notify();
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    this.connection_monitor.topology_menu = None;
+                    this.connection_monitor.topology_drag = Some(TopologyDragState {
+                        last_x: f32::from(event.position.x),
+                        last_y: f32::from(event.position.y),
+                    });
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                if this.pan_topology_graph(event) {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    if this.connection_monitor.topology_drag.take().is_some() {
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }),
+            )
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, window, _| {
+                        window.paint_quad(fill(bounds.clone(), rgb(theme.bg)));
+                        let mut y = 0.0;
+                        while y <= f32::from(bounds.size.height) {
+                            let mut x = 0.0;
+                            while x <= f32::from(bounds.size.width) {
+                                let dot_bounds = gpui::Bounds::new(
+                                    point(bounds.origin.x + px(x), bounds.origin.y + px(y)),
+                                    gpui::size(px(1.0), px(1.0)),
+                                );
+                                window.paint_quad(fill(
+                                    dot_bounds,
+                                    rgba((theme.text_muted << 8) | TOPOLOGY_BG_GRID_ALPHA),
+                                ));
+                                x += TOPOLOGY_BG_GRID_STEP;
+                            }
+                            y += TOPOLOGY_BG_GRID_STEP;
+                        }
+
+                        for edge in &edges {
+                            let start = point(
+                                bounds.origin.x
+                                    + px(topology_transform_x(edge.source_x, transform)),
+                                bounds.origin.y
+                                    + px(topology_transform_y(
+                                        edge.source_y + TOPOLOGY_NODE_HEIGHT / 2.0,
+                                        transform,
+                                    )),
+                            );
+                            let end = point(
+                                bounds.origin.x
+                                    + px(topology_transform_x(edge.target_x, transform)),
+                                bounds.origin.y
+                                    + px(topology_transform_y(
+                                        edge.target_y - TOPOLOGY_NODE_HEIGHT / 2.0,
+                                        transform,
+                                    )),
+                            );
+                            let delta_y = edge.target_y - edge.source_y;
+                            let control_a = point(
+                                bounds.origin.x
+                                    + px(topology_transform_x(edge.source_x, transform)),
+                                bounds.origin.y
+                                    + px(topology_transform_y(
+                                        edge.source_y + delta_y * 0.4,
+                                        transform,
+                                    )),
+                            );
+                            let control_b = point(
+                                bounds.origin.x
+                                    + px(topology_transform_x(edge.target_x, transform)),
+                                bounds.origin.y
+                                    + px(topology_transform_y(
+                                        edge.target_y - delta_y * 0.4,
+                                        transform,
+                                    )),
+                            );
+
+                            if edge.active {
+                                let mut glow = PathBuilder::stroke(px(6.0 * transform.k));
+                                glow.move_to(start);
+                                glow.cubic_bezier_to(end, control_a, control_b);
+                                if let Ok(path) = glow.build() {
+                                    window.paint_path(
+                                        path,
+                                        rgba(
+                                            (topology_view_status_color(edge.source_status) << 8)
+                                                | TOPOLOGY_LINE_GLOW_ALPHA,
+                                        ),
+                                    );
+                                }
+                            }
+
+                            let mut line =
+                                PathBuilder::stroke(px(
+                                    if edge.active { 2.5 } else { 1.5 } * transform.k
+                                ));
+                            line.move_to(start);
+                            line.cubic_bezier_to(end, control_a, control_b);
+                            if let Ok(path) = line.build() {
+                                window.paint_path(
+                                    path,
+                                    rgba(
+                                        (topology_view_status_color(edge.source_status) << 8)
+                                            | if edge.active {
+                                                0xff
+                                            } else {
+                                                TOPOLOGY_LINE_INACTIVE_ALPHA
+                                            },
+                                    ),
+                                );
+                            }
+                        }
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top(px(16.0))
+                    .right(px(16.0))
+                    .px_2()
+                    .py(px(4.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgba((theme.bg_panel << 8) | 0xcc))
+                    .text_size(px(12.0))
+                    .font_family("monospace")
+                    .text_color(rgb(theme.text_muted))
+                    .shadow_sm()
+                    .child(format!("{}%", (transform.k * 100.0).round() as i32)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .bottom(px(16.0))
+                    .left(px(16.0))
+                    .text_size(px(10.0))
+                    .font_family("monospace")
+                    .text_color(rgba(
+                        (theme.text_muted << 8) | TOPOLOGY_INSTRUCTION_ALPHA_60,
+                    ))
+                    .child(self.i18n.t("topology.controls.instructions")),
+            );
+
+        for node in layout.nodes {
+            graph = graph.child(self.render_topology_graph_node(node, transform, cx));
+        }
+
+        if let Some(menu) = self.connection_monitor.topology_menu.clone() {
+            graph = graph.child(self.render_topology_node_action_menu(menu, cx));
+        }
+
+        div()
+            .size_full()
+            .overflow_hidden()
+            .bg(rgb(theme.bg))
+            .child(graph)
+            .into_any_element()
+    }
+
+    fn render_topology_graph_node(
+        &self,
+        node: TopologyLayoutNode,
+        transform: TopologyTransform,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let status_color = topology_view_status_color(node.view_status);
+        let is_down = node.view_status.is_down();
+        let is_connecting = node.view_status.is_connecting();
+        let scale = transform.k;
+        let left = topology_transform_x(node.x, transform) - (TOPOLOGY_NODE_WIDTH * scale / 2.0);
+        let top = topology_transform_y(node.y, transform) - (TOPOLOGY_NODE_HEIGHT * scale / 2.0);
+        let connected_shadow = if node.view_status.is_connected() {
+            vec![gpui::BoxShadow {
+                color: rgba((status_color << 8) | 0x30).into(),
+                offset: point(px(0.0), px(0.0)),
+                blur_radius: px(15.0),
+                spread_radius: px(0.0),
+            }]
+        } else {
+            Vec::new()
+        };
+
+        // Mirrors TopologyViewEnhanced NodeCard: fixed 140x50 glass panel with centered
+        // status dot, semibold 11px name, and 9px mono host line.
+        div()
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .w(px(TOPOLOGY_NODE_WIDTH * scale))
+            .h(px(TOPOLOGY_NODE_HEIGHT * scale))
+            .rounded(px(self.tokens.radii.lg * scale))
+            .border_1()
+            .border_color(if is_down {
+                rgba((TOPOLOGY_FAILED << 8) | 0x66)
+            } else {
+                rgba((theme.border << 8) | TOPOLOGY_PANEL_BORDER_ALPHA_50)
+            })
+            .bg(rgba((theme.bg_panel << 8) | TOPOLOGY_PANEL_BG_ALPHA_20))
+            .shadow(connected_shadow)
+            .cursor_pointer()
+            .hover(|style| {
+                style
+                    .border_color(rgba((theme.accent << 8) | TOPOLOGY_PANEL_BORDER_ALPHA_50))
+                    .shadow(vec![gpui::BoxShadow {
+                        color: rgba((theme.accent << 8) | 0x26).into(),
+                        offset: point(px(0.0), px(0.0)),
+                        blur_radius: px(20.0),
+                        spread_radius: px(0.0),
+                    }])
+            })
+            .child(
+                div()
+                    .size_full()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0 * scale))
+                            .mb(px(2.0 * scale))
+                            .child(
+                                div()
+                                    .w(px(8.0 * scale))
+                                    .h(px(8.0 * scale))
+                                    .rounded_full()
+                                    .bg(rgb(status_color))
+                                    .when(is_down || is_connecting, |dot| {
+                                        dot.shadow(vec![gpui::BoxShadow {
+                                            color: rgba((status_color << 8) | 0x66).into(),
+                                            offset: point(px(0.0), px(0.0)),
+                                            blur_radius: px(8.0),
+                                            spread_radius: px(0.0),
+                                        }])
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .max_w(px(100.0 * scale))
+                                    .truncate()
+                                    .text_size(px(11.0 * scale))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme.text))
+                                    .child(node.name.clone()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(120.0 * scale))
+                            .truncate()
+                            .font_family("monospace")
+                            .text_size(px(9.0 * scale))
+                            .text_color(rgba(
+                                (theme.text_muted << 8) | TOPOLOGY_MUTED_TEXT_ALPHA_70,
+                            ))
+                            .child(node.host.clone()),
+                    ),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener({
+                    let node = node.clone();
+                    move |this, event: &MouseDownEvent, window, cx| {
+                        if event.click_count >= 2 {
+                            this.open_topology_node_menu(&node, window);
+                        }
+                        this.connection_monitor.topology_drag = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_topology_node_action_menu(
+        &self,
+        menu: TopologyNodeMenuState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let is_connected = menu.view_status.is_connected();
+        let node_id = menu.node_id.clone();
+
+        let mut actions = div().py(px(4.0)).child(self.render_topology_menu_action(
+            LucideIcon::ExternalLink,
+            theme.accent,
+            self.i18n.t("topology.menu.navigate_session"),
+            cx.listener({
+                let node_id = node_id.clone();
+                move |this, _event, _window, cx| {
+                    if let Some(node_id) = node_id.clone() {
+                        this.active_ssh_node_id = Some(node_id);
+                        this.active_sidebar_section = SidebarSection::Sessions;
+                    }
+                    this.connection_monitor.topology_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }),
+        ));
+
+        if is_connected {
+            actions = actions
+                .child(self.render_topology_menu_action(
+                    LucideIcon::Terminal,
+                    MONITOR_EMERALD_DARK,
+                    self.i18n.t("topology.menu.new_terminal"),
+                    cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, window, cx| {
+                            if let Some(node_id) = node_id.clone()
+                                && let Some(node) = this.ssh_nodes.get(&node_id).cloned()
+                            {
+                                let _ = this.queue_ssh_terminal_tab_for_node(
+                                    node_id,
+                                    node.config,
+                                    node.title,
+                                    node.saved_connection_id,
+                                    window,
+                                    cx,
+                                );
+                            }
+                            this.connection_monitor.topology_menu = None;
+                            cx.stop_propagation();
+                            cx.notify();
+                        }
+                    }),
+                ))
+                .child(self.render_topology_menu_action(
+                    LucideIcon::FolderOpen,
+                    0xeab308,
+                    self.i18n.t("topology.menu.open_sftp"),
+                    cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, window, cx| {
+                            if let Some(node_id) = node_id.clone() {
+                                this.open_sftp_tab(node_id, window, cx);
+                            }
+                            this.connection_monitor.topology_menu = None;
+                            cx.stop_propagation();
+                            cx.notify();
+                        }
+                    }),
+                ));
+        }
+
+        div()
+            .absolute()
+            .left(px(menu.x))
+            .top(px(menu.y))
+            .min_w(px(TOPOLOGY_MENU_WIDTH))
+            .overflow_hidden()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgba((theme.bg_elevated << 8) | 0xf2))
+            .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation()
+            })
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(rgba((theme.border << 8) | TOPOLOGY_PANEL_BORDER_ALPHA_50))
+                    .bg(rgba((theme.bg << 8) | 0x80))
+                    .child(
+                        div()
+                            .max_w(px(TOPOLOGY_MENU_WIDTH - 24.0))
+                            .truncate()
+                            .text_size(px(12.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.text))
+                            .child(menu.name),
+                    )
+                    .child(
+                        div()
+                            .font_family("monospace")
+                            .text_size(px(10.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(menu.host),
+                    ),
+            )
+            .child(actions)
+            .child(
+                div()
+                    .px_3()
+                    .py(px(6.0))
+                    .border_t_1()
+                    .border_color(rgba((theme.border << 8) | TOPOLOGY_PANEL_BORDER_ALPHA_50))
+                    .bg(rgba((theme.bg << 8) | 0x4d))
+                    .text_align(gpui::TextAlign::Center)
+                    .text_size(px(10.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n.t("topology.menu.close_hint")),
+            )
+            .into_any_element()
+    }
+
+    fn render_topology_menu_action(
+        &self,
+        icon: LucideIcon,
+        icon_color: u32,
+        label: String,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .w_full()
+            .px_3()
+            .py_2()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_size(px(14.0))
+            .text_color(rgb(theme.text_muted))
+            .cursor_pointer()
+            .hover(|style| {
+                style
+                    .bg(rgba((theme.accent << 8) | 0x1a))
+                    .text_color(rgb(theme.text))
+            })
+            .on_mouse_down(MouseButton::Left, listener)
+            .child(Self::render_lucide_icon(icon, 16.0, rgb(icon_color)))
+            .child(label)
+            .into_any_element()
+    }
+
+    fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent) {
+        let delta = event.delta.pixel_delta(px(16.0));
+        let vertical = f32::from(delta.y);
+        if vertical == 0.0 {
+            return;
+        }
+
+        let old = self.connection_monitor.topology_transform;
+        let wheel_factor = (1.0 - vertical * 0.001).clamp(0.85, 1.15);
+        let next_k = (old.k * wheel_factor).clamp(TOPOLOGY_ZOOM_MIN, TOPOLOGY_ZOOM_MAX);
+        if (next_k - old.k).abs() < f32::EPSILON {
+            return;
+        }
+
+        let cursor_x = f32::from(event.position.x);
+        let cursor_y = f32::from(event.position.y);
+        let graph_x = (cursor_x - old.x) / old.k;
+        let graph_y = (cursor_y - old.y) / old.k;
+        self.connection_monitor.topology_transform = TopologyTransform {
+            x: cursor_x - graph_x * next_k,
+            y: cursor_y - graph_y * next_k,
+            k: next_k,
+        };
+    }
+
+    fn pan_topology_graph(&mut self, event: &MouseMoveEvent) -> bool {
+        let Some(drag) = self.connection_monitor.topology_drag else {
+            return false;
+        };
+        if !event.dragging() {
+            return false;
+        }
+
+        let x = f32::from(event.position.x);
+        let y = f32::from(event.position.y);
+        let dx = x - drag.last_x;
+        let dy = y - drag.last_y;
+        self.connection_monitor.topology_transform.x += dx;
+        self.connection_monitor.topology_transform.y += dy;
+        self.connection_monitor.topology_drag = Some(TopologyDragState {
+            last_x: x,
+            last_y: y,
+        });
+        true
+    }
+
+    fn open_topology_node_menu(&mut self, node: &TopologyLayoutNode, window: &Window) {
+        let transform = self.connection_monitor.topology_transform;
+        let node_id = self.node_router.node_id_for_connection(&node.connection_id);
+        let window_bounds = window.inner_window_bounds().get_bounds();
+        let max_x = (f32::from(window_bounds.size.width) - TOPOLOGY_MENU_WIDTH).max(0.0);
+        let max_y = (f32::from(window_bounds.size.height) - TOPOLOGY_MENU_MAX_HEIGHT).max(0.0);
+        let x = (topology_transform_x(node.x, transform)
+            + TOPOLOGY_NODE_WIDTH * transform.k / 2.0
+            + 8.0)
+            .min(max_x)
+            .max(0.0);
+        let y = (topology_transform_y(node.y, transform)
+            - TOPOLOGY_NODE_HEIGHT * transform.k / 2.0)
+            .min(max_y)
+            .max(0.0);
+
+        self.connection_monitor.topology_menu = Some(TopologyNodeMenuState {
+            node_id,
+            name: node.name.clone(),
+            host: node.host.clone(),
+            view_status: node.view_status,
+            x,
+            y,
+        });
     }
 
     fn render_system_health_panel(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -594,7 +1348,7 @@ impl WorkspaceApp {
                             div()
                                 .px_3()
                                 .py_1()
-                                .rounded(px(MONITOR_CARD_RADIUS))
+                                .rounded(px(self.tokens.radii.md))
                                 .border_1()
                                 .border_color(rgba(
                                     (self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA,
@@ -825,7 +1579,7 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .gap_2()
-            .rounded(px(MONITOR_CARD_RADIUS))
+            .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
             .bg(rgb(theme.bg_panel))
@@ -861,7 +1615,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .p_1()
-                    .rounded(px(MONITOR_CARD_RADIUS))
+                    .rounded(px(self.tokens.radii.md))
                     .cursor_pointer()
                     .text_color(if is_enabled {
                         rgb(MONITOR_EMERALD)
@@ -944,7 +1698,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
-            .rounded(px(MONITOR_CARD_RADIUS))
+            .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
             .bg(rgb(theme.bg_panel))
@@ -986,7 +1740,7 @@ impl WorkspaceApp {
     fn render_network_metric_card(&self, metrics: &ResourceMetrics) -> AnyElement {
         let theme = self.tokens.ui;
         div()
-            .rounded(px(MONITOR_CARD_RADIUS))
+            .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
             .bg(rgb(theme.bg_panel))
@@ -1054,7 +1808,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
-            .rounded(px(MONITOR_CARD_RADIUS))
+            .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
             .bg(rgb(theme.bg_panel))
@@ -1109,6 +1863,24 @@ fn monitor_connection_label(connection: &oxideterm_ssh::ConnectionInfo) -> Strin
         "{}@{}:{}",
         connection.username, connection.host, connection.port
     )
+}
+
+fn topology_transform_x(x: f32, transform: TopologyTransform) -> f32 {
+    transform.x + x * transform.k
+}
+
+fn topology_transform_y(y: f32, transform: TopologyTransform) -> f32 {
+    transform.y + y * transform.k
+}
+
+fn topology_view_status_color(status: TopologyViewStatus) -> u32 {
+    match status {
+        TopologyViewStatus::Connected => TOPOLOGY_CONNECTED,
+        TopologyViewStatus::Connecting => TOPOLOGY_CONNECTING,
+        TopologyViewStatus::Failed => TOPOLOGY_FAILED,
+        TopologyViewStatus::Disconnected => TOPOLOGY_DISCONNECTED,
+        TopologyViewStatus::Pending => TOPOLOGY_PENDING,
+    }
 }
 
 fn threshold_color(value: Option<f64>) -> u32 {

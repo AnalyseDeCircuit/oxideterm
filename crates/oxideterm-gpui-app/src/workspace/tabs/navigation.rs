@@ -18,10 +18,10 @@ impl WorkspaceApp {
     }
 
     pub(super) fn sync_active_tab_surface(&mut self) {
-        // Tauri keeps `sidebarUI.activeSection` independent from tab focus:
-        // `setActiveTab`/`closeTab` only change the active tab, while the
-        // sidebar section changes from explicit sidebar button clicks. Preserve
-        // that ownership here so closing a terminal cannot jump the sidebar.
+        // Tauri keeps the SSH session tree independent from terminal tab focus,
+        // but app-level utility tabs still light up their owning activity icon.
+        // Keep terminal/SFTP/IDE ownership separate while syncing these sidebar
+        // entry tabs so the selected icon frame follows the visible surface.
         match self.active_tab().map(|tab| &tab.kind) {
             Some(TabKind::Settings) => {
                 self.active_surface = ActiveSurface::Settings;
@@ -57,6 +57,19 @@ impl WorkspaceApp {
             }
             Some(TabKind::SessionManager) => {
                 self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Connections;
+            }
+            Some(TabKind::ConnectionPool) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Terminal;
+            }
+            Some(TabKind::ConnectionMonitor) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Activity;
+            }
+            Some(TabKind::Topology) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Network;
             }
             _ => {
                 self.active_surface = ActiveSurface::Terminal;

@@ -37,5 +37,35 @@
       "confirm": "Confirmar",
       "delete": "Eliminar"
     }
+  },
+  "topology": {
+    "button_title": "Vista de topología",
+    "title": "Matriz de conexiones",
+    "system_status": "Estado del sistema: En línea",
+    "legend_title": "Estado de señal",
+    "status_active": "Activo",
+    "status_connecting": "Conectando",
+    "status_idle": "Inactivo",
+    "stats_single": "1 conexión activa",
+    "stats_multiple": "{{count}} conexiones activas, profundidad máx: {{depth}}",
+    "page": {
+      "title": "Matriz de conexiones",
+      "description": "Topología visual de túneles SSH activos y hosts de salto.",
+      "no_connections": "No hay conexiones activas",
+      "connect_hint": "Conecta a un servidor para ver la matriz."
+    },
+    "view": {
+      "no_matrix": "No hay matriz activa",
+      "connect_to_populate": "Conecta a un servidor para poblar"
+    },
+    "menu": {
+      "navigate_session": "Ir a sesión activa",
+      "new_terminal": "Nueva terminal",
+      "open_sftp": "Abrir SFTP",
+      "close_hint": "Clic fuera para cerrar"
+    },
+    "controls": {
+      "instructions": "Scroll para zoom · Arrastra para mover · Doble clic en nodo para menú"
+    }
   }
 }

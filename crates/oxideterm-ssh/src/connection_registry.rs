@@ -3,6 +3,7 @@
 
 use std::{
     any::Any,
+    collections::{HashMap, HashSet},
     fmt,
     sync::{
         Arc,
@@ -16,6 +17,10 @@ use oxideterm_connection_monitor::{
     ConnectionMonitorConsumerKind, ConnectionPoolMonitorStats, PoolConnectionMonitorSnapshot,
 };
 use oxideterm_sftp::{SftpError, SftpSession};
+use oxideterm_topology::{
+    ConnectionTopologyConsumerSummary, ConnectionTopologyEdge, ConnectionTopologyNode,
+    ConnectionTopologySnapshot, ConnectionTopologyStatus,
+};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Notify};
@@ -934,6 +939,125 @@ impl SshConnectionRegistry {
             idle_timeout_secs,
         )
     }
+
+    pub fn connection_topology_snapshot(&self) -> ConnectionTopologySnapshot {
+        let infos = self.list();
+        let known_ids = infos
+            .iter()
+            .map(|info| info.connection_id.as_str())
+            .collect::<HashSet<_>>();
+        let depth_by_id = topology_depths(&infos);
+        let mut nodes = infos
+            .iter()
+            .map(|info| ConnectionTopologyNode {
+                connection_id: info.connection_id.clone(),
+                parent_connection_id: info.parent_connection_id.clone(),
+                host: info.host.clone(),
+                port: info.port,
+                username: info.username.clone(),
+                status: ConnectionTopologyStatus::from(&info.state),
+                depth: depth_by_id
+                    .get(info.connection_id.as_str())
+                    .copied()
+                    .unwrap_or_default(),
+                ref_count: info.ref_count,
+                consumers: topology_consumer_summary(&info.consumers),
+            })
+            .collect::<Vec<_>>();
+        nodes.sort_by(|left, right| {
+            left.depth
+                .cmp(&right.depth)
+                .then_with(|| left.parent_connection_id.cmp(&right.parent_connection_id))
+                .then_with(|| left.host.cmp(&right.host))
+                .then_with(|| left.connection_id.cmp(&right.connection_id))
+        });
+
+        let mut edges = infos
+            .iter()
+            .filter_map(|info| {
+                let parent_id = info.parent_connection_id.as_ref()?;
+                known_ids
+                    .contains(parent_id.as_str())
+                    .then(|| ConnectionTopologyEdge {
+                        parent_connection_id: parent_id.clone(),
+                        child_connection_id: info.connection_id.clone(),
+                    })
+            })
+            .collect::<Vec<_>>();
+        edges.sort_by(|left, right| {
+            left.parent_connection_id
+                .cmp(&right.parent_connection_id)
+                .then_with(|| left.child_connection_id.cmp(&right.child_connection_id))
+        });
+
+        ConnectionTopologySnapshot::new(nodes, edges)
+    }
+}
+
+fn topology_depths(infos: &[ConnectionInfo]) -> HashMap<&str, usize> {
+    let parents = infos
+        .iter()
+        .map(|info| {
+            (
+                info.connection_id.as_str(),
+                info.parent_connection_id.as_deref(),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut depths = HashMap::new();
+    for info in infos {
+        let depth = topology_depth_for(info.connection_id.as_str(), &parents, &mut HashSet::new());
+        depths.insert(info.connection_id.as_str(), depth);
+    }
+    depths
+}
+
+fn topology_depth_for<'a>(
+    connection_id: &'a str,
+    parents: &HashMap<&'a str, Option<&'a str>>,
+    seen: &mut HashSet<&'a str>,
+) -> usize {
+    if !seen.insert(connection_id) {
+        return 0;
+    }
+    let Some(Some(parent_id)) = parents.get(connection_id) else {
+        return 0;
+    };
+    if !parents.contains_key(parent_id) {
+        return 0;
+    }
+    topology_depth_for(parent_id, parents, seen).saturating_add(1)
+}
+
+fn topology_consumer_summary(
+    consumers: &[ConnectionConsumer],
+) -> ConnectionTopologyConsumerSummary {
+    let mut summary = ConnectionTopologyConsumerSummary::default();
+    for consumer in consumers {
+        match consumer {
+            ConnectionConsumer::Terminal(_) => summary.terminals += 1,
+            ConnectionConsumer::Sftp(_) => summary.sftp += 1,
+            ConnectionConsumer::PortForward(_) => summary.port_forwards += 1,
+            ConnectionConsumer::Ide(_) => summary.ide += 1,
+            ConnectionConsumer::NodeRouter(_) => summary.node_router += 1,
+        }
+    }
+    summary
+}
+
+impl From<&ConnectionState> for ConnectionTopologyStatus {
+    fn from(state: &ConnectionState) -> Self {
+        match state {
+            ConnectionState::Connecting => Self::Connecting,
+            ConnectionState::Active => Self::Active,
+            ConnectionState::Idle => Self::Idle,
+            ConnectionState::LinkDown => Self::LinkDown,
+            ConnectionState::Reconnecting => Self::Reconnecting,
+            ConnectionState::Disconnecting => Self::Disconnecting,
+            ConnectionState::Disconnected => Self::Disconnected,
+            ConnectionState::Error(_) => Self::Error,
+        }
+    }
 }
 
 impl From<&ConnectionConsumer> for ConnectionMonitorConsumerKind {
@@ -1068,6 +1192,71 @@ mod tests {
         assert_eq!(stats.total_ref_count, 4);
         assert_eq!(stats.pool_capacity, 9);
         assert_eq!(stats.idle_timeout_secs, 120);
+    }
+
+    #[test]
+    fn connection_topology_snapshot_uses_registry_parent_edges_and_consumer_counts() {
+        let registry = SshConnectionRegistry::default();
+        let root = registry.acquire(
+            SshConfig::password("jump.example", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("jump".into()),
+        );
+        registry.mark_state(root.connection_id(), ConnectionState::Active);
+        let child = registry.acquire(
+            SshConfig::password("target.example", 22, "me", "pw"),
+            ConnectionConsumer::Terminal("term-target".into()),
+        );
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(root.connection_id().to_string()),
+        );
+        registry.acquire_consumer_for_connection(
+            child.connection_id(),
+            ConnectionConsumer::Sftp("target:sftp".into()),
+        );
+        registry.acquire_consumer_for_connection(
+            child.connection_id(),
+            ConnectionConsumer::PortForward("target:forward".into()),
+        );
+        registry.acquire_consumer_for_connection(
+            child.connection_id(),
+            ConnectionConsumer::Ide("target:ide".into()),
+        );
+
+        let snapshot = registry.connection_topology_snapshot();
+
+        assert_eq!(snapshot.root_count, 1);
+        assert_eq!(snapshot.child_count, 1);
+        assert_eq!(
+            snapshot.edges,
+            vec![ConnectionTopologyEdge {
+                parent_connection_id: root.connection_id().to_string(),
+                child_connection_id: child.connection_id().to_string(),
+            }]
+        );
+        let root_node = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.connection_id == root.connection_id())
+            .expect("root topology node");
+        assert_eq!(root_node.depth, 0);
+        assert_eq!(root_node.status, ConnectionTopologyStatus::Active);
+        assert_eq!(root_node.consumers.node_router, 1);
+        let child_node = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.connection_id == child.connection_id())
+            .expect("child topology node");
+        assert_eq!(child_node.depth, 1);
+        assert_eq!(
+            child_node.parent_connection_id.as_deref(),
+            Some(root.connection_id())
+        );
+        assert_eq!(child_node.consumers.terminals, 1);
+        assert_eq!(child_node.consumers.sftp, 1);
+        assert_eq!(child_node.consumers.port_forwards, 1);
+        assert_eq!(child_node.consumers.ide, 1);
+        assert_eq!(child_node.consumers.total(), 4);
     }
 
     #[test]

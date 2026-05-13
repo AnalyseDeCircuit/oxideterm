@@ -37,5 +37,35 @@
       "confirm": "Confirm",
       "delete": "Delete"
     }
+  },
+  "topology": {
+    "button_title": "Topology View",
+    "title": "Connection Matrix",
+    "system_status": "SYSTEM_STATUS: ONLINE",
+    "legend_title": "Signal Status",
+    "status_active": "Active",
+    "status_connecting": "Connecting",
+    "status_idle": "Idle",
+    "stats_single": "1 active connection",
+    "stats_multiple": "{{count}} active connections, max depth: {{depth}}",
+    "page": {
+      "title": "Connection Matrix",
+      "description": "Visual topology of active SSH tunnels and jump hosts.",
+      "no_connections": "No active connections",
+      "connect_hint": "Connect to servers to populate the matrix."
+    },
+    "view": {
+      "no_matrix": "No Active Matrix",
+      "connect_to_populate": "Connect to servers to populate"
+    },
+    "menu": {
+      "navigate_session": "Navigate to Active Session",
+      "new_terminal": "New Terminal",
+      "open_sftp": "Open SFTP",
+      "close_hint": "Click outside to close"
+    },
+    "controls": {
+      "instructions": "Scroll to zoom · Drag to pan · Double-click node for menu"
+    }
   }
 }

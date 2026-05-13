@@ -37,5 +37,35 @@
       "confirm": "확인",
       "delete": "삭제"
     }
+  },
+  "topology": {
+    "button_title": "토폴로지 뷰",
+    "title": "연결 매트릭스",
+    "system_status": "시스템_상태: 온라인",
+    "legend_title": "신호 상태",
+    "status_active": "활성",
+    "status_connecting": "연결 중",
+    "status_idle": "유휴",
+    "stats_single": "1개의 활성 연결",
+    "stats_multiple": "{{count}}개의 활성 연결, 최대 깊이: {{depth}}",
+    "page": {
+      "title": "연결 매트릭스",
+      "description": "활성 SSH 터널 및 점프 호스트의 시각적 토폴로지.",
+      "no_connections": "활성 연결 없음",
+      "connect_hint": "서버에 연결하여 매트릭스를 채우세요."
+    },
+    "view": {
+      "no_matrix": "활성 매트릭스 없음",
+      "connect_to_populate": "서버에 연결하여 채우기"
+    },
+    "menu": {
+      "navigate_session": "활성 세션으로 이동",
+      "new_terminal": "새 터미널",
+      "open_sftp": "SFTP 열기",
+      "close_hint": "외부를 클릭하여 닫기"
+    },
+    "controls": {
+      "instructions": "스크롤로 확대/축소 · 드래그로 이동 · 노드 더블클릭으로 메뉴 열기"
+    }
   }
 }

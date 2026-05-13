@@ -37,5 +37,35 @@
       "confirm": "Bestätigen",
       "delete": "Löschen"
     }
+  },
+  "topology": {
+    "button_title": "Topologie-Ansicht",
+    "title": "Verbindungsmatrix",
+    "system_status": "SYSTEMSTATUS: ONLINE",
+    "legend_title": "Signalstatus",
+    "status_active": "Aktiv",
+    "status_connecting": "Verbindung wird hergestellt",
+    "status_idle": "Inaktiv",
+    "stats_single": "1 aktive Verbindung",
+    "stats_multiple": "{{count}} aktive Verbindungen, max. Tiefe: {{depth}}",
+    "page": {
+      "title": "Verbindungsmatrix",
+      "description": "Visuelle Topologie aktiver SSH-Tunnel und Jump-Hosts.",
+      "no_connections": "Keine aktiven Verbindungen",
+      "connect_hint": "Verbinden Sie sich mit Servern, um die Matrix zu füllen."
+    },
+    "view": {
+      "no_matrix": "Keine aktive Matrix",
+      "connect_to_populate": "Verbinden Sie sich mit Servern zum Füllen"
+    },
+    "menu": {
+      "navigate_session": "Zur aktiven Sitzung navigieren",
+      "new_terminal": "Neues Terminal",
+      "open_sftp": "SFTP öffnen",
+      "close_hint": "Außerhalb klicken zum Schließen"
+    },
+    "controls": {
+      "instructions": "Scrollen zum Zoomen · Ziehen zum Verschieben · Doppelklick auf Knoten für Menü"
+    }
   }
 }

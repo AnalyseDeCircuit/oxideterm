@@ -6587,6 +6587,7 @@ dependencies = [
  "oxideterm-terminal",
  "oxideterm-terminal-recording",
  "oxideterm-theme",
+ "oxideterm-topology",
  "oxideterm-webview",
  "oxideterm-workspace",
  "oxideterm-wsl-graphics",
@@ -6823,6 +6824,7 @@ dependencies = [
  "dashmap",
  "oxideterm-connection-monitor",
  "oxideterm-sftp",
+ "oxideterm-topology",
  "parking_lot",
  "russh",
  "serde",
@@ -6889,6 +6891,13 @@ dependencies = [
 [[package]]
 name = "oxideterm-theme"
 version = "0.1.0"
+
+[[package]]
+name = "oxideterm-topology"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "oxideterm-trzsz"

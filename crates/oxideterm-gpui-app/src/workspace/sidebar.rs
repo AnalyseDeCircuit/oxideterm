@@ -46,10 +46,10 @@ impl SidebarSection {
     pub(super) fn from_settings_key(key: &str) -> Self {
         match key {
             "connections" | "saved" => Self::Connections,
-            "sftp" | "terminal" => Self::Terminal,
+            "connection_pool" | "sftp" | "terminal" => Self::Terminal,
             "connection_monitor" => Self::Activity,
             "forwards" | "activity" => Self::Activity,
-            "network" => Self::Network,
+            "network" | "topology" => Self::Network,
             "extensions" => Self::Extensions,
             "ai" | "assistant" => Self::Assistant,
             "automation" => Self::Automation,
@@ -66,9 +66,9 @@ impl SidebarSection {
         match self {
             Self::Sessions => "sessions",
             Self::Connections => "connections",
-            Self::Terminal => "terminal",
+            Self::Terminal => "connection_pool",
             Self::Activity => "activity",
-            Self::Network => "network",
+            Self::Network => "topology",
             Self::Extensions => "extensions",
             Self::Assistant => "ai",
             Self::Automation => "automation",

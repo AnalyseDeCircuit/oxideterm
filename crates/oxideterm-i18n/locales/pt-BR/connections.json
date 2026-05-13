@@ -14,7 +14,9 @@
       "sftp": "SFTP",
       "forwards": "Encaminhamentos",
       "summary": "Total: {{total}} conexões • Referências: {{refs}}",
-      "live": "AO VIVO"
+      "live": "AO VIVO",
+      "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
+      "topology_roots_children": "{{roots}} roots / {{children}} children"
     }
   }
 }

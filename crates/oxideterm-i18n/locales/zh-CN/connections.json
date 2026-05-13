@@ -14,6 +14,8 @@
       "sftp": "SFTP",
       "forwards": "转发",
       "summary": "总计: {{total}} 个连接 • 引用: {{refs}}",
+      "topology_nodes_edges": "节点: {{nodes}} • 边: {{edges}}",
+      "topology_roots_children": "{{roots}} 个根 / {{children}} 个子节点",
       "live": "实时"
     }
   }

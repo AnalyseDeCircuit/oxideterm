@@ -37,5 +37,35 @@
       "confirm": "Xác nhận",
       "delete": "Xóa"
     }
+  },
+  "topology": {
+    "button_title": "Chế độ xem Topology",
+    "title": "Ma trận kết nối",
+    "system_status": "TRẠNG_THÁI_HỆ_THỐNG: TRỰC_TUYẾN",
+    "legend_title": "Trạng thái tín hiệu",
+    "status_active": "Hoạt động",
+    "status_connecting": "Đang kết nối",
+    "status_idle": "Rảnh",
+    "stats_single": "1 kết nối hoạt động",
+    "stats_multiple": "{{count}} kết nối hoạt động, độ sâu tối đa: {{depth}}",
+    "page": {
+      "title": "Ma trận kết nối",
+      "description": "Topology trực quan của các tunnel SSH và jump host đang hoạt động.",
+      "no_connections": "Không có kết nối hoạt động",
+      "connect_hint": "Kết nối đến máy chủ để điền vào ma trận."
+    },
+    "view": {
+      "no_matrix": "Không có ma trận hoạt động",
+      "connect_to_populate": "Kết nối đến máy chủ để điền"
+    },
+    "menu": {
+      "navigate_session": "Điều hướng đến phiên hoạt động",
+      "new_terminal": "Terminal mới",
+      "open_sftp": "Mở SFTP",
+      "close_hint": "Nhấn ra ngoài để đóng"
+    },
+    "controls": {
+      "instructions": "Cuộn để zoom · Kéo để di chuyển · Nhấn đúp vào nút để mở menu"
+    }
   }
 }
