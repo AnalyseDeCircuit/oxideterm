@@ -22,6 +22,9 @@ pub struct ResourceMetrics {
     pub memory_used: Option<u64>,
     pub memory_total: Option<u64>,
     pub memory_percent: Option<f64>,
+    pub disk_used: Option<u64>,
+    pub disk_total: Option<u64>,
+    pub disk_percent: Option<f64>,
     pub load_avg_1: Option<f64>,
     pub load_avg_5: Option<f64>,
     pub load_avg_15: Option<f64>,
@@ -40,6 +43,9 @@ impl ResourceMetrics {
             memory_used: None,
             memory_total: None,
             memory_percent: None,
+            disk_used: None,
+            disk_total: None,
+            disk_percent: None,
             load_avg_1: None,
             load_avg_5: None,
             load_avg_15: None,
@@ -104,6 +110,7 @@ pub fn parse_resource_metrics(
     let cpu_snap = parse_cpu_snapshot(output);
     let net_snap = parse_net_snapshot(output);
     let mem = parse_meminfo(output);
+    let disk = parse_disk_usage(output);
     let load = parse_loadavg(output);
     let nproc = parse_nproc(output);
 
@@ -154,9 +161,28 @@ pub fn parse_resource_metrics(
         None => (None, None, None),
     };
 
-    let source = match (cpu_snap.is_some(), mem.is_some(), load.is_some()) {
-        (true, true, true) => MetricsSource::Full,
-        (true, _, _) | (_, true, _) | (_, _, true) => MetricsSource::Partial,
+    let (disk_used, disk_total, disk_percent) = match disk {
+        Some((used, total)) => {
+            let percent = if total > 0 {
+                Some((used as f64 / total as f64) * 100.0)
+            } else {
+                None
+            };
+            (Some(used), Some(total), percent)
+        }
+        None => (None, None, None),
+    };
+
+    let source = match (
+        cpu_snap.is_some(),
+        mem.is_some(),
+        load.is_some(),
+        disk.is_some(),
+    ) {
+        (true, true, true, _) => MetricsSource::Full,
+        (true, _, _, _) | (_, true, _, _) | (_, _, true, _) | (_, _, _, true) => {
+            MetricsSource::Partial
+        }
         _ => MetricsSource::RttOnly,
     };
 
@@ -166,6 +192,9 @@ pub fn parse_resource_metrics(
         memory_used,
         memory_total,
         memory_percent,
+        disk_used,
+        disk_total,
+        disk_percent,
         load_avg_1: load.map(|(one, _, _)| one),
         load_avg_5: load.map(|(_, five, _)| five),
         load_avg_15: load.map(|(_, _, fifteen)| fifteen),
@@ -302,6 +331,21 @@ pub fn parse_nproc(output: &str) -> Option<u32> {
     section.lines().next()?.trim().parse().ok()
 }
 
+pub fn parse_disk_usage(output: &str) -> Option<(u64, u64)> {
+    let section = extract_section(output, "DISK")?;
+    let line = section.lines().find(|line| !line.trim().is_empty())?;
+    let parts = line.split_whitespace().collect::<Vec<_>>();
+    if parts.len() < 3 {
+        return None;
+    }
+    let total_kib = parts[1].parse::<u64>().ok()?;
+    let used_kib = parts[2].parse::<u64>().ok()?;
+    Some((
+        used_kib.saturating_mul(1024),
+        total_kib.saturating_mul(1024),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,6 +362,8 @@ Inter-|   Receive                                                |  Transmit
  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
     lo: 1000 0 0 0 0 0 0 0 2000 0 0 0 0 0 0 0
   eth0: 987654321 0 0 0 0 0 0 0 123456789 0 0 0 0 0 0 0
+===DISK===
+/dev/root 104857600 52428800 52428800 50% /
 ===NPROC===
 4
 ===END==="#;
@@ -330,6 +376,9 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(metrics.cpu_percent, None);
         assert_eq!(metrics.memory_used, Some(8_192_000 * 1024));
         assert_eq!(metrics.memory_total, Some(16_384_000 * 1024));
+        assert_eq!(metrics.disk_used, Some(52_428_800 * 1024));
+        assert_eq!(metrics.disk_total, Some(104_857_600 * 1024));
+        assert_eq!(metrics.disk_percent, Some(50.0));
         assert_eq!(metrics.load_avg_1, Some(0.52));
         assert_eq!(metrics.cpu_cores, Some(4));
         assert_eq!(metrics.net_rx_bytes_per_sec, None);
@@ -365,12 +414,23 @@ Inter-|   Receive                                                |  Transmit
 
     #[test]
     fn partial_metrics_keep_tauri_source_semantics() {
-        let output = "===MEMINFO===\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n===END===";
+        let output = "===MEMINFO===\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n===DISK===\n/dev/root 2048 1024 1024 50% /\n===END===";
         let metrics = parse_resource_metrics(output, None, 1);
 
         assert_eq!(metrics.source, MetricsSource::Partial);
         assert_eq!(metrics.memory_used, Some(512 * 1024));
+        assert_eq!(metrics.disk_used, Some(1024 * 1024));
         assert_eq!(metrics.cpu_percent, None);
+    }
+
+    #[test]
+    fn parses_root_disk_usage_from_df_posix_output() {
+        let output = "===DISK===\n/dev/disk1s1 411528304 178655880 232872424 44% /\n===END===";
+
+        assert_eq!(
+            parse_disk_usage(output),
+            Some((178_655_880 * 1024, 411_528_304 * 1024))
+        );
     }
 
     #[test]

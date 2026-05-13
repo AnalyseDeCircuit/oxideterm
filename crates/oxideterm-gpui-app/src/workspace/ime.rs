@@ -29,6 +29,8 @@ pub(super) enum WorkspaceImeTarget {
     FileManager(FileManagerInput),
     Launcher(LauncherInput),
     Graphics(GraphicsInput),
+    AiModelSelectorSearch,
+    AiChatInput,
     Sftp(SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
@@ -47,6 +49,8 @@ impl WorkspaceImeTarget {
             Self::FileManager(input) => 1_800 + input.anchor_key(),
             Self::Launcher(input) => 1_850 + input.anchor_key(),
             Self::Graphics(input) => 1_875 + input.anchor_key(),
+            Self::AiModelSelectorSearch => 1_895,
+            Self::AiChatInput => 1_896,
             Self::Sftp(input) => 1_900 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
@@ -373,6 +377,19 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Sftp(input));
         }
 
+        if self.active_sidebar_section == super::sidebar::SidebarSection::Assistant
+            && self.ai_model_selector_open
+            && self.ai_model_selector_search_focused
+        {
+            return Some(WorkspaceImeTarget::AiModelSelectorSearch);
+        }
+
+        if self.active_sidebar_section == super::sidebar::SidebarSection::Assistant
+            && self.ai_chat_input_focused
+        {
+            return Some(WorkspaceImeTarget::AiChatInput);
+        }
+
         if self.terminal_command_bar_focused && self.active_tab().is_some_and(is_terminal_tab) {
             return Some(WorkspaceImeTarget::TerminalCommandBar);
         }
@@ -464,6 +481,12 @@ impl WorkspaceApp {
                     None
                 }
             }
+            WorkspaceImeTarget::AiModelSelectorSearch => self
+                .ai_model_selector_search_focused
+                .then(|| self.ai_model_selector_search_query.clone()),
+            WorkspaceImeTarget::AiChatInput => self
+                .ai_chat_input_focused
+                .then(|| self.ai_chat_draft.clone()),
             WorkspaceImeTarget::Sftp(input) => {
                 if self.sftp_view.focused_input == Some(input) {
                     Some(self.sftp_input_value(input).to_string())
@@ -642,6 +665,24 @@ impl WorkspaceApp {
                         replacement_range,
                         text,
                     );
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::AiModelSelectorSearch => {
+                if self.ai_model_selector_search_focused {
+                    replace_utf16(
+                        &mut self.ai_model_selector_search_query,
+                        replacement_range,
+                        text,
+                    );
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::AiChatInput => {
+                if self.ai_chat_input_focused {
+                    replace_utf16(&mut self.ai_chat_draft, replacement_range, text);
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

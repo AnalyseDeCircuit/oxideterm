@@ -512,6 +512,7 @@
       "model": "Modell",
       "api_key": "API-Schlüssel",
       "api_key_stored": "Sicher im System-Schlüsselbund gespeichert.",
+      "api_key_missing": "API-Schlüssel fehlt.",
       "remove": "Entfernen",
       "remove_confirm": "API-Schlüssel entfernen?",
       "remove_failed": "API-Schlüssel konnte nicht entfernt werden: {{error}}",

@@ -234,7 +234,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn edit_settings(&mut self, edit: impl FnOnce(&mut PersistedSettings), cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn edit_settings(
+        &mut self,
+        edit: impl FnOnce(&mut PersistedSettings),
+        cx: &mut Context<Self>,
+    ) {
         edit(self.settings_store.settings_mut());
         let settings = self.settings_store.settings().clone();
         self.i18n

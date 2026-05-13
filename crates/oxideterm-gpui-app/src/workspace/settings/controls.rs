@@ -583,6 +583,29 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Ai, SettingsSelect::AiProviderTemplate) => {
+                let mut popup = select_overlay_popup(&self.tokens, width.max(AI_PROVIDER_SELECT_W));
+                for template in AI_PROVIDER_TEMPLATES {
+                    let provider_type = template.provider_type.to_string();
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            self.i18n.t(template.label_key),
+                            self.ai_new_provider_type == template.provider_type,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.ai_new_provider_type = provider_type.clone();
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             (SettingsTab::Sftp, SettingsSelect::SftpConcurrent) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &count in sftp_concurrent_options() {

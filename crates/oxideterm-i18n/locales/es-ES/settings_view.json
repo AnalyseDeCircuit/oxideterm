@@ -512,6 +512,7 @@
       "model": "Modelo",
       "api_key": "Clave API",
       "api_key_stored": "Almacenada de forma segura en el llavero del sistema.",
+      "api_key_missing": "Falta la clave API.",
       "remove": "Eliminar",
       "remove_confirm": "¿Eliminar clave API?",
       "remove_failed": "Error al eliminar la clave API: {{error}}",

@@ -512,6 +512,7 @@
       "model": "Modèle",
       "api_key": "Clé API",
       "api_key_stored": "Stockée de manière sécurisée dans le trousseau système.",
+      "api_key_missing": "Clé API manquante.",
       "remove": "Supprimer",
       "remove_confirm": "Supprimer la clé API ?",
       "remove_failed": "Échec de la suppression de la clé API : {{error}}",

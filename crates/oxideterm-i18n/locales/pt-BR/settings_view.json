@@ -512,6 +512,7 @@
       "model": "Modelo",
       "api_key": "Chave de API",
       "api_key_stored": "Armazenada de forma segura no chaveiro do sistema.",
+      "api_key_missing": "Chave de API ausente.",
       "remove": "Remover",
       "remove_confirm": "Remover chave de API?",
       "remove_failed": "Falha ao remover chave de API: {{error}}",

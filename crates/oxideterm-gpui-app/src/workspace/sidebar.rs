@@ -84,6 +84,7 @@ impl SidebarSection {
 include!("sidebar/state.rs");
 include!("sidebar/titlebar.rs");
 include!("sidebar/activity.rs");
+include!("sidebar/ai.rs");
 include!("sidebar/region.rs");
 include!("sidebar/sessions.rs");
 include!("sidebar/saved.rs");

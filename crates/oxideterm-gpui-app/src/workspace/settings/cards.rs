@@ -307,7 +307,7 @@ impl WorkspaceApp {
         match key {
             "escape" => {
                 self.focused_settings_input = None;
-                self.settings_input_draft.clear();
+                self.clear_settings_input_draft(input);
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
@@ -327,7 +327,7 @@ impl WorkspaceApp {
                     return true;
                 }
                 self.focused_settings_input = None;
-                self.settings_input_draft.clear();
+                self.clear_settings_input_draft(input);
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
@@ -343,8 +343,8 @@ impl WorkspaceApp {
 
     pub(super) fn blur_text_inputs(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
-        if self.focused_settings_input.take().is_some() {
-            self.settings_input_draft.clear();
+        if let Some(input) = self.focused_settings_input.take() {
+            self.clear_settings_input_draft(input);
             self.ime_marked_text = None;
             changed = true;
         }
@@ -466,6 +466,13 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn clear_settings_input_draft(&mut self, input: SettingsInput) {
+        if settings_input_is_secret(input) {
+            zeroize::Zeroize::zeroize(&mut self.settings_input_draft);
+        }
+        self.settings_input_draft.clear();
+    }
+
     fn current_settings_input_value(&self, input: SettingsInput) -> String {
         let settings = self.settings_store.settings();
         match input {
@@ -558,6 +565,25 @@ impl WorkspaceApp {
                 .get(index)
                 .and_then(|rule| rule.background.clone())
                 .unwrap_or_default(),
+            SettingsInput::AiProviderName(index) => settings
+                .ai
+                .providers
+                .get(index)
+                .and_then(|provider| ai_provider_string(provider, "name"))
+                .unwrap_or_default(),
+            SettingsInput::AiProviderBaseUrl(index) => settings
+                .ai
+                .providers
+                .get(index)
+                .and_then(|provider| ai_provider_string(provider, "baseUrl"))
+                .unwrap_or_default(),
+            SettingsInput::AiProviderDefaultModel(index) => settings
+                .ai
+                .providers
+                .get(index)
+                .and_then(|provider| ai_provider_string(provider, "defaultModel"))
+                .unwrap_or_default(),
+            SettingsInput::AiProviderApiKey(_) => String::new(),
         }
     }
 
@@ -753,6 +779,45 @@ impl WorkspaceApp {
                     cx,
                 );
             }
+            SettingsInput::AiProviderName(index) => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    |settings| {
+                        ai_update_provider(settings, index, |provider| {
+                            provider.insert("name".to_string(), serde_json::json!(value.clone()));
+                        });
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::AiProviderBaseUrl(index) => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    |settings| {
+                        ai_update_provider(settings, index, |provider| {
+                            provider.insert("baseUrl".to_string(), serde_json::json!(value.clone()));
+                        });
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::AiProviderDefaultModel(index) => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    |settings| {
+                        ai_update_provider(settings, index, |provider| {
+                            provider.insert(
+                                "defaultModel".to_string(),
+                                serde_json::json!(value.clone()),
+                            );
+                        });
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::AiProviderApiKey(_) => {
+                cx.notify();
+            }
         }
     }
 
@@ -913,6 +978,10 @@ impl WorkspaceApp {
 
 fn settings_input_accepts_newline(input: SettingsInput) -> bool {
     matches!(input, SettingsInput::TerminalCommandBarFocusHandoff)
+}
+
+fn settings_input_is_secret(input: SettingsInput) -> bool {
+    matches!(input, SettingsInput::AiProviderApiKey(_))
 }
 
 fn parse_focus_handoff_command_list(input: &str) -> Vec<String> {

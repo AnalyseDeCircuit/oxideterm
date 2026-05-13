@@ -14,6 +14,7 @@ chrono.workspace = true
 gpui-component.workspace = true
 gpui.workspace = true
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
+oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-code-editor = { path = "../oxideterm-code-editor", features = ["syntax"] }
@@ -50,6 +51,7 @@ uuid.workspace = true
 walkdir = "2"
 wry.workspace = true
 zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }
+zeroize.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true

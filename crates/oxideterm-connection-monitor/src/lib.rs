@@ -12,8 +12,9 @@ mod stats;
 
 pub use metrics::{
     CpuSnapshot, MetricsSource, NetSnapshot, PreviousResourceSample, RESOURCE_HISTORY_CAPACITY,
-    ResourceMetrics, parse_cpu_snapshot, parse_loadavg, parse_meminfo, parse_net_snapshot,
-    parse_nproc, parse_resource_metrics, previous_sample_from_metrics, push_history,
+    ResourceMetrics, parse_cpu_snapshot, parse_disk_usage, parse_loadavg, parse_meminfo,
+    parse_net_snapshot, parse_nproc, parse_resource_metrics, previous_sample_from_metrics,
+    push_history,
 };
 pub use profiler::{
     ConnectionProfilerSnapshot, ProfilerRegistry, ProfilerState, ProfilerUpdate,

@@ -17,6 +17,7 @@
       "no_data": "データなし",
       "cpu": "CPU",
       "memory": "メモリ",
+      "disk": "ディスク",
       "network": "ネットワーク I/O",
       "load_avg": "負荷平均",
       "rtt": "RTT レイテンシ",

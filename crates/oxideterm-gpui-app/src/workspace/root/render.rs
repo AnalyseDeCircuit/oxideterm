@@ -227,6 +227,15 @@ impl Render for WorkspaceApp {
                     let _ = this.handle_settings_input_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.active_sidebar_section == sidebar::SidebarSection::Assistant
+                    && (this.ai_chat_input_focused || this.ai_model_selector_search_focused)
+                {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    let _ = this.handle_ai_sidebar_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this
                     .terminal_cast_player
                     .as_ref()
@@ -444,6 +453,12 @@ impl Render for WorkspaceApp {
             })
             .when(self.keyboard_interactive_challenge.is_some(), |root| {
                 root.child(self.render_keyboard_interactive_dialog(cx))
+            })
+            .when(self.show_ai_enable_confirm, |root| {
+                root.child(self.render_ai_enable_confirm_dialog(cx))
+            })
+            .when(self.ai_provider_key_remove_confirm.is_some(), |root| {
+                root.child(self.render_ai_provider_key_remove_confirm_dialog(cx))
             })
             .when(
                 self.active_tab()

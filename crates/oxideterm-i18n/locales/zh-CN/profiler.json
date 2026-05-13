@@ -17,6 +17,7 @@
       "no_data": "暂无数据",
       "cpu": "CPU",
       "memory": "内存",
+      "disk": "磁盘",
       "network": "网络 I/O",
       "load_avg": "平均负载",
       "rtt": "RTT 延迟",

@@ -17,6 +17,7 @@
       "no_data": "Sem dados",
       "cpu": "CPU",
       "memory": "Memória",
+      "disk": "Disco",
       "network": "E/S de Rede",
       "load_avg": "Carga média",
       "rtt": "Latência RTT",

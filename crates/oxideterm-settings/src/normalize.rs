@@ -3,6 +3,7 @@
 
 use anyhow::{Context, Result};
 use serde_json::{Map, Value, json};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::model::*;
 
@@ -38,6 +39,120 @@ fn get_path_mut<'a>(value: &'a mut Value, path: &[&str]) -> Option<&'a mut Value
 
 fn object_mut<'a>(value: &'a mut Value, key: &str) -> Option<&'a mut Map<String, Value>> {
     value.get_mut(key).and_then(Value::as_object_mut)
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
+        .unwrap_or(0)
+}
+
+fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
+    let Some(ai) = settings.get_mut("ai").and_then(Value::as_object_mut) else {
+        return;
+    };
+    if ai
+        .get("providers")
+        .and_then(Value::as_array)
+        .is_some_and(|providers| !providers.is_empty())
+    {
+        return;
+    }
+
+    let base_url = ai
+        .get("baseUrl")
+        .and_then(Value::as_str)
+        .unwrap_or("https://api.openai.com/v1")
+        .to_string();
+    let legacy_model = ai
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.trim().is_empty())
+        .unwrap_or("gpt-4o-mini")
+        .to_string();
+    let created_at = now_ms();
+    let mut providers = vec![
+        json!({
+            "id": "builtin-openai",
+            "type": "openai",
+            "name": "OpenAI",
+            "baseUrl": "https://api.openai.com/v1",
+            "defaultModel": "gpt-4o-mini",
+            "models": [],
+            "enabled": true,
+            "createdAt": created_at,
+        }),
+        json!({
+            "id": "builtin-anthropic",
+            "type": "anthropic",
+            "name": "Anthropic",
+            "baseUrl": "https://api.anthropic.com",
+            "defaultModel": "claude-sonnet-4-20250514",
+            "models": [],
+            "enabled": true,
+            "createdAt": created_at,
+        }),
+        json!({
+            "id": "builtin-deepseek",
+            "type": "deepseek",
+            "name": "DeepSeek",
+            "baseUrl": "https://api.deepseek.com",
+            "defaultModel": "deepseek-v4-flash",
+            "models": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
+            "enabled": true,
+            "createdAt": created_at,
+        }),
+        json!({
+            "id": "builtin-gemini",
+            "type": "gemini",
+            "name": "Google Gemini",
+            "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+            "defaultModel": "gemini-2.0-flash",
+            "models": [],
+            "enabled": true,
+            "createdAt": created_at,
+        }),
+        json!({
+            "id": "builtin-ollama",
+            "type": "ollama",
+            "name": "Ollama (Local)",
+            "baseUrl": "http://localhost:11434",
+            "defaultModel": "",
+            "models": [],
+            "enabled": false,
+            "createdAt": created_at,
+        }),
+    ];
+
+    let default_openai_url = "https://api.openai.com/v1";
+    let active_provider_id = if !base_url.is_empty() && base_url != default_openai_url {
+        providers.insert(
+            0,
+            json!({
+                "id": format!("custom-migrated-{created_at}"),
+                "type": "openai_compatible",
+                "name": "Custom (Migrated)",
+                "baseUrl": base_url.clone(),
+                "defaultModel": legacy_model.clone(),
+                "models": [legacy_model.clone()],
+                "enabled": true,
+                "createdAt": created_at,
+            }),
+        );
+        providers
+            .first()
+            .and_then(|provider| provider.get("id"))
+            .cloned()
+            .unwrap_or_else(|| json!("builtin-openai"))
+    } else {
+        json!("builtin-openai")
+    };
+
+    ai.insert("providers".to_string(), Value::Array(providers));
+    ai.insert("activeProviderId".to_string(), active_provider_id);
+    ai.insert("activeModel".to_string(), json!(legacy_model));
+    warnings.push("Migrated AI settings to multi-provider format".to_string());
 }
 
 fn clamp_i64(
@@ -122,6 +237,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     if let Some(object) = settings.as_object_mut() {
         object.insert("version".to_string(), json!(SETTINGS_SCHEMA_VERSION));
     }
+    migrate_ai_providers(&mut settings, &mut migration_warnings);
 
     if saved_version < SETTINGS_SCHEMA_VERSION
         && let Some(old_scrollback) = raw
@@ -354,4 +470,90 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         migration_warnings,
         validation_warnings,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrates_empty_ai_providers_to_tauri_builtin_defaults() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "providers": []
+            }
+        }))
+        .expect("sanitize settings");
+
+        let providers = sanitized.settings.ai.providers;
+        assert_eq!(providers.len(), 5);
+        assert_eq!(
+            providers
+                .first()
+                .and_then(|provider| provider.get("id"))
+                .and_then(Value::as_str),
+            Some("builtin-openai")
+        );
+        assert_eq!(
+            providers
+                .iter()
+                .find(
+                    |provider| provider.get("id").and_then(Value::as_str) == Some("builtin-ollama")
+                )
+                .and_then(|provider| provider.get("enabled"))
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            sanitized.settings.ai.active_provider_id.as_deref(),
+            Some("builtin-openai")
+        );
+        assert_eq!(
+            sanitized.settings.ai.active_model.as_deref(),
+            Some("gpt-4o-mini")
+        );
+    }
+
+    #[test]
+    fn migrates_legacy_custom_ai_base_url_first() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "baseUrl": "https://gateway.example/v1",
+                "model": "gateway-model",
+                "providers": []
+            }
+        }))
+        .expect("sanitize settings");
+
+        let first = sanitized
+            .settings
+            .ai
+            .providers
+            .first()
+            .expect("first provider");
+        assert_eq!(
+            first.get("type").and_then(Value::as_str),
+            Some("openai_compatible")
+        );
+        assert_eq!(
+            first.get("baseUrl").and_then(Value::as_str),
+            Some("https://gateway.example/v1")
+        );
+        assert_eq!(
+            first
+                .get("models")
+                .and_then(Value::as_array)
+                .and_then(|models| models.first())
+                .and_then(Value::as_str),
+            Some("gateway-model")
+        );
+        assert_eq!(
+            sanitized.settings.ai.active_provider_id.as_deref(),
+            first.get("id").and_then(Value::as_str)
+        );
+        assert_eq!(
+            sanitized.settings.ai.active_model.as_deref(),
+            Some("gateway-model")
+        );
+    }
 }

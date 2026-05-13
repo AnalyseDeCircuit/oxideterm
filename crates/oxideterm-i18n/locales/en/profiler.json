@@ -17,6 +17,7 @@
       "no_data": "No data available",
       "cpu": "CPU",
       "memory": "Memory",
+      "disk": "Disk",
       "network": "Network I/O",
       "load_avg": "Load Average",
       "rtt": "RTT Latency",

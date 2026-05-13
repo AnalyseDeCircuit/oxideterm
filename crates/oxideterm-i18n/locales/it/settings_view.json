@@ -512,6 +512,7 @@
       "model": "Modello",
       "api_key": "Chiave API",
       "api_key_stored": "Memorizzata in modo sicuro nel portachiavi di sistema.",
+      "api_key_missing": "Chiave API mancante.",
       "remove": "Rimuovi",
       "remove_confirm": "Rimuovere la chiave API?",
       "remove_failed": "Impossibile rimuovere la chiave API: {{error}}",

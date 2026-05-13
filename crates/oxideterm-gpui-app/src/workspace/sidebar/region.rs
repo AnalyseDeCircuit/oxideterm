@@ -50,6 +50,7 @@ impl WorkspaceApp {
         let title_key = match self.active_sidebar_section {
             SidebarSection::Connections => "sidebar.panels.saved_connections",
             SidebarSection::Notifications => "sidebar.panels.event_log",
+            SidebarSection::Assistant => "ai.chat.title",
             _ => "sidebar.panels.sessions",
         };
         let mut header = div()
@@ -67,7 +68,10 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text_muted))
                     .child(self.i18n.t(title_key).to_uppercase()),
             );
-        if self.active_sidebar_section != SidebarSection::Connections {
+        if matches!(
+            self.active_sidebar_section,
+            SidebarSection::Sessions | SidebarSection::Notifications
+        ) {
             header = header
                 .child(self.render_sidebar_action(LucideIcon::Folder, SidebarActionKind::None, cx))
                 .child(self.render_sidebar_action(LucideIcon::Network, SidebarActionKind::AutoRoute, cx))
@@ -150,6 +154,9 @@ impl WorkspaceApp {
         }
         if self.active_sidebar_section == SidebarSection::Sessions {
             return self.render_active_sessions_sidebar_content(cx);
+        }
+        if self.active_sidebar_section == SidebarSection::Assistant {
+            return self.render_ai_sidebar_content(cx);
         }
         self.render_empty_sessions_sidebar_content()
     }

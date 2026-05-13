@@ -512,6 +512,7 @@
       "model": "モデル",
       "api_key": "APIキー",
       "api_key_stored": "システムキーチェーンに安全に保存されています。",
+      "api_key_missing": "APIキーがありません。",
       "remove": "削除",
       "remove_confirm": "APIキーを削除しますか？",
       "remove_failed": "APIキーの削除に失敗しました: {{error}}",

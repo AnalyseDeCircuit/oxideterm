@@ -512,6 +512,7 @@
       "model": "模型",
       "api_key": "API 密钥",
       "api_key_stored": "存储在系统钥匙串中。",
+      "api_key_missing": "缺少 API 密钥。",
       "remove": "移除",
       "remove_confirm": "移除 API 密钥？",
       "remove_failed": "移除 API 密钥失败: {{error}}",

@@ -30,6 +30,7 @@ pub enum SelectAnchorId {
     SettingsReconnectMaxAttempts,
     SettingsReconnectBaseDelay,
     SettingsReconnectMaxDelay,
+    SettingsAiProviderTemplate,
     SettingsSftpConcurrent,
     SettingsSftpDirectoryParallelism,
     SettingsSftpConflict,

@@ -512,6 +512,7 @@
       "model": "Model",
       "api_key": "API Key",
       "api_key_stored": "Được lưu trữ an toàn trong keychain hệ thống.",
+      "api_key_missing": "Thiếu API key.",
       "remove": "Xóa",
       "remove_confirm": "Xóa API key?",
       "remove_failed": "Không thể xóa API key: {{error}}",

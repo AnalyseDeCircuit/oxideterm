@@ -17,6 +17,7 @@
       "no_data": "Không có dữ liệu",
       "cpu": "CPU",
       "memory": "Bộ nhớ",
+      "disk": "Đĩa",
       "network": "I/O Mạng",
       "load_avg": "Tải trung bình",
       "rtt": "Độ trễ RTT",

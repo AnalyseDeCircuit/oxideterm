@@ -1916,6 +1916,20 @@ impl WorkspaceApp {
                 history.iter().map(|metric| metric.memory_percent).collect(),
             ));
         }
+        if !is_rtt_only && metrics.disk_used.is_some() && metrics.disk_total.is_some() {
+            panel = panel.child(self.render_metric_card(
+                self.i18n.t("profiler.panel.disk"),
+                format!(
+                    "{} / {}",
+                    format_bytes(metrics.disk_used.unwrap_or_default()),
+                    format_bytes(metrics.disk_total.unwrap_or_default())
+                ),
+                LucideIcon::HardDrive,
+                threshold_color(metrics.disk_percent),
+                metrics.disk_percent.map(|value| value as f32),
+                history.iter().map(|metric| metric.disk_percent).collect(),
+            ));
+        }
         if !is_rtt_only
             && (metrics.net_rx_bytes_per_sec.is_some() || metrics.net_tx_bytes_per_sec.is_some())
         {

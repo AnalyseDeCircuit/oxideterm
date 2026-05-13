@@ -54,6 +54,7 @@ pub enum SettingsSelect {
     ReconnectMaxAttempts,
     ReconnectBaseDelay,
     ReconnectMaxDelay,
+    AiProviderTemplate,
     SftpConcurrent,
     SftpDirectoryParallelism,
     SftpConflict,
@@ -82,6 +83,7 @@ impl SettingsSelect {
             Self::ReconnectMaxAttempts => SelectAnchorId::SettingsReconnectMaxAttempts,
             Self::ReconnectBaseDelay => SelectAnchorId::SettingsReconnectBaseDelay,
             Self::ReconnectMaxDelay => SelectAnchorId::SettingsReconnectMaxDelay,
+            Self::AiProviderTemplate => SelectAnchorId::SettingsAiProviderTemplate,
             Self::SftpConcurrent => SelectAnchorId::SettingsSftpConcurrent,
             Self::SftpDirectoryParallelism => SelectAnchorId::SettingsSftpDirectoryParallelism,
             Self::SftpConflict => SelectAnchorId::SettingsSftpConflict,
@@ -116,6 +118,10 @@ pub enum SettingsInput {
     HighlightPattern(usize),
     HighlightForeground(usize),
     HighlightBackground(usize),
+    AiProviderName(usize),
+    AiProviderBaseUrl(usize),
+    AiProviderDefaultModel(usize),
+    AiProviderApiKey(usize),
 }
 
 impl SettingsInput {
@@ -144,6 +150,10 @@ impl SettingsInput {
             Self::HighlightPattern(index) => 101 + index as u64 * 4,
             Self::HighlightForeground(index) => 102 + index as u64 * 4,
             Self::HighlightBackground(index) => 103 + index as u64 * 4,
+            Self::AiProviderName(index) => 20_000 + index as u64 * 4,
+            Self::AiProviderBaseUrl(index) => 20_001 + index as u64 * 4,
+            Self::AiProviderDefaultModel(index) => 20_002 + index as u64 * 4,
+            Self::AiProviderApiKey(index) => 20_003 + index as u64 * 4,
         }
     }
 }

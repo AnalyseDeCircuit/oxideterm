@@ -28,6 +28,18 @@ impl WorkspaceApp {
                 ForwardingRegistry::new_with_event_sender(forwarding_event_tx)
             }
         };
+        let ai_chat_path = default_ai_conversations_path();
+        let (ai_chat_store, ai_chat) = match oxideterm_ai::AiChatPersistenceStore::load(&ai_chat_path)
+        {
+            Ok((store, state)) => (store, state),
+            Err(error) => {
+                eprintln!("failed to load AI chat store: {error}");
+                (
+                    oxideterm_ai::AiChatPersistenceStore::new(ai_chat_path),
+                    oxideterm_ai::AiChatState::default(),
+                )
+            }
+        };
         // Mirror Tauri's split between SessionTree runtime state and NodeRouter:
         // the router resolves capabilities from this shared node runtime store
         // instead of owning the node lifecycle itself.
@@ -103,6 +115,33 @@ impl WorkspaceApp {
             active_settings_tab: SettingsTab::General,
             terminal_settings_page: TerminalSettingsPage::Display,
             open_settings_select: None,
+            ai_new_provider_type: "openai_compatible".to_string(),
+            ai_provider_settings_expanded: true,
+            expanded_ai_providers: HashSet::new(),
+            expanded_ai_provider_models: HashSet::new(),
+            ai_model_selector_open: false,
+            ai_model_selector_search_focused: false,
+            ai_model_selector_search_query: String::new(),
+            ai_model_selector_expanded_providers: HashSet::new(),
+            ai_model_selector_provider_online: HashMap::new(),
+            ai_model_selector_probe_generations: HashMap::new(),
+            ai_chat,
+            ai_chat_store,
+            ai_conversation_list_open: false,
+            ai_chat_menu_open: false,
+            ai_chat_draft: String::new(),
+            ai_chat_input_focused: false,
+            ai_chat_loading: false,
+            ai_chat_stream_generation: 0,
+            next_ai_chat_sequence: 0,
+            ai_key_store: oxideterm_ai::AiProviderKeyStore::new(),
+            ai_provider_key_status: HashMap::new(),
+            ai_model_refresh_generations: HashMap::new(),
+            ai_model_refreshing: HashSet::new(),
+            next_ai_model_refresh_generation: 0,
+            next_ai_model_selector_probe_generation: 0,
+            show_ai_enable_confirm: false,
+            ai_provider_key_remove_confirm: None,
             select_anchors: HashMap::new(),
             text_input_anchors: HashMap::new(),
             ime_marked_text: None,

@@ -512,6 +512,7 @@
       "model": "Model",
       "api_key": "API Key",
       "api_key_stored": "Stored securely in system keychain.",
+      "api_key_missing": "API key missing.",
       "remove": "Remove",
       "remove_confirm": "Remove API key?",
       "remove_failed": "Failed to remove API key: {{error}}",

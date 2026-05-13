@@ -17,6 +17,7 @@
       "no_data": "Keine Daten",
       "cpu": "CPU",
       "memory": "Speicher",
+      "disk": "Datenträger",
       "network": "Netzwerk-E/A",
       "load_avg": "Lastdurchschnitt",
       "rtt": "RTT-Latenz",

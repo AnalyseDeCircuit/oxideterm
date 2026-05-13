@@ -11,6 +11,21 @@ use oxideterm_theme::BUILT_IN_THEMES;
 
 use super::ime::WorkspaceImeTarget;
 use super::*;
+use oxideterm_ai::{
+    AI_PROVIDER_TEMPLATES, AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, AiProviderView,
+    add_provider_from_template as ai_add_provider_from_template,
+    apply_provider_model_refresh as ai_apply_provider_model_refresh, fetch_provider_models,
+    generated_provider_id, provider_id as ai_provider_id,
+    provider_key_display_state as ai_provider_key_display_state,
+    provider_refresh_key_policy as ai_provider_refresh_key_policy,
+    provider_string as ai_provider_string,
+    provider_template_by_type as ai_provider_template_by_type, provider_view as ai_provider_view,
+    provider_views as ai_provider_views_from_values, remove_provider_at as ai_remove_provider_at,
+    set_active_provider_selection as ai_set_active_provider_selection,
+    set_provider_default_model as ai_set_provider_default_model,
+    take_provider_key_secret as ai_take_provider_key_secret,
+    update_provider as ai_update_provider_values,
+};
 use oxideterm_connections::{
     SshConfigHost, list_available_ssh_keys, list_ssh_config_hosts, resolve_ssh_config_alias,
     saved_connection_from_ssh_host,
@@ -60,6 +75,7 @@ include!("settings/appearance.rs");
 include!("settings/connections_page.rs");
 include!("settings/sftp_page.rs");
 include!("settings/ide_page.rs");
+include!("settings/ai_page.rs");
 include!("settings/pages.rs");
 
 fn settings_tab_lucide(icon: SettingsTabIcon) -> LucideIcon {

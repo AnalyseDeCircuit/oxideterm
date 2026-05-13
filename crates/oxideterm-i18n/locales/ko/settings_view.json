@@ -512,6 +512,7 @@
       "model": "모델",
       "api_key": "API 키",
       "api_key_stored": "시스템 키체인에 안전하게 저장됨.",
+      "api_key_missing": "API 키가 없습니다.",
       "remove": "제거",
       "remove_confirm": "API 키를 제거하시겠습니까?",
       "remove_failed": "API 키 제거 실패: {{error}}",

@@ -28,7 +28,7 @@ pub const RESOURCE_MAX_OUTPUT_SIZE: usize = 65_536;
 pub const RESOURCE_MAX_CONSECUTIVE_FAILURES: u32 = 3;
 pub const RESOURCE_END_MARKER: &str = "===END===";
 
-const METRICS_COMMAND_LINUX: &str = "echo '===STAT==='; head -1 /proc/stat 2>/dev/null; echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo 2>/dev/null; echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; echo '===NPROC==='; nproc 2>/dev/null";
+const METRICS_COMMAND_LINUX: &str = "echo '===STAT==='; head -1 /proc/stat 2>/dev/null; echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo 2>/dev/null; echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; echo '===DISK==='; df -P -k / 2>/dev/null | tail -1; echo '===NPROC==='; nproc 2>/dev/null";
 const PORT_CMD_LINUX: &str = "echo '===PORTS==='; ((ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -i listen || true); echo '===PORTS_END==='; echo '===DOCKER==='; ((docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null || sudo -n docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null) || true); echo '===DOCKER_END==='";
 const PORT_CMD_MACOS: &str = "echo '===PORTS==='; ((lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null | tail -n +2) || true); echo '===PORTS_END==='; echo '===DOCKER==='; ((docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null || sudo -n docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null) || true); echo '===DOCKER_END==='";
 const PORT_CMD_WINDOWS: &str = "echo '===PORTS==='; powershell -NoProfile -Command \"Get-NetTCPConnection -State Listen 2>$null | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -HideTableHeaders\" 2>/dev/null; echo '===PORTS_END==='";
@@ -497,6 +497,8 @@ mod tests {
     #[test]
     fn builds_tauri_sampling_commands() {
         assert!(build_sample_command("Linux").contains("===STAT==="));
+        assert!(build_sample_command("Linux").contains("===DISK==="));
+        assert!(build_sample_command("Linux").contains("df -P -k /"));
         assert!(build_sample_command("Linux").contains("ss -tlnp"));
         assert!(build_sample_command("Darwin").contains("lsof -iTCP"));
         assert!(build_sample_command("Windows").contains("Get-NetTCPConnection"));

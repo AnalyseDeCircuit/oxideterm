@@ -17,6 +17,7 @@
       "no_data": "데이터 없음",
       "cpu": "CPU",
       "memory": "메모리",
+      "disk": "디스크",
       "network": "네트워크 I/O",
       "load_avg": "평균 부하",
       "rtt": "RTT 지연",
