@@ -27,6 +27,7 @@ oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-launcher = { path = "../oxideterm-launcher" }
 oxideterm-local-files = { path = "../oxideterm-local-files" }
+oxideterm-notification-center = { path = "../oxideterm-notification-center" }
 oxideterm-preview = { path = "../oxideterm-preview", features = ["pdfium"] }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }

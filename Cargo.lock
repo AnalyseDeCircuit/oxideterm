@@ -6579,6 +6579,7 @@ dependencies = [
  "oxideterm-i18n",
  "oxideterm-launcher",
  "oxideterm-local-files",
+ "oxideterm-notification-center",
  "oxideterm-preview",
  "oxideterm-render-policy",
  "oxideterm-settings",
@@ -6752,6 +6753,10 @@ dependencies = [
  "walkdir",
  "zip",
 ]
+
+[[package]]
+name = "oxideterm-notification-center"
+version = "0.1.0"
 
 [[package]]
 name = "oxideterm-preview"

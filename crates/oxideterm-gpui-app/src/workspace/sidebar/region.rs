@@ -151,69 +151,10 @@ impl WorkspaceApp {
         if self.active_sidebar_section == SidebarSection::Sessions {
             return self.render_active_sessions_sidebar_content(cx);
         }
-        if self.active_sidebar_section == SidebarSection::Notifications {
-            return self.render_activity_sidebar_content(cx);
-        }
         self.render_empty_sessions_sidebar_content()
     }
 
-    fn render_activity_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .flex_1()
-            .min_h(px(0.0))
-            .w_full()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .p_2()
-                    .border_b_1()
-                    .border_color(rgb(theme.border))
-                    .child(self.render_activity_tab_button(
-                        WorkspaceActivityView::Notifications,
-                        LucideIcon::Bell,
-                        self.i18n.t("sidebar.panels.notifications"),
-                        if self.notification_dnd_enabled {
-                            0
-                        } else {
-                            self.notification_unread_count
-                        },
-                        if self.notification_dnd_enabled {
-                            false
-                        } else {
-                            self.notification_unread_critical_count > 0
-                        },
-                        cx,
-                    ))
-                    .child(self.render_activity_tab_button(
-                        WorkspaceActivityView::EventLog,
-                        LucideIcon::History,
-                        self.i18n.t("sidebar.panels.event_log"),
-                        if self.event_log_dnd_enabled {
-                            0
-                        } else {
-                            self.event_log_unread_count
-                        },
-                        if self.event_log_dnd_enabled {
-                            false
-                        } else {
-                            self.event_log_unread_errors > 0
-                        },
-                        cx,
-                    )),
-            )
-            .child(match self.active_activity_view {
-                WorkspaceActivityView::Notifications => self.render_notifications_sidebar_content(cx),
-                WorkspaceActivityView::EventLog => self.render_event_log_sidebar_content(cx),
-            })
-            .into_any_element()
-    }
-
-    fn render_activity_tab_button(
+    pub(super) fn render_activity_tab_button(
         &self,
         view: WorkspaceActivityView,
         icon: LucideIcon,
@@ -223,7 +164,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_activity_view == view;
+        let active = self.notification_center.active_view == view;
         div()
             .h(px(28.0))
             .flex_1()
@@ -276,13 +217,13 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.active_activity_view = view;
+                    this.notification_center.active_view = view;
                     if view == WorkspaceActivityView::Notifications {
-                        this.notification_unread_count = 0;
-                        this.notification_unread_critical_count = 0;
+                        this.notification_center.notifications.unread_count = 0;
+                        this.notification_center.notifications.unread_critical_count = 0;
                     } else {
-                        this.event_log_unread_count = 0;
-                        this.event_log_unread_errors = 0;
+                        this.notification_center.event_log.unread_count = 0;
+                        this.notification_center.event_log.unread_errors = 0;
                     }
                     cx.notify();
                 }),
@@ -290,10 +231,9 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_notifications_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_notifications_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let filtered = self
-            .notification_entries
+        let filtered = self.notification_center.notifications.entries
             .iter()
             .rev()
             .filter(|entry| self.notification_matches_filter(entry))
@@ -323,7 +263,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .child(self.render_notifications_toolbar(cx))
-            .when(self.notification_dnd_enabled, |content| {
+            .when(self.notification_center.notifications.dnd_enabled, |content| {
                 content.child(
                     div()
                         .border_b_1()
@@ -361,16 +301,16 @@ impl WorkspaceApp {
             .border_color(rgb(theme.border))
             .child(self.render_activity_icon_button(
                 LucideIcon::Bell,
-                self.notification_dnd_enabled,
+                self.notification_center.notifications.dnd_enabled,
                 "Toggle notification DND",
                 cx.listener(|this, _event, _window, cx| {
-                    this.notification_dnd_enabled = !this.notification_dnd_enabled;
+                    this.notification_center.notifications.dnd_enabled = !this.notification_center.notifications.dnd_enabled;
                     cx.notify();
                 }),
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::ListTree,
-                self.notification_filter.status != WorkspaceNotificationStatusFilter::All,
+                self.notification_center.notifications.filter.status != WorkspaceNotificationStatusFilter::All,
                 "Cycle status filter",
                 cx.listener(|this, _event, _window, cx| {
                     this.cycle_notification_status_filter();
@@ -379,7 +319,7 @@ impl WorkspaceApp {
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::AlertCircle,
-                self.notification_filter.severity != WorkspaceNotificationSeverityFilter::All,
+                self.notification_center.notifications.filter.severity != WorkspaceNotificationSeverityFilter::All,
                 "Cycle severity filter",
                 cx.listener(|this, _event, _window, cx| {
                     this.cycle_notification_severity_filter();
@@ -388,7 +328,7 @@ impl WorkspaceApp {
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::Hash,
-                self.notification_filter.kind != WorkspaceNotificationKindFilter::All,
+                self.notification_center.notifications.filter.kind != WorkspaceNotificationKindFilter::All,
                 "Cycle kind filter",
                 cx.listener(|this, _event, _window, cx| {
                     this.cycle_notification_kind_filter();
@@ -417,10 +357,9 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_event_log_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_event_log_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let filtered = self
-            .event_log_entries
+        let filtered = self.notification_center.event_log.entries
             .iter()
             .rev()
             .filter(|entry| self.event_log_entry_matches_filter(entry))
@@ -433,7 +372,7 @@ impl WorkspaceApp {
                     .justify_center()
                     .text_size(px(12.0))
                     .text_color(rgb(theme.text_muted))
-                    .child("No connection events")
+                    .child(self.i18n.t("event_log.empty"))
                     .into_any_element(),
             ]
         } else {
@@ -450,7 +389,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .child(self.render_event_log_toolbar(cx))
-            .when(self.event_log_dnd_enabled, |content| {
+            .when(self.notification_center.event_log.dnd_enabled, |content| {
                 content.child(
                     div()
                         .border_b_1()
@@ -460,7 +399,7 @@ impl WorkspaceApp {
                         .py_2()
                         .text_size(px(11.0))
                         .text_color(rgb(0xfbbf24))
-                        .child("Do Not Disturb is on"),
+                        .child(self.i18n.t("event_log.dnd.on")),
                 )
             })
             .child(
@@ -501,16 +440,16 @@ impl WorkspaceApp {
             .child(div().flex_1())
             .child(self.render_activity_icon_button(
                 LucideIcon::Bell,
-                self.event_log_dnd_enabled,
+                self.notification_center.event_log.dnd_enabled,
                 "Toggle event log DND",
                 cx.listener(|this, _event, _window, cx| {
-                    this.event_log_dnd_enabled = !this.event_log_dnd_enabled;
+                    this.notification_center.event_log.dnd_enabled = !this.notification_center.event_log.dnd_enabled;
                     cx.notify();
                 }),
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::ListTree,
-                self.event_log_filter.severity != WorkspaceEventSeverityFilter::All,
+                self.notification_center.event_log.filter.severity != WorkspaceEventSeverityFilter::All,
                 "Cycle severity filter",
                 cx.listener(|this, _event, _window, cx| {
                     this.cycle_event_log_severity_filter();
@@ -519,7 +458,7 @@ impl WorkspaceApp {
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::Search,
-                self.event_log_filter.category != WorkspaceEventCategoryFilter::All,
+                self.notification_center.event_log.filter.category != WorkspaceEventCategoryFilter::All,
                 "Cycle category filter",
                 cx.listener(|this, _event, _window, cx| {
                     this.cycle_event_log_category_filter();
@@ -587,8 +526,7 @@ impl WorkspaceApp {
         let mut info = 0;
         let mut warn = 0;
         let mut error = 0;
-        for entry in self
-            .event_log_entries
+        for entry in self.notification_center.event_log.entries
             .iter()
             .filter(|entry| self.event_log_entry_matches_filter(entry))
         {
@@ -599,6 +537,25 @@ impl WorkspaceApp {
             }
         }
         (info, warn, error)
+    }
+
+    fn resolve_event_log_title(&self, entry: &WorkspaceEventLogEntry) -> String {
+        resolve_event_log_text(&self.i18n, &entry.title).unwrap_or_else(|| entry.title.clone())
+    }
+
+    fn resolve_event_log_detail(&self, entry: &WorkspaceEventLogEntry) -> Option<String> {
+        let detail = entry.detail.as_ref()?;
+        if let Some(resolved) = resolve_event_log_text(&self.i18n, detail) {
+            return Some(resolved);
+        }
+        if entry.source == "reconnect_orchestrator" {
+            let phase_key = format!("event_log.phase.{detail}");
+            let translated = self.i18n.t(&phase_key);
+            if translated != phase_key {
+                return Some(translated);
+            }
+        }
+        Some(detail.clone())
     }
 
     fn render_notification_row(
@@ -623,7 +580,7 @@ impl WorkspaceApp {
             .unwrap_or_else(|_| "0".to_string());
         let scope = match &entry.scope {
             WorkspaceNotificationScope::Global => "global".to_string(),
-            WorkspaceNotificationScope::Node(node_id) => node_id.0.clone(),
+            WorkspaceNotificationScope::Node(node_id) => node_id.clone(),
             WorkspaceNotificationScope::Connection(connection_id) => connection_id.clone(),
         };
 
@@ -672,7 +629,7 @@ impl WorkspaceApp {
                                             .text_color(rgb(theme.text_heading))
                                             .child(entry.title.clone()),
                                     )
-                                    .when(status_unread && !self.notification_dnd_enabled, |row| {
+                                    .when(status_unread && !self.notification_center.notifications.dnd_enabled, |row| {
                                         row.child(
                                             div()
                                                 .size(px(6.0))
@@ -726,8 +683,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if let Some(entry) = this
-                        .notification_entries
+                    if let Some(entry) = this.notification_center.notifications.entries
                         .iter_mut()
                         .find(|entry| entry.id == id)
                     {
@@ -760,7 +716,7 @@ impl WorkspaceApp {
         let mut meta = format!("#{} | {} | {}", entry.id, category, entry.source);
         if let Some(node_id) = &entry.node_id {
             meta.push_str(" | ");
-            meta.push_str(&node_id.0);
+            meta.push_str(node_id);
         }
         if let Some(connection_id) = &entry.connection_id {
             meta.push_str(" | ");
@@ -794,9 +750,9 @@ impl WorkspaceApp {
                                     .text_size(px(12.0))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(theme.text_heading))
-                                    .child(entry.title.clone()),
+                                    .child(self.resolve_event_log_title(entry)),
                             )
-                            .when_some(entry.detail.clone(), |body, detail| {
+                            .when_some(self.resolve_event_log_detail(entry), |body, detail| {
                                 body.child(
                                     div()
                                         .mt_1()
@@ -873,6 +829,24 @@ fn notification_kind_label(kind: WorkspaceNotificationKind) -> &'static str {
         WorkspaceNotificationKind::Plugin => "plugin",
         WorkspaceNotificationKind::Agent => "agent",
     }
+}
+
+fn resolve_event_log_text(i18n: &I18n, raw: &str) -> Option<String> {
+    if !raw.starts_with("event_log.") {
+        return None;
+    }
+    let (key, count) = raw
+        .split_once(':')
+        .map(|(key, value)| (key, value.parse::<usize>().ok()))
+        .unwrap_or((raw, None));
+    let mut translated = i18n.t(key);
+    if translated == key {
+        return Some(raw.to_string());
+    }
+    if let Some(count) = count {
+        translated = translated.replace("{{count}}", &count.to_string());
+    }
+    Some(translated)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

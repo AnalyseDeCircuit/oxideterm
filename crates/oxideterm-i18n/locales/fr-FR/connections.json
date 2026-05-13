@@ -1,5 +1,43 @@
 {
   "connections": {
+    "state": {
+      "connecting": "Connexion en cours...",
+      "active": "Actif",
+      "idle": "Inactif",
+      "disconnecting": "Déconnexion...",
+      "disconnected": "Déconnecté",
+      "error": "Erreur : {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "Connexion perdue - reconnexion en cours...",
+      "connection_closed": "Connexion fermée"
+    },
+    "time": {
+      "just_now": "À l'instant",
+      "mins_ago": "Il y a {{count}} min",
+      "hrs_ago": "Il y a {{count}} h"
+    },
+    "panel": {
+      "title": "Pool de connexions",
+      "description": "Gérer les connexions SSH actives et les paramètres de maintien en vie",
+      "refresh": "Actualiser",
+      "no_connections": "Aucune connexion SSH active",
+      "no_connections_hint": "Les nouvelles connexions apparaîtront ici",
+      "terminals": "{{count}} Terminaux",
+      "sftp": "{{count}} SFTP",
+      "forwards": "{{count}} Transferts",
+      "created": "Créé : {{time}}",
+      "idle_hint": "Inactif - {{keepAlive}}",
+      "keep_alive_enabled": "Maintien en vie",
+      "disconnect_in": "Déconnexion dans {{min}} min"
+    },
+    "keep_alive": {
+      "enable_tooltip": "Activer le maintien en vie (jamais déconnecter)",
+      "disable_tooltip": "Désactiver le maintien en vie (déconnecter après {{min}} min d'inactivité)",
+      "legend_enabled": "Maintien en vie : jamais de déconnexion automatique",
+      "legend_disabled": "Standard : déconnexion automatique après {{min}} min d'inactivité",
+      "global_never_tooltip": "Paramètre global : pas de délai d'expiration"
+    },
     "monitor": {
       "title": "Pool de connexions",
       "loading": "Chargement des statistiques...",
@@ -17,6 +55,15 @@
       "live": "En direct",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
-    }
+    },
+    "status": {
+      "reconnecting_title": "Reconnexion en cours",
+      "reconnecting_wait": "La connexion est en cours de restauration. Veuillez patienter et réessayer.",
+      "reconnect_unstable": "Connexion instable",
+      "try_again_later": "La connexion n'est pas encore stable. Veuillez réessayer plus tard.",
+      "connection_failed": "Échec de la connexion",
+      "no_connection_id": "Aucun identifiant de connexion n'a été attribué après la reconnexion."
+    },
+    "failedFetchStats": "Échec de la récupération des statistiques"
   }
 }

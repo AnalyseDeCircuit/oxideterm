@@ -1,0 +1,58 @@
+{
+  "event_log": {
+    "title": "イベントログ",
+    "dnd": {
+      "on": "おやすみモード",
+      "enable": "おやすみモードを有効化",
+      "disable": "おやすみモードを無効化",
+      "description": "新しいイベントは引き続き記録されますが、おやすみモードが有効な間は未読バッジとエラーカウンターは抑制されます。"
+    },
+    "empty": "イベントなし",
+    "clear": "すべてクリア",
+    "close": "パネルを閉じる",
+    "all": "すべて",
+    "filter_severity": "重要度でフィルター",
+    "filter_category": "カテゴリーでフィルター",
+    "severity": {
+      "info": "情報",
+      "warn": "警告",
+      "error": "エラー"
+    },
+    "category": {
+      "connection": "接続",
+      "reconnect": "再接続",
+      "node": "ノード"
+    },
+    "events": {
+      "connected": "接続完了",
+      "disconnected": "切断済み",
+      "link_down": "リンク断",
+      "reconnecting": "再接続中",
+      "affected_children": "{{count}} 件の子接続に影響",
+      "node_state_ready": "ノード準備完了",
+      "node_state_connecting": "ノード接続中",
+      "node_state_error": "ノードエラー",
+      "node_state_disconnected": "ノード切断済み",
+      "node_state_unknown": "ノード状態変更",
+      "already_connecting": "接続中のためスキップ",
+      "already_connected": "接続済みのためスキップ",
+      "reconnect_phase": "再接続パイプライン"
+    },
+    "phase": {
+      "queued": "キュー待ち",
+      "snapshot": "スナップショット",
+      "grace-period": "猶予期間",
+      "ssh-connect": "SSH接続",
+      "await-terminal": "ターミナル待ち",
+      "restore-forwards": "転送復元",
+      "resume-transfers": "転送再開",
+      "restore-ide": "IDE復元",
+      "verify": "検証",
+      "done": "完了",
+      "failed": "失敗",
+      "cancelled": "キャンセル済み"
+    },
+    "timeline": "Event timeline",
+    "timeline_hint": "Click to locate event"
+  }
+}

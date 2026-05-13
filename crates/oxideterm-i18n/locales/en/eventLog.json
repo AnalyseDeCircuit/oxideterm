@@ -1,0 +1,58 @@
+{
+  "event_log": {
+    "title": "Event Log",
+    "dnd": {
+      "on": "Do Not Disturb",
+      "enable": "Enable Do Not Disturb",
+      "disable": "Disable Do Not Disturb",
+      "description": "New events are still recorded, but unread badges and error counters are suppressed while Do Not Disturb is enabled."
+    },
+    "empty": "No events",
+    "clear": "Clear All",
+    "close": "Close Panel",
+    "all": "All",
+    "filter_severity": "Filter by Severity",
+    "filter_category": "Filter by Category",
+    "severity": {
+      "info": "Info",
+      "warn": "Warning",
+      "error": "Error"
+    },
+    "category": {
+      "connection": "Connection",
+      "reconnect": "Reconnect",
+      "node": "Node"
+    },
+    "events": {
+      "connected": "Connected",
+      "disconnected": "Disconnected",
+      "link_down": "Link Down",
+      "reconnecting": "Reconnecting",
+      "affected_children": "{{count}} child connection(s) affected",
+      "node_state_ready": "Node Ready",
+      "node_state_connecting": "Node Connecting",
+      "node_state_error": "Node Error",
+      "node_state_disconnected": "Node Disconnected",
+      "node_state_unknown": "Node State Changed",
+      "already_connecting": "Already connecting, skipped",
+      "already_connected": "Already connected, skipped",
+      "reconnect_phase": "Reconnect Pipeline"
+    },
+    "phase": {
+      "queued": "Queued",
+      "snapshot": "Snapshot",
+      "grace-period": "Grace Period",
+      "ssh-connect": "SSH Connect",
+      "await-terminal": "Await Terminal",
+      "restore-forwards": "Restore Forwards",
+      "resume-transfers": "Resume Transfers",
+      "restore-ide": "Restore IDE",
+      "verify": "Verify",
+      "done": "Done",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "timeline": "Event timeline",
+    "timeline_hint": "Click to locate event"
+  }
+}

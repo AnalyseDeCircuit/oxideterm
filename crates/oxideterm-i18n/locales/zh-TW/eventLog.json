@@ -1,0 +1,58 @@
+{
+  "event_log": {
+    "title": "事件日誌",
+    "dnd": {
+      "on": "勿擾模式",
+      "enable": "開啟勿擾模式",
+      "disable": "關閉勿擾模式",
+      "description": "新事件仍會被記錄，但在啟用勿擾模式期間，未讀徽章與錯誤計數會被隱藏。"
+    },
+    "empty": "暫無事件",
+    "clear": "清除全部",
+    "close": "關閉面板",
+    "all": "全部",
+    "filter_severity": "依嚴重性篩選",
+    "filter_category": "依類別篩選",
+    "severity": {
+      "info": "資訊",
+      "warn": "警告",
+      "error": "錯誤"
+    },
+    "category": {
+      "connection": "連線",
+      "reconnect": "重連",
+      "node": "節點"
+    },
+    "events": {
+      "connected": "已連線",
+      "disconnected": "已斷開",
+      "link_down": "鏈路中斷",
+      "reconnecting": "正在重連",
+      "affected_children": "{{count}} 個子連線受影響",
+      "node_state_ready": "節點就緒",
+      "node_state_connecting": "節點連線中",
+      "node_state_error": "節點錯誤",
+      "node_state_disconnected": "節點已斷開",
+      "node_state_unknown": "節點狀態變化",
+      "already_connecting": "已在連線中，已跳過",
+      "already_connected": "已連線，已跳過",
+      "reconnect_phase": "重連管線"
+    },
+    "phase": {
+      "queued": "排隊中",
+      "snapshot": "快照",
+      "grace-period": "寬限期",
+      "ssh-connect": "SSH 連線",
+      "await-terminal": "等待終端",
+      "restore-forwards": "恢復轉發",
+      "resume-transfers": "恢復傳輸",
+      "restore-ide": "恢復 IDE",
+      "verify": "驗證",
+      "done": "完成",
+      "failed": "失敗",
+      "cancelled": "已取消"
+    },
+    "timeline": "事件時間線",
+    "timeline_hint": "點擊定位事件"
+  }
+}

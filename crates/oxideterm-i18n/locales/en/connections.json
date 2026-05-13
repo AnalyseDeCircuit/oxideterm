@@ -1,5 +1,43 @@
 {
   "connections": {
+    "state": {
+      "connecting": "Connecting...",
+      "active": "Active",
+      "idle": "Idle",
+      "disconnecting": "Disconnecting...",
+      "disconnected": "Disconnected",
+      "error": "Error: {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "Connection lost - reconnecting...",
+      "connection_closed": "Connection closed"
+    },
+    "time": {
+      "just_now": "Just now",
+      "mins_ago": "{{count}} mins ago",
+      "hrs_ago": "{{count}} hrs ago"
+    },
+    "panel": {
+      "title": "Connection Pool",
+      "description": "Manage active SSH connections and keep-alive settings",
+      "refresh": "Refresh",
+      "no_connections": "No active SSH connections",
+      "no_connections_hint": "New connections will appear here",
+      "terminals": "{{count}} Terminals",
+      "sftp": "{{count}} SFTP",
+      "forwards": "{{count}} Forwards",
+      "created": "Created: {{time}}",
+      "idle_hint": "Idle - {{keepAlive}}",
+      "keep_alive_enabled": "Keep Alive",
+      "disconnect_in": "Disconnect in {{min}}m"
+    },
+    "keep_alive": {
+      "enable_tooltip": "Enable Keep Alive (Never disconnect)",
+      "disable_tooltip": "Disable Keep Alive (Disconnect after {{min}}m idle)",
+      "legend_enabled": "Keep Alive: Never auto-disconnect",
+      "legend_disabled": "Standard: Auto-disconnect after {{min}} mins idle",
+      "global_never_tooltip": "Global setting: never timeout"
+    },
     "monitor": {
       "title": "Connection Pool",
       "loading": "Loading stats...",
@@ -14,9 +52,18 @@
       "sftp": "SFTP",
       "forwards": "Forwards",
       "summary": "Total: {{total}} connections • Refs: {{refs}}",
+      "live": "Live",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
-      "topology_roots_children": "{{roots}} roots / {{children}} children",
-      "live": "Live"
-    }
+      "topology_roots_children": "{{roots}} roots / {{children}} children"
+    },
+    "status": {
+      "reconnecting_title": "Connection Reconnecting",
+      "reconnecting_wait": "The connection is being restored. Please wait and try again.",
+      "reconnect_unstable": "Connection Unstable",
+      "try_again_later": "The connection has not stabilized. Please try again later.",
+      "connection_failed": "Connection Failed",
+      "no_connection_id": "No connection ID was assigned after reconnect."
+    },
+    "failedFetchStats": "Failed to fetch stats"
   }
 }

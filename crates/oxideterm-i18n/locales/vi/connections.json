@@ -1,5 +1,43 @@
 {
   "connections": {
+    "state": {
+      "connecting": "Đang kết nối...",
+      "active": "Hoạt động",
+      "idle": "Rảnh",
+      "disconnecting": "Đang ngắt kết nối...",
+      "disconnected": "Đã ngắt kết nối",
+      "error": "Lỗi: {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "Mất kết nối - đang kết nối lại...",
+      "connection_closed": "Kết nối đã đóng"
+    },
+    "time": {
+      "just_now": "Vừa xong",
+      "mins_ago": "{{count}} phút trước",
+      "hrs_ago": "{{count}} giờ trước"
+    },
+    "panel": {
+      "title": "Nhóm kết nối",
+      "description": "Quản lý kết nối SSH hoạt động và cài đặt keep-alive",
+      "refresh": "Làm mới",
+      "no_connections": "Không có kết nối SSH hoạt động",
+      "no_connections_hint": "Kết nối mới sẽ xuất hiện ở đây",
+      "terminals": "{{count}} Terminal",
+      "sftp": "{{count}} SFTP",
+      "forwards": "{{count}} Chuyển tiếp",
+      "created": "Tạo lúc: {{time}}",
+      "idle_hint": "Rảnh - {{keepAlive}}",
+      "keep_alive_enabled": "Keep Alive",
+      "disconnect_in": "Ngắt kết nối sau {{min}} phút"
+    },
+    "keep_alive": {
+      "enable_tooltip": "Bật Keep Alive (Không bao giờ ngắt kết nối)",
+      "disable_tooltip": "Tắt Keep Alive (Ngắt kết nối sau {{min}} phút rảnh)",
+      "legend_enabled": "Keep Alive: Không tự động ngắt kết nối",
+      "legend_disabled": "Tiêu chuẩn: Tự động ngắt kết nối sau {{min}} phút rảnh",
+      "global_never_tooltip": "Cài đặt toàn cầu: không giới hạn thời gian"
+    },
     "monitor": {
       "title": "Nhóm kết nối",
       "loading": "Đang tải thống kê...",
@@ -17,6 +55,15 @@
       "live": "Trực tiếp",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
-    }
+    },
+    "status": {
+      "reconnecting_title": "Đang kết nối lại",
+      "reconnecting_wait": "Kết nối đang được khôi phục. Vui lòng đợi và thử lại.",
+      "reconnect_unstable": "Kết nối không ổn định",
+      "try_again_later": "Kết nối chưa ổn định. Vui lòng thử lại sau.",
+      "connection_failed": "Kết nối thất bại",
+      "no_connection_id": "Không có ID kết nối nào được gán sau khi kết nối lại."
+    },
+    "failedFetchStats": "Không thể lấy thống kê"
   }
 }

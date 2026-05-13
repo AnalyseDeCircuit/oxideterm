@@ -1,5 +1,43 @@
 {
   "connections": {
+    "state": {
+      "connecting": "연결 중...",
+      "active": "활성",
+      "idle": "유휴",
+      "disconnecting": "연결 종료 중...",
+      "disconnected": "연결 해제됨",
+      "error": "오류: {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "연결 끊김 - 재연결 중...",
+      "connection_closed": "연결이 닫힘"
+    },
+    "time": {
+      "just_now": "방금",
+      "mins_ago": "{{count}}분 전",
+      "hrs_ago": "{{count}}시간 전"
+    },
+    "panel": {
+      "title": "연결 풀",
+      "description": "활성 SSH 연결 및 keep-alive 설정 관리",
+      "refresh": "새로고침",
+      "no_connections": "활성 SSH 연결 없음",
+      "no_connections_hint": "새 연결이 여기에 표시됩니다",
+      "terminals": "{{count}} 터미널",
+      "sftp": "{{count}} SFTP",
+      "forwards": "{{count}} 포워딩",
+      "created": "생성: {{time}}",
+      "idle_hint": "유휴 - {{keepAlive}}",
+      "keep_alive_enabled": "Keep Alive",
+      "disconnect_in": "{{min}}분 후 연결 해제"
+    },
+    "keep_alive": {
+      "enable_tooltip": "Keep Alive 활성화 (자동 연결 해제 안함)",
+      "disable_tooltip": "Keep Alive 비활성화 ({{min}}분 유휴 후 연결 해제)",
+      "legend_enabled": "Keep Alive: 자동 연결 해제 안함",
+      "legend_disabled": "표준: {{min}}분 유휴 후 자동 연결 해제",
+      "global_never_tooltip": "전역 설정: 시간 초과 없음"
+    },
     "monitor": {
       "title": "연결 풀",
       "loading": "통계 로딩 중...",
@@ -17,6 +55,15 @@
       "live": "실시간",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
-    }
+    },
+    "status": {
+      "reconnecting_title": "연결 재설정 중",
+      "reconnecting_wait": "연결을 복원하고 있습니다. 잠시 후 다시 시도해 주세요.",
+      "reconnect_unstable": "연결 불안정",
+      "try_again_later": "연결이 아직 안정되지 않았습니다. 나중에 다시 시도해 주세요.",
+      "connection_failed": "연결에 실패했습니다",
+      "no_connection_id": "재연결 후 연결 ID가 할당되지 않았습니다."
+    },
+    "failedFetchStats": "통계를 가져오지 못했습니다"
   }
 }

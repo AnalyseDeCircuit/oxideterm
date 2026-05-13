@@ -7,6 +7,7 @@ mod ide;
 mod ime;
 mod launcher;
 mod new_connection;
+mod notification_center;
 mod pane_tree;
 mod quick_commands;
 mod session_manager;
@@ -38,7 +39,8 @@ use gpui::{
 };
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
-    ConnectionPoolMonitorStats, MetricsSource, ProfilerRegistry, ProfilerUpdate, ResourceMetrics,
+    ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
+    MetricsSource, ProfilerRegistry, ProfilerUpdate, ResourceMetrics,
 };
 use oxideterm_connections::ConnectionStore;
 use oxideterm_forwarding::{
@@ -63,6 +65,19 @@ use oxideterm_gpui_ui::{
     tooltip::tooltip_content,
 };
 use oxideterm_i18n::{I18n, Locale};
+use oxideterm_notification_center::{
+    ActivityView as WorkspaceActivityView, EventCategory as WorkspaceEventCategory,
+    EventCategoryFilter as WorkspaceEventCategoryFilter, EventLogEntry as WorkspaceEventLogEntry,
+    EventSeverity as WorkspaceEventSeverity, EventSeverityFilter as WorkspaceEventSeverityFilter,
+    NotificationCenterState, NotificationEntry as WorkspaceNotificationEntry,
+    NotificationKind as WorkspaceNotificationKind,
+    NotificationKindFilter as WorkspaceNotificationKindFilter,
+    NotificationScope as WorkspaceNotificationScope,
+    NotificationSeverity as WorkspaceNotificationSeverity,
+    NotificationSeverityFilter as WorkspaceNotificationSeverityFilter,
+    NotificationStatus as WorkspaceNotificationStatus,
+    NotificationStatusFilter as WorkspaceNotificationStatusFilter,
+};
 use oxideterm_render_policy::{
     DetectedGraphics, EffectiveRenderPolicy, RenderProfile, compute_render_policy,
 };
@@ -216,10 +231,7 @@ pub(crate) struct WorkspaceApp {
     pending_ide_restore_transfer_counts: HashMap<NodeId, u32>,
     reconnect_forward_restore_totals: HashMap<NodeId, u32>,
     reconnect_forward_restore_tokens: HashMap<NodeId, Arc<AtomicBool>>,
-    event_log_entries: VecDeque<WorkspaceEventLogEntry>,
-    event_log_next_id: u64,
-    event_log_unread_count: u32,
-    event_log_unread_errors: u32,
+    notification_center: NotificationCenterState,
     terminal_endpoint_sessions: HashMap<TerminalSessionId, WorkspaceTerminalEndpointSession>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
@@ -277,15 +289,6 @@ pub(crate) struct WorkspaceApp {
     workspace_tooltip: Option<WorkspaceTooltip>,
     workspace_tooltip_pending: Option<WorkspaceTooltipPending>,
     workspace_tooltip_generation: u64,
-    active_activity_view: WorkspaceActivityView,
-    event_log_filter: WorkspaceEventFilter,
-    event_log_dnd_enabled: bool,
-    notification_entries: VecDeque<WorkspaceNotificationEntry>,
-    notification_next_id: u64,
-    notification_unread_count: u32,
-    notification_unread_critical_count: u32,
-    notification_filter: WorkspaceNotificationFilter,
-    notification_dnd_enabled: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -384,162 +387,6 @@ struct WorkspaceTooltipPending {
     x: f32,
     y: f32,
     generation: u64,
-}
-
-const WORKSPACE_EVENT_LOG_MAX_ENTRIES: usize = 500;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceEventSeverity {
-    Info,
-    Warn,
-    Error,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceEventCategory {
-    Connection,
-    Reconnect,
-    Node,
-}
-
-#[derive(Clone, Debug)]
-struct WorkspaceEventLogEntry {
-    id: u64,
-    timestamp: SystemTime,
-    severity: WorkspaceEventSeverity,
-    category: WorkspaceEventCategory,
-    node_id: Option<NodeId>,
-    connection_id: Option<String>,
-    title: String,
-    detail: Option<String>,
-    source: &'static str,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceActivityView {
-    Notifications,
-    EventLog,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceEventSeverityFilter {
-    All,
-    Error,
-    Warn,
-    Info,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceEventCategoryFilter {
-    All,
-    Connection,
-    Reconnect,
-    Node,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct WorkspaceEventFilter {
-    severity: WorkspaceEventSeverityFilter,
-    category: WorkspaceEventCategoryFilter,
-}
-
-impl Default for WorkspaceEventFilter {
-    fn default() -> Self {
-        Self {
-            severity: WorkspaceEventSeverityFilter::All,
-            category: WorkspaceEventCategoryFilter::All,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceNotificationKind {
-    Connection,
-    Security,
-    Transfer,
-    Update,
-    Health,
-    Plugin,
-    Agent,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceNotificationSeverity {
-    Info,
-    Warning,
-    Error,
-    Critical,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceNotificationStatus {
-    Unread,
-    Read,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(dead_code)]
-enum WorkspaceNotificationScope {
-    Global,
-    Node(NodeId),
-    Connection(String),
-}
-
-#[derive(Clone, Debug)]
-struct WorkspaceNotificationEntry {
-    id: u64,
-    created_at: SystemTime,
-    kind: WorkspaceNotificationKind,
-    severity: WorkspaceNotificationSeverity,
-    title: String,
-    body: Option<String>,
-    status: WorkspaceNotificationStatus,
-    scope: WorkspaceNotificationScope,
-    dedupe_key: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceNotificationStatusFilter {
-    All,
-    Unread,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceNotificationSeverityFilter {
-    All,
-    Critical,
-    Error,
-    Warning,
-    Info,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkspaceNotificationKindFilter {
-    All,
-    Connection,
-    Security,
-    Transfer,
-    Update,
-    Health,
-    Plugin,
-    Agent,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct WorkspaceNotificationFilter {
-    status: WorkspaceNotificationStatusFilter,
-    severity: WorkspaceNotificationSeverityFilter,
-    kind: WorkspaceNotificationKindFilter,
-}
-
-impl Default for WorkspaceNotificationFilter {
-    fn default() -> Self {
-        Self {
-            status: WorkspaceNotificationStatusFilter::All,
-            severity: WorkspaceNotificationSeverityFilter::All,
-            kind: WorkspaceNotificationKindFilter::All,
-        }
-    }
 }
 
 #[derive(Clone)]

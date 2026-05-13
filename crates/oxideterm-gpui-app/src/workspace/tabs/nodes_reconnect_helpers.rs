@@ -183,6 +183,15 @@ fn event_log_severity_for_connection_status(status: &str) -> WorkspaceEventSever
     }
 }
 
+fn event_log_title_for_node_readiness(readiness: &NodeReadiness) -> &'static str {
+    match readiness {
+        NodeReadiness::Ready => "event_log.events.node_state_ready",
+        NodeReadiness::Connecting => "event_log.events.node_state_connecting",
+        NodeReadiness::Error => "event_log.events.node_state_error",
+        NodeReadiness::Disconnected => "event_log.events.node_state_disconnected",
+    }
+}
+
 fn reconnect_cascade_child_should_start(readiness: &NodeReadiness) -> bool {
     matches!(readiness, NodeReadiness::Error | NodeReadiness::Connecting)
 }
@@ -275,6 +284,26 @@ mod node_reconnect_helper_tests {
         assert_eq!(
             event_log_severity_for_connection_status("disconnected"),
             WorkspaceEventSeverity::Info
+        );
+    }
+
+    #[test]
+    fn node_readiness_event_titles_match_tauri_event_log_keys() {
+        assert_eq!(
+            event_log_title_for_node_readiness(&NodeReadiness::Ready),
+            "event_log.events.node_state_ready"
+        );
+        assert_eq!(
+            event_log_title_for_node_readiness(&NodeReadiness::Connecting),
+            "event_log.events.node_state_connecting"
+        );
+        assert_eq!(
+            event_log_title_for_node_readiness(&NodeReadiness::Error),
+            "event_log.events.node_state_error"
+        );
+        assert_eq!(
+            event_log_title_for_node_readiness(&NodeReadiness::Disconnected),
+            "event_log.events.node_state_disconnected"
         );
     }
 

@@ -28,6 +28,7 @@ pub enum TabKind {
     ConnectionPool,
     ConnectionMonitor,
     Topology,
+    NotificationCenter,
     Sftp,
     Ide,
     Forwards,

@@ -1,4 +1,6 @@
 impl WorkspaceApp {
+    const HIGHLIGHT_PREVIEW_WRAP_CHARS: usize = 32;
+
     fn highlight_rules_card(
         &self,
         settings: &PersistedSettings,
@@ -560,6 +562,7 @@ impl WorkspaceApp {
         ];
         let mut preview = div()
             .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
@@ -570,13 +573,17 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .flex()
                     .flex_row()
+                    .flex_wrap()
                     .items_center()
                     .justify_between()
                     .gap(px(12.0))
                     .child(
                         div()
+                            .min_w(px(0.0))
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .text_color(rgb(self.tokens.ui.text))
                             .child(
@@ -586,6 +593,7 @@ impl WorkspaceApp {
                     )
                     .child(
                         div()
+                            .min_w(px(0.0))
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(
@@ -595,6 +603,9 @@ impl WorkspaceApp {
                     ),
             );
         let mut sample = div()
+            .w_full()
+            .min_w(px(0.0))
+            .overflow_hidden()
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba(0xffffff0d))
@@ -616,22 +627,55 @@ impl WorkspaceApp {
 
     fn highlight_preview_line(&self, line: &str, rules: &[HighlightRule]) -> AnyElement {
         let matches = accepted_highlight_preview_matches(line, rules);
-        let mut row = div().flex().flex_row().flex_wrap();
+        let mut row = div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .overflow_hidden();
         let mut cursor = 0;
         for matched in matches {
             if matched.start > cursor {
-                row = row.child(line[cursor..matched.start].to_string());
+                row = self.highlight_preview_plain_chunks(row, &line[cursor..matched.start]);
             }
-            row = row.child(highlight_preview_segment(
-                &self.tokens,
-                &line[matched.start..matched.end],
-                matched.rule,
-            ));
+            for chunk in Self::highlight_preview_wrapping_chunks(&line[matched.start..matched.end])
+            {
+                row = row.child(highlight_preview_segment(&self.tokens, &chunk, matched.rule));
+            }
             cursor = matched.end;
         }
         if cursor < line.len() {
-            row = row.child(line[cursor..].to_string());
+            row = self.highlight_preview_plain_chunks(row, &line[cursor..]);
         }
         row.into_any_element()
+    }
+
+    fn highlight_preview_plain_chunks(&self, mut row: Div, text: &str) -> Div {
+        for chunk in Self::highlight_preview_wrapping_chunks(text) {
+            row = row.child(chunk);
+        }
+        row
+    }
+
+    fn highlight_preview_wrapping_chunks(text: &str) -> Vec<String> {
+        let mut chunks = Vec::new();
+        let mut current = String::new();
+        let mut current_chars = 0usize;
+
+        for ch in text.chars() {
+            current.push(ch);
+            current_chars += 1;
+            if ch.is_whitespace() || current_chars >= Self::HIGHLIGHT_PREVIEW_WRAP_CHARS {
+                chunks.push(std::mem::take(&mut current));
+                current_chars = 0;
+            }
+        }
+
+        if !current.is_empty() {
+            chunks.push(current);
+        }
+
+        chunks
     }
 }

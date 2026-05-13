@@ -7,14 +7,15 @@ use std::{
     fmt,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, SystemTime},
 };
 
 use dashmap::DashMap;
 use oxideterm_connection_monitor::{
-    ConnectionMonitorConsumerKind, ConnectionPoolMonitorStats, PoolConnectionMonitorSnapshot,
+    ConnectionMonitorConsumerKind, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
+    ConnectionPoolMonitorStats, PoolConnectionMonitorSnapshot, PoolConnectionSummarySnapshot,
 };
 use oxideterm_sftp::{SftpError, SftpSession};
 use oxideterm_topology::{
@@ -23,6 +24,7 @@ use oxideterm_topology::{
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Handle as TokioHandle;
 use tokio::sync::{Mutex, Notify};
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -70,6 +72,7 @@ pub struct ConnectionInfo {
     pub parent_connection_id: Option<String>,
     pub state: ConnectionState,
     pub ref_count: u64,
+    pub keep_alive: bool,
     pub consumers: Vec<ConnectionConsumer>,
     pub created_at: SystemTime,
     pub last_active_at: SystemTime,
@@ -171,12 +174,14 @@ struct ConnectionEntry {
     parent_connection_id: RwLock<Option<String>>,
     state: RwLock<ConnectionState>,
     ref_count: AtomicU64,
+    keep_alive: AtomicBool,
     consumers: RwLock<Vec<ConnectionConsumer>>,
     physical: RwLock<Option<Arc<dyn Any + Send + Sync>>>,
     sftp: Mutex<SharedSftpState>,
     sftp_generation: AtomicU64,
     sftp_state: RwLock<SftpSessionState>,
     heartbeat_failures: AtomicU64,
+    idle_generation: AtomicU64,
     last_emitted_status: RwLock<Option<String>>,
     created_at: SystemTime,
     last_active_at: RwLock<SystemTime>,
@@ -193,12 +198,14 @@ impl ConnectionEntry {
             parent_connection_id: RwLock::new(None),
             state: RwLock::new(ConnectionState::Connecting),
             ref_count: AtomicU64::new(0),
+            keep_alive: AtomicBool::new(false),
             consumers: RwLock::new(Vec::new()),
             physical: RwLock::new(None),
             sftp: Mutex::new(SharedSftpState::Empty),
             sftp_generation: AtomicU64::new(0),
             sftp_state: RwLock::new(SftpSessionState::default()),
             heartbeat_failures: AtomicU64::new(0),
+            idle_generation: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
             created_at: SystemTime::now(),
             last_active_at: RwLock::new(SystemTime::now()),
@@ -216,6 +223,7 @@ impl ConnectionEntry {
             parent_connection_id: self.parent_connection_id.read().clone(),
             state: self.state.read().clone(),
             ref_count: self.ref_count.load(Ordering::SeqCst),
+            keep_alive: self.is_keep_alive(),
             consumers: self.consumers.read().clone(),
             created_at: self.created_at,
             last_active_at: *self.last_active_at.read(),
@@ -245,6 +253,34 @@ impl ConnectionEntry {
         }
     }
 
+    fn summary_snapshot(&self) -> PoolConnectionSummarySnapshot {
+        let consumers = self.consumers.read().clone();
+        let counts = topology_consumer_summary(&consumers);
+        PoolConnectionSummarySnapshot {
+            id: self.connection_id.clone(),
+            host: self.config.host.clone(),
+            port: self.config.port,
+            username: self.config.username.clone(),
+            state: ConnectionPoolEntryState::from(&*self.state.read()),
+            ref_count: self.ref_count.load(Ordering::SeqCst),
+            keep_alive: self.is_keep_alive(),
+            created_at: self.created_at,
+            last_active_at: *self.last_active_at.read(),
+            terminal_count: counts.terminals,
+            has_sftp_session: self.sftp_state.read().ready,
+            forward_count: counts.port_forwards,
+            parent_connection_id: self.parent_connection_id.read().clone(),
+        }
+    }
+
+    fn is_keep_alive(&self) -> bool {
+        self.keep_alive.load(Ordering::Acquire)
+    }
+
+    fn set_keep_alive(&self, keep_alive: bool) {
+        self.keep_alive.store(keep_alive, Ordering::Release);
+    }
+
     fn touch(&self) {
         *self.last_active_at.write() = SystemTime::now();
     }
@@ -255,6 +291,14 @@ impl ConnectionEntry {
 
     fn increment_heartbeat_failures(&self) -> u64 {
         self.heartbeat_failures.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    fn cancel_idle_timer(&self) {
+        self.idle_generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn idle_generation(&self) -> u64 {
+        self.idle_generation.load(Ordering::Acquire)
     }
 }
 
@@ -452,19 +496,38 @@ impl SshConnectionHandle {
 
 #[derive(Clone, Debug)]
 pub struct SshConnectionRegistry {
-    config: ConnectionPoolConfig,
+    config: Arc<RwLock<ConnectionPoolConfig>>,
     by_key: Arc<DashMap<String, Arc<ConnectionEntry>>>,
     by_id: Arc<DashMap<String, String>>,
+    idle_task_runtime: Arc<RwLock<Option<TokioHandle>>>,
     node_event_emitter: Arc<RwLock<Option<NodeEventEmitter>>>,
 }
 
 impl SshConnectionRegistry {
     pub fn new(config: ConnectionPoolConfig) -> Self {
         Self {
-            config,
+            config: Arc::new(RwLock::new(config)),
             by_key: Arc::new(DashMap::new()),
             by_id: Arc::new(DashMap::new()),
+            idle_task_runtime: Arc::new(RwLock::new(None)),
             node_event_emitter: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    pub fn set_task_runtime(&self, runtime: TokioHandle) {
+        *self.idle_task_runtime.write() = Some(runtime);
+    }
+
+    pub fn set_idle_timeout(&self, idle_timeout: Option<Duration>) {
+        self.config.write().idle_timeout = idle_timeout;
+        for entry in self.by_key.iter() {
+            entry.cancel_idle_timer();
+            if matches!(*entry.state.read(), ConnectionState::Idle)
+                && entry.ref_count.load(Ordering::SeqCst) == 0
+                && !entry.is_keep_alive()
+            {
+                self.start_idle_timer_for_entry(entry.clone());
+            }
         }
     }
 
@@ -478,13 +541,14 @@ impl SshConnectionRegistry {
             .by_key
             .entry(key.clone())
             .or_insert_with(|| {
-                let entry = Arc::new(ConnectionEntry::new(config, self.config));
+                let entry = Arc::new(ConnectionEntry::new(config, *self.config.read()));
                 self.by_id.insert(entry.connection_id.clone(), key);
                 entry
             })
             .clone();
 
         entry.ref_count.fetch_add(1, Ordering::SeqCst);
+        entry.cancel_idle_timer();
         entry.touch();
         {
             let mut consumers = entry.consumers.write();
@@ -524,7 +588,12 @@ impl SshConnectionRegistry {
         }
         entry.touch();
         if entry.ref_count.load(Ordering::SeqCst) == 0 {
-            *entry.state.write() = ConnectionState::Idle;
+            if entry.is_keep_alive() {
+                entry.cancel_idle_timer();
+                *entry.state.write() = ConnectionState::Idle;
+            } else {
+                self.start_idle_timer_for_entry(entry);
+            }
         }
     }
 
@@ -638,6 +707,7 @@ impl SshConnectionRegistry {
             .get(connection_id)
             .map(|key| key.value().clone())?;
         let entry = self.by_key.get(&key).map(|entry| entry.clone())?;
+        entry.cancel_idle_timer();
         let info = entry.info();
         if entry.connection_id == connection_id {
             self.by_key.remove(&key);
@@ -860,7 +930,15 @@ impl SshConnectionRegistry {
             let mut consumers = handle.entry.consumers.write();
             if !consumers.contains(&consumer) {
                 consumers.push(consumer);
-                handle.entry.ref_count.fetch_add(1, Ordering::SeqCst);
+                let previous = handle.entry.ref_count.fetch_add(1, Ordering::SeqCst);
+                if previous == 0 {
+                    handle.entry.cancel_idle_timer();
+                    if matches!(*handle.entry.state.read(), ConnectionState::Idle)
+                        && handle.has_physical()
+                    {
+                        *handle.entry.state.write() = ConnectionState::Active;
+                    }
+                }
             }
         }
         // Adding a consumer must not resurrect a dead transport. The caller has
@@ -900,6 +978,154 @@ impl SshConnectionRegistry {
         self.by_key.iter().map(|entry| entry.info()).collect()
     }
 
+    pub fn list_connection_summaries(&self) -> Vec<ConnectionPoolEntrySummary> {
+        let mut summaries = self
+            .by_key
+            .iter()
+            .map(|entry| ConnectionPoolEntrySummary::from_snapshot(entry.summary_snapshot()))
+            .collect::<Vec<_>>();
+        summaries.sort_by(|left, right| {
+            left.username
+                .cmp(&right.username)
+                .then_with(|| left.host.cmp(&right.host))
+                .then_with(|| left.port.cmp(&right.port))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        summaries
+    }
+
+    pub fn set_keep_alive(&self, connection_id: &str, keep_alive: bool) -> Option<ConnectionInfo> {
+        let key = self
+            .by_id
+            .get(connection_id)
+            .map(|key| key.value().clone())?;
+        let entry = self.by_key.get(&key)?.clone();
+        entry.set_keep_alive(keep_alive);
+        if keep_alive {
+            entry.cancel_idle_timer();
+        } else if matches!(*entry.state.read(), ConnectionState::Idle)
+            && entry.ref_count.load(Ordering::SeqCst) == 0
+        {
+            self.start_idle_timer_for_entry(entry.clone());
+        }
+        entry.touch();
+        Some(entry.info())
+    }
+
+    fn idle_runtime(&self) -> Option<TokioHandle> {
+        self.idle_task_runtime
+            .read()
+            .clone()
+            .or_else(|| TokioHandle::try_current().ok())
+    }
+
+    fn start_idle_timer_for_entry(&self, entry: Arc<ConnectionEntry>) {
+        let connection_id = entry.connection_id.clone();
+        entry.cancel_idle_timer();
+        let generation = entry.idle_generation();
+        *entry.state.write() = ConnectionState::Idle;
+        entry.touch();
+        if let Some(emitter) = self.node_event_emitter.read().clone() {
+            // Tauri immediately exposes Active -> Idle before the timeout
+            // starts; the eventual timeout is a separate disconnected event.
+            let _ = emitter.emit_state_from_connection(
+                &connection_id,
+                &ConnectionState::Idle,
+                "idle (timer started)",
+            );
+        }
+
+        let Some(timeout) = entry.idle_timeout else {
+            return;
+        };
+        if timeout.is_zero() {
+            return;
+        }
+        let Some(runtime) = self.idle_runtime() else {
+            return;
+        };
+
+        let registry = self.clone();
+        runtime.spawn(async move {
+            sleep(timeout).await;
+            registry
+                .disconnect_if_idle_timeout(&connection_id, generation)
+                .await;
+        });
+    }
+
+    async fn disconnect_if_idle_timeout(&self, root_connection_id: &str, generation: u64) {
+        let Some(root) = self.get(root_connection_id) else {
+            return;
+        };
+        if root.entry.idle_generation() != generation
+            || root.entry.ref_count.load(Ordering::SeqCst) != 0
+            || root.entry.is_keep_alive()
+            || !matches!(root.state(), ConnectionState::Idle)
+        {
+            return;
+        }
+
+        let affected_children = self
+            .descendant_connection_infos(root_connection_id)
+            .into_iter()
+            .map(|info| info.connection_id)
+            .collect::<Vec<_>>();
+        for connection_id in affected_children.iter().rev() {
+            self.disconnect_idle_timed_out_connection(
+                connection_id,
+                "ancestor idle timeout cascade",
+            )
+            .await;
+        }
+        if let Some(emitter) = self.node_event_emitter.read().clone() {
+            emitter.emit_connection_status_changed(
+                root_connection_id.to_string(),
+                "disconnected".to_string(),
+                affected_children,
+            );
+        }
+        self.disconnect_idle_timed_out_connection(root_connection_id, "idle timeout")
+            .await;
+    }
+
+    async fn disconnect_idle_timed_out_connection(&self, connection_id: &str, reason: &str) {
+        let Some(handle) = self.get(connection_id) else {
+            return;
+        };
+        if matches!(
+            handle.state(),
+            ConnectionState::Disconnected | ConnectionState::Disconnecting
+        ) {
+            return;
+        }
+        handle.entry.cancel_idle_timer();
+        let info = handle.info();
+        let emitter = self.node_event_emitter.read().clone();
+        if let (Some(parent_connection_id), Some(emitter)) =
+            (info.parent_connection_id.as_ref(), emitter.as_ref())
+            && let Some(node_id) = emitter.node_id_for_connection(connection_id)
+        {
+            self.release(
+                parent_connection_id,
+                &ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0)),
+            );
+        }
+
+        handle.clear_physical().await;
+        let _ = self.mark_state_without_event(connection_id, ConnectionState::Disconnected);
+        if let Some(emitter) = emitter {
+            emitter.emit_sftp_ready(connection_id, false, None);
+            let _ = emitter.emit_state_from_connection(
+                connection_id,
+                &ConnectionState::Disconnected,
+                reason,
+            );
+            emitter.unregister(connection_id);
+        }
+        let _ = self.retire_connection(connection_id);
+    }
+
     pub fn stats(&self) -> ConnectionPoolStats {
         let mut stats = ConnectionPoolStats {
             total: self.by_key.len(),
@@ -924,6 +1150,7 @@ impl SshConnectionRegistry {
     pub fn monitor_stats(&self) -> ConnectionPoolMonitorStats {
         let idle_timeout_secs = self
             .config
+            .read()
             .idle_timeout
             .map(|duration| duration.as_secs())
             .unwrap_or(0);
@@ -935,7 +1162,7 @@ impl SshConnectionRegistry {
 
         ConnectionPoolMonitorStats::from_snapshots(
             snapshots,
-            self.config.max_connections,
+            self.config.read().max_connections,
             idle_timeout_secs,
         )
     }
@@ -1056,6 +1283,21 @@ impl From<&ConnectionState> for ConnectionTopologyStatus {
             ConnectionState::Disconnecting => Self::Disconnecting,
             ConnectionState::Disconnected => Self::Disconnected,
             ConnectionState::Error(_) => Self::Error,
+        }
+    }
+}
+
+impl From<&ConnectionState> for ConnectionPoolEntryState {
+    fn from(state: &ConnectionState) -> Self {
+        match state {
+            ConnectionState::Connecting => Self::Connecting,
+            ConnectionState::Active => Self::Active,
+            ConnectionState::Idle => Self::Idle,
+            ConnectionState::LinkDown => Self::LinkDown,
+            ConnectionState::Reconnecting => Self::Reconnecting,
+            ConnectionState::Disconnecting => Self::Disconnecting,
+            ConnectionState::Disconnected => Self::Disconnected,
+            ConnectionState::Error(error) => Self::Error(error.clone()),
         }
     }
 }
@@ -1192,6 +1434,142 @@ mod tests {
         assert_eq!(stats.total_ref_count, 4);
         assert_eq!(stats.pool_capacity, 9);
         assert_eq!(stats.idle_timeout_secs, 120);
+    }
+
+    #[test]
+    fn connection_summaries_match_tauri_pool_card_fields() {
+        let registry = SshConnectionRegistry::default();
+        let handle = registry.acquire(
+            SshConfig::password("pool.example", 2222, "alice", "pw"),
+            ConnectionConsumer::Terminal("term-1".into()),
+        );
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+        registry.acquire_consumer_for_connection(
+            handle.connection_id(),
+            ConnectionConsumer::Terminal("term-2".into()),
+        );
+        registry.acquire_consumer_for_connection(
+            handle.connection_id(),
+            ConnectionConsumer::Sftp("sftp-1".into()),
+        );
+        registry.mark_sftp_session(handle.connection_id(), true, Some("/home/alice".into()));
+        registry.acquire_consumer_for_connection(
+            handle.connection_id(),
+            ConnectionConsumer::PortForward("forward-1".into()),
+        );
+        registry.set_keep_alive(handle.connection_id(), true);
+
+        let summary = registry
+            .list_connection_summaries()
+            .into_iter()
+            .find(|summary| summary.id == handle.connection_id())
+            .expect("summary exists");
+
+        assert_eq!(summary.host, "pool.example");
+        assert_eq!(summary.port, 2222);
+        assert_eq!(summary.username, "alice");
+        assert_eq!(summary.state, ConnectionPoolEntryState::Active);
+        assert_eq!(summary.ref_count, 4);
+        assert!(summary.keep_alive);
+        assert_eq!(summary.terminal_count, 2);
+        assert!(summary.has_sftp_session);
+        assert_eq!(summary.forward_count, 1);
+        assert!(summary.parent_connection_id.is_none());
+    }
+
+    #[test]
+    fn connection_summaries_classify_unrecoverable_as_not_active() {
+        let registry = SshConnectionRegistry::default();
+        let handle = registry.acquire(
+            SshConfig::password("dead.example", 22, "alice", "pw"),
+            ConnectionConsumer::NodeRouter("dead".into()),
+        );
+        registry.mark_state(
+            handle.connection_id(),
+            ConnectionState::Error("auth failed".into()),
+        );
+
+        let summary = registry
+            .list_connection_summaries()
+            .into_iter()
+            .find(|summary| summary.id == handle.connection_id())
+            .expect("summary exists");
+
+        assert!(!summary.state.is_counted_active());
+        assert!(summary.is_displayed_in_pool());
+        assert_eq!(
+            summary.state,
+            ConnectionPoolEntryState::Error("auth failed".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_disconnects_unused_connection() {
+        let registry = SshConnectionRegistry::new(ConnectionPoolConfig {
+            idle_timeout: Some(Duration::from_millis(10)),
+            max_connections: 4,
+            protect_on_exit: true,
+        });
+        registry.set_task_runtime(tokio::runtime::Handle::current());
+        let consumer = ConnectionConsumer::Terminal("term-1".into());
+        let handle = registry.acquire(
+            SshConfig::password("idle-timeout.example", 22, "alice", "pw"),
+            consumer.clone(),
+        );
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+
+        registry.release(handle.connection_id(), &consumer);
+        sleep(Duration::from_millis(40)).await;
+
+        assert!(registry.get(handle.connection_id()).is_none());
+    }
+
+    #[tokio::test]
+    async fn keep_alive_cancels_idle_timeout_disconnect() {
+        let registry = SshConnectionRegistry::new(ConnectionPoolConfig {
+            idle_timeout: Some(Duration::from_millis(10)),
+            max_connections: 4,
+            protect_on_exit: true,
+        });
+        registry.set_task_runtime(tokio::runtime::Handle::current());
+        let consumer = ConnectionConsumer::Terminal("term-1".into());
+        let handle = registry.acquire(
+            SshConfig::password("keepalive.example", 22, "alice", "pw"),
+            consumer.clone(),
+        );
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+        registry.set_keep_alive(handle.connection_id(), true);
+
+        registry.release(handle.connection_id(), &consumer);
+        sleep(Duration::from_millis(40)).await;
+
+        let info = registry.get(handle.connection_id()).unwrap().info();
+        assert_eq!(info.state, ConnectionState::Idle);
+        assert!(info.keep_alive);
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_updates_across_registry_clones() {
+        let registry = SshConnectionRegistry::new(ConnectionPoolConfig {
+            idle_timeout: Some(Duration::from_secs(60)),
+            max_connections: 4,
+            protect_on_exit: true,
+        });
+        registry.set_task_runtime(tokio::runtime::Handle::current());
+        let clone = registry.clone();
+        clone.set_idle_timeout(Some(Duration::from_millis(10)));
+
+        let consumer = ConnectionConsumer::Terminal("term-1".into());
+        let handle = registry.acquire(
+            SshConfig::password("dynamic-timeout.example", 22, "alice", "pw"),
+            consumer.clone(),
+        );
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+
+        clone.release(handle.connection_id(), &consumer);
+        sleep(Duration::from_millis(40)).await;
+
+        assert!(registry.get(handle.connection_id()).is_none());
     }
 
     #[test]

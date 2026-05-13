@@ -8,6 +8,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::ConnectionPool => "connection_pool",
         TabKind::ConnectionMonitor => "connection_monitor",
         TabKind::Topology => "topology",
+        TabKind::NotificationCenter => "notification_center",
         TabKind::Sftp => "sftp",
         TabKind::Ide => "ide",
         TabKind::Forwards => "forwards",
@@ -191,70 +192,35 @@ impl WorkspaceApp {
         detail: Option<String>,
         source: &'static str,
     ) {
-        let entry = WorkspaceEventLogEntry {
-            id: self.event_log_next_id,
-            timestamp: SystemTime::now(),
+        self.notification_center.event_log.push(
             severity,
             category,
-            node_id,
+            node_id.map(|node_id| node_id.0),
             connection_id,
-            title: title.into(),
+            title,
             detail,
             source,
-        };
-        self.event_log_next_id = self.event_log_next_id.saturating_add(1);
-        self.event_log_entries.push_back(entry);
-        while self.event_log_entries.len() > WORKSPACE_EVENT_LOG_MAX_ENTRIES {
-            self.event_log_entries.pop_front();
-        }
-        self.event_log_unread_count = self.event_log_unread_count.saturating_add(1);
-        if severity == WorkspaceEventSeverity::Error {
-            self.event_log_unread_errors = self.event_log_unread_errors.saturating_add(1);
-        }
+        );
     }
 
     fn clear_event_log(&mut self) {
-        self.event_log_entries.clear();
-        self.event_log_unread_count = 0;
-        self.event_log_unread_errors = 0;
+        self.notification_center.event_log.clear();
     }
 
     fn cycle_event_log_severity_filter(&mut self) {
-        self.event_log_filter.severity = match self.event_log_filter.severity {
-            WorkspaceEventSeverityFilter::All => WorkspaceEventSeverityFilter::Error,
-            WorkspaceEventSeverityFilter::Error => WorkspaceEventSeverityFilter::Warn,
-            WorkspaceEventSeverityFilter::Warn => WorkspaceEventSeverityFilter::Info,
-            WorkspaceEventSeverityFilter::Info => WorkspaceEventSeverityFilter::All,
-        };
+        self.notification_center
+            .event_log
+            .cycle_severity_filter();
     }
 
     fn cycle_event_log_category_filter(&mut self) {
-        self.event_log_filter.category = match self.event_log_filter.category {
-            WorkspaceEventCategoryFilter::All => WorkspaceEventCategoryFilter::Connection,
-            WorkspaceEventCategoryFilter::Connection => WorkspaceEventCategoryFilter::Reconnect,
-            WorkspaceEventCategoryFilter::Reconnect => WorkspaceEventCategoryFilter::Node,
-            WorkspaceEventCategoryFilter::Node => WorkspaceEventCategoryFilter::All,
-        };
+        self.notification_center
+            .event_log
+            .cycle_category_filter();
     }
 
     fn event_log_entry_matches_filter(&self, entry: &WorkspaceEventLogEntry) -> bool {
-        let severity_matches = match self.event_log_filter.severity {
-            WorkspaceEventSeverityFilter::All => true,
-            WorkspaceEventSeverityFilter::Error => entry.severity == WorkspaceEventSeverity::Error,
-            WorkspaceEventSeverityFilter::Warn => entry.severity == WorkspaceEventSeverity::Warn,
-            WorkspaceEventSeverityFilter::Info => entry.severity == WorkspaceEventSeverity::Info,
-        };
-        let category_matches = match self.event_log_filter.category {
-            WorkspaceEventCategoryFilter::All => true,
-            WorkspaceEventCategoryFilter::Connection => {
-                entry.category == WorkspaceEventCategory::Connection
-            }
-            WorkspaceEventCategoryFilter::Reconnect => {
-                entry.category == WorkspaceEventCategory::Reconnect
-            }
-            WorkspaceEventCategoryFilter::Node => entry.category == WorkspaceEventCategory::Node,
-        };
-        severity_matches && category_matches
+        self.notification_center.event_log.matches_filter(entry)
     }
 
     fn push_notification_entry(
@@ -266,167 +232,58 @@ impl WorkspaceApp {
         scope: WorkspaceNotificationScope,
         dedupe_key: Option<String>,
     ) {
-        let title = title.into();
-        if let Some(dedupe_key) = dedupe_key.as_ref()
-            && let Some(existing) = self.notification_entries.iter_mut().find(|entry| {
-                entry.dedupe_key.as_ref() == Some(dedupe_key)
-                    && entry.status != WorkspaceNotificationStatus::Read
-            })
-        {
-            existing.created_at = SystemTime::now();
-            existing.kind = kind;
-            existing.severity = severity;
-            existing.title = title;
-            existing.body = body;
-            existing.scope = scope;
-            existing.status = WorkspaceNotificationStatus::Unread;
-            self.recount_notifications();
-            return;
-        }
-
-        let entry = WorkspaceNotificationEntry {
-            id: self.notification_next_id,
-            created_at: SystemTime::now(),
+        self.notification_center.notifications.push(
             kind,
             severity,
             title,
             body,
-            status: WorkspaceNotificationStatus::Unread,
             scope,
             dedupe_key,
-        };
-        self.notification_next_id = self.notification_next_id.saturating_add(1);
-        self.notification_entries.push_back(entry);
-        while self.notification_entries.len() > 200 {
-            self.notification_entries.pop_front();
-        }
-        self.recount_notifications();
+        );
     }
 
     fn resolve_connection_notifications_for_node(&mut self, node_id: &NodeId) {
-        self.notification_entries.retain(|entry| {
-            let scoped_to_node = matches!(&entry.scope, WorkspaceNotificationScope::Node(entry_node_id) if entry_node_id == node_id);
-            let connection_kind = matches!(
-                entry.kind,
-                WorkspaceNotificationKind::Connection | WorkspaceNotificationKind::Security
-            );
-            !(scoped_to_node && connection_kind)
-        });
-        self.recount_notifications();
+        self.notification_center
+            .notifications
+            .resolve_connection_for_node(&node_id.0);
     }
 
     fn recount_notifications(&mut self) {
-        self.notification_unread_count = 0;
-        self.notification_unread_critical_count = 0;
-        for entry in &self.notification_entries {
-            if entry.status == WorkspaceNotificationStatus::Unread {
-                self.notification_unread_count =
-                    self.notification_unread_count.saturating_add(1);
-                if matches!(
-                    entry.severity,
-                    WorkspaceNotificationSeverity::Critical | WorkspaceNotificationSeverity::Error
-                ) {
-                    self.notification_unread_critical_count =
-                        self.notification_unread_critical_count.saturating_add(1);
-                }
-            }
-        }
+        self.notification_center.notifications.recount();
     }
 
     fn clear_notifications(&mut self) {
-        self.notification_entries.clear();
-        self.recount_notifications();
+        self.notification_center.notifications.clear();
     }
 
     fn mark_all_notifications_read(&mut self) {
-        for entry in &mut self.notification_entries {
-            entry.status = WorkspaceNotificationStatus::Read;
-        }
-        self.recount_notifications();
+        self.notification_center.notifications.mark_all_read();
     }
 
     fn dismiss_notification(&mut self, id: u64) {
-        self.notification_entries.retain(|entry| entry.id != id);
-        self.recount_notifications();
+        self.notification_center.notifications.remove(id);
     }
 
     fn cycle_notification_status_filter(&mut self) {
-        self.notification_filter.status = match self.notification_filter.status {
-            WorkspaceNotificationStatusFilter::All => WorkspaceNotificationStatusFilter::Unread,
-            WorkspaceNotificationStatusFilter::Unread => WorkspaceNotificationStatusFilter::All,
-        };
+        self.notification_center
+            .notifications
+            .cycle_status_filter();
     }
 
     fn cycle_notification_severity_filter(&mut self) {
-        self.notification_filter.severity = match self.notification_filter.severity {
-            WorkspaceNotificationSeverityFilter::All => {
-                WorkspaceNotificationSeverityFilter::Critical
-            }
-            WorkspaceNotificationSeverityFilter::Critical => {
-                WorkspaceNotificationSeverityFilter::Error
-            }
-            WorkspaceNotificationSeverityFilter::Error => {
-                WorkspaceNotificationSeverityFilter::Warning
-            }
-            WorkspaceNotificationSeverityFilter::Warning => {
-                WorkspaceNotificationSeverityFilter::Info
-            }
-            WorkspaceNotificationSeverityFilter::Info => WorkspaceNotificationSeverityFilter::All,
-        };
+        self.notification_center
+            .notifications
+            .cycle_severity_filter();
     }
 
     fn cycle_notification_kind_filter(&mut self) {
-        self.notification_filter.kind = match self.notification_filter.kind {
-            WorkspaceNotificationKindFilter::All => WorkspaceNotificationKindFilter::Connection,
-            WorkspaceNotificationKindFilter::Connection => WorkspaceNotificationKindFilter::Security,
-            WorkspaceNotificationKindFilter::Security => WorkspaceNotificationKindFilter::Transfer,
-            WorkspaceNotificationKindFilter::Transfer => WorkspaceNotificationKindFilter::Update,
-            WorkspaceNotificationKindFilter::Update => WorkspaceNotificationKindFilter::Health,
-            WorkspaceNotificationKindFilter::Health => WorkspaceNotificationKindFilter::Plugin,
-            WorkspaceNotificationKindFilter::Plugin => WorkspaceNotificationKindFilter::Agent,
-            WorkspaceNotificationKindFilter::Agent => WorkspaceNotificationKindFilter::All,
-        };
+        self.notification_center
+            .notifications
+            .cycle_kind_filter();
     }
 
     fn notification_matches_filter(&self, entry: &WorkspaceNotificationEntry) -> bool {
-        let status_matches = match self.notification_filter.status {
-            WorkspaceNotificationStatusFilter::All => true,
-            WorkspaceNotificationStatusFilter::Unread => {
-                entry.status == WorkspaceNotificationStatus::Unread
-            }
-        };
-        let severity_matches = match self.notification_filter.severity {
-            WorkspaceNotificationSeverityFilter::All => true,
-            WorkspaceNotificationSeverityFilter::Critical => {
-                entry.severity == WorkspaceNotificationSeverity::Critical
-            }
-            WorkspaceNotificationSeverityFilter::Error => {
-                entry.severity == WorkspaceNotificationSeverity::Error
-            }
-            WorkspaceNotificationSeverityFilter::Warning => {
-                entry.severity == WorkspaceNotificationSeverity::Warning
-            }
-            WorkspaceNotificationSeverityFilter::Info => {
-                entry.severity == WorkspaceNotificationSeverity::Info
-            }
-        };
-        let kind_matches = match self.notification_filter.kind {
-            WorkspaceNotificationKindFilter::All => true,
-            WorkspaceNotificationKindFilter::Connection => {
-                entry.kind == WorkspaceNotificationKind::Connection
-            }
-            WorkspaceNotificationKindFilter::Security => {
-                entry.kind == WorkspaceNotificationKind::Security
-            }
-            WorkspaceNotificationKindFilter::Transfer => {
-                entry.kind == WorkspaceNotificationKind::Transfer
-            }
-            WorkspaceNotificationKindFilter::Update => entry.kind == WorkspaceNotificationKind::Update,
-            WorkspaceNotificationKindFilter::Health => entry.kind == WorkspaceNotificationKind::Health,
-            WorkspaceNotificationKindFilter::Plugin => entry.kind == WorkspaceNotificationKind::Plugin,
-            WorkspaceNotificationKindFilter::Agent => entry.kind == WorkspaceNotificationKind::Agent,
-        };
-        status_matches && severity_matches && kind_matches
+        self.notification_center.notifications.matches_filter(entry)
     }
 
     fn push_reconnect_notice(
@@ -678,7 +535,7 @@ impl WorkspaceApp {
         &mut self,
         node_id: &NodeId,
         phase: ReconnectPhase,
-        detail: Option<String>,
+        _detail: Option<String>,
     ) {
         let severity = match phase {
             ReconnectPhase::Failed => WorkspaceEventSeverity::Error,
@@ -690,8 +547,8 @@ impl WorkspaceApp {
             WorkspaceEventCategory::Reconnect,
             Some(node_id.clone()),
             self.node_router.connection_id_for_node(node_id),
-            format!("Reconnect phase: {}", reconnect_phase_label(&phase)),
-            detail,
+            "event_log.events.reconnect_phase",
+            Some(reconnect_phase_label(&phase).to_string()),
             "reconnect_orchestrator",
         );
     }
@@ -754,8 +611,8 @@ impl WorkspaceApp {
                 WorkspaceEventCategory::Reconnect,
                 Some(node_id.clone()),
                 self.node_router.connection_id_for_node(node_id),
-                "Reconnect cancelled",
-                Some(format!("cancelled {cancelled} active reconnect job(s)")),
+                "event_log.events.reconnect_phase",
+                Some(reconnect_phase_label(&ReconnectPhase::Cancelled).to_string()),
                 "reconnect_orchestrator",
             );
             self.push_reconnect_notice(

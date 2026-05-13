@@ -249,6 +249,9 @@ impl WorkspaceApp {
             .set_byte_limit(self.render_policy.image_cache_bytes);
         self.sftp_transfer_manager
             .apply_settings(sftp_runtime_settings_from_settings(&settings));
+        self.ssh_registry.set_idle_timeout(Some(Duration::from_secs(
+            settings.connection_pool.idle_timeout_secs as u64,
+        )));
         self.reconnect_orchestrator.configure(
             reconnect_timing_from_settings(&settings),
             reconnect_max_attempts_from_settings(&settings),

@@ -1,5 +1,43 @@
 {
   "connections": {
+    "state": {
+      "connecting": "Conectando...",
+      "active": "Ativo",
+      "idle": "Inativo",
+      "disconnecting": "Desconectando...",
+      "disconnected": "Desconectado",
+      "error": "Erro: {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "Conexão perdida - Reconectando...",
+      "connection_closed": "Conexão fechada"
+    },
+    "time": {
+      "just_now": "Agora mesmo",
+      "mins_ago": "{{count}} min atrás",
+      "hrs_ago": "{{count}} h atrás"
+    },
+    "panel": {
+      "title": "Pool de conexões",
+      "description": "Gerenciar conexões SSH ativas e configurações de keep-alive",
+      "refresh": "Atualizar",
+      "no_connections": "Nenhuma conexão SSH ativa",
+      "no_connections_hint": "Novas conexões aparecerão aqui",
+      "terminals": "{{count}} terminais",
+      "sftp": "{{count}} SFTP",
+      "forwards": "{{count}} encaminhamentos",
+      "created": "Criada: {{time}}",
+      "idle_hint": "Inativo - {{keepAlive}}",
+      "keep_alive_enabled": "Keep-alive",
+      "disconnect_in": "Desconectar em {{min}} min"
+    },
+    "keep_alive": {
+      "enable_tooltip": "Habilitar keep-alive (nunca desconectar)",
+      "disable_tooltip": "Desabilitar keep-alive (desconectar após {{min}} min inativo)",
+      "legend_enabled": "Keep-alive: sem desconexão automática",
+      "legend_disabled": "Padrão: desconexão automática após {{min}} min inativo",
+      "global_never_tooltip": "Configuração global: sem tempo limite"
+    },
     "monitor": {
       "title": "Pool de conexões",
       "loading": "Carregando estatísticas...",
@@ -17,6 +55,15 @@
       "live": "AO VIVO",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
-    }
+    },
+    "status": {
+      "reconnecting_title": "Reconectando",
+      "reconnecting_wait": "A conexão está sendo restaurada. Por favor aguarde e tente novamente.",
+      "reconnect_unstable": "Conexão instável",
+      "try_again_later": "A conexão ainda não se estabilizou. Por favor tente novamente mais tarde.",
+      "connection_failed": "Falha na conexão",
+      "no_connection_id": "Nenhum ID de conexão foi atribuído após a reconexão."
+    },
+    "failedFetchStats": "Falha ao buscar estatísticas"
   }
 }

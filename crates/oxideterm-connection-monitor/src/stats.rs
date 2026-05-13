@@ -1,6 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::time::SystemTime;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -20,6 +22,93 @@ pub struct PoolConnectionMonitorSnapshot {
     pub ref_count: u64,
     pub has_sftp_session: bool,
     pub consumers: Vec<ConnectionMonitorConsumerKind>,
+}
+
+/// Tauri-compatible connection state for `ssh_list_connection_summaries`.
+///
+/// The SSH registry owns the transport state. This crate keeps the UI-facing
+/// projection separate so GPUI renders the same summary contract as Tauri
+/// without deriving state from tabs, terminal panes, or visual selection.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionPoolEntryState {
+    Connecting,
+    Active,
+    Idle,
+    LinkDown,
+    Reconnecting,
+    Disconnecting,
+    Disconnected,
+    Error(String),
+}
+
+impl ConnectionPoolEntryState {
+    pub fn is_displayed_in_pool(&self) -> bool {
+        !matches!(self, Self::Disconnected)
+    }
+
+    pub fn is_counted_active(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PoolConnectionSummarySnapshot {
+    pub id: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub state: ConnectionPoolEntryState,
+    pub ref_count: u64,
+    pub keep_alive: bool,
+    pub created_at: SystemTime,
+    pub last_active_at: SystemTime,
+    pub terminal_count: usize,
+    pub has_sftp_session: bool,
+    pub forward_count: usize,
+    pub parent_connection_id: Option<String>,
+}
+
+/// UI-facing row/card payload for the Tauri `ConnectionsPanel`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConnectionPoolEntrySummary {
+    pub id: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub state: ConnectionPoolEntryState,
+    pub ref_count: u64,
+    pub keep_alive: bool,
+    pub created_at: SystemTime,
+    pub last_active_at: SystemTime,
+    pub terminal_count: usize,
+    pub has_sftp_session: bool,
+    pub forward_count: usize,
+    pub parent_connection_id: Option<String>,
+}
+
+impl ConnectionPoolEntrySummary {
+    pub fn from_snapshot(snapshot: PoolConnectionSummarySnapshot) -> Self {
+        Self {
+            id: snapshot.id,
+            host: snapshot.host,
+            port: snapshot.port,
+            username: snapshot.username,
+            state: snapshot.state,
+            ref_count: snapshot.ref_count,
+            keep_alive: snapshot.keep_alive,
+            created_at: snapshot.created_at,
+            last_active_at: snapshot.last_active_at,
+            terminal_count: snapshot.terminal_count,
+            has_sftp_session: snapshot.has_sftp_session,
+            forward_count: snapshot.forward_count,
+            parent_connection_id: snapshot.parent_connection_id,
+        }
+    }
+
+    pub fn is_displayed_in_pool(&self) -> bool {
+        self.state.is_displayed_in_pool()
+    }
 }
 
 /// Tauri-compatible `ssh_get_pool_stats` payload.
@@ -142,5 +231,50 @@ mod tests {
         assert_eq!(stats.total_ref_count, u32::MAX);
         assert_eq!(stats.pool_capacity, 9);
         assert_eq!(stats.idle_timeout_secs, 120);
+    }
+
+    #[test]
+    fn connection_summary_keeps_tauri_pool_fields() {
+        let created_at = SystemTime::UNIX_EPOCH;
+        let last_active_at = SystemTime::UNIX_EPOCH;
+
+        let summary = ConnectionPoolEntrySummary::from_snapshot(PoolConnectionSummarySnapshot {
+            id: "conn-1".into(),
+            host: "example.com".into(),
+            port: 22,
+            username: "alice".into(),
+            state: ConnectionPoolEntryState::Idle,
+            ref_count: 3,
+            keep_alive: true,
+            created_at,
+            last_active_at,
+            terminal_count: 2,
+            has_sftp_session: true,
+            forward_count: 1,
+            parent_connection_id: Some("jump".into()),
+        });
+
+        assert_eq!(summary.id, "conn-1");
+        assert_eq!(summary.host, "example.com");
+        assert_eq!(summary.port, 22);
+        assert_eq!(summary.username, "alice");
+        assert_eq!(summary.state, ConnectionPoolEntryState::Idle);
+        assert_eq!(summary.ref_count, 3);
+        assert!(summary.keep_alive);
+        assert_eq!(summary.created_at, created_at);
+        assert_eq!(summary.last_active_at, last_active_at);
+        assert_eq!(summary.terminal_count, 2);
+        assert!(summary.has_sftp_session);
+        assert_eq!(summary.forward_count, 1);
+        assert_eq!(summary.parent_connection_id.as_deref(), Some("jump"));
+    }
+
+    #[test]
+    fn disconnected_summary_is_hidden_and_not_active() {
+        assert!(!ConnectionPoolEntryState::Disconnected.is_displayed_in_pool());
+        assert!(!ConnectionPoolEntryState::Disconnected.is_counted_active());
+        assert!(!ConnectionPoolEntryState::Reconnecting.is_counted_active());
+        assert!(!ConnectionPoolEntryState::LinkDown.is_counted_active());
+        assert!(ConnectionPoolEntryState::Active.is_counted_active());
     }
 }

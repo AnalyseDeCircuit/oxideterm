@@ -1,0 +1,58 @@
+{
+  "event_log": {
+    "title": "Registro de eventos",
+    "dnd": {
+      "on": "Não perturbe",
+      "enable": "Ativar Não perturbe",
+      "disable": "Desativar Não perturbe",
+      "description": "Novos eventos continuam sendo registrados, mas os badges de não lidos e os contadores de erro são suprimidos enquanto Não perturbe estiver ativado."
+    },
+    "empty": "Nenhum evento",
+    "clear": "Limpar tudo",
+    "close": "Fechar painel",
+    "all": "Todos",
+    "filter_severity": "Filtrar por gravidade",
+    "filter_category": "Filtrar por categoria",
+    "severity": {
+      "info": "Info",
+      "warn": "Aviso",
+      "error": "Erro"
+    },
+    "category": {
+      "connection": "Conexão",
+      "reconnect": "Reconexão",
+      "node": "Nó"
+    },
+    "events": {
+      "connected": "Conectado",
+      "disconnected": "Desconectado",
+      "link_down": "Link inativo",
+      "reconnecting": "Reconectando",
+      "affected_children": "{{count}} conexão(ões) secundária(s) afetada(s)",
+      "node_state_ready": "Nó pronto",
+      "node_state_connecting": "Nó conectando",
+      "node_state_error": "Erro do nó",
+      "node_state_disconnected": "Nó desconectado",
+      "node_state_unknown": "Estado do nó alterado",
+      "already_connecting": "Já conectando, ignorado",
+      "already_connected": "Já conectado, ignorado",
+      "reconnect_phase": "Pipeline de reconexão"
+    },
+    "phase": {
+      "queued": "Na fila",
+      "snapshot": "Snapshot",
+      "grace-period": "Período de carência",
+      "ssh-connect": "Conexão SSH",
+      "await-terminal": "Aguardando terminal",
+      "restore-forwards": "Restaurar encaminhamentos",
+      "resume-transfers": "Retomar transferências",
+      "restore-ide": "Restaurar IDE",
+      "verify": "Verificar",
+      "done": "Concluído",
+      "failed": "Falhou",
+      "cancelled": "Cancelado"
+    },
+    "timeline": "Event timeline",
+    "timeline_hint": "Click to locate event"
+  }
+}

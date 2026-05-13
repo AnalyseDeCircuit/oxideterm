@@ -1,5 +1,43 @@
 {
   "connections": {
+    "state": {
+      "connecting": "Verbindung wird hergestellt...",
+      "active": "Aktiv",
+      "idle": "Inaktiv",
+      "disconnecting": "Verbindung wird getrennt...",
+      "disconnected": "Getrennt",
+      "error": "Fehler: {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "Verbindung verloren - Wiederverbindung läuft...",
+      "connection_closed": "Verbindung geschlossen"
+    },
+    "time": {
+      "just_now": "Gerade eben",
+      "mins_ago": "vor {{count}} Min.",
+      "hrs_ago": "vor {{count}} Std."
+    },
+    "panel": {
+      "title": "Verbindungspool",
+      "description": "Aktive SSH-Verbindungen und Keep-Alive-Einstellungen verwalten",
+      "refresh": "Aktualisieren",
+      "no_connections": "Keine aktiven SSH-Verbindungen",
+      "no_connections_hint": "Neue Verbindungen werden hier angezeigt",
+      "terminals": "{{count}} Terminals",
+      "sftp": "{{count}} SFTP",
+      "forwards": "{{count}} Weiterleitungen",
+      "created": "Erstellt: {{time}}",
+      "idle_hint": "Inaktiv - {{keepAlive}}",
+      "keep_alive_enabled": "Keep Alive",
+      "disconnect_in": "Trennung in {{min}} Min."
+    },
+    "keep_alive": {
+      "enable_tooltip": "Keep Alive aktivieren (Nie trennen)",
+      "disable_tooltip": "Keep Alive deaktivieren (Nach {{min}} Min. Inaktivität trennen)",
+      "legend_enabled": "Keep Alive: Nie automatisch trennen",
+      "legend_disabled": "Standard: Nach {{min}} Min. Inaktivität automatisch trennen",
+      "global_never_tooltip": "Globale Einstellung: Kein Timeout"
+    },
     "monitor": {
       "title": "Verbindungspool",
       "loading": "Statistiken werden geladen...",
@@ -17,6 +55,15 @@
       "live": "Live",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
-    }
+    },
+    "status": {
+      "reconnecting_title": "Verbindung wird wiederhergestellt",
+      "reconnecting_wait": "Die Verbindung wird wiederhergestellt. Bitte warten Sie und versuchen Sie es erneut.",
+      "reconnect_unstable": "Verbindung instabil",
+      "try_again_later": "Die Verbindung ist noch nicht stabil. Bitte versuchen Sie es später erneut.",
+      "connection_failed": "Verbindung fehlgeschlagen",
+      "no_connection_id": "Nach der Wiederverbindung wurde keine Verbindungs-ID zugewiesen."
+    },
+    "failedFetchStats": "Statistiken konnten nicht abgerufen werden"
   }
 }

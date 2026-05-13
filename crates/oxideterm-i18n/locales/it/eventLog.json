@@ -1,0 +1,58 @@
+{
+  "event_log": {
+    "title": "Registro eventi",
+    "dnd": {
+      "on": "Non disturbare",
+      "enable": "Attiva Non disturbare",
+      "disable": "Disattiva Non disturbare",
+      "description": "I nuovi eventi vengono comunque registrati, ma i badge di non letto e i contatori di errore vengono soppressi finché Non disturbare è attivo."
+    },
+    "empty": "Nessun evento",
+    "clear": "Cancella tutto",
+    "close": "Chiudi pannello",
+    "all": "Tutto",
+    "filter_severity": "Filtra per gravità",
+    "filter_category": "Filtra per categoria",
+    "severity": {
+      "info": "Info",
+      "warn": "Avviso",
+      "error": "Errore"
+    },
+    "category": {
+      "connection": "Connessione",
+      "reconnect": "Riconnessione",
+      "node": "Nodo"
+    },
+    "events": {
+      "connected": "Connesso",
+      "disconnected": "Disconnesso",
+      "link_down": "Collegamento interrotto",
+      "reconnecting": "Riconnessione in corso",
+      "affected_children": "{{count}} connessione/i secondaria/e interessata/e",
+      "node_state_ready": "Nodo pronto",
+      "node_state_connecting": "Nodo in connessione",
+      "node_state_error": "Errore del nodo",
+      "node_state_disconnected": "Nodo disconnesso",
+      "node_state_unknown": "Stato del nodo cambiato",
+      "already_connecting": "Già in connessione, saltato",
+      "already_connected": "Già connesso, saltato",
+      "reconnect_phase": "Pipeline di riconnessione"
+    },
+    "phase": {
+      "queued": "In coda",
+      "snapshot": "Snapshot",
+      "grace-period": "Periodo di grazia",
+      "ssh-connect": "Connessione SSH",
+      "await-terminal": "Attesa terminale",
+      "restore-forwards": "Ripristina inoltri",
+      "resume-transfers": "Riprendi trasferimenti",
+      "restore-ide": "Ripristina IDE",
+      "verify": "Verifica",
+      "done": "Completato",
+      "failed": "Fallito",
+      "cancelled": "Annullato"
+    },
+    "timeline": "Event timeline",
+    "timeline_hint": "Click to locate event"
+  }
+}

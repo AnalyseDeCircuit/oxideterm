@@ -1,5 +1,43 @@
 {
   "connections": {
+    "state": {
+      "connecting": "连接中...",
+      "active": "活动",
+      "idle": "空闲",
+      "disconnecting": "断开中...",
+      "disconnected": "已断开",
+      "error": "错误: {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "连接丢失 - 正在重连...",
+      "connection_closed": "连接已关闭"
+    },
+    "time": {
+      "just_now": "刚刚",
+      "mins_ago": "{{count}} 分钟前",
+      "hrs_ago": "{{count}} 小时前"
+    },
+    "panel": {
+      "title": "连接池",
+      "description": "管理活动的 SSH 连接和保活设置",
+      "refresh": "刷新",
+      "no_connections": "无活动 SSH 连接",
+      "no_connections_hint": "新连接将出现在这里",
+      "terminals": "{{count}} 个终端",
+      "sftp": "{{count}} 个 SFTP",
+      "forwards": "{{count}} 个转发",
+      "created": "创建: {{time}}",
+      "idle_hint": "空闲 - {{keepAlive}}",
+      "keep_alive_enabled": "保持连接",
+      "disconnect_in": "{{min}}分钟后断开"
+    },
+    "keep_alive": {
+      "enable_tooltip": "启用保持连接（永不断开）",
+      "disable_tooltip": "禁用保持连接（空闲{{min}}分钟后断开）",
+      "legend_enabled": "保持连接: 永不自动断开",
+      "legend_disabled": "标准: 空闲{{min}}分钟后自动断开",
+      "global_never_tooltip": "全局设置: 永不超时"
+    },
     "monitor": {
       "title": "连接池",
       "loading": "加载统计中...",
@@ -14,9 +52,18 @@
       "sftp": "SFTP",
       "forwards": "转发",
       "summary": "总计: {{total}} 个连接 • 引用: {{refs}}",
+      "live": "实时",
       "topology_nodes_edges": "节点: {{nodes}} • 边: {{edges}}",
-      "topology_roots_children": "{{roots}} 个根 / {{children}} 个子节点",
-      "live": "实时"
-    }
+      "topology_roots_children": "{{roots}} 个根 / {{children}} 个子节点"
+    },
+    "status": {
+      "reconnecting_title": "连接重连中",
+      "reconnecting_wait": "连接正在恢复中，请稍后重试。",
+      "reconnect_unstable": "连接不稳定",
+      "try_again_later": "连接尚未稳定，请稍后再试。",
+      "connection_failed": "连接失败",
+      "no_connection_id": "重连后未分配连接 ID。"
+    },
+    "failedFetchStats": "获取统计信息失败"
   }
 }

@@ -44,6 +44,7 @@ impl WorkspaceApp {
                 TabKind::ConnectionPool => LucideIcon::Terminal,
                 TabKind::ConnectionMonitor => LucideIcon::Activity,
                 TabKind::Topology => LucideIcon::Network,
+                TabKind::NotificationCenter => LucideIcon::Bell,
                 TabKind::Sftp => LucideIcon::FolderInput,
                 TabKind::Ide => LucideIcon::Code2,
                 TabKind::Forwards => LucideIcon::ArrowLeftRight,

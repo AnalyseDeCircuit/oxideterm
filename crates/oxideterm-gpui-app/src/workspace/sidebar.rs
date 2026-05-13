@@ -56,7 +56,7 @@ impl SidebarSection {
             "workspace" => Self::Workspace,
             "files" => Self::Files,
             "monitor" => Self::Monitor,
-            "notifications" => Self::Notifications,
+            "notifications" => Self::Sessions,
             "settings" => Self::Settings,
             _ => Self::Sessions,
         }

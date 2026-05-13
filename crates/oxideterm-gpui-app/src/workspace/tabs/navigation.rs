@@ -71,6 +71,9 @@ impl WorkspaceApp {
                 self.active_surface = ActiveSurface::Terminal;
                 self.active_sidebar_section = SidebarSection::Network;
             }
+            Some(TabKind::NotificationCenter) => {
+                self.active_surface = ActiveSurface::Terminal;
+            }
             _ => {
                 self.active_surface = ActiveSurface::Terminal;
             }

@@ -1,5 +1,43 @@
 {
   "connections": {
+    "state": {
+      "connecting": "連線中...",
+      "active": "使用中",
+      "idle": "閒置",
+      "disconnecting": "中斷連線中...",
+      "disconnected": "已中斷連線",
+      "error": "錯誤：{{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "連線中斷 - 重新連線中...",
+      "connection_closed": "連線已關閉"
+    },
+    "time": {
+      "just_now": "剛才",
+      "mins_ago": "{{count}} 分鐘前",
+      "hrs_ago": "{{count}} 小時前"
+    },
+    "panel": {
+      "title": "連線池",
+      "description": "管理使用中的 SSH 連線和 Keep-alive 設定",
+      "refresh": "重新整理",
+      "no_connections": "沒有使用中的 SSH 連線",
+      "no_connections_hint": "新的連線將顯示在此處",
+      "terminals": "{{count}} 個終端機",
+      "sftp": "{{count}} 個 SFTP",
+      "forwards": "{{count}} 個轉發",
+      "created": "建立時間：{{time}}",
+      "idle_hint": "閒置 - {{keepAlive}}",
+      "keep_alive_enabled": "Keep Alive",
+      "disconnect_in": "{{min}} 分鐘後中斷連線"
+    },
+    "keep_alive": {
+      "enable_tooltip": "啟用 Keep Alive（永不中斷連線）",
+      "disable_tooltip": "停用 Keep Alive（閒置 {{min}} 分鐘後中斷連線）",
+      "legend_enabled": "Keep Alive：永不自動中斷連線",
+      "legend_disabled": "標準：閒置 {{min}} 分鐘後自動中斷連線",
+      "global_never_tooltip": "全域設定：永不逾時"
+    },
     "monitor": {
       "title": "連線池",
       "loading": "載入統計資料...",
@@ -17,6 +55,15 @@
       "live": "即時",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
-    }
+    },
+    "status": {
+      "reconnecting_title": "連線重新連接中",
+      "reconnecting_wait": "連線正在恢復中，請稍候再試。",
+      "reconnect_unstable": "連線不穩定",
+      "try_again_later": "連線尚未穩定，請稍後再試。",
+      "connection_failed": "連線失敗",
+      "no_connection_id": "重新連線後未分配連線 ID。"
+    },
+    "failedFetchStats": "取得統計資訊失敗"
   }
 }

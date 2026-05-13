@@ -11,7 +11,6 @@ impl WorkspaceApp {
             (SidebarSection::Network, LucideIcon::Network),
             (SidebarSection::Extensions, LucideIcon::Puzzle),
             (SidebarSection::Assistant, LucideIcon::Sparkles),
-            (SidebarSection::Automation, LucideIcon::Bot),
         ];
         let bottom_items = [
             (SidebarSection::Workspace, LucideIcon::Square),
@@ -113,28 +112,33 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_sidebar_section == section;
+        let active = if section == SidebarSection::Notifications {
+            self.active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::NotificationCenter)
+        } else {
+            self.active_sidebar_section == section
+        };
         let tooltip = self.activity_icon_tooltip(section);
         let tooltip_id = format!("activity-icon-{}", section.as_settings_key());
         let tooltip_id_for_move = tooltip_id.clone();
         let badge_count = if section == SidebarSection::Notifications {
-            let notification_count = if self.notification_dnd_enabled {
+            let notification_count = if self.notification_center.notifications.dnd_enabled {
                 0
             } else {
-                self.notification_unread_count
+                self.notification_center.notifications.unread_count
             };
-            let event_count = if self.event_log_dnd_enabled {
+            let event_count = if self.notification_center.event_log.dnd_enabled {
                 0
             } else {
-                self.event_log_unread_count
+                self.notification_center.event_log.unread_count
             };
             notification_count.saturating_add(event_count)
         } else {
             0
         };
         let badge_is_error = section == SidebarSection::Notifications
-            && ((!self.notification_dnd_enabled && self.notification_unread_critical_count > 0)
-                || (!self.event_log_dnd_enabled && self.event_log_unread_errors > 0));
+            && ((!self.notification_center.notifications.dnd_enabled && self.notification_center.notifications.unread_critical_count > 0)
+                || (!self.notification_center.event_log.dnd_enabled && self.notification_center.event_log.unread_errors > 0));
         div()
             .id(("activity-icon", section as u64))
             .relative()
@@ -242,8 +246,7 @@ impl WorkspaceApp {
                     } else if section == SidebarSection::Monitor && cfg!(target_os = "windows") {
                         this.open_graphics_tab(window, cx);
                     } else if section == SidebarSection::Notifications {
-                        this.active_surface = ActiveSurface::Terminal;
-                        this.set_sidebar_section(section, cx);
+                        this.open_notification_center_tab(window, cx);
                     } else {
                         this.active_surface = ActiveSurface::Terminal;
                         this.set_sidebar_section(section, cx);

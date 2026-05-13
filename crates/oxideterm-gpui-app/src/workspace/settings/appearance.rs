@@ -18,6 +18,7 @@ const THEME_EDITOR_PREVIEW_CURSOR_WIDTH: f32 = 8.0; // Tauri cursor w-2.
 const THEME_EDITOR_PREVIEW_CURSOR_HEIGHT: f32 = 16.0; // Tauri cursor h-4.
 const THEME_EDITOR_SWATCH_LABEL_SIZE: f32 = 10.0; // Tauri text-[10px].
 const THEME_EDITOR_SECTION_TITLE_SIZE: f32 = 11.0; // Tauri section heading text-[11px].
+const BACKGROUND_THUMBNAIL_ASPECT_RATIO: f32 = 16.0 / 9.0; // Tauri aspect-video.
 
 #[derive(Clone, Copy)]
 struct ThemeColorField {
@@ -2263,14 +2264,17 @@ impl WorkspaceApp {
         let fallback_text_color = self.tokens.ui.text_muted;
         let fallback_icon_color = self.tokens.ui.text_muted;
         let fallback_bg = self.tokens.ui.bg_sunken;
+        let thumbnail_radius = self.tokens.radii.md;
         let image = gpui::img(image_source)
             .w_full()
             .h_full()
+            .rounded(px(thumbnail_radius))
             .object_fit(ObjectFit::Cover)
             .with_fallback(move || {
                 div()
                     .w_full()
                     .h_full()
+                    .rounded(px(thumbnail_radius))
                     .flex()
                     .flex_col()
                     .items_center()
@@ -2294,9 +2298,9 @@ impl WorkspaceApp {
                     .into_any_element()
             });
 
-        div()
+        let mut thumbnail = div()
             .relative()
-            .h(px(self.tokens.metrics.settings_background_thumb_height))
+            .w_full()
             .rounded(px(self.tokens.radii.md))
             .overflow_hidden()
             .border_2()
@@ -2306,7 +2310,9 @@ impl WorkspaceApp {
                 self.tokens.ui.border
             }))
             .cursor_pointer()
-            .child(image)
+            .child(image);
+        thumbnail.style().aspect_ratio = Some(BACKGROUND_THUMBNAIL_ASPECT_RATIO);
+        thumbnail
             .when(active, |thumb| {
                 thumb.child(
                     div()

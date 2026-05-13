@@ -1,5 +1,43 @@
 {
   "connections": {
+    "state": {
+      "connecting": "接続中...",
+      "active": "アクティブ",
+      "idle": "アイドル",
+      "disconnecting": "切断中...",
+      "disconnected": "切断済み",
+      "error": "エラー: {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "接続が切断されました - 再接続中...",
+      "connection_closed": "接続が閉じられました"
+    },
+    "time": {
+      "just_now": "たった今",
+      "mins_ago": "{{count}}分前",
+      "hrs_ago": "{{count}}時間前"
+    },
+    "panel": {
+      "title": "接続プール",
+      "description": "アクティブなSSH接続とキープアライブ設定を管理",
+      "refresh": "更新",
+      "no_connections": "アクティブなSSH接続がありません",
+      "no_connections_hint": "新しい接続はここに表示されます",
+      "terminals": "{{count}}個のターミナル",
+      "sftp": "{{count}}個のSFTP",
+      "forwards": "{{count}}個の転送",
+      "created": "作成: {{time}}",
+      "idle_hint": "アイドル - {{keepAlive}}",
+      "keep_alive_enabled": "キープアライブ",
+      "disconnect_in": "{{min}}分後に切断"
+    },
+    "keep_alive": {
+      "enable_tooltip": "キープアライブを有効にする（切断しない）",
+      "disable_tooltip": "キープアライブを無効にする（{{min}}分のアイドル後に切断）",
+      "legend_enabled": "キープアライブ: 自動切断なし",
+      "legend_disabled": "標準: {{min}}分のアイドル後に自動切断",
+      "global_never_tooltip": "グローバル設定: タイムアウトなし"
+    },
     "monitor": {
       "title": "接続プール",
       "loading": "統計を読み込み中...",
@@ -17,6 +55,15 @@
       "live": "ライブ",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
-    }
+    },
+    "status": {
+      "reconnecting_title": "接続を再確立中",
+      "reconnecting_wait": "接続を復元しています。しばらくお待ちいただいてから再試行してください。",
+      "reconnect_unstable": "接続が不安定",
+      "try_again_later": "接続がまだ安定していません。しばらくしてから再試行してください。",
+      "connection_failed": "接続に失敗しました",
+      "no_connection_id": "再接続後に接続 ID が割り当てられませんでした。"
+    },
+    "failedFetchStats": "統計情報の取得に失敗しました"
   }
 }

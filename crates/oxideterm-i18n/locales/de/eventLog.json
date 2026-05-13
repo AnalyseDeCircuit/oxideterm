@@ -1,0 +1,58 @@
+{
+  "event_log": {
+    "title": "Ereignisprotokoll",
+    "dnd": {
+      "on": "Nicht stören",
+      "enable": "Nicht stören aktivieren",
+      "disable": "Nicht stören deaktivieren",
+      "description": "Neue Ereignisse werden weiterhin protokolliert, aber Ungelesen-Badges und Fehlerzähler werden unterdrückt, solange Nicht stören aktiviert ist."
+    },
+    "empty": "Keine Ereignisse",
+    "clear": "Alle löschen",
+    "close": "Panel schließen",
+    "all": "Alle",
+    "filter_severity": "Nach Schweregrad filtern",
+    "filter_category": "Nach Kategorie filtern",
+    "severity": {
+      "info": "Info",
+      "warn": "Warnung",
+      "error": "Fehler"
+    },
+    "category": {
+      "connection": "Verbindung",
+      "reconnect": "Wiederverbindung",
+      "node": "Knoten"
+    },
+    "events": {
+      "connected": "Verbunden",
+      "disconnected": "Getrennt",
+      "link_down": "Verbindungsabbruch",
+      "reconnecting": "Wiederverbindung läuft",
+      "affected_children": "{{count}} Unterverbindung(en) betroffen",
+      "node_state_ready": "Knoten bereit",
+      "node_state_connecting": "Knoten verbindet",
+      "node_state_error": "Knotenfehler",
+      "node_state_disconnected": "Knoten getrennt",
+      "node_state_unknown": "Knotenstatus geändert",
+      "already_connecting": "Bereits verbindend, übersprungen",
+      "already_connected": "Bereits verbunden, übersprungen",
+      "reconnect_phase": "Wiederverbindungs-Pipeline"
+    },
+    "phase": {
+      "queued": "Warteschlange",
+      "snapshot": "Snapshot",
+      "grace-period": "Nachfrist",
+      "ssh-connect": "SSH-Verbindung",
+      "await-terminal": "Terminal warten",
+      "restore-forwards": "Weiterleitungen wiederherstellen",
+      "resume-transfers": "Übertragungen fortsetzen",
+      "restore-ide": "IDE wiederherstellen",
+      "verify": "Überprüfung",
+      "done": "Fertig",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    },
+    "timeline": "Event timeline",
+    "timeline_hint": "Click to locate event"
+  }
+}

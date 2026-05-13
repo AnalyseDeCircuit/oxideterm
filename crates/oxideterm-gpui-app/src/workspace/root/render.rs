@@ -38,6 +38,7 @@ impl Render for WorkspaceApp {
                             | TabKind::ConnectionPool
                             | TabKind::ConnectionMonitor
                             | TabKind::Topology
+                            | TabKind::NotificationCenter
                     )
                 })
             && !self.search.visible
@@ -59,6 +60,7 @@ impl Render for WorkspaceApp {
                 (TabKind::ConnectionPool, _) => self.render_connection_pool_surface(cx),
                 (TabKind::ConnectionMonitor, _) => self.render_connection_monitor_surface(cx),
                 (TabKind::Topology, _) => self.render_topology_surface(cx),
+                (TabKind::NotificationCenter, _) => self.render_notification_center_surface(cx),
                 (TabKind::Sftp, _) => self.render_sftp_surface(window, cx),
                 (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),

@@ -164,7 +164,7 @@ impl WorkspaceApp {
                         self.log_connection_event(
                             &node_id,
                             Some(connection_id.clone()),
-                            "SSH connection restored",
+                            "event_log.events.connected",
                             WorkspaceEventSeverity::Info,
                             None,
                             "connect_node",
@@ -309,7 +309,7 @@ impl WorkspaceApp {
                             WorkspaceNotificationSeverity::Error,
                             "Reconnect failed",
                             Some(error.clone()),
-                            WorkspaceNotificationScope::Node(node_id.clone()),
+                            WorkspaceNotificationScope::Node(node_id.0.clone()),
                             Some(format!("reconnect-failed:{}", node_id.0)),
                         );
                         let _ = self.reconnect_orchestrator.complete_phase(
@@ -731,14 +731,16 @@ impl WorkspaceApp {
                     Some(node_id.clone()),
                     Some(connection_id.clone()),
                     match status.as_str() {
-                        "link_down" => "Connection link down",
-                        "disconnected" => "Connection disconnected",
-                        "connected" => "Connection connected",
-                        "reconnecting" => "Connection reconnecting",
-                        _ => "Connection status changed",
+                        "link_down" => "event_log.events.link_down",
+                        "disconnected" => "event_log.events.disconnected",
+                        "connected" => "event_log.events.connected",
+                        "reconnecting" => "event_log.events.reconnecting",
+                        _ => "event_log.events.node_state_unknown",
                     },
                     (affected_children_count > 0)
-                        .then_some(format!("affected children: {affected_children_count}")),
+                        .then_some(format!(
+                            "event_log.events.affected_children:{affected_children_count}"
+                        )),
                     "connection_status_changed",
                 );
                 if matches!(state, NodeReadiness::Error) {
@@ -751,7 +753,7 @@ impl WorkspaceApp {
                         } else {
                             reason.clone()
                         }),
-                        WorkspaceNotificationScope::Node(node_id.clone()),
+                        WorkspaceNotificationScope::Node(node_id.0.clone()),
                         Some(format!("connection-lost:{}", node_id.0)),
                     );
                 } else if matches!(state, NodeReadiness::Ready) {
@@ -812,7 +814,7 @@ impl WorkspaceApp {
                     WorkspaceEventCategory::Node,
                     Some(node_id.clone()),
                     self.node_router.connection_id_for_node(&node_id),
-                    format!("Node state: {:?}", state),
+                    event_log_title_for_node_readiness(&state),
                     (!reason.is_empty()).then_some(reason.clone()),
                     "node:state",
                 );
@@ -837,12 +839,14 @@ impl WorkspaceApp {
                         Some(node_id.clone()),
                         self.node_router.connection_id_for_node(&node_id),
                         if matches!(state, NodeReadiness::Error) {
-                            "Connection link down"
+                            "event_log.events.link_down"
                         } else {
-                            "Connection disconnected"
+                            "event_log.events.disconnected"
                         },
                         (affected_children > 0)
-                            .then_some(format!("affected children: {affected_children}")),
+                            .then_some(format!(
+                                "event_log.events.affected_children:{affected_children}"
+                            )),
                         "connection_status_changed",
                     );
                     if matches!(state, NodeReadiness::Error) {
@@ -855,7 +859,7 @@ impl WorkspaceApp {
                             } else {
                                 reason.clone()
                             }),
-                            WorkspaceNotificationScope::Node(node_id.clone()),
+                            WorkspaceNotificationScope::Node(node_id.0.clone()),
                             Some(format!("connection-lost:{}", node_id.0)),
                         );
                     }
@@ -1635,7 +1639,7 @@ impl WorkspaceApp {
                         WorkspaceNotificationSeverity::Error,
                         "Reconnect failed",
                         Some(error),
-                        WorkspaceNotificationScope::Node(node_id.clone()),
+                        WorkspaceNotificationScope::Node(node_id.0.clone()),
                         Some(format!("reconnect-failed:{}", node_id.0)),
                     );
                 } else {

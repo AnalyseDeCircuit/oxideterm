@@ -64,6 +64,10 @@ impl WorkspaceApp {
                 .thread_name("oxideterm-forwarding")
                 .build()?,
         );
+        // The SSH pool idle timer is long-lived backend work, matching Tauri's
+        // registry-owned timeout task rather than tying disconnects to a GPUI
+        // render/update turn.
+        ssh_registry.set_task_runtime(forwarding_runtime.handle().clone());
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
@@ -154,10 +158,7 @@ impl WorkspaceApp {
             pending_ide_restore_transfer_counts: HashMap::new(),
             reconnect_forward_restore_totals: HashMap::new(),
             reconnect_forward_restore_tokens: HashMap::new(),
-            event_log_entries: VecDeque::new(),
-            event_log_next_id: 1,
-            event_log_unread_count: 0,
-            event_log_unread_errors: 0,
+            notification_center: NotificationCenterState::default(),
             terminal_endpoint_sessions: HashMap::new(),
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
@@ -215,15 +216,6 @@ impl WorkspaceApp {
             workspace_tooltip: None,
             workspace_tooltip_pending: None,
             workspace_tooltip_generation: 0,
-            active_activity_view: WorkspaceActivityView::Notifications,
-            event_log_filter: WorkspaceEventFilter::default(),
-            event_log_dnd_enabled: true,
-            notification_entries: VecDeque::new(),
-            notification_next_id: 1,
-            notification_unread_count: 0,
-            notification_unread_critical_count: 0,
-            notification_filter: WorkspaceNotificationFilter::default(),
-            notification_dnd_enabled: true,
         };
         workspace.restore_session_tree_snapshot();
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);

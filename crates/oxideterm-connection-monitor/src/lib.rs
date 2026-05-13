@@ -23,5 +23,6 @@ pub use profiler::{
     shell_init_command,
 };
 pub use stats::{
-    ConnectionMonitorConsumerKind, ConnectionPoolMonitorStats, PoolConnectionMonitorSnapshot,
+    ConnectionMonitorConsumerKind, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
+    ConnectionPoolMonitorStats, PoolConnectionMonitorSnapshot, PoolConnectionSummarySnapshot,
 };

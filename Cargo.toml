@@ -12,6 +12,7 @@ members = [
   "crates/oxideterm-gpui-ide",
   "crates/oxideterm-connections",
   "crates/oxideterm-connection-monitor",
+  "crates/oxideterm-notification-center",
   "crates/oxideterm-topology",
   "crates/oxideterm-backend-classification",
   "crates/oxideterm-ide-core",
