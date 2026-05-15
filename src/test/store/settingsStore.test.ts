@@ -478,6 +478,26 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settings.terminal.middleClickPaste).toBe(false);
   });
 
+  it('normalizes legacy terminal encoding aliases on load', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      terminal: { theme: 'default', renderer: 'auto', terminalEncoding: 'shift-jis' },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.terminal.terminalEncoding).toBe('shift_jis');
+  });
+
+  it('falls back to utf-8 for invalid terminal encoding updates', async () => {
+    const useSettingsStore = await loadSettingsStore();
+
+    useSettingsStore.getState().updateTerminal('terminalEncoding', 'latin1' as never);
+
+    expect(useSettingsStore.getState().settings.terminal.terminalEncoding).toBe('utf-8');
+    const persisted = await expectLastSavedSettings();
+    expect(persisted.terminal.terminalEncoding).toBe('utf-8');
+  });
+
   it('defaults and normalizes in-band transfer settings on load and update', async () => {
     localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
       terminal: {
