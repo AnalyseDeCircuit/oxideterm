@@ -1,0 +1,197 @@
+use std::time::Duration;
+
+use gpui::{
+    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, TextRun,
+    Window, px, rgb,
+};
+use oxideterm_terminal::{TerminalLifecycle, TerminalProcessInfo};
+
+pub(crate) const DEFAULT_COLS: usize = 120;
+pub(crate) const DEFAULT_ROWS: usize = 40;
+pub const TERMINAL_FONT: &str = "JetBrainsMono Nerd Font";
+pub(crate) const TERMINAL_FONT_SIZE: f32 = 14.0;
+pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
+pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
+pub(crate) const OXIDETERM_TERMINAL_BACKGROUND: u32 = 0x0d0f12;
+pub(crate) const SCROLLBAR_WIDTH: f32 = 3.0;
+pub(crate) const SCROLLBAR_GAP: f32 = 6.0;
+pub(crate) const SCROLLBAR_MIN_THUMB: f32 = 24.0;
+pub(crate) const TERMINAL_SCROLL_MULTIPLIER: f32 = 1.0;
+pub(crate) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
+pub(crate) const TERMINAL_BLINK_MODE: TerminalBlinkMode = TerminalBlinkMode::On;
+pub(crate) const TERMINAL_COPY_ON_SELECT: bool = false;
+pub(crate) const TERMINAL_KEEP_SELECTION_ON_COPY: bool = true;
+
+#[derive(Clone)]
+pub(crate) struct TerminalUiSettings {
+    pub(crate) blink_mode: TerminalBlinkMode,
+    pub(crate) copy_on_select: bool,
+    pub(crate) keep_selection_on_copy: bool,
+}
+
+impl Default for TerminalUiSettings {
+    fn default() -> Self {
+        Self {
+            blink_mode: TERMINAL_BLINK_MODE,
+            copy_on_select: TERMINAL_COPY_ON_SELECT,
+            keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TerminalUiTheme {
+    pub background: u32,
+    pub(crate) bell_background: u32,
+    pub foreground: u32,
+    pub(crate) header_background: u32,
+    pub(crate) header_foreground: u32,
+}
+
+impl Default for TerminalUiTheme {
+    fn default() -> Self {
+        Self {
+            background: OXIDETERM_TERMINAL_BACKGROUND,
+            bell_background: 0x17131a,
+            foreground: 0xe6e8eb,
+            header_background: 0x1b1f24,
+            header_foreground: 0x8bbdff,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TerminalBlinkMode {
+    #[allow(dead_code)]
+    Off,
+    #[allow(dead_code)]
+    TerminalControlled,
+    On,
+}
+
+#[derive(Clone)]
+pub(crate) struct TerminalMetrics {
+    pub(crate) font: Font,
+    pub(crate) font_size: Pixels,
+    pub(crate) cell_width: Pixels,
+    pub(crate) line_height: Pixels,
+}
+
+impl TerminalMetrics {
+    pub(crate) fn measure(window: &mut Window) -> Self {
+        let font_size = px(TERMINAL_FONT_SIZE);
+        let line_height = px(TERMINAL_FONT_SIZE * TERMINAL_LINE_HEIGHT_RATIO);
+        let font = terminal_font();
+        let font_id = window.text_system().resolve_font(&font);
+        let measured_width = window
+            .text_system()
+            .advance(font_id, font_size, 'm')
+            .map(|advance| advance.width)
+            .unwrap_or_else(|_| fallback_cell_width(window, &font, font_size));
+
+        Self {
+            font,
+            font_size,
+            cell_width: measured_width.max(px(1.0)),
+            line_height,
+        }
+    }
+
+    pub(crate) fn cell_width_f32(&self) -> f32 {
+        f32::from(self.cell_width)
+    }
+
+    pub(crate) fn line_height_f32(&self) -> f32 {
+        f32::from(self.line_height)
+    }
+}
+
+pub(crate) fn fallback_cell_width(window: &mut Window, font: &Font, font_size: Pixels) -> Pixels {
+    let sample = SharedString::from("m");
+    let run = TextRun {
+        len: sample.len(),
+        font: font.clone(),
+        color: rgb(0xe6e8eb).into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+
+    window
+        .text_system()
+        .shape_line(sample, font_size, &[run], None)
+        .width
+}
+
+pub(crate) fn terminal_font() -> Font {
+    Font {
+        family: SharedString::from(TERMINAL_FONT),
+        features: terminal_font_features(),
+        fallbacks: Some(FontFallbacks::from_fonts(vec![
+            "JetBrainsMono Nerd Font Mono".to_string(),
+            "JetBrains Mono NF (Subset)".to_string(),
+            "JetBrains Mono".to_string(),
+            "JetBrainsMonoNL Nerd Font Mono".to_string(),
+            "MesloLGS Nerd Font Mono".to_string(),
+            "Maple Mono NF CN".to_string(),
+            "Symbols Nerd Font Mono".to_string(),
+            "Symbols Nerd Font".to_string(),
+            "ui-monospace".to_string(),
+            "SF Mono".to_string(),
+            "Menlo".to_string(),
+            "Monaco".to_string(),
+            "Cascadia Mono".to_string(),
+            "DejaVu Sans Mono".to_string(),
+            "Noto Sans Mono".to_string(),
+            "Liberation Mono".to_string(),
+            "Courier New".to_string(),
+            "Apple Color Emoji".to_string(),
+        ])),
+        weight: FontWeight::default(),
+        style: FontStyle::Normal,
+    }
+}
+
+pub(crate) fn terminal_font_features() -> FontFeatures {
+    FontFeatures::disable_ligatures()
+}
+
+pub(crate) fn terminal_lifecycle_label(lifecycle: &TerminalLifecycle) -> String {
+    match lifecycle {
+        TerminalLifecycle::Running => "running".to_string(),
+        TerminalLifecycle::Exited(Some(code)) => format!("exited({code})"),
+        TerminalLifecycle::Exited(None) => "exited".to_string(),
+        TerminalLifecycle::Closed => "closed".to_string(),
+    }
+}
+
+pub(crate) fn terminal_process_header(process_info: &TerminalProcessInfo) -> String {
+    let mut parts = Vec::new();
+    if let Some(pid) = process_info.shell_pid {
+        parts.push(format!("pid {pid}"));
+    }
+    if let Some(foreground_pid) = process_info
+        .foreground_pid
+        .filter(|foreground_pid| Some(*foreground_pid) != process_info.shell_pid)
+    {
+        parts.push(format!("fg {foreground_pid}"));
+    }
+    if let Some(process_group_id) = process_info
+        .foreground_process_group_id
+        .filter(|process_group_id| Some(*process_group_id) != process_info.foreground_pid)
+    {
+        parts.push(format!("pgid {process_group_id}"));
+    }
+    if let Some(command) = process_info.command.as_deref() {
+        parts.push(command.to_string());
+    }
+    if let Some(cwd) = process_info.cwd.as_ref().and_then(|cwd| cwd.file_name()) {
+        parts.push(cwd.to_string_lossy().to_string());
+    }
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" · {}", parts.join(" · "))
+    }
+}

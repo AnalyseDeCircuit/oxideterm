@@ -1,0 +1,70 @@
+{
+  "app": {
+    "name": "OxideTerm"
+  },
+  "language": {
+    "english": "English",
+    "simplified_chinese": "Simplified Chinese"
+  },
+  "menu": {
+    "app": "OxideTerm",
+    "services": "Services",
+    "new_terminal": "New Terminal",
+    "close_tab": "Close Tab",
+    "quit": "Quit OxideTerm",
+    "edit": "Edit",
+    "copy": "Copy",
+    "paste": "Paste",
+    "find": "Find",
+    "find_next": "Find Next",
+    "find_previous": "Find Previous",
+    "terminal": "Terminal",
+    "split_horizontal": "Split Horizontal",
+    "split_vertical": "Split Vertical",
+    "close_pane": "Close Pane",
+    "window": "Window",
+    "next_tab": "Next Tab",
+    "previous_tab": "Previous Tab",
+    "language": "Language"
+  },
+  "titlebar": {
+    "open_recent_project": "Open Recent Project"
+  },
+  "terminal": {
+    "local_terminal": "Local Terminal"
+  },
+  "search": {
+    "placeholder": "Search",
+    "previous": "prev",
+    "next": "next",
+    "close": "x"
+  },
+  "workspace": {
+    "new_local_terminal": "New Local Terminal"
+  },
+  "sidebar": {
+    "active_sessions": "Active Sessions",
+    "no_sessions": "No Sessions",
+    "add_new_connection": "Click + to add a new connection",
+    "actions": {
+      "new_local_terminal": "New Local Terminal"
+    },
+    "panels": {
+      "sessions": "Active Sessions",
+      "session_manager": "Session Manager",
+      "files": "File Manager",
+      "connection_pool": "Connection Pool",
+      "connection_monitor": "Connection Monitor",
+      "connection_matrix": "Connection Matrix",
+      "plugins": "Plugins",
+      "ai": "OxideSens",
+      "activity": "Activity"
+    }
+  },
+  "sessions": {
+    "tree": {
+      "no_sessions": "No Sessions",
+      "click_to_add": "Click + to add a new connection"
+    }
+  }
+}

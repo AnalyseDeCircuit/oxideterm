@@ -1,0 +1,305 @@
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerminalTheme {
+    pub background: u32,
+    pub foreground: u32,
+    pub cursor: u32,
+    pub selection_background: &'static str,
+    pub black: u32,
+    pub red: u32,
+    pub green: u32,
+    pub yellow: u32,
+    pub blue: u32,
+    pub magenta: u32,
+    pub cyan: u32,
+    pub white: u32,
+    pub bright_black: u32,
+    pub bright_red: u32,
+    pub bright_green: u32,
+    pub bright_yellow: u32,
+    pub bright_blue: u32,
+    pub bright_magenta: u32,
+    pub bright_cyan: u32,
+    pub bright_white: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AppUiColors {
+    pub bg: u32,
+    pub bg_panel: u32,
+    pub bg_card: u32,
+    pub bg_hover: u32,
+    pub bg_active: u32,
+    pub bg_secondary: u32,
+    pub bg_elevated: u32,
+    pub bg_sunken: u32,
+    pub text: u32,
+    pub text_muted: u32,
+    pub text_secondary: u32,
+    pub text_heading: u32,
+    pub border: u32,
+    pub border_strong: u32,
+    pub divider: u32,
+    pub accent: u32,
+    pub accent_hover: u32,
+    pub accent_text: u32,
+    pub accent_secondary: u32,
+    pub success: u32,
+    pub warning: u32,
+    pub error: u32,
+    pub info: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BuiltInTheme {
+    pub id: &'static str,
+    pub terminal: TerminalTheme,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UiMetrics {
+    pub font_family: &'static str,
+    pub traffic_light_x: f32,
+    pub traffic_light_y: f32,
+    pub traffic_light_diameter: f32,
+    pub traffic_light_gap: f32,
+    pub titlebar_height: f32,
+    pub titlebar_label_font_size: f32,
+    pub window_min_width: f32,
+    pub window_min_height: f32,
+    pub tabbar_height: f32,
+    pub tabbar_leading_offset: f32,
+    pub tab_width: f32,
+    pub tab_font_size: f32,
+    pub new_tab_button_width: f32,
+    pub new_tab_button_height: f32,
+    pub activity_bar_width: f32,
+    pub activity_icon_size: f32,
+    pub activity_icon_glyph_size: f32,
+    pub activity_indicator_inset: f32,
+    pub activity_indicator_width: f32,
+    pub sidebar_default_width: f32,
+    pub sidebar_min_width: f32,
+    pub sidebar_max_width: f32,
+    pub sidebar_header_height: f32,
+    pub sidebar_resize_handle_width: f32,
+    pub sidebar_action_size: f32,
+    pub sidebar_action_icon_size: f32,
+    pub sidebar_title_font_size: f32,
+    pub divider_width: f32,
+    pub divider_height: f32,
+    pub split_handle_size: f32,
+    pub min_pane_width: f32,
+    pub min_pane_height: f32,
+    pub min_main_width: f32,
+    pub searchbar_height: f32,
+    pub search_input_height: f32,
+    pub searchbar_font_size: f32,
+    pub empty_sidebar_top_padding: f32,
+    pub empty_sidebar_icon_size: f32,
+    pub empty_sidebar_title_font_size: f32,
+    pub empty_sidebar_subtitle_font_size: f32,
+    pub empty_workspace_padding_x: f32,
+    pub empty_workspace_padding_y: f32,
+    pub titlebar_label_extra_offset: f32,
+}
+
+impl UiMetrics {
+    pub const fn tauri_default() -> Self {
+        Self {
+            font_family: "SF Pro Text",
+            traffic_light_x: 14.0,
+            traffic_light_y: 8.0,
+            traffic_light_diameter: 14.0,
+            traffic_light_gap: 10.0,
+            titlebar_height: 30.0,
+            titlebar_label_font_size: 13.0,
+            window_min_width: 420.0,
+            window_min_height: 280.0,
+            tabbar_height: 30.0,
+            tabbar_leading_offset: 0.0,
+            tab_width: 190.0,
+            tab_font_size: 13.0,
+            new_tab_button_width: 30.0,
+            new_tab_button_height: 24.0,
+            activity_bar_width: 48.0,
+            activity_icon_size: 36.0,
+            activity_icon_glyph_size: 20.0,
+            activity_indicator_inset: 6.0,
+            activity_indicator_width: 2.0,
+            sidebar_default_width: 300.0,
+            sidebar_min_width: 200.0,
+            sidebar_max_width: 600.0,
+            sidebar_header_height: 44.0,
+            sidebar_resize_handle_width: 4.0,
+            sidebar_action_size: 24.0,
+            sidebar_action_icon_size: 12.0,
+            sidebar_title_font_size: 12.0,
+            divider_width: 24.0,
+            divider_height: 1.0,
+            split_handle_size: 5.0,
+            min_pane_width: 80.0,
+            min_pane_height: 60.0,
+            min_main_width: 240.0,
+            searchbar_height: 34.0,
+            search_input_height: 24.0,
+            searchbar_font_size: 12.0,
+            empty_sidebar_top_padding: 66.0,
+            empty_sidebar_icon_size: 34.0,
+            empty_sidebar_title_font_size: 16.0,
+            empty_sidebar_subtitle_font_size: 13.0,
+            empty_workspace_padding_x: 16.0,
+            empty_workspace_padding_y: 8.0,
+            titlebar_label_extra_offset: 18.0,
+        }
+    }
+
+    pub fn titlebar_label_x(self) -> f32 {
+        self.traffic_light_x
+            + self.traffic_light_diameter * 3.0
+            + self.traffic_light_gap * 2.0
+            + self.titlebar_label_extra_offset
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UiRadii {
+    pub sm: f32,
+    pub md: f32,
+    pub lg: f32,
+    pub active_indicator: f32,
+}
+
+impl UiRadii {
+    pub const fn tauri_default() -> Self {
+        Self {
+            sm: 4.0,
+            md: 6.0,
+            lg: 10.0,
+            active_indicator: 2.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UiSpacing {
+    pub one: f32,
+    pub two: f32,
+    pub three: f32,
+    pub icon_gap: f32,
+}
+
+impl UiSpacing {
+    pub const fn tauri_default() -> Self {
+        Self {
+            one: 4.0,
+            two: 8.0,
+            three: 12.0,
+            icon_gap: 8.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThemeTokens {
+    pub terminal: TerminalTheme,
+    pub ui: AppUiColors,
+    pub metrics: UiMetrics,
+    pub radii: UiRadii,
+    pub spacing: UiSpacing,
+}
+
+impl ThemeTokens {
+    pub fn from_builtin(theme: BuiltInTheme) -> Self {
+        Self {
+            terminal: theme.terminal,
+            ui: derive_ui_colors_from_terminal(theme.terminal),
+            metrics: UiMetrics::tauri_default(),
+            radii: UiRadii::tauri_default(),
+            spacing: UiSpacing::tauri_default(),
+        }
+    }
+}
+
+pub fn theme_by_id(id: &str) -> BuiltInTheme {
+    BUILT_IN_THEMES
+        .iter()
+        .copied()
+        .find(|theme| theme.id == id)
+        .unwrap_or(DEFAULT_THEME)
+}
+
+pub fn default_tokens() -> ThemeTokens {
+    ThemeTokens::from_builtin(DEFAULT_THEME)
+}
+
+pub fn derive_ui_colors_from_terminal(theme: TerminalTheme) -> AppUiColors {
+    AppUiColors {
+        bg: theme.background,
+        bg_panel: shift(theme.background, 15),
+        bg_card: shift(theme.background, 20),
+        bg_hover: shift(theme.background, 30),
+        bg_active: shift(theme.background, 40),
+        bg_secondary: shift(theme.background, 10),
+        bg_elevated: shift(theme.background, 22),
+        bg_sunken: shift(theme.background, -10),
+        text: theme.foreground,
+        text_muted: theme.bright_black,
+        text_secondary: mix(theme.foreground, theme.bright_black, 0.5),
+        text_heading: shift(theme.foreground, 8),
+        border: shift(theme.background, 30),
+        border_strong: mix(theme.cursor, theme.foreground, 0.6),
+        divider: shift(theme.background, 20),
+        accent: theme.cursor,
+        accent_hover: shift(theme.cursor, -20),
+        accent_text: mix(theme.cursor, theme.background, 0.7),
+        accent_secondary: theme.bright_black,
+        success: theme.green,
+        warning: theme.yellow,
+        error: theme.red,
+        info: theme.blue,
+    }
+}
+
+fn shift(hex: u32, amount: i32) -> u32 {
+    let r = clamp_channel(((hex >> 16) & 0xff) as i32 + amount);
+    let g = clamp_channel(((hex >> 8) & 0xff) as i32 + amount);
+    let b = clamp_channel((hex & 0xff) as i32 + amount);
+    (r << 16) | (g << 8) | b
+}
+
+fn mix(c1: u32, c2: u32, ratio: f32) -> u32 {
+    let inverse = 1.0 - ratio;
+    let r =
+        (((c1 >> 16) & 0xff) as f32 * ratio + ((c2 >> 16) & 0xff) as f32 * inverse).round() as u32;
+    let g =
+        (((c1 >> 8) & 0xff) as f32 * ratio + ((c2 >> 8) & 0xff) as f32 * inverse).round() as u32;
+    let b = ((c1 & 0xff) as f32 * ratio + (c2 & 0xff) as f32 * inverse).round() as u32;
+    (r.min(255) << 16) | (g.min(255) << 8) | b.min(255)
+}
+
+fn clamp_channel(value: i32) -> u32 {
+    value.clamp(0, 255) as u32
+}
+
+include!("generated.rs");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_all_tauri_builtin_themes() {
+        assert_eq!(BUILT_IN_THEMES.len(), 31);
+        assert_eq!(theme_by_id("default").terminal.background, 0x09090b);
+        assert_eq!(theme_by_id("spring-green").terminal.cursor, 0x16a34a);
+    }
+
+    #[test]
+    fn derives_ui_colors_like_tauri() {
+        let ui = derive_ui_colors_from_terminal(theme_by_id("default").terminal);
+        assert_eq!(ui.bg, 0x09090b);
+        assert_eq!(ui.bg_panel, 0x18181a);
+        assert_eq!(ui.bg_hover, 0x272729);
+        assert_eq!(ui.accent, 0xea580c);
+    }
+}

@@ -1,0 +1,26 @@
+OxideTerm
+Copyright (c) 2026 OxideTerm contributors.
+
+This project includes code, assets, or protocol implementations from the
+following projects:
+
+Alacritty
+Copyright 2016-2025 The Alacritty Project Contributors.
+Licensed under the Apache License, Version 2.0.
+Used through the alacritty_terminal crate for terminal emulation, PTY state,
+and terminal protocol behavior.
+
+Lucide
+Copyright (c) 2020, Lucide Contributors.
+Licensed under the ISC License.
+Used for the native workspace sidebar and toolbar SVG icons.
+
+Russh
+Copyright 2016 Pierre-Étienne Meunier.
+Copyright 2024-2026 Eugeny contributors and Russh contributors.
+Licensed under the Apache License, Version 2.0.
+Vendored as crates/russh from the Tauri application vendor copy
+src-tauri/vendor/russh-0.59.0. That vendored copy is based on Eugeny's
+russh fork (https://github.com/Eugeny/russh), which in turn derives from
+Pierre-Étienne Meunier's Thrussh/Russh lineage. Original source copyright
+and license headers are preserved in the vendored files.

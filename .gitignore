@@ -1,95 +1,27 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Rust / Cargo
+target/
+**/*.rs.bk
 
-node_modules
-.pnpm-store
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# macOS
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-# Tauri
-src-tauri/target/
-src-tauri/.cargo/
+.AppleDouble
+.LSOverride
+*.xcuserstate
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+*.o
+*.a
+*.dylib
+*.so
+*.dll
 
 # Environment
 .env
 .env.local
-.cursorrules
-# OS
-.DS_Store
-Thumbs.db
-
-# IDE
-*.iml
-.vscode/
-!.vscode/settings.json
-!.vscode/extensions.json
-
-# Build artifacts
-dist/
-build/
-*.exe
-*.app
-*.dmg
-
-# Rust
-# Note: Cargo.lock should be committed for applications for reproducible builds
-target/
-**/*.rs.bk
-
-# Agent build artifacts (source compilation cache)
-agent/target/
-
-# CLI build artifacts
-cli/target/
-src-tauri/cli-bin/
-
-# Node
-# Note: package-lock.json should be committed for consistent builds
-yarn.lock
-
-# Development
-*.swp
-*.swo
-*~
-.#*
-
-
-# User data and state (DO NOT COMMIT)
-*.redb
-*.redb.backup
-config.json
-keychain.json
-.cursorignore
-AGENTS.md
-CLAUDE.md
-/debugdocs
-.github/copilot-instructions.md
-.github/agents
-/plugins
-/promo
-# Website (symlink)
-oxideterm-web
-README.old.md
-MAINTAINER_PLAYBOOK.md
-
-
-docs/local/
-DMCA_takedown_template.md
-ns_update_v1.4.2.md
+/docs/local

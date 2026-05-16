@@ -1,0 +1,15 @@
+[package]
+name = "oxideterm-native"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+gpui.workspace = true
+oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
+parking_lot.workspace = true

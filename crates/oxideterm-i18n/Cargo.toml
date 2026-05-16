@@ -1,0 +1,8 @@
+[package]
+name = "oxideterm-i18n"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde_json.workspace = true

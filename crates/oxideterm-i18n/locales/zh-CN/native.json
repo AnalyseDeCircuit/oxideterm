@@ -1,0 +1,70 @@
+{
+  "app": {
+    "name": "OxideTerm"
+  },
+  "language": {
+    "english": "英文",
+    "simplified_chinese": "简体中文"
+  },
+  "menu": {
+    "app": "OxideTerm",
+    "services": "服务",
+    "new_terminal": "新建终端",
+    "close_tab": "关闭标签页",
+    "quit": "退出 OxideTerm",
+    "edit": "编辑",
+    "copy": "复制",
+    "paste": "粘贴",
+    "find": "查找",
+    "find_next": "查找下一个",
+    "find_previous": "查找上一个",
+    "terminal": "终端",
+    "split_horizontal": "水平拆分",
+    "split_vertical": "垂直拆分",
+    "close_pane": "关闭窗格",
+    "window": "窗口",
+    "next_tab": "下一个标签页",
+    "previous_tab": "上一个标签页",
+    "language": "语言"
+  },
+  "titlebar": {
+    "open_recent_project": "打开最近项目"
+  },
+  "terminal": {
+    "local_terminal": "本地终端"
+  },
+  "search": {
+    "placeholder": "搜索",
+    "previous": "上一个",
+    "next": "下一个",
+    "close": "x"
+  },
+  "workspace": {
+    "new_local_terminal": "新建本地终端"
+  },
+  "sidebar": {
+    "active_sessions": "活动会话",
+    "no_sessions": "暂无会话",
+    "add_new_connection": "点击 + 添加新连接",
+    "actions": {
+      "new_local_terminal": "新建本地终端"
+    },
+    "panels": {
+      "sessions": "活动会话",
+      "session_manager": "会话管理器",
+      "files": "文件管理器",
+      "connection_pool": "连接池",
+      "connection_monitor": "连接监控",
+      "connection_matrix": "连接矩阵",
+      "plugins": "插件",
+      "ai": "OxideSens",
+      "activity": "活动"
+    }
+  },
+  "sessions": {
+    "tree": {
+      "no_sessions": "暂无会话",
+      "click_to_add": "点击 + 添加新连接"
+    }
+  }
+}
