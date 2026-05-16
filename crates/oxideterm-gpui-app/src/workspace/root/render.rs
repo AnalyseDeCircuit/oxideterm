@@ -17,6 +17,7 @@ impl Render for WorkspaceApp {
         self.poll_ai_compaction_results(cx);
         self.poll_ai_model_selector_probe_results(cx);
         self.poll_ai_model_refresh_results(cx);
+        self.observe_active_tab_for_history();
         let title = self
             .active_tab()
             .map(|tab| self.tab_display_title(tab))
@@ -128,6 +129,24 @@ impl Render for WorkspaceApp {
                     let _ = this.handle_new_connection_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.command_palette.open {
+                    this.handle_command_palette_key(event, window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.shortcuts_modal.open {
+                    this.handle_shortcuts_modal_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.keybinding_recording_action_id.is_some()
+                    && this.active_surface == ActiveSurface::Settings
+                    && this.active_settings_tab == SettingsTab::Keybindings
+                {
+                    this.handle_keybinding_recording_key(event, window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.dispatch_registered_keybinding(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::SessionManager)
@@ -213,10 +232,14 @@ impl Render for WorkspaceApp {
                     let file_manager_markdown_preview_toggle = key == "u"
                         && this.file_manager.focused_input.is_none()
                         && file_manager_preview_open;
+                    let file_manager_preview_transform = matches!(key, "+" | "=" | "-" | "0" | "r")
+                        && this.file_manager.focused_input.is_none()
+                        && file_manager_preview_open;
                     if keystroke_commits_platform_text(&event.keystroke)
                         && !file_manager_quick_look_space
                         && !file_manager_preview_info_toggle
                         && !file_manager_markdown_preview_toggle
+                        && !file_manager_preview_transform
                     {
                         return;
                     }
@@ -295,8 +318,26 @@ impl Render for WorkspaceApp {
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| {
                 let _ = this.create_local_terminal_tab(window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ShellLauncher, window, cx| {
+                this.open_launcher_tab(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
                 this.close_active_tab(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CloseOtherTabs, window, cx| {
+                this.close_other_tabs_or_active_pane(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &NewConnection, window, cx| {
+                this.open_new_connection_form(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _window, cx| {
+                this.toggle_sidebar(cx);
+            }))
+            .on_action(cx.listener(|this, _: &CommandPalette, _window, cx| {
+                this.open_command_palette(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ZenMode, _window, cx| {
+                this.toggle_zen_mode(cx);
             }))
             .on_action(cx.listener(|this, _: &NextTab, window, cx| {
                 this.next_tab(true, window, cx);
@@ -312,6 +353,12 @@ impl Render for WorkspaceApp {
             }))
             .on_action(cx.listener(|this, _: &ClosePane, window, cx| {
                 this.close_active_pane(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SplitNavLeft, window, cx| {
+                this.focus_adjacent_pane(false, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SplitNavRight, window, cx| {
+                this.focus_adjacent_pane(true, window, cx);
             }))
             .on_action(cx.listener(|this, _: &Copy, _window, cx| {
                 if this.new_connection_form.is_none() {
@@ -339,6 +386,33 @@ impl Render for WorkspaceApp {
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.open_settings(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FontIncrease, _window, cx| {
+                this.adjust_terminal_font_size(1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FontDecrease, _window, cx| {
+                this.adjust_terminal_font_size(-1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FontReset, _window, cx| {
+                this.reset_terminal_font_size(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowShortcuts, _window, cx| {
+                this.open_shortcuts_modal(cx);
+            }))
+            .on_action(cx.listener(|this, _: &TerminalAiPanel, _window, cx| {
+                let _ = this.toggle_ai_sidebar(cx);
+            }))
+            .on_action(cx.listener(|this, _: &TerminalRecording, _window, cx| {
+                this.toggle_active_terminal_recording(cx);
+            }))
+            .on_action(cx.listener(|this, _: &PaletteEventLog, window, cx| {
+                this.open_notification_center_tab(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PaletteAiSidebar, _window, cx| {
+                let _ = this.toggle_ai_sidebar(cx);
+            }))
+            .on_action(cx.listener(|this, _: &PaletteBroadcast, _window, cx| {
+                this.toggle_terminal_broadcast(cx);
             }))
             .on_action(cx.listener(|this, _: &SwitchLocaleEnglish, window, cx| {
                 this.switch_locale(Locale::En, window, cx);
@@ -587,6 +661,12 @@ impl Render for WorkspaceApp {
             )
             .when_some(self.render_terminal_cast_player(cx), |root, player| {
                 root.child(player)
+            })
+            .when(self.command_palette.open, |root| {
+                root.child(self.render_command_palette(cx))
+            })
+            .when(self.shortcuts_modal.open, |root| {
+                root.child(self.render_shortcuts_modal(cx))
             })
             .when_some(self.workspace_tooltip.clone(), |root, tooltip| {
                 root.child(self.render_workspace_tooltip(tooltip))

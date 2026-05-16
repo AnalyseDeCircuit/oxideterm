@@ -1,11 +1,11 @@
 use gpui::{KeyBinding, Menu, MenuItem, SystemMenuType};
 pub use oxideterm_gpui_platform::window_options;
 use oxideterm_i18n::{I18n, Locale};
+use oxideterm_settings::PersistedSettings;
 
 use crate::{
-    ClosePane, CloseSearch, CloseTab, Copy, Find, FindNext, FindPrev, GoToTab1, GoToTab2, GoToTab3,
-    GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewTerminal, NextTab, OpenSettings,
-    Paste, PrevTab, Quit, SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish,
+    ClosePane, CloseTab, Copy, Find, FindNext, FindPrev, NewTerminal, NextTab, OpenSettings, Paste,
+    PrevTab, Quit, SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish,
     SwitchLocaleFrench, SwitchLocaleGerman, SwitchLocaleItalian, SwitchLocaleJapanese,
     SwitchLocaleKorean, SwitchLocalePortugueseBrazil, SwitchLocaleSpanish,
     SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese,
@@ -76,32 +76,8 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
     ]
 }
 
-pub(crate) fn app_key_bindings() -> Vec<KeyBinding> {
-    vec![
-        KeyBinding::new("cmd-t", NewTerminal, Some("Workspace")),
-        KeyBinding::new("cmd-w", CloseTab, Some("Workspace")),
-        KeyBinding::new("cmd-shift-d", SplitVertical, Some("Workspace")),
-        KeyBinding::new("cmd-shift-e", SplitHorizontal, Some("Workspace")),
-        KeyBinding::new("cmd-shift-w", ClosePane, Some("Workspace")),
-        KeyBinding::new("cmd-c", Copy, Some("Workspace")),
-        KeyBinding::new("cmd-v", Paste, Some("Workspace")),
-        KeyBinding::new("cmd-f", Find, Some("Workspace")),
-        KeyBinding::new("cmd-,", OpenSettings, Some("Workspace")),
-        KeyBinding::new("cmd-g", FindNext, Some("Workspace")),
-        KeyBinding::new("cmd-shift-g", FindPrev, Some("Workspace")),
-        KeyBinding::new("escape", CloseSearch, Some("Workspace")),
-        KeyBinding::new("cmd-}", NextTab, Some("Workspace")),
-        KeyBinding::new("cmd-{", PrevTab, Some("Workspace")),
-        KeyBinding::new("cmd-1", GoToTab1, Some("Workspace")),
-        KeyBinding::new("cmd-2", GoToTab2, Some("Workspace")),
-        KeyBinding::new("cmd-3", GoToTab3, Some("Workspace")),
-        KeyBinding::new("cmd-4", GoToTab4, Some("Workspace")),
-        KeyBinding::new("cmd-5", GoToTab5, Some("Workspace")),
-        KeyBinding::new("cmd-6", GoToTab6, Some("Workspace")),
-        KeyBinding::new("cmd-7", GoToTab7, Some("Workspace")),
-        KeyBinding::new("cmd-8", GoToTab8, Some("Workspace")),
-        KeyBinding::new("cmd-9", GoToTab9, Some("Workspace")),
-    ]
+pub(crate) fn app_key_bindings(settings: &PersistedSettings) -> Vec<KeyBinding> {
+    crate::keybindings::startup_key_bindings(&settings.keybindings.overrides)
 }
 
 fn locale_label(i18n: &I18n, locale: Locale) -> String {

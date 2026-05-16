@@ -304,14 +304,24 @@ impl WorkspaceApp {
     }
 
     fn render_file_manager_preview_image(&self, path: &str, fallback_label: String) -> AnyElement {
-        gpui::img(std::path::PathBuf::from(path))
+        let zoom = self.file_manager.preview_image_zoom.clamp(0.25, 4.0);
+        let height = 560.0 * zoom;
+        let rotation = self.file_manager.preview_image_rotation.rem_euclid(360);
+        let image = if rotation == 0 {
+            gpui::img(std::path::PathBuf::from(path))
+        } else if let Some(render_image) = rotated_local_preview_image(path, rotation) {
+            gpui::img(render_image)
+        } else {
+            gpui::img(std::path::PathBuf::from(path))
+        };
+        image
             .w_full()
-            .h(px(560.0))
+            .h(px(height))
             .object_fit(ObjectFit::Contain)
             .with_fallback(move || {
                 div()
                     .w_full()
-                    .h(px(560.0))
+                    .h(px(height))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -324,7 +334,8 @@ impl WorkspaceApp {
 
     fn render_file_manager_preview_pdf(&self, path: &str, mime_type: &str) -> AnyElement {
         let backend = PdfiumPreviewBackend;
-        match backend.render_page(&std::path::PathBuf::from(path), 0, 900) {
+        let zoom = self.file_manager.preview_pdf_zoom.clamp(0.25, 4.0);
+        match backend.render_page(&std::path::PathBuf::from(path), 0, (900.0 * zoom) as u32) {
             Ok(bitmap) => {
                 if let Some(image) = bitmap.into_render_image() {
                     div()
@@ -335,7 +346,7 @@ impl WorkspaceApp {
                         .child(
                             gpui::img(image)
                                 .w_full()
-                                .h(px(520.0))
+                                .h(px(520.0 * zoom))
                                 .object_fit(ObjectFit::Contain),
                         )
                         .child(
@@ -1395,6 +1406,26 @@ fn format_unix_permission_bits(mode: u32) -> String {
         });
     }
     output
+}
+
+fn rotated_local_preview_image(path: &str, rotation: i32) -> Option<std::sync::Arc<RenderImage>> {
+    let image = image::open(std::path::PathBuf::from(path)).ok()?;
+    let image = match rotation.rem_euclid(360) {
+        90 => image.rotate90(),
+        180 => image.rotate180(),
+        270 => image.rotate270(),
+        _ => image,
+    };
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let mut pixels = rgba.into_raw();
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    let buffer = image::RgbaImage::from_raw(width, height, pixels)?;
+    Some(std::sync::Arc::new(RenderImage::new(vec![
+        image::Frame::new(buffer),
+    ])))
 }
 
 fn file_manager_preview_language_for_name(filename: &str) -> String {

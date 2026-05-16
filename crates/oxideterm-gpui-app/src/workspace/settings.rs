@@ -35,9 +35,10 @@ use oxideterm_connections::{
 };
 use oxideterm_gpui_settings_view::*;
 use oxideterm_gpui_ui::{
-    button,
+    ConfirmDialogVariant, ConfirmDialogView, button,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
     checkbox::checkbox,
+    confirm_dialog,
     modal::{
         dialog_backdrop, dialog_content, dialog_description, dialog_footer, dialog_header,
         dialog_title, popover_backdrop,

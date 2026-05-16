@@ -536,6 +536,7 @@ impl WorkspaceApp {
                 .command_bar
                 .focus_handoff_commands
                 .join("\n"),
+            SettingsInput::KeybindingSearch => self.keybinding_search_query.clone(),
             SettingsInput::CustomThemeName => self
                 .theme_editor
                 .as_ref()
@@ -883,6 +884,10 @@ impl WorkspaceApp {
                     move |settings| settings.terminal.command_bar.focus_handoff_commands = commands,
                     cx,
                 );
+            }
+            SettingsInput::KeybindingSearch => {
+                self.keybinding_search_query = self.settings_input_draft.clone();
+                cx.notify();
             }
             SettingsInput::CustomThemeName => {
                 if let Some(editor) = self.theme_editor.as_mut() {

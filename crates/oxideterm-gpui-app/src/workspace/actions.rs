@@ -70,6 +70,149 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn toggle_zen_mode(&mut self, cx: &mut Context<Self>) {
+        let settings = self.settings_store.settings_mut();
+        settings.sidebar_ui.zen_mode = !settings.sidebar_ui.zen_mode;
+        if settings.sidebar_ui.zen_mode {
+            self.clear_ai_sidebar_keyboard_focus();
+        }
+        let _ = self.settings_store.save();
+        cx.notify();
+    }
+
+    pub(super) fn adjust_terminal_font_size(&mut self, delta: i64, cx: &mut Context<Self>) {
+        self.edit_settings(
+            |settings| {
+                settings.terminal.font_size = (settings.terminal.font_size + delta).clamp(8, 32);
+            },
+            cx,
+        );
+    }
+
+    pub(super) fn reset_terminal_font_size(&mut self, cx: &mut Context<Self>) {
+        self.edit_settings(|settings| settings.terminal.font_size = 14, cx);
+    }
+
+    pub(super) fn dispatch_registered_keybinding(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((definition, combo)) = crate::keybindings::matched_action_for_keystroke(
+            &event.keystroke,
+            &self.settings_store.settings().keybindings.overrides,
+        ) else {
+            return false;
+        };
+
+        let terminal_active = self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        if matches!(
+            definition.scope,
+            crate::keybindings::ActionScope::Terminal | crate::keybindings::ActionScope::Split
+        ) && !terminal_active
+        {
+            return false;
+        }
+
+        let terminal_panel_open = self.search.visible || self.ai_sidebar_visible();
+        if !crate::keybindings::action_allowed_by_terminal_behavior(
+            definition,
+            &combo,
+            terminal_active,
+            terminal_panel_open,
+        ) {
+            return false;
+        }
+
+        self.dispatch_keybinding_action(definition.id, window, cx)
+    }
+
+    pub(super) fn dispatch_keybinding_action(
+        &mut self,
+        action_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match action_id {
+            "app.newTerminal" => {
+                let _ = self.create_local_terminal_tab(window, cx);
+            }
+            "app.shellLauncher" => self.open_launcher_tab(window, cx),
+            "app.closeTab" => self.close_active_tab(window, cx),
+            "app.closeOtherTabs" => self.close_other_tabs_or_active_pane(window, cx),
+            "app.newConnection" => self.open_new_connection_form(window, cx),
+            "app.settings" => self.open_settings(window, cx),
+            "app.toggleSidebar" => self.toggle_sidebar(cx),
+            "app.commandPalette" => self.open_command_palette(cx),
+            "app.zenMode" => self.toggle_zen_mode(cx),
+            "app.nextTab" => self.next_tab(true, window, cx),
+            "app.prevTab" => self.next_tab(false, window, cx),
+            "app.navBack" => self.navigate_tab_history(false, window, cx),
+            "app.navForward" => self.navigate_tab_history(true, window, cx),
+            "app.goToTab1" => self.go_to_tab(0, window, cx),
+            "app.goToTab2" => self.go_to_tab(1, window, cx),
+            "app.goToTab3" => self.go_to_tab(2, window, cx),
+            "app.goToTab4" => self.go_to_tab(3, window, cx),
+            "app.goToTab5" => self.go_to_tab(4, window, cx),
+            "app.goToTab6" => self.go_to_tab(5, window, cx),
+            "app.goToTab7" => self.go_to_tab(6, window, cx),
+            "app.goToTab8" => self.go_to_tab(7, window, cx),
+            "app.goToTab9" => self.go_to_tab(8, window, cx),
+            "app.fontIncrease" => self.adjust_terminal_font_size(1, cx),
+            "app.fontDecrease" => self.adjust_terminal_font_size(-1, cx),
+            "app.fontReset" => self.reset_terminal_font_size(cx),
+            "app.showShortcuts" => self.open_shortcuts_modal(cx),
+            "terminal.search" => self.open_search(window, cx),
+            "terminal.paste" => self.paste(cx),
+            "terminal.aiPanel" => {
+                let _ = self.toggle_ai_sidebar(cx);
+            }
+            "terminal.recording" => self.toggle_active_terminal_recording(cx),
+            "terminal.closePanel" => self.close_terminal_panel(window, cx),
+            "split.horizontal" => self.split_active_pane(SplitDirection::Horizontal, window, cx),
+            "split.vertical" => self.split_active_pane(SplitDirection::Vertical, window, cx),
+            "split.closePane" => self.close_active_pane(window, cx),
+            "split.navLeft" => self.focus_adjacent_pane(false, window, cx),
+            "split.navRight" => self.focus_adjacent_pane(true, window, cx),
+            "palette.eventLog" => self.open_notification_center_tab(window, cx),
+            "palette.aiSidebar" => {
+                let _ = self.toggle_ai_sidebar(cx);
+            }
+            "palette.broadcast" => self.toggle_terminal_broadcast(cx),
+            _ => return false,
+        }
+        true
+    }
+
+    fn close_terminal_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.visible {
+            self.close_search(window, cx);
+            return;
+        }
+        if self.ai_sidebar_visible() {
+            self.settings_store
+                .settings_mut()
+                .sidebar_ui
+                .ai_sidebar_collapsed = true;
+            self.clear_ai_sidebar_keyboard_focus();
+            let _ = self.settings_store.save();
+            self.focus_active_pane(window, cx);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn toggle_terminal_broadcast(&mut self, cx: &mut Context<Self>) {
+        self.terminal_broadcast_enabled = !self.terminal_broadcast_enabled;
+        self.terminal_broadcast_menu_open = false;
+        if !self.terminal_broadcast_enabled {
+            self.terminal_broadcast_targets.clear();
+        }
+        cx.notify();
+    }
+
     pub(super) fn handle_workspace_key(
         &mut self,
         event: &KeyDownEvent,
@@ -158,6 +301,29 @@ impl WorkspaceApp {
             return;
         }
 
+        let close_panel_shortcut = crate::keybindings::keystroke_matches_action(
+            &event.keystroke,
+            "terminal.closePanel",
+            &self.settings_store.settings().keybindings.overrides,
+        );
+
+        if close_panel_shortcut && self.search.visible {
+            self.close_search(window, cx);
+            return;
+        }
+
+        if close_panel_shortcut && self.ai_sidebar_visible() {
+            self.settings_store
+                .settings_mut()
+                .sidebar_ui
+                .ai_sidebar_collapsed = true;
+            self.clear_ai_sidebar_keyboard_focus();
+            let _ = self.settings_store.save();
+            self.focus_active_pane(window, cx);
+            cx.notify();
+            return;
+        }
+
         if self.active_surface == ActiveSurface::Settings && key == "escape" && !modifiers.platform
         {
             self.close_settings(window, cx);
@@ -176,6 +342,266 @@ impl WorkspaceApp {
             }
             return;
         }
+    }
+
+    pub(super) fn handle_keybinding_recording_key(
+        &mut self,
+        event: &KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.keystroke.key.as_str() == "escape"
+            && !event.keystroke.modifiers.platform
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.alt
+            && !event.keystroke.modifiers.shift
+        {
+            self.keybinding_recording_action_id = None;
+            self.keybinding_recording_combo = None;
+            self.keybinding_conflict_action_ids.clear();
+            cx.notify();
+            return;
+        }
+
+        let Some(action_id) = self.keybinding_recording_action_id.clone() else {
+            return;
+        };
+        let Some(combo) = crate::keybindings::combo_from_keystroke(&event.keystroke) else {
+            return;
+        };
+
+        let side = crate::keybindings::KeybindingSide::current();
+        let conflicts = crate::keybindings::conflicts_for_combo(
+            &action_id,
+            &combo,
+            &self.settings_store.settings().keybindings.overrides,
+            side,
+        )
+        .into_iter()
+        .map(|definition| definition.id.to_string())
+        .collect::<Vec<_>>();
+
+        self.keybinding_recording_combo = Some(combo);
+        self.keybinding_conflict_action_ids = conflicts;
+        cx.notify();
+    }
+
+    pub(super) fn confirm_keybinding_recording(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(action_id) = self.keybinding_recording_action_id.clone() else {
+            return;
+        };
+        let Some(combo) = self.keybinding_recording_combo.clone() else {
+            return;
+        };
+        let Some(definition) = crate::keybindings::action_definition(&action_id) else {
+            self.cancel_keybinding_recording(cx);
+            return;
+        };
+
+        let side = crate::keybindings::KeybindingSide::current();
+        let previous = crate::keybindings::effective_combo(
+            definition,
+            &self.settings_store.settings().keybindings.overrides,
+            side,
+        );
+        let runtime_bindings =
+            crate::keybindings::runtime_rebind_key_bindings(&action_id, &previous, &combo);
+
+        self.edit_settings(
+            |settings| {
+                crate::keybindings::set_override(
+                    &mut settings.keybindings.overrides,
+                    &action_id,
+                    side,
+                    combo,
+                );
+            },
+            cx,
+        );
+        self.cancel_keybinding_recording(cx);
+        self.apply_runtime_key_bindings(runtime_bindings, window, cx);
+    }
+
+    pub(super) fn cancel_keybinding_recording(&mut self, cx: &mut Context<Self>) {
+        self.keybinding_recording_action_id = None;
+        self.keybinding_recording_combo = None;
+        self.keybinding_conflict_action_ids.clear();
+        cx.notify();
+    }
+
+    pub(super) fn reset_keybinding(
+        &mut self,
+        action_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(definition) = crate::keybindings::action_definition(action_id) else {
+            return;
+        };
+        let side = crate::keybindings::KeybindingSide::current();
+        let previous = crate::keybindings::effective_combo(
+            definition,
+            &self.settings_store.settings().keybindings.overrides,
+            side,
+        );
+        let next = definition.default_combo(side).clone();
+        let runtime_bindings =
+            crate::keybindings::runtime_rebind_key_bindings(action_id, &previous, &next);
+        self.edit_settings(
+            |settings| {
+                crate::keybindings::reset_override(
+                    &mut settings.keybindings.overrides,
+                    action_id,
+                    side,
+                );
+            },
+            cx,
+        );
+        self.keybinding_recording_action_id = None;
+        self.keybinding_recording_combo = None;
+        self.keybinding_conflict_action_ids.clear();
+        self.apply_runtime_key_bindings(runtime_bindings, window, cx);
+    }
+
+    pub(super) fn reset_all_keybindings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let side = crate::keybindings::KeybindingSide::current();
+        let overrides = self.settings_store.settings().keybindings.overrides.clone();
+        let runtime_bindings = crate::keybindings::ACTION_DEFINITIONS
+            .iter()
+            .flat_map(|definition| {
+                let previous = crate::keybindings::effective_combo(definition, &overrides, side);
+                let next = definition.default_combo(side).clone();
+                crate::keybindings::runtime_rebind_key_bindings(definition.id, &previous, &next)
+            })
+            .collect::<Vec<_>>();
+        self.edit_settings(|settings| settings.keybindings.overrides.clear(), cx);
+        self.keybinding_recording_action_id = None;
+        self.keybinding_recording_combo = None;
+        self.keybinding_conflict_action_ids.clear();
+        self.apply_runtime_key_bindings(runtime_bindings, window, cx);
+    }
+
+    pub(super) fn export_keybindings(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(SharedString::from(
+                self.i18n.t("settings_view.keybindings.export"),
+            )),
+        });
+        let overrides = self.settings_store.settings().keybindings.overrides.clone();
+        let success = self.i18n.t("settings_view.keybindings.export_success");
+        let error = self.i18n.t("settings_view.keybindings.export_error");
+        cx.spawn(async move |weak, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(directory) = paths.into_iter().next() else {
+                return;
+            };
+            let path = directory.join("oxideterm-keybindings.json");
+            let result = serde_json::to_string_pretty(&overrides)
+                .map_err(|err| err.to_string())
+                .and_then(|json| fs::write(path, json).map_err(|err| err.to_string()));
+            let _ = weak.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => this.push_ai_settings_toast(success, TerminalNoticeVariant::Success),
+                    Err(_) => this.push_ai_settings_toast(error, TerminalNoticeVariant::Error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn import_keybindings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(SharedString::from(
+                self.i18n.t("settings_view.keybindings.import"),
+            )),
+        });
+        let window_handle = window.window_handle();
+        let side = crate::keybindings::KeybindingSide::current();
+        let previous_overrides = self.settings_store.settings().keybindings.overrides.clone();
+        let success = self.i18n.t("settings_view.keybindings.import_success");
+        let invalid = self.i18n.t("settings_view.keybindings.import_invalid");
+        cx.spawn(async move |weak, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let result = fs::read_to_string(path)
+                .map_err(|err| err.to_string())
+                .and_then(|content| {
+                    serde_json::from_str::<serde_json::Value>(&content)
+                        .map_err(|err| err.to_string())
+                })
+                .and_then(crate::keybindings::sanitize_imported_overrides);
+            let _ = cx.update_window(window_handle, |_root, window, cx| {
+                let _ = weak.update(cx, |this, cx| match result {
+                    Ok(next_overrides) => {
+                        let runtime_bindings = crate::keybindings::ACTION_DEFINITIONS
+                            .iter()
+                            .flat_map(|definition| {
+                                let previous = crate::keybindings::effective_combo(
+                                    definition,
+                                    &previous_overrides,
+                                    side,
+                                );
+                                let next = crate::keybindings::effective_combo(
+                                    definition,
+                                    &next_overrides,
+                                    side,
+                                );
+                                crate::keybindings::runtime_rebind_key_bindings(
+                                    definition.id,
+                                    &previous,
+                                    &next,
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        this.edit_settings(
+                            |settings| settings.keybindings.overrides = next_overrides,
+                            cx,
+                        );
+                        this.keybinding_recording_action_id = None;
+                        this.keybinding_recording_combo = None;
+                        this.keybinding_conflict_action_ids.clear();
+                        this.apply_runtime_key_bindings(runtime_bindings, window, cx);
+                        this.push_ai_settings_toast(success, TerminalNoticeVariant::Success);
+                    }
+                    Err(_) => {
+                        this.push_ai_settings_toast(invalid, TerminalNoticeVariant::Error);
+                        cx.notify();
+                    }
+                });
+            });
+        })
+        .detach();
+    }
+
+    fn apply_runtime_key_bindings(
+        &self,
+        bindings: Vec<gpui::KeyBinding>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if bindings.is_empty() {
+            return;
+        }
+        let _ = cx.update_window(window.window_handle(), move |_root, _window, app| {
+            app.bind_keys(bindings);
+        });
     }
 
     pub(super) fn handle_terminal_command_bar_key(
@@ -352,6 +778,15 @@ impl WorkspaceApp {
             });
         }
         cx.notify();
+    }
+
+    pub(super) fn toggle_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
+        match self.active_terminal_recording_status(cx).state {
+            TerminalRecordingState::Idle => self.start_active_terminal_recording(cx),
+            TerminalRecordingState::Recording | TerminalRecordingState::Paused => {
+                self.stop_active_terminal_recording(cx)
+            }
+        }
     }
 
     pub(super) fn pause_active_terminal_recording(&mut self, cx: &mut Context<Self>) {

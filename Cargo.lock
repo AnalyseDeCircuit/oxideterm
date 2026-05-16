@@ -6687,6 +6687,7 @@ dependencies = [
  "gpui-component",
  "gstreamer",
  "gstreamer-video",
+ "image",
  "lb-wry",
  "objc2",
  "objc2-app-kit",

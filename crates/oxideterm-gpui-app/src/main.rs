@@ -1,10 +1,12 @@
 mod assets;
+mod keybindings;
 mod platform;
 mod workspace;
 
 use gpui::{App, AppContext, Application, Bounds, actions, px, size};
 use gpui_component::Root;
 use oxideterm_i18n::I18n;
+use oxideterm_settings::SettingsStore;
 
 use crate::assets::NativeAssets;
 use crate::workspace::WorkspaceApp;
@@ -14,7 +16,13 @@ actions!(
     [
         Quit,
         NewTerminal,
+        ShellLauncher,
         CloseTab,
+        CloseOtherTabs,
+        NewConnection,
+        ToggleSidebar,
+        CommandPalette,
+        ZenMode,
         NextTab,
         PrevTab,
         GoToTab1,
@@ -26,6 +34,10 @@ actions!(
         GoToTab7,
         GoToTab8,
         GoToTab9,
+        FontIncrease,
+        FontDecrease,
+        FontReset,
+        ShowShortcuts,
         Copy,
         Paste,
         Find,
@@ -46,7 +58,14 @@ actions!(
         SwitchLocaleVietnamese,
         SplitHorizontal,
         SplitVertical,
-        ClosePane
+        ClosePane,
+        SplitNavLeft,
+        SplitNavRight,
+        TerminalAiPanel,
+        TerminalRecording,
+        PaletteEventLog,
+        PaletteAiSidebar,
+        PaletteBroadcast
     ]
 );
 
@@ -57,7 +76,10 @@ fn main() {
             oxideterm_code_editor::init(cx);
             cx.activate(true);
             cx.on_action(quit);
-            cx.bind_keys(platform::app_key_bindings());
+            let startup_settings = SettingsStore::load_default()
+                .map(|store| store.settings().clone())
+                .unwrap_or_default();
+            cx.bind_keys(platform::app_key_bindings(&startup_settings));
             cx.set_menus(platform::app_menus(&I18n::default()));
 
             let bounds = Bounds::centered(None, size(px(1120.0), px(760.0)), cx);

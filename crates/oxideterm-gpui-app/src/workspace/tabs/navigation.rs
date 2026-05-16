@@ -1,4 +1,89 @@
 impl WorkspaceApp {
+    pub(super) fn observe_active_tab_for_history(&mut self) {
+        let active_tab_id = self.active_tab_id;
+        if self.tab_navigation_observed_tab == active_tab_id {
+            return;
+        }
+        self.tab_navigation_observed_tab = active_tab_id;
+
+        let Some(tab_id) = active_tab_id else {
+            return;
+        };
+        if self.tab_navigation_replaying {
+            self.tab_navigation_replaying = false;
+            return;
+        }
+
+        if let Some(index) = self.tab_navigation_index {
+            self.tab_navigation_history.truncate(index.saturating_add(1));
+        }
+        if self.tab_navigation_history.last().copied() != Some(tab_id) {
+            self.tab_navigation_history.push(tab_id);
+        }
+        const MAX_TAB_HISTORY: usize = 50;
+        if self.tab_navigation_history.len() > MAX_TAB_HISTORY {
+            let overflow = self.tab_navigation_history.len() - MAX_TAB_HISTORY;
+            self.tab_navigation_history.drain(0..overflow);
+        }
+        self.tab_navigation_index = self.tab_navigation_history.len().checked_sub(1);
+    }
+
+    pub(super) fn navigate_tab_history(
+        &mut self,
+        forward: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prune_tab_navigation_history();
+        let Some(mut index) = self.tab_navigation_index else {
+            return;
+        };
+
+        loop {
+            if forward {
+                if index + 1 >= self.tab_navigation_history.len() {
+                    return;
+                }
+                index += 1;
+            } else if index == 0 {
+                return;
+            } else {
+                index -= 1;
+            }
+
+            let tab_id = self.tab_navigation_history[index];
+            if self.tabs.iter().any(|tab| tab.id == tab_id) {
+                self.tab_navigation_index = Some(index);
+                self.tab_navigation_replaying = true;
+                self.active_tab_id = Some(tab_id);
+                self.sync_active_tab_surface();
+                self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
+                    matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
+                });
+                self.focus_active_pane(window, cx);
+                self.reveal_active_tab(window);
+                cx.notify();
+                return;
+            }
+        }
+    }
+
+    fn prune_tab_navigation_history(&mut self) {
+        let existing = self.tabs.iter().map(|tab| tab.id).collect::<HashSet<_>>();
+        let current = self
+            .tab_navigation_index
+            .and_then(|index| self.tab_navigation_history.get(index).copied());
+        self.tab_navigation_history
+            .retain(|tab_id| existing.contains(tab_id));
+        self.tab_navigation_index = current
+            .and_then(|tab_id| {
+                self.tab_navigation_history
+                    .iter()
+                    .position(|candidate| *candidate == tab_id)
+            })
+            .or_else(|| self.tab_navigation_history.len().checked_sub(1));
+    }
+
     pub(super) fn set_active_tab(
         &mut self,
         tab_id: TabId,
@@ -350,6 +435,74 @@ impl WorkspaceApp {
             return;
         };
         self.close_tab_at_index(index, window, cx);
+    }
+
+    pub(super) fn close_other_tabs_or_active_pane(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(active_tab_id) = self.active_tab_id else {
+            return;
+        };
+        if self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal))
+        {
+            if self
+                .active_tab()
+                .and_then(|tab| tab.root_pane.as_ref())
+                .is_some_and(|root| root.pane_count() > 1)
+            {
+                self.close_active_pane(window, cx);
+            }
+            return;
+        }
+
+        let tab_ids = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.id != active_tab_id)
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        for tab_id in tab_ids {
+            self.close_tab_by_id(tab_id, window, cx);
+        }
+    }
+
+    pub(super) fn focus_adjacent_pane(
+        &mut self,
+        forward: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(active_pane_id) = self.active_pane_id() else {
+            return;
+        };
+        let mut pane_ids = Vec::new();
+        if let Some(root) = self.active_tab().and_then(|tab| tab.root_pane.as_ref()) {
+            root.collect_pane_ids(&mut pane_ids);
+        }
+        if pane_ids.len() < 2 {
+            return;
+        }
+        let Some(index) = pane_ids.iter().position(|pane_id| *pane_id == active_pane_id) else {
+            return;
+        };
+        let next_index = if forward {
+            (index + 1) % pane_ids.len()
+        } else if index == 0 {
+            pane_ids.len() - 1
+        } else {
+            index - 1
+        };
+        let next_pane_id = pane_ids[next_index];
+        if let Some(tab) = self.active_tab_mut() {
+            tab.active_pane_id = Some(next_pane_id);
+        }
+        self.needs_active_pane_focus = true;
+        self.focus_active_pane(window, cx);
+        cx.notify();
     }
 
     fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {

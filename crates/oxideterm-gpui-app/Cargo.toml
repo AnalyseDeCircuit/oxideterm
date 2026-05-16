@@ -13,6 +13,7 @@ anyhow.workspace = true
 chrono.workspace = true
 gpui-component.workspace = true
 gpui.workspace = true
+image.workspace = true
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }

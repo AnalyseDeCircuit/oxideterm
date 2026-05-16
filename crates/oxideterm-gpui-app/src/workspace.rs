@@ -1,4 +1,5 @@
 mod actions;
+mod command_palette;
 mod connection_monitor;
 mod file_manager;
 mod forwards;
@@ -138,12 +139,15 @@ use self::sidebar::{AiCompactionDelivery, AiModelSelectorProbeDelivery, AiStream
 use self::terminal_cast::TerminalCastPlayerState;
 use crate::assets::LucideIcon;
 use crate::{
-    ClosePane, CloseSearch, CloseTab, Copy, Find, FindNext, FindPrev, GoToTab1, GoToTab2, GoToTab3,
-    GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewTerminal, NextTab, OpenSettings,
-    Paste, PrevTab, SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish,
-    SwitchLocaleFrench, SwitchLocaleGerman, SwitchLocaleItalian, SwitchLocaleJapanese,
-    SwitchLocaleKorean, SwitchLocalePortugueseBrazil, SwitchLocaleSpanish,
-    SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese,
+    CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Find, FindNext,
+    FindPrev, FontDecrease, FontIncrease, FontReset, GoToTab1, GoToTab2, GoToTab3, GoToTab4,
+    GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewConnection, NewTerminal, NextTab,
+    OpenSettings, PaletteAiSidebar, PaletteBroadcast, PaletteEventLog, Paste, PrevTab,
+    ShellLauncher, ShowShortcuts, SplitHorizontal, SplitNavLeft, SplitNavRight, SplitVertical,
+    SwitchLocaleChinese, SwitchLocaleEnglish, SwitchLocaleFrench, SwitchLocaleGerman,
+    SwitchLocaleItalian, SwitchLocaleJapanese, SwitchLocaleKorean, SwitchLocalePortugueseBrazil,
+    SwitchLocaleSpanish, SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese, TerminalAiPanel,
+    TerminalRecording, ToggleSidebar, ZenMode,
 };
 use oxideterm_gpui_settings_view::{
     ActiveSurface, SettingsInput, SettingsSelect, SettingsSlider, SettingsTab, TerminalSettingsPage,
@@ -191,9 +195,44 @@ struct KnowledgeExternalEdit {
     version: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeybindingScopeFilter {
+    All,
+    Scope(crate::keybindings::ActionScope),
+}
+
+impl KeybindingScopeFilter {
+    fn matches(self, scope: crate::keybindings::ActionScope) -> bool {
+        match self {
+            Self::All => true,
+            Self::Scope(candidate) => candidate == scope,
+        }
+    }
+
+    fn label_key(self) -> &'static str {
+        match self {
+            Self::All => "settings_view.keybindings.scope_all",
+            Self::Scope(scope) => scope.label_key(),
+        }
+    }
+}
+
 enum KnowledgeReindexDelivery {
     Progress { current: usize, total: usize },
     Finished(Result<usize, String>),
+}
+
+#[derive(Clone, Debug)]
+struct CommandPaletteState {
+    open: bool,
+    query: String,
+    selected_index: usize,
+}
+
+#[derive(Clone, Debug)]
+struct ShortcutsModalState {
+    open: bool,
+    query: String,
 }
 
 impl Default for AiMcpServerDraft {
@@ -219,6 +258,10 @@ pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
     tabs: Vec<Tab>,
     active_tab_id: Option<TabId>,
+    tab_navigation_history: Vec<TabId>,
+    tab_navigation_index: Option<usize>,
+    tab_navigation_replaying: bool,
+    tab_navigation_observed_tab: Option<TabId>,
     panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
     tab_scroll_x: f32,
     next_tab_id: u64,
@@ -234,6 +277,8 @@ pub(crate) struct WorkspaceApp {
     terminal_quick_command_pending: Option<String>,
     terminal_cast_player: Option<TerminalCastPlayerState>,
     terminal_cast_seek_dragging: bool,
+    command_palette: CommandPaletteState,
+    shortcuts_modal: ShortcutsModalState,
     quick_commands: QuickCommandsState,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
@@ -342,6 +387,12 @@ pub(crate) struct WorkspaceApp {
     focused_settings_input: Option<SettingsInput>,
     settings_input_draft: String,
     settings_slider_drag: Option<SettingsSlider>,
+    keybinding_recording_action_id: Option<String>,
+    keybinding_recording_combo: Option<crate::keybindings::KeyCombo>,
+    keybinding_conflict_action_ids: Vec<String>,
+    keybinding_search_query: String,
+    keybinding_scope_filter: KeybindingScopeFilter,
+    keybinding_reset_all_confirm_open: bool,
     theme_editor: Option<ThemeEditorState>,
     background_blur_preview: Option<i64>,
     background_blur_commit_generation: u64,

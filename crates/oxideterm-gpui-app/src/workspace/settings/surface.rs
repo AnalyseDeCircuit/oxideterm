@@ -73,6 +73,9 @@ impl WorkspaceApp {
             .when_some(self.render_knowledge_delete_confirm_dialog(cx), |surface, modal| {
                 surface.child(modal)
             })
+            .when(self.keybinding_reset_all_confirm_open, |surface| {
+                surface.child(self.render_keybinding_reset_all_confirm_dialog(cx))
+            })
             .when_some(self.render_settings_select_overlay(cx), |surface, overlay| {
                 surface.child(overlay)
             })
@@ -221,7 +224,7 @@ impl WorkspaceApp {
                 SettingsTab::Ide => self.settings_ide(cx),
                 SettingsTab::Ai => self.settings_ai(cx),
                 SettingsTab::Knowledge => self.settings_knowledge(cx),
-                SettingsTab::Keybindings => self.settings_keybindings(),
+                SettingsTab::Keybindings => self.settings_keybindings(cx),
                 SettingsTab::Help => self.settings_help(cx),
             })
             .into_any_element()
