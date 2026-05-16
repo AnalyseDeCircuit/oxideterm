@@ -290,6 +290,12 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
             MAX_AI_TOOL_MAX_ROUNDS,
         ),
         (
+            "ai.toolUse.maxCallsPerRound",
+            DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND,
+            MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
+            MAX_AI_TOOL_MAX_CALLS_PER_ROUND,
+        ),
+        (
             "terminal.inBandTransfer.maxChunkBytes",
             1024 * 1024,
             64 * 1024,

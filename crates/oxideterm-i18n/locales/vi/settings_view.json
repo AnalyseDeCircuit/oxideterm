@@ -665,7 +665,9 @@
       "profile_default": "Default",
       "profile_set_default": "Set default",
       "profile_inherit_provider": "Use active provider",
-      "profile_inherit_model": "Use provider default"
+      "profile_inherit_model": "Use provider default",
+      "tool_use_max_calls_per_round": "Số lệnh gọi tối đa mỗi vòng",
+      "tool_use_max_calls_per_round_hint": "Số lệnh gọi công cụ tối đa mà mô hình có thể yêu cầu trong một vòng. Mặc định: 8."
     },
     "sftp": {
       "title": "Truyền file SFTP",

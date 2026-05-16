@@ -665,7 +665,9 @@
       "profile_default": "Default",
       "profile_set_default": "Set default",
       "profile_inherit_provider": "Use active provider",
-      "profile_inherit_model": "Use provider default"
+      "profile_inherit_model": "Use provider default",
+      "tool_use_max_calls_per_round": "라운드당 최대 도구 호출",
+      "tool_use_max_calls_per_round_hint": "모델이 한 라운드에서 요청할 수 있는 도구 호출 수입니다. 기본값: 8."
     },
     "sftp": {
       "title": "SFTP 전송",

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use gpui::Div;
 use oxideterm_ai::{
     AiAutocompleteCandidate, AiAutocompleteKind, AiChatMessage, AiChatMessageMetadata,
     AiChatRole, AiChatStreamConfig, AiConversation, AiMessageBranches, AiProviderView,
@@ -36,9 +37,9 @@ use oxideterm_gpui_ui::{
         ai_model_selector_models_panel, ai_model_selector_no_provider_button,
         ai_model_selector_provider_header, ai_model_selector_provider_message,
         ai_model_selector_refresh_button, ai_model_selector_root, ai_model_selector_search_bar,
-        ai_model_selector_trigger_compact, ai_profile_button, ai_safety_indicator, ai_send_button,
-        ai_status_indicator, ai_stop_button, ai_thinking_block, ai_thinking_compact,
-        ai_thinking_content, ai_thinking_header,
+        ai_model_selector_trigger_compact, ai_profile_button, ai_raw_block, ai_guardrail_block,
+        ai_safety_indicator, ai_send_button, ai_status_indicator, ai_stop_button,
+        ai_thinking_block, ai_thinking_compact, ai_thinking_content, ai_thinking_header,
         ai_tool_approval_bar, ai_tool_approval_button, ai_tool_args_pre, ai_tool_block,
         ai_tool_details, ai_tool_heading, ai_tool_item, ai_tool_item_header, ai_tool_output_pre,
         ai_tool_section_label,
@@ -51,6 +52,14 @@ use oxideterm_gpui_ui::{
 enum AiHeaderAction {
     NewChat,
     Settings,
+}
+
+#[derive(Clone)]
+pub(super) struct AiPendingChatStream {
+    pub(super) conversation_id: String,
+    pub(super) config: AiChatStreamConfig,
+    pub(super) request_content: Option<String>,
+    pub(super) task_system_prompt: Option<String>,
 }
 
 include!("ai/render.rs");

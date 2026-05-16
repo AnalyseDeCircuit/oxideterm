@@ -169,6 +169,12 @@ fn merge_tool_policy(
     if let Some(max_rounds) = profile_tool_use.get("maxRounds").and_then(Value::as_i64) {
         base.max_rounds = Some(max_rounds);
     }
+    if let Some(max_calls_per_round) = profile_tool_use
+        .get("maxCallsPerRound")
+        .and_then(Value::as_i64)
+    {
+        base.max_calls_per_round = Some(max_calls_per_round);
+    }
     if let Some(auto_approve) = profile_tool_use
         .get("autoApproveTools")
         .and_then(Value::as_object)
@@ -197,11 +203,13 @@ pub fn tool_policy_from_parts(
     auto_approve_tools: impl IntoIterator<Item = (String, bool)>,
     disabled_tools: Vec<String>,
     max_rounds: Option<i64>,
+    max_calls_per_round: Option<i64>,
 ) -> AiToolUsePolicy {
     AiToolUsePolicy {
         enabled,
         auto_approve_tools: HashMap::from_iter(auto_approve_tools),
         disabled_tools,
         max_rounds,
+        max_calls_per_round,
     }
 }

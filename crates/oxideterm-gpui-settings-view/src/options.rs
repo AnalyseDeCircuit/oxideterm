@@ -361,6 +361,10 @@ pub fn set_ai_tool_use_max_rounds(settings: &mut PersistedSettings, value: i64) 
     settings.ai.tool_use.max_rounds = Some(value);
 }
 
+pub fn set_ai_tool_use_max_calls_per_round(settings: &mut PersistedSettings, value: i64) {
+    settings.ai.tool_use.max_calls_per_round = Some(value);
+}
+
 pub fn set_command_bar_enabled(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.command_bar.enabled = value;
 }

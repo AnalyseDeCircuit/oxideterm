@@ -170,9 +170,6 @@ impl WorkspaceApp {
         ));
         ai_chat_input_root(&self.tokens)
             .relative()
-            .when(self.ai_context_popover_open, |root| {
-                root.child(self.render_ai_context_popover(cx))
-            })
             .when(self.ai_should_show_context_chips(cx), |root| {
                 root.child(self.render_ai_context_chips(cx))
             })

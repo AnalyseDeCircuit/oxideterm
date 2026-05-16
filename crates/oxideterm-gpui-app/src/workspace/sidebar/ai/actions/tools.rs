@@ -2,6 +2,11 @@ use std::collections::BTreeMap;
 
 use sha2::Digest as _;
 
+const AI_MAX_TOOL_ROUNDS_PER_REPLY: usize = 30;
+const AI_MAX_REQUIRED_TOOL_RETRIES: usize = 1;
+const AI_MAX_HARD_DENY_RETRIES: usize = 1;
+const AI_PSEUDO_TOOL_RETRY_TOOL_NAME: &str = "tool_use_disabled";
+
 #[derive(Clone)]
 struct AiOrchestratorRuntimeSnapshot {
     targets: Vec<AiOrchestratorTarget>,
@@ -55,6 +60,34 @@ enum AiRemoteFileWriteError {
 pub(super) enum AiStreamDeliveryEvent {
     Stream(AiStreamEvent),
     TrimNotice(usize),
+    Guardrail {
+        code: String,
+        message: String,
+        raw_text: Option<String>,
+    },
+    AssistantRound {
+        round_id: String,
+        round_number: i64,
+        response_length: usize,
+        tool_call_ids: Vec<String>,
+        synthetic: bool,
+        retry_attempt: Option<usize>,
+        hard_deny_triggered: bool,
+    },
+    RoundSummary {
+        round_id: String,
+        text: String,
+        metadata: serde_json::Value,
+    },
+    RoundStatefulMarker {
+        round_id: String,
+        marker: Option<String>,
+    },
+    Diagnostic {
+        event_type: String,
+        round_id: Option<String>,
+        data: serde_json::Value,
+    },
     ToolStatus {
         tool_call_id: String,
         name: String,
@@ -63,6 +96,10 @@ pub(super) enum AiStreamDeliveryEvent {
         result: Option<serde_json::Value>,
         risk: Option<String>,
         summary: Option<String>,
+        synthetic_denied: bool,
+        raw_text: Option<String>,
+        round_id: Option<String>,
+        round_number: Option<i64>,
     },
     ToolApprovalRequested {
         tool_call_id: String,
@@ -286,6 +323,7 @@ impl WorkspaceApp {
                     "toolUse": {
                         "enabled": settings.ai.tool_use.enabled,
                         "maxRounds": settings.ai.tool_use.max_rounds,
+                        "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
                         "autoApproveTools": settings.ai.tool_use.auto_approve_tools,
                         "disabledTools": settings.ai.tool_use.disabled_tools,
                     },
@@ -1370,9 +1408,55 @@ async fn run_ai_chat_tool_loop(
         .tool_policy
         .max_rounds
         .unwrap_or(8)
-        .clamp(1, 24) as usize;
+        .clamp(1, AI_MAX_TOOL_ROUNDS_PER_REPLY as i64) as usize;
+    let max_calls_per_round = config
+        .tool_policy
+        .max_calls_per_round
+        .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND)
+        .clamp(
+            oxideterm_settings::MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
+            oxideterm_settings::MAX_AI_TOOL_MAX_CALLS_PER_ROUND,
+        ) as usize;
     let mut assistant_content = String::new();
     let mut assistant_thinking = String::new();
+    let response_reserve = config
+        .max_response_tokens
+        .and_then(|tokens| usize::try_from(tokens).ok())
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or_else(|| ai_response_reserve(snapshot.ai_context_window));
+    let transcript_lookup_prompt =
+        ai_find_prompt_transcript_lookup_reference(&history).map(ai_build_transcript_lookup_prompt_reference);
+    let mut transcript_lookup_prompt_injected = history
+        .iter()
+        .any(|message| message.id == "transcript-lookup-reference");
+    let request_text = rag_query
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            history
+                .iter()
+                .rev()
+                .find(|message| message.role == AiChatRole::User)
+                .map(|message| message.content.clone())
+        })
+        .unwrap_or_default();
+    let tool_obligation = if config.tool_policy.enabled {
+        ai_classify_orchestrator_obligation(&request_text)
+    } else {
+        AiOrchestratorObligation::auto()
+    };
+    if let Some(prompt) = ai_orchestrator_obligation_prompt(&tool_obligation)
+        && let Some(system_message) = history
+            .iter_mut()
+            .find(|message| message.role == AiChatRole::System)
+    {
+        system_message.content.push_str("\n\n");
+        system_message.content.push_str(&prompt);
+    }
+    let user_requested_json = ai_user_explicitly_requested_json(&request_text);
+    let mut required_tool_retry_count = 0usize;
+    let mut hard_deny_retry_count = 0usize;
     if let Some(rag_prompt) = snapshot
         .build_rag_system_prompt(rag_query.as_deref(), &config)
         .await
@@ -1404,9 +1488,35 @@ async fn run_ai_chat_tool_loop(
         }
     }
 
-    for round_index in 0..max_rounds {
+    let mut awaiting_summary_round_id: Option<String> = None;
+
+    for round_index in 0..=max_rounds {
         let (stream_tx, mut stream_rx) = tokio::sync::mpsc::unbounded_channel();
-        let provider_config = config.clone();
+        let mut provider_config = config.clone();
+        if tool_obligation.mode == AiOrchestratorObligationMode::Required
+            && !provider_config.tools.is_empty()
+        {
+            provider_config.tool_choice = oxideterm_ai::AiToolChoice::Required;
+        }
+        let _ = send_ai_diagnostic(
+            &ui_tx,
+            generation,
+            &conversation_id,
+            &assistant_id,
+            "llm_request",
+            None,
+            serde_json::json!({
+                "logicalRound": round_index.saturating_add(1),
+                "messageCount": history.len(),
+                "toolDefinitionCount": provider_config.tools.len(),
+                "hardDenyRetryCount": hard_deny_retry_count,
+                "requiredToolRetryCount": required_tool_retry_count,
+                "toolObligationMode": ai_orchestrator_obligation_mode_label(tool_obligation.mode),
+                "toolObligationReason": tool_obligation.reason.clone(),
+                "candidateToolNames": tool_obligation.candidate_tools.clone(),
+                "toolChoice": ai_tool_choice_label(&provider_config.tool_choice),
+            }),
+        );
         tokio::spawn(stream_chat_completion(provider_config, history.clone(), stream_tx));
 
         let mut stream_error = None;
@@ -1418,6 +1528,16 @@ async fn run_ai_chat_tool_loop(
         while let Some(event) = stream_rx.recv().await {
             match event {
                 AiStreamEvent::Content(chunk) => {
+                    if let Some(round_id) = awaiting_summary_round_id.take() {
+                        let _ = send_ai_round_stateful_marker(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            round_id,
+                            None,
+                        );
+                    }
                     round_content.push_str(&chunk);
                     assistant_content.push_str(&chunk);
                     if send_ai_stream_delivery(
@@ -1433,6 +1553,16 @@ async fn run_ai_chat_tool_loop(
                     }
                 }
                 AiStreamEvent::Thinking(chunk) => {
+                    if let Some(round_id) = awaiting_summary_round_id.take() {
+                        let _ = send_ai_round_stateful_marker(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            round_id,
+                            None,
+                        );
+                    }
                     round_thinking.push_str(&chunk);
                     assistant_thinking.push_str(&chunk);
                     if send_ai_stream_delivery(
@@ -1452,6 +1582,16 @@ async fn run_ai_chat_tool_loop(
                     name,
                     arguments,
                 } => {
+                    if let Some(round_id) = awaiting_summary_round_id.take() {
+                        let _ = send_ai_round_stateful_marker(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            round_id,
+                            None,
+                        );
+                    }
                     pending_calls.insert(
                         id.clone(),
                         AiToolCall {
@@ -1481,13 +1621,23 @@ async fn run_ai_chat_tool_loop(
                     name,
                     arguments,
                 } => {
+                    if let Some(round_id) = awaiting_summary_round_id.take() {
+                        let _ = send_ai_round_stateful_marker(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            round_id,
+                            None,
+                        );
+                    }
                     let call = AiToolCall {
                         id: id.clone(),
                         name: name.clone(),
                         arguments: arguments.clone(),
                     };
                     pending_calls.insert(id.clone(), call.clone());
-                    completed_calls.push(call);
+                    record_completed_ai_tool_call(&mut completed_calls, call);
                     if send_ai_stream_delivery(
                         &ui_tx,
                         generation,
@@ -1504,8 +1654,30 @@ async fn run_ai_chat_tool_loop(
                         return;
                     }
                 }
-                AiStreamEvent::Done => break,
+                AiStreamEvent::Done => {
+                    if let Some(round_id) = awaiting_summary_round_id.take() {
+                        let _ = send_ai_round_stateful_marker(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            round_id,
+                            None,
+                        );
+                    }
+                    break;
+                }
                 AiStreamEvent::Error(error) => {
+                    if let Some(round_id) = awaiting_summary_round_id.take() {
+                        let _ = send_ai_round_stateful_marker(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            round_id,
+                            None,
+                        );
+                    }
                     stream_error = Some(error);
                     break;
                 }
@@ -1523,13 +1695,279 @@ async fn run_ai_chat_tool_loop(
             return;
         }
 
+        let round_number = round_index.saturating_add(1) as i64;
+        let round_id = format!("{assistant_id}-round-{round_number}");
+        let _ = send_ai_assistant_round(
+            &ui_tx,
+            generation,
+            &conversation_id,
+            &assistant_id,
+            round_id.clone(),
+            round_number,
+            round_content.len(),
+            completed_calls
+                .iter()
+                .map(|call| call.id.clone())
+                .collect::<Vec<_>>(),
+            false,
+            None,
+            false,
+        );
+
         if completed_calls.is_empty() {
+            if !config.tool_policy.enabled
+                && hard_deny_retry_count < AI_MAX_HARD_DENY_RETRIES
+                && ai_should_trigger_hard_deny(&round_content, user_requested_json)
+            {
+                let retry_attempt = hard_deny_retry_count.saturating_add(1);
+                let synthetic_round_id =
+                    format!("{assistant_id}-hard-deny-{retry_attempt}");
+                let synthetic_tool_call_id = format!("{synthetic_round_id}-tool");
+                let _ = send_ai_guardrail(
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    "tool-disabled-hard-deny",
+                    "Tool calling is disabled, so the assistant response that looked like a tool transcript was rejected and retried.",
+                    Some(round_content.clone()),
+                );
+                let _ = send_ai_assistant_round(
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    synthetic_round_id.clone(),
+                    retry_attempt as i64,
+                    round_content.len(),
+                    vec![synthetic_tool_call_id.clone()],
+                    true,
+                    Some(retry_attempt),
+                    true,
+                );
+                let synthetic_call = AiToolCall {
+                    id: synthetic_tool_call_id.clone(),
+                    name: AI_PSEUDO_TOOL_RETRY_TOOL_NAME.to_string(),
+                    arguments: serde_json::json!({
+                        "reason": "tool_use_disabled",
+                        "retryAttempt": retry_attempt,
+                    })
+                    .to_string(),
+                };
+                let synthetic_result = rejected_ai_tool_result(
+                    synthetic_tool_call_id.clone(),
+                    AI_PSEUDO_TOOL_RETRY_TOOL_NAME.to_string(),
+                    "tool_use_disabled",
+                    "Tool use is disabled.",
+                );
+                send_ai_tool_status_with_payload(
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    &synthetic_call,
+                    "rejected",
+                    Some(synthetic_result.envelope.clone()),
+                    Some("write".to_string()),
+                    Some(executed_summary(&synthetic_result)),
+                    true,
+                    Some(round_content.clone()),
+                    Some(synthetic_round_id.clone()),
+                    Some(retry_attempt as i64),
+                )
+                .ok();
+                history.push(AiChatMessage {
+                    id: format!("{synthetic_round_id}-assistant"),
+                    role: AiChatRole::Assistant,
+                    content: String::new(),
+                    timestamp_ms: ai_now_ms(),
+                    model: Some(config.model.clone()),
+                    context: None,
+                    is_streaming: false,
+                    thinking_content: None,
+                    metadata: None,
+                    tool_call_id: None,
+                    tool_calls: vec![serde_json::json!({
+                        "id": synthetic_tool_call_id,
+                        "name": AI_PSEUDO_TOOL_RETRY_TOOL_NAME,
+                        "arguments": serde_json::json!({
+                            "reason": "tool_use_disabled",
+                            "retryAttempt": retry_attempt,
+                        }).to_string(),
+                    })],
+                    turn: None,
+                    transcript_ref: None,
+                    summary_ref: None,
+                    branches: None,
+                });
+                history.push(AiChatMessage {
+                    id: format!("{synthetic_round_id}-tool-result"),
+                    role: AiChatRole::Tool,
+                    content: serde_json::json!({
+                        "kind": "tool_denied",
+                        "reason": "Tool use is disabled.",
+                        "detail": "Do not emit JSON that imitates a tool call or tool result. Answer conversationally without claiming app actions were performed.",
+                    })
+                    .to_string(),
+                    timestamp_ms: ai_now_ms(),
+                    model: None,
+                    context: None,
+                    is_streaming: false,
+                    thinking_content: None,
+                    metadata: None,
+                    tool_call_id: Some(format!("{synthetic_round_id}-tool")),
+                    tool_calls: Vec::new(),
+                    turn: None,
+                    transcript_ref: None,
+                    summary_ref: None,
+                    branches: None,
+                });
+                hard_deny_retry_count = retry_attempt;
+                continue;
+            }
+            if required_tool_retry_count < AI_MAX_REQUIRED_TOOL_RETRIES
+                && ai_should_retry_required_tool_round(&tool_obligation, &round_content)
+            {
+                let retry_attempt = required_tool_retry_count.saturating_add(1);
+                let _ = send_ai_guardrail(
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    "tool-required-no-call",
+                    "This request requires a real tool result before the assistant can answer. Retrying with a stricter tool-use instruction.",
+                    (!round_content.trim().is_empty()).then_some(round_content.clone()),
+                );
+                let _ = send_ai_diagnostic(
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    "guardrail",
+                    None,
+                    serde_json::json!({
+                        "code": "tool-required-no-call",
+                        "retryAttempt": retry_attempt,
+                        "candidateToolNames": tool_obligation.candidate_tools.clone(),
+                    }),
+                );
+                let _ = send_ai_assistant_round(
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    format!("{assistant_id}-required-retry-{retry_attempt}"),
+                    retry_attempt as i64,
+                    round_content.len(),
+                    Vec::new(),
+                    true,
+                    Some(retry_attempt),
+                    false,
+                );
+                history.push(AiChatMessage {
+                    id: format!("required-retry-assistant-{retry_attempt}"),
+                    role: AiChatRole::Assistant,
+                    content: if round_content.trim().is_empty() {
+                        "(No tool call was made.)".to_string()
+                    } else {
+                        round_content
+                    },
+                    timestamp_ms: ai_now_ms(),
+                    model: Some(config.model.clone()),
+                    context: None,
+                    is_streaming: false,
+                    thinking_content: (!round_thinking.is_empty()).then_some(round_thinking),
+                    metadata: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                    turn: None,
+                    transcript_ref: None,
+                    summary_ref: None,
+                    branches: None,
+                });
+                history.push(AiChatMessage {
+                    id: format!("required-retry-user-{retry_attempt}"),
+                    role: AiChatRole::User,
+                    content: ai_required_tool_retry_prompt(&tool_obligation),
+                    timestamp_ms: ai_now_ms(),
+                    model: None,
+                    context: None,
+                    is_streaming: false,
+                    thinking_content: None,
+                    metadata: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                    turn: None,
+                    transcript_ref: None,
+                    summary_ref: None,
+                    branches: None,
+                });
+                required_tool_retry_count = retry_attempt;
+                continue;
+            }
             let _ = send_ai_stream_delivery(
                 &ui_tx,
                 generation,
                 &conversation_id,
                 &assistant_id,
                 AiStreamDeliveryEvent::Stream(AiStreamEvent::Done),
+            );
+            return;
+        }
+
+        if completed_calls.len() > max_calls_per_round {
+            reject_ai_tool_calls_for_protocol_guard(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                &completed_calls,
+                "too_many_tool_calls",
+                format!(
+                    "Too many tool calls in one round (max {}).",
+                    max_calls_per_round
+                ),
+            );
+            let _ = send_ai_stream_delivery(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(format!(
+                    "Too many tool calls in one round (max {}).",
+                    max_calls_per_round
+                ))),
+            );
+            return;
+        }
+
+        if round_index >= max_rounds {
+            let _ = send_ai_guardrail(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                "tool-budget-limit",
+                "Tool use stopped because the conversation reached the configured tool-round limit.",
+                None,
+            );
+            reject_ai_tool_calls_for_protocol_guard(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                &completed_calls,
+                "tool_budget_limit",
+                "Tool use stopped because the conversation reached the configured tool-round limit.",
+            );
+            let _ = send_ai_stream_delivery(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(
+                    "Tool execution stopped after reaching the maximum tool rounds.".to_string(),
+                )),
             );
             return;
         }
@@ -1543,7 +1981,7 @@ async fn run_ai_chat_tool_loop(
             model: Some(config.model.clone()),
             context: None,
             is_streaming: false,
-            thinking_content: (!round_thinking.trim().is_empty()).then_some(round_thinking),
+            thinking_content: (!round_thinking.is_empty()).then_some(round_thinking),
             metadata: None,
             tool_call_id: None,
             tool_calls: completed_calls
@@ -1556,6 +1994,7 @@ async fn run_ai_chat_tool_loop(
             branches: None,
         });
 
+        let mut round_results = Vec::new();
         for call in completed_calls {
             let args = parse_ai_tool_args(&call.arguments);
             let decision = resolve_ai_policy_decision(
@@ -1695,8 +2134,118 @@ async fn run_ai_chat_tool_loop(
                 Some(executed_summary(&executed)),
             )
             .ok();
+            round_results.push(AiRoundToolResultSummary {
+                tool_name: call.name.clone(),
+                success: executed.success,
+                summary: executed_summary(&executed),
+            });
             history.push(ai_tool_result_message(executed));
         }
+
+        if round_index >= 1 {
+            condense_ai_tool_messages(&mut history);
+        }
+        let system_message_tokens = history
+            .iter()
+            .filter(|message| message.role == AiChatRole::System)
+            .map(ai_message_estimated_tokens)
+            .sum::<usize>();
+        let total_message_tokens = history.iter().map(ai_message_estimated_tokens).sum::<usize>();
+        let system_budget = system_message_tokens
+            .saturating_add(ai_tool_definitions_estimated_tokens(&config.tools));
+        let regular_messages = history
+            .iter()
+            .filter(|message| message.role != AiChatRole::System)
+            .collect::<Vec<_>>();
+        let summary_eligible_tokens = ai_summary_eligible_tokens(&regular_messages);
+        let tool_loop_budget = determine_ai_compression_level(AiPromptBudgetInput {
+            context_window: snapshot.ai_context_window,
+            response_reserve,
+            system_budget,
+            history_tokens: total_message_tokens.saturating_sub(system_message_tokens),
+            trimmable_history_tokens: None,
+            summary_eligible_tokens: Some(summary_eligible_tokens),
+            can_summarize: summary_eligible_tokens > 0,
+            can_lookup_transcript: transcript_lookup_prompt.is_some(),
+            in_tool_loop: true,
+            auto_compact_threshold: None,
+            transcript_lookup_threshold: None,
+            tool_loop_stop_threshold: Some(ai_to_usable_budget_threshold(
+                0.9,
+                snapshot.ai_context_window,
+                system_budget,
+                response_reserve,
+            )),
+            safety_margin: None,
+        });
+        if !round_results.is_empty() {
+            let _ = send_ai_round_summary(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                round_id.clone(),
+                ai_round_summary_text(&round_results),
+                serde_json::json!({
+                    "source": "background",
+                    "model": config.model.clone(),
+                    "summarizationMode": "background",
+                    "contextLengthBefore": total_message_tokens,
+                    "numRounds": round_number,
+                    "numRoundsSinceLastSummarization": 1,
+                }),
+            );
+        }
+        if tool_loop_budget.level >= 3 && !transcript_lookup_prompt_injected {
+            if let Some(prompt) = transcript_lookup_prompt.clone() {
+                history.push(AiChatMessage {
+                    id: "transcript-lookup-reference".to_string(),
+                    role: AiChatRole::System,
+                    content: prompt,
+                    timestamp_ms: 0,
+                    model: None,
+                    context: None,
+                    is_streaming: false,
+                    thinking_content: None,
+                    metadata: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                    turn: None,
+                    transcript_ref: None,
+                    summary_ref: None,
+                    branches: None,
+                });
+                transcript_lookup_prompt_injected = true;
+            }
+        }
+        if tool_loop_budget.level == 4 {
+            let _ = send_ai_guardrail(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                "tool-budget-limit",
+                "Tool use stopped because the conversation is approaching the current context window limit.",
+                Some("Tool use stopped: approaching context window limit".to_string()),
+            );
+            let _ = send_ai_stream_delivery(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::Stream(AiStreamEvent::Done),
+            );
+            return;
+        }
+        let _ = send_ai_round_stateful_marker(
+            &ui_tx,
+            generation,
+            &conversation_id,
+            &assistant_id,
+            round_id.clone(),
+            Some("awaiting-summary".to_string()),
+        );
+        awaiting_summary_round_id = Some(round_id);
     }
 
     let _ = send_ai_stream_delivery(
@@ -1704,10 +2253,201 @@ async fn run_ai_chat_tool_loop(
         generation,
         &conversation_id,
         &assistant_id,
-        AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(
-            "Tool execution stopped after reaching the maximum tool rounds.".to_string(),
-        )),
+        AiStreamDeliveryEvent::Stream(AiStreamEvent::Done),
     );
+}
+
+fn record_completed_ai_tool_call(completed_calls: &mut Vec<AiToolCall>, call: AiToolCall) {
+    if let Some(existing) = completed_calls
+        .iter_mut()
+        .find(|existing| existing.id == call.id)
+    {
+        *existing = call;
+    } else {
+        completed_calls.push(call);
+    }
+}
+
+fn reject_ai_tool_calls_for_protocol_guard(
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    calls: &[AiToolCall],
+    code: &str,
+    message: impl Into<String>,
+) {
+    let message = message.into();
+    for call in calls {
+        let executed = rejected_ai_tool_result(
+            call.id.clone(),
+            call.name.clone(),
+            code.to_string(),
+            message.clone(),
+        );
+        let _ = send_ai_tool_status(
+            ui_tx,
+            generation,
+            conversation_id,
+            assistant_id,
+            call,
+            "rejected",
+            Some(executed.envelope.clone()),
+            Some("write".to_string()),
+            Some(executed_summary(&executed)),
+        );
+    }
+}
+
+fn send_ai_guardrail(
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    raw_text: Option<String>,
+) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    send_ai_stream_delivery(
+        ui_tx,
+        generation,
+        conversation_id,
+        assistant_id,
+        AiStreamDeliveryEvent::Guardrail {
+            code: code.into(),
+            message: message.into(),
+            raw_text,
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn send_ai_assistant_round(
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    round_id: String,
+    round_number: i64,
+    response_length: usize,
+    tool_call_ids: Vec<String>,
+    synthetic: bool,
+    retry_attempt: Option<usize>,
+    hard_deny_triggered: bool,
+) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    send_ai_stream_delivery(
+        ui_tx,
+        generation,
+        conversation_id,
+        assistant_id,
+        AiStreamDeliveryEvent::AssistantRound {
+            round_id,
+            round_number,
+            response_length,
+            tool_call_ids,
+            synthetic,
+            retry_attempt,
+            hard_deny_triggered,
+        },
+    )
+}
+
+fn send_ai_round_summary(
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    round_id: String,
+    text: String,
+    metadata: serde_json::Value,
+) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    send_ai_stream_delivery(
+        ui_tx,
+        generation,
+        conversation_id,
+        assistant_id,
+        AiStreamDeliveryEvent::RoundSummary {
+            round_id,
+            text,
+            metadata,
+        },
+    )
+}
+
+fn send_ai_round_stateful_marker(
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    round_id: String,
+    marker: Option<String>,
+) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    send_ai_stream_delivery(
+        ui_tx,
+        generation,
+        conversation_id,
+        assistant_id,
+        AiStreamDeliveryEvent::RoundStatefulMarker { round_id, marker },
+    )
+}
+
+fn send_ai_diagnostic(
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    event_type: impl Into<String>,
+    round_id: Option<String>,
+    data: serde_json::Value,
+) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    send_ai_stream_delivery(
+        ui_tx,
+        generation,
+        conversation_id,
+        assistant_id,
+        AiStreamDeliveryEvent::Diagnostic {
+            event_type: event_type.into(),
+            round_id,
+            data,
+        },
+    )
+}
+
+fn ai_orchestrator_obligation_mode_label(mode: AiOrchestratorObligationMode) -> &'static str {
+    match mode {
+        AiOrchestratorObligationMode::Auto => "auto",
+        AiOrchestratorObligationMode::Required => "required",
+    }
+}
+
+fn ai_tool_choice_label(choice: &oxideterm_ai::AiToolChoice) -> serde_json::Value {
+    match choice {
+        oxideterm_ai::AiToolChoice::Auto => serde_json::json!("auto"),
+        oxideterm_ai::AiToolChoice::Required => serde_json::json!("required"),
+        oxideterm_ai::AiToolChoice::Named(name) => serde_json::json!(name),
+    }
+}
+
+#[derive(Debug)]
+struct AiRoundToolResultSummary {
+    tool_name: String,
+    success: bool,
+    summary: String,
+}
+
+fn ai_round_summary_text(results: &[AiRoundToolResultSummary]) -> String {
+    results
+        .iter()
+        .map(|result| {
+            format!(
+                "{}: {} - {}",
+                result.tool_name,
+                if result.success { "ok" } else { "error" },
+                result.summary.trim()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 impl AiOrchestratorRuntimeSnapshot {
@@ -3356,6 +4096,39 @@ fn send_ai_tool_status(
     risk: Option<String>,
     summary: Option<String>,
 ) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    send_ai_tool_status_with_payload(
+        ui_tx,
+        generation,
+        conversation_id,
+        assistant_id,
+        call,
+        status,
+        result,
+        risk,
+        summary,
+        false,
+        None,
+        None,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn send_ai_tool_status_with_payload(
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    call: &AiToolCall,
+    status: &str,
+    result: Option<serde_json::Value>,
+    risk: Option<String>,
+    summary: Option<String>,
+    synthetic_denied: bool,
+    raw_text: Option<String>,
+    round_id: Option<String>,
+    round_number: Option<i64>,
+) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -3369,6 +4142,10 @@ fn send_ai_tool_status(
             result,
             risk,
             summary,
+            synthetic_denied,
+            raw_text,
+            round_id,
+            round_number,
         },
     )
 }
@@ -3417,6 +4194,272 @@ fn ai_tool_result_message(result: AiExecutedToolResult) -> AiChatMessage {
         summary_ref: None,
         branches: None,
     }
+}
+
+const AI_TOOL_CONDENSE_KEEP_RECENT: usize = 5;
+const AI_TOOL_CONDENSE_SUMMARY_MAX_CHARS: usize = 300;
+
+fn condense_ai_tool_messages(history: &mut [AiChatMessage]) {
+    let tool_indices = history
+        .iter()
+        .enumerate()
+        .filter_map(|(index, message)| (message.role == AiChatRole::Tool).then_some(index))
+        .collect::<Vec<_>>();
+    if tool_indices.len() <= AI_TOOL_CONDENSE_KEEP_RECENT {
+        return;
+    }
+
+    for index in tool_indices
+        .iter()
+        .take(tool_indices.len().saturating_sub(AI_TOOL_CONDENSE_KEEP_RECENT))
+        .copied()
+    {
+        let message = &mut history[index];
+        if message.content.starts_with("[condensed]") {
+            continue;
+        }
+        let parsed = serde_json::from_str::<serde_json::Value>(&message.content).ok();
+        let is_error = parsed.as_ref().is_some_and(|value| {
+            value
+                .get("error")
+                .is_some_and(|error| !error.is_null() && error != &serde_json::Value::Bool(false))
+        });
+        if is_error {
+            continue;
+        }
+        let tool_name = parsed
+            .as_ref()
+            .and_then(|value| value.get("meta"))
+            .and_then(|meta| meta.get("toolName"))
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| {
+                parsed
+                    .as_ref()
+                    .and_then(|value| value.get("metadata"))
+                    .and_then(|meta| meta.get("toolName"))
+                    .and_then(serde_json::Value::as_str)
+            })
+            .unwrap_or("tool");
+        let lines = message
+            .content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>();
+        let mut summary = if lines.len() <= 4 {
+            lines.join("\n")
+        } else {
+            format!(
+                "{}\n... ({} lines omitted)\n{}",
+                lines[..2].join("\n"),
+                lines.len().saturating_sub(4),
+                lines[lines.len().saturating_sub(2)..].join("\n")
+            )
+        };
+        if summary.chars().count() > AI_TOOL_CONDENSE_SUMMARY_MAX_CHARS {
+            summary = summary
+                .chars()
+                .take(AI_TOOL_CONDENSE_SUMMARY_MAX_CHARS)
+                .collect::<String>();
+            summary.push_str("...");
+        }
+        message.content = format!("[condensed] {tool_name} -> ok:\n{summary}");
+    }
+}
+
+fn ai_to_usable_budget_threshold(
+    raw_window_ratio: f32,
+    context_window: usize,
+    system_budget: usize,
+    response_reserve: usize,
+) -> f32 {
+    let prompt_budget =
+        compute_ai_prompt_budget(context_window, response_reserve, system_budget, None);
+    if prompt_budget.usable_prompt_budget == 0 {
+        raw_window_ratio
+    } else {
+        (context_window as f32 * raw_window_ratio) / prompt_budget.usable_prompt_budget as f32
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AiOrchestratorObligationMode {
+    Auto,
+    Required,
+}
+
+#[derive(Clone, Debug)]
+struct AiOrchestratorObligation {
+    mode: AiOrchestratorObligationMode,
+    reason: String,
+    candidate_tools: Vec<String>,
+}
+
+impl AiOrchestratorObligation {
+    fn auto() -> Self {
+        Self {
+            mode: AiOrchestratorObligationMode::Auto,
+            reason: "No mandatory app action detected.".to_string(),
+            candidate_tools: Vec::new(),
+        }
+    }
+}
+
+fn ai_classify_orchestrator_obligation(text: &str) -> AiOrchestratorObligation {
+    let lower = text.to_lowercase();
+    let discovery = ["有哪些", "哪些", "列出", "看看", "查看", "show", "list", "available", "host", "target", "connection", "主机", "连接"]
+        .iter()
+        .any(|needle| lower.contains(needle));
+    let direct_target_action = ["连接到", "connect to", "run on", "在"].iter().any(|needle| lower.contains(needle))
+        && ["运行", "执行", "run", "execute"].iter().any(|needle| lower.contains(needle));
+    if discovery && !direct_target_action {
+        return AiOrchestratorObligation {
+            mode: AiOrchestratorObligationMode::Required,
+            reason: "The user is asking for real available app targets; call list_targets before answering.".to_string(),
+            candidate_tools: vec!["list_targets".to_string()],
+        };
+    }
+
+    let action = [
+        "连接", "打开", "执行", "运行", "修改", "设置", "上传", "下载", "读取", "写入", "搜索",
+        "connect", "open", "run", "execute", "modify", "set", "upload", "download", "read",
+        "write", "search",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    if action {
+        return AiOrchestratorObligation {
+            mode: AiOrchestratorObligationMode::Required,
+            reason: "The request asks OxideTerm to inspect, connect, execute, open, or modify real app state.".to_string(),
+            candidate_tools: vec![
+                "list_targets".to_string(),
+                "select_target".to_string(),
+                "connect_target".to_string(),
+                "run_command".to_string(),
+                "open_app_surface".to_string(),
+                "read_resource".to_string(),
+                "write_resource".to_string(),
+            ],
+        };
+    }
+
+    AiOrchestratorObligation::auto()
+}
+
+fn ai_orchestrator_obligation_prompt(obligation: &AiOrchestratorObligation) -> Option<String> {
+    if obligation.mode != AiOrchestratorObligationMode::Required {
+        return None;
+    }
+    Some(
+        [
+            "## Required Tool Call".to_string(),
+            obligation.reason.clone(),
+            format!(
+                "Call one of these tools before the final answer: {}.",
+                obligation
+                    .candidate_tools
+                    .iter()
+                    .map(|tool| format!("`{tool}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            "If a tool returns disambiguation or multiple targets, ask the user to choose instead of guessing.".to_string(),
+        ]
+        .join("\n"),
+    )
+}
+
+fn ai_required_tool_retry_prompt(obligation: &AiOrchestratorObligation) -> String {
+    let candidates = if obligation.candidate_tools.is_empty() {
+        "the relevant available tool".to_string()
+    } else {
+        obligation
+            .candidate_tools
+            .iter()
+            .take(8)
+            .map(|tool| format!("`{tool}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    [
+        "The previous assistant response did not call a structured tool, but this user request requires real app/tool state.".to_string(),
+        format!("Reason: {}.", obligation.reason),
+        format!("Call one of these tools before giving a final answer: {candidates}."),
+        "Do not claim that anything was opened, connected, executed, read, modified, checked, verified, or diagnosed until a tool result proves it.".to_string(),
+    ]
+    .join("\n")
+}
+
+fn ai_should_retry_required_tool_round(obligation: &AiOrchestratorObligation, assistant_text: &str) -> bool {
+    if obligation.mode != AiOrchestratorObligationMode::Required || obligation.candidate_tools.is_empty() {
+        return false;
+    }
+    let trimmed = assistant_text.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let lower = trimmed.to_lowercase();
+    let action_claim = [
+        "opened", "connected", "executed", "ran", "read", "modified", "changed", "checked",
+        "verified", "diagnosed", "found", "failed", "succeeded", "已经", "已", "我来", "我已",
+        "现在", "结果是", "连接失败", "执行完成", "修改完成",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    if action_claim {
+        return true;
+    }
+    let looks_like_clarification = trimmed.ends_with('?')
+        || trimmed.ends_with('？')
+        || ["请", "需要你", "你可以", "是否", "哪一个", "哪个", "确认"]
+            .iter()
+            .any(|needle| trimmed.contains(needle));
+    !looks_like_clarification
+}
+
+fn ai_user_explicitly_requested_json(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    ["json", "jsonl", "json schema", "jsonschema", "payload", "response format", "object literal", "schema"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+}
+
+fn ai_should_trigger_hard_deny(assistant_text: &str, user_requested_json: bool) -> bool {
+    if user_requested_json {
+        return false;
+    }
+    let trimmed = ai_strip_code_fence(assistant_text);
+    if trimmed.is_empty() {
+        return false;
+    }
+    let looks_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+    if !looks_json {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+    let field_count = [
+        "\"name\"", "\"arguments\"", "\"stdout\"", "\"stderr\"", "\"exit_code\"", "\"exit-code\"",
+        "\"status\"", "\"tool_call_id\"", "\"toolname\"", "\"toolcallid\"",
+    ]
+    .iter()
+    .filter(|needle| lower.contains(*needle))
+    .count();
+    let looks_like_tool_request = lower.contains("\"name\"") && lower.contains("\"arguments\"");
+    let looks_like_tool_result = (lower.contains("\"stdout\"") || lower.contains("\"stderr\""))
+        && (lower.contains("\"exit_code\"") || lower.contains("\"exit-code\"") || lower.contains("\"status\""));
+    looks_like_tool_request || looks_like_tool_result || field_count >= 3
+}
+
+fn ai_strip_code_fence(text: &str) -> String {
+    let trimmed = text.trim();
+    for prefix in ["```json", "```javascript", "```js", "```text", "```"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix)
+            && let Some(inner) = rest.strip_suffix("```")
+        {
+            return inner.trim().to_string();
+        }
+    }
+    trimmed.to_string()
 }
 
 fn rejected_ai_tool_result(

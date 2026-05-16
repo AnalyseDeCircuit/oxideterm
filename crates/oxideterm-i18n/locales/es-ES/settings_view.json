@@ -665,7 +665,9 @@
       "profile_default": "Default",
       "profile_set_default": "Set default",
       "profile_inherit_provider": "Use active provider",
-      "profile_inherit_model": "Use provider default"
+      "profile_inherit_model": "Use provider default",
+      "tool_use_max_calls_per_round": "Llamadas máximas por ronda",
+      "tool_use_max_calls_per_round_hint": "Número máximo de llamadas a herramientas que el modelo puede solicitar en una ronda. Predeterminado: 8."
     },
     "sftp": {
       "title": "Transferencias SFTP",

@@ -10,6 +10,9 @@ pub const BACKEND_HOT_BUFFER_MAX: i64 = 12_000;
 pub const DEFAULT_AI_TOOL_MAX_ROUNDS: i64 = 10;
 pub const MIN_AI_TOOL_MAX_ROUNDS: i64 = 1;
 pub const MAX_AI_TOOL_MAX_ROUNDS: i64 = 30;
+pub const DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND: i64 = 8;
+pub const MIN_AI_TOOL_MAX_CALLS_PER_ROUND: i64 = 1;
+pub const MAX_AI_TOOL_MAX_CALLS_PER_ROUND: i64 = 32;
 pub const MAX_HIGHLIGHT_RULES: usize = 32;
 pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
 
@@ -249,4 +252,3 @@ pub enum HighlightRuleRenderMode {
     Underline,
     Outline,
 }
-
