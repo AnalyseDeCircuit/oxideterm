@@ -16,6 +16,8 @@ use oxideterm_ai::{
     provider_views as ai_provider_views, resolve_ai_policy_decision, resolve_ai_slash_command,
     resolve_ai_execution_profile, resolve_model_selector_provider_probe,
     select_provider_model as ai_select_provider_model, stream_chat_completion, tool_policy_from_parts,
+    ai_detected_intent_system_prompt, ai_visible_suggestion_content, detect_ai_intent,
+    parse_ai_suggestions,
 };
 use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_markdown::{MarkdownOptions, markdown_with_options};

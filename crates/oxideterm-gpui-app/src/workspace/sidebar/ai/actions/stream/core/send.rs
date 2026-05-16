@@ -115,6 +115,7 @@ impl WorkspaceApp {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             },
         );
         if let Some(conversation) = self

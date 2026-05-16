@@ -77,6 +77,20 @@ pub struct AiParsedInput {
     pub raw_text: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiDetectedIntent {
+    pub kind: &'static str,
+    pub confidence_percent: u8,
+    pub system_hint: &'static str,
+}
+
+struct AiIntentPattern {
+    kind: &'static str,
+    confidence_percent: u8,
+    system_hint: &'static str,
+    predicates: &'static [fn(&str) -> bool],
+}
+
 pub const AI_SLASH_COMMANDS: &[AiSlashCommand] = &[
     AiSlashCommand {
         name: "explain",
@@ -253,6 +267,347 @@ pub fn parse_ai_user_input(raw: &str) -> AiParsedInput {
         clean_text: collapse_ai_input_whitespace(&clean_text),
         raw_text: raw.to_string(),
     }
+}
+
+pub fn detect_ai_intent(parsed: &AiParsedInput) -> AiDetectedIntent {
+    if let Some(command) = parsed.slash_command.as_deref()
+        && let Some(kind) = match command {
+            "explain" => Some("explain"),
+            "fix" => Some("troubleshoot"),
+            _ => None,
+        }
+        && let Some(pattern) = AI_INTENT_PATTERNS
+            .iter()
+            .find(|pattern| pattern.kind == kind)
+    {
+        return AiDetectedIntent {
+            kind,
+            confidence_percent: 95,
+            system_hint: pattern.system_hint,
+        };
+    }
+
+    let text = parsed.clean_text.trim().to_lowercase();
+    if text.is_empty() {
+        return AiDetectedIntent {
+            kind: "general",
+            confidence_percent: 50,
+            system_hint: "",
+        };
+    }
+
+    AI_INTENT_PATTERNS
+        .iter()
+        .filter(|pattern| pattern.predicates.iter().any(|predicate| predicate(&text)))
+        .max_by_key(|pattern| pattern.confidence_percent)
+        .map(|pattern| AiDetectedIntent {
+            kind: pattern.kind,
+            confidence_percent: pattern.confidence_percent,
+            system_hint: pattern.system_hint,
+        })
+        .unwrap_or(AiDetectedIntent {
+            kind: "general",
+            confidence_percent: 50,
+            system_hint: "",
+        })
+}
+
+pub fn ai_detected_intent_system_prompt(intent: &AiDetectedIntent) -> Option<String> {
+    (intent.confidence_percent >= 80 && !intent.system_hint.is_empty())
+        .then(|| format!("## Detected Intent\n{}", intent.system_hint))
+}
+
+const AI_INTENT_PATTERNS: &[AiIntentPattern] = &[
+    AiIntentPattern {
+        kind: "execute",
+        confidence_percent: 85,
+        system_hint: "The user wants to execute an action. Focus on providing actionable commands and confirming before executing anything destructive.",
+        predicates: &[
+            starts_with_execute_verb,
+            contains_execute_phrase,
+            contains_connection_phrase,
+            starts_with_command_runner,
+        ],
+    },
+    AiIntentPattern {
+        kind: "explain",
+        confidence_percent: 80,
+        system_hint: "The user wants an explanation. Provide clear, educational answers with examples where helpful.",
+        predicates: &[
+            starts_with_explain_phrase,
+            contains_explain_phrase,
+            ends_with_question_mark,
+        ],
+    },
+    AiIntentPattern {
+        kind: "troubleshoot",
+        confidence_percent: 90,
+        system_hint: "The user is troubleshooting a problem. Analyze error messages carefully, suggest diagnostic commands, and provide step-by-step fixes.",
+        predicates: &[
+            starts_with_troubleshoot_phrase,
+            contains_error_phrase,
+            contains_problem_phrase,
+            contains_common_error_phrase,
+        ],
+    },
+    AiIntentPattern {
+        kind: "create",
+        confidence_percent: 85,
+        system_hint: "The user wants to create or generate something. Provide complete, production-ready code or configurations.",
+        predicates: &[
+            starts_with_create_verb,
+            starts_with_add_verb,
+            contains_create_artifact,
+            contains_create_phrase,
+        ],
+    },
+    AiIntentPattern {
+        kind: "explore",
+        confidence_percent: 75,
+        system_hint: "The user wants to discover or inspect information. Use appropriate tools to gather and present the requested data.",
+        predicates: &[
+            starts_with_explore_verb,
+            starts_with_inspection_command,
+            contains_inspection_phrase,
+        ],
+    },
+    AiIntentPattern {
+        kind: "configure",
+        confidence_percent: 80,
+        system_hint: "The user wants to modify settings or configuration. Identify the specific setting, explain the change, and confirm before applying.",
+        predicates: &[
+            starts_with_configure_verb,
+            contains_settings_phrase,
+            contains_toggle_phrase,
+        ],
+    },
+];
+
+fn starts_with_any(text: &str, prefixes: &[&str]) -> bool {
+    prefixes.iter().any(|prefix| {
+        text == *prefix
+            || text
+                .strip_prefix(*prefix)
+                .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    })
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn starts_with_execute_verb(text: &str) -> bool {
+    starts_with_any(
+        text,
+        &[
+            "run",
+            "execute",
+            "start",
+            "stop",
+            "restart",
+            "kill",
+            "deploy",
+            "install",
+            "uninstall",
+        ],
+    )
+}
+
+fn contains_execute_phrase(text: &str) -> bool {
+    contains_any(text, &["run this", "execute this", "do this", "make it"])
+}
+
+fn contains_connection_phrase(text: &str) -> bool {
+    contains_any(text, &["ssh into", "connect to", "login", "log in"])
+}
+
+fn starts_with_command_runner(text: &str) -> bool {
+    starts_with_any(
+        text,
+        &[
+            "sudo",
+            "apt",
+            "yum",
+            "brew",
+            "pip",
+            "npm",
+            "pnpm",
+            "cargo",
+            "docker",
+            "kubectl",
+            "systemctl",
+        ],
+    )
+}
+
+fn starts_with_explain_phrase(text: &str) -> bool {
+    starts_with_any(
+        text,
+        &[
+            "explain",
+            "what is",
+            "what are",
+            "what does",
+            "how does",
+            "why does",
+            "why is",
+            "tell me about",
+            "describe",
+            "walk me through",
+        ],
+    )
+}
+
+fn contains_explain_phrase(text: &str) -> bool {
+    contains_any(text, &["mean", "meaning", "purpose", "difference between"])
+}
+
+fn ends_with_question_mark(text: &str) -> bool {
+    text.trim_end().ends_with('?') || text.trim_end().ends_with('？')
+}
+
+fn starts_with_troubleshoot_phrase(text: &str) -> bool {
+    starts_with_any(text, &["fix", "debug", "troubleshoot", "diagnose"])
+        || (text.starts_with("why") && contains_any(text, &["fail", "error", "crash", "broken"]))
+}
+
+fn contains_error_phrase(text: &str) -> bool {
+    contains_any(
+        text,
+        &[
+            "error",
+            "fail",
+            "failed",
+            "failing",
+            "failure",
+            "crash",
+            "crashed",
+            "crashing",
+            "broken",
+            "not working",
+            "can't",
+            "cant",
+            "unable",
+        ],
+    )
+}
+
+fn contains_problem_phrase(text: &str) -> bool {
+    contains_any(
+        text,
+        &["issue", "problem", "bug", "wrong", "weird", "strange"],
+    )
+}
+
+fn contains_common_error_phrase(text: &str) -> bool {
+    contains_any(
+        text,
+        &[
+            "permission denied",
+            "connection refused",
+            "timeout",
+            "not found",
+            "no such",
+        ],
+    )
+}
+
+fn starts_with_create_verb(text: &str) -> bool {
+    starts_with_any(
+        text,
+        &[
+            "create", "write", "generate", "make", "build", "set up", "setup", "init",
+        ],
+    )
+}
+
+fn starts_with_add_verb(text: &str) -> bool {
+    starts_with_any(text, &["add", "new", "draft", "compose"])
+}
+
+fn contains_create_artifact(text: &str) -> bool {
+    contains_any(
+        text,
+        &[
+            "script",
+            "config",
+            "file",
+            "template",
+            "dockerfile",
+            "makefile",
+            "pipeline",
+        ],
+    )
+}
+
+fn contains_create_phrase(text: &str) -> bool {
+    contains_any(text, &["write me", "generate a", "create a", "make a"])
+}
+
+fn starts_with_explore_verb(text: &str) -> bool {
+    starts_with_any(
+        text,
+        &[
+            "find", "search", "list", "show", "display", "get", "check", "look", "where",
+        ],
+    )
+}
+
+fn starts_with_inspection_command(text: &str) -> bool {
+    starts_with_any(
+        text,
+        &[
+            "ls", "cat", "grep", "find", "locate", "which", "type", "file",
+        ],
+    )
+}
+
+fn contains_inspection_phrase(text: &str) -> bool {
+    contains_any(
+        text,
+        &["how many", "count", "size", "status", "info", "version"],
+    )
+}
+
+fn starts_with_configure_verb(text: &str) -> bool {
+    starts_with_any(
+        text,
+        &[
+            "configure",
+            "config",
+            "set",
+            "change",
+            "modify",
+            "update",
+            "edit",
+            "adjust",
+            "tune",
+        ],
+    )
+}
+
+fn contains_settings_phrase(text: &str) -> bool {
+    contains_any(
+        text,
+        &[
+            "setting",
+            "settings",
+            "config",
+            "configuration",
+            "preference",
+            "option",
+            "parameter",
+        ],
+    )
+}
+
+fn contains_toggle_phrase(text: &str) -> bool {
+    contains_any(
+        text,
+        &[
+            "enable", "disable", "toggle", "switch", "turn on", "turn off",
+        ],
+    )
 }
 
 fn parse_participants(text: &str) -> Vec<AiParticipantMatch> {

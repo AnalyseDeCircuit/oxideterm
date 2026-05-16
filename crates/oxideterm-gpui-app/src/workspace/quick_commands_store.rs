@@ -885,7 +885,10 @@ mod quick_command_tests {
     }
 }
 
-fn match_quick_command_host_pattern(pattern: Option<&str>, target_fields: &[String]) -> bool {
+pub(in crate::workspace) fn match_quick_command_host_pattern(
+    pattern: Option<&str>,
+    target_fields: &[String],
+) -> bool {
     let Some(pattern) = pattern.map(str::trim).filter(|pattern| !pattern.is_empty()) else {
         return true;
     };

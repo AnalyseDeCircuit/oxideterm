@@ -621,6 +621,7 @@ fn message_from_persisted(message: PersistedMessage) -> AiChatMessage {
         transcript_ref: message.transcript_ref,
         summary_ref: message.summary_ref,
         branches: message.branches,
+        suggestions: message.suggestions,
     }
 }
 
@@ -899,6 +900,7 @@ fn persisted_from_message(conversation_id: &str, message: &AiChatMessage) -> Per
         summary_ref: message.summary_ref.clone(),
         model: message.model.clone(),
         branches: message.branches.clone(),
+        suggestions: message.suggestions.clone(),
     }
 }
 
@@ -1106,6 +1108,8 @@ pub struct PersistedMessage {
     pub model: Option<String>,
     #[serde(default)]
     pub branches: Option<AiMessageBranches>,
+    #[serde(default)]
+    pub suggestions: Vec<crate::AiFollowUpSuggestion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

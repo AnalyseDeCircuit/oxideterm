@@ -60,6 +60,7 @@ fn chat_message(id: &str, role: AiChatRole, content: &str) -> AiChatMessage {
         transcript_ref: None,
         summary_ref: None,
         branches: None,
+        suggestions: Vec::new(),
     }
 }
 
@@ -1143,6 +1144,39 @@ fn slash_help_and_request_overrides_are_core_logic() {
 }
 
 #[test]
+fn parses_follow_up_suggestions_like_tauri() {
+    let parsed = parse_ai_suggestions(
+        "Answer\n<suggestions>\n<s icon=\"Zap\">Run deploy</s>\n<s icon=\"Search\">Show logs</s>\n</suggestions>",
+    );
+    assert_eq!(parsed.clean_content, "Answer");
+    assert_eq!(parsed.suggestions.len(), 2);
+    assert_eq!(parsed.suggestions[0].icon, "Zap");
+    assert_eq!(parsed.suggestions[0].text, "Run deploy");
+
+    assert_eq!(
+        ai_visible_suggestion_content("Answer\n<suggestions>\n<s icon=\"Zap\">..."),
+        "Answer"
+    );
+}
+
+#[test]
+fn detects_tauri_style_intent_hints() {
+    let parsed = parse_ai_user_input("/fix @terminal permission denied");
+    let intent = detect_ai_intent(&parsed);
+    assert_eq!(intent.kind, "troubleshoot");
+    assert_eq!(intent.confidence_percent, 95);
+    assert!(
+        ai_detected_intent_system_prompt(&intent)
+            .expect("intent prompt")
+            .contains("## Detected Intent")
+    );
+
+    let parsed = parse_ai_user_input("docker ps");
+    let intent = detect_ai_intent(&parsed);
+    assert_eq!(intent.kind, "execute");
+}
+
+#[test]
 fn references_extract_context_like_tauri() {
     let reference = AiReferenceMatch {
         reference_type: "buffer".into(),
@@ -1199,6 +1233,7 @@ fn chat_request_overrides_inject_current_context_as_system_message() {
         transcript_ref: None,
         summary_ref: None,
         branches: None,
+        suggestions: Vec::new(),
     }];
 
     apply_chat_request_overrides(&mut history, Some("explain".into()), None);
@@ -1243,6 +1278,7 @@ fn chat_persistence_round_trips_tauri_redb_tables() {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         },
     );
 
@@ -1448,6 +1484,33 @@ fn chat_persistence_preserves_message_branches() {
 }
 
 #[test]
+fn chat_persistence_preserves_follow_up_suggestions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chat_history.redb");
+    let store = AiChatPersistenceStore::new(&path);
+    let mut state = AiChatState::default();
+    let conversation_id = state.create_conversation(
+        "conversation-suggestions".into(),
+        Some("Suggestions".into()),
+        42,
+        None,
+    );
+    let mut reply = chat_message("reply", AiChatRole::Assistant, "Answer");
+    reply.suggestions = vec![AiFollowUpSuggestion {
+        icon: "Zap".into(),
+        text: "Run deploy".into(),
+    }];
+    state.add_message(&conversation_id, reply);
+
+    store.save_state(&state).unwrap();
+    let reloaded = store.load_state().unwrap();
+    let message = &reloaded.conversations[0].messages[0];
+    assert_eq!(message.suggestions.len(), 1);
+    assert_eq!(message.suggestions[0].icon, "Zap");
+    assert_eq!(message.suggestions[0].text, "Run deploy");
+}
+
+#[test]
 fn chat_persistence_loads_metadata_first_and_conversation_on_demand() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("chat_history.redb");
@@ -1509,6 +1572,7 @@ fn openai_chat_messages_merge_system_prompts() {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         },
         AiChatMessage {
             id: "2".into(),
@@ -1526,6 +1590,7 @@ fn openai_chat_messages_merge_system_prompts() {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         },
         AiChatMessage {
             id: "3".into(),
@@ -1543,6 +1608,7 @@ fn openai_chat_messages_merge_system_prompts() {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         },
     ];
     let converted = openai_chat_messages(&test_stream_config("openai"), &messages);
@@ -1578,6 +1644,7 @@ fn assistant_tool_call_message(
         transcript_ref: None,
         summary_ref: None,
         branches: None,
+        suggestions: Vec::new(),
     }
 }
 
@@ -1598,6 +1665,7 @@ fn tool_result_message(id: &str, tool_call_id: &str) -> AiChatMessage {
         transcript_ref: None,
         summary_ref: None,
         branches: None,
+        suggestions: Vec::new(),
     }
 }
 

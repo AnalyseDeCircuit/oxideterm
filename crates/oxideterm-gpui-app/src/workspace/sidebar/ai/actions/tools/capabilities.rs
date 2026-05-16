@@ -34,6 +34,7 @@ struct AiActionResultLite {
     risk: &'static str,
     target: Option<AiOrchestratorTarget>,
     targets: Vec<AiOrchestratorTarget>,
+    state_version: Option<String>,
 }
 
 impl AiActionResultLite {
@@ -54,6 +55,11 @@ impl AiActionResultLite {
 
     fn with_optional_target(mut self, target: Option<AiOrchestratorTarget>) -> Self {
         self.target = target;
+        self
+    }
+
+    fn with_state_version(mut self, state_version: impl Into<String>) -> Self {
+        self.state_version = Some(state_version.into());
         self
     }
 }
@@ -93,6 +99,7 @@ async fn run_local_ai_command(command: &str, timeout_secs: u64, target: &AiOrche
                 risk: "execute",
                 target: Some(target.clone()),
                 targets: Vec::new(),
+                state_version: None,
             }
         }
         Ok(Err(error)) => AiActionResultLite {
@@ -105,6 +112,7 @@ async fn run_local_ai_command(command: &str, timeout_secs: u64, target: &AiOrche
             risk: "execute",
             target: Some(target.clone()),
             targets: Vec::new(),
+            state_version: None,
         },
         Err(_) => AiActionResultLite {
             ok: false,
@@ -116,6 +124,7 @@ async fn run_local_ai_command(command: &str, timeout_secs: u64, target: &AiOrche
             risk: "execute",
             target: Some(target.clone()),
             targets: Vec::new(),
+            state_version: None,
         },
     }
 }

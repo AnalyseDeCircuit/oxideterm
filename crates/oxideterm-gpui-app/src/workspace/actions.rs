@@ -188,6 +188,9 @@ impl WorkspaceApp {
     }
 
     fn close_terminal_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.close_terminal_command_overlays(cx) {
+            return;
+        }
         if self.search.visible {
             self.close_search(window, cx);
             return;
@@ -202,6 +205,43 @@ impl WorkspaceApp {
             self.focus_active_pane(window, cx);
             cx.notify();
         }
+    }
+
+    fn close_terminal_command_overlays(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.terminal_broadcast_menu_open {
+            self.terminal_broadcast_menu_open = false;
+            cx.notify();
+            return true;
+        }
+
+        if self.terminal_quick_commands_open {
+            self.terminal_quick_commands_open = false;
+            self.terminal_quick_command_pending = None;
+            self.quick_commands.focused_input = None;
+            cx.notify();
+            return true;
+        }
+
+        if self.terminal_command_suggestions_open {
+            self.terminal_command_suggestions_open = false;
+            self.terminal_command_suggestion_highlighted = None;
+            cx.notify();
+            return true;
+        }
+
+        false
+    }
+
+    pub(super) fn handle_terminal_command_overlay_escape(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.key.as_str() != "escape" || event.keystroke.modifiers.platform {
+            return false;
+        }
+
+        self.close_terminal_command_overlays(cx)
     }
 
     pub(super) fn toggle_terminal_broadcast(&mut self, cx: &mut Context<Self>) {
@@ -242,6 +282,10 @@ impl WorkspaceApp {
 
         if self.terminal_quick_commands_open && self.quick_commands.focused_input.is_some() {
             self.handle_quick_commands_key(event, cx);
+            return;
+        }
+
+        if self.handle_terminal_command_overlay_escape(event, cx) {
             return;
         }
 
@@ -618,6 +662,9 @@ impl WorkspaceApp {
 
         match key {
             "escape" => {
+                if self.close_terminal_command_overlays(cx) {
+                    return;
+                }
                 self.terminal_command_bar_focused = false;
                 self.terminal_quick_commands_open = false;
                 self.terminal_quick_command_pending = None;
@@ -625,9 +672,85 @@ impl WorkspaceApp {
                 self.focus_active_pane(window, cx);
                 cx.notify();
             }
-            "enter" => self.submit_terminal_command_bar(window, cx),
+            "tab" => {
+                if self.terminal_command_suggestions_open {
+                    let suggestions = self.terminal_command_bar_visible_suggestions(cx);
+                    let index = self.terminal_command_suggestion_highlighted.unwrap_or(0);
+                    if let Some(suggestion) = suggestions.get(index) {
+                        self.accept_terminal_command_suggestion(suggestion, cx);
+                    }
+                }
+            }
+            "right" => {
+                let suggestions = self.terminal_command_bar_visible_suggestions(cx);
+                if let Some(suggestion) = suggestions.iter().find(|candidate| candidate.inline_safe)
+                {
+                    self.accept_terminal_command_suggestion(suggestion, cx);
+                }
+            }
+            "down" => {
+                let mut suggestions = self.terminal_command_bar_suggestions(false, cx);
+                if suggestions.is_empty() {
+                    suggestions = self.terminal_command_bar_suggestions(true, cx);
+                }
+                if !suggestions.is_empty() {
+                    let next = if self.terminal_command_suggestions_open {
+                        self.terminal_command_suggestion_highlighted
+                            .unwrap_or(0)
+                            .saturating_add(1)
+                            .min(suggestions.len().saturating_sub(1))
+                    } else {
+                        0
+                    };
+                    self.terminal_command_suggestions_open = true;
+                    self.terminal_command_suggestion_highlighted = Some(next);
+                    cx.notify();
+                }
+            }
+            "up" => {
+                let mut suggestions = self.terminal_command_bar_suggestions(false, cx);
+                if suggestions.is_empty() {
+                    suggestions = self.terminal_command_bar_suggestions(true, cx);
+                }
+                if !suggestions.is_empty() {
+                    let next = if self.terminal_command_suggestions_open {
+                        self.terminal_command_suggestion_highlighted
+                            .unwrap_or_else(|| suggestions.len().saturating_sub(1))
+                            .saturating_sub(1)
+                    } else {
+                        suggestions.len().saturating_sub(1)
+                    };
+                    self.terminal_command_suggestions_open = true;
+                    self.terminal_command_suggestion_highlighted = Some(next);
+                    cx.notify();
+                }
+            }
+            "enter" if modifiers.shift || modifiers.alt => {
+                self.terminal_command_suggestions_open = false;
+                self.terminal_command_suggestion_highlighted = None;
+                cx.notify();
+            }
+            "enter" => {
+                if self.terminal_command_suggestions_open {
+                    let suggestions = self.terminal_command_bar_visible_suggestions(cx);
+                    if let Some(index) = self.terminal_command_suggestion_highlighted
+                        && let Some(suggestion) = suggestions.get(index)
+                    {
+                        if !suggestion.executable {
+                            self.accept_terminal_command_suggestion(suggestion, cx);
+                            return;
+                        }
+                        self.accept_terminal_command_suggestion(suggestion, cx);
+                    }
+                }
+                self.terminal_command_suggestions_open = false;
+                self.terminal_command_suggestion_highlighted = None;
+                self.submit_terminal_command_bar(window, cx)
+            }
             "backspace" => {
                 self.terminal_command_bar_draft.pop();
+                self.terminal_command_suggestions_open = false;
+                self.terminal_command_suggestion_highlighted = None;
                 self.ime_marked_text = None;
                 cx.notify();
             }

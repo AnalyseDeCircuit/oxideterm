@@ -421,8 +421,16 @@ impl WorkspaceApp {
                                 cx.stop_propagation();
                             }),
                         ),
-                    ),
+                ),
             );
+        }
+        if !user
+            && last_assistant
+            && !message.is_streaming
+            && !message.suggestions.is_empty()
+            && !editing
+        {
+            body = body.child(self.render_ai_follow_up_suggestions(message, cx));
         }
         div()
             .w_full()
@@ -455,11 +463,60 @@ impl WorkspaceApp {
         let mut options = MarkdownOptions::from_theme(&self.tokens);
         options.base_font_size = 13.0;
         options.block_gap = 8.0;
+        let content = ai_visible_suggestion_content(&message.content);
         div()
             .w_full()
             .min_w_0()
             .text_color(rgb(self.tokens.ui.text))
-            .child(markdown_with_options(&self.tokens, &message.content, &options))
+            .child(markdown_with_options(&self.tokens, &content, &options))
+            .into_any_element()
+    }
+
+    fn render_ai_follow_up_suggestions(
+        &self,
+        message: &AiChatMessage,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .mt(px(self.tokens.spacing.two))
+            .flex()
+            .flex_wrap()
+            .gap(px(self.tokens.spacing.one + self.tokens.spacing.one / 2.0))
+            .children(message.suggestions.iter().map(|suggestion| {
+                let text = suggestion.text.clone();
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.one))
+                    .px(px(self.tokens.spacing.two))
+                    .py(px(self.tokens.spacing.one))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | 0x4d))
+                    .text_size(px(11.0))
+                    .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xb3))
+                    .cursor_pointer()
+                    .hover(|style| {
+                        style
+                            .border_color(rgba((self.tokens.ui.accent << 8) | 0x66))
+                            .text_color(rgb(self.tokens.ui.accent))
+                            .bg(rgba((self.tokens.ui.accent << 8) | 0x0d))
+                    })
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::MessageSquare,
+                        12.0,
+                        rgba((self.tokens.ui.text_muted << 8) | 0xb3),
+                    ))
+                    .child(div().min_w_0().child(text.clone()))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.send_ai_follow_up_suggestion(text.clone(), cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .into_any_element()
+            }))
             .into_any_element()
     }
 
@@ -523,9 +580,13 @@ impl WorkspaceApp {
                         .and_then(serde_json::Value::as_str)
                         .filter(|text| !text.trim().is_empty())
                     {
+                        let text = ai_visible_suggestion_content(text);
+                        if text.trim().is_empty() {
+                            continue;
+                        }
                         let mut segment = message.clone();
                         segment.id = format!("{}-text-{segment_index}", message.id);
-                        segment.content = text.to_string();
+                        segment.content = text;
                         segment.tool_calls.clear();
                         body = body.child(self.render_ai_message_content(&segment));
                         segment_index = segment_index.saturating_add(1);

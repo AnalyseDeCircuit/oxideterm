@@ -274,12 +274,27 @@ impl AiOrchestratorRuntimeSnapshot {
             .map(|(index, target)| format!("{}. {} - {} [{}]", index + 1, target.id, target.label, target.kind))
             .collect::<Vec<_>>()
             .join("\n");
+        let state_version = make_ai_state_version(
+            "targets",
+            [
+                view.to_string(),
+                kind.to_string(),
+                query.clone(),
+                targets.len().to_string(),
+                self.targets.len().to_string(),
+            ],
+        );
         self.ok(
             format!("Found {} target(s).", targets.len()),
             if output.is_empty() { "No targets found.".to_string() } else { output },
-            serde_json::json!({ "targets": targets.iter().map(target_json).collect::<Vec<_>>() }),
+            serde_json::json!({
+                "runtimeEpoch": self.runtime_epoch,
+                "stateVersion": state_version,
+                "targets": targets.iter().map(target_json).collect::<Vec<_>>()
+            }),
             "read",
         )
+        .with_state_version(state_version)
     }
 
     fn select_target(&self, args: &serde_json::Value) -> AiActionResultLite {
@@ -804,7 +819,7 @@ impl AiOrchestratorRuntimeSnapshot {
 
     fn get_state(&self, args: &serde_json::Value) -> AiActionResultLite {
         let scope = args.get("scope").and_then(serde_json::Value::as_str).unwrap_or("active");
-        let data = match scope {
+        let mut data = match scope {
             "targets" => serde_json::json!({ "targets": self.targets.iter().map(target_json).collect::<Vec<_>>() }),
             "settings" => self.settings_summary.clone(),
             "active" => serde_json::json!({
@@ -815,7 +830,23 @@ impl AiOrchestratorRuntimeSnapshot {
                 "targetCount": self.targets.len(),
             }),
         };
+        let state_version = make_ai_state_version(
+            scope,
+            [
+                self.targets.len().to_string(),
+                self.targets
+                    .iter()
+                    .filter(|target| target.state == "connected")
+                    .count()
+                    .to_string(),
+            ],
+        );
+        if let Some(object) = data.as_object_mut() {
+            object.insert("runtimeEpoch".to_string(), serde_json::json!(self.runtime_epoch));
+            object.insert("stateVersion".to_string(), serde_json::json!(state_version));
+        }
         self.ok(format!("Read {scope} state."), serde_json::to_string_pretty(&data).unwrap_or_default(), data, "read")
+            .with_state_version(state_version)
     }
 
     fn remember_preference(&self, args: &serde_json::Value) -> AiActionResultLite {
@@ -1269,6 +1300,7 @@ impl AiOrchestratorRuntimeSnapshot {
             risk,
             target: None,
             targets: Vec::new(),
+            state_version: None,
         }
     }
 
@@ -1290,6 +1322,7 @@ impl AiOrchestratorRuntimeSnapshot {
             risk,
             target: None,
             targets: Vec::new(),
+            state_version: None,
         }
     }
 
@@ -1310,6 +1343,7 @@ impl AiOrchestratorRuntimeSnapshot {
             risk,
             target: None,
             targets: Vec::new(),
+            state_version: None,
         }
     }
 
@@ -1321,6 +1355,12 @@ impl AiOrchestratorRuntimeSnapshot {
         duration_ms: u128,
     ) -> AiExecutedToolResult {
         let output = truncate_for_model(result.output.clone(), 12_000);
+        let targets = result
+            .target
+            .iter()
+            .chain(result.targets.iter())
+            .map(target_json)
+            .collect::<Vec<_>>();
         let envelope = serde_json::json!({
             "ok": result.ok,
             "summary": result.summary,
@@ -1331,7 +1371,7 @@ impl AiOrchestratorRuntimeSnapshot {
                 "message": message,
                 "recoverable": true,
             })),
-            "targets": result.targets.iter().map(target_json).collect::<Vec<_>>(),
+            "targets": targets,
             "meta": {
                 "toolName": tool_name,
                 "durationMs": duration_ms,
@@ -1339,6 +1379,8 @@ impl AiOrchestratorRuntimeSnapshot {
                 "capability": risk_to_capability(result.risk),
                 "targetId": result.target.as_ref().map(|target| target.id.clone()),
                 "truncated": result.output.len() > output.len(),
+                "runtimeEpoch": self.runtime_epoch,
+                "stateVersion": result.state_version,
             }
         });
         AiExecutedToolResult {
@@ -1351,6 +1393,19 @@ impl AiOrchestratorRuntimeSnapshot {
             envelope,
         }
     }
+}
+
+fn make_ai_state_version(scope: &str, parts: impl IntoIterator<Item = String>) -> String {
+    std::iter::once(scope.to_string())
+        .chain(parts.into_iter().map(|part| {
+            if part.is_empty() {
+                "none".to_string()
+            } else {
+                part
+            }
+        }))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 async fn execute_ai_tool(

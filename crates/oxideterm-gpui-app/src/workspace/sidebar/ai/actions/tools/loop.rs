@@ -126,6 +126,9 @@ async fn run_ai_chat_tool_loop(
         let mut stream_error = None;
         let mut round_content = String::new();
         let mut round_thinking = String::new();
+        let mut buffered_required_content = String::new();
+        let mut buffered_required_thinking = String::new();
+        let mut buffering_required_tool = tool_obligation.mode == AiOrchestratorObligationMode::Required;
         let mut pending_calls = BTreeMap::<String, AiToolCall>::new();
         let mut completed_calls = Vec::<AiToolCall>::new();
 
@@ -143,17 +146,21 @@ async fn run_ai_chat_tool_loop(
                         );
                     }
                     round_content.push_str(&chunk);
-                    assistant_content.push_str(&chunk);
-                    if send_ai_stream_delivery(
-                        &ui_tx,
-                        generation,
-                        &conversation_id,
-                        &assistant_id,
-                        AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)),
-                    )
-                    .is_err()
-                    {
-                        return;
+                    if buffering_required_tool {
+                        buffered_required_content.push_str(&chunk);
+                    } else {
+                        assistant_content.push_str(&chunk);
+                        if send_ai_stream_delivery(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)),
+                        )
+                        .is_err()
+                        {
+                            return;
+                        }
                     }
                 }
                 AiStreamEvent::Thinking(chunk) => {
@@ -168,17 +175,21 @@ async fn run_ai_chat_tool_loop(
                         );
                     }
                     round_thinking.push_str(&chunk);
-                    assistant_thinking.push_str(&chunk);
-                    if send_ai_stream_delivery(
-                        &ui_tx,
-                        generation,
-                        &conversation_id,
-                        &assistant_id,
-                        AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(chunk)),
-                    )
-                    .is_err()
-                    {
-                        return;
+                    if buffering_required_tool {
+                        buffered_required_thinking.push_str(&chunk);
+                    } else {
+                        assistant_thinking.push_str(&chunk);
+                        if send_ai_stream_delivery(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(chunk)),
+                        )
+                        .is_err()
+                        {
+                            return;
+                        }
                     }
                 }
                 AiStreamEvent::ToolCall {
@@ -204,6 +215,23 @@ async fn run_ai_chat_tool_loop(
                             arguments: arguments.clone(),
                         },
                     );
+                    if buffering_required_tool {
+                        buffering_required_tool = false;
+                        if flush_ai_required_tool_buffer(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            &mut assistant_content,
+                            &mut assistant_thinking,
+                            &mut buffered_required_content,
+                            &mut buffered_required_thinking,
+                        )
+                        .is_err()
+                        {
+                            return;
+                        }
+                    }
                     if send_ai_stream_delivery(
                         &ui_tx,
                         generation,
@@ -242,6 +270,23 @@ async fn run_ai_chat_tool_loop(
                     };
                     pending_calls.insert(id.clone(), call.clone());
                     record_completed_ai_tool_call(&mut completed_calls, call);
+                    if buffering_required_tool {
+                        buffering_required_tool = false;
+                        if flush_ai_required_tool_buffer(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            &mut assistant_content,
+                            &mut assistant_thinking,
+                            &mut buffered_required_content,
+                            &mut buffered_required_thinking,
+                        )
+                        .is_err()
+                        {
+                            return;
+                        }
+                    }
                     if send_ai_stream_delivery(
                         &ui_tx,
                         generation,
@@ -403,6 +448,7 @@ async fn run_ai_chat_tool_loop(
                     transcript_ref: None,
                     summary_ref: None,
                     branches: None,
+            suggestions: Vec::new(),
                 });
                 history.push(AiChatMessage {
                     id: format!("{synthetic_round_id}-tool-result"),
@@ -425,6 +471,7 @@ async fn run_ai_chat_tool_loop(
                     transcript_ref: None,
                     summary_ref: None,
                     branches: None,
+            suggestions: Vec::new(),
                 });
                 hard_deny_retry_count = retry_attempt;
                 continue;
@@ -488,6 +535,7 @@ async fn run_ai_chat_tool_loop(
                     transcript_ref: None,
                     summary_ref: None,
                     branches: None,
+            suggestions: Vec::new(),
                 });
                 history.push(AiChatMessage {
                     id: format!("required-retry-user-{retry_attempt}"),
@@ -505,9 +553,24 @@ async fn run_ai_chat_tool_loop(
                     transcript_ref: None,
                     summary_ref: None,
                     branches: None,
+            suggestions: Vec::new(),
                 });
                 required_tool_retry_count = retry_attempt;
                 continue;
+            }
+            if flush_ai_required_tool_buffer(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                &mut assistant_content,
+                &mut assistant_thinking,
+                &mut buffered_required_content,
+                &mut buffered_required_thinking,
+            )
+            .is_err()
+            {
+                return;
             }
             let _ = send_ai_stream_delivery(
                 &ui_tx,
@@ -596,6 +659,7 @@ async fn run_ai_chat_tool_loop(
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         });
 
         let mut round_results = Vec::new();
@@ -818,6 +882,7 @@ async fn run_ai_chat_tool_loop(
                     transcript_ref: None,
                     summary_ref: None,
                     branches: None,
+            suggestions: Vec::new(),
                 });
                 transcript_lookup_prompt_injected = true;
             }
@@ -859,4 +924,41 @@ async fn run_ai_chat_tool_loop(
         &assistant_id,
         AiStreamDeliveryEvent::Stream(AiStreamEvent::Done),
     );
+}
+
+fn flush_ai_required_tool_buffer(
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    assistant_content: &mut String,
+    assistant_thinking: &mut String,
+    buffered_content: &mut String,
+    buffered_thinking: &mut String,
+) -> Result<(), ()> {
+    if !buffered_thinking.is_empty() {
+        let chunk = std::mem::take(buffered_thinking);
+        assistant_thinking.push_str(&chunk);
+        send_ai_stream_delivery(
+            ui_tx,
+            generation,
+            conversation_id,
+            assistant_id,
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(chunk)),
+        )
+        .map_err(|_| ())?;
+    }
+    if !buffered_content.is_empty() {
+        let chunk = std::mem::take(buffered_content);
+        assistant_content.push_str(&chunk);
+        send_ai_stream_delivery(
+            ui_tx,
+            generation,
+            conversation_id,
+            assistant_id,
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)),
+        )
+        .map_err(|_| ())?;
+    }
+    Ok(())
 }

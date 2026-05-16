@@ -314,5 +314,6 @@ fn ai_tool_result_message(result: AiExecutedToolResult) -> AiChatMessage {
         transcript_ref: None,
         summary_ref: None,
         branches: None,
+            suggestions: Vec::new(),
     }
 }

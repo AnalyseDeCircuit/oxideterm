@@ -124,6 +124,44 @@ fn set_ai_turn_status(message: &mut AiChatMessage, status: &str) {
     }
 }
 
+fn finalize_ai_turn_suggestions(message: &mut AiChatMessage) {
+    let parsed = parse_ai_suggestions(&message.content);
+    if parsed.suggestions.is_empty() {
+        return;
+    }
+
+    message.content = parsed.clean_content;
+    message.suggestions = parsed.suggestions;
+
+    if let Some(parts) = message
+        .turn
+        .as_mut()
+        .and_then(|turn| turn.get_mut("parts"))
+        .and_then(serde_json::Value::as_array_mut)
+        && let Some(text_part) = parts.iter_mut().rev().find(|part| {
+            part.get("type").and_then(serde_json::Value::as_str) == Some("text")
+        })
+        && let Some(object) = text_part.as_object_mut()
+        && let Some(text) = object.get("text").and_then(serde_json::Value::as_str)
+    {
+        let part_parsed = parse_ai_suggestions(text);
+        if !part_parsed.suggestions.is_empty() {
+            object.insert("text".to_string(), serde_json::json!(part_parsed.clean_content));
+        }
+    }
+
+    if let Some(object) = message
+        .turn
+        .as_mut()
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        object.insert(
+            "plainTextSummary".to_string(),
+            serde_json::json!(message.content),
+        );
+    }
+}
+
 fn mutate_ai_turn_parts(message: &mut AiChatMessage, f: impl FnOnce(&mut Vec<serde_json::Value>)) {
     ensure_ai_turn(message);
     if let Some(parts) = message
@@ -687,4 +725,3 @@ fn append_ai_turn_tool_result(
         }));
     });
 }
-

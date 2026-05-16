@@ -78,6 +78,7 @@ fn ai_compaction_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatMessa
         transcript_ref: None,
         summary_ref: None,
         branches: None,
+            suggestions: Vec::new(),
     }]
 }
 
@@ -117,6 +118,7 @@ fn ai_conversation_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatMes
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         },
         AiChatMessage {
             id: "summary-request".to_string(),
@@ -134,6 +136,7 @@ fn ai_conversation_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatMes
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         },
     ]
 }

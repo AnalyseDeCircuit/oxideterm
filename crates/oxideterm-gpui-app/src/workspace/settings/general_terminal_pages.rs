@@ -1,3 +1,10 @@
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalCommandSpecsAction {
+    Format,
+    Example,
+    Save,
+}
+
 impl WorkspaceApp {
     fn settings_general(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = self.settings_store.settings();
@@ -242,17 +249,6 @@ impl WorkspaceApp {
                             cx,
                         ),
                         self.card_separator(),
-                        self.select_setting_row(
-                            "settings_view.terminal.adaptive_renderer",
-                            "settings_view.terminal.adaptive_renderer_hint",
-                            SettingsSelect::TerminalAdaptiveRenderer,
-                            adaptive_renderer_label(
-                                settings.terminal.adaptive_renderer,
-                                &self.i18n,
-                            ),
-                            self.tokens.metrics.settings_select_width,
-                            cx,
-                        ),
                         self.checkbox_row(
                             "settings_view.terminal.show_fps_overlay",
                             "settings_view.terminal.show_fps_overlay_hint",
@@ -337,6 +333,8 @@ impl WorkspaceApp {
                         set_quick_commands_toast,
                         cx,
                     ),
+                    self.card_separator(),
+                    self.terminal_command_specs_editor_row(cx),
                 ],
                 ));
             }
@@ -565,6 +563,286 @@ impl WorkspaceApp {
             )
             .child(control)
             .into_any_element()
+    }
+
+    fn terminal_command_specs_editor_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let input = SettingsInput::TerminalCommandSpecsJson;
+        let focused = self.focused_settings_input == Some(input);
+        let value = if focused {
+            self.settings_input_draft.clone()
+        } else {
+            self.load_terminal_command_specs_editor_value()
+        };
+        let path = super::terminal_command_bar::completion::terminal_command_specs_path(
+            self.settings_store.path(),
+        );
+        let target = WorkspaceImeTarget::Settings(input);
+        let workspace = cx.entity();
+        let theme = self.tokens.ui;
+        let mut textarea = div()
+            .w_full()
+            .min_h(px(220.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(if focused {
+                rgba((theme.accent << 8) | 0x99)
+            } else {
+                rgb(theme.border)
+            })
+            .bg(rgb(theme.bg))
+            .px(px(12.0))
+            .py(px(8.0))
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap(px(2.0))
+            .cursor(CursorStyle::IBeam)
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .text_color(rgb(theme.text))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    let current = this.current_settings_input_value(input);
+                    this.focus_settings_input(input, current, cx);
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                }),
+            );
+
+        let display = if value.trim().is_empty() {
+            super::terminal_command_bar::completion::terminal_command_specs_example_json()
+        } else {
+            value
+        };
+        for line in display.lines() {
+            textarea = textarea.child(div().min_h(px(18.0)).child(line.to_string()));
+        }
+        if let Some(marked) = self.marked_text_for_target(target) {
+            textarea = textarea.child(
+                div()
+                    .underline()
+                    .text_color(rgb(theme.text))
+                    .child(marked.to_string()),
+            );
+        }
+        if focused {
+            textarea = textarea.child(text_caret(
+                &self.tokens,
+                self.new_connection_caret_visible,
+            ));
+        }
+        let control = text_input_anchor_probe(target.anchor_id(), textarea, move |anchor, _window, cx| {
+            let _ = workspace.update(cx, |this, cx| {
+                this.update_text_input_anchor(anchor, cx);
+            });
+        });
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(self.i18n.t("settings_view.terminal.command_specs")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("settings_view.terminal.command_specs_hint")),
+                    ),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .text_color(rgb(theme.text_muted))
+                    .truncate()
+                    .child(path.display().to_string()),
+            )
+            .child(control)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.terminal_command_specs_summary()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(self.terminal_command_specs_button(
+                                "settings_view.terminal.command_specs_format",
+                                TerminalCommandSpecsAction::Format,
+                                cx,
+                            ))
+                            .child(self.terminal_command_specs_button(
+                                "settings_view.terminal.command_specs_example",
+                                TerminalCommandSpecsAction::Example,
+                                cx,
+                            ))
+                            .child(self.terminal_command_specs_button(
+                                "settings_view.terminal.command_specs_save",
+                                TerminalCommandSpecsAction::Save,
+                                cx,
+                            )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn terminal_command_specs_button(
+        &self,
+        label_key: &'static str,
+        action: TerminalCommandSpecsAction,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        button_with(
+            &self.tokens,
+            self.i18n.t(label_key),
+            ButtonOptions {
+                variant: if action == TerminalCommandSpecsAction::Save {
+                    ButtonVariant::Secondary
+                } else {
+                    ButtonVariant::Outline
+                },
+                size: ButtonSize::Sm,
+                radius: ButtonRadius::Md,
+                disabled: false,
+            },
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, window, cx| {
+                this.handle_terminal_command_specs_action(action, window, cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn load_terminal_command_specs_editor_value(&self) -> String {
+        let path = super::terminal_command_bar::completion::terminal_command_specs_path(
+            self.settings_store.path(),
+        );
+        std::fs::read_to_string(path).unwrap_or_default()
+    }
+
+    fn terminal_command_specs_summary(&self) -> String {
+        let built_in_count =
+            super::terminal_command_bar::completion::built_in_terminal_fig_specs().len();
+        let custom_count = super::terminal_command_bar::completion::user_terminal_fig_specs_count(
+            self.settings_store.path(),
+        );
+        self.i18n
+            .t("settings_view.terminal.command_specs_summary")
+            .replace("{builtIn}", &built_in_count.to_string())
+            .replace("{custom}", &custom_count.to_string())
+    }
+
+    fn current_terminal_command_specs_editor_value(&self) -> String {
+        if self.focused_settings_input == Some(SettingsInput::TerminalCommandSpecsJson) {
+            self.settings_input_draft.clone()
+        } else {
+            self.load_terminal_command_specs_editor_value()
+        }
+    }
+
+    fn handle_terminal_command_specs_action(
+        &mut self,
+        action: TerminalCommandSpecsAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = SettingsInput::TerminalCommandSpecsJson;
+        match action {
+            TerminalCommandSpecsAction::Example => {
+                let example =
+                    super::terminal_command_bar::completion::terminal_command_specs_example_json();
+                self.focus_settings_input(input, example, cx);
+                window.focus(&self.focus_handle);
+            }
+            TerminalCommandSpecsAction::Format => {
+                let value = self.current_terminal_command_specs_editor_value();
+                match super::terminal_command_bar::completion::normalize_terminal_command_specs_json(&value) {
+                    Ok(pretty) => {
+                        self.focus_settings_input(input, pretty, cx);
+                        window.focus(&self.focus_handle);
+                    }
+                    Err(error) => self.push_ai_settings_toast(
+                        format!(
+                            "{} {}",
+                            self.i18n
+                                .t("settings_view.terminal.command_specs_invalid"),
+                            error
+                        ),
+                        TerminalNoticeVariant::Error,
+                    ),
+                }
+            }
+            TerminalCommandSpecsAction::Save => {
+                let value = self.current_terminal_command_specs_editor_value();
+                match super::terminal_command_bar::completion::normalize_terminal_command_specs_json(&value) {
+                    Ok(pretty) => {
+                        let path =
+                            super::terminal_command_bar::completion::terminal_command_specs_path(
+                                self.settings_store.path(),
+                            );
+                        let result = path
+                            .parent()
+                            .map(std::fs::create_dir_all)
+                            .transpose()
+                            .and_then(|_| std::fs::write(&path, pretty.as_bytes()));
+                        match result {
+                            Ok(()) => {
+                                if self.focused_settings_input == Some(input) {
+                                    self.settings_input_draft = pretty;
+                                }
+                                self.push_ai_settings_toast(
+                                    self.i18n.t("settings_view.terminal.command_specs_saved"),
+                                    TerminalNoticeVariant::Success,
+                                );
+                                cx.notify();
+                            }
+                            Err(error) => self.push_ai_settings_toast(
+                                error.to_string(),
+                                TerminalNoticeVariant::Error,
+                            ),
+                        }
+                    }
+                    Err(error) => self.push_ai_settings_toast(
+                        format!(
+                            "{} {}",
+                            self.i18n
+                                .t("settings_view.terminal.command_specs_invalid"),
+                            error
+                        ),
+                        TerminalNoticeVariant::Error,
+                    ),
+                }
+            }
+        }
     }
 
     fn in_band_transfer_number_row(

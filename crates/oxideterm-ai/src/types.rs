@@ -81,6 +81,14 @@ pub struct AiChatMessage {
     pub summary_ref: Option<serde_json::Value>,
     #[serde(default)]
     pub branches: Option<AiMessageBranches>,
+    #[serde(default)]
+    pub suggestions: Vec<AiFollowUpSuggestion>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AiFollowUpSuggestion {
+    pub icon: String,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -4,6 +4,8 @@ use super::*;
 use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
 use oxideterm_terminal_recording::format_recording_elapsed;
 
+pub(in crate::workspace) mod completion;
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_terminal_surface(
         &self,
@@ -54,6 +56,31 @@ impl WorkspaceApp {
         let focused = self.terminal_command_bar_focused;
         let marked_text = self.marked_text_for_target(target);
         let command_is_empty = self.terminal_command_bar_draft.is_empty();
+        let command_suggestions = if focused {
+            self.terminal_command_bar_suggestions(false, cx)
+        } else {
+            Vec::new()
+        };
+        let ghost_text = command_suggestions
+            .iter()
+            .find(|candidate| candidate.inline_safe)
+            .and_then(|candidate| {
+                let start = candidate
+                    .replacement
+                    .start
+                    .min(self.terminal_command_bar_draft.len());
+                let end = candidate
+                    .replacement
+                    .end
+                    .min(self.terminal_command_bar_draft.len())
+                    .max(start);
+                let current = &self.terminal_command_bar_draft[start..end];
+                candidate
+                    .insert_text
+                    .strip_prefix(current)
+                    .filter(|suffix| !suffix.is_empty())
+                    .map(ToString::to_string)
+            });
         let showing_placeholder = command_is_empty && marked_text.is_none();
         let command_text = if showing_placeholder {
             self.i18n.t("terminal.command_bar.command_placeholder")
@@ -108,6 +135,12 @@ impl WorkspaceApp {
             .px(px(12.0))
             .py(px(4.0))
             .shadow_lg()
+            .when(
+                focused
+                    && self.terminal_command_suggestions_open
+                    && !command_suggestions.is_empty(),
+                |bar| bar.child(self.render_terminal_command_suggestions(&command_suggestions, cx)),
+            )
             .child(
                 div()
                     .min_h(px(24.0))
@@ -137,7 +170,7 @@ impl WorkspaceApp {
                                             .flex()
                                             .items_center()
                                             .gap(px(4.0))
-                                            .rounded_md()
+                                            .rounded(px(self.tokens.radii.md))
                                             .border_1()
                                             .border_color(rgba(0xf973164d))
                                             .bg(rgba(0xf973161a))
@@ -160,7 +193,7 @@ impl WorkspaceApp {
                                             .flex()
                                             .items_center()
                                             .justify_center()
-                                            .rounded_md()
+                                            .rounded(px(self.tokens.radii.md))
                                             .text_color(if can_split {
                                                 rgb(theme.text_muted)
                                             } else {
@@ -200,7 +233,7 @@ impl WorkspaceApp {
                                             .flex()
                                             .items_center()
                                             .justify_center()
-                                            .rounded_md()
+                                            .rounded(px(self.tokens.radii.md))
                                             .when(can_split, |button| {
                                                 button
                                                     .cursor_pointer()
@@ -237,7 +270,7 @@ impl WorkspaceApp {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .rounded_md()
+                                    .rounded(px(self.tokens.radii.md))
                                     .cursor_pointer()
                                     .bg(if self.terminal_broadcast_enabled {
                                         rgba(0xf9731626)
@@ -272,7 +305,7 @@ impl WorkspaceApp {
                                         .flex()
                                         .items_center()
                                         .gap(px(4.0))
-                                        .rounded_md()
+                                        .rounded(px(self.tokens.radii.md))
                                         .border_1()
                                         .border_color(rgba(0xef44444d))
                                         .bg(rgba(0xef44441a))
@@ -292,7 +325,7 @@ impl WorkspaceApp {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .rounded_md()
+                                    .rounded(px(self.tokens.radii.md))
                                     .cursor_pointer()
                                     .bg(if recording_active {
                                         rgba(0xef444426)
@@ -338,7 +371,7 @@ impl WorkspaceApp {
                                             .flex()
                                             .items_center()
                                             .justify_center()
-                                            .rounded_md()
+                                            .rounded(px(self.tokens.radii.md))
                                             .cursor_pointer()
                                             .hover(move |style| style.bg(rgb(theme.bg_hover)))
                                             .on_mouse_down(
@@ -360,7 +393,7 @@ impl WorkspaceApp {
                                             .flex()
                                             .items_center()
                                             .justify_center()
-                                            .rounded_md()
+                                            .rounded(px(self.tokens.radii.md))
                                             .cursor_pointer()
                                             .hover(move |style| style.bg(rgb(theme.bg_hover)))
                                             .on_mouse_down(
@@ -383,7 +416,7 @@ impl WorkspaceApp {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .rounded_md()
+                                    .rounded(px(self.tokens.radii.md))
                                     .cursor_pointer()
                                     .hover(move |style| style.bg(rgb(theme.bg_hover)))
                                     .on_mouse_down(
@@ -465,6 +498,13 @@ impl WorkspaceApp {
                                     &self.tokens,
                                     self.new_connection_caret_visible,
                                 ))
+                            })
+                            .when_some(ghost_text, |input, ghost| {
+                                input.child(
+                                    div()
+                                        .text_color(rgba((theme.text_muted << 8) | 0x99))
+                                        .child(ghost),
+                                )
                             }),
                         move |anchor, _window, cx| {
                             let _ = workspace.update(cx, |this, cx| {
@@ -479,7 +519,7 @@ impl WorkspaceApp {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded_md()
+                                .rounded(px(self.tokens.radii.md))
                                 .cursor_pointer()
                                 .bg(if self.terminal_quick_commands_open {
                                     rgba((theme.accent << 8) | 0x1a)
@@ -551,7 +591,7 @@ impl WorkspaceApp {
             .w(px(260.0))
             .max_h(px(320.0))
             .overflow_hidden()
-            .rounded_lg()
+            .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(theme.border))
             .bg(rgba((theme.bg_elevated << 8) | 0xf2))
@@ -607,7 +647,7 @@ impl WorkspaceApp {
                         .items_center()
                         .gap(px(8.0))
                         .px(px(8.0))
-                        .rounded_md()
+                        .rounded(px(self.tokens.radii.md))
                         .text_color(row_color)
                         .when(!is_current, |row| {
                             row.cursor_pointer()
@@ -646,7 +686,7 @@ impl WorkspaceApp {
                                 div()
                                     .px(px(5.0))
                                     .py(px(1.0))
-                                    .rounded_md()
+                                    .rounded(px(self.tokens.radii.md))
                                     .text_size(px(10.0))
                                     .text_color(rgb(theme.text_muted))
                                     .bg(rgba((theme.bg_panel << 8) | 0x99))
@@ -658,7 +698,7 @@ impl WorkspaceApp {
                                 div()
                                     .px(px(5.0))
                                     .py(px(1.0))
-                                    .rounded_md()
+                                    .rounded(px(self.tokens.radii.md))
                                     .text_size(px(10.0))
                                     .text_color(rgba(0xfb923cff))
                                     .bg(rgba(0xf9731626))

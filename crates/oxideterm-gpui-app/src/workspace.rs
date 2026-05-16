@@ -272,6 +272,8 @@ pub(crate) struct WorkspaceApp {
     search: SearchBarState,
     terminal_command_bar_focused: bool,
     terminal_command_bar_draft: String,
+    terminal_command_suggestions_open: bool,
+    terminal_command_suggestion_highlighted: Option<usize>,
     terminal_broadcast_enabled: bool,
     terminal_broadcast_targets: HashSet<PaneId>,
     terminal_broadcast_menu_open: bool,
@@ -314,6 +316,10 @@ pub(crate) struct WorkspaceApp {
     ai_model_selector_probe_generations: HashMap<String, u64>,
     ai_chat: oxideterm_ai::AiChatState,
     ai_chat_store: oxideterm_ai::AiChatPersistenceStore,
+    ai_runtime_epoch: String,
+    ai_command_record_sequence: u64,
+    ai_command_records: VecDeque<AiRuntimeCommandRecord>,
+    ai_cli_agent_sessions: HashMap<String, AiCliAgentSession>,
     ai_conversation_list_open: bool,
     ai_chat_menu_open: bool,
     ai_profile_selector_open: bool,
@@ -501,6 +507,64 @@ pub(crate) struct WorkspaceApp {
     workspace_tooltip: Option<WorkspaceTooltip>,
     workspace_tooltip_pending: Option<WorkspaceTooltipPending>,
     workspace_tooltip_generation: u64,
+}
+
+#[derive(Clone, Debug)]
+struct TerminalCommandSuggestion {
+    kind: TerminalCommandSuggestionKind,
+    label: String,
+    insert_text: String,
+    description: Option<String>,
+    executable: bool,
+    replacement: std::ops::Range<usize>,
+    group_label_key: &'static str,
+    source_label_key: &'static str,
+    score: f64,
+    risk: Option<&'static str>,
+    inline_safe: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalCommandSuggestionKind {
+    History,
+    Command,
+    Subcommand,
+    Option,
+    File,
+    Directory,
+    QuickCommand,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AiRuntimeCommandRecord {
+    pub(crate) command_id: String,
+    pub(crate) target_id: Option<String>,
+    pub(crate) session_id: Option<String>,
+    pub(crate) node_id: Option<String>,
+    pub(crate) command: String,
+    pub(crate) cwd: Option<String>,
+    pub(crate) source: String,
+    pub(crate) status: String,
+    pub(crate) exit_code: Option<i64>,
+    pub(crate) started_at: i64,
+    pub(crate) finished_at: Option<i64>,
+    pub(crate) runtime_epoch: String,
+    pub(crate) risk: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AiCliAgentSession {
+    pub(crate) id: String,
+    pub(crate) kind: String,
+    pub(crate) label: String,
+    pub(crate) status: String,
+    pub(crate) target_id: Option<String>,
+    pub(crate) session_id: Option<String>,
+    pub(crate) node_id: Option<String>,
+    pub(crate) command: String,
+    pub(crate) started_at: i64,
+    pub(crate) updated_at: i64,
+    pub(crate) runtime_epoch: String,
 }
 
 #[derive(Clone, Debug)]

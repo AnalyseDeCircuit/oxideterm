@@ -22,7 +22,6 @@ pub enum SelectAnchorId {
     SettingsTerminalFontFamily,
     SettingsTerminalFontSizeSlider,
     SettingsTerminalEncoding,
-    SettingsTerminalAdaptiveRenderer,
     SettingsTerminalCursorStyle,
     SettingsIdeAgentMode,
     SettingsLocalShell,

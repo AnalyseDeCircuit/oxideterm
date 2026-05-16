@@ -136,6 +136,7 @@ impl WorkspaceApp {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             },
         );
         let context_window = self.ai_active_model_context_window(config);
@@ -158,6 +159,7 @@ impl WorkspaceApp {
                     transcript_ref: None,
                     summary_ref: None,
                     branches: None,
+            suggestions: Vec::new(),
                 },
             );
         }

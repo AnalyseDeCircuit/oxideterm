@@ -44,6 +44,7 @@ impl WorkspaceApp {
         }
 
         let parsed_input = parse_ai_user_input(&content);
+        let detected_intent = detect_ai_intent(&parsed_input);
         let sidebar_context = self.resolve_ai_sidebar_context_block(cx);
         let selected_context = self.resolve_ai_selected_terminal_context(cx);
         let reference_context = self.resolve_ai_reference_context(&parsed_input.references, cx);
@@ -115,6 +116,7 @@ impl WorkspaceApp {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         };
         self.ai_chat.add_message(&conversation_id, message);
         self.persist_ai_chat_state();
@@ -128,7 +130,39 @@ impl WorkspaceApp {
         let task_system_prompt = ai_chat_message_context([
             ai_input_system_prompt(slash_command, &parsed_input.participants),
             runtime_system_prompt,
+            ai_detected_intent_system_prompt(&detected_intent),
         ]);
+        if let Some(conversation) = self
+            .ai_chat
+            .conversations
+            .iter_mut()
+            .find(|conversation| conversation.id == conversation_id)
+        {
+            let metadata = conversation
+                .session_metadata
+                .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
+            if let Some(object) = metadata.as_object_mut() {
+                object.insert("conversationId".to_string(), serde_json::json!(conversation_id));
+                object.insert("origin".to_string(), serde_json::json!("sidebar"));
+                object
+                    .entry("firstUserMessage".to_string())
+                    .or_insert_with(|| serde_json::json!(parsed_input.raw_text.clone()));
+                object.insert(
+                    "providerId".to_string(),
+                    serde_json::json!(stream_config.provider_id.clone()),
+                );
+                object.insert(
+                    "providerModel".to_string(),
+                    serde_json::json!(stream_config.model.clone()),
+                );
+                if let Some(participant) = parsed_input.participants.first() {
+                    object.insert(
+                        "activeParticipant".to_string(),
+                        serde_json::json!(participant.name.clone()),
+                    );
+                }
+            }
+        }
         self.start_ai_chat_stream(
             conversation_id,
             stream_config,
@@ -171,6 +205,7 @@ impl WorkspaceApp {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         };
         let assistant_message = AiChatMessage {
             id: self.next_ai_chat_id(now),
@@ -188,12 +223,18 @@ impl WorkspaceApp {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         };
         self.ai_chat.add_message(&conversation_id, user_message);
         self.ai_chat.add_message(&conversation_id, assistant_message);
         self.persist_ai_chat_state();
         self.reset_ai_chat_input_after_submit();
         cx.notify();
+    }
+
+    fn send_ai_follow_up_suggestion(&mut self, text: String, cx: &mut Context<Self>) {
+        self.ai_chat_draft = text;
+        self.send_ai_chat_draft(cx);
     }
 
     fn regenerate_ai_last_response(&mut self, cx: &mut Context<Self>) {
@@ -422,6 +463,7 @@ impl WorkspaceApp {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: Some(branch_data),
+                suggestions: Vec::new(),
             });
             conversation.message_count = conversation.messages.len();
             conversation.updated_at_ms = now;
@@ -504,7 +546,7 @@ impl WorkspaceApp {
 
 }
 
-fn ai_chat_message_context(contexts: [Option<String>; 2]) -> Option<String> {
+fn ai_chat_message_context(contexts: impl IntoIterator<Item = Option<String>>) -> Option<String> {
     let blocks = contexts
         .into_iter()
         .flatten()

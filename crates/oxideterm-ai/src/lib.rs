@@ -14,6 +14,7 @@ mod references;
 mod settings;
 mod slash;
 mod streaming;
+mod suggestions;
 mod touch_id;
 mod types;
 
@@ -81,17 +82,22 @@ pub use settings::{
 };
 pub use slash::{
     AI_PARTICIPANTS, AI_REFERENCES, AI_SLASH_COMMANDS, AiAutocompleteCandidate, AiAutocompleteKind,
-    AiInputTokenAtCursor, AiInputTokenType, AiParsedInput, AiParticipantDef, AiParticipantMatch,
-    AiReferenceDef, AiReferenceMatch, AiSlashCommand, ai_autocomplete_candidates, ai_help_markdown,
+    AiDetectedIntent, AiInputTokenAtCursor, AiInputTokenType, AiParsedInput, AiParticipantDef,
+    AiParticipantMatch, AiReferenceDef, AiReferenceMatch, AiSlashCommand,
+    ai_autocomplete_candidates, ai_detected_intent_system_prompt, ai_help_markdown,
     ai_input_system_prompt, ai_input_token_at_cursor, apply_ai_autocomplete_candidate,
-    parse_ai_user_input, resolve_ai_participant, resolve_ai_reference, resolve_ai_slash_command,
-    slash_task_system_prompt,
+    detect_ai_intent, parse_ai_user_input, resolve_ai_participant, resolve_ai_reference,
+    resolve_ai_slash_command, slash_task_system_prompt,
 };
 pub use streaming::stream_chat_completion;
+pub use suggestions::{
+    AiSuggestionParseResult, ai_has_partial_suggestions_block, ai_visible_suggestion_content,
+    parse_ai_suggestions,
+};
 pub use types::{
     AiChatMessage, AiChatMessageMetadata, AiChatRole, AiChatState, AiChatStreamConfig,
-    AiConversation, AiMessageBranches, AiProviderTemplate, AiProviderView, AiStreamEvent,
-    AiToolCall, AiToolChoice, AiToolDefinition, ModelSelectorProviderGroup,
+    AiConversation, AiFollowUpSuggestion, AiMessageBranches, AiProviderTemplate, AiProviderView,
+    AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition, ModelSelectorProviderGroup,
     ModelSelectorProviderProbe, ProviderModelRefresh,
 };
 

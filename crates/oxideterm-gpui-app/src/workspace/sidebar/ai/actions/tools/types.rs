@@ -22,6 +22,7 @@ struct AiOrchestratorRuntimeSnapshot {
     ai_providers: Vec<serde_json::Value>,
     ai_embedding_config: Option<serde_json::Value>,
     ai_context_window: usize,
+    runtime_epoch: String,
 }
 
 #[derive(Clone, Debug)]

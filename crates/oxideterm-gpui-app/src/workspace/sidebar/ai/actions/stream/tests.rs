@@ -19,6 +19,7 @@ mod ai_turn_order_tests {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         }
     }
 
@@ -39,6 +40,7 @@ mod ai_turn_order_tests {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         }
     }
 
@@ -145,6 +147,7 @@ mod ai_turn_order_tests {
                 "transcriptRef": source_ref,
             })),
             branches: None,
+            suggestions: Vec::new(),
         }];
 
         normalize_ai_stream_history_for_provider(&mut history);
@@ -182,6 +185,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             })
             .collect::<Vec<_>>();
 
@@ -414,6 +418,43 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn required_tool_buffer_flushes_only_after_tool_call() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut assistant_content = String::new();
+        let mut assistant_thinking = String::new();
+        let mut buffered_content = "我已经打开了终端。".to_string();
+        let mut buffered_thinking = "需要调用工具。".to_string();
+
+        flush_ai_required_tool_buffer(
+            &tx,
+            1,
+            "conversation-1",
+            "assistant-1",
+            &mut assistant_content,
+            &mut assistant_thinking,
+            &mut buffered_content,
+            &mut buffered_thinking,
+        )
+        .expect("flush");
+
+        assert!(buffered_content.is_empty());
+        assert!(buffered_thinking.is_empty());
+        assert_eq!(assistant_content, "我已经打开了终端。");
+        assert_eq!(assistant_thinking, "需要调用工具。");
+
+        let first = rx.recv().expect("thinking delivery");
+        assert!(matches!(
+            first.event,
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(_))
+        ));
+        let second = rx.recv().expect("content delivery");
+        assert!(matches!(
+            second.event,
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(_))
+        ));
+    }
+
+    #[test]
     fn pseudo_tool_json_hard_deny_respects_json_requests() {
         let pseudo = r#"{"name":"run_command","arguments":{"command":"ls"},"status":"ok"}"#;
 
@@ -561,6 +602,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             },
             AiChatMessage {
                 id: "assistant-1".to_string(),
@@ -588,6 +630,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             },
             AiChatMessage {
                 id: "tool-result-call-1".to_string(),
@@ -605,6 +648,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             },
         ];
 
@@ -640,6 +684,7 @@ mod ai_turn_order_tests {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         }];
 
         normalize_ai_stream_history_for_provider(&mut history);
@@ -666,6 +711,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             },
             AiChatMessage {
                 id: "stale-system".to_string(),
@@ -683,6 +729,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             },
             AiChatMessage {
                 id: "anchor-1".to_string(),
@@ -705,6 +752,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             },
             AiChatMessage {
                 id: "user-1".to_string(),
@@ -722,6 +770,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             },
         ];
 
@@ -800,6 +849,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
+            suggestions: Vec::new(),
             }],
             created_at_ms: 1,
             updated_at_ms: 1,

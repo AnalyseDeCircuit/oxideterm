@@ -303,6 +303,7 @@ mod tests {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         };
         let result = AiChatMessage {
             id: "t1".to_string(),
@@ -320,6 +321,7 @@ mod tests {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         };
 
         let converted = openai_chat_messages(&config("openai", "auto"), &[assistant, result]);

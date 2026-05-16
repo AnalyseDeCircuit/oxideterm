@@ -89,6 +89,7 @@ impl WorkspaceApp {
             transcript_ref: Some(transcript_ref),
             summary_ref: Some(summary_ref),
             branches: None,
+            suggestions: Vec::new(),
         };
         conversation.messages = std::iter::once(anchor)
             .chain(plan.keep_messages)
@@ -196,6 +197,7 @@ impl WorkspaceApp {
             transcript_ref: None,
             summary_ref: Some(serde_json::json!({ "kind": "conversation" })),
             branches: None,
+            suggestions: Vec::new(),
         }];
         let metadata = conversation
             .session_metadata

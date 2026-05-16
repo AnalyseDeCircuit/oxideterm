@@ -571,6 +571,8 @@ impl WorkspaceApp {
                         replacement_range,
                         text,
                     );
+                    self.terminal_command_suggestions_open = false;
+                    self.terminal_command_suggestion_highlighted = None;
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

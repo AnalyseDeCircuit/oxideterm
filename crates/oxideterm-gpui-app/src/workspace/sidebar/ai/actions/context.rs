@@ -133,7 +133,194 @@ impl WorkspaceApp {
             }
         }
 
+        if let Some(context_chips) = self.resolve_ai_runtime_context_chips_prompt(cx) {
+            parts.push(String::new());
+            parts.push(context_chips);
+        }
+
         (!parts.is_empty()).then(|| parts.join("\n"))
+    }
+
+    fn resolve_ai_runtime_context_chips_prompt(&self, cx: &mut Context<Self>) -> Option<String> {
+        let mut chips = Vec::new();
+        let mut command_records = self.ai_runtime_command_records(cx);
+        command_records.sort_by(|left, right| {
+            right
+                .finished_at
+                .unwrap_or(right.started_at)
+                .cmp(&left.finished_at.unwrap_or(left.started_at))
+        });
+        for record in command_records.iter().take(5) {
+            let kind = if record.status == "error" {
+                "recent_error"
+            } else {
+                "recent_command"
+            };
+            let exit_suffix = record
+                .exit_code
+                .map(|code| format!(" (exit {code})"))
+                .unwrap_or_default();
+            chips.push(format!(
+                "- {kind}: {}{} {}",
+                record.command,
+                exit_suffix,
+                serde_json::json!({
+                    "commandRecordId": record.command_id,
+                    "targetId": record.target_id,
+                    "sessionId": record.session_id,
+                    "nodeId": record.node_id,
+                    "status": record.status,
+                    "runtimeEpoch": record.runtime_epoch,
+                    "source": record.source,
+                    "risk": record.risk,
+                    "cwd": record.cwd,
+                })
+            ));
+            if chips.len() >= 8 {
+                break;
+            }
+        }
+        if chips.len() < 8 {
+            let mut sessions = self.ai_runtime_cli_agent_sessions(&command_records);
+            sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+            for session in sessions.into_iter().take(3) {
+                chips.push(format!(
+                    "- cli_agent: {} is {}{} {}",
+                    session.kind,
+                    session.status,
+                    session
+                        .session_id
+                        .as_ref()
+                        .map(|id| format!(" in {id}"))
+                        .unwrap_or_default(),
+                    serde_json::json!({
+                        "cliAgentSessionId": session.id,
+                        "kind": session.kind,
+                        "status": session.status,
+                        "targetId": session.target_id,
+                        "sessionId": session.session_id,
+                        "nodeId": session.node_id,
+                        "runtimeEpoch": session.runtime_epoch,
+                        "label": session.label,
+                        "command": session.command,
+                    })
+                ));
+                if chips.len() >= 8 {
+                    break;
+                }
+            }
+        }
+        if chips.is_empty() {
+            return None;
+        }
+        Some(
+            [
+                "## Runtime Context Chips".to_string(),
+                "These are current-runtime structured hints. Treat chips as stale if their runtimeEpoch differs from current tool results.".to_string(),
+            ]
+            .into_iter()
+            .chain(chips)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        )
+    }
+
+    pub(in crate::workspace) fn ai_runtime_command_records(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Vec<AiRuntimeCommandRecord> {
+        let mut records = self.ai_command_records.iter().cloned().collect::<Vec<_>>();
+        let mut seen = records
+            .iter()
+            .map(|record| record.command_id.clone())
+            .collect::<HashSet<_>>();
+        for (pane_id, pane) in &self.panes {
+            let Some(session_id) = self.session_id_for_pane(*pane_id) else {
+                continue;
+            };
+            let node_id = self.terminal_ssh_nodes.get(&session_id).cloned();
+            for record in pane.read(cx).ai_command_records() {
+                if !seen.insert(record.command_id.clone()) {
+                    continue;
+                }
+                let source = ai_ledger_source_from_terminal_source(record.source);
+                let status = ai_ledger_status_from_terminal_status(record.status);
+                records.push(AiRuntimeCommandRecord {
+                    command_id: record.command_id,
+                    target_id: node_id
+                        .as_ref()
+                        .map(|node_id| format!("ssh-node:{}", node_id.0)),
+                    session_id: Some(session_id.0.to_string()),
+                    node_id: node_id.as_ref().map(|node_id| node_id.0.to_string()),
+                    command: record.command,
+                    cwd: None,
+                    source,
+                    status,
+                    exit_code: record.exit_code.map(i64::from),
+                    started_at: record.started_at as i64,
+                    finished_at: record.finished_at.map(|value| value as i64),
+                    runtime_epoch: self.ai_runtime_epoch.clone(),
+                    risk: "execute".to_string(),
+                });
+            }
+        }
+        records
+    }
+
+    fn ai_runtime_cli_agent_sessions(
+        &self,
+        records: &[AiRuntimeCommandRecord],
+    ) -> Vec<AiCliAgentSession> {
+        let mut sessions = self
+            .ai_cli_agent_sessions
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut seen = sessions
+            .iter()
+            .map(|session| session.id.clone())
+            .collect::<HashSet<_>>();
+        for record in records {
+            let Some(kind) = detect_ai_cli_agent_kind(&record.command) else {
+                continue;
+            };
+            let target_key = record
+                .session_id
+                .as_ref()
+                .or(record.node_id.as_ref())
+                .or(record.target_id.as_ref())
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string());
+            let id = format!("cli-agent:{kind}:{target_key}");
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            let status = match record.status.as_str() {
+                "waiting_for_input" => "waiting_for_input",
+                "error" => "failed",
+                _ => "running",
+            };
+            sessions.push(AiCliAgentSession {
+                id,
+                kind: kind.clone(),
+                label: format!("{kind} agent"),
+                status: status.to_string(),
+                target_id: record.target_id.clone(),
+                session_id: record.session_id.clone(),
+                node_id: record.node_id.clone(),
+                command: record.command.clone(),
+                started_at: record.started_at,
+                updated_at: record.finished_at.unwrap_or(record.started_at),
+                runtime_epoch: record.runtime_epoch.clone(),
+            });
+        }
+        sessions
+    }
+
+    fn session_id_for_pane(&self, pane_id: PaneId) -> Option<TerminalSessionId> {
+        self.tabs
+            .iter()
+            .find_map(|tab| tab.root_pane.as_ref()?.session_id_for_pane(pane_id))
     }
 
     fn ai_single_pane_terminal_context(&self, cx: &mut Context<Self>) -> Option<String> {
@@ -395,4 +582,27 @@ fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
         TabKind::Graphics => "graphics",
         TabKind::NotificationCenter => "notifications",
     }
+}
+
+fn ai_ledger_source_from_terminal_source(source: TerminalCommandMarkDetectionSource) -> String {
+    match source {
+        TerminalCommandMarkDetectionSource::Ai => "ai.terminal_input",
+        TerminalCommandMarkDetectionSource::Broadcast => "broadcast",
+        TerminalCommandMarkDetectionSource::ShellIntegration => "shell_integration",
+        TerminalCommandMarkDetectionSource::CommandBar => "command_bar",
+        TerminalCommandMarkDetectionSource::UserInputObserved => "user.terminal_input",
+        TerminalCommandMarkDetectionSource::Heuristic => "user_promoted",
+    }
+    .to_string()
+}
+
+fn ai_ledger_status_from_terminal_status(
+    status: oxideterm_gpui_terminal::TerminalCommandFactStatus,
+) -> String {
+    match status {
+        oxideterm_gpui_terminal::TerminalCommandFactStatus::Open => "running",
+        oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed => "completed",
+        oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale => "stale",
+    }
+    .to_string()
 }

@@ -44,10 +44,19 @@ pub struct TerminalAiCommandRecord {
     pub end_line: Option<usize>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalAutosuggestCommandRecord {
+    pub command_id: String,
+    pub command: String,
+    pub started_at: u64,
+    pub finished_at: u64,
+}
+
 #[derive(Default)]
 pub(crate) struct CommandFactLedger {
     facts: Vec<TerminalCommandFact>,
     ai_records: Vec<TerminalAiCommandRecord>,
+    autosuggest_records: Vec<TerminalAutosuggestCommandRecord>,
 }
 
 impl CommandFactLedger {
@@ -57,6 +66,39 @@ impl CommandFactLedger {
 
     pub(crate) fn ai_records(&self) -> Vec<TerminalAiCommandRecord> {
         self.ai_records.clone()
+    }
+
+    pub(crate) fn autosuggest_records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
+        self.autosuggest_records.clone()
+    }
+
+    pub(crate) fn record_runtime_autosuggest_command(&mut self, command: &str) {
+        let command = command.trim();
+        if command.is_empty() {
+            return;
+        }
+        let normalized = command.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized.is_empty()
+            || self
+                .autosuggest_records
+                .last()
+                .is_some_and(|record| record.command == normalized)
+        {
+            return;
+        }
+        let now = now_millis();
+        self.autosuggest_records
+            .push(TerminalAutosuggestCommandRecord {
+                command_id: format!("runtime-autosuggest-{now}"),
+                command: normalized,
+                started_at: now,
+                finished_at: now,
+            });
+        const MAX_AUTOSUGGEST_RECORDS: usize = 1000;
+        if self.autosuggest_records.len() > MAX_AUTOSUGGEST_RECORDS {
+            let overflow = self.autosuggest_records.len() - MAX_AUTOSUGGEST_RECORDS;
+            self.autosuggest_records.drain(0..overflow);
+        }
     }
 
     pub(crate) fn create_from_mark(&mut self, mark: &TerminalCommandMark) {
@@ -245,5 +287,18 @@ mod tests {
 
         assert_eq!(ledger.facts().len(), 1);
         assert!(ledger.ai_records().is_empty());
+    }
+
+    #[test]
+    fn command_fact_ledger_records_runtime_autosuggest_independently() {
+        let mut ledger = CommandFactLedger::default();
+
+        ledger.record_runtime_autosuggest_command("  git   status  ");
+        ledger.record_runtime_autosuggest_command("git status");
+        ledger.record_runtime_autosuggest_command(" ");
+
+        let records = ledger.autosuggest_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].command, "git status");
     }
 }

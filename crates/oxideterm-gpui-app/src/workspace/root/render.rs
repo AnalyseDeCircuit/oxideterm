@@ -144,6 +144,18 @@ impl Render for WorkspaceApp {
                     this.handle_keybinding_recording_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.terminal_quick_commands_open
+                    && this.quick_commands.focused_input.is_some()
+                {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    this.handle_quick_commands_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_terminal_command_overlay_escape(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.dispatch_registered_keybinding(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -273,15 +285,6 @@ impl Render for WorkspaceApp {
                         return;
                     }
                     this.handle_terminal_cast_search_key(event, cx);
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.terminal_quick_commands_open
-                    && this.quick_commands.focused_input.is_some()
-                {
-                    if keystroke_commits_platform_text(&event.keystroke) {
-                        return;
-                    }
-                    this.handle_quick_commands_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 }

@@ -196,6 +196,7 @@ impl WorkspaceApp {
             ai_providers: settings.ai.providers.clone(),
             ai_embedding_config: settings.ai.embedding_config.clone(),
             ai_context_window: AI_COMPACTION_DEFAULT_CONTEXT_WINDOW,
+            runtime_epoch: self.ai_runtime_epoch.clone(),
             settings_summary: serde_json::json!({
                 "ai": {
                     "enabled": settings.ai.enabled,
@@ -925,6 +926,7 @@ impl WorkspaceApp {
                         risk: "interactive",
                         target: Some(target),
                         targets: Vec::new(),
+                        state_version: None,
                     },
                     started.elapsed().as_millis(),
                 )
@@ -1274,4 +1276,3 @@ impl WorkspaceApp {
         ))
     }
 }
-

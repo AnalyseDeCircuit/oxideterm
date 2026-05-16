@@ -332,30 +332,6 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Terminal, SettingsSelect::TerminalAdaptiveRenderer) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &mode in adaptive_renderer_options() {
-                    popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            adaptive_renderer_label(mode, &self.i18n),
-                            mode == settings.terminal.adaptive_renderer,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
-                                this.edit_settings(
-                                    |settings| settings.terminal.adaptive_renderer = mode,
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    );
-                }
-                Some(popup)
-            }
             (SettingsTab::Terminal, SettingsSelect::TerminalCursorStyle) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &style in cursor_style_options() {

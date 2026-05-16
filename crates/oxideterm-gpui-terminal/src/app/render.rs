@@ -153,6 +153,9 @@ impl Render for TerminalPane {
             .when_some(self.pending_paste.clone(), |pane, paste| {
                 pane.child(self.render_paste_confirm_overlay(&paste, cx))
             })
+            .when(self.preferences.show_fps_overlay, |pane| {
+                pane.child(self.render_fps_overlay())
+            })
             .when(
                 self.settings.command_marks_enabled
                     && self.settings.command_marks_show_hover_actions,
@@ -172,6 +175,53 @@ impl TerminalPane {
             .iter()
             .find(|mark| mark.command_id == selected_id)
             .cloned()
+    }
+
+    fn render_fps_overlay(&self) -> AnyElement {
+        let stats = self.render_stats;
+        div()
+            .absolute()
+            .top(px(8.0))
+            .left(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .px(px(8.0))
+            .py(px(2.0))
+            .rounded(px(4.0))
+            .border_1()
+            .border_color(rgba(0xffffff33))
+            .bg(rgba(0x0d0f12dd))
+            .text_size(px(10.0))
+            .font_family(SharedString::from("JetBrainsMono Nerd Font"))
+            .line_height(px(20.0))
+            .child(
+                div()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(stats.tier.color()))
+                    .child(stats.tier.label()),
+            )
+            .child(div().text_color(rgba(0xe6e8eb99)).child("|"))
+            .child(
+                div()
+                    .text_color(rgb(self.theme.foreground))
+                    .child(stats.fps.to_string()),
+            )
+            .child(div().text_color(rgba(0xe6e8eb99)).child("fps"))
+            .child(div().text_color(rgba(0xe6e8eb99)).child("·"))
+            .child(
+                div()
+                    .text_color(rgba(0xe6e8eb99))
+                    .child(stats.writes_per_sec.to_string()),
+            )
+            .child(div().text_color(rgba(0xe6e8eb99)).child("wps"))
+            .child(div().text_color(rgba(0xe6e8eb99)).child("·"))
+            .child(
+                div()
+                    .text_color(rgba(0xe6e8eb99))
+                    .child(format!("{}b", stats.pending_bytes)),
+            )
+            .into_any_element()
     }
 
     fn render_command_mark_actions(

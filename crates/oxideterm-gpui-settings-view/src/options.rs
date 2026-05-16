@@ -3,9 +3,9 @@ use std::path::Path;
 use oxideterm_gpui_ui::select::SelectAnchorId;
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
-    AdaptiveRendererMode, AiReasoningEffort, AiThinkingStyle, AnimationSpeed, BackgroundFit,
-    ConflictAction, CursorStyle as SettingsCursorStyle, FontFamily, IdeAgentMode, Language,
-    PersistedSettings, TerminalEncoding, UiDensity, UpdateChannel,
+    AiReasoningEffort, AiThinkingStyle, AnimationSpeed, BackgroundFit, ConflictAction,
+    CursorStyle as SettingsCursorStyle, FontFamily, IdeAgentMode, Language, PersistedSettings,
+    TerminalEncoding, UiDensity, UpdateChannel,
 };
 use oxideterm_theme::BUILT_IN_THEMES;
 
@@ -70,14 +70,6 @@ pub fn terminal_encoding_options() -> &'static [TerminalEncoding] {
         TerminalEncoding::EucJp,
         TerminalEncoding::EucKr,
         TerminalEncoding::Windows1252,
-    ]
-}
-
-pub fn adaptive_renderer_options() -> &'static [AdaptiveRendererMode] {
-    &[
-        AdaptiveRendererMode::Auto,
-        AdaptiveRendererMode::Always60,
-        AdaptiveRendererMode::Off,
     ]
 }
 
@@ -521,16 +513,6 @@ pub fn terminal_encoding_label(encoding: TerminalEncoding) -> String {
         TerminalEncoding::Windows1252 => "Windows-1252",
     }
     .to_string()
-}
-
-pub fn adaptive_renderer_label(mode: AdaptiveRendererMode, i18n: &I18n) -> String {
-    match mode {
-        AdaptiveRendererMode::Auto => i18n.t("settings_view.terminal.adaptive_renderer_auto"),
-        AdaptiveRendererMode::Always60 => {
-            i18n.t("settings_view.terminal.adaptive_renderer_always60")
-        }
-        AdaptiveRendererMode::Off => i18n.t("settings_view.terminal.adaptive_renderer_off"),
-    }
 }
 
 pub fn cursor_style_label(style: SettingsCursorStyle, i18n: &I18n) -> String {

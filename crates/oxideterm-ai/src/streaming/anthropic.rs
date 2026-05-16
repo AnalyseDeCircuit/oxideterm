@@ -416,6 +416,7 @@ mod tests {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         };
         let body = anthropic_chat_body(&config("high", 4096), &[message]);
         assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
@@ -476,6 +477,7 @@ mod tests {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         };
         let result = AiChatMessage {
             id: "t1".to_string(),
@@ -493,6 +495,7 @@ mod tests {
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         };
 
         let (_, converted) = anthropic_chat_messages(&[assistant, result]);

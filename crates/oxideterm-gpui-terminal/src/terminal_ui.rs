@@ -58,6 +58,7 @@ pub struct TerminalUiPreferences {
     pub command_marks_heuristic_detection: bool,
     pub command_marks_show_hover_actions: bool,
     pub terminal_encoding: TerminalEncoding,
+    pub show_fps_overlay: bool,
     pub theme: TerminalUiTheme,
     pub render_policy: EffectiveRenderPolicy,
     pub background: Option<TerminalBackgroundPreferences>,
@@ -90,6 +91,7 @@ impl Default for TerminalUiPreferences {
             command_marks_heuristic_detection: false,
             command_marks_show_hover_actions: TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS,
             terminal_encoding: TerminalEncoding::Utf8,
+            show_fps_overlay: false,
             theme: TerminalUiTheme::default(),
             render_policy: EffectiveRenderPolicy::quality(),
             background: None,
@@ -99,6 +101,50 @@ impl Default for TerminalUiPreferences {
             notice_sink: None,
             highlight_rules: Vec::new(),
             trzsz_policy: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TerminalRenderTier {
+    Boost,
+    Normal,
+    Idle,
+}
+
+impl TerminalRenderTier {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Boost => "B",
+            Self::Normal => "N",
+            Self::Idle => "I",
+        }
+    }
+
+    pub(crate) fn color(self) -> u32 {
+        match self {
+            Self::Boost => 0x22c55e,
+            Self::Normal => 0xfacc15,
+            Self::Idle => 0x94a3b8,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TerminalRenderStats {
+    pub tier: TerminalRenderTier,
+    pub fps: u32,
+    pub writes_per_sec: u32,
+    pub pending_bytes: usize,
+}
+
+impl Default for TerminalRenderStats {
+    fn default() -> Self {
+        Self {
+            tier: TerminalRenderTier::Normal,
+            fps: 0,
+            writes_per_sec: 0,
+            pending_bytes: 0,
         }
     }
 }

@@ -191,6 +191,7 @@ pub fn apply_chat_request_overrides(
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         });
     }
     if let Some(current_context) = current_context {
@@ -210,6 +211,7 @@ pub fn apply_chat_request_overrides(
             transcript_ref: None,
             summary_ref: None,
             branches: None,
+            suggestions: Vec::new(),
         });
     }
     history.splice(0..0, system_messages);

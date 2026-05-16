@@ -53,6 +53,7 @@ impl WorkspaceApp {
             AiStreamEvent::Done => {
                 self.ai_chat
                     .update_message(conversation_id, message_id, |message| {
+                        finalize_ai_turn_suggestions(message);
                         message.is_streaming = false;
                         set_ai_turn_status(message, "complete");
                     });
@@ -249,7 +250,7 @@ impl WorkspaceApp {
                     arguments,
                     status,
                     result.clone(),
-                    risk,
+                    risk.clone(),
                     summary,
                     round_id_override.as_deref(),
                     round_number_override,
@@ -355,12 +356,194 @@ impl WorkspaceApp {
                         "syntheticDenied": synthetic_denied,
                     })),
                 ));
+                self.record_ai_command_from_tool_status(
+                    name,
+                    arguments,
+                    status,
+                    result.as_ref(),
+                    risk.as_deref(),
+                );
             }
             self.persist_ai_transcript_entries(conversation_id.to_string(), transcript_entries);
             self.persist_ai_diagnostic_events(conversation_id.to_string(), diagnostic_events);
             self.persist_ai_chat_state();
         }
         cx.notify();
+    }
+
+    fn record_ai_command_from_tool_status(
+        &mut self,
+        tool_name: &str,
+        arguments: &str,
+        status: &str,
+        result: Option<&serde_json::Value>,
+        risk: Option<&str>,
+    ) {
+        if !matches!(tool_name, "run_command" | "send_terminal_input")
+            || !matches!(status, "completed" | "error")
+        {
+            return;
+        }
+        let args = serde_json::from_str::<serde_json::Value>(arguments)
+            .unwrap_or_else(|_| serde_json::json!({ "rawArguments": arguments }));
+        let command = match tool_name {
+            "run_command" => args
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            "send_terminal_input" => args
+                .get("text")
+                .or_else(|| args.get("keys"))
+                .or_else(|| args.get("sequence"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            _ => String::new(),
+        };
+        let command = command.trim().to_string();
+        if command.is_empty() {
+            return;
+        }
+
+        let meta = result.and_then(|value| value.get("meta"));
+        let data = result.and_then(|value| value.get("data"));
+        let target = result
+            .and_then(|value| value.get("targets"))
+            .and_then(serde_json::Value::as_array)
+            .and_then(|targets| targets.first());
+        let target_refs = target.and_then(|value| value.get("refs"));
+        let target_id = meta
+            .and_then(|value| value.get("targetId"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string)
+            .or_else(|| {
+                target
+                    .and_then(|value| value.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string)
+            });
+        let session_id = target_refs
+            .and_then(|refs| refs.get("sessionId"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string)
+            .or_else(|| {
+                data.and_then(|value| value.get("sessionId"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string)
+            });
+        let node_id = target_refs
+            .and_then(|refs| refs.get("nodeId"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string);
+        let exit_code = data
+            .and_then(|value| value.get("exitCode"))
+            .and_then(serde_json::Value::as_i64);
+        let waiting_for_input = data
+            .and_then(|value| value.get("waitingForInput"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let runtime_epoch = meta
+            .and_then(|value| value.get("runtimeEpoch"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&self.ai_runtime_epoch)
+            .to_string();
+        self.ai_command_record_sequence = self.ai_command_record_sequence.saturating_add(1);
+        let now = ai_now_ms();
+        let record = AiRuntimeCommandRecord {
+            command_id: format!("cmd-{}-{}", now, self.ai_command_record_sequence),
+            target_id,
+            session_id,
+            node_id,
+            command,
+            cwd: args
+                .get("cwd")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            source: if tool_name == "run_command" {
+                "ai.run_command".to_string()
+            } else {
+                "ai.terminal_input".to_string()
+            },
+            status: if waiting_for_input {
+                "waiting_for_input".to_string()
+            } else if status == "completed" {
+                "completed".to_string()
+            } else {
+                "error".to_string()
+            },
+            exit_code,
+            started_at: now,
+            finished_at: Some(now),
+            runtime_epoch,
+            risk: risk.unwrap_or("read").to_string(),
+        };
+        self.record_ai_cli_agent_command(&record);
+        self.ai_command_records.push_back(record);
+        while self.ai_command_records.len() > 200 {
+            self.ai_command_records.pop_front();
+        }
+        self.trim_ai_command_records_per_session();
+    }
+
+    fn trim_ai_command_records_per_session(&mut self) {
+        let mut per_session: HashMap<String, usize> = HashMap::new();
+        let mut keep = VecDeque::new();
+        for record in self.ai_command_records.iter().rev() {
+            let key = record
+                .session_id
+                .as_ref()
+                .or(record.node_id.as_ref())
+                .or(record.target_id.as_ref())
+                .cloned()
+                .unwrap_or_else(|| "global".to_string());
+            let count = per_session.entry(key).or_insert(0);
+            if *count < 50 {
+                keep.push_front(record.clone());
+                *count += 1;
+            }
+        }
+        self.ai_command_records = keep;
+    }
+
+    fn record_ai_cli_agent_command(&mut self, record: &AiRuntimeCommandRecord) {
+        let Some(kind) = detect_ai_cli_agent_kind(&record.command) else {
+            return;
+        };
+        let target_key = record
+            .session_id
+            .as_ref()
+            .or(record.node_id.as_ref())
+            .or(record.target_id.as_ref())
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
+        let id = format!("cli-agent:{kind}:{target_key}");
+        let existing_started_at = self
+            .ai_cli_agent_sessions
+            .get(&id)
+            .map(|session| session.started_at)
+            .unwrap_or(record.started_at);
+        let status = match record.status.as_str() {
+            "waiting_for_input" => "waiting_for_input",
+            "error" => "failed",
+            _ => "running",
+        };
+        self.ai_cli_agent_sessions.insert(
+            id.clone(),
+            AiCliAgentSession {
+                id,
+                kind: kind.clone(),
+                label: format!("{kind} agent"),
+                status: status.to_string(),
+                target_id: record.target_id.clone(),
+                session_id: record.session_id.clone(),
+                node_id: record.node_id.clone(),
+                command: record.command.clone(),
+                started_at: existing_started_at,
+                updated_at: record.finished_at.unwrap_or(record.started_at),
+                runtime_epoch: record.runtime_epoch.clone(),
+            },
+        );
     }
 
     fn apply_ai_guardrail(
@@ -417,4 +600,37 @@ impl WorkspaceApp {
         self.persist_ai_chat_state();
         cx.notify();
     }
+}
+
+fn detect_ai_cli_agent_kind(command: &str) -> Option<String> {
+    let tokens = command
+        .split_whitespace()
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index];
+        if token.eq_ignore_ascii_case("env") || token.contains('=') {
+            index += 1;
+            continue;
+        }
+        if token.eq_ignore_ascii_case("npx") {
+            index += 1;
+            continue;
+        }
+        let executable = token
+            .rsplit('/')
+            .next()
+            .unwrap_or(token)
+            .trim_start_matches('@')
+            .to_ascii_lowercase();
+        return match executable.as_str() {
+            "codex" => Some("codex".to_string()),
+            "claude" => Some("claude".to_string()),
+            "gemini" => Some("gemini".to_string()),
+            "opencode" => Some("opencode".to_string()),
+            _ => None,
+        };
+    }
+    None
 }

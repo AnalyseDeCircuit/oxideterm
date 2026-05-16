@@ -18,14 +18,17 @@ use oxideterm_terminal::{
     GraphicsOptions, LocalPtyConfig, ShellIntegrationLifecycleState, ShellIntegrationStatus,
     SshSessionConfig, TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy,
     TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
-    TerminalDrainBudget, TerminalEvent, TerminalLifecycle, TerminalSession, TerminalSnapshot,
-    TrzszTransferDirection, TrzszTransferSelection,
+    TerminalDrainBudget, TerminalDrainReport, TerminalEvent, TerminalLifecycle, TerminalSession,
+    TerminalSnapshot, TrzszTransferDirection, TrzszTransferSelection,
 };
 use oxideterm_trzsz::TrzszState;
 use parking_lot::Mutex;
 
 use crate::background_cache::BackgroundImageRenderCache;
-use crate::command_facts::{CommandFactLedger, TerminalAiCommandRecord, TerminalCommandFact};
+use crate::command_facts::{
+    CommandFactLedger, TerminalAiCommandRecord, TerminalAutosuggestCommandRecord,
+    TerminalCommandFact,
+};
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 use oxideterm_terminal_recording::{
@@ -83,7 +86,12 @@ pub struct TerminalPane {
     cursor_blink_terminal_enabled: bool,
     last_cursor_blink: Instant,
     last_terminal_input: Instant,
+    last_terminal_activity: Instant,
     last_drain_budget_exhausted: bool,
+    render_stats: TerminalRenderStats,
+    render_stats_window_start: Instant,
+    render_stats_window_frames: u32,
+    render_stats_window_writes: usize,
     image_cache: ImageRenderCache,
     background_image_cache: BackgroundImageRenderCache,
     bounds: Option<Bounds<Pixels>>,
@@ -283,7 +291,12 @@ impl TerminalPane {
             cursor_blink_terminal_enabled: false,
             last_cursor_blink: Instant::now(),
             last_terminal_input: Instant::now(),
+            last_terminal_activity: Instant::now(),
             last_drain_budget_exhausted: false,
+            render_stats: TerminalRenderStats::default(),
+            render_stats_window_start: Instant::now(),
+            render_stats_window_frames: 0,
+            render_stats_window_writes: 0,
             image_cache: {
                 let mut cache = ImageRenderCache::default();
                 cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
@@ -324,6 +337,10 @@ impl TerminalPane {
 
     pub fn ai_command_records(&self) -> Vec<TerminalAiCommandRecord> {
         self.command_fact_ledger.ai_records()
+    }
+
+    pub fn autosuggest_command_records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
+        self.command_fact_ledger.autosuggest_records()
     }
 
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
@@ -456,6 +473,7 @@ impl TerminalPane {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
+        let now = Instant::now();
         let budget = self.next_drain_budget();
         let (report, events) = {
             let mut terminal = self.terminal.lock();
@@ -464,6 +482,10 @@ impl TerminalPane {
             (report, terminal.take_events())
         };
         self.last_drain_budget_exhausted = report.budget_exhausted;
+        if report.changed {
+            self.last_terminal_activity = now;
+        }
+        self.update_render_stats(&report, now);
 
         for event in events {
             self.handle_terminal_event(event, cx);
@@ -471,6 +493,8 @@ impl TerminalPane {
 
         if report.changed {
             self.snapshot = self.terminal.lock().snapshot();
+            cx.notify();
+        } else if self.preferences.show_fps_overlay {
             cx.notify();
         }
 
@@ -485,6 +509,40 @@ impl TerminalPane {
             TerminalDrainBudget::new(drain.interactive_bytes, drain.max_events)
         } else {
             TerminalDrainBudget::new(drain.normal_bytes, drain.max_events)
+        }
+    }
+
+    fn current_render_tier(&self) -> TerminalRenderTier {
+        if self.last_drain_budget_exhausted {
+            TerminalRenderTier::Boost
+        } else if self.last_terminal_input.elapsed() <= Duration::from_millis(220)
+            || self.last_terminal_activity.elapsed() <= Duration::from_millis(600)
+        {
+            TerminalRenderTier::Normal
+        } else {
+            TerminalRenderTier::Idle
+        }
+    }
+
+    fn update_render_stats(&mut self, report: &TerminalDrainReport, now: Instant) {
+        self.render_stats_window_frames = self.render_stats_window_frames.saturating_add(1);
+        let writes = report
+            .events_drained
+            .max(usize::from(report.changed && report.drained_bytes > 0));
+        self.render_stats_window_writes = self.render_stats_window_writes.saturating_add(writes);
+        let elapsed = now.saturating_duration_since(self.render_stats_window_start);
+        let tier = self.current_render_tier();
+        self.render_stats.tier = tier;
+        self.render_stats.pending_bytes = report.pending_bytes;
+        if elapsed >= Duration::from_millis(500) {
+            let seconds = elapsed.as_secs_f64().max(0.001);
+            self.render_stats.fps =
+                (f64::from(self.render_stats_window_frames) / seconds).round() as u32;
+            self.render_stats.writes_per_sec =
+                (self.render_stats_window_writes as f64 / seconds).round() as u32;
+            self.render_stats_window_start = now;
+            self.render_stats_window_frames = 0;
+            self.render_stats_window_writes = 0;
         }
     }
 
@@ -706,6 +764,8 @@ impl TerminalPane {
         let Some(command) = self.input_tracker.apply_bytes(bytes) else {
             return;
         };
+        self.command_fact_ledger
+            .record_runtime_autosuggest_command(&command);
         if self.shell_integration_status.detected
             || !self.settings.command_marks_user_input_observed
         {

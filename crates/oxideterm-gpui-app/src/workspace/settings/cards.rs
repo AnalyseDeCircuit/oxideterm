@@ -536,6 +536,9 @@ impl WorkspaceApp {
                 .command_bar
                 .focus_handoff_commands
                 .join("\n"),
+            SettingsInput::TerminalCommandSpecsJson => {
+                self.load_terminal_command_specs_editor_value()
+            }
             SettingsInput::KeybindingSearch => self.keybinding_search_query.clone(),
             SettingsInput::CustomThemeName => self
                 .theme_editor
@@ -884,6 +887,9 @@ impl WorkspaceApp {
                     move |settings| settings.terminal.command_bar.focus_handoff_commands = commands,
                     cx,
                 );
+            }
+            SettingsInput::TerminalCommandSpecsJson => {
+                cx.notify();
             }
             SettingsInput::KeybindingSearch => {
                 self.keybinding_search_query = self.settings_input_draft.clone();
@@ -1320,6 +1326,7 @@ fn settings_input_accepts_newline(input: SettingsInput) -> bool {
     matches!(
         input,
         SettingsInput::TerminalCommandBarFocusHandoff
+            | SettingsInput::TerminalCommandSpecsJson
             | SettingsInput::AiSystemPrompt
             | SettingsInput::AiMemoryContent
             | SettingsInput::AiMcpArgs
