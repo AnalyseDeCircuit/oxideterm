@@ -40,6 +40,11 @@ impl WorkspaceApp {
                 )
             }
         };
+        let ai_rag_data_dir = default_rag_data_dir();
+        if let Err(error) = fs::create_dir_all(&ai_rag_data_dir) {
+            eprintln!("failed to create AI RAG data directory: {error}");
+        }
+        let ai_rag_store = Arc::new(oxideterm_ai::RagStore::new(&ai_rag_data_dir)?);
         // Mirror Tauri's split between SessionTree runtime state and NodeRouter:
         // the router resolves capabilities from this shared node runtime store
         // instead of owning the node lifecycle itself.
@@ -80,6 +85,19 @@ impl WorkspaceApp {
         // registry-owned timeout task rather than tying disconnects to a GPUI
         // render/update turn.
         ssh_registry.set_task_runtime(forwarding_runtime.handle().clone());
+        let ai_agent_fs = NodeAgentIdeFileSystem::new(
+            node_router.clone(),
+            crate::workspace::ide::node_agent_mode_from_settings(&settings),
+        );
+        let ai_key_store = oxideterm_ai::AiProviderKeyStore::new();
+        let ai_mcp_registry = oxideterm_ai::McpRegistry::new(ai_key_store.clone());
+        {
+            let registry = ai_mcp_registry.clone();
+            let configs = settings.ai.mcp_servers.clone();
+            forwarding_runtime.spawn(async move {
+                registry.connect_all_values(&configs).await;
+            });
+        }
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
@@ -107,6 +125,11 @@ impl WorkspaceApp {
             sidebar_resizing: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,
             sidebar_width: settings.sidebar_ui.width as f32,
+            ai_sidebar_resizing: false,
+            ai_sidebar_width: settings.sidebar_ui.ai_sidebar_width as f32,
+            ai_overlay_window_size: Some(current_window_size(window)),
+            ai_overlay_window_bounds_subscription: None,
+            knowledge_window_activation_subscription: None,
             needs_active_pane_focus: false,
             active_sidebar_section: SidebarSection::from_settings_key(
                 &settings.sidebar_ui.active_section,
@@ -117,8 +140,13 @@ impl WorkspaceApp {
             open_settings_select: None,
             ai_new_provider_type: "openai_compatible".to_string(),
             ai_provider_settings_expanded: true,
+            ai_tool_use_expanded: true,
+            ai_context_windows_expanded: true,
+            ai_model_reasoning_expanded: false,
             expanded_ai_providers: HashSet::new(),
             expanded_ai_provider_models: HashSet::new(),
+            expanded_ai_context_providers: HashSet::new(),
+            expanded_ai_model_reasoning_providers: HashSet::new(),
             ai_model_selector_open: false,
             ai_model_selector_search_focused: false,
             ai_model_selector_search_query: String::new(),
@@ -129,17 +157,71 @@ impl WorkspaceApp {
             ai_chat_store,
             ai_conversation_list_open: false,
             ai_chat_menu_open: false,
+            ai_profile_selector_open: false,
+            ai_safety_menu_open: false,
+            ai_safety_confirm_open: false,
+            ai_summarize_confirm_open: false,
+            ai_clear_all_confirm_open: false,
+            ai_delete_message_confirm: None,
+            ai_safety_bypass_conversations: HashSet::new(),
             ai_chat_draft: String::new(),
             ai_chat_input_focused: false,
+            ai_editing_message_id: None,
+            ai_editing_message_draft: String::new(),
+            ai_editing_message_focused: false,
+            ai_thinking_expansion_state: HashMap::new(),
+            ai_chat_autocomplete_index: 0,
+            ai_chat_autocomplete_suppressed: false,
+            ai_context_popover_open: false,
+            ai_model_switch_warning_percentage: None,
+            ai_context_trim_notice_count: None,
+            ai_context_trim_notice_sequence: 0,
+            ai_chat_include_context: false,
+            ai_chat_include_all_panes: false,
             ai_chat_loading: false,
             ai_chat_stream_generation: 0,
+            ai_chat_stream_task: None,
+            ai_chat_stream_rx: None,
+            ai_chat_stream_polling: false,
+            ai_pending_tool_approvals: HashMap::new(),
+            ai_agent_fs,
+            ai_mcp_registry,
+            ai_rag_store,
+            ai_mcp_add_dialog: None,
+            knowledge_selected_collection_id: None,
+            knowledge_create_dialog_open: false,
+            knowledge_new_document_dialog_open: false,
+            knowledge_embedding_config_expanded: false,
+            knowledge_new_collection_name: String::new(),
+            knowledge_new_document_title: String::new(),
+            knowledge_new_document_format: "markdown".to_string(),
+            knowledge_import_progress: None,
+            knowledge_embedding_progress: None,
+            knowledge_reindex_progress: None,
+            knowledge_reindex_cancel: None,
+            knowledge_reindex_rx: None,
+            knowledge_reindex_polling: false,
+            knowledge_delete_confirm: None,
+            knowledge_external_edit: None,
+            knowledge_error: None,
+            ai_compaction_rx: None,
+            ai_compaction_polling: false,
+            ai_compacting_conversations: HashSet::new(),
             next_ai_chat_sequence: 0,
-            ai_key_store: oxideterm_ai::AiProviderKeyStore::new(),
+            ai_key_store,
             ai_provider_key_status: HashMap::new(),
             ai_model_refresh_generations: HashMap::new(),
             ai_model_refreshing: HashSet::new(),
+            ai_model_refresh_tx: None,
+            ai_model_refresh_rx: None,
+            ai_model_refresh_polling: false,
+            ai_model_refresh_pending: 0,
             next_ai_model_refresh_generation: 0,
             next_ai_model_selector_probe_generation: 0,
+            ai_model_selector_probe_rx: None,
+            ai_model_selector_probe_tx: None,
+            ai_model_selector_probe_polling: false,
+            ai_model_selector_probe_pending: 0,
             show_ai_enable_confirm: false,
             ai_provider_key_remove_confirm: None,
             select_anchors: HashMap::new(),
@@ -256,6 +338,16 @@ impl WorkspaceApp {
             workspace_tooltip_pending: None,
             workspace_tooltip_generation: 0,
         };
+        workspace.ai_overlay_window_bounds_subscription =
+            Some(cx.observe_window_bounds(window, |this, window, cx| {
+                this.update_ai_sidebar_overlay_for_window_bounds(window, cx);
+            }));
+        workspace.knowledge_window_activation_subscription =
+            Some(cx.observe_window_activation(window, |this, window, cx| {
+                if window.is_window_active() {
+                    this.knowledge_sync_external_edit(false, cx);
+                }
+            }));
         workspace.restore_session_tree_snapshot();
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
         let window_handle = window.window_handle();
@@ -292,6 +384,7 @@ impl WorkspaceApp {
                                 || workspace.session_manager.focused_input.is_some()
                                 || workspace.sftp_view.focused_input.is_some()
                                 || workspace.graphics.focused_input.is_some()
+                                || workspace.ai_editing_message_focused
                             {
                                 workspace.new_connection_caret_visible =
                                     !workspace.new_connection_caret_visible;

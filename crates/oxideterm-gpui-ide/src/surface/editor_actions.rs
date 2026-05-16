@@ -14,6 +14,44 @@ impl IdeSurface {
             .collect()
     }
 
+    pub fn ai_context_snapshot(&self) -> Option<IdeAiContextSnapshot> {
+        let project_root = self.root_path.clone()?;
+        let project_name = Path::new(&project_root)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or(project_root.as_str())
+            .to_string();
+        let active_tab_id = self.workspace.active_tab();
+        let active_tab = active_tab_id
+            .and_then(|tab_id| self.workspace.tabs().iter().find(|tab| tab.id == tab_id));
+        let active_file = active_tab.and_then(|tab| match &tab.location {
+            IdeLocation::Remote { path, .. } => Some(path.clone()),
+            IdeLocation::Local { .. } => None,
+        });
+        let open_tab_paths = self.open_file_paths();
+        let buffer = active_tab_id.and_then(|tab_id| self.workspace.buffer(tab_id));
+        let is_dirty = buffer.is_some_and(|buffer| buffer.is_dirty());
+        let active_language = active_tab
+            .and_then(|tab| buffer.and_then(|buffer| language_for_location(&tab.location, &buffer.text)))
+            .map(|language| format!("{language:?}"));
+        let (code_snippet, snippet_start_line) = buffer
+            .map(|buffer| ai_code_snippet_around_start(&buffer.text))
+            .unwrap_or((None, 1));
+        Some(IdeAiContextSnapshot {
+            project_root,
+            project_name,
+            git_branch: self.git_branch.clone(),
+            active_file,
+            active_language,
+            is_dirty,
+            open_tab_count: self.workspace.tabs().len(),
+            open_tab_paths,
+            code_snippet,
+            snippet_start_line,
+        })
+    }
+
     pub fn retry_open_project(&mut self, cx: &mut Context<Self>) {
         let Some(node_id) = self.node_id.clone() else {
             return;
@@ -1455,4 +1493,23 @@ impl IdeSurface {
         cx.notify();
         false
     }
+}
+
+fn ai_code_snippet_around_start(text: &str) -> (Option<String>, usize) {
+    const MAX_LINES: usize = 21;
+    const MAX_CHARS: usize = 4000;
+    let snippet = text.lines().take(MAX_LINES).collect::<Vec<_>>().join("\n");
+    if snippet.trim().is_empty() {
+        return (None, 1);
+    }
+    if snippet.len() <= MAX_CHARS {
+        return (Some(snippet), 1);
+    }
+    let end = snippet
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= MAX_CHARS)
+        .last()
+        .unwrap_or(0);
+    (Some(format!("{}\n... (truncated)", &snippet[..end])), 1)
 }

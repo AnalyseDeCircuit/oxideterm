@@ -25,6 +25,12 @@
       "branch_prev": "上一版本",
       "branch_next": "下一版本"
     },
+    "profile": {
+      "default": "默认",
+      "select": "选择执行档案",
+      "active": "执行档案：{{profile}}",
+      "default_badge": "默认"
+    },
     "quick_prompts": {
       "explain_command": "解释命令",
       "explain_command_prompt": "解释这个命令的作用：",

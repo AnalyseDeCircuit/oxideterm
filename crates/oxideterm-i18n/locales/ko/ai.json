@@ -25,6 +25,12 @@
       "branch_prev": "이전 버전",
       "branch_next": "다음 버전"
     },
+    "profile": {
+      "default": "Default",
+      "select": "Select execution profile",
+      "active": "Execution profile: {{profile}}",
+      "default_badge": "Default"
+    },
     "quick_prompts": {
       "explain_command": "명령어 설명",
       "explain_command_prompt": "이 명령어가 무엇을 하는지 설명해 주세요: ",

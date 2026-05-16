@@ -283,6 +283,16 @@ impl WorkspaceApp {
                 .is_some_and(|select| select.anchor_id() == anchor.id)
                 || (self.open_new_connection_select == Some(NewConnectionSelect::Group)
                     && anchor.id == SelectAnchorId::NewConnectionGroup)
+                || (matches!(
+                    anchor.id,
+                    SelectAnchorId::AiPanelRoot
+                        | SelectAnchorId::AiConversationList
+                        | SelectAnchorId::AiChatMenu
+                        | SelectAnchorId::AiModelSelector
+                        | SelectAnchorId::AiProfileSelector
+                        | SelectAnchorId::AiSafetyMenu
+                        | SelectAnchorId::AiContextPopover
+                ) && self.has_ai_sidebar_floating_overlay())
                 || self
                     .settings_slider_drag
                     .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
@@ -584,6 +594,141 @@ impl WorkspaceApp {
                 .and_then(|provider| ai_provider_string(provider, "defaultModel"))
                 .unwrap_or_default(),
             SettingsInput::AiProviderApiKey(_) => String::new(),
+            SettingsInput::AiProfileName(index) => settings
+                .ai
+                .execution_profiles
+                .get("profiles")
+                .and_then(|profiles| profiles.as_array())
+                .and_then(|profiles| profiles.get(index))
+                .and_then(|profile| profile.get("name"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            SettingsInput::AiProfileModel(index) => settings
+                .ai
+                .execution_profiles
+                .get("profiles")
+                .and_then(|profiles| profiles.as_array())
+                .and_then(|profiles| profiles.get(index))
+                .and_then(|profile| profile.get("model"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            SettingsInput::AiSystemPrompt => settings.ai.custom_system_prompt.clone(),
+            SettingsInput::AiMemoryContent => settings.ai.memory.content.clone(),
+            SettingsInput::AiModelContextWindow(provider_index, model_index) => settings
+                .ai
+                .providers
+                .get(provider_index)
+                .and_then(ai_provider_id)
+                .and_then(|provider_id| {
+                    let model = settings
+                        .ai
+                        .providers
+                        .get(provider_index)
+                        .and_then(|provider| provider.get("models"))
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|models| models.get(model_index))
+                        .and_then(serde_json::Value::as_str)?;
+                    settings
+                        .ai
+                        .user_context_windows
+                        .get(&provider_id)
+                        .and_then(|windows| windows.get(model))
+                        .and_then(serde_json::Value::as_i64)
+                        .or_else(|| {
+                            Some(
+                                ai_model_context_window_info(
+                                    model,
+                                    &settings.ai.model_context_windows,
+                                    Some(&provider_id),
+                                    &settings.ai.user_context_windows,
+                                )
+                                .value,
+                            )
+                        })
+                        .map(|value| value.to_string())
+                })
+                .unwrap_or_default(),
+            SettingsInput::AiActiveModelMaxResponseTokens => settings
+                .ai
+                .active_provider_id
+                .as_ref()
+                .zip(settings.ai.active_model.as_ref())
+                .and_then(|(provider_id, model)| {
+                    settings
+                        .ai
+                        .model_max_response_tokens
+                        .get(provider_id)
+                        .and_then(|models| models.get(model))
+                        .and_then(serde_json::Value::as_i64)
+                })
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            SettingsInput::AiEmbeddingModel => settings
+                .ai
+                .embedding_config
+                .as_ref()
+                .and_then(|config| config.get("model"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            SettingsInput::AiMcpName => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .map(|draft| draft.name.clone())
+                .unwrap_or_default(),
+            SettingsInput::AiMcpCommand => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .map(|draft| draft.command.clone())
+                .unwrap_or_default(),
+            SettingsInput::AiMcpArgs => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .map(|draft| draft.args.clone())
+                .unwrap_or_default(),
+            SettingsInput::AiMcpUrl => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .map(|draft| draft.url.clone())
+                .unwrap_or_default(),
+            SettingsInput::AiMcpAuthHeaderName => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .map(|draft| draft.auth_header_name.clone())
+                .unwrap_or_default(),
+            SettingsInput::AiMcpAuthToken => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .map(|draft| draft.auth_token.clone())
+                .unwrap_or_default(),
+            SettingsInput::AiMcpEnvKey(index) => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .and_then(|draft| draft.env.get(index))
+                .map(|(key, _)| key.clone())
+                .unwrap_or_default(),
+            SettingsInput::AiMcpEnvValue(index) => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .and_then(|draft| draft.env.get(index))
+                .map(|(_, value)| value.clone())
+                .unwrap_or_default(),
+            SettingsInput::AiMcpHeaderKey(index) => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .and_then(|draft| draft.headers.get(index))
+                .map(|(key, _)| key.clone())
+                .unwrap_or_default(),
+            SettingsInput::AiMcpHeaderValue(index) => self
+                .ai_mcp_add_dialog
+                .as_ref()
+                .and_then(|draft| draft.headers.get(index))
+                .map(|(_, value)| value.clone())
+                .unwrap_or_default(),
+            SettingsInput::KnowledgeCollectionName => self.knowledge_new_collection_name.clone(),
+            SettingsInput::KnowledgeDocumentTitle => self.knowledge_new_document_title.clone(),
         }
     }
 
@@ -818,6 +963,196 @@ impl WorkspaceApp {
             SettingsInput::AiProviderApiKey(_) => {
                 cx.notify();
             }
+            SettingsInput::AiProfileName(index) => {
+                let value = self.settings_input_draft.clone();
+                self.edit_settings(
+                    move |settings| {
+                        ai_patch_execution_profile(settings, index, |profile| {
+                            profile.insert("name".to_string(), serde_json::json!(value.clone()));
+                            profile.insert(
+                                "updatedAt".to_string(),
+                                serde_json::json!(current_time_millis()),
+                            );
+                        });
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::AiProfileModel(index) => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    move |settings| {
+                        ai_patch_execution_profile(settings, index, |profile| {
+                            profile.insert(
+                                "model".to_string(),
+                                if value.is_empty() {
+                                    serde_json::Value::Null
+                                } else {
+                                    serde_json::json!(value.clone())
+                                },
+                            );
+                            profile.insert(
+                                "updatedAt".to_string(),
+                                serde_json::json!(current_time_millis()),
+                            );
+                        });
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::AiSystemPrompt => {
+                let value = self.settings_input_draft.clone();
+                self.edit_settings(|settings| settings.ai.custom_system_prompt = value.clone(), cx);
+            }
+            SettingsInput::AiMemoryContent => {
+                let value = self.settings_input_draft.clone();
+                self.edit_settings(|settings| settings.ai.memory.content = value.clone(), cx);
+            }
+            SettingsInput::AiModelContextWindow(provider_index, model_index) => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    move |settings| {
+                        let Some(provider_id) = settings
+                            .ai
+                            .providers
+                            .get(provider_index)
+                            .and_then(ai_provider_id)
+                        else {
+                            return;
+                        };
+                        let Some(model) = settings
+                            .ai
+                            .providers
+                            .get(provider_index)
+                            .and_then(|provider| provider.get("models"))
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|models| models.get(model_index))
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
+                        else {
+                            return;
+                        };
+                        set_ai_user_context_window(settings, &provider_id, &model, value.parse().ok());
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::AiActiveModelMaxResponseTokens => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    move |settings| {
+                        let Some(provider_id) = settings.ai.active_provider_id.clone() else {
+                            return;
+                        };
+                        let Some(model) = settings.ai.active_model.clone() else {
+                            return;
+                        };
+                        set_ai_model_max_response_tokens(settings, &provider_id, &model, value.parse().ok());
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::AiEmbeddingModel => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    move |settings| {
+                        let mut config = settings
+                            .ai
+                            .embedding_config
+                            .take()
+                            .unwrap_or_else(|| serde_json::json!({ "providerId": null, "model": "" }));
+                        if let Some(object) = config.as_object_mut() {
+                            object.insert("model".to_string(), serde_json::json!(value.clone()));
+                        }
+                        settings.ai.embedding_config = Some(config);
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::AiMcpName => {
+                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
+                    draft.name = self.settings_input_draft.trim().to_string();
+                }
+                cx.notify();
+            }
+            SettingsInput::AiMcpCommand => {
+                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
+                    draft.command = self.settings_input_draft.trim().to_string();
+                }
+                cx.notify();
+            }
+            SettingsInput::AiMcpArgs => {
+                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
+                    draft.args = self.settings_input_draft.clone();
+                }
+                cx.notify();
+            }
+            SettingsInput::AiMcpUrl => {
+                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
+                    draft.url = self.settings_input_draft.trim().to_string();
+                }
+                cx.notify();
+            }
+            SettingsInput::AiMcpAuthHeaderName => {
+                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
+                    draft.auth_header_name = self.settings_input_draft.trim().to_string();
+                }
+                cx.notify();
+            }
+            SettingsInput::AiMcpAuthToken => {
+                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
+                    draft.auth_token = self.settings_input_draft.clone();
+                }
+                cx.notify();
+            }
+            SettingsInput::AiMcpEnvKey(index) => {
+                if let Some((key, _)) = self
+                    .ai_mcp_add_dialog
+                    .as_mut()
+                    .and_then(|draft| draft.env.get_mut(index))
+                {
+                    *key = self.settings_input_draft.trim().to_string();
+                }
+                cx.notify();
+            }
+            SettingsInput::AiMcpEnvValue(index) => {
+                if let Some((_, value)) = self
+                    .ai_mcp_add_dialog
+                    .as_mut()
+                    .and_then(|draft| draft.env.get_mut(index))
+                {
+                    *value = self.settings_input_draft.clone();
+                }
+                cx.notify();
+            }
+            SettingsInput::AiMcpHeaderKey(index) => {
+                if let Some((key, _)) = self
+                    .ai_mcp_add_dialog
+                    .as_mut()
+                    .and_then(|draft| draft.headers.get_mut(index))
+                {
+                    *key = self.settings_input_draft.trim().to_string();
+                }
+                cx.notify();
+            }
+            SettingsInput::AiMcpHeaderValue(index) => {
+                if let Some((_, value)) = self
+                    .ai_mcp_add_dialog
+                    .as_mut()
+                    .and_then(|draft| draft.headers.get_mut(index))
+                {
+                    *value = self.settings_input_draft.clone();
+                }
+                cx.notify();
+            }
+            SettingsInput::KnowledgeCollectionName => {
+                self.knowledge_new_collection_name = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::KnowledgeDocumentTitle => {
+                self.knowledge_new_document_title = self.settings_input_draft.clone();
+                cx.notify();
+            }
         }
     }
 
@@ -977,11 +1312,20 @@ impl WorkspaceApp {
 }
 
 fn settings_input_accepts_newline(input: SettingsInput) -> bool {
-    matches!(input, SettingsInput::TerminalCommandBarFocusHandoff)
+    matches!(
+        input,
+        SettingsInput::TerminalCommandBarFocusHandoff
+            | SettingsInput::AiSystemPrompt
+            | SettingsInput::AiMemoryContent
+            | SettingsInput::AiMcpArgs
+    )
 }
 
 fn settings_input_is_secret(input: SettingsInput) -> bool {
-    matches!(input, SettingsInput::AiProviderApiKey(_))
+    matches!(
+        input,
+        SettingsInput::AiProviderApiKey(_) | SettingsInput::AiMcpAuthToken
+    )
 }
 
 fn parse_focus_handoff_command_list(input: &str) -> Vec<String> {

@@ -72,7 +72,7 @@ pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String
                 system_parts.push(message.content.clone());
             }
             AiChatRole::System => {}
-            AiChatRole::User | AiChatRole::Assistant => {
+            AiChatRole::User | AiChatRole::Assistant | AiChatRole::Tool => {
                 let role = if message.role == AiChatRole::Assistant {
                     "model"
                 } else {

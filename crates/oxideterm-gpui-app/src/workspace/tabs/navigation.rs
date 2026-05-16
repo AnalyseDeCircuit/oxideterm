@@ -86,7 +86,8 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn focus_active_pane(&self, window: &mut Window, cx: &App) {
+    pub(super) fn focus_active_pane(&mut self, window: &mut Window, cx: &App) {
+        self.clear_ai_sidebar_keyboard_focus();
         if let Some(pane) = self.active_pane() {
             pane.read(cx).focus(window);
         } else {
@@ -498,7 +499,12 @@ impl WorkspaceApp {
         } else {
             self.sidebar_width
         };
-        (window_width - sidebar_width).max(0.0)
+        let ai_sidebar_width = if self.ai_sidebar_visible() {
+            self.ai_sidebar_width
+        } else {
+            0.0
+        };
+        (window_width - sidebar_width - ai_sidebar_width).max(0.0)
     }
 
     fn tabbar_content_width(&self) -> f32 {

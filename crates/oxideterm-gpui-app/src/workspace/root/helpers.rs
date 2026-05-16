@@ -17,6 +17,14 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
     }
 }
 
+fn current_window_size(window: &Window) -> (f32, f32) {
+    let bounds = window.inner_window_bounds().get_bounds();
+    (
+        f32::from(bounds.size.width),
+        f32::from(bounds.size.height),
+    )
+}
+
 fn terminal_background_fit(fit: BackgroundFit) -> TerminalBackgroundFit {
     match fit {
         BackgroundFit::Cover => TerminalBackgroundFit::Cover,

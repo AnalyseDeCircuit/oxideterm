@@ -7,3 +7,6 @@ version.workspace = true
 [dependencies]
 gpui.workspace = true
 oxideterm-theme = { path = "../oxideterm-theme" }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

@@ -115,6 +115,8 @@ impl WorkspaceApp {
         let active = if section == SidebarSection::Notifications {
             self.active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::NotificationCenter)
+        } else if section == SidebarSection::Assistant {
+            self.ai_sidebar_visible()
         } else {
             self.active_sidebar_section == section
         };
@@ -247,6 +249,8 @@ impl WorkspaceApp {
                         this.open_graphics_tab(window, cx);
                     } else if section == SidebarSection::Notifications {
                         this.open_notification_center_tab(window, cx);
+                    } else if section == SidebarSection::Assistant {
+                        let _ = this.toggle_ai_sidebar(cx);
                     } else {
                         this.active_surface = ActiveSurface::Terminal;
                         this.set_sidebar_section(section, cx);

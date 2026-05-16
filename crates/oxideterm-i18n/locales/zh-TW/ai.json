@@ -25,6 +25,12 @@
       "branch_prev": "上一版本",
       "branch_next": "下一版本"
     },
+    "profile": {
+      "default": "預設",
+      "select": "選擇執行設定檔",
+      "active": "執行設定檔：{{profile}}",
+      "default_badge": "預設"
+    },
     "quick_prompts": {
       "explain_command": "解釋命令",
       "explain_command_prompt": "解釋這個命令的作用：",

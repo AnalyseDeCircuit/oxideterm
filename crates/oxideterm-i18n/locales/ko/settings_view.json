@@ -934,6 +934,7 @@
       "scope": "범위",
       "scope_global": "전역",
       "scope_connection": "연결별",
+      "format": "형식",
       "no_collections": "컨렉션이 없습니다. 문서 가져오기를 시작하려면 새로 만드세요.",
       "import_files": "파일 가져오기",
       "generate_embeddings": "임베딩 생성",

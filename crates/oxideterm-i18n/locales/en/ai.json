@@ -25,6 +25,12 @@
       "branch_prev": "Previous version",
       "branch_next": "Next version"
     },
+    "profile": {
+      "default": "Default",
+      "select": "Select execution profile",
+      "active": "Execution profile: {{profile}}",
+      "default_badge": "Default"
+    },
     "quick_prompts": {
       "explain_command": "Explain a command",
       "explain_command_prompt": "Explain what this command does: ",

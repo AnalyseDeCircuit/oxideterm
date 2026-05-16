@@ -30,6 +30,121 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(super) fn render_ai_right_sidebar_region(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .relative()
+            .w(px(self.ai_sidebar_width))
+            .flex_none()
+            .h_full()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .bg(rgb(theme.bg))
+            .border_l_1()
+            .border_color(rgba((theme.border << 8) | 0x80))
+            .child(
+                div()
+                    .w_full()
+                    .h(px(42.0))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_3()
+                    .border_b_1()
+                    .border_color(rgba((theme.border << 8) | 0x4d))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Sparkles,
+                                16.0,
+                                rgb(theme.accent),
+                            ))
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text))
+                                    .child(self.i18n.t("sidebar.panels.ai")),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("ai-sidebar-collapse")
+                            .size(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.md))
+                            .cursor_pointer()
+                            .hover(move |button| button.bg(rgb(theme.bg_hover)))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::PanelRightClose,
+                                16.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .on_mouse_move(cx.listener({
+                                let label = self.i18n.t("sidebar.tooltips.collapse");
+                                move |this, event: &MouseMoveEvent, _window, cx| {
+                                    this.queue_workspace_tooltip(
+                                        "ai-sidebar-collapse",
+                                        label.clone(),
+                                        f32::from(event.position.x) + 12.0,
+                                        f32::from(event.position.y) + 16.0,
+                                        cx,
+                                    );
+                                }
+                            }))
+                            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                                if !*hovered {
+                                    this.clear_workspace_tooltip("ai-sidebar-collapse", cx);
+                                }
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    let _ = this.toggle_ai_sidebar(cx);
+                                }),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(self.render_ai_sidebar_content(cx)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(4.0))
+                    .cursor(CursorStyle::ResizeColumn)
+                    .bg(if self.ai_sidebar_resizing {
+                        rgb(theme.accent)
+                    } else {
+                        rgba(theme.bg << 8)
+                    })
+                    .hover(|handle| handle.bg(rgba((theme.accent << 8) | 0x80)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event, window, cx| {
+                            this.start_ai_sidebar_resize(event, window, cx);
+                        }),
+                    ),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -50,7 +165,6 @@ impl WorkspaceApp {
         let title_key = match self.active_sidebar_section {
             SidebarSection::Connections => "sidebar.panels.saved_connections",
             SidebarSection::Notifications => "sidebar.panels.event_log",
-            SidebarSection::Assistant => "ai.chat.title",
             _ => "sidebar.panels.sessions",
         };
         let mut header = div()
@@ -154,9 +268,6 @@ impl WorkspaceApp {
         }
         if self.active_sidebar_section == SidebarSection::Sessions {
             return self.render_active_sessions_sidebar_content(cx);
-        }
-        if self.active_sidebar_section == SidebarSection::Assistant {
-            return self.render_ai_sidebar_content(cx);
         }
         self.render_empty_sessions_sidebar_content()
     }

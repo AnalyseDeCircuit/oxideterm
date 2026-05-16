@@ -416,6 +416,13 @@ impl TerminalPane {
         self.send_text(&input, cx);
     }
 
+    pub fn send_ai_input_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
+        if bytes.is_empty() || !self.terminal_accepts_input() {
+            return;
+        }
+        self.send_user_protocol_bytes(bytes, cx);
+    }
+
     pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;

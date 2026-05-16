@@ -934,6 +934,7 @@
       "scope": "Geltungsbereich",
       "scope_global": "Global",
       "scope_connection": "Verbindungsspezifisch",
+      "format": "Format",
       "no_collections": "Keine Sammlungen vorhanden. Erstellen Sie eine, um mit dem Import zu beginnen.",
       "import_files": "Dateien importieren",
       "generate_embeddings": "Embeddings generieren",

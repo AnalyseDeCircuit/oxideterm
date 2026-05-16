@@ -25,6 +25,12 @@
       "branch_prev": "Phiên bản trước",
       "branch_next": "Phiên bản sau"
     },
+    "profile": {
+      "default": "Default",
+      "select": "Select execution profile",
+      "active": "Execution profile: {{profile}}",
+      "default_badge": "Default"
+    },
     "quick_prompts": {
       "explain_command": "Giải thích lệnh",
       "explain_command_prompt": "Giải thích lệnh này làm gì: ",

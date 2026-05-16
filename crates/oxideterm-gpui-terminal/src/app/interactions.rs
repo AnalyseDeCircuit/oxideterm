@@ -162,6 +162,10 @@ impl TerminalPane {
             .join("\n")
     }
 
+    pub fn visible_text_snapshot(&self) -> String {
+        self.snapshot_text()
+    }
+
     fn copy_text(&self) -> String {
         self.selected_text()
             .filter(|text| !text.is_empty())
@@ -224,6 +228,10 @@ impl TerminalPane {
 
     fn selected_text(&self) -> Option<String> {
         selected_text_for_selection(&self.snapshot, self.selection?)
+    }
+
+    pub fn selected_text_snapshot(&self) -> Option<String> {
+        self.selected_text().filter(|text| !text.is_empty())
     }
 
     fn copy_selection_to_clipboard_if_present(&mut self, cx: &mut Context<Self>) -> bool {

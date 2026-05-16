@@ -162,6 +162,23 @@ impl SftpSession {
         })
     }
 
+    pub async fn read_file_bytes(&self, path: &str) -> Result<Vec<u8>, SftpError> {
+        let canonical_path = self.resolve_path(path).await?;
+        let metadata = self
+            .sftp
+            .metadata(&canonical_path)
+            .await
+            .map_err(|error| self.map_sftp_error(error, &canonical_path))?;
+        if metadata.is_dir() {
+            return Err(SftpError::DirectoryNotFound(canonical_path));
+        }
+        self.read_file_limited(
+            &canonical_path,
+            metadata.size.unwrap_or(0).try_into().unwrap_or(usize::MAX),
+        )
+        .await
+    }
+
     pub async fn write_content(
         &self,
         path: &str,

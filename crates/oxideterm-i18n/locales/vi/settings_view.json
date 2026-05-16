@@ -934,6 +934,7 @@
       "scope": "Phạm vi",
       "scope_global": "Toàn cục",
       "scope_connection": "Theo kết nối",
+      "format": "Định dạng",
       "no_collections": "Chưa có bộ sưu tập nào. Tạo một bộ để bắt đầu nhập tài liệu.",
       "import_files": "Nhập tệp",
       "generate_embeddings": "Tạo embeddings",

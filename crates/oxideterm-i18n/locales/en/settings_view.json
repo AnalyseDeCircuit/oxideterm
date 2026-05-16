@@ -934,6 +934,7 @@
       "scope": "Scope",
       "scope_global": "Global",
       "scope_connection": "Connection-specific",
+      "format": "Format",
       "no_collections": "No collections yet. Create one to start importing documents.",
       "import_files": "Import Files",
       "generate_embeddings": "Generate Embeddings",

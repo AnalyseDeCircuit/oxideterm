@@ -617,9 +617,11 @@ fn render_math(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
 ) -> AnyElement {
-    match math::render_math_svg_image(latex, display, tokens, opts) {
-        Ok(image) => {
-            let formula = img(image).max_w(relative(1.0));
+    match math::render_math_svg(latex, display, tokens, opts) {
+        Ok(rendered) => {
+            let formula = img(rendered.image)
+                .w(px(rendered.display_width))
+                .max_w(relative(1.0));
             if display {
                 div()
                     .w_full()

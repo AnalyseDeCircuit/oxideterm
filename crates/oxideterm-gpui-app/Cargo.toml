@@ -26,6 +26,7 @@ oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
 oxideterm-launcher = { path = "../oxideterm-launcher" }
 oxideterm-local-files = { path = "../oxideterm-local-files" }
 oxideterm-notification-center = { path = "../oxideterm-notification-center" }
@@ -45,6 +46,7 @@ parking_lot.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sysinfo.workspace = true
 tokio.workspace = true
 uuid.workspace = true

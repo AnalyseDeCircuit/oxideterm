@@ -52,10 +52,16 @@ pub fn ai_sidebar_header(
 }
 
 pub fn ai_chat_panel(tokens: &ThemeTokens) -> Div {
+    // Tauri's root is `h-full flex flex-col bg-theme-bg relative`.
+    // GPUI does not inherit the same flex min-size defaults, so make the native
+    // panel an explicit full-width clipping flex root.
     div()
+        .w_full()
         .h_full()
+        .min_h_0()
         .flex()
         .flex_col()
+        .overflow_hidden()
         .bg(rgb(tokens.ui.bg))
         .text_color(rgb(tokens.ui.text))
 }
@@ -63,6 +69,7 @@ pub fn ai_chat_panel(tokens: &ThemeTokens) -> Div {
 pub fn ai_chat_scroll_area(tokens: &ThemeTokens, id: impl Into<ElementId>) -> Stateful<Div> {
     div()
         .id(id)
+        .w_full()
         .flex_1()
         .min_h_0()
         .overflow_y_scroll()
@@ -126,6 +133,8 @@ pub fn ai_context_chip(
 
 pub fn ai_chat_input_root(tokens: &ThemeTokens) -> Div {
     div()
+        .w_full()
+        .flex_none()
         .bg(rgb(tokens.ui.bg))
         .border_t_1()
         .border_color(bg_alpha(
@@ -149,6 +158,8 @@ pub fn ai_chat_input_chips(tokens: &ThemeTokens) -> Div {
 pub fn ai_chat_input_frame(tokens: &ThemeTokens, focused: bool) -> Div {
     div()
         .relative()
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
         .rounded(px(tokens.radii.md))
@@ -170,6 +181,7 @@ pub fn ai_chat_input_frame(tokens: &ThemeTokens, focused: bool) -> Div {
 pub fn ai_chat_input_editor(tokens: &ThemeTokens, editor: impl IntoElement) -> Div {
     div()
         .w_full()
+        .min_w_0()
         .min_h(px(AI_CHAT_INPUT_MIN_HEIGHT))
         .px(px(tokens.spacing.three))
         .py(px(tokens.spacing.two))
@@ -185,6 +197,8 @@ pub fn ai_chat_input_footer(
     trailing: impl IntoElement,
 ) -> Div {
     div()
+        .w_full()
+        .min_w_0()
         .flex()
         .items_center()
         .justify_between()
@@ -375,6 +389,7 @@ pub fn ai_message_body(
     content: impl IntoElement,
 ) -> Div {
     div()
+        .w_full()
         .mt(px(tokens.spacing.one))
         .when(role == AiMessageRole::User, |body| {
             body.rounded(px(tokens.radii.md))
@@ -653,4 +668,110 @@ pub fn ai_raw_block(
         .text_color(muted_text(tokens, 0.65))
         .whitespace_normal()
         .child(content.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{
+        Context, InteractiveElement, IntoElement, ParentElement, Render, Styled, TestAppContext,
+        Window, div, px, size,
+    };
+    use oxideterm_theme::{ThemeTokens, default_tokens};
+
+    struct TestAiChatPanel {
+        tokens: ThemeTokens,
+    }
+
+    impl Render for TestAiChatPanel {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w_full()
+                .h_full()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .debug_selector(|| "outer".to_string())
+                .child(
+                    div()
+                        .h(px(42.0))
+                        .flex_none()
+                        .debug_selector(|| "sidebar-header".to_string()),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_hidden()
+                        .debug_selector(|| "content-wrapper".to_string())
+                        .child(
+                            ai_chat_panel(&self.tokens)
+                                .debug_selector(|| "panel".to_string())
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .h(px(36.0))
+                                        .debug_selector(|| "header".to_string()),
+                                )
+                                .child(
+                                    ai_chat_scroll_area(&self.tokens, "scroll")
+                                        .debug_selector(|| "scroll".to_string())
+                                        .p_0()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .debug_selector(|| "body".to_string())
+                                                .children((0..12).map(|index| {
+                                                    div()
+                                                        .h(px(72.0))
+                                                        .child(format!("message {index}"))
+                                                        .into_any_element()
+                                                })),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .h(px(36.0))
+                                        .debug_selector(|| "model-bar".to_string()),
+                                )
+                                .child(
+                                    ai_chat_input_root(&self.tokens)
+                                        .debug_selector(|| "input".to_string())
+                                        .child(div().h(px(92.0))),
+                                ),
+                        ),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn ai_chat_scroll_area_is_bounded_between_fixed_header_and_footer(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TestAiChatPanel {
+            tokens: default_tokens(),
+        });
+        cx.simulate_resize(size(px(420.0), px(600.0)));
+        cx.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+
+        let scroll = cx.debug_bounds("scroll").expect("scroll bounds");
+        let model_bar = cx.debug_bounds("model-bar").expect("model bar bounds");
+        let input = cx.debug_bounds("input").expect("input bounds");
+        let content_wrapper = cx
+            .debug_bounds("content-wrapper")
+            .expect("content wrapper bounds");
+
+        assert_eq!(scroll.origin.y + scroll.size.height, model_bar.origin.y);
+        assert_eq!(model_bar.origin.y + model_bar.size.height, input.origin.y);
+        assert!(
+            input.origin.y + input.size.height
+                <= content_wrapper.origin.y + content_wrapper.size.height
+        );
+        assert_eq!(scroll.size.width, content_wrapper.size.width);
+        assert_eq!(input.size.width, content_wrapper.size.width);
+    }
 }

@@ -44,9 +44,11 @@ impl WorkspaceApp {
                     .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
                         // GPUI can advance scroll state without rebuilding the settings view,
                         // so cached trigger bounds must not survive a settings scroll.
-                        this.open_settings_select = None;
+                        let had_open_select = this.open_settings_select.take().is_some();
                         this.clear_settings_select_anchors();
-                        cx.notify();
+                        if had_open_select {
+                            cx.notify();
+                        }
                     }))
                     .child(
                         div()
@@ -59,6 +61,18 @@ impl WorkspaceApp {
                             .child(self.render_settings_tab_content(cx)),
                     ),
             )
+            .when_some(self.render_ai_mcp_add_server_dialog(cx), |surface, modal| {
+                surface.child(modal)
+            })
+            .when_some(self.render_knowledge_create_collection_dialog(cx), |surface, modal| {
+                surface.child(modal)
+            })
+            .when_some(self.render_knowledge_new_document_dialog(cx), |surface, modal| {
+                surface.child(modal)
+            })
+            .when_some(self.render_knowledge_delete_confirm_dialog(cx), |surface, modal| {
+                surface.child(modal)
+            })
             .when_some(self.render_settings_select_overlay(cx), |surface, overlay| {
                 surface.child(overlay)
             })
@@ -206,7 +220,7 @@ impl WorkspaceApp {
                 SettingsTab::Sftp => self.settings_sftp(cx),
                 SettingsTab::Ide => self.settings_ide(cx),
                 SettingsTab::Ai => self.settings_ai(cx),
-                SettingsTab::Knowledge => self.settings_knowledge(),
+                SettingsTab::Knowledge => self.settings_knowledge(cx),
                 SettingsTab::Keybindings => self.settings_keybindings(),
                 SettingsTab::Help => self.settings_help(cx),
             })
@@ -260,8 +274,18 @@ impl WorkspaceApp {
             reconnect_timing_from_settings(&settings),
             reconnect_max_attempts_from_settings(&settings),
         );
+        self.ai_agent_fs
+            .set_mode(crate::workspace::ide::node_agent_mode_from_settings(&settings));
+        {
+            let registry = self.ai_mcp_registry.clone();
+            let configs = settings.ai.mcp_servers.clone();
+            self.forwarding_runtime.spawn(async move {
+                registry.connect_all_values(&configs).await;
+            });
+        }
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_width = settings.sidebar_ui.width as f32;
+        self.ai_sidebar_width = settings.sidebar_ui.ai_sidebar_width as f32;
         let panes = self
             .panes
             .iter()

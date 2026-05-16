@@ -1,6 +1,8 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use gpui::{
-    AnchoredPositionMode, Corner, Div, ObjectFit, PathPromptOptions, StatefulInteractiveElement,
-    StyledImage, anchored, deferred, point,
+    AnchoredPositionMode, Corner, Div, ObjectFit, PathPromptOptions, Rgba,
+    StatefulInteractiveElement, StyledImage, anchored, deferred, point,
 };
 use gpui_component::scroll::ScrollableElement;
 use oxideterm_settings::{
@@ -13,14 +15,15 @@ use super::ime::WorkspaceImeTarget;
 use super::*;
 use oxideterm_ai::{
     AI_PROVIDER_TEMPLATES, AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, AiProviderView,
-    add_provider_from_template as ai_add_provider_from_template,
+    ContextWindowSource, add_provider_from_template as ai_add_provider_from_template,
     apply_provider_model_refresh as ai_apply_provider_model_refresh, fetch_provider_models,
-    generated_provider_id, provider_id as ai_provider_id,
-    provider_key_display_state as ai_provider_key_display_state,
+    generated_provider_id, model_context_window_info as ai_model_context_window_info,
+    provider_id as ai_provider_id, provider_key_display_state as ai_provider_key_display_state,
     provider_refresh_key_policy as ai_provider_refresh_key_policy,
     provider_string as ai_provider_string,
     provider_template_by_type as ai_provider_template_by_type, provider_view as ai_provider_view,
-    provider_views as ai_provider_views_from_values, remove_provider_at as ai_remove_provider_at,
+    provider_views as ai_provider_views_from_values,
+    remove_provider_at_with_scoped_settings as ai_remove_provider_at_with_scoped_settings,
     set_active_provider_selection as ai_set_active_provider_selection,
     set_provider_default_model as ai_set_provider_default_model,
     take_provider_key_secret as ai_take_provider_key_secret,
@@ -35,7 +38,10 @@ use oxideterm_gpui_ui::{
     button,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
     checkbox::checkbox,
-    modal::{dialog_backdrop, popover_backdrop},
+    modal::{
+        dialog_backdrop, dialog_content, dialog_description, dialog_footer, dialog_header,
+        dialog_title, popover_backdrop,
+    },
     select::{
         OverlayAnchor, SelectAnchorId, select_anchor_probe, select_label, select_option,
         select_overlay_popup, select_panel_overlay_popup_with_max_height, select_separator,

@@ -102,7 +102,7 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.active_sidebar_section == SidebarSection::Assistant
+        if self.ai_sidebar_visible()
             && (self.ai_chat_input_focused || self.ai_model_selector_search_focused)
         {
             let _ = self.handle_ai_sidebar_key(event, cx);

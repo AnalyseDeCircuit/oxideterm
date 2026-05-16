@@ -35,22 +35,32 @@ enum AgentMessage {
     Notification(AgentNotification),
 }
 
-#[derive(Deserialize, Serialize)]
-struct ReadFileResult {
-    content: String,
-    hash: String,
-    size: u64,
-    mtime: u64,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReadFileResult {
+    pub content: String,
+    pub hash: String,
+    pub size: u64,
+    pub mtime: u64,
     #[serde(default = "plain_encoding")]
-    encoding: String,
+    pub encoding: String,
 }
 
-#[derive(Deserialize, Serialize)]
-struct WriteFileResult {
-    hash: String,
-    size: u64,
-    mtime: u64,
-    atomic: bool,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct WriteFileResult {
+    pub hash: String,
+    pub size: u64,
+    pub mtime: u64,
+    pub atomic: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum NodeAgentRpcError {
+    #[error("Agent unavailable: {0}")]
+    Unavailable(String),
+    #[error("Agent conflict: {0}")]
+    Conflict(String),
+    #[error("Agent RPC failed: {0}")]
+    Other(String),
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -606,6 +606,533 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Ai, SettingsSelect::AiContextMaxChars) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for value in AI_CONTEXT_MAX_CHAR_OPTIONS {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            self.ai_context_max_chars_label(value),
+                            settings.ai.context_max_chars == value,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    move |settings| set_ai_context_max_chars(settings, value),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai, SettingsSelect::AiContextVisibleLines) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for value in AI_CONTEXT_VISIBLE_LINE_OPTIONS {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            self.ai_context_visible_lines_label(value),
+                            settings.ai.context_visible_lines == value,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    move |settings| set_ai_context_lines(settings, value),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai, SettingsSelect::AiGlobalReasoning) => {
+                let current = ai_reasoning_profile_value(settings.ai.reasoning_effort);
+                let mut popup = select_overlay_popup(&self.tokens, width.max(AI_PROVIDER_SELECT_W));
+                for value in ["auto", "off", "low", "medium", "high", "max"] {
+                    popup = popup.child(
+                        select_option(&self.tokens, self.ai_reasoning_display(value), current == value)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.open_settings_select = None;
+                                    this.edit_settings(
+                                        move |settings| {
+                                            settings.ai.reasoning_effort =
+                                                ai_reasoning_effort_from_profile_value(value);
+                                        },
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai, SettingsSelect::AiProfileProvider(profile_index)) => {
+                let mut popup = select_panel_overlay_popup_with_max_height(
+                    &self.tokens,
+                    width.max(AI_PROVIDER_SELECT_W),
+                    320.0,
+                );
+                let current = settings
+                    .ai
+                    .execution_profiles
+                    .get("profiles")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|profiles| profiles.get(profile_index))
+                    .and_then(|profile| profile.get("providerId"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                popup = popup.child(
+                    select_option(
+                        &self.tokens,
+                        self.i18n.t("settings_view.ai.profile_inherit_provider"),
+                        current.is_none(),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.open_settings_select = None;
+                            this.edit_settings(
+                                move |settings| {
+                                    ai_patch_execution_profile(settings, profile_index, |profile| {
+                                        profile.insert(
+                                            "providerId".to_string(),
+                                            serde_json::Value::Null,
+                                        );
+                                        profile.insert("model".to_string(), serde_json::Value::Null);
+                                        profile.insert(
+                                            "updatedAt".to_string(),
+                                            serde_json::json!(current_time_millis()),
+                                        );
+                                    });
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+                for provider in ai_provider_views(settings) {
+                    let provider_id = provider.id.clone();
+                    let default_model = provider.default_model.clone();
+                    let selected = current.as_deref() == Some(provider.id.as_str());
+                    popup = popup.child(
+                        select_option(&self.tokens, provider.name, selected).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                let provider_id = provider_id.clone();
+                                let default_model = default_model.clone();
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    move |settings| {
+                                        ai_patch_execution_profile(settings, profile_index, |profile| {
+                                            profile.insert(
+                                                "providerId".to_string(),
+                                                serde_json::json!(provider_id.clone()),
+                                            );
+                                            profile.insert(
+                                                "model".to_string(),
+                                                if default_model.trim().is_empty() {
+                                                    serde_json::Value::Null
+                                                } else {
+                                                    serde_json::json!(default_model.clone())
+                                                },
+                                            );
+                                            profile.insert(
+                                                "updatedAt".to_string(),
+                                                serde_json::json!(current_time_millis()),
+                                            );
+                                        });
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai, SettingsSelect::AiProfileReasoning(profile_index)) => {
+                let current = settings
+                    .ai
+                    .execution_profiles
+                    .get("profiles")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|profiles| profiles.get(profile_index))
+                    .and_then(|profile| profile.get("reasoningEffort"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("auto")
+                    .to_string();
+                let mut popup = select_overlay_popup(&self.tokens, width.max(160.0));
+                for value in ["auto", "off", "low", "medium", "high", "max"] {
+                    popup = popup.child(
+                        select_option(&self.tokens, self.ai_reasoning_display(value), current == value)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.open_settings_select = None;
+                                    this.edit_settings(
+                                        move |settings| {
+                                            ai_patch_execution_profile(settings, profile_index, |profile| {
+                                                profile.insert(
+                                                    "reasoningEffort".to_string(),
+                                                    serde_json::json!(value),
+                                                );
+                                                profile.insert(
+                                                    "updatedAt".to_string(),
+                                                    serde_json::json!(current_time_millis()),
+                                                );
+                                            });
+                                        },
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai, SettingsSelect::AiProviderReasoning(provider_index)) => {
+                let Some(provider_id) = settings.ai.providers.get(provider_index).and_then(ai_provider_id) else {
+                    return None;
+                };
+                let current = settings
+                    .ai
+                    .reasoning_provider_overrides
+                    .get(&provider_id)
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let mut popup = select_overlay_popup(&self.tokens, width.max(192.0));
+                let global =
+                    self.ai_reasoning_display(ai_reasoning_profile_value(settings.ai.reasoning_effort));
+                let inherit_provider_id = provider_id.clone();
+                popup = popup.child(
+                    select_option(
+                        &self.tokens,
+                        self.i18n
+                            .t("settings_view.ai.reasoning_inherit_global")
+                            .replace("{{value}}", &global),
+                        current.is_none(),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            let provider_id = inherit_provider_id.clone();
+                            this.open_settings_select = None;
+                            this.edit_settings(
+                                move |settings| {
+                                    set_ai_provider_reasoning_override(settings, &provider_id, None);
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+                for value in ["auto", "off", "low", "medium", "high", "max"] {
+                    let selected = current.as_deref() == Some(value);
+                    let option_provider_id = provider_id.clone();
+                    popup = popup.child(
+                        select_option(&self.tokens, self.ai_reasoning_display(value), selected)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    let provider_id = option_provider_id.clone();
+                                    this.open_settings_select = None;
+                                    this.edit_settings(
+                                        move |settings| {
+                                            set_ai_provider_reasoning_override(
+                                                settings,
+                                                &provider_id,
+                                                Some(value),
+                                            );
+                                        },
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai, SettingsSelect::AiModelReasoning(provider_index, model_index)) => {
+                let Some(provider) = settings.ai.providers.get(provider_index) else {
+                    return None;
+                };
+                let Some(provider_id) = ai_provider_id(provider) else {
+                    return None;
+                };
+                let Some(model) = provider
+                    .get("models")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|models| models.get(model_index))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+                else {
+                    return None;
+                };
+                let current = settings
+                    .ai
+                    .reasoning_model_overrides
+                    .get(&provider_id)
+                    .and_then(|models| models.get(model.as_str()))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let mut popup = select_overlay_popup(&self.tokens, width.max(160.0));
+                let inherit_provider_id = provider_id.clone();
+                let inherit_model = model.clone();
+                popup = popup.child(
+                    select_option(
+                        &self.tokens,
+                        self.i18n.t("settings_view.ai.reasoning_inherit_provider"),
+                        current.is_none(),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            let provider_id = inherit_provider_id.clone();
+                            let model = inherit_model.clone();
+                            this.open_settings_select = None;
+                            this.edit_settings(
+                                move |settings| {
+                                    set_ai_model_reasoning_override(
+                                        settings,
+                                        &provider_id,
+                                        &model,
+                                        None,
+                                    );
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+                for value in ["auto", "off", "low", "medium", "high", "max"] {
+                    let selected = current.as_deref() == Some(value);
+                    let option_provider_id = provider_id.clone();
+                    let option_model = model.clone();
+                    popup = popup.child(
+                        select_option(&self.tokens, self.ai_reasoning_display(value), selected)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    let provider_id = option_provider_id.clone();
+                                    let model = option_model.clone();
+                                    this.open_settings_select = None;
+                                    this.edit_settings(
+                                        move |settings| {
+                                            set_ai_model_reasoning_override(
+                                                settings,
+                                                &provider_id,
+                                                &model,
+                                                Some(value),
+                                            );
+                                        },
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai | SettingsTab::Knowledge, SettingsSelect::AiEmbeddingProvider) => {
+                let current = settings
+                    .ai
+                    .embedding_config
+                    .as_ref()
+                    .and_then(|config| config.get("providerId"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let mut popup = select_panel_overlay_popup_with_max_height(
+                    &self.tokens,
+                    width.max(AI_PROVIDER_SELECT_W),
+                    320.0,
+                );
+                popup = popup.child(
+                    select_option(
+                        &self.tokens,
+                        self.i18n.t("settings_view.knowledge.auto_embedding_provider"),
+                        current.is_none(),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.open_settings_select = None;
+                            this.edit_settings(
+                                |settings| {
+                                    let model = settings
+                                        .ai
+                                        .embedding_config
+                                        .as_ref()
+                                        .and_then(|config| config.get("model"))
+                                        .and_then(serde_json::Value::as_str)
+                                        .unwrap_or_default()
+                                        .to_string();
+                                    settings.ai.embedding_config = Some(serde_json::json!({
+                                        "providerId": null,
+                                        "model": model
+                                    }));
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+                for provider in ai_provider_views(settings) {
+                    let provider_id = provider.id.clone();
+                    let selected = current.as_deref() == Some(provider.id.as_str());
+                    popup = popup.child(
+                        select_option(&self.tokens, provider.name, selected).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                let provider_id = provider_id.clone();
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    move |settings| {
+                                        let model = settings
+                                            .ai
+                                            .embedding_config
+                                            .as_ref()
+                                            .and_then(|config| config.get("model"))
+                                            .and_then(serde_json::Value::as_str)
+                                            .unwrap_or_default()
+                                            .to_string();
+                                        settings.ai.embedding_config = Some(serde_json::json!({
+                                            "providerId": provider_id,
+                                            "model": model
+                                        }));
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Knowledge, SettingsSelect::KnowledgeCollectionScope) => {
+                let popup = select_overlay_popup(&self.tokens, width.max(220.0)).child(
+                    select_option(
+                        &self.tokens,
+                        self.i18n.t("settings_view.knowledge.scope_global"),
+                        true,
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.open_settings_select = None;
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+                );
+                Some(popup)
+            }
+            (SettingsTab::Knowledge, SettingsSelect::KnowledgeDocumentFormat) => {
+                let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
+                for (format, label) in [("markdown", "Markdown"), ("plaintext", "Plain Text")] {
+                    let selected = self.knowledge_new_document_format == format;
+                    popup = popup.child(
+                        select_option(&self.tokens, label, selected).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.knowledge_new_document_format = format.to_string();
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai, SettingsSelect::AiMcpTransport) => {
+                let current = self
+                    .ai_mcp_add_dialog
+                    .as_ref()
+                    .map(|draft| draft.transport)
+                    .unwrap_or(oxideterm_ai::McpTransport::Stdio);
+                let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
+                for (transport, label) in [
+                    (oxideterm_ai::McpTransport::Stdio, "stdio"),
+                    (
+                        oxideterm_ai::McpTransport::StreamableHttp,
+                        "Streamable HTTP (auto fallback)",
+                    ),
+                    (oxideterm_ai::McpTransport::LegacySse, "Legacy SSE"),
+                ] {
+                    popup = popup.child(
+                        select_option(&self.tokens, label, transport == current).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                if let Some(draft) = this.ai_mcp_add_dialog.as_mut() {
+                                    draft.transport = transport;
+                                }
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai, SettingsSelect::AiMcpAuthMode) => {
+                let current = self
+                    .ai_mcp_add_dialog
+                    .as_ref()
+                    .map(|draft| draft.auth_header_mode)
+                    .unwrap_or(oxideterm_ai::McpAuthHeaderMode::Bearer);
+                let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
+                for (mode, label) in [
+                    (
+                        oxideterm_ai::McpAuthHeaderMode::Bearer,
+                        self.i18n.t("settings_view.mcp.auth_header_mode_bearer"),
+                    ),
+                    (
+                        oxideterm_ai::McpAuthHeaderMode::Raw,
+                        self.i18n.t("settings_view.mcp.auth_header_mode_raw"),
+                    ),
+                    (
+                        oxideterm_ai::McpAuthHeaderMode::None,
+                        self.i18n.t("settings_view.mcp.auth_header_mode_none"),
+                    ),
+                ] {
+                    popup = popup.child(
+                        select_option(&self.tokens, label, mode == current).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                if let Some(draft) = this.ai_mcp_add_dialog.as_mut() {
+                                    draft.auth_header_mode = mode;
+                                }
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             (SettingsTab::Sftp, SettingsSelect::SftpConcurrent) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &count in sftp_concurrent_options() {
@@ -805,10 +1332,6 @@ impl WorkspaceApp {
         ));
 
         self.setting_row(label_key, hint_key, control.into_any_element())
-    }
-
-    fn count_row(&self, label_key: &str, hint_key: &str, count: usize) -> AnyElement {
-        self.value_row(label_key, hint_key, count.to_string())
     }
 
     fn bool_row(

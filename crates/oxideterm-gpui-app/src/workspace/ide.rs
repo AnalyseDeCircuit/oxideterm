@@ -2,7 +2,7 @@ use gpui::{AnyElement, AppContext, Context, IntoElement, div};
 use oxideterm_gpui_ide::{
     IdeLabels, IdeRuntimeSettings, IdeSurface, IdeSurfaceEvent, NodeAgentMode,
 };
-use oxideterm_settings::IdeAgentMode;
+use oxideterm_settings::{IdeAgentMode, PersistedSettings};
 use oxideterm_ssh::{NodeId, PhaseResult, ReconnectIdeSnapshot};
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use std::time::SystemTime;
@@ -40,20 +40,13 @@ impl WorkspaceApp {
             *tab_id
         } else {
             let tab_id = self.alloc_tab_id();
-            let router = self.node_router.clone();
+            let fs = self.ai_agent_fs.clone();
             let tokens = self.tokens;
             let labels = self.ide_labels();
             let runtime_settings = self.ide_runtime_settings();
             let backend_runtime = self.forwarding_runtime.clone();
             let surface = cx.new(|cx| {
-                IdeSurface::new(
-                    router,
-                    tokens,
-                    labels,
-                    runtime_settings,
-                    backend_runtime,
-                    cx,
-                )
+                IdeSurface::new(fs, tokens, labels, runtime_settings, backend_runtime, cx)
             });
             surface.update(cx, |surface: &mut IdeSurface, cx| {
                 surface.open_remote_folder_picker_for_node(node_id.0.clone(), "/", cx);
@@ -173,20 +166,13 @@ impl WorkspaceApp {
             *tab_id
         } else {
             let tab_id = self.alloc_tab_id();
-            let router = self.node_router.clone();
+            let fs = self.ai_agent_fs.clone();
             let tokens = self.tokens;
             let labels = self.ide_labels();
             let runtime_settings = self.ide_runtime_settings();
             let backend_runtime = self.forwarding_runtime.clone();
             let surface = cx.new(|cx| {
-                IdeSurface::new(
-                    router,
-                    tokens,
-                    labels,
-                    runtime_settings,
-                    backend_runtime,
-                    cx,
-                )
+                IdeSurface::new(fs, tokens, labels, runtime_settings, backend_runtime, cx)
             });
             let restored = surface.update(cx, |surface: &mut IdeSurface, cx| {
                 surface.restore_reconnect_snapshot(ide_snapshot, reconnect_node_id.0.clone(), cx)
@@ -369,11 +355,7 @@ impl WorkspaceApp {
                 .clamp(0.8, 3.0) as f32,
             word_wrap: settings.ide.word_wrap,
             background_active: self.terminal_background_preferences("ide").is_some(),
-            agent_mode: match settings.ide.agent_mode {
-                IdeAgentMode::Ask => NodeAgentMode::Ask,
-                IdeAgentMode::Enabled => NodeAgentMode::Enabled,
-                IdeAgentMode::Disabled => NodeAgentMode::Disabled,
-            },
+            agent_mode: node_agent_mode_from_settings(settings),
         }
     }
 
@@ -436,8 +418,17 @@ impl WorkspaceApp {
             NodeAgentMode::Disabled => IdeAgentMode::Disabled,
         };
         let _ = self.settings_store.save();
+        self.ai_agent_fs.set_mode(mode);
         self.apply_ide_runtime_settings_to_surfaces(cx);
         cx.notify();
+    }
+}
+
+pub(super) fn node_agent_mode_from_settings(settings: &PersistedSettings) -> NodeAgentMode {
+    match settings.ide.agent_mode {
+        IdeAgentMode::Ask => NodeAgentMode::Ask,
+        IdeAgentMode::Enabled => NodeAgentMode::Enabled,
+        IdeAgentMode::Disabled => NodeAgentMode::Disabled,
     }
 }
 

@@ -934,6 +934,7 @@
       "scope": "スコープ",
       "scope_global": "グローバル",
       "scope_connection": "接続固有",
+      "format": "フォーマット",
       "no_collections": "コレクションがありません。ドキュメントのインポートを開始するには作成してください。",
       "import_files": "ファイルをインポート",
       "generate_embeddings": "埋め込みを生成",

@@ -7,7 +7,8 @@ use crate::{AiChatMessage, AiChatStreamConfig, AiStreamEvent};
 use super::CHAT_STREAM_TIMEOUT;
 use super::common::{StreamParseResult, stream_sse_response};
 use super::openai_parse::{
-    parse_ollama_error, parse_openai_data_line, parse_openai_error, parse_openai_json_events,
+    OpenAiToolAccumulator, parse_ollama_error, parse_openai_data_line_with_accumulator,
+    parse_openai_error, parse_openai_json_events,
 };
 use super::openai_payload::openai_chat_body;
 
@@ -142,5 +143,9 @@ async fn stream_openai_response(
     response: reqwest::Response,
     events: &tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) -> Result<StreamParseResult> {
-    stream_sse_response(response, events, parse_openai_data_line).await
+    let mut accumulator = OpenAiToolAccumulator::default();
+    stream_sse_response(response, events, |line| {
+        parse_openai_data_line_with_accumulator(line, &mut accumulator)
+    })
+    .await
 }

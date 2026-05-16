@@ -31,6 +31,7 @@ pub(super) enum WorkspaceImeTarget {
     Graphics(GraphicsInput),
     AiModelSelectorSearch,
     AiChatInput,
+    AiMessageEdit,
     Sftp(SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
@@ -51,6 +52,7 @@ impl WorkspaceImeTarget {
             Self::Graphics(input) => 1_875 + input.anchor_key(),
             Self::AiModelSelectorSearch => 1_895,
             Self::AiChatInput => 1_896,
+            Self::AiMessageEdit => 1_897,
             Self::Sftp(input) => 1_900 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
@@ -377,17 +379,22 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Sftp(input));
         }
 
-        if self.active_sidebar_section == super::sidebar::SidebarSection::Assistant
+        if self.ai_sidebar_visible()
             && self.ai_model_selector_open
             && self.ai_model_selector_search_focused
         {
             return Some(WorkspaceImeTarget::AiModelSelectorSearch);
         }
 
-        if self.active_sidebar_section == super::sidebar::SidebarSection::Assistant
-            && self.ai_chat_input_focused
-        {
+        if self.ai_sidebar_visible() && self.ai_chat_input_focused {
             return Some(WorkspaceImeTarget::AiChatInput);
+        }
+
+        if self.ai_sidebar_visible()
+            && self.ai_editing_message_id.is_some()
+            && self.ai_editing_message_focused
+        {
+            return Some(WorkspaceImeTarget::AiMessageEdit);
         }
 
         if self.terminal_command_bar_focused && self.active_tab().is_some_and(is_terminal_tab) {
@@ -487,6 +494,9 @@ impl WorkspaceApp {
             WorkspaceImeTarget::AiChatInput => self
                 .ai_chat_input_focused
                 .then(|| self.ai_chat_draft.clone()),
+            WorkspaceImeTarget::AiMessageEdit => self
+                .ai_editing_message_focused
+                .then(|| self.ai_editing_message_draft.clone()),
             WorkspaceImeTarget::Sftp(input) => {
                 if self.sftp_view.focused_input == Some(input) {
                     Some(self.sftp_input_value(input).to_string())
@@ -683,6 +693,15 @@ impl WorkspaceApp {
             WorkspaceImeTarget::AiChatInput => {
                 if self.ai_chat_input_focused {
                     replace_utf16(&mut self.ai_chat_draft, replacement_range, text);
+                    self.ai_chat_autocomplete_suppressed = false;
+                    self.ai_chat_autocomplete_index = 0;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::AiMessageEdit => {
+                if self.ai_editing_message_focused {
+                    replace_utf16(&mut self.ai_editing_message_draft, replacement_range, text);
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

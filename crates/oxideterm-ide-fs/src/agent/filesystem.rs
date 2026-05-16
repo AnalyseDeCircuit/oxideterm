@@ -90,6 +90,37 @@ impl NodeAgentIdeFileSystem {
         Ok(())
     }
 
+    pub async fn node_agent_read_file(
+        &self,
+        node_id: impl Into<String>,
+        path: impl Into<String>,
+    ) -> Result<ReadFileResult, NodeAgentRpcError> {
+        let node_id = NodeId::new(node_id.into());
+        let path = path.into();
+        let session = self.node_agent_rpc_session(&node_id).await?;
+        session
+            .read_file(&path)
+            .await
+            .map_err(node_agent_rpc_error_from_agent)
+    }
+
+    pub async fn node_agent_write_file(
+        &self,
+        node_id: impl Into<String>,
+        path: impl Into<String>,
+        content: impl Into<String>,
+        expect_hash: Option<&str>,
+    ) -> Result<WriteFileResult, NodeAgentRpcError> {
+        let node_id = NodeId::new(node_id.into());
+        let path = path.into();
+        let content = content.into();
+        let session = self.node_agent_rpc_session(&node_id).await?;
+        session
+            .write_file(&path, &content, expect_hash)
+            .await
+            .map_err(node_agent_rpc_error_from_agent)
+    }
+
     pub async fn open_project(
         &self,
         node_id: impl Into<String>,
@@ -389,6 +420,52 @@ impl NodeAgentIdeFileSystem {
         session.acquire_connection().await
     }
 
+    async fn node_agent_rpc_session(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Arc<AgentSession>, NodeAgentRpcError> {
+        if self.mode == NodeAgentMode::Disabled {
+            self.set_status_for_node(node_id, None, AgentStatus::SftpFallback);
+            return Err(NodeAgentRpcError::Unavailable(
+                "Agent deployment is disabled".to_string(),
+            ));
+        }
+        if self.mode == NodeAgentMode::Enabled {
+            let status = self.ensure_agent(node_id).await;
+            if !status.is_ready() {
+                return Err(NodeAgentRpcError::Unavailable(format!(
+                    "Agent is not ready: {status:?}"
+                )));
+            }
+        }
+
+        let resolved = self
+            .acquire_ide_connection(node_id)
+            .await
+            .map_err(|error| NodeAgentRpcError::Unavailable(error.to_string()))?;
+        let Some(session) = self.registry.get(&resolved.connection_id) else {
+            self.set_status_for_node(node_id, Some(&resolved.connection_id), AgentStatus::SftpFallback);
+            return Err(NodeAgentRpcError::Unavailable(
+                "Agent not deployed".to_string(),
+            ));
+        };
+        if session.is_alive() {
+            self.set_status_for_node(node_id, Some(&resolved.connection_id), session.status());
+            Ok(session)
+        } else {
+            self.registry
+                .remove_without_shutdown(&resolved.connection_id);
+            self.set_status_for_node(
+                node_id,
+                Some(&resolved.connection_id),
+                AgentStatus::SftpFallback,
+            );
+            Err(NodeAgentRpcError::Unavailable(
+                "Agent channel closed".to_string(),
+            ))
+        }
+    }
+
     async fn agent_session(&self, node_id: &NodeId) -> Option<Arc<AgentSession>> {
         if self.mode == NodeAgentMode::Disabled {
             self.set_status_for_node(node_id, None, AgentStatus::SftpFallback);
@@ -568,6 +645,22 @@ impl NodeAgentIdeFileSystem {
         };
         self.agent_statuses.insert(key.clone(), status);
         self.latest_agent_status.insert(node_id.0.clone(), key);
+    }
+}
+
+fn node_agent_rpc_error_from_agent(error: AgentError) -> NodeAgentRpcError {
+    match error {
+        AgentError::Rpc { code, message } if is_agent_conflict_parts(code, &message) => {
+            NodeAgentRpcError::Conflict(message)
+        }
+        AgentError::ChannelClosed
+        | AgentError::Timeout(_)
+        | AgentError::Route(_)
+        | AgentError::StartFailed(_)
+        | AgentError::Handshake(_)
+        | AgentError::UnsupportedArch(_)
+        | AgentError::BinaryNotFound(_) => NodeAgentRpcError::Unavailable(error.to_string()),
+        other => NodeAgentRpcError::Other(other.to_string()),
     }
 }
 

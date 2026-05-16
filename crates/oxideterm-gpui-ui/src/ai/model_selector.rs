@@ -124,8 +124,6 @@ pub fn ai_model_selector_dropdown(
     placement: AiModelSelectorPlacement,
 ) -> Div {
     div()
-        .absolute()
-        .left_0()
         .w(px(MODEL_SELECTOR_DROPDOWN_WIDTH))
         .overflow_hidden()
         .rounded(px(tokens.radii.lg))
@@ -134,12 +132,8 @@ pub fn ai_model_selector_dropdown(
         .bg(rgb(tokens.ui.bg_elevated))
         .font_family(ai_font_family())
         .shadow_lg()
-        .when(placement == AiModelSelectorPlacement::Down, |panel| {
-            panel.top_full().mt(px(tokens.spacing.one))
-        })
-        .when(placement == AiModelSelectorPlacement::Up, |panel| {
-            panel.bottom_full().mb(px(tokens.spacing.one / 2.0))
-        })
+        .when(placement == AiModelSelectorPlacement::Down, |panel| panel)
+        .when(placement == AiModelSelectorPlacement::Up, |panel| panel)
 }
 
 pub fn ai_model_selector_search_bar(

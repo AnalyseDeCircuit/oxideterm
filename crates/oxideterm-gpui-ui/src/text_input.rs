@@ -95,7 +95,10 @@ impl Element for TextInputAnchorProbe {
                 id: self.id,
                 bounds,
             };
-            window.on_next_frame(move |window, cx| on_bounds(anchor, window, cx));
+            // Keep text input anchors in the same draw pass as their trigger.
+            // Deferring this by a frame makes anchored UI drift when the trigger
+            // lives inside a scrolling or resizing container.
+            on_bounds(anchor, window, cx);
         }
     }
 

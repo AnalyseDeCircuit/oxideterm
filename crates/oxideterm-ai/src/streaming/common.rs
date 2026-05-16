@@ -12,7 +12,7 @@ pub(crate) enum StreamParseResult {
 pub(crate) async fn stream_sse_response(
     response: reqwest::Response,
     events: &tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
-    parse_line: fn(&str) -> ParsedStreamLine,
+    mut parse_line: impl FnMut(&str) -> ParsedStreamLine,
 ) -> Result<StreamParseResult> {
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();

@@ -7,7 +7,15 @@ impl WorkspaceApp {
         let _ = self.settings_store.save();
     }
 
+    pub(super) fn ai_sidebar_visible(&self) -> bool {
+        let settings = self.settings_store.settings();
+        settings.ai.enabled
+            && !settings.sidebar_ui.ai_sidebar_collapsed
+            && !settings.sidebar_ui.zen_mode
+    }
+
     pub(super) fn set_sidebar_section(&mut self, section: SidebarSection, cx: &mut Context<Self>) {
+        self.clear_ai_sidebar_keyboard_focus();
         self.active_sidebar_section = section;
         if self.sidebar_collapsed {
             self.sidebar_collapsed = false;
@@ -56,5 +64,72 @@ impl WorkspaceApp {
             self.persist_sidebar_settings();
             cx.notify();
         }
+    }
+
+    pub(super) fn toggle_ai_sidebar(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.settings_store.settings().ai.enabled {
+            self.push_ai_settings_toast(
+                self.i18n.t("ai.sidebar.not_enabled_hint"),
+                TerminalNoticeVariant::Warning,
+            );
+            cx.notify();
+            return false;
+        }
+        let collapsed = !self.settings_store.settings().sidebar_ui.ai_sidebar_collapsed;
+        self.settings_store
+            .settings_mut()
+            .sidebar_ui
+            .ai_sidebar_collapsed = collapsed;
+        self.clear_ai_sidebar_keyboard_focus();
+        let _ = self.settings_store.save();
+        cx.notify();
+        true
+    }
+
+    pub(super) fn set_ai_sidebar_width(&mut self, width: f32, cx: &mut Context<Self>) {
+        self.ai_sidebar_width = width.clamp(280.0, 500.0);
+        cx.notify();
+    }
+
+    pub(super) fn start_ai_sidebar_resize(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_sidebar_resizing = true;
+        self.set_ai_sidebar_width(self.ai_sidebar_width_from_cursor(event.position.x, window), cx);
+    }
+
+    pub(super) fn update_ai_sidebar_resize(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ai_sidebar_resizing {
+            return;
+        }
+        if event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        self.set_ai_sidebar_width(self.ai_sidebar_width_from_cursor(event.position.x, window), cx);
+    }
+
+    pub(super) fn finish_ai_sidebar_resize(&mut self, cx: &mut Context<Self>) {
+        if self.ai_sidebar_resizing {
+            self.ai_sidebar_resizing = false;
+            self.settings_store
+                .settings_mut()
+                .sidebar_ui
+                .ai_sidebar_width = self.ai_sidebar_width.round() as i64;
+            let _ = self.settings_store.save();
+            cx.notify();
+        }
+    }
+
+    fn ai_sidebar_width_from_cursor(&self, cursor_x: Pixels, window: &Window) -> f32 {
+        let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
+        (window_width - f32::from(cursor_x)).clamp(280.0, 500.0)
     }
 }

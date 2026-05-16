@@ -33,7 +33,7 @@ use oxideterm_ide_core::{
     SavedFileVersion, WorkspaceSnapshot, WriteMode,
 };
 use oxideterm_ide_fs::{AgentStatus, IdeSearchMatch, NodeAgentIdeFileSystem, NodeAgentMode};
-use oxideterm_ssh::{NodeRouter, ReconnectIdeSnapshot};
+use oxideterm_ssh::ReconnectIdeSnapshot;
 use oxideterm_theme::ThemeTokens;
 
 use crate::{file_icons, labels::IdeLabels};
@@ -176,6 +176,20 @@ impl Default for IdeRuntimeSettings {
             agent_mode: NodeAgentMode::Ask,
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdeAiContextSnapshot {
+    pub project_root: String,
+    pub project_name: String,
+    pub git_branch: Option<String>,
+    pub active_file: Option<String>,
+    pub active_language: Option<String>,
+    pub is_dirty: bool,
+    pub open_tab_count: usize,
+    pub open_tab_paths: Vec<String>,
+    pub code_snippet: Option<String>,
+    pub snippet_start_line: usize,
 }
 
 #[derive(Clone, Debug)]

@@ -1,4 +1,6 @@
-use crate::{AiChatMessage, AiChatState, AiConversation};
+use crate::{
+    AiChatMessage, AiChatRole, AiChatState, AiConversation, current_terminal_context_system_message,
+};
 
 impl AiChatState {
     pub fn create_conversation(
@@ -8,6 +10,15 @@ impl AiChatState {
         now_ms: i64,
         profile_id: Option<String>,
     ) -> String {
+        let session_metadata = {
+            let mut metadata = serde_json::Map::new();
+            metadata.insert("conversationId".to_string(), serde_json::json!(&id));
+            metadata.insert("origin".to_string(), serde_json::json!("sidebar"));
+            if let Some(profile_id) = profile_id.as_ref() {
+                metadata.insert("profileId".to_string(), serde_json::json!(profile_id));
+            }
+            Some(serde_json::Value::Object(metadata))
+        };
         let title = title
             .filter(|title| !title.trim().is_empty())
             .unwrap_or_else(|| "New Chat".to_string());
@@ -19,6 +30,10 @@ impl AiChatState {
             updated_at_ms: now_ms,
             origin: "sidebar".to_string(),
             profile_id,
+            message_count: 0,
+            session_id: None,
+            session_metadata,
+            messages_loaded: true,
         };
         self.conversations.insert(0, conversation);
         self.active_conversation_id = Some(id.clone());
@@ -100,6 +115,7 @@ impl AiChatState {
         {
             conversation.updated_at_ms = message.timestamp_ms;
             conversation.messages.push(message);
+            conversation.message_count = conversation.messages.len();
         }
     }
 
@@ -149,18 +165,52 @@ pub fn apply_chat_request_overrides(
     {
         message.content = request_content;
     }
+    let current_context = history
+        .iter()
+        .rev()
+        .find(|message| message.role == AiChatRole::User)
+        .and_then(|message| message.context.as_deref())
+        .map(str::trim)
+        .filter(|context| !context.is_empty())
+        .map(current_terminal_context_system_message);
+    let mut system_messages = Vec::new();
     if let Some(task_system_prompt) = task_system_prompt {
-        history.insert(
-            0,
-            AiChatMessage {
-                id: "task-mode".to_string(),
-                role: crate::AiChatRole::System,
-                content: task_system_prompt,
-                timestamp_ms: 0,
-                model: None,
-                context: None,
-                is_streaming: false,
-            },
-        );
+        system_messages.push(AiChatMessage {
+            id: "task-mode".to_string(),
+            role: crate::AiChatRole::System,
+            content: task_system_prompt,
+            timestamp_ms: 0,
+            model: None,
+            context: None,
+            thinking_content: None,
+            is_streaming: false,
+            metadata: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: None,
+        });
     }
+    if let Some(current_context) = current_context {
+        system_messages.push(AiChatMessage {
+            id: "current-terminal-context".to_string(),
+            role: AiChatRole::System,
+            content: current_context,
+            timestamp_ms: 0,
+            model: None,
+            context: None,
+            thinking_content: None,
+            is_streaming: false,
+            metadata: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: None,
+        });
+    }
+    history.splice(0..0, system_messages);
 }

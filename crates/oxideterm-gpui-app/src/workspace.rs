@@ -65,6 +65,7 @@ use oxideterm_gpui_ui::{
     tooltip::tooltip_content,
 };
 use oxideterm_i18n::{I18n, Locale};
+use oxideterm_ide_fs::{NodeAgentIdeFileSystem, NodeAgentRpcError};
 use oxideterm_notification_center::{
     ActivityView as WorkspaceActivityView, EventCategory as WorkspaceEventCategory,
     EventCategoryFilter as WorkspaceEventCategoryFilter, EventLogEntry as WorkspaceEventLogEntry,
@@ -87,8 +88,11 @@ use oxideterm_settings::{
     default_settings_path,
 };
 use oxideterm_sftp::{
-    DummyProgressStore, ProgressStore, RedbProgressStore, SftpTransferManager,
-    SftpTransferRuntimeSettings, StoredTransferProgress,
+    BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
+    BackgroundTransferState, DummyProgressStore, ProgressStore, RedbProgressStore,
+    SftpTransferGuard, SftpTransferManager, SftpTransferRuntimeSettings, StoredTransferProgress,
+    TransferStrategy, probe_tar_compression, probe_tar_support, tar_download_directory,
+    tar_upload_directory,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState,
@@ -97,8 +101,8 @@ use oxideterm_ssh::{
     PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRule,
     ReconnectForwardRuleSnapshot, ReconnectJob, ReconnectNodeConnectionSnapshot,
     ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
-    ReconnectPhase, ReconnectSnapshot, ReconnectTiming, SshConfig, SshConnectionRegistry,
-    SshTransportClient, TerminalEndpoint,
+    ReconnectPhase, ReconnectSnapshot, ReconnectTiming, SshConfig, SshConnectionHandle,
+    SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
 };
 use oxideterm_terminal::TerminalCommandMarkDetectionSource;
 use oxideterm_terminal::{
@@ -127,8 +131,10 @@ use self::new_connection::{
 use self::pane_tree::SplitDrag;
 use self::quick_commands::QuickCommandsState;
 use self::session_manager::{AutoRouteModalState, SessionManagerState};
+use self::settings::AiModelRefreshDelivery;
 use self::settings::ThemeEditorState;
 use self::sidebar::SidebarSection;
+use self::sidebar::{AiCompactionDelivery, AiModelSelectorProbeDelivery, AiStreamDelivery};
 use self::terminal_cast::TerminalCastPlayerState;
 use crate::assets::LucideIcon;
 use crate::{
@@ -148,6 +154,66 @@ use oxideterm_gpui_ui::typography::{
     css_font_family_head as settings_css_font_family_head, gpui_font_family_name,
     tauri_ui_font_family as settings_ui_font_family,
 };
+
+#[derive(Clone, Debug)]
+struct AiMcpServerDraft {
+    name: String,
+    transport: oxideterm_ai::McpTransport,
+    command: String,
+    args: String,
+    env: Vec<(String, String)>,
+    url: String,
+    auth_header_name: String,
+    auth_header_mode: oxideterm_ai::McpAuthHeaderMode,
+    auth_token: String,
+    headers: Vec<(String, String)>,
+    retry_on_disconnect: bool,
+    show_auth_token: bool,
+}
+
+#[derive(Clone, Debug)]
+enum KnowledgeDeleteTarget {
+    Collection,
+    Document,
+}
+
+#[derive(Clone, Debug)]
+struct KnowledgeDeleteConfirm {
+    target: KnowledgeDeleteTarget,
+    id: String,
+    name: String,
+}
+
+#[derive(Clone, Debug)]
+struct KnowledgeExternalEdit {
+    doc_id: String,
+    path: PathBuf,
+    version: u64,
+}
+
+enum KnowledgeReindexDelivery {
+    Progress { current: usize, total: usize },
+    Finished(Result<usize, String>),
+}
+
+impl Default for AiMcpServerDraft {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            transport: oxideterm_ai::McpTransport::Stdio,
+            command: String::new(),
+            args: String::new(),
+            env: Vec::new(),
+            url: String::new(),
+            auth_header_name: "Authorization".to_string(),
+            auth_header_mode: oxideterm_ai::McpAuthHeaderMode::Bearer,
+            auth_token: String::new(),
+            headers: Vec::new(),
+            retry_on_disconnect: false,
+            show_auth_token: false,
+        }
+    }
+}
 
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
@@ -173,6 +239,11 @@ pub(crate) struct WorkspaceApp {
     sidebar_resizing: bool,
     sidebar_collapsed: bool,
     sidebar_width: f32,
+    ai_sidebar_resizing: bool,
+    ai_sidebar_width: f32,
+    ai_overlay_window_size: Option<(f32, f32)>,
+    ai_overlay_window_bounds_subscription: Option<Subscription>,
+    knowledge_window_activation_subscription: Option<Subscription>,
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,
     active_surface: ActiveSurface,
@@ -181,8 +252,13 @@ pub(crate) struct WorkspaceApp {
     open_settings_select: Option<SettingsSelect>,
     ai_new_provider_type: String,
     ai_provider_settings_expanded: bool,
+    ai_tool_use_expanded: bool,
+    ai_context_windows_expanded: bool,
+    ai_model_reasoning_expanded: bool,
     expanded_ai_providers: HashSet<String>,
     expanded_ai_provider_models: HashSet<String>,
+    expanded_ai_context_providers: HashSet<String>,
+    expanded_ai_model_reasoning_providers: HashSet<String>,
     ai_model_selector_open: bool,
     ai_model_selector_search_focused: bool,
     ai_model_selector_search_query: String,
@@ -193,17 +269,71 @@ pub(crate) struct WorkspaceApp {
     ai_chat_store: oxideterm_ai::AiChatPersistenceStore,
     ai_conversation_list_open: bool,
     ai_chat_menu_open: bool,
+    ai_profile_selector_open: bool,
+    ai_safety_menu_open: bool,
+    ai_safety_confirm_open: bool,
+    ai_summarize_confirm_open: bool,
+    ai_clear_all_confirm_open: bool,
+    ai_delete_message_confirm: Option<String>,
+    ai_safety_bypass_conversations: HashSet<String>,
     ai_chat_draft: String,
     ai_chat_input_focused: bool,
+    ai_editing_message_id: Option<String>,
+    ai_editing_message_draft: String,
+    ai_editing_message_focused: bool,
+    ai_thinking_expansion_state: HashMap<String, bool>,
+    ai_chat_autocomplete_index: usize,
+    ai_chat_autocomplete_suppressed: bool,
+    ai_context_popover_open: bool,
+    ai_model_switch_warning_percentage: Option<usize>,
+    ai_context_trim_notice_count: Option<usize>,
+    ai_context_trim_notice_sequence: u64,
+    ai_chat_include_context: bool,
+    ai_chat_include_all_panes: bool,
     ai_chat_loading: bool,
     ai_chat_stream_generation: u64,
+    ai_chat_stream_task: Option<tokio::task::JoinHandle<()>>,
+    ai_chat_stream_rx: Option<std::sync::mpsc::Receiver<AiStreamDelivery>>,
+    ai_chat_stream_polling: bool,
+    ai_pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
+    ai_agent_fs: NodeAgentIdeFileSystem,
+    ai_mcp_registry: oxideterm_ai::McpRegistry,
+    ai_rag_store: Arc<oxideterm_ai::RagStore>,
+    ai_mcp_add_dialog: Option<AiMcpServerDraft>,
+    knowledge_selected_collection_id: Option<String>,
+    knowledge_create_dialog_open: bool,
+    knowledge_new_document_dialog_open: bool,
+    knowledge_embedding_config_expanded: bool,
+    knowledge_new_collection_name: String,
+    knowledge_new_document_title: String,
+    knowledge_new_document_format: String,
+    knowledge_import_progress: Option<(usize, usize)>,
+    knowledge_embedding_progress: Option<(usize, usize)>,
+    knowledge_reindex_progress: Option<(usize, usize)>,
+    knowledge_reindex_cancel: Option<Arc<AtomicBool>>,
+    knowledge_reindex_rx: Option<std::sync::mpsc::Receiver<KnowledgeReindexDelivery>>,
+    knowledge_reindex_polling: bool,
+    knowledge_delete_confirm: Option<KnowledgeDeleteConfirm>,
+    knowledge_external_edit: Option<KnowledgeExternalEdit>,
+    knowledge_error: Option<String>,
+    ai_compaction_rx: Option<std::sync::mpsc::Receiver<AiCompactionDelivery>>,
+    ai_compaction_polling: bool,
+    ai_compacting_conversations: HashSet<String>,
     next_ai_chat_sequence: u64,
     ai_key_store: oxideterm_ai::AiProviderKeyStore,
     ai_provider_key_status: HashMap<String, bool>,
     ai_model_refresh_generations: HashMap<String, u64>,
     ai_model_refreshing: HashSet<String>,
+    ai_model_refresh_tx: Option<std::sync::mpsc::Sender<AiModelRefreshDelivery>>,
+    ai_model_refresh_rx: Option<std::sync::mpsc::Receiver<AiModelRefreshDelivery>>,
+    ai_model_refresh_polling: bool,
+    ai_model_refresh_pending: usize,
     next_ai_model_refresh_generation: u64,
     next_ai_model_selector_probe_generation: u64,
+    ai_model_selector_probe_rx: Option<std::sync::mpsc::Receiver<AiModelSelectorProbeDelivery>>,
+    ai_model_selector_probe_tx: Option<std::sync::mpsc::Sender<AiModelSelectorProbeDelivery>>,
+    ai_model_selector_probe_polling: bool,
+    ai_model_selector_probe_pending: usize,
     show_ai_enable_confirm: bool,
     ai_provider_key_remove_confirm: Option<(usize, String)>,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,

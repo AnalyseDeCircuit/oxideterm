@@ -577,13 +577,12 @@ impl WorkspaceApp {
                     .min_w(px(0.0))
                     .flex()
                     .flex_row()
-                    .flex_wrap()
                     .items_center()
                     .justify_between()
                     .gap(px(12.0))
                     .child(
                         div()
-                            .min_w(px(0.0))
+                            .flex_none()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .text_color(rgb(self.tokens.ui.text))
                             .child(
@@ -593,7 +592,10 @@ impl WorkspaceApp {
                     )
                     .child(
                         div()
+                            .flex_1()
                             .min_w(px(0.0))
+                            .truncate()
+                            .text_align(gpui::TextAlign::Right)
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(

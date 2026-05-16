@@ -1,6 +1,6 @@
 impl IdeSurface {
     pub fn new(
-        router: NodeRouter,
+        fs: NodeAgentIdeFileSystem,
         tokens: ThemeTokens,
         labels: IdeLabels,
         runtime_settings: IdeRuntimeSettings,
@@ -9,7 +9,7 @@ impl IdeSurface {
     ) -> Self {
         Self {
             workspace: IdeWorkspace::new(),
-            fs: NodeAgentIdeFileSystem::new(router, runtime_settings.agent_mode),
+            fs,
             tokens,
             labels,
             runtime_settings,

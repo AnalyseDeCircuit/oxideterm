@@ -7,6 +7,7 @@ use zeroize::Zeroizing;
 
 const AI_KEYCHAIN_SERVICE: &str = "com.oxideterm.ai";
 
+#[derive(Clone)]
 pub struct AiProviderKeyStore {
     service: String,
     cache: Arc<RwLock<HashMap<String, Zeroizing<String>>>>,

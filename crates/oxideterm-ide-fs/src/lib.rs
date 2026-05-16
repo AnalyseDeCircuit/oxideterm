@@ -13,6 +13,8 @@ mod node_sftp;
 
 pub use agent::{
     AgentStatus, IdeSearchMatch, IdeWatchSubscription, NodeAgentIdeFileSystem, NodeAgentMode,
+    NodeAgentRpcError, ReadFileResult as NodeAgentReadFileResult,
+    WriteFileResult as NodeAgentWriteFileResult,
 };
 pub use local::LocalIdeFileSystem;
 pub use node_sftp::NodeSftpIdeFileSystem;

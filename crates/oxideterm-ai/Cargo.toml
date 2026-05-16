@@ -6,15 +6,27 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
+chrono.workspace = true
+instant-distance = { version = "0.6.1", features = ["with-serde"] }
 keyring.workspace = true
 futures-util.workspace = true
 parking_lot.workspace = true
+redb = "2.1"
+regex.workspace = true
 reqwest.workspace = true
+rmp-serde = "1"
+rust-stemmers = "1"
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
 whoami.workspace = true
 zeroize.workspace = true
+zstd = "0.13"
 
 [dev-dependencies]
 tempfile = "3.23"

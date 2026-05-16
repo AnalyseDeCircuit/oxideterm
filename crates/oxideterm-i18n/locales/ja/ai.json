@@ -25,6 +25,12 @@
       "branch_prev": "前のバージョン",
       "branch_next": "次のバージョン"
     },
+    "profile": {
+      "default": "Default",
+      "select": "Select execution profile",
+      "active": "Execution profile: {{profile}}",
+      "default_badge": "Default"
+    },
     "quick_prompts": {
       "explain_command": "コマンドを説明",
       "explain_command_prompt": "このコマンドの動作を説明してください：",

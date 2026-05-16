@@ -29,14 +29,18 @@ impl AiProviderKeyDisplayState {
 }
 
 pub fn provider_chat_requires_key(provider_type: &str) -> bool {
-    provider_type != "ollama"
+    // Tauri chat execution allows OpenAI-compatible endpoints to be keyless
+    // so local LM Studio / gateway providers can work without credentials.
+    !matches!(provider_type, "ollama" | "openai_compatible")
 }
 
 pub fn provider_key_display_state(
     provider_type: &str,
     stored_key_present: bool,
 ) -> AiProviderKeyDisplayState {
-    if !provider_chat_requires_key(provider_type) {
+    // Tauri settings hides ProviderKeyInput only for Ollama. OpenAI-compatible
+    // providers may run keyless, but still expose an optional key field.
+    if provider_type == "ollama" {
         AiProviderKeyDisplayState::Keyless
     } else if stored_key_present {
         AiProviderKeyDisplayState::Stored
@@ -74,8 +78,9 @@ pub fn set_active_provider_selection(
     provider: &AiProviderView,
 ) {
     *active_provider_id = Some(provider.id.clone());
-    *active_model =
-        (!provider.default_model.trim().is_empty()).then(|| provider.default_model.clone());
+    if !provider.default_model.trim().is_empty() {
+        *active_model = Some(provider.default_model.clone());
+    }
 }
 
 pub fn add_provider_from_template(
@@ -109,6 +114,24 @@ pub fn remove_provider_at(
         select_first_provider(providers, active_provider_id, active_model);
     }
     removed
+}
+
+pub fn remove_provider_at_with_scoped_settings(
+    providers: &mut Vec<Value>,
+    active_provider_id: &mut Option<String>,
+    active_model: &mut Option<String>,
+    reasoning_provider_overrides: &mut Map<String, Value>,
+    reasoning_model_overrides: &mut Map<String, Value>,
+    user_context_windows: &mut Map<String, Value>,
+    model_max_response_tokens: &mut Map<String, Value>,
+    index: usize,
+) -> Option<String> {
+    let removed = remove_provider_at(providers, active_provider_id, active_model, index)?;
+    reasoning_provider_overrides.remove(&removed);
+    reasoning_model_overrides.remove(&removed);
+    user_context_windows.remove(&removed);
+    model_max_response_tokens.remove(&removed);
+    Some(removed)
 }
 
 pub fn select_provider_model(

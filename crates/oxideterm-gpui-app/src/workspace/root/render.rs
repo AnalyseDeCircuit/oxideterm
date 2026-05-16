@@ -13,6 +13,10 @@ impl Render for WorkspaceApp {
         self.maybe_refresh_connection_monitor(cx);
         self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
+        self.poll_ai_chat_stream_events(Some(window), cx);
+        self.poll_ai_compaction_results(cx);
+        self.poll_ai_model_selector_probe_results(cx);
+        self.poll_ai_model_refresh_results(cx);
         let title = self
             .active_tab()
             .map(|tab| self.tab_display_title(tab))
@@ -46,6 +50,7 @@ impl Render for WorkspaceApp {
             && let Some(pane) = self.active_pane()
         {
             self.needs_active_pane_focus = false;
+            self.clear_ai_sidebar_keyboard_focus();
             window.on_next_frame(move |window, cx| {
                 pane.read(cx).focus(window);
             });
@@ -227,7 +232,7 @@ impl Render for WorkspaceApp {
                     let _ = this.handle_settings_input_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.active_sidebar_section == sidebar::SidebarSection::Assistant
+                } else if this.ai_sidebar_visible()
                     && (this.ai_chat_input_focused || this.ai_model_selector_search_focused)
                 {
                     if keystroke_commits_platform_text(&event.keystroke) {
@@ -263,6 +268,7 @@ impl Render for WorkspaceApp {
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_sidebar_resize(event, cx);
+                this.update_ai_sidebar_resize(event, window, cx);
                 this.update_split_drag(event, window, cx);
                 this.update_settings_slider_drag(event, cx);
                 this.update_terminal_cast_seek_drag(event, cx);
@@ -277,6 +283,7 @@ impl Render for WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
                     this.finish_sidebar_resize(cx);
+                    this.finish_ai_sidebar_resize(cx);
                     this.finish_split_drag(cx);
                     this.finish_settings_slider_drag(cx);
                     this.finish_terminal_cast_seek_drag(cx);
@@ -427,10 +434,13 @@ impl Render for WorkspaceApp {
                                         .left_0()
                                         .right_0()
                                         .bottom_0()
-                                        .child(content),
+                                    .child(content),
                                 ),
                             ),
-                    ),
+                    )
+                    .when(self.ai_sidebar_visible(), |layout| {
+                        layout.child(self.render_ai_right_sidebar_region(cx))
+                    }),
             )
             .when(self.new_connection_form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
@@ -459,6 +469,21 @@ impl Render for WorkspaceApp {
             })
             .when(self.ai_provider_key_remove_confirm.is_some(), |root| {
                 root.child(self.render_ai_provider_key_remove_confirm_dialog(cx))
+            })
+            .when(self.ai_safety_confirm_open, |root| {
+                root.child(self.render_ai_safety_confirm_dialog(cx))
+            })
+            .when(self.ai_summarize_confirm_open, |root| {
+                root.child(self.render_ai_summarize_confirm_dialog(cx))
+            })
+            .when(self.ai_clear_all_confirm_open, |root| {
+                root.child(self.render_ai_clear_all_confirm_dialog(cx))
+            })
+            .when(self.ai_delete_message_confirm.is_some(), |root| {
+                root.child(self.render_ai_delete_message_confirm_dialog(cx))
+            })
+            .when_some(self.render_ai_sidebar_floating_overlay(window, cx), |root, overlay| {
+                root.child(overlay)
             })
             .when(
                 self.active_tab()

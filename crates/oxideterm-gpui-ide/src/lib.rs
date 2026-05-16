@@ -14,4 +14,6 @@ mod surface;
 
 pub use labels::IdeLabels;
 pub use oxideterm_ide_fs::NodeAgentMode;
-pub use surface::{IdeLoadState, IdeRuntimeSettings, IdeSurface, IdeSurfaceEvent};
+pub use surface::{
+    IdeAiContextSnapshot, IdeLoadState, IdeRuntimeSettings, IdeSurface, IdeSurfaceEvent,
+};

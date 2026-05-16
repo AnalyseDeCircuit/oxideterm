@@ -605,6 +605,18 @@ impl Default for SftpViewState {
     }
 }
 
+impl SftpViewState {
+    pub(super) fn current_remote_path(&self) -> &str {
+        &self.remote_path
+    }
+
+    pub(super) fn selected_remote_files(&self) -> Vec<String> {
+        let mut files = self.remote_selected.iter().cloned().collect::<Vec<_>>();
+        files.sort();
+        files
+    }
+}
+
 include!("sftp/runtime.rs");
 include!("sftp/surface.rs");
 include!("sftp/file_list.rs");

@@ -51,7 +51,7 @@ impl SidebarSection {
             "forwards" | "activity" => Self::Activity,
             "network" | "topology" => Self::Network,
             "extensions" => Self::Extensions,
-            "ai" | "assistant" => Self::Assistant,
+            "ai" | "assistant" => Self::Sessions,
             "automation" => Self::Automation,
             "workspace" => Self::Workspace,
             "files" => Self::Files,

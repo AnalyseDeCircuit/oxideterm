@@ -934,6 +934,7 @@
       "scope": "范围",
       "scope_global": "全局",
       "scope_connection": "特定连接",
+      "format": "格式",
       "no_collections": "暂无集合。创建一个以开始导入文档。",
       "import_files": "导入文件",
       "generate_embeddings": "生成嵌入向量",
