@@ -1,0 +1,321 @@
+impl WorkspaceApp {
+    fn render_knowledge_create_collection_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.knowledge_create_dialog_open {
+            return None;
+        }
+        let can_create = !self.knowledge_new_collection_name.trim().is_empty();
+        Some(
+            dialog_backdrop()
+                .child(
+                    dialog_content(&self.tokens)
+                        .w(px(KNOWLEDGE_DIALOG_WIDTH))
+                        .max_w(relative(0.92))
+                        .shadow_lg()
+                        .child(
+                            dialog_header(&self.tokens)
+                                .child(dialog_title(
+                                    &self.tokens,
+                                    self.i18n.t("settings_view.knowledge.create_collection"),
+                                ))
+                                .child(dialog_description(
+                                    &self.tokens,
+                                    self.i18n.t("settings_view.knowledge.create_description"),
+                                )),
+                        )
+                        .child(
+                            div()
+                                .px(px(24.0))
+                                .py(px(18.0))
+                                .flex()
+                                .flex_col()
+                                .gap(px(12.0))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(8.0))
+                                        .child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(self.tokens.ui.text))
+                                                .child(self.i18n.t("settings_view.knowledge.collection_name")),
+                                        )
+                                        .child(self.settings_text_input_control(
+                                            SettingsInput::KnowledgeCollectionName,
+                                            self.knowledge_new_collection_name.clone(),
+                                            self.i18n
+                                                .t("settings_view.knowledge.collection_name_placeholder"),
+                                            420.0,
+                                            cx,
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(8.0))
+                                        .child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(self.tokens.ui.text))
+                                                .child(self.i18n.t("settings_view.knowledge.scope")),
+                                        )
+                                        .child(self.ai_settings_select_control(
+                                            SettingsSelect::KnowledgeCollectionScope,
+                                            self.i18n.t("settings_view.knowledge.scope_global"),
+                                            420.0,
+                                            cx,
+                                        )),
+                                ),
+                        )
+                        .child(
+                            dialog_footer(&self.tokens)
+                                .child(
+                                    button_with(
+                                        &self.tokens,
+                                        self.i18n.t("common.actions.cancel"),
+                                        ButtonOptions {
+                                            variant: ButtonVariant::Outline,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: false,
+                                        },
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.knowledge_create_dialog_open = false;
+                                            this.knowledge_new_collection_name.clear();
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    ),
+                                )
+                                .child(
+                                    button_with(
+                                        &self.tokens,
+                                        self.i18n.t("settings_view.knowledge.create_collection"),
+                                        ButtonOptions {
+                                            variant: ButtonVariant::Default,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: !can_create,
+                                        },
+                                    )
+                                    .when(can_create, |button| {
+                                        button.on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(|this, _event, _window, cx| {
+                                                this.knowledge_create_collection(cx);
+                                                this.knowledge_create_dialog_open = false;
+                                                cx.stop_propagation();
+                                            }),
+                                        )
+                                    }),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_knowledge_new_document_dialog(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.knowledge_new_document_dialog_open {
+            return None;
+        }
+        let can_create = !self.knowledge_new_document_title.trim().is_empty();
+        Some(
+            dialog_backdrop()
+                .child(
+                    dialog_content(&self.tokens)
+                        .w(px(KNOWLEDGE_DIALOG_WIDTH))
+                        .max_w(relative(0.92))
+                        .shadow_lg()
+                        .child(
+                            dialog_header(&self.tokens)
+                                .child(dialog_title(
+                                    &self.tokens,
+                                    self.i18n.t("settings_view.knowledge.new_document"),
+                                ))
+                                .child(dialog_description(
+                                    &self.tokens,
+                                    self.i18n.t("settings_view.knowledge.new_document_description"),
+                                )),
+                        )
+                        .child(
+                            div()
+                                .px(px(24.0))
+                                .py(px(18.0))
+                                .flex()
+                                .flex_col()
+                                .gap(px(12.0))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(8.0))
+                                        .child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(self.tokens.ui.text))
+                                                .child(self.i18n.t("settings_view.knowledge.new_document_title")),
+                                        )
+                                        .child(self.settings_text_input_control(
+                                            SettingsInput::KnowledgeDocumentTitle,
+                                            self.knowledge_new_document_title.clone(),
+                                            self.i18n
+                                                .t("settings_view.knowledge.new_document_title_placeholder"),
+                                            420.0,
+                                            cx,
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(8.0))
+                                        .child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(self.tokens.ui.text))
+                                                .child(self.i18n.t("settings_view.knowledge.format")),
+                                        )
+                                        .child(self.ai_settings_select_control(
+                                            SettingsSelect::KnowledgeDocumentFormat,
+                                            self.knowledge_document_format_label(),
+                                            420.0,
+                                            cx,
+                                        )),
+                                ),
+                        )
+                        .child(
+                            dialog_footer(&self.tokens)
+                                .child(
+                                    button_with(
+                                        &self.tokens,
+                                        self.i18n.t("common.actions.cancel"),
+                                        ButtonOptions {
+                                            variant: ButtonVariant::Outline,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: false,
+                                        },
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.knowledge_new_document_dialog_open = false;
+                                            this.knowledge_new_document_title.clear();
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    ),
+                                )
+                                .child(
+                                    button_with(
+                                        &self.tokens,
+                                        self.i18n.t("settings_view.knowledge.new_document"),
+                                        ButtonOptions {
+                                            variant: ButtonVariant::Default,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: !can_create,
+                                        },
+                                    )
+                                    .when(can_create, |button| {
+                                        button.on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(|this, _event, _window, cx| {
+                                                this.knowledge_create_blank_document(cx);
+                                                this.knowledge_new_document_dialog_open = false;
+                                                cx.stop_propagation();
+                                            }),
+                                        )
+                                    }),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_knowledge_delete_confirm_dialog(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let confirm = self.knowledge_delete_confirm.as_ref()?;
+        let message_key = match confirm.target {
+            KnowledgeDeleteTarget::Collection => "settings_view.knowledge.delete_collection_confirm",
+            KnowledgeDeleteTarget::Document => "settings_view.knowledge.delete_document_confirm",
+        };
+        let message = self
+            .i18n
+            .t(message_key)
+            .replace("{{name}}", &confirm.name);
+        Some(
+            dialog_backdrop()
+                .child(
+                    dialog_content(&self.tokens)
+                        .w(px(KNOWLEDGE_DIALOG_WIDTH))
+                        .max_w(relative(0.92))
+                        .shadow_lg()
+                        .child(
+                            dialog_header(&self.tokens)
+                                .child(dialog_title(
+                                    &self.tokens,
+                                    self.i18n.t("settings_view.knowledge.delete_confirm_title"),
+                                ))
+                                .child(dialog_description(&self.tokens, message)),
+                        )
+                        .child(
+                            dialog_footer(&self.tokens)
+                                .child(
+                                    button_with(
+                                        &self.tokens,
+                                        self.i18n.t("common.actions.cancel"),
+                                        ButtonOptions {
+                                            variant: ButtonVariant::Outline,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: false,
+                                        },
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.knowledge_delete_confirm = None;
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    ),
+                                )
+                                .child(
+                                    button_with(
+                                        &self.tokens,
+                                        self.i18n.t("common.delete"),
+                                        ButtonOptions {
+                                            variant: ButtonVariant::Destructive,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: false,
+                                        },
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.knowledge_confirm_delete(cx);
+                                            cx.stop_propagation();
+                                        }),
+                                    ),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+}

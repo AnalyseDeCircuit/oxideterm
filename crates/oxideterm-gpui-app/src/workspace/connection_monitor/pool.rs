@@ -1,0 +1,478 @@
+impl WorkspaceApp {
+    pub(super) fn render_connection_monitor_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .size_full()
+            .overflow_y_scrollbar()
+            .p(px(MONITOR_PAGE_PADDING))
+            .bg(rgb(theme.bg))
+            .text_color(rgb(theme.text))
+            .child(
+                div()
+                    .max_w(px(MONITOR_CONTENT_MAX_WIDTH))
+                    .mx_auto()
+                    .flex()
+                    .flex_col()
+                    .gap(px(MONITOR_SECTION_GAP))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .mb_6()
+                                    .text_size(px(24.0))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .text_color(rgb(theme.text))
+                                    .child(self.i18n.t("layout.connection_monitor.title")),
+                            )
+                            .child(self.render_connection_pool_monitor(cx)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .mb_4()
+                                    .text_size(px(20.0))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .text_color(rgb(theme.text))
+                                    .child(self.i18n.t("sidebar.panels.system_health")),
+                            )
+                            .child(self.render_system_health_panel(cx)),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_connection_pool_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let stats = self.connection_monitor.pool_stats.as_ref();
+        let idle_timeout_secs = stats.map_or(0, |stats| stats.idle_timeout_secs);
+        let connection_list = self
+            .connection_monitor
+            .pool_summaries
+            .iter()
+            .filter(|summary| summary.is_displayed_in_pool())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(rgb(theme.bg))
+            .text_color(rgb(theme.text))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px(px(CONNECTION_POOL_HEADER_X))
+                    .py(px(CONNECTION_POOL_HEADER_Y))
+                    .border_b_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.bg_card))
+                    .child(
+                        div()
+                            .child(
+                                div()
+                                    .text_size(px(20.0))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme.text_heading))
+                                    .child(self.i18n.t("connections.panel.title")),
+                            )
+                            .child(
+                                div()
+                                    .mt_1()
+                                    .text_size(px(14.0))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(self.i18n.t("connections.panel.description")),
+                            ),
+                    )
+                    .child(self.render_connection_pool_refresh_button(cx)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_y_scrollbar()
+                    .p(px(CONNECTION_POOL_BODY_PADDING))
+                    .child(if let Some(error) = &self.connection_monitor.pool_error {
+                        monitor_center_state(
+                            &self.tokens,
+                            LucideIcon::AlertTriangle,
+                            MONITOR_RED,
+                            error.clone(),
+                        )
+                    } else if self.connection_monitor.pool_stats.is_none() {
+                        monitor_center_state(
+                            &self.tokens,
+                            LucideIcon::RefreshCw,
+                            theme.text_muted,
+                            self.i18n.t("connections.monitor.loading"),
+                        )
+                    } else if connection_list.is_empty() {
+                        self.render_connection_pool_empty_state()
+                    } else {
+                        let mut list = div()
+                            .grid()
+                            .gap(px(CONNECTION_POOL_CARD_GAP))
+                            .max_w(px(896.0));
+                        for connection in connection_list {
+                            list = list.child(self.render_connection_pool_card(
+                                connection,
+                                idle_timeout_secs,
+                                cx,
+                            ));
+                        }
+                        list.into_any_element()
+                    }),
+            )
+            .child(self.render_connection_pool_keep_alive_legend(idle_timeout_secs))
+            .into_any_element()
+    }
+
+    fn render_connection_pool_refresh_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .h(px(CONNECTION_POOL_BUTTON_SIZE))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap_2()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg))
+            .text_size(px(14.0))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(theme.text))
+            .cursor_pointer()
+            .hover(|style| {
+                style
+                    .bg(rgb(theme.bg_hover))
+                    .border_color(rgb(theme.border_strong))
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.refresh_connection_monitor_pool_stats();
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(Self::render_lucide_icon(
+                LucideIcon::RefreshCw,
+                CONNECTION_POOL_ICON_SIZE_MD,
+                rgb(theme.text),
+            ))
+            .child(self.i18n.t("connections.panel.refresh"))
+            .into_any_element()
+    }
+
+    fn render_connection_pool_empty_state(&self) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .w_full()
+            .py(px(CONNECTION_POOL_EMPTY_Y))
+            .flex()
+            .flex_col()
+            .items_center()
+            .text_align(gpui::TextAlign::Center)
+            .text_color(rgb(theme.text_muted))
+            .child(Self::render_lucide_icon(
+                LucideIcon::Server,
+                64.0,
+                rgba((theme.text_muted << 8) | CONNECTION_POOL_EMPTY_ICON_ALPHA),
+            ))
+            .child(
+                div()
+                    .mt_4()
+                    .text_size(px(18.0))
+                    .child(self.i18n.t("connections.panel.no_connections")),
+            )
+            .child(
+                div()
+                    .mt_2()
+                    .text_size(px(14.0))
+                    .opacity(CONNECTION_POOL_EMPTY_HINT_OPACITY)
+                    .child(self.i18n.t("connections.panel.no_connections_hint")),
+            )
+            .into_any_element()
+    }
+
+    fn render_connection_pool_card(
+        &self,
+        connection: ConnectionPoolEntrySummary,
+        idle_timeout_secs: u64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let state = connection_pool_state_view(&connection.state, &self.i18n, &self.tokens);
+        let is_idle = matches!(connection.state, ConnectionPoolEntryState::Idle);
+        let is_active = matches!(connection.state, ConnectionPoolEntryState::Active);
+        let global_never_timeout = idle_timeout_secs == 0;
+        let idle_timeout_min = (idle_timeout_secs as f64 / 60.0).round() as u64;
+        let tooltip = connection_pool_keep_alive_tooltip(
+            &self.i18n,
+            connection.keep_alive,
+            global_never_timeout,
+            idle_timeout_min,
+        );
+        let connection_id = connection.id.clone();
+        let next_keep_alive = !connection.keep_alive;
+
+        div()
+            .border_1()
+            .border_color(if is_idle {
+                rgba((MONITOR_AMBER << 8) | CONNECTION_POOL_IDLE_BORDER_ALPHA_30)
+            } else {
+                rgb(theme.border)
+            })
+            .rounded(px(self.tokens.radii.lg))
+            .p(px(CONNECTION_POOL_CARD_PADDING))
+            .bg(rgb(theme.bg_panel))
+            .flex()
+            .flex_col()
+            .gap_3()
+            .hover(|style| style.border_color(rgb(theme.border_strong)))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Server,
+                                CONNECTION_POOL_ICON_SIZE_LG,
+                                rgb(if is_active {
+                                    CONNECTION_POOL_GREEN_400
+                                } else if is_idle {
+                                    CONNECTION_POOL_AMBER_400
+                                } else {
+                                    theme.text_muted
+                                }),
+                            ))
+                            .child(
+                                div()
+                                    .child(
+                                        div()
+                                            .text_size(px(14.0))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(rgb(theme.text))
+                                            .child(format!(
+                                                "{}@{}:{}",
+                                                connection.username,
+                                                connection.host,
+                                                connection.port
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.0))
+                                            .text_color(rgb(state.color))
+                                            .child(state.label),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(px(CONNECTION_POOL_BUTTON_SIZE))
+                            .h(px(CONNECTION_POOL_BUTTON_SIZE))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.md))
+                            .cursor(if global_never_timeout {
+                                CursorStyle::Arrow
+                            } else {
+                                CursorStyle::PointingHand
+                            })
+                            .opacity(if global_never_timeout { 0.5 } else { 1.0 })
+                            .hover(|style| style.bg(rgb(theme.bg_hover)))
+                            .on_mouse_move(cx.listener({
+                                let tooltip = tooltip.clone();
+                                let tooltip_id = format!("pool-keepalive-{}", connection_id);
+                                move |this, event: &MouseMoveEvent, _window, cx| {
+                                    this.queue_workspace_tooltip(
+                                        tooltip_id.clone(),
+                                        tooltip.clone(),
+                                        f32::from(event.position.x) + 12.0,
+                                        f32::from(event.position.y) + 16.0,
+                                        cx,
+                                    );
+                                }
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener({
+                                    let connection_id = connection_id.clone();
+                                    let tooltip_id = format!("pool-keepalive-{}", connection_id);
+                                    move |this, _event, _window, cx| {
+                                        this.clear_workspace_tooltip(&tooltip_id, cx);
+                                        if !global_never_timeout {
+                                            this.set_connection_pool_keep_alive(
+                                                &connection_id,
+                                                next_keep_alive,
+                                                cx,
+                                            );
+                                        }
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            )
+                            .child(Self::render_lucide_icon(
+                                if global_never_timeout || connection.keep_alive {
+                                    LucideIcon::Shield
+                                } else {
+                                    LucideIcon::ShieldOff
+                                },
+                                CONNECTION_POOL_ICON_SIZE_MD,
+                                rgb(if global_never_timeout || connection.keep_alive {
+                                    CONNECTION_POOL_GREEN_400
+                                } else {
+                                    theme.text_muted
+                                }),
+                            )),
+                    ),
+            )
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(3)
+                    .gap_2()
+                    .text_size(px(12.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(
+                        self.render_connection_pool_metric(
+                            LucideIcon::Terminal,
+                            self.i18n
+                                .t("connections.panel.terminals")
+                                .replace("{{count}}", &connection.terminal_count.to_string()),
+                        ),
+                    )
+                    .child(self.render_connection_pool_metric(
+                        LucideIcon::FolderOpen,
+                        self.i18n.t("connections.panel.sftp").replace(
+                            "{{count}}",
+                            if connection.has_sftp_session {
+                                "1"
+                            } else {
+                                "0"
+                            },
+                        ),
+                    ))
+                    .child(
+                        self.render_connection_pool_metric(
+                            LucideIcon::GitFork,
+                            self.i18n
+                                .t("connections.panel.forwards")
+                                .replace("{{count}}", &connection.forward_count.to_string()),
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .text_size(px(12.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.render_connection_pool_metric(
+                        LucideIcon::Clock,
+                        self.i18n.t("connections.panel.created").replace(
+                            "{{time}}",
+                            &self.format_connection_pool_time(connection.created_at),
+                        ),
+                    ))
+                    .when(is_idle, |row| {
+                        let keep_alive_label = if global_never_timeout || connection.keep_alive {
+                            self.i18n.t("connections.panel.keep_alive_enabled")
+                        } else {
+                            self.i18n
+                                .t("connections.panel.disconnect_in")
+                                .replace("{{min}}", &idle_timeout_min.to_string())
+                        };
+                        row.child(
+                            div().text_color(rgb(CONNECTION_POOL_AMBER_400)).child(
+                                self.i18n
+                                    .t("connections.panel.idle_hint")
+                                    .replace("{{keepAlive}}", &keep_alive_label),
+                            ),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_connection_pool_metric(&self, icon: LucideIcon, label: String) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .child(Self::render_lucide_icon(
+                icon,
+                CONNECTION_POOL_ICON_SIZE_SM,
+                rgb(theme.text_muted),
+            ))
+            .child(label)
+            .into_any_element()
+    }
+
+    fn render_connection_pool_keep_alive_legend(&self, idle_timeout_secs: u64) -> AnyElement {
+        let theme = self.tokens.ui;
+        let disabled_label = if idle_timeout_secs == 0 {
+            self.i18n.t("connections.keep_alive.global_never_tooltip")
+        } else {
+            self.i18n
+                .t("connections.keep_alive.legend_disabled")
+                .replace(
+                    "{{min}}",
+                    &((idle_timeout_secs as f64 / 60.0).round() as u64).to_string(),
+                )
+        };
+        div()
+            .px(px(CONNECTION_POOL_HEADER_X))
+            .py(px(CONNECTION_POOL_HEADER_Y))
+            .border_t_1()
+            .border_color(rgb(theme.border))
+            .bg(rgba((theme.bg_panel << 8) | CONNECTION_POOL_PANEL_ALPHA_30))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .text_size(px(14.0))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Shield,
+                        CONNECTION_POOL_ICON_SIZE_MD,
+                        rgb(CONNECTION_POOL_GREEN_400),
+                    ))
+                    .child(self.i18n.t("connections.keep_alive.legend_enabled")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::ShieldOff,
+                        CONNECTION_POOL_ICON_SIZE_MD,
+                        rgb(theme.text_muted),
+                    ))
+                    .child(disabled_label),
+            )
+            .into_any_element()
+    }
+
+}
