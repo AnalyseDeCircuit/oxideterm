@@ -630,11 +630,29 @@ impl WorkspaceApp {
                         .child(self.number_row(
                             "settings_view.ai.tool_use_max_rounds",
                             "settings_view.ai.tool_use_max_rounds_hint",
-                            settings.ai.tool_use.max_rounds.unwrap_or(10),
+                            settings
+                                .ai
+                                .tool_use
+                                .max_rounds
+                                .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS),
                             1,
-                            1,
-                            30,
+                            oxideterm_settings::MIN_AI_TOOL_MAX_ROUNDS,
+                            oxideterm_settings::MAX_AI_TOOL_MAX_ROUNDS,
                             set_ai_tool_use_max_rounds,
+                            cx,
+                        ))
+                        .child(self.number_row(
+                            "settings_view.ai.tool_use_max_calls_per_round",
+                            "settings_view.ai.tool_use_max_calls_per_round_hint",
+                            settings
+                                .ai
+                                .tool_use
+                                .max_calls_per_round
+                                .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND),
+                            1,
+                            oxideterm_settings::MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
+                            oxideterm_settings::MAX_AI_TOOL_MAX_CALLS_PER_ROUND,
+                            set_ai_tool_use_max_calls_per_round,
                             cx,
                         ))
                         .child(policy_groups)

@@ -14,6 +14,7 @@ mod references;
 mod settings;
 mod slash;
 mod streaming;
+mod touch_id;
 mod types;
 
 pub use chat::{apply_chat_request_overrides, generate_chat_title};
@@ -29,7 +30,7 @@ pub use mcp::{
     mcp_tool_output,
 };
 pub use orchestrator::orchestrator_tool_definitions;
-pub use persistence::AiChatPersistenceStore;
+pub use persistence::{AiChatPersistenceStore, PersistedDiagnosticEvent, PersistedTranscriptEntry};
 pub use policy::{
     AiActionRisk, AiPolicyDecision, AiPolicyDecisionKind, AiPolicySafetyMode, AiToolUsePolicy,
     denied_commands, has_denied_commands, is_command_denied, is_orchestrator_tool_name,

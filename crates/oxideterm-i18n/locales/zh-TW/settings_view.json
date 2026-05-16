@@ -607,6 +607,8 @@
       "tool_use_restore_disabled_tools": "恢復所有工具",
       "tool_use_max_rounds": "最大工具輪數",
       "tool_use_max_rounds_hint": "每次回覆中允許的工具/模型往返上限，達到後 OxideSens 會停止循環。預設：10。",
+      "tool_use_max_calls_per_round": "每輪最大工具呼叫數",
+      "tool_use_max_calls_per_round_hint": "模型在單輪中最多可以請求的工具呼叫數量。預設：8。",
       "tool_use_policy_summary": "唯讀操作會自動允許；命令執行、寫入、設定修改和傳輸遵循下方核准策略。",
       "tool_policy_read_title": "唯讀探索",
       "tool_policy_read_desc": "目標探索、終端機觀察、設定讀取和偏好回憶一律自動允許。",

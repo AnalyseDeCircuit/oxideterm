@@ -665,7 +665,9 @@
       "profile_default": "Default",
       "profile_set_default": "Set default",
       "profile_inherit_provider": "Use active provider",
-      "profile_inherit_model": "Use provider default"
+      "profile_inherit_model": "Use provider default",
+      "tool_use_max_calls_per_round": "1 ラウンドあたりの最大ツール呼び出し数",
+      "tool_use_max_calls_per_round_hint": "モデルが 1 ラウンドで要求できるツール呼び出し数の上限です。既定値: 8。"
     },
     "sftp": {
       "title": "SFTP転送",

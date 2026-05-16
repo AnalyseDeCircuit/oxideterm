@@ -135,7 +135,9 @@ use self::session_manager::{AutoRouteModalState, SessionManagerState};
 use self::settings::AiModelRefreshDelivery;
 use self::settings::ThemeEditorState;
 use self::sidebar::SidebarSection;
-use self::sidebar::{AiCompactionDelivery, AiModelSelectorProbeDelivery, AiStreamDelivery};
+use self::sidebar::{
+    AiCompactionDelivery, AiModelSelectorProbeDelivery, AiPendingChatStream, AiStreamDelivery,
+};
 use self::terminal_cast::TerminalCastPlayerState;
 use crate::assets::LucideIcon;
 use crate::{
@@ -327,6 +329,7 @@ pub(crate) struct WorkspaceApp {
     ai_editing_message_draft: String,
     ai_editing_message_focused: bool,
     ai_thinking_expansion_state: HashMap<String, bool>,
+    ai_tool_call_expansion_state: HashSet<String>,
     ai_chat_autocomplete_index: usize,
     ai_chat_autocomplete_suppressed: bool,
     ai_context_popover_open: bool,
@@ -364,6 +367,7 @@ pub(crate) struct WorkspaceApp {
     ai_compaction_rx: Option<std::sync::mpsc::Receiver<AiCompactionDelivery>>,
     ai_compaction_polling: bool,
     ai_compacting_conversations: HashSet<String>,
+    ai_pending_chat_after_compaction: Option<AiPendingChatStream>,
     next_ai_chat_sequence: u64,
     ai_key_store: oxideterm_ai::AiProviderKeyStore,
     ai_provider_key_status: HashMap<String, bool>,

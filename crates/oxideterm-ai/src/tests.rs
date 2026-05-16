@@ -8,7 +8,10 @@ use crate::streaming::{
     anthropic_chat_messages, gemini_chat_contents, openai_chat_messages, parse_anthropic_data_line,
     parse_gemini_data_line, parse_openai_data_line,
 };
-use crate::{ContextWindowSource, ModelContextWindowInfo, model_context_window_info};
+use crate::{
+    AiPolicySafetyMode, AiToolChoice, AiToolUsePolicy, ContextWindowSource, ModelContextWindowInfo,
+    model_context_window_info,
+};
 
 fn provider(id: &str, provider_type: &str, base_url: &str, enabled: bool) -> AiProviderView {
     AiProviderView {
@@ -20,6 +23,23 @@ fn provider(id: &str, provider_type: &str, base_url: &str, enabled: bool) -> AiP
         models: Vec::new(),
         enabled,
         custom: false,
+    }
+}
+
+fn test_stream_config(provider_type: &str) -> AiChatStreamConfig {
+    AiChatStreamConfig {
+        provider_id: Some("provider".to_string()),
+        provider_type: provider_type.to_string(),
+        base_url: "https://api.example.test".to_string(),
+        model: "model".to_string(),
+        api_key: None,
+        max_response_tokens: None,
+        reasoning_effort: Some("auto".to_string()),
+        safety_mode: AiPolicySafetyMode::Default,
+        profile_id: None,
+        tool_policy: AiToolUsePolicy::default(),
+        tools: Vec::new(),
+        tool_choice: AiToolChoice::Auto,
     }
 }
 
@@ -474,6 +494,7 @@ fn ai_policy_requires_destructive_approval_but_bypass_allows_it() {
         auto_approve_tools,
         disabled_tools: Vec::new(),
         max_rounds: Some(10),
+        max_calls_per_round: Some(8),
     };
     let args = serde_json::json!({ "command": "sudo reboot" });
 
@@ -512,6 +533,7 @@ fn ai_policy_matches_tauri_tool_keys_and_disabled_rules() {
         auto_approve_tools,
         disabled_tools: vec!["write_resource:settings".to_string()],
         max_rounds: Some(10),
+        max_calls_per_round: Some(8),
     };
 
     let settings_args = serde_json::json!({ "resource": "settings" });
@@ -572,6 +594,7 @@ fn execution_profile_merge_matches_tauri_settings_overlay() {
         ],
         vec!["transfer_resource".to_string()],
         Some(10),
+        Some(8),
     );
     let config = serde_json::json!({
         "defaultProfileId": "default",
@@ -600,6 +623,7 @@ fn execution_profile_merge_matches_tauri_settings_overlay() {
                 "toolUse": {
                     "enabled": true,
                     "maxRounds": 24,
+                    "maxCallsPerRound": 12,
                     "autoApproveTools": {
                         "write_resource:file": true,
                         "read_resource": false
@@ -628,6 +652,7 @@ fn execution_profile_merge_matches_tauri_settings_overlay() {
     assert!(!resolved.include_rag);
     assert!(resolved.tool_policy.enabled);
     assert_eq!(resolved.tool_policy.max_rounds, Some(24));
+    assert_eq!(resolved.tool_policy.max_calls_per_round, Some(12));
     assert_eq!(
         resolved.tool_policy.auto_approve_tools.get("run_command"),
         Some(&false)
@@ -1246,6 +1271,147 @@ fn chat_persistence_round_trips_tauri_redb_tables() {
 }
 
 #[test]
+fn chat_persistence_appends_transcript_and_diagnostic_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chat_history.redb");
+    let store = AiChatPersistenceStore::new(&path);
+    let transcript = PersistedTranscriptEntry {
+        id: "tr-1".into(),
+        conversation_id: "conversation-1".into(),
+        turn_id: Some("assistant-1".into()),
+        parent_id: Some("message-1".into()),
+        timestamp: 44,
+        kind: "assistant_turn_start".into(),
+        payload: serde_json::json!({ "messageId": "assistant-1" }),
+    };
+    let diagnostic = PersistedDiagnosticEvent {
+        id: "diag-1".into(),
+        conversation_id: "conversation-1".into(),
+        turn_id: Some("assistant-1".into()),
+        round_id: None,
+        timestamp: 45,
+        event_type: "budget_level_changed".into(),
+        data: serde_json::json!({ "source": "sidebar", "nextLevel": 2 }),
+    };
+
+    store
+        .append_transcript_entries("conversation-1", std::slice::from_ref(&transcript))
+        .unwrap();
+    store
+        .append_diagnostic_events("conversation-1", std::slice::from_ref(&diagnostic))
+        .unwrap();
+    store
+        .append_diagnostic_events("conversation-1", std::slice::from_ref(&diagnostic))
+        .unwrap();
+
+    let tail = store.diagnostic_tail("conversation-1", 10).unwrap();
+    assert_eq!(tail, vec![diagnostic]);
+
+    drop(store);
+    let db = redb::Database::create(&path).unwrap();
+    let read = db.begin_read().unwrap();
+    let transcript_index = read
+        .open_table(redb::TableDefinition::<&str, &[u8]>::new(
+            "conversation_transcript",
+        ))
+        .unwrap();
+    let transcript_ids: Vec<String> = rmp_serde::from_slice(
+        transcript_index
+            .get("conversation-1")
+            .unwrap()
+            .unwrap()
+            .value(),
+    )
+    .unwrap();
+    assert_eq!(transcript_ids, vec!["tr-1"]);
+    let diagnostic_index = read
+        .open_table(redb::TableDefinition::<&str, &[u8]>::new(
+            "conversation_diagnostic_events",
+        ))
+        .unwrap();
+    let diagnostic_ids: Vec<String> = rmp_serde::from_slice(
+        diagnostic_index
+            .get("conversation-1")
+            .unwrap()
+            .unwrap()
+            .value(),
+    )
+    .unwrap();
+    assert_eq!(diagnostic_ids, vec!["diag-1"]);
+}
+
+#[test]
+fn chat_persistence_hydrates_round_summaries_from_transcript() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chat_history.redb");
+    let store = AiChatPersistenceStore::new(&path);
+    let mut state = AiChatState::default();
+    let conversation_id =
+        state.create_conversation("conversation-1".into(), Some("Hello".into()), 42, None);
+    let mut assistant = chat_message("assistant-1", AiChatRole::Assistant, "answer");
+    assistant.turn = Some(serde_json::json!({
+        "id": "assistant-1",
+        "status": "complete",
+        "plainTextSummary": "answer",
+        "parts": [],
+        "toolRounds": [{
+            "id": "assistant-1-round-1",
+            "round": 1,
+            "toolCalls": [],
+        }],
+        "pendingSummaries": [],
+    }));
+    state.add_message(
+        &conversation_id,
+        chat_message("user-1", AiChatRole::User, "hello"),
+    );
+    state.add_message(&conversation_id, assistant);
+    store.save_state(&state).unwrap();
+    store
+        .append_transcript_entries(
+            &conversation_id,
+            &[PersistedTranscriptEntry {
+                id: "summary-1".into(),
+                conversation_id: conversation_id.clone(),
+                turn_id: Some("assistant-1".into()),
+                parent_id: Some("assistant-1-round-1".into()),
+                timestamp: 45,
+                kind: "summary_created".into(),
+                payload: serde_json::json!({
+                    "messageId": "assistant-1",
+                    "summaryText": "run_command: ok - printed cwd",
+                    "summaryKind": "round",
+                    "roundId": "assistant-1-round-1",
+                    "source": "background",
+                    "summarizationMode": "background",
+                    "contextLengthBefore": 256,
+                }),
+            }],
+        )
+        .unwrap();
+
+    let loaded = store.load_conversation(&conversation_id).unwrap().unwrap();
+    let assistant = loaded
+        .messages
+        .iter()
+        .find(|message| message.id == "assistant-1")
+        .expect("assistant message");
+    let turn = assistant.turn.as_ref().expect("assistant turn");
+    let round = &turn
+        .get("toolRounds")
+        .and_then(serde_json::Value::as_array)
+        .expect("tool rounds")[0];
+    assert_eq!(round["summary"], "run_command: ok - printed cwd");
+    assert_eq!(round["summaryMetadata"]["contextLengthBefore"], 256);
+    assert_eq!(
+        turn.get("pendingSummaries")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+}
+
+#[test]
 fn chat_persistence_preserves_message_branches() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("chat_history.redb");
@@ -1379,11 +1545,95 @@ fn openai_chat_messages_merge_system_prompts() {
             branches: None,
         },
     ];
-    let converted = openai_chat_messages(&messages);
+    let converted = openai_chat_messages(&test_stream_config("openai"), &messages);
     assert_eq!(converted[0]["role"], "system");
     assert_eq!(converted[0]["content"], "one\n\ntwo");
     assert_eq!(converted[1]["role"], "user");
     assert_eq!(converted[1]["content"], "hi");
+}
+
+fn assistant_tool_call_message(
+    id: &str,
+    content: &str,
+    thinking_content: Option<&str>,
+    tool_call_id: &str,
+) -> AiChatMessage {
+    AiChatMessage {
+        id: id.into(),
+        role: AiChatRole::Assistant,
+        content: content.into(),
+        timestamp_ms: 2,
+        model: None,
+        context: None,
+        is_streaming: false,
+        thinking_content: thinking_content.map(str::to_string),
+        metadata: None,
+        tool_call_id: None,
+        tool_calls: vec![serde_json::json!({
+            "id": tool_call_id,
+            "name": "open_app_surface",
+            "arguments": "{\"surface\":\"local_terminal\"}"
+        })],
+        turn: None,
+        transcript_ref: None,
+        summary_ref: None,
+        branches: None,
+    }
+}
+
+fn tool_result_message(id: &str, tool_call_id: &str) -> AiChatMessage {
+    AiChatMessage {
+        id: id.into(),
+        role: AiChatRole::Tool,
+        content: "{\"ok\":true}".into(),
+        timestamp_ms: 3,
+        model: None,
+        context: None,
+        is_streaming: false,
+        thinking_content: None,
+        metadata: None,
+        tool_call_id: Some(tool_call_id.into()),
+        tool_calls: Vec::new(),
+        turn: None,
+        transcript_ref: None,
+        summary_ref: None,
+        branches: None,
+    }
+}
+
+#[test]
+fn deepseek_tool_subturn_preserves_reasoning_only_after_latest_user() {
+    let messages = vec![
+        chat_message("u1", AiChatRole::User, "old request"),
+        assistant_tool_call_message("a1", "", Some("old reasoning"), "old-call"),
+        tool_result_message("t1", "old-call"),
+        chat_message("u2", AiChatRole::User, "please open a terminal"),
+        assistant_tool_call_message("a2", "", Some("current reasoning"), "current-call"),
+        tool_result_message("t2", "current-call"),
+    ];
+
+    let converted = openai_chat_messages(&test_stream_config("deepseek"), &messages);
+    assert!(converted[1].get("reasoning_content").is_none());
+    assert_eq!(
+        converted[4]["reasoning_content"].as_str(),
+        Some("current reasoning")
+    );
+}
+
+#[test]
+fn openai_compatible_tool_subturn_preserves_reasoning_for_kimi_style_models() {
+    let messages = vec![
+        chat_message("u1", AiChatRole::User, "old request"),
+        assistant_tool_call_message("a1", "", Some("kimi reasoning"), "call-1"),
+        tool_result_message("t1", "call-1"),
+        chat_message("u2", AiChatRole::User, "next request"),
+    ];
+
+    let converted = openai_chat_messages(&test_stream_config("openai_compatible"), &messages);
+    assert_eq!(
+        converted[1]["reasoning_content"].as_str(),
+        Some("kimi reasoning")
+    );
 }
 
 #[test]

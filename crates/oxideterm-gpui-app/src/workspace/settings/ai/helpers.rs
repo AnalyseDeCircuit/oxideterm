@@ -82,6 +82,7 @@ fn ai_add_execution_profile(settings: &mut PersistedSettings) {
         "toolUse": {
             "enabled": settings.ai.tool_use.enabled,
             "maxRounds": settings.ai.tool_use.max_rounds,
+            "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
             "autoApproveTools": settings.ai.tool_use.auto_approve_tools.clone(),
             "disabledTools": settings.ai.tool_use.disabled_tools.clone()
         },

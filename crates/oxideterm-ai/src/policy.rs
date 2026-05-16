@@ -55,6 +55,7 @@ pub struct AiToolUsePolicy {
     pub auto_approve_tools: HashMap<String, bool>,
     pub disabled_tools: Vec<String>,
     pub max_rounds: Option<i64>,
+    pub max_calls_per_round: Option<i64>,
 }
 
 pub const ORCHESTRATOR_TOOL_NAMES: &[&str] = &[

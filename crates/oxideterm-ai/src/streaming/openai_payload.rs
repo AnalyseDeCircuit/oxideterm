@@ -7,7 +7,7 @@ use crate::{
 pub(crate) fn openai_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMessage]) -> Value {
     let mut body = serde_json::json!({
         "model": config.model,
-        "messages": openai_chat_messages(messages),
+        "messages": openai_chat_messages(config, messages),
         "stream": true,
     });
     if let Some(tokens) = config.max_response_tokens.filter(|tokens| *tokens > 0)
@@ -105,33 +105,48 @@ fn apply_reasoning_options(body: &mut serde_json::Map<String, Value>, config: &A
     }
 }
 
-pub(crate) fn openai_chat_messages(messages: &[AiChatMessage]) -> Vec<Value> {
+pub(crate) fn openai_chat_messages(
+    config: &AiChatStreamConfig,
+    messages: &[AiChatMessage],
+) -> Vec<Value> {
     let mut system_parts = Vec::new();
-    let mut out = Vec::new();
+    let mut normalized = Vec::new();
     for message in messages {
         match message.role {
             AiChatRole::System if !message.content.is_empty() => {
                 system_parts.push(message.content.clone());
             }
             AiChatRole::System => {}
-            AiChatRole::User => out.push(serde_json::json!({
+            _ => normalized.push(message),
+        }
+    }
+
+    let last_user_index = normalized
+        .iter()
+        .rposition(|message| message.role == AiChatRole::User)
+        .unwrap_or(usize::MAX);
+    let mut out = normalized
+        .iter()
+        .enumerate()
+        .map(|(index, message)| match message.role {
+            AiChatRole::User => serde_json::json!({
                 "role": "user",
                 "content": message.content,
-            })),
-            AiChatRole::Tool => out.push(serde_json::json!({
+            }),
+            AiChatRole::Tool => serde_json::json!({
                 "role": "tool",
                 "tool_call_id": message.tool_call_id.as_deref().unwrap_or_default(),
                 "content": message.content,
-            })),
+            }),
             AiChatRole::Assistant => {
                 let calls = tool_calls_from_message(message);
                 if calls.is_empty() {
-                    out.push(serde_json::json!({
+                    serde_json::json!({
                         "role": "assistant",
                         "content": message.content,
-                    }));
+                    })
                 } else {
-                    out.push(serde_json::json!({
+                    let mut assistant = serde_json::json!({
                         "role": "assistant",
                         "content": if message.content.is_empty() {
                             Value::Null
@@ -149,11 +164,22 @@ pub(crate) fn openai_chat_messages(messages: &[AiChatMessage]) -> Vec<Value> {
                                 },
                             }))
                             .collect::<Vec<_>>(),
-                    }));
+                    });
+                    if let Some(reasoning) = message.thinking_content.as_ref()
+                        && should_preserve_reasoning_content(config, index, last_user_index)
+                        && let Some(object) = assistant.as_object_mut()
+                    {
+                        object.insert(
+                            "reasoning_content".to_string(),
+                            Value::String(reasoning.clone()),
+                        );
+                    }
+                    assistant
                 }
             }
-        }
-    }
+            AiChatRole::System => unreachable!("system messages are merged before conversion"),
+        })
+        .collect::<Vec<_>>();
     if !system_parts.is_empty() {
         out.insert(
             0,
@@ -164,6 +190,14 @@ pub(crate) fn openai_chat_messages(messages: &[AiChatMessage]) -> Vec<Value> {
         );
     }
     out
+}
+
+fn should_preserve_reasoning_content(
+    config: &AiChatStreamConfig,
+    index: usize,
+    last_user_index: usize,
+) -> bool {
+    config.provider_type != "deepseek" || index > last_user_index
 }
 
 fn tool_calls_from_message(message: &AiChatMessage) -> Vec<AiToolCall> {
@@ -288,7 +322,7 @@ mod tests {
             branches: None,
         };
 
-        let converted = openai_chat_messages(&[assistant, result]);
+        let converted = openai_chat_messages(&config("openai", "auto"), &[assistant, result]);
         assert_eq!(converted[0]["role"].as_str(), Some("assistant"));
         assert!(converted[0]["content"].is_null());
         assert_eq!(

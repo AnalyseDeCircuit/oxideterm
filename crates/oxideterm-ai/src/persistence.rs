@@ -131,6 +131,9 @@ impl AiChatPersistenceStore {
             }
         }
         messages.sort_by(|left, right| left.timestamp_ms.cmp(&right.timestamp_ms));
+        let transcript_round_summaries =
+            load_round_summaries_from_transcript(&read_txn, conversation_id)?;
+        apply_round_summaries_to_messages(&mut messages, &transcript_round_summaries);
 
         let mut conversation = conversation_from_meta(meta);
         conversation.messages = messages;
@@ -203,6 +206,90 @@ impl AiChatPersistenceStore {
 
         write_txn.commit()?;
         Ok(())
+    }
+
+    pub fn append_transcript_entries(
+        &self,
+        conversation_id: &str,
+        entries: &[PersistedTranscriptEntry],
+    ) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        self.initialize()?;
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut transcript_table = write_txn.open_table(TRANSCRIPT_TABLE)?;
+            let mut transcript_index_table = write_txn.open_table(CONV_TRANSCRIPT_TABLE)?;
+            let mut ids = read_index_ids(&transcript_index_table, conversation_id)?;
+            let mut seen = ids.iter().cloned().collect::<HashSet<_>>();
+            for entry in entries {
+                let bytes = rmp_serde::to_vec(entry)?;
+                transcript_table.insert(entry.id.as_str(), bytes.as_slice())?;
+                if seen.insert(entry.id.clone()) {
+                    ids.push(entry.id.clone());
+                }
+            }
+            let index_bytes = rmp_serde::to_vec(&ids)?;
+            transcript_index_table.insert(conversation_id, index_bytes.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn append_diagnostic_events(
+        &self,
+        conversation_id: &str,
+        events: &[PersistedDiagnosticEvent],
+    ) -> Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        self.initialize()?;
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut diagnostic_table = write_txn.open_table(DIAGNOSTIC_TABLE)?;
+            let mut diagnostic_index_table = write_txn.open_table(CONV_DIAGNOSTIC_TABLE)?;
+            let mut ids = read_index_ids(&diagnostic_index_table, conversation_id)?;
+            let mut seen = ids.iter().cloned().collect::<HashSet<_>>();
+            for event in events {
+                let bytes = rmp_serde::to_vec(event)?;
+                diagnostic_table.insert(event.id.as_str(), bytes.as_slice())?;
+                if seen.insert(event.id.clone()) {
+                    ids.push(event.id.clone());
+                }
+            }
+            let index_bytes = rmp_serde::to_vec(&ids)?;
+            diagnostic_index_table.insert(conversation_id, index_bytes.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn diagnostic_tail(
+        &self,
+        conversation_id: &str,
+        count: usize,
+    ) -> Result<Vec<PersistedDiagnosticEvent>> {
+        self.initialize()?;
+        let read_txn = self.db.begin_read()?;
+        let diagnostic_index_table = read_txn.open_table(CONV_DIAGNOSTIC_TABLE)?;
+        let diagnostic_table = read_txn.open_table(DIAGNOSTIC_TABLE)?;
+        let ids = diagnostic_index_table
+            .get(conversation_id)?
+            .map(|bytes| rmp_serde::from_slice::<Vec<String>>(bytes.value()))
+            .transpose()?
+            .unwrap_or_default();
+        let mut events = Vec::new();
+        for id in ids.into_iter().rev().take(count) {
+            if let Some(bytes) = diagnostic_table.get(id.as_str())? {
+                events.push(rmp_serde::from_slice::<PersistedDiagnosticEvent>(
+                    bytes.value(),
+                )?);
+            }
+        }
+        events.reverse();
+        Ok(events)
     }
 
     fn initialize(&self) -> Result<()> {
@@ -325,6 +412,17 @@ fn ensure_index_row(table: &mut redb::Table<'_, &str, &[u8]>, conversation_id: &
         table.insert(conversation_id, bytes.as_slice())?;
     }
     Ok(())
+}
+
+fn read_index_ids(
+    table: &redb::Table<'_, &str, &[u8]>,
+    conversation_id: &str,
+) -> Result<Vec<String>> {
+    Ok(table
+        .get(conversation_id)?
+        .map(|bytes| rmp_serde::from_slice::<Vec<String>>(bytes.value()))
+        .transpose()?
+        .unwrap_or_default())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -524,6 +622,244 @@ fn message_from_persisted(message: PersistedMessage) -> AiChatMessage {
         summary_ref: message.summary_ref,
         branches: message.branches,
     }
+}
+
+#[derive(Debug, Clone)]
+struct TranscriptRoundSummary {
+    message_id: Option<String>,
+    round_id: String,
+    text: String,
+    metadata: Option<Value>,
+    timestamp: i64,
+}
+
+fn load_round_summaries_from_transcript(
+    read_txn: &redb::ReadTransaction,
+    conversation_id: &str,
+) -> Result<Vec<TranscriptRoundSummary>> {
+    let transcript_index_table = read_txn.open_table(CONV_TRANSCRIPT_TABLE)?;
+    let transcript_table = read_txn.open_table(TRANSCRIPT_TABLE)?;
+    let ids = transcript_index_table
+        .get(conversation_id)?
+        .map(|bytes| rmp_serde::from_slice::<Vec<String>>(bytes.value()))
+        .transpose()?
+        .unwrap_or_default();
+    let mut summaries = Vec::new();
+    for id in ids {
+        let Some(bytes) = transcript_table.get(id.as_str())? else {
+            continue;
+        };
+        let entry: PersistedTranscriptEntry = rmp_serde::from_slice(bytes.value())?;
+        if entry.kind != "summary_created" {
+            continue;
+        }
+        let payload = entry.payload.as_object();
+        let summary_kind = payload
+            .and_then(|payload| payload.get("summaryKind"))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                payload
+                    .and_then(|payload| payload.get("roundId"))
+                    .and_then(Value::as_str)
+                    .map(|_| "round")
+            });
+        if summary_kind != Some("round") {
+            continue;
+        }
+        let Some(round_id) = payload
+            .and_then(|payload| payload.get("roundId"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let Some(text) = payload
+            .and_then(|payload| payload.get("summaryText"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        summaries.push(TranscriptRoundSummary {
+            message_id: payload
+                .and_then(|payload| payload.get("messageId"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or(entry.turn_id.clone()),
+            round_id: round_id.to_string(),
+            text: text.to_string(),
+            metadata: extract_round_summary_metadata(&entry.payload),
+            timestamp: entry.timestamp,
+        });
+    }
+    summaries.sort_by_key(|summary| summary.timestamp);
+    Ok(summaries)
+}
+
+fn extract_round_summary_metadata(payload: &Value) -> Option<Value> {
+    let payload = payload.as_object()?;
+    let mut metadata = serde_json::Map::new();
+    for key in [
+        "source",
+        "model",
+        "summarizationMode",
+        "durationMs",
+        "contextLengthBefore",
+        "numRounds",
+        "numRoundsSinceLastSummarization",
+        "usage",
+    ] {
+        if let Some(value) = payload.get(key) {
+            metadata.insert(key.to_string(), value.clone());
+        }
+    }
+    (!metadata.is_empty()).then_some(Value::Object(metadata))
+}
+
+fn apply_round_summaries_to_messages(
+    messages: &mut [AiChatMessage],
+    summaries: &[TranscriptRoundSummary],
+) {
+    for summary in summaries {
+        if let Some(message) = summary
+            .message_id
+            .as_deref()
+            .and_then(|message_id| messages.iter_mut().find(|message| message.id == message_id))
+        {
+            upsert_message_round_summary(message, summary);
+            continue;
+        }
+        if let Some(message) = messages.iter_mut().find(|message| {
+            message.role == AiChatRole::Assistant
+                && message_turn_has_round(message, &summary.round_id)
+        }) {
+            upsert_message_round_summary(message, summary);
+        }
+    }
+}
+
+fn upsert_message_round_summary(message: &mut AiChatMessage, summary: &TranscriptRoundSummary) {
+    ensure_message_turn(message);
+    if attach_message_round_summary(message, summary) {
+        remove_message_pending_summary(message, &summary.round_id);
+    } else {
+        upsert_message_pending_summary(message, summary);
+    }
+}
+
+fn ensure_message_turn(message: &mut AiChatMessage) {
+    if !message
+        .turn
+        .as_ref()
+        .is_some_and(|turn| turn.as_object().is_some())
+    {
+        message.turn = Some(serde_json::json!({
+            "id": message.id.clone(),
+            "status": "complete",
+            "plainTextSummary": message.content.clone(),
+            "parts": [],
+            "toolRounds": [],
+            "pendingSummaries": [],
+        }));
+    }
+    if let Some(object) = message.turn.as_mut().and_then(Value::as_object_mut) {
+        object
+            .entry("toolRounds".to_string())
+            .or_insert_with(|| serde_json::json!([]));
+        object
+            .entry("pendingSummaries".to_string())
+            .or_insert_with(|| serde_json::json!([]));
+    }
+}
+
+fn attach_message_round_summary(
+    message: &mut AiChatMessage,
+    summary: &TranscriptRoundSummary,
+) -> bool {
+    let Some(rounds) = message
+        .turn
+        .as_mut()
+        .and_then(|turn| turn.get_mut("toolRounds"))
+        .and_then(Value::as_array_mut)
+    else {
+        return false;
+    };
+    let Some(round) = rounds.iter_mut().find(|round| {
+        round
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|round_id| round_id == summary.round_id)
+    }) else {
+        return false;
+    };
+    let Some(object) = round.as_object_mut() else {
+        return false;
+    };
+    object.insert("summary".to_string(), Value::String(summary.text.clone()));
+    if let Some(metadata) = summary.metadata.as_ref() {
+        object.insert("summaryMetadata".to_string(), metadata.clone());
+    }
+    true
+}
+
+fn upsert_message_pending_summary(message: &mut AiChatMessage, summary: &TranscriptRoundSummary) {
+    let Some(pending) = message
+        .turn
+        .as_mut()
+        .and_then(|turn| turn.get_mut("pendingSummaries"))
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    let mut value = serde_json::json!({
+        "roundId": summary.round_id,
+        "text": summary.text,
+    });
+    if let Some(object) = value.as_object_mut()
+        && let Some(metadata) = summary.metadata.as_ref()
+    {
+        object.insert("metadata".to_string(), metadata.clone());
+    }
+    if let Some(existing) = pending.iter_mut().find(|candidate| {
+        candidate
+            .get("roundId")
+            .and_then(Value::as_str)
+            .is_some_and(|round_id| round_id == summary.round_id)
+    }) {
+        *existing = value;
+    } else {
+        pending.push(value);
+    }
+}
+
+fn remove_message_pending_summary(message: &mut AiChatMessage, round_id: &str) {
+    if let Some(pending) = message
+        .turn
+        .as_mut()
+        .and_then(|turn| turn.get_mut("pendingSummaries"))
+        .and_then(Value::as_array_mut)
+    {
+        pending.retain(|summary| {
+            !summary
+                .get("roundId")
+                .and_then(Value::as_str)
+                .is_some_and(|candidate| candidate == round_id)
+        });
+    }
+}
+
+fn message_turn_has_round(message: &AiChatMessage, round_id: &str) -> bool {
+    message
+        .turn
+        .as_ref()
+        .and_then(|turn| turn.get("toolRounds"))
+        .and_then(Value::as_array)
+        .is_some_and(|rounds| {
+            rounds.iter().any(|round| {
+                round
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|candidate| candidate == round_id)
+            })
+        })
 }
 
 fn persisted_from_message(conversation_id: &str, message: &AiChatMessage) -> PersistedMessage {
@@ -787,7 +1123,7 @@ pub struct ConversationMeta {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PersistedTranscriptEntry {
     pub id: String,
     pub conversation_id: String,
@@ -802,7 +1138,7 @@ pub struct PersistedTranscriptEntry {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PersistedDiagnosticEvent {
     pub id: String,
     pub conversation_id: String,

@@ -24,7 +24,11 @@ impl WorkspaceApp {
         self.ai_chat_stream_rx = None;
         self.ai_chat_stream_generation = self.ai_chat_stream_generation.saturating_add(1);
         self.ai_chat_loading = false;
+        for (_, sender) in self.ai_pending_tool_approvals.drain() {
+            let _ = sender.send(false);
+        }
         if let Some(conversation) = self.ai_chat.active_conversation_mut() {
+            reject_incomplete_ai_tool_calls_on_cancel(conversation);
             for message in &mut conversation.messages {
                 message.is_streaming = false;
             }
@@ -73,6 +77,7 @@ impl WorkspaceApp {
         self.ai_editing_message_draft.clear();
         self.ai_editing_message_focused = false;
         self.ai_thinking_expansion_state.clear();
+        self.ai_tool_call_expansion_state.clear();
         self.ai_chat_input_focused = false;
     }
 
@@ -80,6 +85,7 @@ impl WorkspaceApp {
         self.ai_chat.delete_conversation(id);
         self.ai_safety_bypass_conversations.remove(id);
         self.ai_thinking_expansion_state.clear();
+        self.ai_tool_call_expansion_state.clear();
         self.ai_conversation_list_open = !self.ai_chat.conversations.is_empty();
         self.ai_chat_menu_open = false;
         self.persist_ai_chat_state();
@@ -89,6 +95,7 @@ impl WorkspaceApp {
         self.ai_chat.clear_conversations();
         self.ai_safety_bypass_conversations.clear();
         self.ai_thinking_expansion_state.clear();
+        self.ai_tool_call_expansion_state.clear();
         self.close_ai_sidebar_popovers();
         self.ai_clear_all_confirm_open = false;
         self.cancel_ai_chat_stream_without_notify();
@@ -102,7 +109,11 @@ impl WorkspaceApp {
         self.ai_chat_stream_rx = None;
         self.ai_chat_stream_generation = self.ai_chat_stream_generation.saturating_add(1);
         self.ai_chat_loading = false;
+        for (_, sender) in self.ai_pending_tool_approvals.drain() {
+            let _ = sender.send(false);
+        }
         if let Some(conversation) = self.ai_chat.active_conversation_mut() {
+            reject_incomplete_ai_tool_calls_on_cancel(conversation);
             for message in &mut conversation.messages {
                 message.is_streaming = false;
             }

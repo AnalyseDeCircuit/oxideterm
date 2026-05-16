@@ -25,6 +25,8 @@ pub struct AiToolUseSettings {
     pub disabled_tools: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_rounds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_calls_per_round: Option<i64>,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -56,6 +58,7 @@ impl Default for AiToolUseSettings {
             auto_approve_tools,
             disabled_tools: Vec::new(),
             max_rounds: Some(DEFAULT_AI_TOOL_MAX_ROUNDS),
+            max_calls_per_round: Some(DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND),
             extra: ExtraFields::new(),
         }
     }
@@ -92,6 +95,7 @@ fn default_execution_profiles() -> Value {
             "toolUse": {
                 "enabled": false,
                 "maxRounds": DEFAULT_AI_TOOL_MAX_ROUNDS,
+                "maxCallsPerRound": DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND,
                 "autoApproveTools": {},
                 "disabledTools": []
             },

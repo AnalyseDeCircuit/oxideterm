@@ -106,11 +106,17 @@ impl WorkspaceApp {
             time_label(message.timestamp_ms),
             user,
         ));
-        let thinking_content = message
-            .thinking_content
-            .as_ref()
-            .map(|content| content.trim())
-            .filter(|content| !content.is_empty());
+        let structured_parts = ai_turn_parts(message);
+        let has_structured_parts = structured_parts.is_some_and(|parts| !parts.is_empty());
+        let thinking_content = (!has_structured_parts)
+            .then(|| {
+                message
+                    .thinking_content
+                    .as_ref()
+                    .map(|content| content.trim())
+                    .filter(|content| !content.is_empty())
+            })
+            .flatten();
         let thinking_expanded = self
             .ai_thinking_expansion_state
             .get(&message.id)
@@ -210,11 +216,13 @@ impl WorkspaceApp {
         }
         if editing {
             body = body.child(self.render_ai_message_edit_body(cx));
+        } else if has_structured_parts {
+            body = self.render_ai_turn_parts(body, message, cx);
         } else if !message.content.is_empty() {
             body = body.child(self.render_ai_message_content(message));
-        }
-        if !message.tool_calls.is_empty() {
-            body = body.child(self.render_ai_tool_calls(message, cx));
+            if !message.tool_calls.is_empty() {
+                body = body.child(self.render_ai_tool_calls(message, cx));
+            }
         }
         if user && !editing
             && let Some(branches) = message.branches.as_ref().filter(|branches| branches.total > 1)
@@ -455,9 +463,428 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    fn render_ai_turn_parts(
+        &self,
+        mut body: Div,
+        message: &AiChatMessage,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let Some(parts) = ai_turn_parts(message) else {
+            return body;
+        };
+        let mut buffered_tool_parts = Vec::new();
+        let mut buffered_tool_round_id: Option<String> = None;
+        let mut segment_index = 0usize;
+
+        for part in parts {
+            let part_type = part
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if matches!(part_type, "tool_call" | "tool_result") {
+                let next_round_id = ai_tool_part_round_id(message, part);
+                if !buffered_tool_parts.is_empty()
+                    && buffered_tool_round_id.as_deref() != next_round_id.as_deref()
+                {
+                    body = body.child(self.render_ai_tool_part_segment(
+                        message,
+                        segment_index,
+                        &buffered_tool_parts,
+                        cx,
+                    ));
+                    buffered_tool_parts.clear();
+                    buffered_tool_round_id = None;
+                    segment_index = segment_index.saturating_add(1);
+                }
+
+                buffered_tool_parts.push(part.clone());
+                if buffered_tool_round_id.is_none() {
+                    buffered_tool_round_id = next_round_id;
+                }
+                continue;
+            }
+
+            if !buffered_tool_parts.is_empty() {
+                body = body.child(self.render_ai_tool_part_segment(
+                    message,
+                    segment_index,
+                    &buffered_tool_parts,
+                    cx,
+                ));
+                buffered_tool_parts.clear();
+                buffered_tool_round_id = None;
+                segment_index = segment_index.saturating_add(1);
+            }
+
+            match part_type {
+                "text" => {
+                    if let Some(text) = part
+                        .get("text")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|text| !text.trim().is_empty())
+                    {
+                        let mut segment = message.clone();
+                        segment.id = format!("{}-text-{segment_index}", message.id);
+                        segment.content = text.to_string();
+                        segment.tool_calls.clear();
+                        body = body.child(self.render_ai_message_content(&segment));
+                        segment_index = segment_index.saturating_add(1);
+                    }
+                }
+                "thinking" => {
+                    if let Some(text) = part
+                        .get("text")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|text| !text.trim().is_empty())
+                    {
+                        body = body.child(self.render_ai_thinking_part(
+                            message,
+                            segment_index,
+                            text,
+                            part.get("streaming")
+                                .and_then(serde_json::Value::as_bool)
+                                .unwrap_or(message.is_streaming),
+                            cx,
+                        ));
+                        segment_index = segment_index.saturating_add(1);
+                    }
+                }
+                "warning" | "error" => {
+                    if let Some(text) = part
+                        .get("message")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|text| !text.trim().is_empty())
+                    {
+                        body = body.child(
+                            div()
+                                .rounded(px(self.tokens.radii.md))
+                                .border_1()
+                                .border_color(rgba((self.tokens.ui.error << 8) | 0x66))
+                                .bg(rgba((self.tokens.ui.error << 8) | 0x12))
+                                .px(px(self.tokens.spacing.three))
+                                .py(px(self.tokens.spacing.two))
+                                .text_color(rgb(self.tokens.ui.error))
+                                .child(text.to_string()),
+                        );
+                        segment_index = segment_index.saturating_add(1);
+                    }
+                }
+                "guardrail" => {
+                    if let Some(text) = part
+                        .get("message")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|text| !text.trim().is_empty())
+                    {
+                        body = body.child(self.render_ai_guardrail_part(
+                            message,
+                            segment_index,
+                            part,
+                            text,
+                            cx,
+                        ));
+                        segment_index = segment_index.saturating_add(1);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !buffered_tool_parts.is_empty() {
+            body = body.child(self.render_ai_tool_part_segment(
+                message,
+                segment_index,
+                &buffered_tool_parts,
+                cx,
+            ));
+        }
+        body
+    }
+
+    fn render_ai_guardrail_part(
+        &self,
+        message: &AiChatMessage,
+        segment_index: usize,
+        part: &serde_json::Value,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let code = part
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let strong = matches!(code, "tool-disabled-hard-deny" | "pseudo-tool-transcript");
+        let raw_text = part
+            .get("rawText")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty());
+        let expanded_key = format!("{}-guardrail-{segment_index}", message.id);
+        let expanded = self
+            .ai_tool_call_expansion_state
+            .contains(&expanded_key);
+        let mut block = ai_guardrail_block(
+            &self.tokens,
+            text.to_string(),
+            strong,
+            Self::render_lucide_icon(
+                LucideIcon::AlertTriangle,
+                14.0,
+                rgba((0xf59e0b << 8) | 0xe6),
+            ),
+        );
+        if let Some(raw_text) = raw_text {
+            let toggle_key = expanded_key.clone();
+            block = block.child(
+                div()
+                    .mt(px(self.tokens.spacing.two))
+                    .flex()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.one))
+                    .text_size(px(11.0))
+                    .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
+                    .cursor_pointer()
+                    .hover(|style| style.text_color(rgb(self.tokens.ui.text_muted)))
+                    .child(Self::render_lucide_icon(
+                        if expanded {
+                            LucideIcon::ChevronDown
+                        } else {
+                            LucideIcon::ChevronRight
+                        },
+                        12.0,
+                        rgba((self.tokens.ui.text_muted << 8) | 0x99),
+                    ))
+                    .child(self.i18n.t("ai.context.view_original"))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            let current = this
+                                .ai_tool_call_expansion_state
+                                .contains(&toggle_key);
+                            if current {
+                                this.ai_tool_call_expansion_state.remove(&toggle_key);
+                            } else {
+                                this.ai_tool_call_expansion_state.insert(toggle_key.clone());
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+            );
+            if expanded {
+                block = block.child(ai_raw_block(
+                    &self.tokens,
+                    (
+                        "ai-guardrail-raw",
+                        ai_message_element_seed(&expanded_key),
+                    ),
+                    Some(220.0),
+                    raw_text.to_string(),
+                ));
+            }
+        }
+        div().w_full().child(block)
+    }
+
+    fn render_ai_thinking_part(
+        &self,
+        message: &AiChatMessage,
+        segment_index: usize,
+        text: &str,
+        streaming: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let thinking_key = format!("{}-thinking-{segment_index}", message.id);
+        let thinking_expanded = self
+            .ai_thinking_expansion_state
+            .get(&thinking_key)
+            .copied()
+            .unwrap_or_else(|| self.settings_store.settings().ai.thinking_default_expanded);
+        let compact =
+            self.settings_store.settings().ai.thinking_style == AiThinkingStyle::Compact
+                && !thinking_expanded;
+        if compact {
+            let toggle_key = thinking_key.clone();
+            return ai_thinking_compact(
+                &self.tokens,
+                self.i18n.t("ai.thinking.thought"),
+                Self::render_lucide_icon(LucideIcon::Brain, 12.0, rgb(self.tokens.ui.text_muted)),
+                Self::render_lucide_icon(
+                    LucideIcon::ChevronRight,
+                    12.0,
+                    rgb(self.tokens.ui.text_muted),
+                ),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    let default_expanded =
+                        this.settings_store.settings().ai.thinking_default_expanded;
+                    let current = this
+                        .ai_thinking_expansion_state
+                        .get(&toggle_key)
+                        .copied()
+                        .unwrap_or(default_expanded);
+                    this.ai_thinking_expansion_state
+                        .insert(toggle_key.clone(), !current);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .into_any_element();
+        }
+
+        let toggle_key = thinking_key.clone();
+        let chevron = if thinking_expanded {
+            LucideIcon::ChevronDown
+        } else {
+            LucideIcon::ChevronRight
+        };
+        let header = ai_thinking_header(
+            &self.tokens,
+            self.i18n.t("ai.thinking.thought"),
+            streaming,
+            Self::render_lucide_icon(chevron, 12.0, rgb(self.tokens.ui.text_muted)),
+            Self::render_lucide_icon(LucideIcon::Brain, 12.0, rgb(self.tokens.ui.text_muted)),
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                let default_expanded = this.settings_store.settings().ai.thinking_default_expanded;
+                let current = this
+                    .ai_thinking_expansion_state
+                    .get(&toggle_key)
+                    .copied()
+                    .unwrap_or(default_expanded);
+                this.ai_thinking_expansion_state
+                    .insert(toggle_key.clone(), !current);
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        );
+        ai_thinking_block(&self.tokens, thinking_expanded)
+            .child(header)
+            .when(thinking_expanded, |block| {
+                block.child(ai_thinking_content(
+                    &self.tokens,
+                    ("ai-thinking", ai_message_element_seed(&thinking_key)),
+                    text.to_string(),
+                ))
+            })
+            .into_any_element()
+    }
+
+    fn render_ai_tool_part_segment(
+        &self,
+        message: &AiChatMessage,
+        segment_index: usize,
+        parts: &[serde_json::Value],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut values = Vec::new();
+        let mut ids = Vec::<String>::new();
+        for part in parts {
+            let id = part
+                .get("id")
+                .or_else(|| part.get("toolCallId"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if id.is_empty() || ids.iter().any(|existing| existing == id) {
+                continue;
+            }
+            ids.push(id.to_string());
+        }
+
+        for id in ids {
+            if let Some(existing) = message.tool_calls.iter().find(|call| {
+                call.get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|existing| existing == id)
+            }) {
+                values.push(existing.clone());
+            } else if let Some(value) = ai_tool_call_value_from_turn_parts(&id, parts) {
+                values.push(value);
+            }
+        }
+
+        let mut segment = message.clone();
+        segment.id = format!("{}-tools-{segment_index}", message.id);
+        segment.content.clear();
+        segment.tool_calls = values;
+        self.render_ai_tool_calls(&segment, cx)
+    }
+
     fn render_ai_tool_calls(&self, message: &AiChatMessage, cx: &mut Context<Self>) -> AnyElement {
-        let mut block = ai_tool_block(&self.tokens).child(ai_tool_heading(&self.tokens, "工具调用"));
-        for call in &message.tool_calls {
+        let mut block = ai_tool_block(&self.tokens).child(ai_tool_heading(
+            &self.tokens,
+            format!(
+                "{} ({})",
+                self.i18n.t("ai.tool_use.heading"),
+                message.tool_calls.len()
+            ),
+        ));
+        let should_condense = message.tool_calls.len() >= 5;
+        let split_at = if should_condense {
+            message.tool_calls.len().saturating_sub(3)
+        } else {
+            0
+        };
+        let condensed_key = format!("{}:condensed-tools", message.id);
+        let show_condensed = self.ai_tool_call_expansion_state.contains(&condensed_key);
+        if should_condense {
+            let hidden_count = split_at;
+            let expanded_key = condensed_key.clone();
+            let label = if show_condensed {
+                self.i18n.t("ai.tool_use.condensed_label")
+            } else {
+                self.i18n
+                    .t("ai.tool_use.condensed")
+                    .replace("{{count}}", &hidden_count.to_string())
+            };
+            block = block.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.one))
+                    .rounded(px(self.tokens.radii.md))
+                    .px(px(self.tokens.spacing.two))
+                    .py(px(self.tokens.spacing.one))
+                    .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x33))
+                    .hover(|style| style.bg(rgba((self.tokens.ui.bg_hover << 8) | 0x66)))
+                    .text_size(px(10.0))
+                    .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x66))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::FileArchive,
+                        12.0,
+                        rgba((self.tokens.ui.text_muted << 8) | 0x80),
+                    ))
+                    .child(div().flex_1().min_w_0().child(label))
+                    .child(Self::render_lucide_icon(
+                        if show_condensed {
+                            LucideIcon::ChevronDown
+                        } else {
+                            LucideIcon::ChevronRight
+                        },
+                        12.0,
+                        rgba((self.tokens.ui.text_muted << 8) | 0x80),
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            if !this.ai_tool_call_expansion_state.remove(&expanded_key) {
+                                this.ai_tool_call_expansion_state.insert(expanded_key.clone());
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+            );
+        }
+        let calls = message
+            .tool_calls
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !should_condense || show_condensed || *index >= split_at)
+            .map(|(_, call)| call);
+        for call in calls {
             let id = call
                 .get("id")
                 .and_then(serde_json::Value::as_str)
@@ -507,30 +934,53 @@ impl WorkspaceApp {
                 pending_denied_command: risk == AiToolRisk::Destructive,
                 bypass_approval: false,
             };
-            let mut item = ai_tool_item(&self.tokens, &view).child(ai_tool_item_header(
-                &self.tokens,
-                &view,
-                Self::render_lucide_icon(
-                    ai_tool_status_icon(status),
-                    12.0,
-                    rgb(ai_tool_status_color(&self.tokens, status)),
+            let expansion_key = format!("{}:{id}", message.id);
+            let expanded = self.ai_tool_call_expansion_state.contains(&expansion_key);
+            let header_key = expansion_key.clone();
+            let mut item = ai_tool_item(&self.tokens, &view).child(
+                ai_tool_item_header(
+                    &self.tokens,
+                    &view,
+                    Self::render_lucide_icon(
+                        ai_tool_status_icon(status),
+                        12.0,
+                        rgb(ai_tool_status_color(&self.tokens, status)),
+                    ),
+                    Self::render_lucide_icon(
+                        LucideIcon::Wrench,
+                        12.0,
+                        rgba((self.tokens.ui.text_muted << 8) | 0x99),
+                    ),
+                    Self::render_lucide_icon(
+                        if expanded {
+                            LucideIcon::ChevronDown
+                        } else {
+                            LucideIcon::ChevronRight
+                        },
+                        12.0,
+                        rgba((self.tokens.ui.text_muted << 8) | 0x80),
+                    ),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        if !this.ai_tool_call_expansion_state.remove(&header_key) {
+                            this.ai_tool_call_expansion_state.insert(header_key.clone());
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
                 ),
-                Self::render_lucide_icon(
-                    LucideIcon::Wrench,
-                    12.0,
-                    rgba((self.tokens.ui.text_muted << 8) | 0x99),
-                ),
-                Self::render_lucide_icon(
-                    LucideIcon::ChevronDown,
-                    12.0,
-                    rgba((self.tokens.ui.text_muted << 8) | 0x80),
-                ),
-            ));
+            );
 
             let mut details = ai_tool_details(&self.tokens)
                 .child(
                     div()
-                        .child(ai_tool_section_label(&self.tokens, "参数", None))
+                        .child(ai_tool_section_label(
+                            &self.tokens,
+                            self.i18n.t("ai.tool_use.arguments"),
+                            None,
+                        ))
                         .child(ai_tool_args_pre(
                             &self.tokens,
                             ("ai-tool-args", ai_message_element_seed(&id)),
@@ -547,7 +997,7 @@ impl WorkspaceApp {
                     div()
                         .child(ai_tool_section_label(
                             &self.tokens,
-                            "结果",
+                            self.i18n.t("ai.tool_use.output"),
                             if status == AiToolStatus::Error {
                                 Some(AiTone::Red)
                             } else {
@@ -561,7 +1011,9 @@ impl WorkspaceApp {
                         )),
                 );
             }
-            item = item.child(details);
+            if expanded {
+                item = item.child(details);
+            }
 
             if status == AiToolStatus::PendingApproval {
                 let approve_id = id.clone();
@@ -603,6 +1055,28 @@ impl WorkspaceApp {
                 ));
             }
             block = block.child(item);
+        }
+        if ai_latest_tool_round_marker(message).as_deref() == Some("awaiting-summary") {
+            block = block.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.two))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
+                    .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x33))
+                    .px(px(self.tokens.spacing.two))
+                    .py(px(self.tokens.spacing.two))
+                    .text_size(px(11.0))
+                    .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::LoaderCircle,
+                        14.0,
+                        rgba((self.tokens.ui.accent << 8) | 0xb3),
+                    ))
+                    .child(self.i18n.t("ai.tool_use.awaiting_summary")),
+            );
         }
         block.into_any_element()
     }
@@ -877,6 +1351,121 @@ fn ai_tool_status_from_value(value: Option<&serde_json::Value>) -> AiToolStatus 
         "rejected" => AiToolStatus::Rejected,
         _ => AiToolStatus::Pending,
     }
+}
+
+fn ai_latest_tool_round_marker(message: &AiChatMessage) -> Option<String> {
+    message
+        .turn
+        .as_ref()
+        .and_then(|turn| turn.get("toolRounds"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|rounds| rounds.last())
+        .and_then(|round| round.get("statefulMarker"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+fn ai_turn_parts(message: &AiChatMessage) -> Option<&Vec<serde_json::Value>> {
+    message
+        .turn
+        .as_ref()
+        .and_then(|turn| turn.get("parts"))
+        .and_then(serde_json::Value::as_array)
+}
+
+fn ai_tool_part_round_id(message: &AiChatMessage, part: &serde_json::Value) -> Option<String> {
+    let tool_call_id = part
+        .get("id")
+        .or_else(|| part.get("toolCallId"))
+        .and_then(serde_json::Value::as_str)?;
+    let rounds = message
+        .turn
+        .as_ref()
+        .and_then(|turn| turn.get("toolRounds"))
+        .and_then(serde_json::Value::as_array)?;
+    rounds.iter().find_map(|round| {
+        let has_tool_call = round
+            .get("toolCalls")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|tool_calls| {
+                tool_calls.iter().any(|tool_call| {
+                    tool_call
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|existing| existing == tool_call_id)
+                })
+            });
+        has_tool_call
+            .then(|| round.get("id").and_then(serde_json::Value::as_str))
+            .flatten()
+            .map(str::to_string)
+    })
+}
+
+fn ai_tool_call_value_from_turn_parts(
+    id: &str,
+    parts: &[serde_json::Value],
+) -> Option<serde_json::Value> {
+    let call = parts.iter().find(|part| {
+        part.get("type").and_then(serde_json::Value::as_str) == Some("tool_call")
+            && part
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|existing| existing == id)
+    })?;
+    let result = parts.iter().find(|part| {
+        part.get("type").and_then(serde_json::Value::as_str) == Some("tool_result")
+            && part
+                .get("toolCallId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|existing| existing == id)
+    });
+    let name = call
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("tool");
+    let arguments = call
+        .get("argumentsText")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let mut value = serde_json::json!({
+        "id": id,
+        "name": name,
+        "arguments": arguments,
+        "status": call
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("pending"),
+        "result": serde_json::Value::Null,
+    });
+    if let Some(result) = result
+        && let Some(object) = value.as_object_mut()
+    {
+        let success = result
+            .get("success")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        object.insert(
+            "status".to_string(),
+            serde_json::json!(if success { "completed" } else { "error" }),
+        );
+        object.insert(
+            "result".to_string(),
+            result
+                .get("envelope")
+                .cloned()
+                .unwrap_or_else(|| {
+                    serde_json::json!({
+                        "ok": success,
+                        "output": result
+                            .get("output")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default(),
+                    })
+                }),
+        );
+    }
+    Some(value)
 }
 
 fn ai_tool_risk_from_value(value: Option<&serde_json::Value>, tool_name: &str) -> AiToolRisk {
