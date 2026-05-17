@@ -3,6 +3,9 @@ impl WorkspaceApp {
         &self,
         conversation_id: &str,
         config: &AiChatStreamConfig,
+        request_content: Option<&str>,
+        task_system_prompt: Option<&str>,
+        rag_system_prompt: Option<&str>,
     ) -> bool {
         let Some(conversation) = self
             .ai_chat
@@ -12,7 +15,14 @@ impl WorkspaceApp {
         else {
             return false;
         };
-        let Some(decision) = self.ai_send_budget_decision(conversation, config) else {
+        let Some(decision) = self.ai_send_budget_decision(
+            conversation,
+            config,
+            request_content,
+            task_system_prompt,
+            rag_system_prompt,
+        )
+        else {
             return false;
         };
         decision.level >= 2 && ai_find_prompt_transcript_lookup_reference(&conversation.messages).is_none()
@@ -27,19 +37,7 @@ impl WorkspaceApp {
             .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
         let model = active_model_or_provider_default(applied_profile.model.as_deref(), &provider)
             .ok_or_else(|| "No model selected. Please refresh models or select one in Settings > AI.".to_string())?;
-        let requires_key = ai_provider_chat_requires_key(&provider.provider_type);
-        let api_key = match self.ai_key_store.get_provider_key(&provider.id) {
-            Ok(key) => key,
-            Err(_) if requires_key => {
-                return Err(self.i18n.t("ai.model_selector.failed_to_get_api_key"));
-            }
-            Err(_) => None,
-        };
-        if requires_key && api_key.is_none() {
-            return Err(self.i18n.t("ai.model_selector.api_key_not_found"));
-        }
-        let max_response_tokens =
-            ai_model_max_response_tokens(&settings.ai.model_max_response_tokens, &provider.id, &model);
+        let max_response_tokens = ai_chat_request_max_response_tokens(settings, &provider.id, &model);
         let reasoning_effort = oxideterm_ai::resolve_ai_reasoning_effort(
             applied_profile.reasoning_effort.as_deref(),
             &settings.ai.reasoning_provider_overrides,
@@ -61,7 +59,7 @@ impl WorkspaceApp {
             provider_type: provider.provider_type,
             base_url: provider.base_url,
             model,
-            api_key,
+            api_key: None,
             max_response_tokens,
             reasoning_effort: Some(reasoning_effort),
             safety_mode: match self.active_ai_safety_mode() {
@@ -71,6 +69,58 @@ impl WorkspaceApp {
             profile_id: applied_profile.profile_id,
             tool_policy: applied_profile.tool_policy,
             tools,
+            tool_choice: oxideterm_ai::AiToolChoice::Auto,
+        })
+    }
+
+    fn resolve_ai_summary_stream_config(&self, compact: bool) -> Result<AiChatStreamConfig, String> {
+        let settings = self.settings_store.settings();
+        let providers = ai_provider_views(&settings.ai.providers);
+        let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())
+            .cloned()
+            .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
+        let model = active_model_or_provider_default(settings.ai.active_model.as_deref(), &provider)
+            .ok_or_else(|| "No model selected. Please refresh models or select one in Settings > AI.".to_string())?;
+        let max_response_tokens = if compact {
+            ai_model_max_response_tokens(&settings.ai.model_max_response_tokens, &provider.id, &model)
+                .or_else(|| {
+                    let context_window = oxideterm_ai::model_context_window(
+                        &model,
+                        &settings.ai.model_context_windows,
+                        Some(&provider.id),
+                        &settings.ai.user_context_windows,
+                    )
+                    .try_into()
+                    .ok()
+                    .filter(|value: &usize| *value > 0)
+                    .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW);
+                    i64::try_from(ai_response_reserve(context_window)).ok()
+                })
+        } else {
+            None
+        };
+        let reasoning_effort = oxideterm_ai::resolve_ai_reasoning_effort(
+            ai_reasoning_effort_value(settings.ai.reasoning_effort).as_deref(),
+            &settings.ai.reasoning_provider_overrides,
+            &settings.ai.reasoning_model_overrides,
+            Some(&provider.id),
+            Some(&model),
+        );
+        Ok(AiChatStreamConfig {
+            provider_id: Some(provider.id),
+            provider_type: provider.provider_type,
+            base_url: provider.base_url,
+            model,
+            api_key: None,
+            max_response_tokens,
+            reasoning_effort: Some(reasoning_effort),
+            safety_mode: match self.active_ai_safety_mode() {
+                AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
+                AiSafetyMode::Default => AiPolicySafetyMode::Default,
+            },
+            profile_id: None,
+            tool_policy: AiToolUsePolicy::default(),
+            tools: Vec::new(),
             tool_choice: oxideterm_ai::AiToolChoice::Auto,
         })
     }
@@ -106,18 +156,32 @@ impl WorkspaceApp {
         config: &AiChatStreamConfig,
         request_content: Option<String>,
         task_system_prompt: Option<String>,
+        rag_system_prompt: Option<String>,
     ) -> Option<(Vec<AiChatMessage>, usize)> {
-        let transcript_lookup_prompt =
-            self.ai_transcript_lookup_prompt_for_conversation(conversation_id, config);
+        let transcript_lookup_prompt = self.ai_transcript_lookup_prompt_for_conversation(
+            conversation_id,
+            config,
+            request_content.as_deref(),
+            task_system_prompt.as_deref(),
+            rag_system_prompt.as_deref(),
+        );
         let mut history = self
             .ai_chat
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
             .map(|conversation| conversation.messages.clone())?;
-        apply_chat_request_overrides(&mut history, request_content, task_system_prompt);
+        apply_chat_request_overrides(&mut history, request_content, None);
         normalize_ai_stream_history_for_provider(&mut history);
-        let base_system_prompt = self.build_ai_base_system_prompt(config);
+        let mut base_system_prompt = self.build_ai_base_system_prompt(
+            config,
+            rag_system_prompt.as_deref(),
+            task_system_prompt.as_deref(),
+        );
+        if let Some(prompt) = ai_orchestrator_obligation_prompt_for_history(config, &history) {
+            base_system_prompt.push_str("\n\n");
+            base_system_prompt.push_str(&prompt);
+        }
         history.insert(
             0,
             AiChatMessage {
@@ -178,6 +242,9 @@ impl WorkspaceApp {
         &self,
         conversation: &AiConversation,
         config: &AiChatStreamConfig,
+        request_content: Option<&str>,
+        task_system_prompt: Option<&str>,
+        rag_system_prompt: Option<&str>,
     ) -> Option<AiPromptBudgetDecision> {
         let context_window = self.ai_active_model_context_window(config);
         let response_reserve = config
@@ -185,8 +252,25 @@ impl WorkspaceApp {
             .and_then(|tokens| usize::try_from(tokens).ok())
             .filter(|tokens| *tokens > 0)
             .unwrap_or_else(|| ai_response_reserve(context_window));
-        let base_system_tokens = ai_estimated_tokens(&self.build_ai_base_system_prompt(config))
-            .saturating_add(ai_tool_definitions_estimated_tokens(&config.tools));
+        let base_system_tokens = ai_estimated_tokens(&self.build_ai_base_system_prompt(
+            config,
+            rag_system_prompt,
+            task_system_prompt,
+        ))
+        .saturating_add(ai_tool_definitions_estimated_tokens(&config.tools));
+        let obligation_tokens = request_content
+            .map(str::to_string)
+            .or_else(|| {
+                conversation
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|message| message.role == AiChatRole::User)
+                    .map(|message| message.content.clone())
+            })
+            .and_then(|request| ai_orchestrator_obligation_prompt_for_text(config, &request))
+            .map(|prompt| ai_estimated_tokens(&prompt))
+            .unwrap_or(0);
         let anchor_tokens = conversation
             .messages
             .iter()
@@ -206,7 +290,9 @@ impl WorkspaceApp {
         Some(determine_ai_compression_level(AiPromptBudgetInput {
             context_window,
             response_reserve,
-            system_budget: base_system_tokens.saturating_add(anchor_tokens),
+            system_budget: base_system_tokens
+                .saturating_add(obligation_tokens)
+                .saturating_add(anchor_tokens),
             history_tokens,
             trimmable_history_tokens: Some(history_tokens),
             summary_eligible_tokens: Some(summary_eligible_tokens),
@@ -221,17 +307,94 @@ impl WorkspaceApp {
         }))
     }
 
+    fn ai_budget_diagnostic_payload(
+        &self,
+        conversation: &AiConversation,
+        config: &AiChatStreamConfig,
+        request_content: Option<&str>,
+        task_system_prompt: Option<&str>,
+        rag_system_prompt: Option<&str>,
+        decision: Option<AiPromptBudgetDecision>,
+        trimmed_count: usize,
+    ) -> serde_json::Value {
+        let base_system_tokens = ai_estimated_tokens(&self.build_ai_base_system_prompt(
+            config,
+            rag_system_prompt,
+            task_system_prompt,
+        ))
+        .saturating_add(ai_tool_definitions_estimated_tokens(&config.tools));
+        let obligation_tokens = request_content
+            .map(str::to_string)
+            .or_else(|| {
+                conversation
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|message| message.role == AiChatRole::User)
+                    .map(|message| message.content.clone())
+            })
+            .and_then(|request| ai_orchestrator_obligation_prompt_for_text(config, &request))
+            .map(|prompt| ai_estimated_tokens(&prompt))
+            .unwrap_or(0);
+        let anchor_tokens = conversation
+            .messages
+            .iter()
+            .filter(|message| is_ai_compaction_anchor(message))
+            .map(ai_message_estimated_tokens)
+            .sum::<usize>();
+        let history_tokens = conversation
+            .messages
+            .iter()
+            .filter(|message| !is_ai_compaction_anchor(message))
+            .map(ai_message_estimated_tokens)
+            .sum::<usize>();
+        let transcript_lookup_tokens = decision
+            .filter(|decision| decision.level >= 3)
+            .and_then(|_| ai_find_prompt_transcript_lookup_reference(&conversation.messages))
+            .map(ai_build_transcript_lookup_prompt_reference)
+            .map(|prompt| ai_estimated_tokens(&prompt))
+            .unwrap_or(0);
+        let previous_level = conversation
+            .session_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("lastBudgetLevel"))
+            .and_then(serde_json::Value::as_i64);
+        serde_json::json!({
+            "requestKind": "chat",
+            "budgetLevel": decision.map(|decision| decision.level).unwrap_or(0),
+            "previousLevel": previous_level,
+            "nextLevel": decision.map(|decision| decision.level).unwrap_or(0),
+            "contextWindow": self.ai_active_model_context_window(config),
+            "responseReserve": config.max_response_tokens,
+            "systemBudget": base_system_tokens
+                .saturating_add(obligation_tokens)
+                .saturating_add(anchor_tokens)
+                .saturating_add(transcript_lookup_tokens),
+            "historyTokens": history_tokens,
+            "trimmedCount": trimmed_count,
+        })
+    }
+
     fn ai_transcript_lookup_prompt_for_conversation(
         &self,
         conversation_id: &str,
         config: &AiChatStreamConfig,
+        request_content: Option<&str>,
+        task_system_prompt: Option<&str>,
+        rag_system_prompt: Option<&str>,
     ) -> Option<String> {
         let conversation = self
             .ai_chat
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)?;
-        let decision = self.ai_send_budget_decision(&conversation, config)?;
+        let decision = self.ai_send_budget_decision(
+            conversation,
+            config,
+            request_content,
+            task_system_prompt,
+            rag_system_prompt,
+        )?;
         (decision.level >= 3)
             .then(|| ai_find_prompt_transcript_lookup_reference(&conversation.messages))
             .flatten()
@@ -310,7 +473,12 @@ impl WorkspaceApp {
         serde_json::Value::Object(object)
     }
 
-    fn build_ai_base_system_prompt(&self, config: &AiChatStreamConfig) -> String {
+    fn build_ai_base_system_prompt(
+        &self,
+        config: &AiChatStreamConfig,
+        rag_system_prompt: Option<&str>,
+        task_system_prompt: Option<&str>,
+    ) -> String {
         let settings = self.settings_store.settings();
         let providers = ai_provider_views(&settings.ai.providers);
         let provider = active_provider_view(&providers, config.provider_id.as_deref());
@@ -334,6 +502,20 @@ impl WorkspaceApp {
             prompt.push_str("\n\n");
             prompt.push_str(&memory);
         }
+        if let Some(rag_system_prompt) = rag_system_prompt
+            .map(str::trim)
+            .filter(|prompt| !prompt.is_empty())
+        {
+            prompt.push_str("\n\n");
+            prompt.push_str(rag_system_prompt);
+        }
+        if let Some(task_system_prompt) = task_system_prompt
+            .map(str::trim)
+            .filter(|prompt| !prompt.is_empty())
+        {
+            prompt.push_str("\n\n");
+            prompt.push_str(task_system_prompt);
+        }
         if self.ai_active_model_context_window(config) >= 8192 {
             prompt.push_str(AI_SUGGESTIONS_INSTRUCTION);
         }
@@ -341,4 +523,61 @@ impl WorkspaceApp {
         prompt.push_str(&ai_orchestrator_system_prompt(config.tool_policy.enabled));
         prompt
     }
+}
+
+fn ai_chat_request_max_response_tokens(
+    settings: &oxideterm_settings::PersistedSettings,
+    provider_id: &str,
+    model: &str,
+) -> Option<i64> {
+    ai_model_max_response_tokens(&settings.ai.model_max_response_tokens, provider_id, model)
+        .or_else(|| {
+            let context_window = oxideterm_ai::model_context_window(
+                model,
+                &settings.ai.model_context_windows,
+                Some(provider_id),
+                &settings.ai.user_context_windows,
+            );
+            i64::try_from(ai_response_reserve(
+                usize::try_from(context_window)
+                    .ok()
+                    .filter(|tokens| *tokens > 0)
+                    .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW),
+            ))
+            .ok()
+        })
+}
+
+fn ai_orchestrator_obligation_prompt_for_history(
+    config: &AiChatStreamConfig,
+    history: &[AiChatMessage],
+) -> Option<String> {
+    history
+        .iter()
+        .rev()
+        .find(|message| message.role == AiChatRole::User)
+        .and_then(|message| ai_orchestrator_obligation_prompt_for_text(config, &message.content))
+}
+
+fn ai_orchestrator_obligation_prompt_for_text(
+    config: &AiChatStreamConfig,
+    request_text: &str,
+) -> Option<String> {
+    config
+        .tool_policy
+        .enabled
+        .then(|| ai_classify_orchestrator_obligation(request_text))
+        .as_ref()
+        .and_then(ai_orchestrator_obligation_prompt)
+}
+
+#[cfg(test)]
+fn ai_insert_rag_prompt_before_runtime_tail(system_prompt: &mut String, rag_prompt: &str) {
+    let insert_at = ["\n\n## Follow-Up Suggestions", "\n\n## OxideSens Runtime Rules"]
+        .into_iter()
+        .filter_map(|marker| system_prompt.find(marker))
+        .min()
+        .unwrap_or(system_prompt.len());
+    let insertion = format!("\n\n{rag_prompt}");
+    system_prompt.insert_str(insert_at, &insertion);
 }

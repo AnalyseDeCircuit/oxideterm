@@ -134,6 +134,9 @@ impl McpRegistry {
     }
 
     fn mcp_auth_token(&self, config: &McpServerConfig) -> Option<Zeroizing<String>> {
+        if config.auth_header_mode == Some(McpAuthHeaderMode::None) {
+            return None;
+        }
         // Tauri stores MCP auth tokens in the same OS keychain namespace under
         // `mcp:{id}` and only falls back to legacy config.authToken for
         // migration. Keep both values out of Debug/log paths and return an

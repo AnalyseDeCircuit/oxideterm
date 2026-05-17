@@ -2,6 +2,7 @@
 // Tauri ReconnectTab uses `max-w-2xl` for the switch row, select grids, and hint card.
 const SETTINGS_RECONNECT_MAX_WIDTH: f32 = 672.0;
 const KNOWLEDGE_MAX_IMPORT_FILE_SIZE: u64 = 5 * 1024 * 1024;
+const KNOWLEDGE_IMPORT_EXTENSIONS: &[&str] = &["md", "txt", "markdown"];
 const KNOWLEDGE_EMBEDDING_BATCH_SIZE: usize = 32;
 const KNOWLEDGE_DIALOG_WIDTH: f32 = 520.0;
 const KNOWLEDGE_ACTION_BUTTON_HEIGHT: f32 = 28.0; // Tauri size="sm" outline action buttons.

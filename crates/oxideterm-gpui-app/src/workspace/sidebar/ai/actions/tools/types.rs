@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use sha2::Digest as _;
 
-const AI_MAX_TOOL_ROUNDS_PER_REPLY: usize = 30;
 const AI_MAX_REQUIRED_TOOL_RETRIES: usize = 1;
 const AI_MAX_HARD_DENY_RETRIES: usize = 1;
 const AI_PSEUDO_TOOL_RETRY_TOOL_NAME: &str = "tool_use_disabled";
@@ -60,7 +59,6 @@ enum AiRemoteFileWriteError {
 
 pub(super) enum AiStreamDeliveryEvent {
     Stream(AiStreamEvent),
-    TrimNotice(usize),
     Guardrail {
         code: String,
         message: String,

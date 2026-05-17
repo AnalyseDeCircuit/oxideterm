@@ -121,24 +121,18 @@ impl WorkspaceApp {
                     .get(index)
                     .and_then(ai_provider_id)
                 {
-                    let _ = this.ai_key_store.delete_provider_key(&provider_id);
-                    this.ai_provider_key_status.remove(&provider_id);
+                    let provider_name = this
+                        .settings_store
+                        .settings()
+                        .ai
+                        .providers
+                        .get(index)
+                        .and_then(|provider| ai_provider_string(provider, "name"))
+                        .unwrap_or_else(|| _name.clone());
+                    this.ai_provider_remove_confirm = Some((provider_id, provider_name));
                 }
-                this.edit_settings(
-                    |settings| {
-                        ai_remove_provider_at_with_scoped_settings(
-                            &mut settings.ai.providers,
-                            &mut settings.ai.active_provider_id,
-                            &mut settings.ai.active_model,
-                            &mut settings.ai.reasoning_provider_overrides,
-                            &mut settings.ai.reasoning_model_overrides,
-                            &mut settings.ai.user_context_windows,
-                            &mut settings.ai.model_max_response_tokens,
-                            index,
-                        );
-                    },
-                    cx,
-                );
+                cx.stop_propagation();
+                cx.notify();
             }),
         )
         .into_any_element()

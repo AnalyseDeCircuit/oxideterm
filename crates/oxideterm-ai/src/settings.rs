@@ -93,9 +93,15 @@ pub fn add_provider_from_template(
     now_ms: u128,
 ) {
     let value = new_provider_from_template(template, id, label, now_ms);
+    let default_model = provider_string(&value, "defaultModel");
     providers.push(value);
     if active_provider_id.is_none() {
         select_first_provider(providers, active_provider_id, active_model);
+    } else if active_model
+        .as_ref()
+        .is_none_or(|model| model.trim().is_empty())
+    {
+        *active_model = default_model.filter(|model| !model.trim().is_empty());
     }
 }
 

@@ -2,7 +2,10 @@ use std::{
     collections::HashSet,
     fmt,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicI64, Ordering},
+    },
 };
 
 use anyhow::{Context, Result, anyhow};
@@ -35,6 +38,7 @@ const DIAGNOSTIC_TABLE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("ai_chat_diagnostic_events");
 const CONV_DIAGNOSTIC_TABLE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("conversation_diagnostic_events");
+static PROJECTION_PERSIST_AT: AtomicI64 = AtomicI64::new(0);
 
 #[derive(Clone)]
 pub struct AiChatPersistenceStore {
@@ -142,7 +146,32 @@ impl AiChatPersistenceStore {
         Ok(Some(conversation))
     }
 
+    pub fn next_projection_persist_at() -> i64 {
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut current = PROJECTION_PERSIST_AT.load(Ordering::Acquire);
+        loop {
+            let next = now.max(current.saturating_add(1));
+            match PROJECTION_PERSIST_AT.compare_exchange(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return next,
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
     pub fn save_state(&self, state: &AiChatState) -> Result<()> {
+        self.save_state_with_projection_updated_at(state, Self::next_projection_persist_at())
+    }
+
+    pub fn save_state_with_projection_updated_at(
+        &self,
+        state: &AiChatState,
+        projection_updated_at: i64,
+    ) -> Result<()> {
         self.initialize()?;
         let write_txn = self.db.begin_write()?;
 
@@ -199,6 +228,7 @@ impl AiChatPersistenceStore {
                         &mut conv_table,
                         &mut message_table,
                         &mut message_index_table,
+                        projection_updated_at,
                     )?;
                 }
             }
@@ -465,6 +495,7 @@ fn replace_conversation_messages(
     conv_table: &mut redb::Table<'_, &str, &[u8]>,
     message_table: &mut redb::Table<'_, &str, &[u8]>,
     message_index_table: &mut redb::Table<'_, &str, &[u8]>,
+    projection_updated_at: i64,
 ) -> Result<()> {
     let current_ids = message_index_table
         .get(conversation.id.as_str())?
@@ -496,7 +527,11 @@ fn replace_conversation_messages(
         .into_iter()
         .rev()
     {
-        let persisted = persisted_from_message(&conversation.id, message);
+        let persisted = persisted_from_message_with_projection(
+            &conversation.id,
+            message,
+            projection_updated_at,
+        );
         let should_write = message_table
             .get(persisted.id.as_str())?
             .map(|bytes| rmp_serde::from_slice::<PersistedMessage>(bytes.value()))
@@ -599,7 +634,7 @@ fn message_from_persisted(message: PersistedMessage) -> AiChatMessage {
     } else {
         content
     };
-    AiChatMessage {
+    let mut message = AiChatMessage {
         id: message.id,
         role: role_from_str(&message.role),
         content,
@@ -622,7 +657,121 @@ fn message_from_persisted(message: PersistedMessage) -> AiChatMessage {
         summary_ref: message.summary_ref,
         branches: message.branches,
         suggestions: message.suggestions,
+    };
+    normalize_interrupted_assistant_projection(&mut message);
+    message
+}
+
+fn normalize_interrupted_assistant_projection(message: &mut AiChatMessage) {
+    if message.role != AiChatRole::Assistant {
+        return;
     }
+    let Some(turn) = message.turn.as_mut() else {
+        return;
+    };
+    if turn.get("status").and_then(Value::as_str) != Some("streaming") {
+        return;
+    }
+    if let Some(object) = turn.as_object_mut() {
+        object.insert("status".to_string(), Value::String("complete".to_string()));
+    }
+    if let Some(parts) = turn.get_mut("parts").and_then(Value::as_array_mut) {
+        for part in parts {
+            if part.get("type").and_then(Value::as_str) == Some("thinking")
+                && let Some(object) = part.as_object_mut()
+            {
+                object.insert("streaming".to_string(), Value::Bool(false));
+            }
+        }
+    }
+    let mut rejected_tool_ids = HashSet::new();
+    for call in &mut message.tool_calls {
+        if ai_tool_call_is_unfinished(call) {
+            let id = call
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_default();
+            let result = interrupted_tool_result_payload(call);
+            if let Some(object) = call.as_object_mut() {
+                object.insert("status".to_string(), Value::String("rejected".to_string()));
+                object.insert(
+                    "summary".to_string(),
+                    Value::String("Generation was stopped.".to_string()),
+                );
+                object.insert("result".to_string(), result);
+            }
+            if !id.is_empty() {
+                rejected_tool_ids.insert(id);
+            }
+        }
+    }
+    if rejected_tool_ids.is_empty() {
+        return;
+    }
+    if let Some(rounds) = turn.get_mut("toolRounds").and_then(Value::as_array_mut) {
+        for round in rounds {
+            let Some(tool_calls) = round.get_mut("toolCalls").and_then(Value::as_array_mut) else {
+                continue;
+            };
+            for tool_call in tool_calls {
+                let id = tool_call
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !rejected_tool_ids.contains(id) {
+                    continue;
+                }
+                if let Some(object) = tool_call.as_object_mut() {
+                    object.insert(
+                        "approvalState".to_string(),
+                        Value::String("rejected".to_string()),
+                    );
+                    object.insert(
+                        "executionState".to_string(),
+                        Value::String("error".to_string()),
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn ai_tool_call_is_unfinished(call: &Value) -> bool {
+    if call.get("result").is_some_and(|result| !result.is_null()) {
+        return false;
+    }
+    matches!(
+        call.get("status").and_then(Value::as_str),
+        Some("pending" | "approved" | "running" | "pending_user_approval")
+    )
+}
+
+fn interrupted_tool_result_payload(call: &Value) -> Value {
+    let tool_name = call
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("tool")
+        .to_string();
+    serde_json::json!({
+        "ok": false,
+        "summary": "Generation was stopped.",
+        "output": "Generation was stopped.",
+        "data": Value::Null,
+        "error": {
+            "code": "generation_stopped",
+            "message": "Generation was stopped.",
+            "recoverable": true,
+        },
+        "targets": [],
+        "meta": {
+            "toolName": tool_name,
+            "durationMs": 0,
+            "verified": false,
+            "capability": Value::Null,
+            "truncated": false,
+        }
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -863,7 +1012,11 @@ fn message_turn_has_round(message: &AiChatMessage, round_id: &str) -> bool {
         })
 }
 
-fn persisted_from_message(conversation_id: &str, message: &AiChatMessage) -> PersistedMessage {
+fn persisted_from_message_with_projection(
+    conversation_id: &str,
+    message: &AiChatMessage,
+    projection_updated_at: i64,
+) -> PersistedMessage {
     let mut turn = message.turn.clone();
     if message.role == AiChatRole::Assistant && turn.is_none() && message.thinking_content.is_some()
     {
@@ -879,7 +1032,7 @@ fn persisted_from_message(conversation_id: &str, message: &AiChatMessage) -> Per
             message.content.clone()
         },
         timestamp: message.timestamp_ms,
-        projection_updated_at: message.timestamp_ms,
+        projection_updated_at,
         tool_calls: message
             .tool_calls
             .iter()

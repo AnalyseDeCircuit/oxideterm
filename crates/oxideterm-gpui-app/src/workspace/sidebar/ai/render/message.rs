@@ -979,6 +979,10 @@ impl WorkspaceApp {
                 .unwrap_or_else(|| ai_tool_status_label(status))
                 .to_string();
             let result = call.get("result").filter(|value| !value.is_null());
+            let bypass_approval = result
+                .and_then(|value| value.pointer("/meta/approvalMode"))
+                .and_then(serde_json::Value::as_str)
+                == Some("bypass");
             let view = AiToolCallView {
                 name: name.clone(),
                 summary,
@@ -993,7 +997,7 @@ impl WorkspaceApp {
                     .and_then(serde_json::Value::as_u64)
                     .map(|duration| format!("{duration}ms")),
                 pending_denied_command: risk == AiToolRisk::Destructive,
-                bypass_approval: false,
+                bypass_approval,
             };
             let expansion_key = format!("{}:{id}", message.id);
             let expanded = self.ai_tool_call_expansion_state.contains(&expansion_key);
@@ -1049,6 +1053,21 @@ impl WorkspaceApp {
                         )),
                 );
             if let Some(result) = result {
+                if let Some(policy_decision) = result.pointer("/meta/policyDecision") {
+                    details = details.child(
+                        div()
+                            .child(ai_tool_section_label(
+                                &self.tokens,
+                                self.i18n.t("ai.tool_use.policy"),
+                                None,
+                            ))
+                            .child(ai_tool_output_pre(
+                                &self.tokens,
+                                ("ai-tool-policy", ai_message_element_seed(&id)),
+                                ai_tool_policy_decision_summary(policy_decision),
+                            )),
+                    );
+                }
                 let output = result
                     .get("output")
                     .and_then(serde_json::Value::as_str)
@@ -1581,6 +1600,22 @@ fn ai_tool_status_color(tokens: &oxideterm_theme::ThemeTokens, status: AiToolSta
         AiToolStatus::Running | AiToolStatus::Approved => tokens.ui.accent,
         AiToolStatus::Pending => 0xeab308,
     }
+}
+
+fn ai_tool_policy_decision_summary(policy_decision: &serde_json::Value) -> String {
+    let decision = policy_decision
+        .get("decision")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("-");
+    let reason = policy_decision
+        .get("reasonCode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("-");
+    let matched_key = policy_decision
+        .get("matchedPolicyKey")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("-");
+    format!("{decision} · {reason} · {matched_key}")
 }
 
 fn pretty_tool_json_or_raw(value: &str) -> String {

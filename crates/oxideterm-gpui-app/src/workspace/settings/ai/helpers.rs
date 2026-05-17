@@ -54,6 +54,107 @@ fn ai_execution_profile_id(profile: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
+fn ai_fallback_execution_profile(settings: &PersistedSettings) -> serde_json::Value {
+    let now = current_time_millis();
+    serde_json::json!({
+        "id": "default",
+        "name": "Default",
+        "providerId": settings.ai.active_provider_id.clone(),
+        "model": settings.ai.active_model.clone(),
+        "reasoningEffort": ai_reasoning_profile_value(settings.ai.reasoning_effort),
+        "toolUse": {
+            "enabled": settings.ai.tool_use.enabled,
+            "maxRounds": settings.ai.tool_use.max_rounds,
+            "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
+            "autoApproveTools": settings.ai.tool_use.auto_approve_tools.clone(),
+            "disabledTools": settings.ai.tool_use.disabled_tools.clone()
+        },
+        "context": {
+            "includeRuntimeChips": true,
+            "includeMemory": true,
+            "includeRag": true
+        },
+        "commandPolicy": { "allow": [], "deny": [] },
+        "createdAt": now,
+        "updatedAt": now
+    })
+}
+
+fn ai_execution_profiles_need_normalization(settings: &PersistedSettings) -> bool {
+    let Some(profiles) = settings
+        .ai
+        .execution_profiles
+        .get("profiles")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return true;
+    };
+    if profiles.is_empty() {
+        return true;
+    }
+    let default_id = settings
+        .ai
+        .execution_profiles
+        .get("defaultProfileId")
+        .and_then(serde_json::Value::as_str);
+    default_id.is_none_or(|default_id| {
+        !profiles
+            .iter()
+            .any(|profile| profile.get("id").and_then(serde_json::Value::as_str) == Some(default_id))
+    })
+}
+
+fn ai_normalize_execution_profiles(settings: &mut PersistedSettings) {
+    let Some(profiles) = settings
+        .ai
+        .execution_profiles
+        .get("profiles")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+    else {
+        settings.ai.execution_profiles = serde_json::json!({
+            "defaultProfileId": "default",
+            "profiles": [ai_fallback_execution_profile(settings)]
+        });
+        return;
+    };
+
+    if profiles.is_empty() {
+        settings.ai.execution_profiles = serde_json::json!({
+            "defaultProfileId": "default",
+            "profiles": [ai_fallback_execution_profile(settings)]
+        });
+        return;
+    }
+
+    let current_default = settings
+        .ai
+        .execution_profiles
+        .get("defaultProfileId")
+        .and_then(serde_json::Value::as_str);
+    let default_is_valid = current_default.is_some_and(|default_id| {
+        profiles
+            .iter()
+            .any(|profile| profile.get("id").and_then(serde_json::Value::as_str) == Some(default_id))
+    });
+    if default_is_valid {
+        return;
+    }
+    let next_default = profiles
+        .iter()
+        .find_map(ai_execution_profile_id)
+        .unwrap_or_else(|| "default".to_string());
+    let object = settings
+        .ai
+        .execution_profiles
+        .as_object_mut()
+        .expect("execution_profiles with a profiles array must be an object");
+    object.insert(
+        "defaultProfileId".to_string(),
+        serde_json::json!(next_default),
+    );
+}
+
 fn ai_default_execution_profile(settings: &PersistedSettings) -> Option<String> {
     settings
         .ai
@@ -116,19 +217,23 @@ fn ai_duplicate_execution_profile(settings: &mut PersistedSettings, index: usize
     };
     let now = current_time_millis();
     let mut copy = source;
+    let copy_id = format!("profile-{now}");
     if let Some(object) = copy.as_object_mut() {
         let name = object
             .get("name")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("Profile")
             .to_string();
-        object.insert("id".to_string(), serde_json::json!(format!("profile-{now}")));
+        object.insert("id".to_string(), serde_json::json!(copy_id.clone()));
         object.insert("name".to_string(), serde_json::json!(format!("{name} Copy")));
         object.insert("createdAt".to_string(), serde_json::json!(now));
         object.insert("updatedAt".to_string(), serde_json::json!(now));
     }
     if let Some(profiles) = ai_execution_profiles_array_mut(settings) {
         profiles.push(copy);
+    }
+    if let Some(object) = settings.ai.execution_profiles.as_object_mut() {
+        object.insert("defaultProfileId".to_string(), serde_json::json!(copy_id));
     }
 }
 

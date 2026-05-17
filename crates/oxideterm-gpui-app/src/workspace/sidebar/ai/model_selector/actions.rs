@@ -28,6 +28,7 @@ impl WorkspaceApp {
     }
 
     fn refresh_ai_model_selector_provider_statuses(&mut self, cx: &mut Context<Self>) {
+        self.ensure_ai_provider_key_statuses(cx);
         let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
         for provider in providers {
             match resolve_model_selector_provider_probe(&provider) {

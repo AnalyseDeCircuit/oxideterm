@@ -1,9 +1,14 @@
 impl WorkspaceApp {
-    fn settings_ai(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn settings_ai(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        self.ensure_ai_provider_key_statuses(cx);
+        if ai_execution_profiles_need_normalization(self.settings_store.settings()) {
+            self.edit_settings(ai_normalize_execution_profiles, cx);
+        }
         vec![self.ai_settings_surface(cx)]
     }
 
-    fn settings_knowledge(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn settings_knowledge(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        self.ensure_ai_provider_key_statuses(cx);
         let collections = oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
             .unwrap_or_default();
         let selected_id = self
@@ -225,6 +230,13 @@ impl WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {
+                                    if matches!(
+                                        this.knowledge_reindex_progress,
+                                        Some((_current, 0))
+                                    ) {
+                                        cx.stop_propagation();
+                                        return;
+                                    }
                                     if this.knowledge_reindex_progress.is_some() {
                                         this.knowledge_cancel_reindex(cx);
                                     } else {
@@ -543,7 +555,7 @@ impl WorkspaceApp {
         );
         let has_api_key = preliminary.provider.as_ref().and_then(|provider| {
             oxideterm_ai::ai_embedding_requires_api_key(provider)
-                .then(|| self.ai_key_store.has_provider_key(&provider.id))
+                .then(|| self.ai_provider_has_key_cached(&provider.id))
         });
         let resolved = oxideterm_ai::resolve_ai_embedding_provider(
             &settings.ai.providers,

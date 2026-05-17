@@ -13,6 +13,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::Ide => "ide",
         TabKind::Forwards => "forwards",
         TabKind::SessionManager => "session_manager",
+        TabKind::PluginManager => "plugin_manager",
         TabKind::Settings => "settings",
     }
 }

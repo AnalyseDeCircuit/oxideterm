@@ -10,7 +10,7 @@ pub mod search;
 pub mod store;
 pub mod types;
 
-use std::sync::atomic::AtomicBool;
+use std::sync::{LazyLock, Mutex, atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,6 +21,76 @@ pub use types::{DocCollection, DocFormat, DocMetadata, DocScope, EmbeddingRecord
 const MAX_NAME_LENGTH: usize = 1000;
 const MAX_CONTENT_SIZE: usize = 10 * 1024 * 1024;
 const MAX_QUERY_LENGTH: usize = 10_000;
+
+#[derive(Default)]
+struct HnswRebuildState {
+    running: bool,
+    rerun_requested: bool,
+}
+
+#[derive(Default)]
+struct HnswRebuildCoordinator {
+    state: Mutex<HnswRebuildState>,
+}
+
+impl HnswRebuildCoordinator {
+    fn request_or_queue(&self) -> bool {
+        let mut state = self.state.lock().expect("hnsw rebuild lock poisoned");
+        if state.running {
+            state.rerun_requested = true;
+            false
+        } else {
+            state.running = true;
+            state.rerun_requested = false;
+            true
+        }
+    }
+
+    fn finish_cycle(&self) -> bool {
+        let mut state = self.state.lock().expect("hnsw rebuild lock poisoned");
+        if state.rerun_requested {
+            state.rerun_requested = false;
+            true
+        } else {
+            state.running = false;
+            false
+        }
+    }
+
+    fn abort(&self) {
+        let mut state = self.state.lock().expect("hnsw rebuild lock poisoned");
+        state.running = false;
+        state.rerun_requested = false;
+    }
+}
+
+static HNSW_REBUILD_COORDINATOR: LazyLock<HnswRebuildCoordinator> =
+    LazyLock::new(HnswRebuildCoordinator::default);
+
+fn queue_hnsw_rebuild(store: RagStore) {
+    if !HNSW_REBUILD_COORDINATOR.request_or_queue() {
+        tracing::debug!("HNSW rebuild already running; queued another pass");
+        return;
+    }
+
+    if let Err(error) = std::thread::Builder::new()
+        .name("oxideterm-rag-hnsw-rebuild".to_string())
+        .spawn(move || {
+            loop {
+                if let Err(error) = store.rebuild_hnsw_index() {
+                    tracing::warn!("Async HNSW rebuild failed: {}", error);
+                }
+
+                if !HNSW_REBUILD_COORDINATOR.finish_cycle() {
+                    break;
+                }
+            }
+        })
+    {
+        HNSW_REBUILD_COORDINATOR.abort();
+        tracing::warn!("Failed to spawn HNSW rebuild thread: {}", error);
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -317,8 +387,8 @@ pub fn rag_remove_document(store: &RagStore, doc_id: &str) -> Result<(), String>
     Ok(())
 }
 
-pub fn rag_reindex_collection(store: &RagStore, collection_id: &str) -> Result<usize, String> {
-    bm25::reindex_collection(store, collection_id).map_err(|e| e.to_string())
+pub fn rag_reindex_collection(store: &RagStore, _collection_id: &str) -> Result<usize, String> {
+    bm25::reindex_all(store, None, None).map_err(|e| e.to_string())
 }
 
 pub fn rag_reindex_collection_with_progress(
@@ -399,7 +469,7 @@ pub fn rag_store_embeddings(
         }
     }
     let count = embedding::store_embeddings(store, records).map_err(|e| e.to_string())?;
-    let _ = store.rebuild_hnsw_index();
+    queue_hnsw_rebuild(store.clone());
     Ok(count)
 }
 
@@ -515,4 +585,20 @@ pub fn rag_create_blank_document(
         .add_document(&metadata, &[], Some(""))
         .map_err(|e| e.to_string())?;
     Ok(document_response(metadata))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HnswRebuildCoordinator;
+
+    #[test]
+    fn hnsw_rebuild_coordinator_queues_one_follow_up_pass() {
+        let coordinator = HnswRebuildCoordinator::default();
+
+        assert!(coordinator.request_or_queue());
+        assert!(!coordinator.request_or_queue());
+        assert!(coordinator.finish_cycle());
+        assert!(!coordinator.finish_cycle());
+        assert!(coordinator.request_or_queue());
+    }
 }

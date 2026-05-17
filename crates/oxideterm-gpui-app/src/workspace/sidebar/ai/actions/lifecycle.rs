@@ -1,4 +1,16 @@
 impl WorkspaceApp {
+    pub(super) fn bootstrap_ai_mcp_registry(&self) {
+        // Tauri boots the MCP registry from AiChatPanel mount, not from process
+        // startup or every settings write. Keep native at the same user-visible
+        // boundary so HTTP auth-token/keychain access only happens when the AI
+        // surface is actually in use.
+        let registry = self.ai_mcp_registry.clone();
+        let configs = self.settings_store.settings().ai.mcp_servers.clone();
+        self.forwarding_runtime.spawn(async move {
+            registry.connect_all_values(&configs).await;
+        });
+    }
+
     pub(super) fn clear_ai_sidebar_keyboard_focus(&mut self) {
         self.ai_chat_input_focused = false;
         self.ai_model_selector_search_focused = false;
@@ -27,11 +39,14 @@ impl WorkspaceApp {
         for (_, sender) in self.ai_pending_tool_approvals.drain() {
             let _ = sender.send(false);
         }
-        if let Some(conversation) = self.ai_chat.active_conversation_mut() {
-            reject_incomplete_ai_tool_calls_on_cancel(conversation);
-            for message in &mut conversation.messages {
-                message.is_streaming = false;
-            }
+        let conversation_id = self.ai_chat.active_conversation_id.clone();
+        let stopped_turns = self
+            .ai_chat
+            .active_conversation_mut()
+            .map(finalize_streaming_ai_messages_on_cancel)
+            .unwrap_or_default();
+        if let Some(conversation_id) = conversation_id.as_deref() {
+            self.persist_ai_stopped_assistant_turns(conversation_id, &stopped_turns);
         }
         self.persist_ai_chat_state();
         cx.notify();
@@ -112,22 +127,51 @@ impl WorkspaceApp {
         for (_, sender) in self.ai_pending_tool_approvals.drain() {
             let _ = sender.send(false);
         }
-        if let Some(conversation) = self.ai_chat.active_conversation_mut() {
-            reject_incomplete_ai_tool_calls_on_cancel(conversation);
-            for message in &mut conversation.messages {
-                message.is_streaming = false;
-            }
+        let conversation_id = self.ai_chat.active_conversation_id.clone();
+        let stopped_turns = self
+            .ai_chat
+            .active_conversation_mut()
+            .map(finalize_streaming_ai_messages_on_cancel)
+            .unwrap_or_default();
+        if let Some(conversation_id) = conversation_id.as_deref() {
+            self.persist_ai_stopped_assistant_turns(conversation_id, &stopped_turns);
         }
     }
 
     fn persist_ai_chat_state(&self) {
         let store = self.ai_chat_store.clone();
         let state = self.ai_chat.clone();
+        let projection_updated_at =
+            oxideterm_ai::AiChatPersistenceStore::next_projection_persist_at();
         self.forwarding_runtime.spawn_blocking(move || {
-            if let Err(error) = store.save_state(&state) {
+            if let Err(error) =
+                store.save_state_with_projection_updated_at(&state, projection_updated_at)
+            {
                 eprintln!("[AiChatStore] Failed to persist conversation: {error}");
             }
         });
+    }
+
+    fn persist_ai_stopped_assistant_turns(
+        &self,
+        conversation_id: &str,
+        stopped_turns: &[AiStoppedAssistantTurn],
+    ) {
+        for stopped in stopped_turns {
+            if stopped.retained {
+                self.persist_ai_assistant_turn_end(
+                    conversation_id,
+                    &stopped.message_id,
+                    stopped.status,
+                );
+            } else {
+                self.persist_ai_removed_assistant_turn_end(
+                    conversation_id,
+                    &stopped.message_id,
+                    stopped.status,
+                );
+            }
+        }
     }
 
     fn ai_messages_count_label(&self, count: usize) -> String {

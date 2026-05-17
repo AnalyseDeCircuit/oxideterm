@@ -271,9 +271,13 @@ fn send_ai_tool_status_with_payload(
     )
 }
 
-fn parse_ai_tool_args(arguments: &str) -> serde_json::Value {
-    serde_json::from_str(arguments)
-        .unwrap_or_else(|_| serde_json::json!({ "rawArguments": arguments }))
+fn parse_ai_tool_args(arguments: &str) -> Option<serde_json::Value> {
+    let parsed = serde_json::from_str::<serde_json::Value>(arguments).ok()?;
+    if parsed.is_object() {
+        Some(parsed)
+    } else {
+        None
+    }
 }
 
 fn ai_tool_call_message_value(call: &AiToolCall) -> serde_json::Value {

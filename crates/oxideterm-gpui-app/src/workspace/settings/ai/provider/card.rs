@@ -5,7 +5,6 @@ impl WorkspaceApp {
         provider: AiProviderView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let expanded = self.expanded_ai_providers.contains(&provider.id);
         let active_provider = self
             .settings_store
             .settings()
@@ -13,6 +12,11 @@ impl WorkspaceApp {
             .active_provider_id
             .as_deref()
             == Some(provider.id.as_str());
+        let expanded = self
+            .expanded_ai_providers
+            .get(&provider.id)
+            .copied()
+            .unwrap_or(active_provider);
         let models_expanded = self.expanded_ai_provider_models.contains(&provider.id);
         let visible_models = if models_expanded {
             provider.models.clone()
@@ -177,7 +181,20 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    toggle_string_set(&mut this.expanded_ai_providers, &provider_id);
+                    let is_active_provider = this
+                        .settings_store
+                        .settings()
+                        .ai
+                        .active_provider_id
+                        .as_deref()
+                        == Some(provider_id.as_str());
+                    let expanded = this
+                        .expanded_ai_providers
+                        .get(&provider_id)
+                        .copied()
+                        .unwrap_or(is_active_provider);
+                    this.expanded_ai_providers
+                        .insert(provider_id.clone(), !expanded);
                     cx.stop_propagation();
                     cx.notify();
                 }),

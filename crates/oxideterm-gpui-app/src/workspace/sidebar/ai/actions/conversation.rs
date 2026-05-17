@@ -42,6 +42,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        self.bootstrap_ai_mcp_registry();
 
         let parsed_input = parse_ai_user_input(&content);
         let detected_intent = detect_ai_intent(&parsed_input);
@@ -163,7 +164,7 @@ impl WorkspaceApp {
                 }
             }
         }
-        self.start_ai_chat_stream(
+        self.start_ai_chat_stream_after_api_key_lookup(
             conversation_id,
             stream_config,
             request_content,
@@ -171,6 +172,82 @@ impl WorkspaceApp {
             cx,
         );
         self.reset_ai_chat_input_after_submit();
+        cx.notify();
+    }
+
+    fn start_ai_chat_stream_after_api_key_lookup(
+        &mut self,
+        conversation_id: String,
+        mut stream_config: AiChatStreamConfig,
+        request_content: Option<String>,
+        task_system_prompt: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let requires_key = ai_provider_chat_requires_key(&stream_config.provider_type);
+        let Some(provider_id) = stream_config.provider_id.clone() else {
+            self.start_ai_chat_stream_after_rag_lookup(
+                conversation_id,
+                stream_config,
+                request_content,
+                task_system_prompt,
+                cx,
+            );
+            return;
+        };
+        let key_store = self.ai_key_store.clone();
+        let runtime = self.forwarding_runtime.clone();
+        let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
+        let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");
+        self.ai_chat_loading = true;
+        cx.spawn(async move |weak, cx| {
+            let key_result = runtime
+                .spawn_blocking(move || key_store.get_provider_key(&provider_id))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+            let _ = weak.update(cx, |this, cx| {
+                match key_result {
+                    Ok(api_key) => {
+                        if requires_key && api_key.is_none() {
+                            this.ai_chat_loading = false;
+                            this.push_ai_settings_toast(
+                                api_key_not_found,
+                                TerminalNoticeVariant::Error,
+                            );
+                            cx.notify();
+                            return;
+                        }
+                        stream_config.api_key = api_key;
+                        this.start_ai_chat_stream_after_rag_lookup(
+                            conversation_id,
+                            stream_config,
+                            request_content,
+                            task_system_prompt,
+                            cx,
+                        );
+                    }
+                    Err(_) if requires_key => {
+                        this.ai_chat_loading = false;
+                        this.push_ai_settings_toast(
+                            failed_to_get_key,
+                            TerminalNoticeVariant::Error,
+                        );
+                        cx.notify();
+                    }
+                    Err(_) => {
+                        stream_config.api_key = None;
+                        this.start_ai_chat_stream_after_rag_lookup(
+                            conversation_id,
+                            stream_config,
+                            request_content,
+                            task_system_prompt,
+                            cx,
+                        );
+                    }
+                }
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -272,7 +349,13 @@ impl WorkspaceApp {
             }
         };
         self.persist_ai_chat_state();
-        self.start_ai_chat_stream(conversation_id, stream_config, None, None, cx);
+        self.start_ai_chat_stream_after_api_key_lookup(
+            conversation_id,
+            stream_config,
+            None,
+            None,
+            cx,
+        );
         cx.notify();
     }
 
@@ -473,7 +556,13 @@ impl WorkspaceApp {
         self.ai_editing_message_focused = false;
         self.ime_marked_text = None;
         self.persist_ai_chat_state();
-        self.start_ai_chat_stream(conversation_id, stream_config, request_content, None, cx);
+        self.start_ai_chat_stream_after_api_key_lookup(
+            conversation_id,
+            stream_config,
+            request_content,
+            None,
+            cx,
+        );
         cx.notify();
     }
 

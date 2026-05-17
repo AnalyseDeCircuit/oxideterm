@@ -2,6 +2,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::AiChatMessage;
+
 const REDACTED: &str = "[REDACTED]";
 
 static PRIVATE_KEY_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
@@ -102,4 +104,16 @@ pub fn sanitize_for_ai(text: &str) -> String {
     CONNECTION_PASSWORD
         .replace_all(&result, format!("${{1}}{REDACTED}${{3}}"))
         .into_owned()
+}
+
+pub fn sanitize_api_messages_for_provider(messages: Vec<AiChatMessage>) -> Vec<AiChatMessage> {
+    messages
+        .into_iter()
+        .map(|mut message| {
+            if !message.content.is_empty() {
+                message.content = sanitize_for_ai(&message.content);
+            }
+            message
+        })
+        .collect()
 }

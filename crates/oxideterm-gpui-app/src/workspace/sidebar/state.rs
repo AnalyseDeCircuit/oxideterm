@@ -80,6 +80,9 @@ impl WorkspaceApp {
             .settings_mut()
             .sidebar_ui
             .ai_sidebar_collapsed = collapsed;
+        if !collapsed {
+            self.bootstrap_ai_mcp_registry();
+        }
         self.clear_ai_sidebar_keyboard_focus();
         let _ = self.settings_store.save();
         cx.notify();

@@ -25,10 +25,13 @@ fn import_knowledge_file(
         .and_then(|extension| extension.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
+    if !KNOWLEDGE_IMPORT_EXTENSIONS.contains(&extension.as_str()) {
+        return Err(format!("Unsupported document type: {file_name}"));
+    }
     let format = match extension.as_str() {
         "md" | "markdown" => "markdown",
         "txt" => "plaintext",
-        _ => return Err(format!("Unsupported document type: {file_name}")),
+        _ => "plaintext",
     };
     let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
     oxideterm_ai::rag_add_document(

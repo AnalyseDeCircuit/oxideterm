@@ -7,11 +7,15 @@ impl WorkspaceApp {
         summary: String,
         stream_error: Option<String>,
         resume_after: Option<AiPendingChatStream>,
+        silent: bool,
         cx: &mut Context<Self>,
     ) {
         self.ai_compacting_conversations.remove(&conversation_id);
         if let Some(error) = stream_error {
-            if resume_after.is_none() {
+            if silent {
+                self.clear_ai_compaction_notice_for(&conversation_id, cx);
+            }
+            if !silent {
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
             }
             self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
@@ -20,6 +24,9 @@ impl WorkspaceApp {
         }
         let summary = summary.trim();
         if summary.is_empty() {
+            if silent {
+                self.clear_ai_compaction_notice_for(&conversation_id, cx);
+            }
             self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
             cx.notify();
             return;
@@ -32,6 +39,9 @@ impl WorkspaceApp {
             .iter_mut()
             .find(|conversation| conversation.id == conversation_id)
         else {
+            if silent {
+                self.clear_ai_compaction_notice_for(&conversation_id, cx);
+            }
             self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
             cx.notify();
             return;
@@ -48,6 +58,9 @@ impl WorkspaceApp {
                 .zip(base_ids.iter())
                 .any(|(latest, expected)| *latest != expected);
         if stale {
+            if silent {
+                self.clear_ai_compaction_notice_for(&conversation_id, cx);
+            }
             self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
             cx.notify();
             return;
@@ -60,12 +73,19 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         let summary_source_transcript_ref =
             ai_summary_source_transcript_ref(&plan.compact_messages, &conversation_id);
+        let summary_round_id = ai_latest_summary_round_id(&plan.compact_messages);
+        let compacted_until_entry_id =
+            ai_transcript_boundary_id(plan.compact_messages.last(), "end");
+        let total_compacted = ai_compaction_original_count(&plan.compact_messages);
+        let snapshot_messages = ai_compaction_anchor_snapshot(&plan.compact_messages);
+        let summary_entry_id = format!("transcript-summary-created-{anchor_id}");
         let transcript_ref = serde_json::json!({
-            "conversationId": conversation_id,
-            "endEntryId": anchor_id,
+            "conversationId": conversation_id.clone(),
+            "endEntryId": summary_entry_id,
         });
         let summary_ref = serde_json::json!({
             "kind": "compaction",
+            "roundId": summary_round_id.clone(),
             "transcriptRef": summary_source_transcript_ref.clone(),
         });
         let anchor = AiChatMessage {
@@ -79,9 +99,9 @@ impl WorkspaceApp {
             thinking_content: None,
             metadata: Some(AiChatMessageMetadata {
                 kind: "compaction-anchor".to_string(),
-                original_count: Some(plan.compact_messages.len()),
+                original_count: Some(total_compacted),
                 compacted_at_ms: Some(now),
-                original_messages: Some(plan.compact_messages.clone()),
+                original_messages: Some(snapshot_messages),
             }),
             tool_call_id: None,
             tool_calls: Vec::new(),
@@ -96,17 +116,41 @@ impl WorkspaceApp {
             .chain(appended)
             .collect();
         conversation.updated_at_ms = now;
+        let metadata = conversation
+            .session_metadata
+            .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
+        if let Some(object) = metadata.as_object_mut() {
+            object.insert("conversationId".to_string(), serde_json::json!(conversation_id));
+            object.insert("lastSummaryAt".to_string(), serde_json::json!(now));
+            if let Some(compacted_until_entry_id) = compacted_until_entry_id.as_deref() {
+                object.insert(
+                    "lastCompactedUntilEntryId".to_string(),
+                    serde_json::json!(compacted_until_entry_id),
+                );
+            }
+            if let Some(summary_round_id) = summary_round_id.as_deref() {
+                object.insert(
+                    "lastSummaryRoundId".to_string(),
+                    serde_json::json!(summary_round_id),
+                );
+            }
+        }
         self.persist_ai_chat_state();
         self.persist_ai_summary_created(
             &conversation_id,
             &anchor_id,
             "compaction",
             summary,
+            summary_round_id.clone(),
             Some(summary_source_transcript_ref),
-            Some(plan.compact_messages.len()),
-            Some(if resume_after.is_some() { "background" } else { "manual" }),
+            Some(total_compacted),
+            compacted_until_entry_id,
+            Some(if silent { "background" } else { "manual" }),
             now,
         );
+        if silent {
+            self.set_ai_compaction_notice_done(&conversation_id, total_compacted, cx);
+        }
         self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
         cx.notify();
     }
@@ -126,6 +170,7 @@ impl WorkspaceApp {
             pending.config,
             pending.request_content,
             pending.task_system_prompt,
+            pending.rag_system_prompt,
             false,
             cx,
         );
@@ -214,7 +259,9 @@ impl WorkspaceApp {
             "conversation",
             summary,
             None,
+            None,
             Some(original_count),
+            None,
             Some("manual"),
             now,
         );

@@ -164,6 +164,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let title_key = match self.active_sidebar_section {
             SidebarSection::Connections => "sidebar.panels.saved_connections",
+            SidebarSection::Extensions => "sidebar.panels.plugins",
             SidebarSection::Notifications => "sidebar.panels.event_log",
             _ => "sidebar.panels.sessions",
         };
@@ -268,6 +269,9 @@ impl WorkspaceApp {
         }
         if self.active_sidebar_section == SidebarSection::Sessions {
             return self.render_active_sessions_sidebar_content(cx);
+        }
+        if self.active_sidebar_section == SidebarSection::Extensions {
+            return self.render_plugin_sidebar_placeholder();
         }
         self.render_empty_sessions_sidebar_content()
     }

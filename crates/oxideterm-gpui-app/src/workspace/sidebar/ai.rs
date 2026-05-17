@@ -62,6 +62,7 @@ pub(super) struct AiPendingChatStream {
     pub(super) config: AiChatStreamConfig,
     pub(super) request_content: Option<String>,
     pub(super) task_system_prompt: Option<String>,
+    pub(super) rag_system_prompt: Option<String>,
 }
 
 include!("ai/render.rs");

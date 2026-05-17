@@ -19,7 +19,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn render_settings_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_settings_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let has_settings_background = self.settings_background_active();
         div()
@@ -202,7 +202,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_settings_tab_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_settings_tab_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .w_full()
             .relative()
@@ -279,13 +279,6 @@ impl WorkspaceApp {
         );
         self.ai_agent_fs
             .set_mode(crate::workspace::ide::node_agent_mode_from_settings(&settings));
-        {
-            let registry = self.ai_mcp_registry.clone();
-            let configs = settings.ai.mcp_servers.clone();
-            self.forwarding_runtime.spawn(async move {
-                registry.connect_all_values(&configs).await;
-            });
-        }
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_width = settings.sidebar_ui.width as f32;
         self.ai_sidebar_width = settings.sidebar_ui.ai_sidebar_width as f32;

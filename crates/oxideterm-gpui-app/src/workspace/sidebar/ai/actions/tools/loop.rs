@@ -2,7 +2,7 @@ async fn run_ai_chat_tool_loop(
     config: AiChatStreamConfig,
     mut history: Vec<AiChatMessage>,
     snapshot: AiOrchestratorRuntimeSnapshot,
-    rag_query: Option<String>,
+    budget_level: u8,
     generation: u64,
     conversation_id: String,
     assistant_id: String,
@@ -11,8 +11,11 @@ async fn run_ai_chat_tool_loop(
     let max_rounds = config
         .tool_policy
         .max_rounds
-        .unwrap_or(8)
-        .clamp(1, AI_MAX_TOOL_ROUNDS_PER_REPLY as i64) as usize;
+        .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS)
+        .clamp(
+            oxideterm_settings::MIN_AI_TOOL_MAX_ROUNDS,
+            oxideterm_settings::MAX_AI_TOOL_MAX_ROUNDS,
+        ) as usize;
     let max_calls_per_round = config
         .tool_policy
         .max_calls_per_round
@@ -33,64 +36,20 @@ async fn run_ai_chat_tool_loop(
     let mut transcript_lookup_prompt_injected = history
         .iter()
         .any(|message| message.id == "transcript-lookup-reference");
-    let request_text = rag_query
-        .as_deref()
-        .filter(|text| !text.trim().is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            history
-                .iter()
-                .rev()
-                .find(|message| message.role == AiChatRole::User)
-                .map(|message| message.content.clone())
-        })
+    let request_text = history
+        .iter()
+        .rev()
+        .find(|message| message.role == AiChatRole::User)
+        .map(|message| message.content.clone())
         .unwrap_or_default();
     let tool_obligation = if config.tool_policy.enabled {
         ai_classify_orchestrator_obligation(&request_text)
     } else {
         AiOrchestratorObligation::auto()
     };
-    if let Some(prompt) = ai_orchestrator_obligation_prompt(&tool_obligation)
-        && let Some(system_message) = history
-            .iter_mut()
-            .find(|message| message.role == AiChatRole::System)
-    {
-        system_message.content.push_str("\n\n");
-        system_message.content.push_str(&prompt);
-    }
     let user_requested_json = ai_user_explicitly_requested_json(&request_text);
     let mut required_tool_retry_count = 0usize;
     let mut hard_deny_retry_count = 0usize;
-    if let Some(rag_prompt) = snapshot
-        .build_rag_system_prompt(rag_query.as_deref(), &config)
-        .await
-    {
-        if let Some(system_message) = history
-            .iter_mut()
-            .find(|message| message.role == AiChatRole::System)
-        {
-            system_message.content.push_str("\n\n");
-            system_message.content.push_str(&rag_prompt);
-        }
-        let trimmed_count = trim_ai_stream_history_to_budget(
-            &mut history,
-            snapshot.ai_context_window,
-            config
-                .max_response_tokens
-                .and_then(|tokens| usize::try_from(tokens).ok())
-                .filter(|tokens| *tokens > 0)
-                .unwrap_or_else(|| ai_response_reserve(snapshot.ai_context_window)),
-        );
-        if trimmed_count > 0 {
-            let _ = send_ai_stream_delivery(
-                &ui_tx,
-                generation,
-                &conversation_id,
-                &assistant_id,
-                AiStreamDeliveryEvent::TrimNotice(trimmed_count),
-            );
-        }
-    }
 
     let mut awaiting_summary_round_id: Option<String> = None;
 
@@ -110,6 +69,8 @@ async fn run_ai_chat_tool_loop(
             "llm_request",
             None,
             serde_json::json!({
+                "requestKind": "chat",
+                "budgetLevel": budget_level,
                 "logicalRound": round_index.saturating_add(1),
                 "messageCount": history.len(),
                 "toolDefinitionCount": provider_config.tools.len(),
@@ -121,7 +82,12 @@ async fn run_ai_chat_tool_loop(
                 "toolChoice": ai_tool_choice_label(&provider_config.tool_choice),
             }),
         );
-        tokio::spawn(stream_chat_completion(provider_config, history.clone(), stream_tx));
+        let provider_history = oxideterm_ai::sanitize_api_messages_for_provider(history.clone());
+        tokio::spawn(stream_chat_completion(
+            provider_config,
+            provider_history,
+            stream_tx,
+        ));
 
         let mut stream_error = None;
         let mut round_content = String::new();
@@ -664,7 +630,33 @@ async fn run_ai_chat_tool_loop(
 
         let mut round_results = Vec::new();
         for call in completed_calls {
-            let args = parse_ai_tool_args(&call.arguments);
+            let Some(args) = parse_ai_tool_args(&call.arguments) else {
+                let executed = rejected_ai_tool_result(
+                    call.id.clone(),
+                    call.name.clone(),
+                    "invalid_json_arguments",
+                    "Invalid JSON arguments",
+                );
+                send_ai_tool_status(
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    &call,
+                    "error",
+                    Some(executed.envelope.clone()),
+                    Some("read".to_string()),
+                    Some(executed_summary(&executed)),
+                )
+                .ok();
+                round_results.push(AiRoundToolResultSummary {
+                    tool_name: call.name.clone(),
+                    success: false,
+                    summary: executed_summary(&executed),
+                });
+                history.push(ai_tool_result_message(executed));
+                continue;
+            };
             let decision = resolve_ai_policy_decision(
                 &call.name,
                 Some(&args),
@@ -675,7 +667,7 @@ async fn run_ai_chat_tool_loop(
             let risk = ai_policy_risk_label(decision.risk).to_string();
             let summary = decision.reason_code.clone();
 
-            let executed = match decision.decision {
+            let mut executed = match decision.decision {
                 oxideterm_ai::AiPolicyDecisionKind::Deny => {
                     send_ai_tool_status(
                         &ui_tx,
@@ -693,7 +685,7 @@ async fn run_ai_chat_tool_loop(
                         call.id.clone(),
                         call.name.clone(),
                         "tool_disabled",
-                        decision.reason_code,
+                        decision.reason_code.clone(),
                     )
                 }
                 oxideterm_ai::AiPolicyDecisionKind::RequireApproval => {
@@ -743,6 +735,18 @@ async fn run_ai_chat_tool_loop(
                             &conversation_id,
                             &assistant_id,
                             &call,
+                            "approved",
+                            None,
+                            Some(risk.clone()),
+                            Some("Approved by user.".to_string()),
+                        )
+                        .ok();
+                        send_ai_tool_status(
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            &call,
                             "running",
                             None,
                             Some(risk.clone()),
@@ -769,6 +773,18 @@ async fn run_ai_chat_tool_loop(
                         &conversation_id,
                         &assistant_id,
                         &call,
+                        "approved",
+                        None,
+                        Some(risk.clone()),
+                        Some(summary.clone()),
+                    )
+                    .ok();
+                    send_ai_tool_status(
+                        &ui_tx,
+                        generation,
+                        &conversation_id,
+                        &assistant_id,
+                        &call,
                         "running",
                         None,
                         Some(risk.clone()),
@@ -788,6 +804,13 @@ async fn run_ai_chat_tool_loop(
                     .await
                 }
             };
+            if matches!(
+                decision.decision,
+                oxideterm_ai::AiPolicyDecisionKind::Allow
+                    | oxideterm_ai::AiPolicyDecisionKind::RequireApproval
+            ) {
+                annotate_executed_ai_tool_result_policy(&mut executed, &decision);
+            }
 
             let status = if executed.success { "completed" } else { "error" };
             send_ai_tool_status(

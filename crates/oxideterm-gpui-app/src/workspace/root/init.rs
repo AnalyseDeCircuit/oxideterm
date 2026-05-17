@@ -91,13 +91,6 @@ impl WorkspaceApp {
         );
         let ai_key_store = oxideterm_ai::AiProviderKeyStore::new();
         let ai_mcp_registry = oxideterm_ai::McpRegistry::new(ai_key_store.clone());
-        {
-            let registry = ai_mcp_registry.clone();
-            let configs = settings.ai.mcp_servers.clone();
-            forwarding_runtime.spawn(async move {
-                registry.connect_all_values(&configs).await;
-            });
-        }
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
@@ -128,8 +121,12 @@ impl WorkspaceApp {
             terminal_cast_seek_dragging: false,
             command_palette: CommandPaletteState {
                 open: false,
-                query: String::new(),
+                raw_query: String::new(),
+                mode: PaletteMode::All,
                 selected_index: 0,
+                ssh_config_hosts: Vec::new(),
+                ssh_config_hosts_loading: false,
+                error: None,
             },
             shortcuts_modal: ShortcutsModalState {
                 open: false,
@@ -158,7 +155,7 @@ impl WorkspaceApp {
             ai_tool_use_expanded: true,
             ai_context_windows_expanded: true,
             ai_model_reasoning_expanded: false,
-            expanded_ai_providers: HashSet::new(),
+            expanded_ai_providers: HashMap::new(),
             expanded_ai_provider_models: HashSet::new(),
             expanded_ai_context_providers: HashSet::new(),
             expanded_ai_model_reasoning_providers: HashSet::new(),
@@ -227,10 +224,15 @@ impl WorkspaceApp {
             ai_compaction_rx: None,
             ai_compaction_polling: false,
             ai_compacting_conversations: HashSet::new(),
+            ai_compaction_notice: None,
             ai_pending_chat_after_compaction: None,
             next_ai_chat_sequence: 0,
             ai_key_store,
             ai_provider_key_status: HashMap::new(),
+            ai_provider_key_status_pending: HashSet::new(),
+            ai_provider_key_status_tx: None,
+            ai_provider_key_status_rx: None,
+            ai_provider_key_status_polling: false,
             ai_model_refresh_generations: HashMap::new(),
             ai_model_refreshing: HashSet::new(),
             ai_model_refresh_tx: None,
@@ -245,6 +247,7 @@ impl WorkspaceApp {
             ai_model_selector_probe_pending: 0,
             show_ai_enable_confirm: false,
             ai_provider_key_remove_confirm: None,
+            ai_provider_remove_confirm: None,
             select_anchors: HashMap::new(),
             text_input_anchors: HashMap::new(),
             ime_marked_text: None,
@@ -375,6 +378,9 @@ impl WorkspaceApp {
                     this.knowledge_sync_external_edit(false, cx);
                 }
             }));
+        if workspace.ai_sidebar_visible() {
+            workspace.bootstrap_ai_mcp_registry();
+        }
         workspace.restore_session_tree_snapshot();
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
         let window_handle = window.window_handle();

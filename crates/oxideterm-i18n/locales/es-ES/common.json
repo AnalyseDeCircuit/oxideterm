@@ -27,7 +27,45 @@
     }
   },
   "command_palette": {
-    "title": "Paleta de comandos"
+    "title": "Paleta de comandos",
+    "placeholder": "Type a command or search...",
+    "no_results": "No results found.",
+    "footer_hint": "↑↓ Select · Enter Run · Esc Close · > Commands · @ Sessions · # Connections",
+    "quick_connect": "Connect to {{target}}",
+    "ssh_config_alias": "SSH config alias",
+    "session_ssh_terminal": "SSH Terminal",
+    "quick_connect_alias_not_found": "SSH config alias not found.",
+    "quick_connect_resolve_failed": "Failed to resolve SSH config alias",
+    "sections": {
+      "quick_connect": "Quick Connect",
+      "recent": "Recently Used",
+      "commands": "Commands",
+      "sessions": "Sessions",
+      "connections": "Saved Connections",
+      "plugins": "Plugin Commands",
+      "help": "Help"
+    },
+    "commands": {
+      "close_all_tabs": "Close All Tabs",
+      "open_connection_manager": "Open Connection Manager",
+      "theme_next": "Next Theme",
+      "theme_prev": "Previous Theme",
+      "cursor_block": "Cursor: Block",
+      "cursor_bar": "Cursor: Bar",
+      "cursor_underline": "Cursor: Underline",
+      "sidebar_sessions": "Sidebar: Sessions",
+      "sidebar_saved": "Sidebar: Saved Connections",
+      "sidebar_sftp": "Sidebar: SFTP",
+      "sidebar_forwards": "Sidebar: Port Forwarding",
+      "sidebar_connections": "Sidebar: Network",
+      "sidebar_ai": "Sidebar: OxideSens",
+      "open_connection_pool": "Open Connection Pool",
+      "open_connection_monitor": "Open Connection Monitor",
+      "toggle_fps": "Toggle FPS Overlay",
+      "open_plugin_manager": "Open Plugin Manager",
+      "open_topology": "Open Topology",
+      "open_notification_center": "Open Notification Center"
+    }
   },
   "common": {
     "enabled": "Activado",
@@ -67,5 +105,16 @@
     "controls": {
       "instructions": "Scroll para zoom · Arrastra para mover · Doble clic en nodo para menú"
     }
+  },
+  "plugin": {
+    "manager_title": "Gestor de plugins",
+    "native_description": "El alojamiento nativo de plugins aún no está activado.",
+    "native_empty_title": "Sistema de plugins no disponible en native",
+    "native_empty_description": "OxideTerm native conserva la entrada de plugins mientras se diseña la API sin WebView. Aún no hay instalación, activación, mercado ni acciones de runtime.",
+    "native_runtime_note": "Runtime: host nativo de plugins desactivado",
+    "native_webview_note": "WebView: no se usa en la ruta nativa de plugins",
+    "native_api_note": "API: contrato de extensión aún en diseño",
+    "native_sidebar_empty_title": "Sistema de plugins no disponible",
+    "native_sidebar_empty_description": "Abre la pestaña de plugins para ver el estado native actual."
   }
 }

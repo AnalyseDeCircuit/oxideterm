@@ -151,7 +151,12 @@ impl WorkspaceApp {
                     self.knowledge_reindex_progress = None;
                     self.knowledge_reindex_cancel = None;
                     if let Err(error) = result {
-                        self.knowledge_error = Some(error);
+                        let message = format!(
+                            "{}: {error}",
+                            self.i18n.t("settings_view.knowledge.error_reindex")
+                        );
+                        self.knowledge_error = None;
+                        self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
                     } else {
                         self.knowledge_error = None;
                     }
@@ -221,12 +226,6 @@ impl WorkspaceApp {
                 let failed = result.is_err();
                 let _ = weak.update(cx, |this, cx| {
                     this.knowledge_import_progress = Some((current, total));
-                    if failed {
-                        this.knowledge_error = result
-                            .as_ref()
-                            .err()
-                            .map(|error| format!("{error_title}: {error}"));
-                    }
                     cx.notify();
                 });
                 if failed {
@@ -236,7 +235,11 @@ impl WorkspaceApp {
             let _ = weak.update(cx, |this, cx| {
                 this.knowledge_import_progress = None;
                 if let Err(error) = result {
-                    this.knowledge_error = Some(format!("{error_title}: {error}"));
+                    let message = format!("{error_title}: {error}");
+                    this.knowledge_error = None;
+                    this.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
+                } else {
+                    this.knowledge_error = None;
                 }
                 cx.notify();
             });
@@ -256,36 +259,45 @@ impl WorkspaceApp {
             None,
         );
         let Some(provider) = resolved.provider.clone() else {
-            self.knowledge_error = Some(self.i18n.t("settings_view.knowledge.error_no_embedding_support"));
+            let message = self
+                .i18n
+                .t("settings_view.knowledge.error_no_embedding_support");
+            self.knowledge_embedding_config_expanded = true;
+            self.knowledge_error = None;
+            self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
             cx.notify();
             return;
         };
         if resolved.reason == oxideterm_ai::AiEmbeddingProviderReason::UnsupportedProvider
             || resolved.reason == oxideterm_ai::AiEmbeddingProviderReason::NoProvider
         {
-            self.knowledge_error = Some(self.i18n.t("settings_view.knowledge.error_no_embedding_support"));
+            let message = self
+                .i18n
+                .t("settings_view.knowledge.error_no_embedding_support");
+            self.knowledge_embedding_config_expanded = true;
+            self.knowledge_error = None;
+            self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
             cx.notify();
             return;
         }
         if resolved.reason == oxideterm_ai::AiEmbeddingProviderReason::MissingModel {
-            self.knowledge_error = Some(self.i18n.t("settings_view.knowledge.error_no_embedding_model"));
+            let message = self
+                .i18n
+                .t("settings_view.knowledge.error_no_embedding_model");
+            self.knowledge_embedding_config_expanded = true;
+            self.knowledge_error = None;
+            self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
             cx.notify();
             return;
         }
-        let api_key = if oxideterm_ai::ai_embedding_requires_api_key(&provider) {
-            match self.ai_key_store.get_provider_key(&provider.id).ok().flatten() {
-                Some(key) if !key.trim().is_empty() => Some(key),
-                _ => {
-                    self.knowledge_error =
-                        Some(self.i18n.t("settings_view.knowledge.error_no_embedding_api_key"));
-                    cx.notify();
-                    return;
-                }
-            }
-        } else {
-            self.ai_key_store.get_provider_key(&provider.id).ok().flatten()
-        };
         let store = self.ai_rag_store.clone();
+        let key_store = self.ai_key_store.clone();
+        let key_provider_id = provider.id.clone();
+        let key_lookup_runtime = self.forwarding_runtime.clone();
+        let requires_api_key = oxideterm_ai::ai_embedding_requires_api_key(&provider);
+        let api_key_error = self
+            .i18n
+            .t("settings_view.knowledge.error_no_embedding_api_key");
         let error_title = self
             .i18n
             .t("settings_view.knowledge.error_generate_embeddings");
@@ -294,13 +306,39 @@ impl WorkspaceApp {
             .t("settings_view.knowledge.embedding_partial_failure");
         let model = resolved.model.clone();
         cx.spawn(async move |weak, cx| {
+            let api_key = if requires_api_key {
+                let key_lookup = key_lookup_runtime
+                    .spawn_blocking(move || key_store.get_provider_key(&key_provider_id).ok().flatten())
+                    .await
+                    .ok()
+                    .flatten();
+                match key_lookup {
+                    Some(key) if !key.trim().is_empty() => Some(key),
+                    _ => {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.knowledge_embedding_config_expanded = true;
+                            this.knowledge_error = None;
+                            this.push_ai_settings_toast(
+                                api_key_error,
+                                TerminalNoticeVariant::Error,
+                            );
+                            cx.notify();
+                        });
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
             let pending =
                 match oxideterm_ai::rag_get_pending_embeddings(&store, &collection_id, Some(500))
                 {
                     Ok(pending) => pending,
                     Err(error) => {
                         let _ = weak.update(cx, |this, cx| {
-                            this.knowledge_error = Some(format!("{error_title}: {error}"));
+                            let message = format!("{error_title}: {error}");
+                            this.knowledge_error = None;
+                            this.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
                             cx.notify();
                         });
                         return;
@@ -357,11 +395,16 @@ impl WorkspaceApp {
             let _ = weak.update(cx, |this, cx| {
                 this.knowledge_embedding_progress = None;
                 if failed_count > 0 {
-                    this.knowledge_error = Some(
-                        partial_template
+                    let detail = partial_template
                             .replace("{{failed}}", &failed_count.to_string())
-                            .replace("{{total}}", &total.to_string()),
+                            .replace("{{total}}", &total.to_string());
+                    this.knowledge_error = None;
+                    this.push_ai_settings_toast(
+                        format!("{error_title}: {detail}"),
+                        TerminalNoticeVariant::Error,
                     );
+                } else {
+                    this.knowledge_error = None;
                 }
                 cx.notify();
             });
@@ -370,6 +413,11 @@ impl WorkspaceApp {
     }
 
     fn knowledge_open_external(&mut self, document_id: String, cx: &mut Context<Self>) {
+        if uuid::Uuid::parse_str(&document_id).is_err() {
+            self.knowledge_error = Some(self.i18n.t("settings_view.knowledge.error_open_external"));
+            cx.notify();
+            return;
+        }
         let docs = oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
             .ok()
             .into_iter()
@@ -420,6 +468,22 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        #[cfg(unix)]
+        {
+            let permissions_result = fs::metadata(&edit_dir).and_then(|metadata| {
+                let mut permissions = metadata.permissions();
+                std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o700);
+                fs::set_permissions(&edit_dir, permissions)
+            });
+            if let Err(error) = permissions_result {
+                self.knowledge_error = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("settings_view.knowledge.error_open_external")
+                ));
+                cx.notify();
+                return;
+            }
+        }
         let extension = if document.format == "plaintext" {
             "txt"
         } else {
@@ -433,6 +497,22 @@ impl WorkspaceApp {
             ));
             cx.notify();
             return;
+        }
+        #[cfg(unix)]
+        {
+            let permissions_result = fs::metadata(&path).and_then(|metadata| {
+                let mut permissions = metadata.permissions();
+                std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o600);
+                fs::set_permissions(&path, permissions)
+            });
+            if let Err(error) = permissions_result {
+                self.knowledge_error = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("settings_view.knowledge.error_open_external")
+                ));
+                cx.notify();
+                return;
+            }
         }
         let opened = open_path_external(&path).map_err(|error| error.to_string());
         match opened {
@@ -465,6 +545,8 @@ impl WorkspaceApp {
         let content = match fs::read_to_string(&edit.path) {
             Ok(content) => content,
             Err(error) => {
+                let _ = fs::remove_file(&edit.path);
+                self.knowledge_external_edit = None;
                 self.knowledge_error = Some(format!(
                     "{}: {error}",
                     self.i18n.t("settings_view.knowledge.error_sync")
@@ -475,13 +557,15 @@ impl WorkspaceApp {
         };
         match oxideterm_ai::rag_get_document_content(&self.ai_rag_store, &edit.doc_id) {
             Ok(current) if current == content => {
+                let _ = fs::remove_file(&edit.path);
+                self.knowledge_external_edit = None;
                 if notify_no_changes {
                     self.push_ai_settings_toast(
                         self.i18n.t("settings_view.knowledge.doc_no_changes"),
                         TerminalNoticeVariant::Success,
                     );
-                    cx.notify();
                 }
+                cx.notify();
                 return;
             }
             Ok(_) => {}
@@ -500,12 +584,9 @@ impl WorkspaceApp {
             content,
             Some(edit.version),
         ) {
-            Ok(document) => {
-                self.knowledge_external_edit = Some(KnowledgeExternalEdit {
-                    doc_id: document.id,
-                    path: edit.path,
-                    version: document.version,
-                });
+            Ok(_document) => {
+                let _ = fs::remove_file(&edit.path);
+                self.knowledge_external_edit = None;
                 self.knowledge_error = None;
                 self.push_ai_settings_toast(
                     self.i18n.t("settings_view.knowledge.doc_updated"),
@@ -513,6 +594,9 @@ impl WorkspaceApp {
                 );
             }
             Err(error) => {
+                if error.contains("Version conflict") {
+                    self.knowledge_external_edit = None;
+                }
                 self.knowledge_error = Some(format!(
                     "{}: {error}",
                     self.i18n.t("settings_view.knowledge.error_sync")

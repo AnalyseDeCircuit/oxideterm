@@ -5,7 +5,7 @@ impl WorkspaceApp {
     ) -> AiProviderKeyDisplayState {
         ai_provider_key_display_state(
             &provider.provider_type,
-            self.ai_provider_has_key(&provider.id),
+            self.ai_provider_has_key_cached(&provider.id),
         )
     }
 
@@ -197,6 +197,109 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    fn ai_provider_has_key_cached(&self, provider_id: &str) -> bool {
+        self.ai_provider_key_status
+            .get(provider_id)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub(in crate::workspace) fn ensure_ai_provider_key_statuses(&mut self, cx: &mut Context<Self>) {
+        let provider_jobs: Vec<_> = ai_provider_views(self.settings_store.settings())
+            .into_iter()
+            .filter(|provider| {
+                ai_provider_key_display_state(&provider.provider_type, false).shows_key_control()
+            })
+            .map(|provider| provider.id)
+            .collect();
+
+        for provider_id in provider_jobs {
+            if self.ai_provider_key_status.contains_key(&provider_id)
+                || self.ai_provider_key_status_pending.contains(&provider_id)
+            {
+                continue;
+            }
+            self.ai_provider_key_status_pending
+                .insert(provider_id.clone());
+            if self.ai_provider_key_status_tx.is_none() {
+                let (tx, rx) = std::sync::mpsc::channel();
+                self.ai_provider_key_status_tx = Some(tx);
+                self.ai_provider_key_status_rx = Some(rx);
+            }
+            let Some(ui_tx) = self.ai_provider_key_status_tx.as_ref().cloned() else {
+                continue;
+            };
+            let key_store = self.ai_key_store.clone();
+            self.forwarding_runtime.spawn(async move {
+                let provider_id_for_check = provider_id.clone();
+                let has_key = tokio::task::spawn_blocking(move || {
+                    key_store.has_provider_key(&provider_id_for_check)
+                })
+                .await
+                .unwrap_or(false);
+                let _ = ui_tx.send(AiProviderKeyStatusDelivery {
+                    provider_id,
+                    has_key,
+                });
+            });
+        }
+
+        if !self.ai_provider_key_status_pending.is_empty() {
+            self.schedule_ai_provider_key_status_poll(cx);
+        }
+    }
+
+    fn poll_ai_provider_key_statuses(&mut self, cx: &mut Context<Self>) {
+        let Some(rx) = self.ai_provider_key_status_rx.take() else {
+            return;
+        };
+        let mut changed = false;
+        loop {
+            match rx.try_recv() {
+                Ok(delivery) => {
+                    self.ai_provider_key_status_pending
+                        .remove(&delivery.provider_id);
+                    let previous = self
+                        .ai_provider_key_status
+                        .insert(delivery.provider_id, delivery.has_key);
+                    changed |= previous != Some(delivery.has_key);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.ai_provider_key_status_pending.clear();
+                    self.ai_provider_key_status_tx = None;
+                    break;
+                }
+            }
+        }
+        if changed {
+            cx.notify();
+        }
+        if self.ai_provider_key_status_pending.is_empty() {
+            self.ai_provider_key_status_tx = None;
+        } else {
+            self.ai_provider_key_status_rx = Some(rx);
+        }
+    }
+
+    fn schedule_ai_provider_key_status_poll(&mut self, cx: &mut Context<Self>) {
+        if self.ai_provider_key_status_polling {
+            return;
+        }
+        self.ai_provider_key_status_polling = true;
+        cx.spawn(async move |weak, cx| {
+            Timer::after(Duration::from_millis(50)).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.ai_provider_key_status_polling = false;
+                this.poll_ai_provider_key_statuses(cx);
+                if !this.ai_provider_key_status_pending.is_empty() {
+                    this.schedule_ai_provider_key_status_poll(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     fn save_ai_provider_api_key(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(provider_id) = self
             .settings_store
@@ -220,28 +323,42 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        match self.ai_key_store.store_provider_key(&provider_id, secret) {
-            Ok(()) => {
-                self.ai_provider_key_status.insert(provider_id.clone(), true);
-                self.focused_settings_input = None;
-                if let Some(provider) = self
-                    .settings_store
-                    .settings()
-                    .ai
-                    .providers
-                    .get(index)
-                    .and_then(ai_provider_view)
-                {
-                    self.refresh_ai_provider_models(index, provider, cx);
+        let key_store = self.ai_key_store.clone();
+        let runtime = self.forwarding_runtime.clone();
+        cx.spawn(async move |weak, cx| {
+            let provider_id_for_store = provider_id.clone();
+            let result = runtime
+                .spawn_blocking(move || key_store.store_provider_key(&provider_id_for_store, secret))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+            let _ = weak.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.ai_provider_key_status.insert(provider_id.clone(), true);
+                        this.focused_settings_input = None;
+                        if let Some(provider) = this
+                            .settings_store
+                            .settings()
+                            .ai
+                            .providers
+                            .get(index)
+                            .and_then(ai_provider_view)
+                        {
+                            this.refresh_ai_provider_models(index, provider, cx);
+                        }
+                    }
+                    Err(error) => {
+                        this.push_ai_settings_toast(
+                            this.ai_i18n_error("settings_view.ai.save_failed", &error),
+                            TerminalNoticeVariant::Error,
+                        );
+                    }
                 }
-            }
-            Err(error) => {
-                self.push_ai_settings_toast(
-                    self.ai_i18n_error("settings_view.ai.save_failed", &error.to_string()),
-                    TerminalNoticeVariant::Error,
-                );
-            }
-        }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -251,18 +368,32 @@ impl WorkspaceApp {
         provider_id: &str,
         cx: &mut Context<Self>,
     ) {
-        match self.ai_key_store.delete_provider_key(provider_id) {
-            Ok(()) => {
-                self.ai_provider_key_status
-                    .insert(provider_id.to_string(), false);
-            }
-            Err(error) => {
-                self.push_ai_settings_toast(
-                    self.ai_i18n_error("settings_view.ai.remove_failed", &error.to_string()),
-                    TerminalNoticeVariant::Error,
-                );
-            }
-        }
+        let provider_id = provider_id.to_string();
+        let key_store = self.ai_key_store.clone();
+        let runtime = self.forwarding_runtime.clone();
+        cx.spawn(async move |weak, cx| {
+            let provider_id_for_delete = provider_id.clone();
+            let result = runtime
+                .spawn_blocking(move || key_store.delete_provider_key(&provider_id_for_delete))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+            let _ = weak.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.ai_provider_key_status.insert(provider_id.clone(), false);
+                    }
+                    Err(error) => {
+                        this.push_ai_settings_toast(
+                            this.ai_i18n_error("settings_view.ai.remove_failed", &error),
+                            TerminalNoticeVariant::Error,
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 

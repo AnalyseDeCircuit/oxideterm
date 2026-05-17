@@ -171,6 +171,7 @@ impl WorkspaceApp {
                     "nodeId": record.node_id,
                     "status": record.status,
                     "runtimeEpoch": record.runtime_epoch,
+                    "approvalMode": record.approval_mode,
                     "source": record.source,
                     "risk": record.risk,
                     "cwd": record.cwd,
@@ -260,6 +261,7 @@ impl WorkspaceApp {
                     started_at: record.started_at as i64,
                     finished_at: record.finished_at.map(|value| value as i64),
                     runtime_epoch: self.ai_runtime_epoch.clone(),
+                    approval_mode: None,
                     risk: "execute".to_string(),
                 });
             }
@@ -581,6 +583,7 @@ fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
         TabKind::Launcher => "launcher",
         TabKind::Graphics => "graphics",
         TabKind::NotificationCenter => "notifications",
+        TabKind::PluginManager => "plugin_manager",
     }
 }
 

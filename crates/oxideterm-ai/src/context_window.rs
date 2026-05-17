@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-pub const DEFAULT_CONTEXT_WINDOW: i64 = 32_000;
+pub const DEFAULT_CONTEXT_WINDOW: i64 = 8_192;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContextWindowSource {

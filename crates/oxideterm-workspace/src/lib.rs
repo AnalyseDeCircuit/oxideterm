@@ -33,6 +33,7 @@ pub enum TabKind {
     Ide,
     Forwards,
     SessionManager,
+    PluginManager,
     Settings,
 }
 

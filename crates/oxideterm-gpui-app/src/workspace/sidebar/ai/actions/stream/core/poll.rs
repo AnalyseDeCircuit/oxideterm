@@ -23,9 +23,6 @@ impl WorkspaceApp {
                         cx,
                     );
                 }
-                AiStreamDeliveryEvent::TrimNotice(count) => {
-                    self.show_ai_trim_notice(count, cx);
-                }
                 AiStreamDeliveryEvent::Guardrail {
                     code,
                     message,
@@ -227,6 +224,7 @@ impl WorkspaceApp {
                             delivery.summary,
                             delivery.stream_error,
                             delivery.resume_after,
+                            delivery.silent,
                             cx,
                         );
                     }

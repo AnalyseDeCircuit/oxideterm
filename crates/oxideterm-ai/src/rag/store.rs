@@ -103,6 +103,16 @@ pub struct RagStore {
     hnsw_index: Arc<HnswRuntime>,
 }
 
+impl Clone for RagStore {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            data_dir: self.data_dir.clone(),
+            hnsw_index: self.hnsw_index.clone(),
+        }
+    }
+}
+
 impl RagStore {
     fn hnsw_operation_lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, RagError> {
         lock_with_diagnostics(&self.hnsw_index.operation, "hnsw.operation")
