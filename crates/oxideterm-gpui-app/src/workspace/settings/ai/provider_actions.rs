@@ -10,38 +10,6 @@ impl WorkspaceApp {
             return;
         }
 
-        let api_key = match ai_provider_refresh_key_policy(&provider.provider_type) {
-            AiProviderRefreshKeyPolicy::NoKey => None,
-            AiProviderRefreshKeyPolicy::OptionalStoredKey => {
-                self.ai_key_store.get_provider_key(&provider.id).ok().flatten()
-            }
-            AiProviderRefreshKeyPolicy::RequiredStoredKey => {
-                match self.ai_key_store.get_provider_key(&provider.id) {
-                    Ok(Some(key)) => Some(key),
-                    Ok(None) => {
-                        self.ai_provider_key_status.insert(provider.id.clone(), false);
-                        self.push_ai_settings_toast(
-                            self.i18n.t("settings_view.ai.api_key_missing"),
-                            TerminalNoticeVariant::Warning,
-                        );
-                        cx.notify();
-                        return;
-                    }
-                    Err(error) => {
-                        self.push_ai_settings_toast(
-                            self.ai_i18n_error(
-                                "settings_view.ai.refresh_failed",
-                                &error.to_string(),
-                            ),
-                            TerminalNoticeVariant::Error,
-                        );
-                        cx.notify();
-                        return;
-                    }
-                }
-            }
-        };
-
         self.next_ai_model_refresh_generation =
             self.next_ai_model_refresh_generation.saturating_add(1);
         let generation = self.next_ai_model_refresh_generation;
@@ -60,7 +28,59 @@ impl WorkspaceApp {
             return;
         };
         self.ai_model_refresh_pending = self.ai_model_refresh_pending.saturating_add(1);
+        let key_store = self.ai_key_store.clone();
+        let key_policy = ai_provider_refresh_key_policy(&provider.provider_type);
         self.forwarding_runtime.spawn(async move {
+            let api_key = match key_policy {
+                AiProviderRefreshKeyPolicy::NoKey => None,
+                AiProviderRefreshKeyPolicy::OptionalStoredKey => tokio::task::spawn_blocking({
+                    let key_store = key_store.clone();
+                    let provider_id = provider_id.clone();
+                    move || key_store.get_provider_key(&provider_id)
+                })
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten(),
+                AiProviderRefreshKeyPolicy::RequiredStoredKey => {
+                    match tokio::task::spawn_blocking({
+                        let key_store = key_store.clone();
+                        let provider_id = provider_id.clone();
+                        move || key_store.get_provider_key(&provider_id)
+                    })
+                    .await
+                    {
+                        Ok(Ok(Some(key))) => Some(key),
+                        Ok(Ok(None)) => {
+                            let _ = ui_tx.send(AiModelRefreshDelivery {
+                                index,
+                                provider_id,
+                                generation,
+                                result: Err(AI_MODEL_REFRESH_MISSING_API_KEY.to_string()),
+                            });
+                            return;
+                        }
+                        Ok(Err(error)) => {
+                            let _ = ui_tx.send(AiModelRefreshDelivery {
+                                index,
+                                provider_id,
+                                generation,
+                                result: Err(error.to_string()),
+                            });
+                            return;
+                        }
+                        Err(error) => {
+                            let _ = ui_tx.send(AiModelRefreshDelivery {
+                                index,
+                                provider_id,
+                                generation,
+                                result: Err(error.to_string()),
+                            });
+                            return;
+                        }
+                    }
+                }
+            };
             let result = fetch_provider_models(provider, api_key).await;
             let result = result.map_err(|error| error.to_string());
             let _ = ui_tx.send(AiModelRefreshDelivery {
@@ -107,10 +127,19 @@ impl WorkspaceApp {
                             );
                         }
                         Err(error) => {
-                            self.push_ai_settings_toast(
-                                self.ai_i18n_error("settings_view.ai.refresh_failed", &error),
-                                TerminalNoticeVariant::Error,
-                            );
+                            if error == AI_MODEL_REFRESH_MISSING_API_KEY {
+                                self.ai_provider_key_status
+                                    .insert(delivery.provider_id.clone(), false);
+                                self.push_ai_settings_toast(
+                                    self.i18n.t("settings_view.ai.api_key_missing"),
+                                    TerminalNoticeVariant::Warning,
+                                );
+                            } else {
+                                self.push_ai_settings_toast(
+                                    self.ai_i18n_error("settings_view.ai.refresh_failed", &error),
+                                    TerminalNoticeVariant::Error,
+                                );
+                            }
                             cx.notify();
                         }
                     }
@@ -167,6 +196,8 @@ impl WorkspaceApp {
     }
 
 }
+
+const AI_MODEL_REFRESH_MISSING_API_KEY: &str = "__missing_api_key__";
 
 pub(super) struct AiModelRefreshDelivery {
     pub(super) index: usize,

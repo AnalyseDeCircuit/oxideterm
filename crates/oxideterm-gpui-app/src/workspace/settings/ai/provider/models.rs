@@ -140,10 +140,7 @@ fn ai_provider_model_chip(
     }
 
     pub(in crate::workspace) fn ai_provider_has_key(&self, provider_id: &str) -> bool {
-        self.ai_provider_key_status
-            .get(provider_id)
-            .copied()
-            .unwrap_or_else(|| self.ai_key_store.has_provider_key(provider_id))
+        self.ai_provider_has_key_cached(provider_id)
     }
 
 

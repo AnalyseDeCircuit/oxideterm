@@ -27,7 +27,45 @@
     }
   },
   "command_palette": {
-    "title": "命令面板"
+    "title": "命令面板",
+    "placeholder": "输入命令或搜索...",
+    "no_results": "没有找到结果。",
+    "footer_hint": "↑↓ 选择 · Enter 执行 · Esc 关闭 · > 命令 · @ 会话 · # 连接",
+    "quick_connect": "连接到 {{target}}",
+    "ssh_config_alias": "SSH config 别名",
+    "session_ssh_terminal": "SSH 终端",
+    "quick_connect_alias_not_found": "未找到 SSH config 别名。",
+    "quick_connect_resolve_failed": "解析 SSH config 别名失败",
+    "sections": {
+      "quick_connect": "快速连接",
+      "recent": "最近使用",
+      "commands": "命令",
+      "sessions": "会话",
+      "connections": "保存的连接",
+      "plugins": "插件命令",
+      "help": "帮助"
+    },
+    "commands": {
+      "close_all_tabs": "关闭所有标签页",
+      "open_connection_manager": "打开连接管理器",
+      "theme_next": "下一个主题",
+      "theme_prev": "上一个主题",
+      "cursor_block": "光标：块状",
+      "cursor_bar": "光标：竖线",
+      "cursor_underline": "光标：下划线",
+      "sidebar_sessions": "侧边栏：会话",
+      "sidebar_saved": "侧边栏：保存的连接",
+      "sidebar_sftp": "侧边栏：SFTP",
+      "sidebar_forwards": "侧边栏：端口转发",
+      "sidebar_connections": "侧边栏：网络",
+      "sidebar_ai": "侧边栏：OxideSens",
+      "open_connection_pool": "打开连接池",
+      "open_connection_monitor": "打开连接监控",
+      "toggle_fps": "切换帧率浮层",
+      "open_plugin_manager": "打开插件管理器",
+      "open_topology": "打开拓扑",
+      "open_notification_center": "打开通知中心"
+    }
   },
   "common": {
     "enabled": "已启用",
@@ -67,5 +105,16 @@
     "controls": {
       "instructions": "滚轮缩放 · 拖拽平移 · 双击节点打开菜单"
     }
+  },
+  "plugin": {
+    "manager_title": "插件管理器",
+    "native_description": "native 插件宿主尚未启用。",
+    "native_empty_title": "native 暂未启用插件系统",
+    "native_empty_description": "OxideTerm native 会保留插件入口，但非 WebView 插件 API 仍在设计中。这里暂不提供安装、启用、市场或运行时操作。",
+    "native_runtime_note": "运行时：native 插件宿主未启用",
+    "native_webview_note": "WebView：native 插件路径不使用 WebView",
+    "native_api_note": "API：扩展契约仍在设计中",
+    "native_sidebar_empty_title": "插件系统暂不可用",
+    "native_sidebar_empty_description": "打开插件标签页查看 native 当前状态。"
   }
 }

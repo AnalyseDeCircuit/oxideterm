@@ -103,6 +103,140 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn chat_request_max_response_tokens_matches_tauri_reserve_fallback() {
+        let settings = oxideterm_settings::PersistedSettings::default();
+
+        assert_eq!(
+            ai_chat_request_max_response_tokens(&settings, "builtin-openai", "gpt-4o-mini"),
+            Some(4096)
+        );
+    }
+
+    #[test]
+    fn chat_request_max_response_tokens_prefers_user_override() {
+        let mut settings = oxideterm_settings::PersistedSettings::default();
+        settings.ai.model_max_response_tokens.insert(
+            "builtin-openai".to_string(),
+            serde_json::json!({ "gpt-4o-mini": 2048 }),
+        );
+
+        assert_eq!(
+            ai_chat_request_max_response_tokens(&settings, "builtin-openai", "gpt-4o-mini"),
+            Some(2048)
+        );
+    }
+
+    #[test]
+    fn user_memory_prompt_truncates_like_tauri_character_limit() {
+        let memory = "你".repeat(4_001);
+
+        let prompt = ai_user_memory_prompt(&memory, true).expect("memory prompt");
+
+        assert!(prompt.contains(&"你".repeat(4_000)));
+        assert!(!prompt.contains(&"你".repeat(4_001)));
+        assert!(prompt.contains("\n...[truncated]"));
+    }
+
+    #[test]
+    fn user_memory_prompt_respects_disabled_setting() {
+        assert!(ai_user_memory_prompt("remember this", false).is_none());
+    }
+
+    #[test]
+    fn compaction_plan_uses_tauri_manual_and_silent_keep_budgets() {
+        let messages = (0..6)
+            .map(|index| {
+                test_message(
+                    &format!("m-{index}"),
+                    if index % 2 == 0 {
+                        AiChatRole::User
+                    } else {
+                        AiChatRole::Assistant
+                    },
+                    "x".repeat(1_000),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let silent = ai_compaction_plan(&messages, 2_000, true).expect("silent plan");
+        let manual = ai_compaction_plan(&messages, 2_000, false).expect("manual plan");
+
+        assert!(silent.keep_messages.len() >= manual.keep_messages.len());
+        assert!(silent.compact_messages.len() <= manual.compact_messages.len());
+    }
+
+    #[test]
+    fn compaction_plan_skips_when_less_than_two_messages_would_compact() {
+        let messages = vec![
+            test_message("u-1", AiChatRole::User, "short".to_string()),
+            test_message("a-1", AiChatRole::Assistant, "short".to_string()),
+            test_message("u-2", AiChatRole::User, "short".to_string()),
+            test_message("a-2", AiChatRole::Assistant, "short".to_string()),
+        ];
+
+        assert!(ai_compaction_plan(&messages, 100_000, true).is_none());
+    }
+
+    #[test]
+    fn compaction_summary_prompt_matches_tauri_shape() {
+        let anchor = AiChatMessage {
+            id: "anchor-1".to_string(),
+            role: AiChatRole::System,
+            content: "previous summary".to_string(),
+            timestamp_ms: 1,
+            model: None,
+            context: None,
+            is_streaming: false,
+            thinking_content: None,
+            metadata: Some(AiChatMessageMetadata {
+                kind: "compaction-anchor".to_string(),
+                original_count: Some(4),
+                compacted_at_ms: Some(1),
+                original_messages: None,
+            }),
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: None,
+            suggestions: Vec::new(),
+        };
+        let messages = vec![
+            anchor,
+            test_message("u-1", AiChatRole::User, "question".to_string()),
+            test_message("tool-1", AiChatRole::Tool, "tool output".to_string()),
+            test_message("a-1", AiChatRole::Assistant, "answer".to_string()),
+        ];
+
+        let prompt = ai_compaction_summary_messages(&messages);
+
+        assert_eq!(prompt.len(), 2);
+        assert_eq!(prompt[0].role, AiChatRole::System);
+        assert_eq!(prompt[1].role, AiChatRole::User);
+        assert!(prompt[1].content.contains("[Previous Summary]: previous summary"));
+        assert!(prompt[1].content.contains("User: question"));
+        assert!(prompt[1].content.contains("Assistant: answer"));
+        assert!(!prompt[1].content.contains("tool output"));
+    }
+
+    #[test]
+    fn compaction_summary_uses_latest_tool_round_id() {
+        let mut message = test_message("a-1", AiChatRole::Assistant, "answer".to_string());
+        message.turn = Some(serde_json::json!({
+            "toolRounds": [
+                { "id": "round-old" },
+                { "id": "round-new" }
+            ]
+        }));
+
+        assert_eq!(
+            ai_latest_summary_round_id(&[message]),
+            Some("round-new".to_string())
+        );
+    }
+
+    #[test]
     fn compaction_reference_survives_provider_history_normalization() {
         let compacted = vec![
             test_message("u-1", AiChatRole::User, "first".to_string()),
@@ -415,6 +549,52 @@ mod ai_turn_order_tests {
             &obligation,
             "需要你确认打开哪一个终端？"
         ));
+    }
+
+    #[test]
+    fn required_tool_prompt_is_available_before_history_budgeting() {
+        let mut tool_policy = AiToolUsePolicy::default();
+        tool_policy.enabled = true;
+        let config = AiChatStreamConfig {
+            provider_id: Some("provider-1".to_string()),
+            provider_type: "openai".to_string(),
+            base_url: "https://api.example.test".to_string(),
+            model: "model".to_string(),
+            api_key: None,
+            max_response_tokens: None,
+            reasoning_effort: Some("auto".to_string()),
+            safety_mode: AiPolicySafetyMode::Default,
+            profile_id: None,
+            tool_policy,
+            tools: Vec::new(),
+            tool_choice: oxideterm_ai::AiToolChoice::Auto,
+        };
+
+        let prompt = ai_orchestrator_obligation_prompt_for_text(&config, "打开本地终端")
+            .expect("required tool prompt");
+
+        assert!(prompt.contains("## Required Tool Call"));
+        assert!(prompt.contains("open_app_surface"));
+    }
+
+    #[test]
+    fn rag_prompt_inserts_before_suggestions_and_runtime_rules() {
+        let mut system_prompt = [
+            "base",
+            "## Follow-Up Suggestions",
+            "suggestions",
+            "## OxideSens Runtime Rules",
+            "rules",
+        ]
+        .join("\n\n");
+
+        ai_insert_rag_prompt_before_runtime_tail(&mut system_prompt, "## Relevant Knowledge Base");
+
+        let rag_index = system_prompt.find("## Relevant Knowledge Base").unwrap();
+        let suggestions_index = system_prompt.find("## Follow-Up Suggestions").unwrap();
+        let runtime_index = system_prompt.find("## OxideSens Runtime Rules").unwrap();
+        assert!(rag_index < suggestions_index);
+        assert!(rag_index < runtime_index);
     }
 
     #[test]
@@ -823,6 +1003,17 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn tool_arguments_must_parse_to_json_object() {
+        assert_eq!(
+            parse_ai_tool_args("{\"target\":\"local\"}")
+                .and_then(|value| value.get("target").cloned()),
+            Some(serde_json::json!("local"))
+        );
+        assert!(parse_ai_tool_args("not json").is_none());
+        assert!(parse_ai_tool_args("[\"not\", \"an\", \"object\"]").is_none());
+    }
+
+    #[test]
     fn cancel_rejects_streaming_pending_tool_calls_with_results() {
         let mut conversation = AiConversation {
             id: "conv-1".to_string(),
@@ -849,7 +1040,7 @@ mod ai_turn_order_tests {
                 transcript_ref: None,
                 summary_ref: None,
                 branches: None,
-            suggestions: Vec::new(),
+                suggestions: Vec::new(),
             }],
             created_at_ms: 1,
             updated_at_ms: 1,
@@ -861,7 +1052,7 @@ mod ai_turn_order_tests {
             messages_loaded: true,
         };
 
-        reject_incomplete_ai_tool_calls_on_cancel(&mut conversation);
+        let stopped = finalize_streaming_ai_messages_on_cancel(&mut conversation);
 
         let call = &conversation.messages[0].tool_calls[0];
         assert_eq!(call["status"], "rejected");
@@ -883,5 +1074,75 @@ mod ai_turn_order_tests {
                     .and_then(serde_json::Value::as_str)
                     == Some("call-1")
         }));
+        assert_eq!(
+            conversation.messages[0]
+                .turn
+                .as_ref()
+                .and_then(|turn| turn.get("status"))
+                .and_then(serde_json::Value::as_str),
+            Some("complete")
+        );
+        assert!(!conversation.messages[0].is_streaming);
+        assert_eq!(
+            stopped,
+            vec![AiStoppedAssistantTurn {
+                message_id: "assistant-1".to_string(),
+                status: "complete",
+                retained: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn cancel_removes_empty_streaming_placeholder_like_tauri_abort() {
+        let mut conversation = AiConversation {
+            id: "conv-1".to_string(),
+            title: "Chat".to_string(),
+            messages: vec![AiChatMessage {
+                id: "assistant-empty".to_string(),
+                role: AiChatRole::Assistant,
+                content: String::new(),
+                timestamp_ms: 1,
+                model: None,
+                context: None,
+                is_streaming: true,
+                thinking_content: None,
+                metadata: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+                turn: Some(serde_json::json!({
+                    "id": "assistant-empty",
+                    "status": "streaming",
+                    "parts": [],
+                    "toolRounds": [],
+                    "plainTextSummary": "",
+                })),
+                transcript_ref: None,
+                summary_ref: None,
+                branches: None,
+                suggestions: Vec::new(),
+            }],
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            origin: "sidebar".to_string(),
+            profile_id: None,
+            message_count: 1,
+            session_id: None,
+            session_metadata: None,
+            messages_loaded: true,
+        };
+
+        let stopped = finalize_streaming_ai_messages_on_cancel(&mut conversation);
+
+        assert!(conversation.messages.is_empty());
+        assert_eq!(conversation.message_count, 0);
+        assert_eq!(
+            stopped,
+            vec![AiStoppedAssistantTurn {
+                message_id: "assistant-empty".to_string(),
+                status: "error",
+                retained: false,
+            }]
+        );
     }
 }

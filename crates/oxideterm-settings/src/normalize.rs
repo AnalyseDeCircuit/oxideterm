@@ -155,6 +155,124 @@ fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
     warnings.push("Migrated AI settings to multi-provider format".to_string());
 }
 
+fn normalize_ai_execution_profiles(settings: &mut Value, raw_had_execution_profiles: bool) {
+    let Some(ai) = settings.get_mut("ai").and_then(Value::as_object_mut) else {
+        return;
+    };
+
+    let active_provider_id = ai.get("activeProviderId").cloned().unwrap_or(Value::Null);
+    let active_model = ai.get("activeModel").cloned().unwrap_or(Value::Null);
+    let reasoning_effort = ai
+        .get("reasoningEffort")
+        .and_then(Value::as_str)
+        .map(ai_reasoning_profile_value)
+        .unwrap_or("auto")
+        .to_string();
+    let tool_use = ai.get("toolUse").cloned().unwrap_or_else(|| {
+        serde_json::to_value(AiToolUseSettings::default()).unwrap_or_else(|_| json!({}))
+    });
+    let created_at = now_ms();
+    let fallback = json!({
+        "id": "default",
+        "name": "Default",
+        "providerId": active_provider_id,
+        "model": active_model,
+        "reasoningEffort": reasoning_effort,
+        "toolUse": tool_use,
+        "context": {
+            "includeRuntimeChips": true,
+            "includeMemory": true,
+            "includeRag": true
+        },
+        "commandPolicy": { "allow": [], "deny": [] },
+        "createdAt": created_at,
+        "updatedAt": created_at
+    });
+
+    let existing_profiles = if raw_had_execution_profiles {
+        ai.get("executionProfiles")
+            .and_then(|config| config.get("profiles"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let mut profiles = if existing_profiles.is_empty() {
+        vec![fallback.clone()]
+    } else {
+        existing_profiles
+    };
+    for profile in &mut profiles {
+        if let Some(profile) = profile.as_object_mut()
+            && let Some(value) = profile.get("reasoningEffort").and_then(Value::as_str)
+            && let Some(normalized) = ai_reasoning_profile_alias(value)
+        {
+            profile.insert("reasoningEffort".to_string(), json!(normalized));
+        }
+    }
+    let configured_default_id = ai
+        .get("executionProfiles")
+        .and_then(|config| config.get("defaultProfileId"))
+        .and_then(Value::as_str);
+    let default_profile_id = configured_default_id
+        .filter(|default_id| {
+            profiles
+                .iter()
+                .any(|profile| profile.get("id").and_then(Value::as_str) == Some(*default_id))
+        })
+        .map(str::to_string)
+        .or_else(|| {
+            profiles
+                .first()
+                .and_then(|profile| profile.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "default".to_string());
+
+    ai.insert(
+        "executionProfiles".to_string(),
+        json!({
+            "defaultProfileId": default_profile_id,
+            "profiles": profiles
+        }),
+    );
+}
+
+fn normalize_ai_reasoning_effort_aliases(settings: &mut Value) {
+    let Some(ai) = settings.get_mut("ai").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let Some(current) = ai.get("reasoningEffort").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(normalized) = (match current {
+        "off" => Some("none"),
+        "max" => Some("xhigh"),
+        _ => None,
+    }) else {
+        return;
+    };
+    ai.insert("reasoningEffort".to_string(), json!(normalized));
+}
+
+fn ai_reasoning_profile_value(value: &str) -> &'static str {
+    match value {
+        "none" | "off" => "off",
+        "minimal" | "low" => "low",
+        "medium" => "medium",
+        "high" => "high",
+        "xhigh" | "max" => "max",
+        _ => "auto",
+    }
+}
+
+fn ai_reasoning_profile_alias(value: &str) -> Option<&'static str> {
+    let normalized = ai_reasoning_profile_value(value);
+    (normalized != value).then_some(normalized)
+}
+
 fn clamp_i64(
     value: &mut Value,
     fallback: i64,
@@ -229,6 +347,10 @@ fn derive_backend_hot_lines(scrollback: i64) -> i64 {
 
 pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     let saved_version = raw.get("version").and_then(Value::as_u64).unwrap_or(0) as u32;
+    let raw_had_ai_execution_profiles = raw
+        .get("ai")
+        .and_then(|ai| ai.get("executionProfiles"))
+        .is_some();
     let mut migration_warnings = Vec::new();
     let mut validation_warnings = Vec::new();
     let mut settings = PersistedSettings::default().to_value();
@@ -449,6 +571,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         "detailed",
         &mut validation_warnings,
     );
+    normalize_ai_reasoning_effort_aliases(&mut settings);
     sanitize_enum(
         &mut settings,
         &["ai", "reasoningEffort"],
@@ -468,6 +591,8 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     if let Some(value) = get_path_mut(&mut settings, &["terminal", "highlightRules"]) {
         *value = sanitize_highlight_rules_value(value);
     }
+
+    normalize_ai_execution_profiles(&mut settings, raw_had_ai_execution_profiles);
 
     let settings =
         serde_json::from_value(settings).context("sanitized settings did not match schema")?;
@@ -517,6 +642,191 @@ mod tests {
         assert_eq!(
             sanitized.settings.ai.active_model.as_deref(),
             Some("gpt-4o-mini")
+        );
+    }
+
+    #[test]
+    fn missing_execution_profiles_fall_back_to_active_ai_settings() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "providers": [{
+                    "id": "provider-1",
+                    "type": "openai_compatible",
+                    "name": "Provider 1",
+                    "baseUrl": "https://gateway.example/v1",
+                    "defaultModel": "model-1",
+                    "models": ["model-1"],
+                    "enabled": true,
+                    "createdAt": 1
+                }],
+                "activeProviderId": "provider-1",
+                "activeModel": "model-1",
+                "reasoningEffort": "high",
+                "toolUse": {
+                    "enabled": true,
+                    "maxRounds": 12,
+                    "maxCallsPerRound": 6,
+                    "autoApproveTools": { "read_resource": true },
+                    "disabledTools": ["run_command"]
+                }
+            }
+        }))
+        .expect("sanitize settings");
+
+        let config = sanitized.settings.ai.execution_profiles;
+        let profile = config
+            .get("profiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| profiles.first())
+            .expect("default profile");
+        assert_eq!(
+            config.get("defaultProfileId").and_then(Value::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            profile.get("providerId").and_then(Value::as_str),
+            Some("provider-1")
+        );
+        assert_eq!(
+            profile.get("model").and_then(Value::as_str),
+            Some("model-1")
+        );
+        assert_eq!(
+            profile.get("reasoningEffort").and_then(Value::as_str),
+            Some("high")
+        );
+        assert_eq!(
+            profile
+                .get("toolUse")
+                .and_then(|tool_use| tool_use.get("enabled"))
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            profile
+                .get("toolUse")
+                .and_then(|tool_use| tool_use.get("maxRounds"))
+                .and_then(Value::as_i64),
+            Some(12)
+        );
+        assert_eq!(
+            profile
+                .get("toolUse")
+                .and_then(|tool_use| tool_use.get("disabledTools"))
+                .and_then(Value::as_array)
+                .and_then(|tools| tools.first())
+                .and_then(Value::as_str),
+            Some("run_command")
+        );
+    }
+
+    #[test]
+    fn tauri_reasoning_effort_aliases_keep_native_schema_and_profile_semantics() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "reasoningEffort": "max",
+                "providers": [{
+                    "id": "provider-1",
+                    "type": "openai",
+                    "name": "OpenAI",
+                    "baseUrl": "https://api.openai.com/v1",
+                    "defaultModel": "gpt-4o-mini",
+                    "models": ["gpt-4o-mini"],
+                    "enabled": true,
+                    "createdAt": 1
+                }],
+                "activeProviderId": "provider-1",
+                "activeModel": "gpt-4o-mini"
+            }
+        }))
+        .expect("sanitize settings");
+
+        assert_eq!(
+            sanitized.settings.ai.reasoning_effort,
+            AiReasoningEffort::Xhigh
+        );
+        let profile_reasoning = sanitized
+            .settings
+            .ai
+            .execution_profiles
+            .get("profiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| profiles.first())
+            .and_then(|profile| profile.get("reasoningEffort"))
+            .and_then(Value::as_str);
+        assert_eq!(profile_reasoning, Some("max"));
+    }
+
+    #[test]
+    fn legacy_native_profile_reasoning_aliases_display_as_tauri_values() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "providers": [{
+                    "id": "provider-1",
+                    "type": "openai",
+                    "name": "OpenAI",
+                    "baseUrl": "https://api.openai.com/v1",
+                    "defaultModel": "gpt-4o-mini",
+                    "models": ["gpt-4o-mini"],
+                    "enabled": true,
+                    "createdAt": 1
+                }],
+                "activeProviderId": "provider-1",
+                "activeModel": "gpt-4o-mini",
+                "executionProfiles": {
+                    "defaultProfileId": "default",
+                    "profiles": [{
+                        "id": "default",
+                        "name": "Default",
+                        "providerId": "provider-1",
+                        "model": "gpt-4o-mini",
+                        "reasoningEffort": "xhigh"
+                    }]
+                }
+            }
+        }))
+        .expect("sanitize settings");
+
+        let profile_reasoning = sanitized
+            .settings
+            .ai
+            .execution_profiles
+            .get("profiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| profiles.first())
+            .and_then(|profile| profile.get("reasoningEffort"))
+            .and_then(Value::as_str);
+        assert_eq!(profile_reasoning, Some("max"));
+    }
+
+    #[test]
+    fn execution_profiles_with_missing_default_select_first_profile() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "executionProfiles": {
+                    "defaultProfileId": "missing",
+                    "profiles": [{
+                        "id": "first",
+                        "name": "First",
+                        "providerId": null,
+                        "model": null,
+                        "reasoningEffort": "auto",
+                        "createdAt": 1,
+                        "updatedAt": 1
+                    }]
+                }
+            }
+        }))
+        .expect("sanitize settings");
+
+        assert_eq!(
+            sanitized
+                .settings
+                .ai
+                .execution_profiles
+                .get("defaultProfileId")
+                .and_then(Value::as_str),
+            Some("first")
         );
     }
 

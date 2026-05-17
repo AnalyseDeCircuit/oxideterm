@@ -19,6 +19,7 @@ pub(super) struct AiCompactionDelivery {
     pub(super) summary: String,
     pub(super) stream_error: Option<String>,
     pub(super) resume_after: Option<AiPendingChatStream>,
+    pub(super) silent: bool,
 }
 
 pub(super) enum AiCompactionDeliveryKind {

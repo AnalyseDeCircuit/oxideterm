@@ -10,6 +10,7 @@ mod launcher;
 mod new_connection;
 mod notification_center;
 mod pane_tree;
+mod plugin_manager;
 mod quick_commands;
 mod session_manager;
 mod settings;
@@ -126,8 +127,9 @@ use self::graphics::GraphicsState;
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
 use self::launcher::LauncherState;
 use self::new_connection::{
-    HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
-    NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab, SshConnectionWorkerResult,
+    HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionField,
+    NewConnectionForm, NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab,
+    SshConnectionWorkerResult,
 };
 use self::pane_tree::SplitDrag;
 use self::quick_commands::QuickCommandsState;
@@ -197,6 +199,20 @@ struct KnowledgeExternalEdit {
     version: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum AiCompactionNoticePhase {
+    Running,
+    Done,
+}
+
+#[derive(Clone, Debug)]
+struct AiCompactionNotice {
+    conversation_id: String,
+    phase: AiCompactionNoticePhase,
+    compacted_count: Option<usize>,
+    timestamp_ms: i64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum KeybindingScopeFilter {
     All,
@@ -224,11 +240,28 @@ enum KnowledgeReindexDelivery {
     Finished(Result<usize, String>),
 }
 
+struct AiProviderKeyStatusDelivery {
+    provider_id: String,
+    has_key: bool,
+}
+
 #[derive(Clone, Debug)]
 struct CommandPaletteState {
     open: bool,
-    query: String,
+    raw_query: String,
+    mode: PaletteMode,
     selected_index: usize,
+    ssh_config_hosts: Vec<oxideterm_connections::SshConfigHost>,
+    ssh_config_hosts_loading: bool,
+    error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PaletteMode {
+    All,
+    Commands,
+    Sessions,
+    Connections,
 }
 
 #[derive(Clone, Debug)]
@@ -304,7 +337,7 @@ pub(crate) struct WorkspaceApp {
     ai_tool_use_expanded: bool,
     ai_context_windows_expanded: bool,
     ai_model_reasoning_expanded: bool,
-    expanded_ai_providers: HashSet<String>,
+    expanded_ai_providers: HashMap<String, bool>,
     expanded_ai_provider_models: HashSet<String>,
     expanded_ai_context_providers: HashSet<String>,
     expanded_ai_model_reasoning_providers: HashSet<String>,
@@ -373,10 +406,15 @@ pub(crate) struct WorkspaceApp {
     ai_compaction_rx: Option<std::sync::mpsc::Receiver<AiCompactionDelivery>>,
     ai_compaction_polling: bool,
     ai_compacting_conversations: HashSet<String>,
+    ai_compaction_notice: Option<AiCompactionNotice>,
     ai_pending_chat_after_compaction: Option<AiPendingChatStream>,
     next_ai_chat_sequence: u64,
     ai_key_store: oxideterm_ai::AiProviderKeyStore,
     ai_provider_key_status: HashMap<String, bool>,
+    ai_provider_key_status_pending: HashSet<String>,
+    ai_provider_key_status_tx: Option<std::sync::mpsc::Sender<AiProviderKeyStatusDelivery>>,
+    ai_provider_key_status_rx: Option<std::sync::mpsc::Receiver<AiProviderKeyStatusDelivery>>,
+    ai_provider_key_status_polling: bool,
     ai_model_refresh_generations: HashMap<String, u64>,
     ai_model_refreshing: HashSet<String>,
     ai_model_refresh_tx: Option<std::sync::mpsc::Sender<AiModelRefreshDelivery>>,
@@ -391,6 +429,7 @@ pub(crate) struct WorkspaceApp {
     ai_model_selector_probe_pending: usize,
     show_ai_enable_confirm: bool,
     ai_provider_key_remove_confirm: Option<(usize, String)>,
+    ai_provider_remove_confirm: Option<(String, String)>,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
     text_input_anchors: HashMap<TextInputAnchorId, TextInputAnchor>,
     ime_marked_text: Option<String>,
@@ -549,6 +588,7 @@ pub(crate) struct AiRuntimeCommandRecord {
     pub(crate) started_at: i64,
     pub(crate) finished_at: Option<i64>,
     pub(crate) runtime_epoch: String,
+    pub(crate) approval_mode: Option<String>,
     pub(crate) risk: String,
 }
 

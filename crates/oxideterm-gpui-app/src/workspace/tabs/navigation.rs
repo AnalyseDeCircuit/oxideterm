@@ -159,6 +159,10 @@ impl WorkspaceApp {
             Some(TabKind::NotificationCenter) => {
                 self.active_surface = ActiveSurface::Terminal;
             }
+            Some(TabKind::PluginManager) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Extensions;
+            }
             _ => {
                 self.active_surface = ActiveSurface::Terminal;
             }

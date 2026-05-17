@@ -244,4 +244,181 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(in crate::workspace) fn render_ai_provider_remove_confirm_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let provider_name = self
+            .ai_provider_remove_confirm
+            .as_ref()
+            .map(|(_, name)| name.as_str())
+            .unwrap_or_default();
+        let title = self
+            .i18n
+            .t("settings_view.ai.remove_provider_confirm")
+            .replace("{{name}}", provider_name);
+        dialog_backdrop()
+            .child(
+                dialog_content(&self.tokens)
+                    .w(px(AI_KEY_REMOVE_DIALOG_WIDTH))
+                    .max_w(relative(0.92))
+                    .shadow_lg()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap(px(12.0))
+                            .px(px(24.0))
+                            .pt(px(24.0))
+                            .pb(px(16.0))
+                            .child(
+                                div()
+                                    .size(px(AI_CONFIRM_ICON_WRAP))
+                                    .rounded(px(AI_CONFIRM_ICON_WRAP / 2.0))
+                                    .border_1()
+                                    .border_color(rgba((self.tokens.ui.error << 8) | 0x33))
+                                    .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(Self::render_lucide_icon(
+                                        LucideIcon::AlertTriangle,
+                                        AI_CONFIRM_ICON,
+                                        rgb(self.tokens.ui.error),
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_align(gpui::TextAlign::Center)
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .line_height(px(20.0))
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(title),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .border_t_1()
+                            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .py(px(10.0))
+                                    .border_r_1()
+                                    .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+                                    .text_align(gpui::TextAlign::Center)
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .cursor_pointer()
+                                    .hover(|style| {
+                                        style
+                                            .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x80))
+                                            .text_color(rgb(self.tokens.ui.text))
+                                    })
+                                    .child(self.i18n.t("common.actions.cancel"))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.ai_provider_remove_confirm = None;
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .py(px(10.0))
+                                    .text_align(gpui::TextAlign::Center)
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(self.tokens.ui.error))
+                                    .cursor_pointer()
+                                    .hover(|style| {
+                                        style
+                                            .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
+                                            .text_color(rgb(self.tokens.ui.error))
+                                    })
+                                    .child(self.i18n.t("settings_view.ai.remove"))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            if let Some((provider_id, _name)) =
+                                                this.ai_provider_remove_confirm.take()
+                                            {
+                                                this.remove_ai_provider(&provider_id, cx);
+                                            }
+                                            cx.stop_propagation();
+                                        }),
+                                    ),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn remove_ai_provider(&mut self, provider_id: &str, cx: &mut Context<Self>) {
+        let Some(index) = self
+            .settings_store
+            .settings()
+            .ai
+            .providers
+            .iter()
+            .position(|provider| ai_provider_id(provider).as_deref() == Some(provider_id))
+        else {
+            cx.notify();
+            return;
+        };
+        let provider_id = provider_id.to_string();
+        self.ai_provider_key_status.remove(&provider_id);
+        self.ai_provider_key_status_pending.remove(&provider_id);
+        self.expanded_ai_providers.remove(&provider_id);
+        self.expanded_ai_provider_models.remove(&provider_id);
+        self.expanded_ai_context_providers.remove(&provider_id);
+        self.expanded_ai_model_reasoning_providers
+            .remove(&provider_id);
+        self.edit_settings(
+            |settings| {
+                ai_remove_provider_at_with_scoped_settings(
+                    &mut settings.ai.providers,
+                    &mut settings.ai.active_provider_id,
+                    &mut settings.ai.active_model,
+                    &mut settings.ai.reasoning_provider_overrides,
+                    &mut settings.ai.reasoning_model_overrides,
+                    &mut settings.ai.user_context_windows,
+                    &mut settings.ai.model_max_response_tokens,
+                    index,
+                );
+            },
+            cx,
+        );
+
+        let key_store = self.ai_key_store.clone();
+        let runtime = self.forwarding_runtime.clone();
+        cx.spawn(async move |weak, cx| {
+            let provider_id_for_delete = provider_id.clone();
+            let result = runtime
+                .spawn_blocking(move || key_store.delete_provider_key(&provider_id_for_delete))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+            if let Err(error) = result {
+                let _ = weak.update(cx, |this, cx| {
+                    this.push_ai_settings_toast(
+                        this.ai_i18n_error("settings_view.ai.remove_failed", &error),
+                        TerminalNoticeVariant::Error,
+                    );
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
 }

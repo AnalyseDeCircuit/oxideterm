@@ -447,20 +447,37 @@ fn redact_sensitive_args(args: &[String]) -> Vec<String> {
                 redact_next = false;
                 return "[redacted]".to_string();
             }
-            let lower = arg.to_ascii_lowercase();
-            if matches!(
-                lower.as_str(),
-                "--api-key" | "--token" | "--secret" | "--password"
-            ) || lower.ends_with("_token")
-                || lower.ends_with("_key")
-            {
+
+            let trimmed = arg.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            let sensitive_name = lower
+                .trim_start_matches('-')
+                .split_once('=')
+                .map(|(name, _)| name)
+                .unwrap_or_else(|| lower.trim_start_matches('-'));
+            let is_sensitive_flag = matches!(
+                sensitive_name,
+                "apikey"
+                    | "api-key"
+                    | "api_key"
+                    | "auth"
+                    | "authorization"
+                    | "bearer"
+                    | "password"
+                    | "secret"
+                    | "token"
+            );
+
+            if is_sensitive_flag && trimmed.contains('=') {
+                trimmed
+                    .split_once('=')
+                    .map(|(name, _)| format!("{name}=[redacted]"))
+                    .unwrap_or_else(|| trimmed.to_string())
+            } else if is_sensitive_flag {
                 redact_next = true;
-            }
-            if lower.contains("token=") || lower.contains("api_key=") || lower.contains("password=")
-            {
-                "[redacted]".to_string()
+                trimmed.to_string()
             } else {
-                arg.clone()
+                trimmed.to_string()
             }
         })
         .collect()

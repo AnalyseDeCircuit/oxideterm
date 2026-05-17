@@ -10,6 +10,9 @@ impl WorkspaceApp {
             ai_chat_panel(&self.tokens)
                 .relative()
                 .child(self.render_ai_sidebar_chat_header(cx))
+                .when_some(self.render_ai_compaction_notice(), |panel, notice| {
+                    panel.child(notice)
+                })
                 .child(
                     div()
                         .w_full()
@@ -63,6 +66,59 @@ impl WorkspaceApp {
             body = body.child(self.render_ai_message(conversation, message, cx));
         }
         body.child(div().h(px(16.0))).into_any_element()
+    }
+
+    fn render_ai_compaction_notice(&self) -> Option<AnyElement> {
+        let active_id = self.ai_chat.active_conversation_id.as_deref()?;
+        let notice = self.ai_compaction_notice.as_ref()?;
+        if notice.conversation_id != active_id {
+            return None;
+        }
+        let running = notice.phase == AiCompactionNoticePhase::Running;
+        let label = if running {
+            self.i18n.t("ai.context.compaction_running")
+        } else {
+            self.i18n
+                .t("ai.context.compaction_done")
+                .replace(
+                    "{{count}}",
+                    &notice.compacted_count.unwrap_or_default().to_string(),
+                )
+        };
+        Some(
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(12.0))
+                .py(px(8.0))
+                .border_b_1()
+                .border_color(if running {
+                    rgba((self.tokens.ui.accent << 8) | 0x33)
+                } else {
+                    rgba((self.tokens.ui.border << 8) | 0x33)
+                })
+                .bg(if running {
+                    rgba((self.tokens.ui.accent << 8) | 0x1a)
+                } else {
+                    rgba((self.tokens.ui.border << 8) | 0x1a)
+                })
+                .child(Self::render_lucide_icon(
+                    LucideIcon::Archive,
+                    14.0,
+                    rgb(self.tokens.ui.text_muted),
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(11.0))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(label),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_ai_trim_notice(&self, count: usize) -> AnyElement {

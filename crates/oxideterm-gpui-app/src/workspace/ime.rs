@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use super::WorkspaceApp;
+use super::command_palette::parse_command_palette_mode;
 use super::file_manager::FileManagerInput;
 use super::forwards::ForwardInput;
 use super::graphics::GraphicsInput;
@@ -19,6 +20,7 @@ use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum WorkspaceImeTarget {
+    CommandPalette,
     Search,
     TerminalCommandBar,
     TerminalCastSearch,
@@ -40,6 +42,7 @@ pub(super) enum WorkspaceImeTarget {
 impl WorkspaceImeTarget {
     pub(super) fn anchor_id(self) -> TextInputAnchorId {
         let id = match self {
+            Self::CommandPalette => 4,
             Self::Search => 1,
             Self::TerminalCommandBar => 2,
             Self::TerminalCastSearch => 3,
@@ -317,6 +320,10 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Settings(input));
         }
 
+        if self.command_palette.open {
+            return Some(WorkspaceImeTarget::CommandPalette);
+        }
+
         if self.terminal_quick_commands_open
             && let Some(input) = self.quick_commands.focused_input
         {
@@ -425,6 +432,7 @@ impl WorkspaceApp {
 
     fn text_for_ime_target(&self, target: WorkspaceImeTarget) -> Option<String> {
         match target {
+            WorkspaceImeTarget::CommandPalette => Some(self.command_palette.raw_query.clone()),
             WorkspaceImeTarget::Search => Some(self.search.query.clone()),
             WorkspaceImeTarget::TerminalCommandBar => self
                 .terminal_command_bar_focused
@@ -560,6 +568,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match target {
+            WorkspaceImeTarget::CommandPalette => {
+                replace_utf16(&mut self.command_palette.raw_query, replacement_range, text);
+                let (mode, _) = parse_command_palette_mode(&self.command_palette.raw_query);
+                self.command_palette.mode = mode;
+                self.command_palette.selected_index = 0;
+                self.new_connection_caret_visible = true;
+                cx.notify();
+            }
             WorkspaceImeTarget::Search => {
                 replace_utf16(&mut self.search.query, replacement_range, text);
                 self.update_search_query(cx);

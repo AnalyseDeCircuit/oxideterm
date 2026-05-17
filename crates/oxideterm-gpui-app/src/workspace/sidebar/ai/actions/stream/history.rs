@@ -12,7 +12,7 @@ fn ai_tool_definitions_estimated_tokens(tools: &[oxideterm_ai::AiToolDefinition]
     tools
         .iter()
         .map(|tool| {
-            ai_estimated_tokens(&tool.name)
+            10 + ai_estimated_tokens(&tool.name)
                 + ai_estimated_tokens(&tool.description)
                 + ai_estimated_tokens(&tool.parameters.to_string())
         })
@@ -90,7 +90,18 @@ fn is_runtime_ai_history_system(message: &AiChatMessage) -> bool {
     )
 }
 
-fn reject_incomplete_ai_tool_calls_on_cancel(conversation: &mut AiConversation) {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AiStoppedAssistantTurn {
+    message_id: String,
+    status: &'static str,
+    retained: bool,
+}
+
+fn finalize_streaming_ai_messages_on_cancel(
+    conversation: &mut AiConversation,
+) -> Vec<AiStoppedAssistantTurn> {
+    let mut stopped_turns = Vec::new();
+    let mut remove_ids = Vec::new();
     for message in &mut conversation.messages {
         if message.role != AiChatRole::Assistant || !message.is_streaming {
             continue;
@@ -133,7 +144,54 @@ fn reject_incomplete_ai_tool_calls_on_cancel(conversation: &mut AiConversation) 
                 None,
             );
         }
+        message.is_streaming = false;
+        if should_retain_stopped_ai_message(message) {
+            set_ai_turn_status(message, "complete");
+            stopped_turns.push(AiStoppedAssistantTurn {
+                message_id: message.id.clone(),
+                status: "complete",
+                retained: true,
+            });
+        } else {
+            stopped_turns.push(AiStoppedAssistantTurn {
+                message_id: message.id.clone(),
+                status: "error",
+                retained: false,
+            });
+            remove_ids.push(message.id.clone());
+        }
     }
+    if !remove_ids.is_empty() {
+        let remove_ids = remove_ids.into_iter().collect::<std::collections::HashSet<_>>();
+        conversation
+            .messages
+            .retain(|message| !remove_ids.contains(&message.id));
+        conversation.message_count = conversation.messages.len();
+    }
+    stopped_turns
+}
+
+fn should_retain_stopped_ai_message(message: &AiChatMessage) -> bool {
+    if !message.content.trim().is_empty()
+        || message
+            .thinking_content
+            .as_deref()
+            .is_some_and(|content| !content.trim().is_empty())
+    {
+        return true;
+    }
+    if !message.tool_calls.is_empty() {
+        return true;
+    }
+    message.turn.as_ref().is_some_and(|turn| {
+        turn.get("parts")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|parts| !parts.is_empty())
+            || turn
+                .get("toolRounds")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|rounds| !rounds.is_empty())
+    })
 }
 
 fn cancel_rejected_tool_call(call: &serde_json::Value) -> Option<(String, String, String)> {
@@ -368,8 +426,8 @@ fn ai_user_memory_prompt(content: &str, enabled: bool) -> Option<String> {
     if content.is_empty() {
         return None;
     }
-    let truncated = truncate_at_char_boundary(&content, AI_USER_MEMORY_MAX_CHARS);
-    let suffix = if truncated.len() < content.len() {
+    let truncated = truncate_to_char_count(&content, AI_USER_MEMORY_MAX_CHARS);
+    let suffix = if truncated.chars().count() < content.chars().count() {
         "\n...[truncated]"
     } else {
         ""
@@ -379,15 +437,8 @@ fn ai_user_memory_prompt(content: &str, enabled: bool) -> Option<String> {
     ))
 }
 
-fn truncate_at_char_boundary(text: &str, max_bytes: usize) -> &str {
-    if text.len() <= max_bytes {
-        return text;
-    }
-    let mut end = max_bytes.min(text.len());
-    while !text.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    &text[..end]
+fn truncate_to_char_count(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
 }
 
 fn ai_orchestrator_system_prompt(tool_use_enabled: bool) -> String {
@@ -503,7 +554,7 @@ fn ai_context_percentage(tokens: usize, max_tokens: usize) -> f32 {
 const AI_CONTEXT_WARNING_PERCENT: f32 = 70.0;
 const AI_CONTEXT_DANGER_PERCENT: f32 = 85.0;
 const AI_COMPACTION_DEFAULT_CONTEXT_WINDOW: usize = oxideterm_ai::DEFAULT_CONTEXT_WINDOW as usize;
-const AI_USER_MEMORY_MAX_CHARS: usize = 6_000;
+const AI_USER_MEMORY_MAX_CHARS: usize = 4_000;
 const DEFAULT_AI_SYSTEM_PROMPT: &str = r#"You are OxideSens, a terminal-aware assistant inside OxideTerm.
 
 ## Identity / Scope

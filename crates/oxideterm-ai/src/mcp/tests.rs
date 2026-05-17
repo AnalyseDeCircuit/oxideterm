@@ -184,7 +184,7 @@ mod tests {
             args: Vec::new(),
             env: HashMap::new(),
             auth_header_name: None,
-            auth_header_mode: None,
+            auth_header_mode: Some(McpAuthHeaderMode::None),
             headers: HashMap::new(),
             enabled: true,
             retry_on_disconnect: false,
@@ -489,6 +489,32 @@ mod tests {
     }
 
     #[test]
+    fn mcp_snapshot_redacts_sensitive_args_like_tauri() {
+        let redacted = redact_sensitive_args(&[
+            "--api-key".to_string(),
+            "secret-1".to_string(),
+            "--api_key=secret-2".to_string(),
+            "--authorization".to_string(),
+            "secret-3".to_string(),
+            "--bearer=secret-4".to_string(),
+            "plain".to_string(),
+        ]);
+
+        assert_eq!(
+            redacted,
+            vec![
+                "--api-key",
+                "[redacted]",
+                "--api_key=[redacted]",
+                "--authorization",
+                "[redacted]",
+                "--bearer=[redacted]",
+                "plain",
+            ]
+        );
+    }
+
+    #[test]
     fn sse_parser_matches_tauri_line_semantics() {
         let mut parser = SseEventParser::default();
         parser.push_str(": keepalive\r\n");
@@ -555,7 +581,7 @@ mod tests {
             args: Vec::new(),
             env: HashMap::new(),
             auth_header_name: None,
-            auth_header_mode: None,
+            auth_header_mode: Some(McpAuthHeaderMode::None),
             headers: HashMap::new(),
             enabled: true,
             retry_on_disconnect: false,
@@ -640,7 +666,7 @@ mod tests {
                     if request_line.starts_with("GET ") {
                         let body = "event: endpoint\ndata: /message\n\n";
                         let response = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
                             body.len(),
                             body
                         );
@@ -648,7 +674,8 @@ mod tests {
                         return;
                     }
                     if force_legacy && request_line.starts_with("POST / ") {
-                        let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                        let response =
+                            "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
                         let _ = stream.write_all(response.as_bytes()).await;
                         return;
                     }
@@ -660,7 +687,7 @@ mod tests {
                     };
                     let response_body = mcp_http_response_body(&request);
                     let response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nMCP-Session-Id: {}\r\nContent-Length: {}\r\n\r\n{}",
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nMCP-Session-Id: {}\r\nContent-Length: {}\r\n\r\n{}",
                         session_id,
                         response_body.len(),
                         response_body

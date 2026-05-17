@@ -70,6 +70,32 @@ impl WorkspaceApp {
         self.persist_ai_transcript_entries(conversation_id.to_string(), entries);
     }
 
+    fn persist_ai_removed_assistant_turn_end(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        status: &str,
+    ) {
+        let now = ai_now_ms();
+        self.persist_ai_transcript_entries(
+            conversation_id.to_string(),
+            vec![ai_transcript_entry(
+                format!("transcript-assistant-end-{message_id}"),
+                conversation_id,
+                "assistant_turn_end",
+                serde_json::json!({
+                    "status": status,
+                    "messageId": message_id,
+                    "plainTextSummary": "",
+                    "toolRoundCount": 0,
+                }),
+                Some(message_id.to_string()),
+                Some(message_id.to_string()),
+                now,
+            )],
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn persist_ai_assistant_round(
         &self,
@@ -132,11 +158,14 @@ impl WorkspaceApp {
         message_id: &str,
         summary_kind: &str,
         summary_text: &str,
+        round_id: Option<String>,
         transcript_ref: Option<serde_json::Value>,
         compacted_message_count: Option<usize>,
+        compacted_until_message_id: Option<String>,
         source: Option<&str>,
         timestamp: i64,
     ) {
+        let round_id_for_diagnostic = round_id.clone();
         self.persist_ai_transcript_entries(
             conversation_id.to_string(),
             vec![ai_transcript_entry(
@@ -145,6 +174,7 @@ impl WorkspaceApp {
                 "summary_created",
                 serde_json::json!({
                     "messageId": message_id,
+                    "roundId": round_id,
                     "summaryText": summary_text,
                     "summaryKind": summary_kind,
                     "sourceStartEntryId": transcript_ref
@@ -158,6 +188,7 @@ impl WorkspaceApp {
                     "source": source,
                     "summarizationMode": source,
                     "compactedMessageCount": compacted_message_count,
+                    "compactedUntilMessageId": compacted_until_message_id,
                 }),
                 Some(message_id.to_string()),
                 Some(message_id.to_string()),
@@ -174,6 +205,7 @@ impl WorkspaceApp {
                 None,
                 timestamp,
                 self.ai_diagnostic_base(serde_json::json!({
+                    "roundId": round_id_for_diagnostic,
                     "summaryKind": summary_kind,
                     "summaryLength": summary_text.len(),
                     "compactedMessageCount": compacted_message_count,

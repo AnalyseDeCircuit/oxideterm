@@ -251,6 +251,8 @@ impl WorkspaceApp {
                         this.open_notification_center_tab(window, cx);
                     } else if section == SidebarSection::Assistant {
                         let _ = this.toggle_ai_sidebar(cx);
+                    } else if section == SidebarSection::Extensions {
+                        this.open_plugin_manager_tab(window, cx);
                     } else {
                         this.active_surface = ActiveSurface::Terminal;
                         this.set_sidebar_section(section, cx);

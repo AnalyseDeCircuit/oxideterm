@@ -206,10 +206,17 @@ impl WorkspaceApp {
                                 false,
                                 move |this, _event, _window, cx| {
                                     let registry = this.ai_mcp_registry.clone();
+                                    let runtime = this.forwarding_runtime.clone();
                                     let server_id = remove_id.clone();
                                     cx.spawn(async move |weak, cx| {
                                         registry.disconnect_server(&server_id).await;
-                                        let _ = registry.delete_auth_token(&server_id);
+                                        let delete_registry = registry.clone();
+                                        let server_id_for_delete = server_id.clone();
+                                        let _ = runtime
+                                            .spawn_blocking(move || {
+                                                delete_registry.delete_auth_token(&server_id_for_delete)
+                                            })
+                                            .await;
                                         let _ = weak.update(cx, |this, cx| {
                                             this.edit_settings(
                                                 |settings| {
@@ -956,19 +963,6 @@ impl WorkspaceApp {
             return;
         }
         let id = format!("mcp-{}", uuid::Uuid::new_v4());
-        if !draft.auth_token.is_empty()
-            && draft.auth_header_mode != oxideterm_ai::McpAuthHeaderMode::None
-        {
-            if let Err(error) = self
-                .ai_mcp_registry
-                .store_auth_token(&id, zeroize::Zeroizing::new(draft.auth_token.clone()))
-            {
-                self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error);
-                self.ai_mcp_add_dialog = Some(draft);
-                cx.notify();
-                return;
-            }
-        }
         let transport = draft.transport;
         let mut object = serde_json::Map::new();
         object.insert("id".to_string(), serde_json::json!(id));
@@ -986,32 +980,80 @@ impl WorkspaceApp {
                 serde_json::json!(draft.command.trim()),
             );
         }
-        object.insert(
-            "args".to_string(),
-            serde_json::json!(ai_mcp_split_args(&draft.args)),
-        );
+        let args = ai_mcp_split_args(&draft.args);
+        if !args.is_empty() {
+            object.insert("args".to_string(), serde_json::json!(args));
+        }
         if let Some(env) = ai_mcp_clean_record(&draft.env) {
             object.insert("env".to_string(), env);
         }
-        if !draft.auth_header_name.trim().is_empty() {
+        let auth_header_name = draft.auth_header_name.trim();
+        if !auth_header_name.is_empty() && auth_header_name != "Authorization" {
             object.insert(
                 "authHeaderName".to_string(),
-                serde_json::json!(draft.auth_header_name.trim()),
+                serde_json::json!(auth_header_name),
             );
         }
-        object.insert(
-            "authHeaderMode".to_string(),
-            serde_json::json!(ai_mcp_auth_mode_value(draft.auth_header_mode)),
-        );
+        if draft.auth_header_mode != oxideterm_ai::McpAuthHeaderMode::Bearer {
+            object.insert(
+                "authHeaderMode".to_string(),
+                serde_json::json!(ai_mcp_auth_mode_value(draft.auth_header_mode)),
+            );
+        }
         if let Some(headers) = ai_mcp_clean_record(&draft.headers) {
             object.insert("headers".to_string(), headers);
         }
         object.insert("enabled".to_string(), serde_json::json!(true));
-        object.insert(
-            "retryOnDisconnect".to_string(),
-            serde_json::json!(draft.retry_on_disconnect),
-        );
+        if draft.retry_on_disconnect {
+            object.insert(
+                "retryOnDisconnect".to_string(),
+                serde_json::json!(draft.retry_on_disconnect),
+            );
+        }
         let config = serde_json::Value::Object(object);
+        let should_store_auth_token = !draft.auth_token.is_empty()
+            && draft.auth_header_mode != oxideterm_ai::McpAuthHeaderMode::None;
+        if should_store_auth_token {
+            let registry = self.ai_mcp_registry.clone();
+            let runtime = self.forwarding_runtime.clone();
+            let token = draft.auth_token.clone();
+            let mut restore_draft = draft.clone();
+            cx.spawn(async move |weak, cx| {
+                let id_for_store = id.clone();
+                let result = runtime
+                    .spawn_blocking(move || {
+                        registry.store_auth_token(&id_for_store, zeroize::Zeroizing::new(token))
+                    })
+                    .await
+                    .map_err(|error| error.to_string())
+                    .and_then(|result| result.map_err(|error| error.to_string()));
+                let _ = weak.update(cx, |this, cx| {
+                    match result {
+                        Ok(()) => {
+                            zeroize::Zeroize::zeroize(&mut restore_draft.auth_token);
+                            this.focused_settings_input = None;
+                            this.settings_input_draft.clear();
+                            this.open_settings_select = None;
+                            this.edit_settings(
+                                move |settings| {
+                                    settings.ai.mcp_servers.push(config.clone());
+                                },
+                                cx,
+                            );
+                        }
+                        Err(error) => {
+                            this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                            this.ai_mcp_add_dialog = Some(restore_draft);
+                            cx.notify();
+                        }
+                    }
+                });
+            })
+            .detach();
+            cx.notify();
+            return;
+        }
+
         zeroize::Zeroize::zeroize(&mut draft.auth_token);
         self.focused_settings_input = None;
         self.settings_input_draft.clear();

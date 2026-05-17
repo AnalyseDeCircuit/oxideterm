@@ -405,14 +405,6 @@ impl AiOrchestratorRuntimeSnapshot {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("")
                 .trim();
-            if query.is_empty() {
-                return self.fail(
-                    "Knowledge query is required.",
-                    "missing_query",
-                    "read_resource(resource=rag) requires query or path.",
-                    "read",
-                );
-            }
             let results = oxideterm_ai::rag_search(
                 &self.rag_store,
                 oxideterm_ai::RagSearchRequest {

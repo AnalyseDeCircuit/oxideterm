@@ -41,6 +41,69 @@ pub(crate) async fn stream_openai_completion(
             let status = response.status().as_u16();
             let error_text = response.text().await.unwrap_or_default();
             let parsed = parse_openai_error(status, &error_text);
+            if body.get("tool_choice").is_some() && is_tool_choice_unsupported_error(&parsed) {
+                let fallback_body = body_without_tool_choice(&body);
+                let retry_response =
+                    openai_stream_request(&client, url, &config, &fallback_body).await;
+                let retry_response = match retry_response {
+                    Ok(response) => response,
+                    Err(error) if has_fallback => {
+                        last_error = Some(error.to_string());
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                };
+                if retry_response.status().is_success() {
+                    match stream_openai_response(retry_response, &events).await? {
+                        StreamParseResult::Done | StreamParseResult::SawEvent => {
+                            let _ = events.send(AiStreamEvent::Done);
+                            return Ok(());
+                        }
+                        StreamParseResult::Empty { raw } => {
+                            if has_fallback
+                                && (raw.trim().is_empty() || looks_like_html_response(&raw))
+                            {
+                                continue;
+                            }
+                            if raw.trim().is_empty() {
+                                return Err(anyhow!(
+                                    "Provider returned an empty successful response ({url})."
+                                ));
+                            }
+                            if looks_like_html_response(&raw) {
+                                return Err(anyhow!(
+                                    "Provider returned HTML instead of OpenAI SSE. Check the provider Base URL; OpenAI-compatible endpoints usually end with /v1. ({url})"
+                                ));
+                            }
+                            let parsed = parse_openai_json_events(&raw, "OpenAI chat response")?;
+                            if parsed.is_empty() {
+                                return Err(anyhow!(
+                                    "Provider returned a successful response without content ({url})."
+                                ));
+                            }
+                            for event in parsed {
+                                let _ = events.send(event);
+                            }
+                            let _ = events.send(AiStreamEvent::Done);
+                            return Ok(());
+                        }
+                    }
+                }
+                let retry_status = retry_response.status().as_u16();
+                let retry_error_text = retry_response.text().await.unwrap_or_default();
+                let retry_parsed = parse_openai_error(retry_status, &retry_error_text);
+                if has_fallback
+                    && (retry_status == 400
+                        || retry_status == 404
+                        || retry_status == 405
+                        || looks_like_html_response(&retry_error_text)
+                        || looks_like_html_response(&retry_parsed))
+                {
+                    last_error = Some(retry_parsed);
+                    continue;
+                }
+                return Err(anyhow!(retry_parsed));
+            }
             if has_fallback
                 && (status == 400
                     || status == 404
@@ -148,4 +211,60 @@ async fn stream_openai_response(
         parse_openai_data_line_with_accumulator(line, &mut accumulator)
     })
     .await
+}
+
+fn body_without_tool_choice(body: &Value) -> Value {
+    let mut fallback_body = body.clone();
+    if let Some(object) = fallback_body.as_object_mut() {
+        object.remove("tool_choice");
+    }
+    fallback_body
+}
+
+fn is_tool_choice_unsupported_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("tool_choice")
+        || lower.contains("tool-choice")
+        || (lower.contains("unsupported") && lower.contains("tool"))
+        || (lower.contains("unknown") && lower.contains("tool"))
+        || (lower.contains("unrecognized") && lower.contains("tool"))
+        || (lower.contains("invalid") && lower.contains("tool_choice"))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{body_without_tool_choice, is_tool_choice_unsupported_error};
+
+    #[test]
+    fn tool_choice_fallback_removes_only_tool_choice() {
+        let body = json!({
+            "model": "model",
+            "stream": true,
+            "tool_choice": "required",
+            "tools": [{ "type": "function" }],
+        });
+
+        let fallback = body_without_tool_choice(&body);
+
+        assert!(fallback.get("tool_choice").is_none());
+        assert_eq!(fallback.get("tools"), body.get("tools"));
+        assert_eq!(
+            body.get("tool_choice").and_then(|value| value.as_str()),
+            Some("required")
+        );
+    }
+
+    #[test]
+    fn detects_tool_choice_unsupported_errors_like_tauri() {
+        assert!(is_tool_choice_unsupported_error("unsupported tool choice"));
+        assert!(is_tool_choice_unsupported_error(
+            "Unknown parameter: tool_choice"
+        ));
+        assert!(is_tool_choice_unsupported_error(
+            "unrecognized tool call option"
+        ));
+        assert!(!is_tool_choice_unsupported_error("invalid API key"));
+    }
 }

@@ -19,7 +19,7 @@ mod touch_id;
 mod types;
 
 pub use chat::{apply_chat_request_overrides, generate_chat_title};
-pub use context_sanitizer::sanitize_for_ai;
+pub use context_sanitizer::{sanitize_api_messages_for_provider, sanitize_for_ai};
 pub use context_window::{
     ContextWindowSource, DEFAULT_CONTEXT_WINDOW, ModelContextWindowInfo,
     extract_context_window_from_model_name, model_context_window, model_context_window_info,

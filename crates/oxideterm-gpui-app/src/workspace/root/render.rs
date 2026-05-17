@@ -44,6 +44,7 @@ impl Render for WorkspaceApp {
                             | TabKind::ConnectionMonitor
                             | TabKind::Topology
                             | TabKind::NotificationCenter
+                            | TabKind::PluginManager
                     )
                 })
             && !self.search.visible
@@ -71,6 +72,7 @@ impl Render for WorkspaceApp {
                 (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
                 (TabKind::SessionManager, _) => self.render_session_manager_surface(window, cx),
+                (TabKind::PluginManager, _) => self.render_plugin_manager_surface(),
                 (_, Some(root_pane)) => self.render_terminal_surface(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
             }
@@ -130,6 +132,11 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.command_palette.open {
+                    if this.active_ime_target().is_some()
+                        && keystroke_commits_platform_text(&event.keystroke)
+                    {
+                        return;
+                    }
                     this.handle_command_palette_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -154,6 +161,13 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_terminal_command_overlay_escape(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.terminal_command_bar_focused {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    this.handle_terminal_command_bar_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.dispatch_registered_keybinding(event, window, cx) {
@@ -546,6 +560,9 @@ impl Render for WorkspaceApp {
             })
             .when(self.ai_provider_key_remove_confirm.is_some(), |root| {
                 root.child(self.render_ai_provider_key_remove_confirm_dialog(cx))
+            })
+            .when(self.ai_provider_remove_confirm.is_some(), |root| {
+                root.child(self.render_ai_provider_remove_confirm_dialog(cx))
             })
             .when(self.ai_safety_confirm_open, |root| {
                 root.child(self.render_ai_safety_confirm_dialog(cx))

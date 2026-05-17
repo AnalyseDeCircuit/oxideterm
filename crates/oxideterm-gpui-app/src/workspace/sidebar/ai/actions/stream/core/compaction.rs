@@ -47,7 +47,7 @@ impl WorkspaceApp {
             return false;
         }
 
-        let config = match self.resolve_ai_stream_config() {
+        let config = match self.resolve_ai_summary_stream_config(true) {
             Ok(config) => config,
             Err(error) => {
                 self.ai_compacting_conversations.remove(&conversation.id);
@@ -92,10 +92,13 @@ impl WorkspaceApp {
                 return false;
             }
         }
-        let Some(plan) = ai_compaction_plan(&conversation.messages, context_window) else {
+        let Some(plan) = ai_compaction_plan(&conversation.messages, context_window, silent) else {
             self.ai_compacting_conversations.remove(&conversation.id);
             return false;
         };
+        if silent {
+            self.set_ai_compaction_notice_running(&conversation.id, cx);
+        }
         let summary_messages = ai_compaction_summary_messages(&plan.compact_messages);
         let conversation_id = conversation.id.clone();
         let base_ids = conversation
@@ -103,8 +106,197 @@ impl WorkspaceApp {
             .iter()
             .map(|message| message.id.clone())
             .collect::<Vec<_>>();
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let (ui_tx, ui_rx) = std::sync::mpsc::channel();
+        self.start_ai_compaction_stream_after_api_key_lookup(
+            config,
+            AiCompactionDeliveryKind::Compact,
+            conversation_id,
+            base_ids,
+            Some(plan),
+            summary_messages,
+            resume_after,
+            silent,
+            tx,
+            rx,
+            ui_tx,
+            ui_rx,
+            cx,
+        );
+        true
+    }
+
+    fn start_ai_summarize_conversation(&mut self, cx: &mut Context<Self>) {
+        let conversation = match self.ai_chat.active_conversation() {
+            Some(conversation) if conversation.messages.len() >= 4 => conversation.clone(),
+            _ => return,
+        };
+        if !self
+            .ai_compacting_conversations
+            .insert(conversation.id.clone())
+        {
+            return;
+        }
+
+        let config = match self.resolve_ai_summary_stream_config(false) {
+            Ok(config) => config,
+            Err(error) => {
+                self.ai_compacting_conversations.remove(&conversation.id);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                return;
+            }
+        };
+        let summary_messages = ai_conversation_summary_messages(&conversation.messages);
+        let conversation_id = conversation.id.clone();
+        let base_ids = conversation
+            .messages
+            .iter()
+            .map(|message| message.id.clone())
+            .collect::<Vec<_>>();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (ui_tx, ui_rx) = std::sync::mpsc::channel();
+        self.ai_chat_loading = true;
+        self.start_ai_compaction_stream_after_api_key_lookup(
+            config,
+            AiCompactionDeliveryKind::Summary,
+            conversation_id,
+            base_ids,
+            None,
+            summary_messages,
+            None,
+            false,
+            tx,
+            rx,
+            ui_tx,
+            ui_rx,
+            cx,
+        );
+        cx.notify();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start_ai_compaction_stream_after_api_key_lookup(
+        &mut self,
+        mut config: AiChatStreamConfig,
+        kind: AiCompactionDeliveryKind,
+        conversation_id: String,
+        base_ids: Vec<String>,
+        plan: Option<AiCompactionPlan>,
+        summary_messages: Vec<AiChatMessage>,
+        resume_after: Option<AiPendingChatStream>,
+        silent: bool,
+        tx: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
+        rx: tokio::sync::mpsc::UnboundedReceiver<AiStreamEvent>,
+        ui_tx: std::sync::mpsc::Sender<AiCompactionDelivery>,
+        ui_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
+        cx: &mut Context<Self>,
+    ) {
+        let requires_key = ai_provider_chat_requires_key(&config.provider_type);
+        let provider_id = config.provider_id.clone();
+        let key_store = self.ai_key_store.clone();
+        let runtime = self.forwarding_runtime.clone();
+        let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
+        let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");
+        cx.spawn(async move |weak, cx| {
+            let key_result = if let Some(provider_id) = provider_id {
+                runtime
+                    .spawn_blocking(move || key_store.get_provider_key(&provider_id))
+                    .await
+                    .map_err(|error| error.to_string())
+                    .and_then(|result| result.map_err(|error| error.to_string()))
+            } else {
+                Ok(None)
+            };
+            let _ = weak.update(cx, |this, cx| {
+                match key_result {
+                    Ok(api_key) => {
+                        if requires_key && api_key.is_none() {
+                            this.ai_compacting_conversations.remove(&conversation_id);
+                            this.ai_chat_loading = false;
+                            if silent {
+                                this.clear_ai_compaction_notice_for(&conversation_id, cx);
+                            }
+                            if !silent {
+                                this.push_ai_settings_toast(
+                                    api_key_not_found,
+                                    TerminalNoticeVariant::Error,
+                                );
+                            }
+                            cx.notify();
+                            return;
+                        }
+                        config.api_key = api_key;
+                        this.start_ai_compaction_stream_with_config(
+                            config,
+                            kind,
+                            conversation_id,
+                            base_ids,
+                            plan,
+                            summary_messages,
+                            resume_after,
+                            silent,
+                            tx,
+                            rx,
+                            ui_tx,
+                            ui_rx,
+                            cx,
+                        );
+                    }
+                    Err(_) if requires_key => {
+                        this.ai_compacting_conversations.remove(&conversation_id);
+                        this.ai_chat_loading = false;
+                        if silent {
+                            this.clear_ai_compaction_notice_for(&conversation_id, cx);
+                        }
+                        if !silent {
+                            this.push_ai_settings_toast(
+                                failed_to_get_key,
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
+                        cx.notify();
+                    }
+                    Err(_) => {
+                        config.api_key = None;
+                        this.start_ai_compaction_stream_with_config(
+                            config,
+                            kind,
+                            conversation_id,
+                            base_ids,
+                            plan,
+                            summary_messages,
+                            resume_after,
+                            silent,
+                            tx,
+                            rx,
+                            ui_tx,
+                            ui_rx,
+                            cx,
+                        );
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start_ai_compaction_stream_with_config(
+        &mut self,
+        config: AiChatStreamConfig,
+        kind: AiCompactionDeliveryKind,
+        conversation_id: String,
+        base_ids: Vec<String>,
+        plan: Option<AiCompactionPlan>,
+        summary_messages: Vec<AiChatMessage>,
+        resume_after: Option<AiPendingChatStream>,
+        silent: bool,
+        tx: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<AiStreamEvent>,
+        ui_tx: std::sync::mpsc::Sender<AiCompactionDelivery>,
+        ui_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
+        cx: &mut Context<Self>,
+    ) {
         if resume_after.is_some() {
             self.ai_pending_chat_after_compaction = resume_after.clone();
         }
@@ -130,79 +322,16 @@ impl WorkspaceApp {
                 }
             }
             let _ = ui_tx.send(AiCompactionDelivery {
-                kind: AiCompactionDeliveryKind::Compact,
+                kind,
                 conversation_id,
                 base_ids,
-                plan: Some(plan),
+                plan,
                 summary,
                 stream_error,
                 resume_after,
+                silent,
             });
         });
         self.schedule_ai_compaction_poll(cx);
-        true
-    }
-
-    fn start_ai_summarize_conversation(&mut self, cx: &mut Context<Self>) {
-        let conversation = match self.ai_chat.active_conversation() {
-            Some(conversation) if conversation.messages.len() >= 4 => conversation.clone(),
-            _ => return,
-        };
-        if !self
-            .ai_compacting_conversations
-            .insert(conversation.id.clone())
-        {
-            return;
-        }
-
-        let config = match self.resolve_ai_stream_config() {
-            Ok(config) => config,
-            Err(error) => {
-                self.ai_compacting_conversations.remove(&conversation.id);
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
-                return;
-            }
-        };
-        let summary_messages = ai_conversation_summary_messages(&conversation.messages);
-        let conversation_id = conversation.id.clone();
-        let base_ids = conversation
-            .messages
-            .iter()
-            .map(|message| message.id.clone())
-            .collect::<Vec<_>>();
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let (ui_tx, ui_rx) = std::sync::mpsc::channel();
-        self.ai_chat_loading = true;
-        self.ai_compaction_rx = Some(ui_rx);
-        self.forwarding_runtime
-            .spawn(stream_chat_completion(config, summary_messages, tx));
-        self.forwarding_runtime.spawn(async move {
-            let mut summary = String::new();
-            let mut stream_error = None;
-            while let Some(event) = rx.recv().await {
-                match event {
-                    AiStreamEvent::Content(chunk) => summary.push_str(&chunk),
-                    AiStreamEvent::Thinking(_)
-                    | AiStreamEvent::ToolCall { .. }
-                    | AiStreamEvent::ToolCallComplete { .. } => {}
-                    AiStreamEvent::Done => break,
-                    AiStreamEvent::Error(error) => {
-                        stream_error = Some(error);
-                        break;
-                    }
-                }
-            }
-            let _ = ui_tx.send(AiCompactionDelivery {
-                kind: AiCompactionDeliveryKind::Summary,
-                conversation_id,
-                base_ids,
-                plan: None,
-                summary,
-                stream_error,
-                resume_after: None,
-            });
-        });
-        self.schedule_ai_compaction_poll(cx);
-        cx.notify();
     }
 }

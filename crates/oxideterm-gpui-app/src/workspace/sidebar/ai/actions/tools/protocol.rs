@@ -328,6 +328,63 @@ fn ai_policy_risk_label(risk: oxideterm_ai::AiActionRisk) -> &'static str {
     }
 }
 
+fn ai_policy_decision_label(decision: oxideterm_ai::AiPolicyDecisionKind) -> &'static str {
+    match decision {
+        oxideterm_ai::AiPolicyDecisionKind::Allow => "allow",
+        oxideterm_ai::AiPolicyDecisionKind::RequireApproval => "require_approval",
+        oxideterm_ai::AiPolicyDecisionKind::Deny => "deny",
+    }
+}
+
+fn ai_policy_safety_mode_label(mode: oxideterm_ai::AiPolicySafetyMode) -> &'static str {
+    match mode {
+        oxideterm_ai::AiPolicySafetyMode::Default => "default",
+        oxideterm_ai::AiPolicySafetyMode::Bypass => "bypass",
+    }
+}
+
+fn annotate_executed_ai_tool_result_policy(
+    result: &mut AiExecutedToolResult,
+    decision: &oxideterm_ai::AiPolicyDecision,
+) {
+    let Some(envelope) = result.envelope.as_object_mut() else {
+        return;
+    };
+    let meta = envelope
+        .entry("meta")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut();
+    let Some(meta) = meta else {
+        return;
+    };
+    let approval_mode = ai_policy_safety_mode_label(decision.approval_mode);
+    if decision.approval_mode == oxideterm_ai::AiPolicySafetyMode::Bypass
+        && decision.risk == oxideterm_ai::AiActionRisk::Destructive
+        && decision.decision == oxideterm_ai::AiPolicyDecisionKind::Allow
+    {
+        meta.insert(
+            "approvalMode".to_string(),
+            serde_json::json!(approval_mode),
+        );
+    }
+    if let Some(profile_id) = decision.profile_id.as_deref() {
+        meta.insert("profileId".to_string(), serde_json::json!(profile_id));
+    }
+    let mut policy_decision = serde_json::json!({
+        "decision": ai_policy_decision_label(decision.decision),
+        "risk": ai_policy_risk_label(decision.risk),
+        "reasonCode": decision.reason_code.as_str(),
+        "matchedPolicyKey": decision.matched_policy_key.as_str(),
+        "approvalMode": approval_mode,
+    });
+    if let Some(profile_id) = decision.profile_id.as_deref()
+        && let Some(object) = policy_decision.as_object_mut()
+    {
+        object.insert("profileId".to_string(), serde_json::json!(profile_id));
+    }
+    meta.insert("policyDecision".to_string(), policy_decision);
+}
+
 fn ai_terminal_input_payload(args: &serde_json::Value) -> String {
     if let Some(control) = args.get("control").and_then(serde_json::Value::as_str) {
         return match control {
@@ -413,4 +470,91 @@ fn settings_with_json_patch(
     };
     section_object.insert(key.to_string(), value);
     serde_json::from_value(root).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_result() -> AiExecutedToolResult {
+        AiExecutedToolResult {
+            tool_call_id: "tool-1".to_string(),
+            tool_name: "run_command".to_string(),
+            success: true,
+            output: "ok".to_string(),
+            error: None,
+            duration_ms: 7,
+            envelope: serde_json::json!({
+                "ok": true,
+                "summary": "ok",
+                "output": "ok",
+                "meta": {
+                    "toolName": "run_command",
+                    "durationMs": 7,
+                },
+            }),
+        }
+    }
+
+    #[test]
+    fn bypass_destructive_policy_annotation_matches_tauri_envelope_shape() {
+        let mut result = sample_result();
+        let decision = oxideterm_ai::AiPolicyDecision {
+            decision: oxideterm_ai::AiPolicyDecisionKind::Allow,
+            risk: oxideterm_ai::AiActionRisk::Destructive,
+            reason_code: "bypass_destructive_allowed".to_string(),
+            reason_text_key: "ai.tool_use.policy_reason_bypass".to_string(),
+            matched_policy_key: "run_command:dangerous".to_string(),
+            approval_mode: oxideterm_ai::AiPolicySafetyMode::Bypass,
+            profile_id: Some("profile-1".to_string()),
+        };
+
+        annotate_executed_ai_tool_result_policy(&mut result, &decision);
+
+        assert_eq!(
+            result.envelope.pointer("/meta/approvalMode"),
+            Some(&serde_json::json!("bypass"))
+        );
+        assert_eq!(
+            result.envelope.pointer("/meta/profileId"),
+            Some(&serde_json::json!("profile-1"))
+        );
+        assert_eq!(
+            result.envelope.pointer("/meta/policyDecision"),
+            Some(&serde_json::json!({
+                "decision": "allow",
+                "risk": "destructive",
+                "reasonCode": "bypass_destructive_allowed",
+                "matchedPolicyKey": "run_command:dangerous",
+                "approvalMode": "bypass",
+                "profileId": "profile-1",
+            }))
+        );
+    }
+
+    #[test]
+    fn default_policy_annotation_does_not_mark_bypass() {
+        let mut result = sample_result();
+        let decision = oxideterm_ai::AiPolicyDecision {
+            decision: oxideterm_ai::AiPolicyDecisionKind::Allow,
+            risk: oxideterm_ai::AiActionRisk::Read,
+            reason_code: "read_only_auto_allowed".to_string(),
+            reason_text_key: "ai.tool_use.policy_reason_read_only".to_string(),
+            matched_policy_key: "list_targets".to_string(),
+            approval_mode: oxideterm_ai::AiPolicySafetyMode::Default,
+            profile_id: None,
+        };
+
+        annotate_executed_ai_tool_result_policy(&mut result, &decision);
+
+        assert!(result.envelope.pointer("/meta/approvalMode").is_none());
+        assert_eq!(
+            result.envelope.pointer("/meta/policyDecision/approvalMode"),
+            Some(&serde_json::json!("default"))
+        );
+        assert!(result
+            .envelope
+            .pointer("/meta/policyDecision/profileId")
+            .is_none());
+    }
 }

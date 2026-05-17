@@ -1,5 +1,5 @@
 impl WorkspaceApp {
-    fn start_ai_chat_stream(
+    fn start_ai_chat_stream_after_rag_lookup(
         &mut self,
         conversation_id: String,
         config: AiChatStreamConfig,
@@ -7,14 +7,49 @@ impl WorkspaceApp {
         task_system_prompt: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.start_ai_chat_stream_after_budget_preflight(
-            conversation_id,
-            config,
-            request_content,
-            task_system_prompt,
-            true,
-            cx,
-        );
+        let rag_query = self
+            .resolved_ai_execution_profile()
+            .include_rag
+            .then(|| request_content.clone())
+            .flatten()
+            .filter(|query| query.trim().chars().count() >= 4);
+        let Some(rag_query) = rag_query else {
+            self.start_ai_chat_stream_after_budget_preflight(
+                conversation_id,
+                config,
+                request_content,
+                task_system_prompt,
+                None,
+                true,
+                cx,
+            );
+            return;
+        };
+
+        let snapshot = self.ai_chat_orchestrator_snapshot(&config, cx);
+        let config_for_rag = config.clone();
+        cx.spawn(async move |weak, cx| {
+            let rag_system_prompt = tokio::time::timeout(
+                std::time::Duration::from_millis(3000),
+                snapshot.build_rag_system_prompt(Some(&rag_query), &config_for_rag),
+            )
+            .await
+            .ok()
+            .flatten();
+            let _ = weak.update(cx, |this, cx| {
+                this.start_ai_chat_stream_after_budget_preflight(
+                    conversation_id,
+                    config,
+                    request_content,
+                    task_system_prompt,
+                    rag_system_prompt,
+                    true,
+                    cx,
+                );
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     fn start_ai_chat_stream_after_budget_preflight(
@@ -23,17 +58,25 @@ impl WorkspaceApp {
         config: AiChatStreamConfig,
         request_content: Option<String>,
         task_system_prompt: Option<String>,
+        rag_system_prompt: Option<String>,
         allow_pre_send_compaction: bool,
         cx: &mut Context<Self>,
     ) {
         if allow_pre_send_compaction
-            && self.should_force_ai_pre_send_compaction(&conversation_id, &config)
+            && self.should_force_ai_pre_send_compaction(
+                &conversation_id,
+                &config,
+                request_content.as_deref(),
+                task_system_prompt.as_deref(),
+                rag_system_prompt.as_deref(),
+            )
         {
             let pending = AiPendingChatStream {
                 conversation_id: conversation_id.clone(),
                 config,
                 request_content,
                 task_system_prompt,
+                rag_system_prompt,
             };
             if self.start_ai_compact_conversation_for(
                 conversation_id,
@@ -51,21 +94,18 @@ impl WorkspaceApp {
                 pending.config,
                 pending.request_content,
                 pending.task_system_prompt,
+                pending.rag_system_prompt,
                 false,
                 cx,
             );
         }
 
-        let rag_query = if self.resolved_ai_execution_profile().include_rag {
-            request_content.clone()
-        } else {
-            None
-        };
         let Some((history, trimmed_count)) = self.build_ai_stream_history(
             &conversation_id,
             &config,
             request_content.clone(),
-            task_system_prompt,
+            task_system_prompt.clone(),
+            rag_system_prompt.clone(),
         ) else {
             return;
         };
@@ -91,12 +131,43 @@ impl WorkspaceApp {
             .as_ref()
             .map(|message| message.id.clone())
             .unwrap_or_else(|| format!("{assistant_id}-request"));
-        let budget_decision = self
+        let (budget_decision, budget_diagnostic_payload) = self
             .ai_chat
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
-            .and_then(|conversation| self.ai_send_budget_decision(conversation, &config));
+            .map(|conversation| {
+                let decision =
+                    self.ai_send_budget_decision(
+                        conversation,
+                        &config,
+                        request_content.as_deref(),
+                        task_system_prompt.as_deref(),
+                        rag_system_prompt.as_deref(),
+                    );
+                let payload = self.ai_budget_diagnostic_payload(
+                    conversation,
+                    &config,
+                    request_content.as_deref(),
+                    task_system_prompt.as_deref(),
+                    rag_system_prompt.as_deref(),
+                    decision,
+                    trimmed_count,
+                );
+                (decision, payload)
+            })
+            .unwrap_or_else(|| {
+                let decision = None;
+                let payload = serde_json::json!({
+                    "requestKind": "chat",
+                    "budgetLevel": 0,
+                    "nextLevel": 0,
+                    "contextWindow": self.ai_active_model_context_window(&config),
+                    "responseReserve": config.max_response_tokens,
+                    "trimmedCount": trimmed_count,
+                });
+                (decision, payload)
+            });
         self.ai_chat.add_message(
             &conversation_id,
             AiChatMessage {
@@ -188,12 +259,7 @@ impl WorkspaceApp {
             Some(assistant_id.clone()),
             None,
             now,
-            self.ai_diagnostic_base(serde_json::json!({
-                "nextLevel": budget_decision.map(|decision| decision.level).unwrap_or(0),
-                "contextWindow": self.ai_active_model_context_window(&config),
-                "responseReserve": config.max_response_tokens,
-                "trimmedCount": trimmed_count,
-            })),
+            self.ai_diagnostic_base(budget_diagnostic_payload),
         ));
         self.persist_ai_transcript_entries(conversation_id.clone(), transcript_entries);
         self.persist_ai_diagnostic_events(conversation_id.clone(), diagnostic_events);
@@ -212,7 +278,7 @@ impl WorkspaceApp {
                     config,
                     history,
                     snapshot,
-                    rag_query,
+                    budget_decision.map(|decision| decision.level).unwrap_or(0),
                     generation,
                     conversation_id,
                     assistant_id,

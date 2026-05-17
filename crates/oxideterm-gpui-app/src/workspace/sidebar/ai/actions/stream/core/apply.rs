@@ -448,6 +448,10 @@ impl WorkspaceApp {
             .and_then(serde_json::Value::as_str)
             .unwrap_or(&self.ai_runtime_epoch)
             .to_string();
+        let approval_mode = meta
+            .and_then(|value| value.get("approvalMode"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string);
         self.ai_command_record_sequence = self.ai_command_record_sequence.saturating_add(1);
         let now = ai_now_ms();
         let record = AiRuntimeCommandRecord {
@@ -476,6 +480,7 @@ impl WorkspaceApp {
             started_at: now,
             finished_at: Some(now),
             runtime_epoch,
+            approval_mode,
             risk: risk.unwrap_or("read").to_string(),
         };
         self.record_ai_cli_agent_command(&record);

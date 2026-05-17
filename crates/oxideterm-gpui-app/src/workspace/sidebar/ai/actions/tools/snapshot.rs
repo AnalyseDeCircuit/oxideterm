@@ -1036,7 +1036,6 @@ impl WorkspaceApp {
         self.edit_settings(
             |settings| {
                 let current = settings.ai.memory.content.trim();
-                settings.ai.memory.enabled = true;
                 settings.ai.memory.content = [current, &format!("- {preference}")]
                     .into_iter()
                     .filter(|value| !value.is_empty())
