@@ -108,11 +108,10 @@ mod tests {
     #[test]
     fn owned_temp_asset_is_removed_when_owner_drops() {
         let temp = tempdir().unwrap();
-        let path = temp.path().join("preview.pdf");
-        fs::write(&path, b"pdf").unwrap();
+        let path = temp.path().join("preview.png");
+        fs::write(&path, b"png").unwrap();
         {
-            let _owner =
-                PreviewAssetOwner::owned_temp(&path, "application/pdf", PreviewAssetKind::Pdf);
+            let _owner = PreviewAssetOwner::owned_temp(&path, "image/png", PreviewAssetKind::Image);
             assert!(path.exists());
         }
         assert!(!path.exists());

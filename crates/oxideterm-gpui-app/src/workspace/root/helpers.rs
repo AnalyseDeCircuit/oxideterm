@@ -20,10 +20,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
 
 fn current_window_size(window: &Window) -> (f32, f32) {
     let bounds = window.inner_window_bounds().get_bounds();
-    (
-        f32::from(bounds.size.width),
-        f32::from(bounds.size.height),
-    )
+    (f32::from(bounds.size.width), f32::from(bounds.size.height))
 }
 
 fn terminal_background_fit(fit: BackgroundFit) -> TerminalBackgroundFit {
@@ -217,15 +214,11 @@ impl WorkspaceApp {
     }
 
     fn cycle_event_log_severity_filter(&mut self) {
-        self.notification_center
-            .event_log
-            .cycle_severity_filter();
+        self.notification_center.event_log.cycle_severity_filter();
     }
 
     fn cycle_event_log_category_filter(&mut self) {
-        self.notification_center
-            .event_log
-            .cycle_category_filter();
+        self.notification_center.event_log.cycle_category_filter();
     }
 
     fn event_log_entry_matches_filter(&self, entry: &WorkspaceEventLogEntry) -> bool {
@@ -241,14 +234,9 @@ impl WorkspaceApp {
         scope: WorkspaceNotificationScope,
         dedupe_key: Option<String>,
     ) {
-        self.notification_center.notifications.push(
-            kind,
-            severity,
-            title,
-            body,
-            scope,
-            dedupe_key,
-        );
+        self.notification_center
+            .notifications
+            .push(kind, severity, title, body, scope, dedupe_key);
     }
 
     fn resolve_connection_notifications_for_node(&mut self, node_id: &NodeId) {
@@ -274,9 +262,7 @@ impl WorkspaceApp {
     }
 
     fn cycle_notification_status_filter(&mut self) {
-        self.notification_center
-            .notifications
-            .cycle_status_filter();
+        self.notification_center.notifications.cycle_status_filter();
     }
 
     fn cycle_notification_severity_filter(&mut self) {
@@ -286,9 +272,7 @@ impl WorkspaceApp {
     }
 
     fn cycle_notification_kind_filter(&mut self) {
-        self.notification_center
-            .notifications
-            .cycle_kind_filter();
+        self.notification_center.notifications.cycle_kind_filter();
     }
 
     fn notification_matches_filter(&self, entry: &WorkspaceNotificationEntry) -> bool {
@@ -342,9 +326,9 @@ impl WorkspaceApp {
         {
             let total = run.node_ids.len();
             return Some((
-                self.i18n.t("connections.errors.chain_failed_title"),
+                self.i18n.t("ssh.errors.chain_failed_title"),
                 Some(self.i18n_with(
-                    "connections.errors.chain_failed_desc",
+                    "ssh.errors.chain_failed_desc",
                     &[
                         ("position", (position + 1).to_string()),
                         ("total", total.to_string()),
@@ -355,7 +339,7 @@ impl WorkspaceApp {
         }
 
         Some((
-            self.i18n.t("connections.errors.generic_title"),
+            self.i18n.t("ssh.errors.generic_title"),
             Some(error.to_string()),
         ))
     }
@@ -398,7 +382,10 @@ impl WorkspaceApp {
                     .connection_id_for_node(node_id)
                     .and_then(|connection_id| self.ssh_registry.get(&connection_id))
                     .is_some_and(|handle| {
-                        matches!(handle.state(), ConnectionState::Active | ConnectionState::Idle)
+                        matches!(
+                            handle.state(),
+                            ConnectionState::Active | ConnectionState::Idle
+                        )
                     })
         })
     }
@@ -469,7 +456,13 @@ impl WorkspaceApp {
         progress: f32,
         detail: Option<String>,
     ) {
-        self.emit_connection_trace_event(node_id, stage, ConnectionTraceStatus::Running, progress, detail);
+        self.emit_connection_trace_event(
+            node_id,
+            stage,
+            ConnectionTraceStatus::Running,
+            progress,
+            detail,
+        );
     }
 
     fn finish_connection_trace_success(&mut self, node_id: &NodeId) {
@@ -605,13 +598,16 @@ impl WorkspaceApp {
             self.cancel_forward_restore_token(&affected_node_id);
             self.pending_reconnect_node_ids.remove(&affected_node_id);
             self.reconnect_requeue_counts.remove(&affected_node_id);
-            self.pending_reconnect_transfer_resumes.remove(&affected_node_id);
-            self.reconnect_transfer_resume_totals.remove(&affected_node_id);
+            self.pending_reconnect_transfer_resumes
+                .remove(&affected_node_id);
+            self.reconnect_transfer_resume_totals
+                .remove(&affected_node_id);
             self.reconnect_transfer_resume_successes
                 .remove(&affected_node_id);
             self.pending_ide_restore_transfer_counts
                 .remove(&affected_node_id);
-            self.reconnect_forward_restore_totals.remove(&affected_node_id);
+            self.reconnect_forward_restore_totals
+                .remove(&affected_node_id);
             self.clear_reconnect_pipeline_active(&affected_node_id);
         }
         if cancelled > 0 {
@@ -756,7 +752,10 @@ impl WorkspaceApp {
                 })
             })
             .collect::<Vec<_>>();
-        let retained_ids = nodes.iter().map(|node| node.id.clone()).collect::<HashSet<_>>();
+        let retained_ids = nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<HashSet<_>>();
         let persisted = PersistedNodeTreeSnapshot {
             version: runtime.version,
             exported_at_ms: runtime.exported_at_ms,

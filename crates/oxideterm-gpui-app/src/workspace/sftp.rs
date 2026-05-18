@@ -18,9 +18,8 @@ use oxideterm_gpui_ui::{
     text_input::{text_caret, text_input_anchor_probe},
 };
 use oxideterm_preview::{
-    AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, PdfPreviewBackend,
-    PdfiumPreviewBackend, PreviewAssetOwner, PreviewSession, RodioAudioPreviewBackend,
-    font_family_name_from_bytes,
+    AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, PreviewAssetOwner, PreviewSession,
+    RodioAudioPreviewBackend, font_family_name_from_bytes,
 };
 use oxideterm_sftp::{
     AssetFileKind, BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,

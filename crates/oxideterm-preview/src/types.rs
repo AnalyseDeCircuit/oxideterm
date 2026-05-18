@@ -11,7 +11,6 @@ pub enum PreviewAssetKind {
     Image,
     Video,
     Audio,
-    Pdf,
     Office,
     Font,
 }
@@ -21,7 +20,6 @@ pub enum PreviewKind {
     Text,
     Image,
     Hex,
-    Pdf,
     Audio,
     Video,
     Office,
@@ -78,7 +76,6 @@ impl PreviewContent {
                 PreviewAssetKind::Image => PreviewKind::Image,
                 PreviewAssetKind::Video => PreviewKind::Video,
                 PreviewAssetKind::Audio => PreviewKind::Audio,
-                PreviewAssetKind::Pdf => PreviewKind::Pdf,
                 PreviewAssetKind::Office => PreviewKind::Office,
                 PreviewAssetKind::Font => PreviewKind::Font,
             },
@@ -110,7 +107,7 @@ pub fn classify_preview_path(path: impl AsRef<Path>) -> PreviewKind {
 
 pub fn classify_preview_type(extension: &str, mime_type: &str) -> PreviewKind {
     if extension == "pdf" || mime_type == "application/pdf" {
-        return PreviewKind::Pdf;
+        return PreviewKind::Unsupported;
     }
     if is_office_extension(extension) {
         return PreviewKind::Office;
@@ -199,7 +196,7 @@ mod tests {
         );
         assert_eq!(
             classify_preview_type("pdf", "application/pdf"),
-            PreviewKind::Pdf
+            PreviewKind::Unsupported
         );
         assert_eq!(
             classify_preview_type("mp3", "audio/mpeg"),
@@ -230,13 +227,13 @@ mod tests {
     #[test]
     fn preview_content_asset_shape_matches_sftp_wire_shape() {
         let content = PreviewContent::AssetFile {
-            path: "/tmp/a.pdf".to_string(),
-            mime_type: "application/pdf".to_string(),
-            kind: PreviewAssetKind::Pdf,
+            path: "/tmp/a.png".to_string(),
+            mime_type: "image/png".to_string(),
+            kind: PreviewAssetKind::Image,
         };
         let json = serde_json::to_value(content).unwrap();
-        assert_eq!(json["AssetFile"]["path"], "/tmp/a.pdf");
-        assert_eq!(json["AssetFile"]["mime_type"], "application/pdf");
-        assert_eq!(json["AssetFile"]["kind"], "pdf");
+        assert_eq!(json["AssetFile"]["path"], "/tmp/a.png");
+        assert_eq!(json["AssetFile"]["mime_type"], "image/png");
+        assert_eq!(json["AssetFile"]["kind"], "image");
     }
 }

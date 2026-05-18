@@ -9,10 +9,10 @@ gpui.workspace = true
 gpui-component.workspace = true
 oxideterm-theme = { path = "../oxideterm-theme" }
 pulldown-cmark = "0.12"
-ratex-layout = "0.1.4"
-ratex-parser = "0.1.4"
-ratex-svg = { version = "0.1.4", features = ["embed-fonts"] }
-ratex-types = "0.1.4"
+ratex-layout = "0.1.8"
+ratex-parser = "0.1.8"
+ratex-svg = { version = "0.1.8", features = ["embed-fonts"] }
+ratex-types = "0.1.8"
 syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }
 
 [dev-dependencies]

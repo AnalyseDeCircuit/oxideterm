@@ -222,9 +222,23 @@ async fn load_local_path(
             .essence_str()
             .to_string()
     });
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+        || mime_type == "application/pdf"
+    {
+        return Ok(LoadedPreview {
+            content: PreviewContent::Unsupported {
+                mime_type,
+                reason: "PDF preview is disabled.".to_string(),
+            },
+            asset: None,
+        });
+    }
     let kind = classify_preview_path(&path);
     match kind {
-        PreviewKind::Image | PreviewKind::Pdf | PreviewKind::Office | PreviewKind::Font => {
+        PreviewKind::Image | PreviewKind::Office | PreviewKind::Font => {
             let asset_kind = preview_asset_kind(kind);
             load_local_asset(path, mime_type, asset_kind, size, options.max_preview_size)
         }
@@ -390,7 +404,6 @@ fn read_local_range_mmap(
 fn preview_asset_kind(kind: PreviewKind) -> PreviewAssetKind {
     match kind {
         PreviewKind::Image => PreviewAssetKind::Image,
-        PreviewKind::Pdf => PreviewAssetKind::Pdf,
         PreviewKind::Audio => PreviewAssetKind::Audio,
         PreviewKind::Video => PreviewAssetKind::Video,
         PreviewKind::Office => PreviewAssetKind::Office,

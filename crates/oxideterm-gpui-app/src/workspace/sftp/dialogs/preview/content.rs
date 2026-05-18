@@ -32,11 +32,6 @@ impl WorkspaceApp {
             PreviewContent::AssetFile {
                 path,
                 mime_type,
-                kind: AssetFileKind::Pdf,
-            } => self.render_sftp_preview_pdf(path, mime_type),
-            PreviewContent::AssetFile {
-                path,
-                mime_type,
                 kind: AssetFileKind::Audio,
             } => self.render_sftp_preview_audio(path, mime_type, cx),
             PreviewContent::AssetFile {

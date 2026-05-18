@@ -166,17 +166,15 @@ impl TerminalInputEncoder {
     }
 
     pub fn encode_paste(self, text: &str, bracketed: bool) -> Vec<u8> {
-        let normalized = if bracketed {
-            text.replace('\x1b', "")
-        } else {
-            normalize_paste_line_endings(text)
-        };
-        let encoded = self.encode_text(&normalized);
+        let prepared = normalize_paste_line_endings(text);
 
-        if !bracketed {
+        if !bracketed || !prepared.contains('\r') {
+            let encoded = self.encode_text(&prepared);
             return encoded.into_owned();
         }
 
+        let sanitized = prepared.replace('\x1b', "");
+        let encoded = self.encode_text(&sanitized);
         let mut bytes = Vec::with_capacity(encoded.len() + 12);
         bytes.extend_from_slice(b"\x1b[200~");
         bytes.extend_from_slice(&encoded);
@@ -398,7 +396,7 @@ mod tests {
     #[test]
     fn bracketed_paste_wraps_raw_protocol_and_encodes_only_content() {
         let encoded =
-            TerminalInputEncoder::new(TerminalEncoding::Gbk).encode_paste("你好\x1b", true);
+            TerminalInputEncoder::new(TerminalEncoding::Gbk).encode_paste("你好\n世界\x1b", true);
         assert!(encoded.starts_with(b"\x1b[200~"));
         assert!(encoded.ends_with(b"\x1b[201~"));
         assert!(!encoded[6..encoded.len() - 6].contains(&0x1b));
@@ -407,8 +405,31 @@ mod tests {
         let body = &encoded[6..encoded.len() - 6];
         assert_eq!(
             String::from_utf8(decoder.decode_to_utf8_bytes(body).into_owned()).unwrap(),
-            "你好"
+            "你好\r世界"
         );
+    }
+
+    #[test]
+    fn paste_converts_line_endings_to_terminal_cr_without_bracketed_mode() {
+        let encoded =
+            TerminalInputEncoder::new(TerminalEncoding::Utf8).encode_paste("line 1\nline 2", false);
+
+        assert_eq!(encoded, b"line 1\rline 2");
+    }
+
+    #[test]
+    fn bracketed_paste_converts_line_endings_to_terminal_cr() {
+        let encoded = TerminalInputEncoder::new(TerminalEncoding::Utf8)
+            .encode_paste("line 1\r\nline 2\nline 3", true);
+
+        assert_eq!(encoded, b"\x1b[200~line 1\rline 2\rline 3\x1b[201~");
+    }
+
+    #[test]
+    fn bracketed_paste_leaves_single_line_unwrapped_like_tauri() {
+        let encoded = TerminalInputEncoder::new(TerminalEncoding::Utf8).encode_paste("pwd", true);
+
+        assert_eq!(encoded, b"pwd");
     }
 
     #[test]

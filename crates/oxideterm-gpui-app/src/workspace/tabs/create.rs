@@ -241,16 +241,17 @@ impl WorkspaceApp {
             .snapshot(&node_id)
             .map(|snapshot| snapshot.origin)
             .or_else(|| {
-                saved_connection_id
-                    .as_ref()
-                    .map(|id| NodeOrigin::Restored {
-                        saved_connection_id: id.clone(),
-                    })
+                saved_connection_id.as_ref().map(|id| NodeOrigin::Restored {
+                    saved_connection_id: id.clone(),
+                })
             })
             .unwrap_or(NodeOrigin::Direct);
         if self.node_runtime_store.snapshot(&node_id).is_none() {
-            self.node_runtime_store
-                .upsert_node_with_origin(node_id.clone(), config.clone(), origin);
+            self.node_runtime_store.upsert_node_with_origin(
+                node_id.clone(),
+                config.clone(),
+                origin,
+            );
         }
         let starting_node_connection = self.node_router.connection_id_for_node(&node_id).is_none();
         let trace_plan = starting_node_connection
@@ -402,8 +403,11 @@ impl WorkspaceApp {
             })
             .unwrap_or(NodeOrigin::Direct);
         if self.node_runtime_store.snapshot(node_id).is_none() {
-            self.node_runtime_store
-                .upsert_node_with_origin(node_id.clone(), node.config.clone(), origin);
+            self.node_runtime_store.upsert_node_with_origin(
+                node_id.clone(),
+                node.config.clone(),
+                origin,
+            );
         }
         if self.node_router.connection_id_for_node(node_id).is_none() {
             self.ensure_node_connection_started(node_id);
@@ -522,6 +526,13 @@ impl WorkspaceApp {
         opened
     }
 
+    pub(super) fn remove_pending_ssh_terminal_opens_for_node(&mut self, node_id: &NodeId) -> bool {
+        let before = self.pending_ssh_terminal_opens.len();
+        self.pending_ssh_terminal_opens
+            .retain(|pending| pending.node_id != *node_id);
+        self.pending_ssh_terminal_opens.len() != before
+    }
+
     fn node_is_ready_for_terminal(&self, node_id: &NodeId) -> bool {
         self.ssh_nodes
             .get(node_id)
@@ -531,7 +542,10 @@ impl WorkspaceApp {
                 .connection_id_for_node(node_id)
                 .and_then(|connection_id| self.ssh_registry.get(&connection_id))
                 .is_some_and(|handle| {
-                    matches!(handle.state(), ConnectionState::Active | ConnectionState::Idle)
+                    matches!(
+                        handle.state(),
+                        ConnectionState::Active | ConnectionState::Idle
+                    )
                 })
     }
 

@@ -1517,26 +1517,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "console_error_panic_hook"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
-dependencies = [
- "cfg-if",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "console_log"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be8aed40e4edbf4d3b4431ab260b63fdc40f5780a4766824329ea0f1eefe3c0f"
-dependencies = [
- "log",
- "web-sys",
-]
-
-[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2748,6 +2728,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener 5.4.1",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "eventsource-stream"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74fef4569247a5f429d9156b9d0a2599914385dd189c539334c625d8099d90ab"
+dependencies = [
+ "futures-core",
+ "nom 7.1.3",
  "pin-project-lite",
 ]
 
@@ -5521,12 +5512,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2532096657941c2fea9c289d370a250971c689d4f143798ff67113ec042024a5"
 
 [[package]]
-name = "maybe-owned"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
-
-[[package]]
 name = "maybe-rayon"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6562,6 +6547,7 @@ dependencies = [
  "base64",
  "block2",
  "chrono",
+ "eventsource-stream",
  "futures-util",
  "instant-distance",
  "keyring",
@@ -6904,7 +6890,6 @@ dependencies = [
  "image",
  "memmap2",
  "mime_guess",
- "pdfium-render",
  "rodio",
  "serde",
  "serde_json",
@@ -7287,32 +7272,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdfium-render"
-version = "0.8.37"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6553f6604a52b3203db7b4e9d51eb4dd193cf455af9e56d40cab6575b547b679"
-dependencies = [
- "bitflags 2.11.1",
- "bytemuck",
- "bytes",
- "chrono",
- "console_error_panic_hook",
- "console_log",
- "image",
- "itertools 0.14.0",
- "js-sys",
- "libloading",
- "log",
- "maybe-owned",
- "once_cell",
- "utf16string",
- "vecmath",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "pem-rfc7468"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7561,12 +7520,6 @@ dependencies = [
  "fastrand 2.4.1",
  "futures-io",
 ]
-
-[[package]]
-name = "piston-float"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad78bf43dcf80e8f950c92b84f938a0fc7590b7f6866fbcbeca781609c115590"
 
 [[package]]
 name = "pkcs1"
@@ -8301,28 +8254,41 @@ dependencies = [
 
 [[package]]
 name = "ratex-font"
-version = "0.1.4"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "811056be8417c5d4fed9ea925f0da209bad38c6cde4c3242db8c10d2a0f16bf1"
+checksum = "3287aee055baa465bcf791a578bee28d7912b0e544b8a8918bee5d70f144147c"
 dependencies = [
  "phf 0.11.3",
  "ratex-types",
 ]
 
 [[package]]
-name = "ratex-katex-fonts"
-version = "0.1.4"
+name = "ratex-font-loader"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21c4ea69dd97adce33581f2169dedb1a2d8e986d5f14e301af3460048250fc91"
+checksum = "4654df65e0a709d8db8ff061d7e3757539ad974d22af27ac4ae88ce2ec280eac"
+dependencies = [
+ "ab_glyph",
+ "ratex-font",
+ "ratex-katex-fonts",
+ "ratex-types",
+ "ratex-unicode-font",
+]
+
+[[package]]
+name = "ratex-katex-fonts"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b660c6f7104934fe5beb52a0009522f4b9b8661c85e4236dac29e6a899b99e5"
 dependencies = [
  "rust-embed",
 ]
 
 [[package]]
 name = "ratex-layout"
-version = "0.1.4"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c6b915c74165d6a144ad22128092e6a60cf2586175c0f5fd04b6f179cfb238"
+checksum = "b7e38cc05c6e860474a82f6edef692f5c319c7facfd73bb08459df6482297d38"
 dependencies = [
  "ratex-font",
  "ratex-parser",
@@ -8332,9 +8298,9 @@ dependencies = [
 
 [[package]]
 name = "ratex-lexer"
-version = "0.1.4"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d7aedd5d39fb5aea83e010533bc4229465d674b0b09059fa77c6bf27effd74f"
+checksum = "b2b07ffa738229e05c6d0d325e5a53aca464fa6e74460da219b4d88f7e331d51"
 dependencies = [
  "ratex-types",
  "serde",
@@ -8343,9 +8309,9 @@ dependencies = [
 
 [[package]]
 name = "ratex-parser"
-version = "0.1.4"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6532529dc75e1b1b81ea0f6884afcb64d1623dcf6a2a154aa59529ef54e98db9"
+checksum = "f4b154def1edd954eb49a9ade5f3767938b8f8f3befd14f2831aec60ee7340f9"
 dependencies = [
  "fancy-regex 0.14.0",
  "ratex-font",
@@ -8361,13 +8327,14 @@ dependencies = [
 
 [[package]]
 name = "ratex-svg"
-version = "0.1.4"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "309d62be1b5b0cca719999e0ae0c122de6ad2fe1447afc7faeddf8877434b62c"
+checksum = "139cfdafcffa58d32de1cb610c7711da4c4ec94895399dbf04650b659ba7f888"
 dependencies = [
  "ab_glyph",
  "base64",
  "ratex-font",
+ "ratex-font-loader",
  "ratex-katex-fonts",
  "ratex-types",
  "ratex-unicode-font",
@@ -8375,20 +8342,21 @@ dependencies = [
 
 [[package]]
 name = "ratex-types"
-version = "0.1.4"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cd64ef688da5133869b8573a6d4bd8f3a0ffbfe002cef63d7dec13f00d78024"
+checksum = "00dba2961b961035e3bf6a3c7cba018dbb0758db18df6261cb8456aa2f5782f1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "ratex-unicode-font"
-version = "0.1.4"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0cd1c831dd9c04b28d157a96f215005af0902b6702af0146020586ee89a02cf"
+checksum = "7ffd397a005861d5134c40dd8361902fe7cb17b54089634efe53aecc769d3f13"
 dependencies = [
  "fontdb 0.23.0",
+ "system-fonts",
  "ttf-parser 0.25.1",
 ]
 
@@ -10372,6 +10340,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "system-fonts"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f369feb844d5e08bb4e938c3f88ff359261bc94c7553ddb34e174447120b64d6"
+dependencies = [
+ "fontdb 0.23.0",
+ "sys-locale",
+]
+
+[[package]]
 name = "taffy"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11570,15 +11548,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
-name = "utf16string"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b62a1e85e12d5d712bf47a85f426b73d303e2d00a90de5f3004df3596e9d216"
-dependencies = [
- "byteorder",
-]
-
-[[package]]
 name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11656,15 +11625,6 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
-
-[[package]]
-name = "vecmath"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "956ae1e0d85bca567dee1dcf87fb1ca2e792792f66f87dced8381f99cd91156a"
-dependencies = [
- "piston-float",
-]
 
 [[package]]
 name = "version-compare"

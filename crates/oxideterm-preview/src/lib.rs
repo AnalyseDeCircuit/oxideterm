@@ -8,7 +8,6 @@
 
 mod asset;
 mod audio;
-mod pdf;
 mod renderer;
 mod session;
 mod text;
@@ -19,9 +18,6 @@ pub use asset::{PreviewAssetOwner, PreviewAssetOwnership};
 pub use audio::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewSnapshot, AudioPreviewState,
     MemoryAudioPreviewBackend, RodioAudioPreviewBackend, UnsupportedAudioPreviewBackend,
-};
-pub use pdf::{
-    PdfDocumentInfo, PdfPageBitmap, PdfPreviewBackend, PdfPreviewError, PdfiumPreviewBackend,
 };
 pub use renderer::PreviewRenderer;
 pub use session::{

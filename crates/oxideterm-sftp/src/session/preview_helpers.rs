@@ -61,9 +61,7 @@ impl SftpSession {
         let max_size = match kind {
             AssetFileKind::Audio | AssetFileKind::Video => constants::MAX_MEDIA_PREVIEW_SIZE,
             AssetFileKind::Office => constants::MAX_OFFICE_CONVERT_SIZE,
-            AssetFileKind::Image | AssetFileKind::Pdf | AssetFileKind::Font => {
-                constants::MAX_PREVIEW_SIZE
-            }
+            AssetFileKind::Image | AssetFileKind::Font => constants::MAX_PREVIEW_SIZE,
         };
         if size > max_size {
             return Ok(PreviewContent::TooLarge {

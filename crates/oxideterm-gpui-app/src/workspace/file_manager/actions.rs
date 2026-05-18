@@ -167,12 +167,6 @@ impl WorkspaceApp {
                         cx.notify();
                         return true;
                     }
-                    if matches!(self.file_manager.preview, Some(LocalPreview::Pdf { .. })) {
-                        self.file_manager.preview_pdf_zoom =
-                            (self.file_manager.preview_pdf_zoom + 0.25).min(4.0);
-                        cx.notify();
-                        return true;
-                    }
                 }
                 "-" => {
                     if matches!(self.file_manager.preview, Some(LocalPreview::Image { .. })) {
@@ -181,22 +175,11 @@ impl WorkspaceApp {
                         cx.notify();
                         return true;
                     }
-                    if matches!(self.file_manager.preview, Some(LocalPreview::Pdf { .. })) {
-                        self.file_manager.preview_pdf_zoom =
-                            (self.file_manager.preview_pdf_zoom - 0.25).max(0.25);
-                        cx.notify();
-                        return true;
-                    }
                 }
                 "0" => {
                     if matches!(self.file_manager.preview, Some(LocalPreview::Image { .. })) {
                         self.file_manager.preview_image_zoom = 1.0;
                         self.file_manager.preview_image_rotation = 0;
-                        cx.notify();
-                        return true;
-                    }
-                    if matches!(self.file_manager.preview, Some(LocalPreview::Pdf { .. })) {
-                        self.file_manager.preview_pdf_zoom = 1.0;
                         cx.notify();
                         return true;
                     }
@@ -651,7 +634,6 @@ impl WorkspaceApp {
         self.file_manager.preview_metadata = local_preview_metadata(&entry.path);
         self.file_manager.preview_image_zoom = 1.0;
         self.file_manager.preview_image_rotation = 0;
-        self.file_manager.preview_pdf_zoom = 1.0;
         self.file_manager.dialog = Some(FileManagerDialog::Preview { entry });
         self.file_manager.context_menu = None;
     }

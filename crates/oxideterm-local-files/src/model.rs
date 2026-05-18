@@ -86,10 +86,6 @@ pub enum LocalPreview {
         path: String,
         mime_type: String,
     },
-    Pdf {
-        path: String,
-        mime_type: String,
-    },
     Archive {
         info: LocalArchiveInfo,
     },

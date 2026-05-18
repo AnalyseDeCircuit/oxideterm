@@ -262,9 +262,6 @@ impl WorkspaceApp {
             Some(LocalPreview::Font { path, mime_type }) => {
                 self.render_file_manager_preview_font(entry.name, path, mime_type, cx)
             }
-            Some(LocalPreview::Pdf { path, mime_type }) => self
-                .render_file_manager_preview_pdf(path, mime_type)
-                .into_any_element(),
             Some(LocalPreview::Archive { info }) => {
                 self.render_file_manager_archive_tree(info, has_background)
             }
@@ -330,40 +327,6 @@ impl WorkspaceApp {
                     .into_any_element()
             })
             .into_any_element()
-    }
-
-    fn render_file_manager_preview_pdf(&self, path: &str, mime_type: &str) -> AnyElement {
-        let backend = PdfiumPreviewBackend;
-        let zoom = self.file_manager.preview_pdf_zoom.clamp(0.25, 4.0);
-        match backend.render_page(&std::path::PathBuf::from(path), 0, (900.0 * zoom) as u32) {
-            Ok(bitmap) => {
-                if let Some(image) = bitmap.into_render_image() {
-                    div()
-                        .p(px(16.0))
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.0))
-                        .child(
-                            gpui::img(image)
-                                .w_full()
-                                .h(px(520.0 * zoom))
-                                .object_fit(ObjectFit::Contain),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(FILE_MANAGER_TEXT_XS))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(format!("PDF · {mime_type} · page 1")),
-                        )
-                        .into_any_element()
-                } else {
-                    self.render_file_manager_preview_text_status(
-                        "PDFium rendered a page but GPUI could not build a bitmap.",
-                    )
-                }
-            }
-            Err(error) => self.render_file_manager_preview_text_status(&format!("{error}")),
-        }
     }
 
     fn render_file_manager_preview_audio(
@@ -1312,7 +1275,6 @@ fn preview_icon(preview: &LocalPreview) -> LucideIcon {
         } => LucideIcon::FileCode,
         LocalPreview::Text { .. } => LucideIcon::FileText,
         LocalPreview::Image { .. } => LucideIcon::FileImage,
-        LocalPreview::Pdf { .. } => LucideIcon::FileText,
         LocalPreview::Video { .. } => LucideIcon::FileVideo,
         LocalPreview::Audio { .. } => LucideIcon::FileAudio,
         LocalPreview::Font { .. } => LucideIcon::FileText,

@@ -12,22 +12,23 @@ impl WorkspaceApp {
         let mut trace_ready_nodes = Vec::new();
         let mut trace_failed_nodes = Vec::new();
         for (session_id, node_id) in terminal_nodes {
-            let terminal_snapshot = self.terminal_endpoint_sessions.get(&session_id).map(
-                |endpoint_session| {
-                    // This mirrors Tauri's SessionRegistry boundary: node
-                    // lifecycle is read from the terminal endpoint owner,
-                    // not from the currently mounted GPUI pane. Panes may
-                    // be replaced during reconnect/remount; the endpoint
-                    // owner is the stable terminal-session record.
-                    let terminal = endpoint_session.session.lock();
-                    let readiness = match terminal.lifecycle() {
-                        TerminalLifecycle::Running => NodeReadiness::Ready,
-                        TerminalLifecycle::Exited(_) => NodeReadiness::Error,
-                        TerminalLifecycle::Closed => NodeReadiness::Disconnected,
-                    };
-                    (readiness, terminal.ssh_connection_handle())
-                },
-            );
+            let terminal_snapshot =
+                self.terminal_endpoint_sessions
+                    .get(&session_id)
+                    .map(|endpoint_session| {
+                        // This mirrors Tauri's SessionRegistry boundary: node
+                        // lifecycle is read from the terminal endpoint owner,
+                        // not from the currently mounted GPUI pane. Panes may
+                        // be replaced during reconnect/remount; the endpoint
+                        // owner is the stable terminal-session record.
+                        let terminal = endpoint_session.session.lock();
+                        let readiness = match terminal.lifecycle() {
+                            TerminalLifecycle::Running => NodeReadiness::Ready,
+                            TerminalLifecycle::Exited(_) => NodeReadiness::Error,
+                            TerminalLifecycle::Closed => NodeReadiness::Disconnected,
+                        };
+                        (readiness, terminal.ssh_connection_handle())
+                    });
             let Some((terminal_readiness, ssh_handle)) = terminal_snapshot else {
                 self.unregister_ssh_terminal_session(session_id);
                 changed = true;
@@ -79,7 +80,9 @@ impl WorkspaceApp {
                         node_id.clone(),
                         match readiness {
                             NodeReadiness::Error => Some("terminal session exited".to_string()),
-                            NodeReadiness::Disconnected => Some("terminal session closed".to_string()),
+                            NodeReadiness::Disconnected => {
+                                Some("terminal session closed".to_string())
+                            }
                             _ => None,
                         },
                     ));
@@ -178,16 +181,11 @@ impl WorkspaceApp {
                         let _ = self
                             .reconnect_orchestrator
                             .advance(&node_id.0, ReconnectPhase::AwaitTerminal);
-                        self.log_reconnect_phase(
-                            &node_id,
-                            ReconnectPhase::AwaitTerminal,
-                            None,
-                        );
+                        self.log_reconnect_phase(&node_id, ReconnectPhase::AwaitTerminal, None);
                         let remounted =
                             self.remount_terminal_panes_for_reconnect(&node_id, window, cx);
-                        let terminal_message = format!(
-                            "fixed {remounted} terminal pane(s) through native remount"
-                        );
+                        let terminal_message =
+                            format!("fixed {remounted} terminal pane(s) through native remount");
                         let _ = self.reconnect_orchestrator.complete_phase(
                             &node_id.0,
                             PhaseResult::Ok,
@@ -196,11 +194,7 @@ impl WorkspaceApp {
                         let _ = self
                             .reconnect_orchestrator
                             .advance(&node_id.0, ReconnectPhase::RestoreForwards);
-                        self.log_reconnect_phase(
-                            &node_id,
-                            ReconnectPhase::RestoreForwards,
-                            None,
-                        );
+                        self.log_reconnect_phase(&node_id, ReconnectPhase::RestoreForwards, None);
                     }
                     if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                         node.readiness = NodeReadiness::Ready;
@@ -263,9 +257,11 @@ impl WorkspaceApp {
                             .map(|snapshot| snapshot.children_ids)
                             .unwrap_or_default();
                         for child_id in children_to_start {
-                            if self.ssh_nodes.get(&child_id).is_some_and(|child| {
-                                child.readiness == NodeReadiness::Connecting
-                            }) {
+                            if self
+                                .ssh_nodes
+                                .get(&child_id)
+                                .is_some_and(|child| child.readiness == NodeReadiness::Connecting)
+                            {
                                 self.ensure_node_connection_started(&child_id);
                             }
                         }
@@ -351,8 +347,21 @@ impl WorkspaceApp {
                             self.finish_reconnect_job(&node_id, Err(error.clone()));
                         }
                     } else if let Some((title, description)) = connection_failure_notice {
-                        self.push_reconnect_notice(title, description, TerminalNoticeVariant::Error);
+                        self.push_reconnect_notice(
+                            title.clone(),
+                            description.clone(),
+                            TerminalNoticeVariant::Error,
+                        );
+                        self.push_notification_entry(
+                            WorkspaceNotificationKind::Connection,
+                            WorkspaceNotificationSeverity::Error,
+                            title,
+                            description,
+                            WorkspaceNotificationScope::Node(node_id.0.clone()),
+                            Some(format!("connect-failed:{}", node_id.0)),
+                        );
                     }
+                    self.remove_pending_ssh_terminal_opens_for_node(&node_id);
                     if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                         node.readiness = NodeReadiness::Error;
                     }
@@ -388,13 +397,9 @@ impl WorkspaceApp {
                     node_id,
                     expected_connection_id,
                 } => {
-                    if expected_connection_id
-                        .as_ref()
-                        .is_some_and(|expected| {
-                            self.node_router.connection_id_for_node(&node_id).as_ref()
-                                != Some(expected)
-                        })
-                    {
+                    if expected_connection_id.as_ref().is_some_and(|expected| {
+                        self.node_router.connection_id_for_node(&node_id).as_ref() != Some(expected)
+                    }) {
                         continue;
                     }
                     self.start_grace_period_reconnect(&node_id, cx);
@@ -442,7 +447,10 @@ impl WorkspaceApp {
                         self.log_reconnect_phase(
                             &node_id,
                             ReconnectPhase::SshConnect,
-                            Some(format!("starting retry {}/{}", job.attempt, job.max_attempts)),
+                            Some(format!(
+                                "starting retry {}/{}",
+                                job.attempt, job.max_attempts
+                            )),
                         );
                         let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
                         self.start_reconnect_cascade_after_grace_expired(&node_id);
@@ -499,12 +507,10 @@ impl WorkspaceApp {
                         .ssh_registry
                         .mark_state_without_event(&connection_id, ConnectionState::Active);
                     for (recovered_node_id, recovered_connection_id) in recovered_connections {
-                        let _ = self
-                            .ssh_registry
-                            .mark_state_without_event(
-                                &recovered_connection_id,
-                                ConnectionState::Active,
-                            );
+                        let _ = self.ssh_registry.mark_state_without_event(
+                            &recovered_connection_id,
+                            ConnectionState::Active,
+                        );
                         if let Some(node) = self.ssh_nodes.get_mut(&recovered_node_id) {
                             node.readiness = NodeReadiness::Ready;
                         }
@@ -541,11 +547,7 @@ impl WorkspaceApp {
                     let _ = self
                         .reconnect_orchestrator
                         .advance(&node_id.0, ReconnectPhase::SshConnect);
-                    self.log_reconnect_phase(
-                        &node_id,
-                        ReconnectPhase::SshConnect,
-                        Some(detail),
-                    );
+                    self.log_reconnect_phase(&node_id, ReconnectPhase::SshConnect, Some(detail));
                     let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
                     // Tauri falls back from grace-period probing to a full
                     // reconnectCascade(root): root reconnect first, and
@@ -713,10 +715,7 @@ impl WorkspaceApp {
                 }
                 let event_severity = event_log_severity_for_connection_status(&status);
                 let affected_children_count = affected_children.len();
-                if matches!(
-                    state,
-                    NodeReadiness::Error | NodeReadiness::Disconnected
-                ) {
+                if matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected) {
                     let _ = self.cascade_connection_status_to_runtime_children(
                         &node_id,
                         Some(&affected_children),
@@ -737,10 +736,9 @@ impl WorkspaceApp {
                         "reconnecting" => "event_log.events.reconnecting",
                         _ => "event_log.events.node_state_unknown",
                     },
-                    (affected_children_count > 0)
-                        .then_some(format!(
-                            "event_log.events.affected_children:{affected_children_count}"
-                        )),
+                    (affected_children_count > 0).then_some(format!(
+                        "event_log.events.affected_children:{affected_children_count}"
+                    )),
                     "connection_status_changed",
                 );
                 if matches!(state, NodeReadiness::Error) {
@@ -825,14 +823,13 @@ impl WorkspaceApp {
                     && matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected)
                 {
                     self.mark_ide_interrupted_for_node(&node_id, cx);
-                    let affected_children =
-                        self.cascade_connection_status_to_runtime_children(
-                            &node_id,
-                            None,
-                            state.clone(),
-                            reason.clone(),
-                            cx,
-                        );
+                    let affected_children = self.cascade_connection_status_to_runtime_children(
+                        &node_id,
+                        None,
+                        state.clone(),
+                        reason.clone(),
+                        cx,
+                    );
                     self.push_event_log_entry(
                         event_severity,
                         WorkspaceEventCategory::Connection,
@@ -843,10 +840,9 @@ impl WorkspaceApp {
                         } else {
                             "event_log.events.disconnected"
                         },
-                        (affected_children > 0)
-                            .then_some(format!(
-                                "event_log.events.affected_children:{affected_children}"
-                            )),
+                        (affected_children > 0).then_some(format!(
+                            "event_log.events.affected_children:{affected_children}"
+                        )),
                         "connection_status_changed",
                     );
                     if matches!(state, NodeReadiness::Error) {
@@ -979,8 +975,7 @@ impl WorkspaceApp {
                 state.clone(),
                 reason.clone(),
             );
-            if let Some(connection_id) = self.node_router.connection_id_for_node(affected_node_id)
-            {
+            if let Some(connection_id) = self.node_router.connection_id_for_node(affected_node_id) {
                 let _ = self
                     .ssh_registry
                     .mark_state_without_event(&connection_id, connection_state.clone());
@@ -1130,9 +1125,7 @@ impl WorkspaceApp {
             .pending_reconnect_transfer_resumes
             .iter()
             .filter_map(|(root_id, pending)| {
-                pending
-                    .contains(transfer_id)
-                    .then_some(root_id.clone())
+                pending.contains(transfer_id).then_some(root_id.clone())
             })
             .collect::<Vec<_>>();
         for root_id in roots {
@@ -1232,9 +1225,9 @@ impl WorkspaceApp {
             self.pending_ide_restore_transfer_counts.remove(node_id);
             return;
         }
-        let _ = self
-            .reconnect_orchestrator
-            .complete_phase(&node_id.0, result, Some(detail.clone()));
+        let _ =
+            self.reconnect_orchestrator
+                .complete_phase(&node_id.0, result, Some(detail.clone()));
         if result == PhaseResult::Failed {
             self.pending_ide_restore_transfer_counts.remove(node_id);
             self.finish_reconnect_job(node_id, Err(detail));
@@ -1272,8 +1265,7 @@ impl WorkspaceApp {
             return;
         }
         self.pending_reconnect_node_ids.insert(node_id.clone());
-        self.reconnect_debounce_generation =
-            self.reconnect_debounce_generation.saturating_add(1);
+        self.reconnect_debounce_generation = self.reconnect_debounce_generation.saturating_add(1);
         let generation = self.reconnect_debounce_generation;
         self.reconnect_debounce_scheduled = true;
         let tx = self.reconnect_worker_tx.clone();
@@ -1406,9 +1398,9 @@ impl WorkspaceApp {
             snapshot_at: Some(SystemTime::now()),
             ..ReconnectSnapshot::default()
         };
-        let reconnect_job = self
-            .reconnect_orchestrator
-            .schedule(node_id.0.clone(), node_title, snapshot);
+        let reconnect_job =
+            self.reconnect_orchestrator
+                .schedule(node_id.0.clone(), node_title, snapshot);
         self.push_reconnect_notice(
             self.i18n_with(
                 "connections.reconnect.starting",
@@ -2078,20 +2070,20 @@ impl WorkspaceApp {
         let Some(node) = self.ssh_nodes.get(node_id).cloned() else {
             return false;
         };
-        let stale_connection_id = self
-            .node_router
-            .connection_id_for_node(node_id)
-            .filter(|connection_id| {
-                self.ssh_registry.get(connection_id).is_some_and(|handle| {
-                    matches!(
-                        handle.state(),
-                        ConnectionState::LinkDown
-                            | ConnectionState::Disconnected
-                            | ConnectionState::Disconnecting
-                            | ConnectionState::Error(_)
-                    )
-                })
-            });
+        let stale_connection_id =
+            self.node_router
+                .connection_id_for_node(node_id)
+                .filter(|connection_id| {
+                    self.ssh_registry.get(connection_id).is_some_and(|handle| {
+                        matches!(
+                            handle.state(),
+                            ConnectionState::LinkDown
+                                | ConnectionState::Disconnected
+                                | ConnectionState::Disconnecting
+                                | ConnectionState::Error(_)
+                        )
+                    })
+                });
         let force_reconnect = stale_connection_id.is_some();
         if matches!(
             node.readiness,
@@ -2160,15 +2152,23 @@ impl WorkspaceApp {
                     })
             })
             .unwrap_or(NodeOrigin::Direct);
-        self.node_runtime_store
-            .upsert_node_with_origin(node_id.clone(), node.config.clone(), origin);
+        self.node_runtime_store.upsert_node_with_origin(
+            node_id.clone(),
+            node.config.clone(),
+            origin,
+        );
         let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
-        let handle = self.ssh_registry.acquire(node.config.clone(), consumer.clone());
+        let handle = self
+            .ssh_registry
+            .acquire(node.config.clone(), consumer.clone());
         let connection_id = handle.connection_id().to_string();
         let _ = self
             .ssh_registry
             .mark_state(&connection_id, ConnectionState::Connecting);
-        if let Ok(event) = self.node_router.bind_connection(node_id, connection_id.clone()) {
+        if let Ok(event) = self
+            .node_router
+            .bind_connection(node_id, connection_id.clone())
+        {
             self.emit_node_event(event);
         }
         if let Some(node) = self.ssh_nodes.get_mut(node_id) {
@@ -2198,9 +2198,9 @@ impl WorkspaceApp {
                 node_handle.clear_physical().await;
             }
             let client = SshTransportClient::new(config).with_prompt_handler(prompt_handler);
-            let parent_consumer = parent_id.as_ref().map(|_| {
-                ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0))
-            });
+            let parent_consumer = parent_id
+                .as_ref()
+                .map(|_| ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0)));
             let parent_handle = if let Some(parent_id) = parent_id {
                 // Tauri's connect_tree_node waits for the parent path before
                 // dialing a tunneled child. Native must do the same here: a
@@ -2333,10 +2333,18 @@ impl WorkspaceApp {
                     return;
                 }
                 let entry_node_id = NodeId::new(entry.node_id.clone());
-                let session_id = format!("{}{}", crate::workspace::forwards::FORWARDS_NODE_SESSION_PREFIX, entry.node_id);
+                let session_id = format!(
+                    "{}{}",
+                    crate::workspace::forwards::FORWARDS_NODE_SESSION_PREFIX,
+                    entry.node_id
+                );
                 let consumer = ConnectionConsumer::PortForward(session_id.clone());
                 let resolved = match router
-                    .acquire_connection_wait(&entry_node_id, consumer.clone(), Duration::from_secs(15))
+                    .acquire_connection_wait(
+                        &entry_node_id,
+                        consumer.clone(),
+                        Duration::from_secs(15),
+                    )
                     .await
                 {
                     Ok(resolved) => resolved,
@@ -2497,7 +2505,10 @@ impl WorkspaceApp {
         if drifts.is_empty() {
             "native node reconnect verified".to_string()
         } else {
-            format!("native node reconnect verified with drift: {}", drifts.join("; "))
+            format!(
+                "native node reconnect verified with drift: {}",
+                drifts.join("; ")
+            )
         }
     }
 

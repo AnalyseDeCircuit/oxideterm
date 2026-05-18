@@ -473,7 +473,6 @@ impl WorkspaceApp {
                                     }
                                     AssetFileKind::Image
                                     | AssetFileKind::Video
-                                    | AssetFileKind::Pdf
                                     | AssetFileKind::Office => {}
                                 }
                             }

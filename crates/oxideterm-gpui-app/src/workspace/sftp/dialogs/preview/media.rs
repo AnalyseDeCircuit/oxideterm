@@ -1,47 +1,4 @@
 impl WorkspaceApp {
-    fn render_sftp_preview_pdf(&self, path: &str, mime_type: &str) -> AnyElement {
-        let backend = PdfiumPreviewBackend;
-        let path_buf = std::path::PathBuf::from(path);
-        match backend.render_page(&path_buf, 0, 900) {
-            Ok(bitmap) => {
-                if let Some(image) = bitmap.into_render_image() {
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.0))
-                        .child(
-                            gpui::img(image)
-                                .w_full()
-                                .h(px(456.0))
-                                .object_fit(ObjectFit::Contain),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(SFTP_TEXT_XS))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(format!("PDF · {mime_type} · page 1")),
-                        )
-                        .into_any_element()
-                } else {
-                    self.render_sftp_native_asset_status(
-                        "PDF",
-                        path,
-                        mime_type,
-                        "PDFium rendered a page but GPUI could not build a bitmap.",
-                    )
-                    .into_any_element()
-                }
-            }
-            Err(error) => self.render_sftp_native_asset_status(
-                "PDF",
-                path,
-                mime_type,
-                &format!("{error}"),
-            )
-            .into_any_element(),
-        }
-    }
-
     fn render_sftp_preview_audio(
         &self,
         path: &str,

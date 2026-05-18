@@ -21,8 +21,8 @@ use oxideterm_local_files::{
     LocalPreview, LocalPreviewMetadata, LocalSortDirection, LocalSortField,
 };
 use oxideterm_preview::{
-    AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, PdfPreviewBackend,
-    PdfiumPreviewBackend, RodioAudioPreviewBackend, font_family_name_from_bytes,
+    AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, RodioAudioPreviewBackend,
+    font_family_name_from_bytes,
 };
 
 mod actions;
@@ -185,7 +185,6 @@ pub(super) struct FileManagerState {
     pub(super) preview_markdown_source: bool,
     pub(super) preview_image_zoom: f32,
     pub(super) preview_image_rotation: i32,
-    pub(super) preview_pdf_zoom: f32,
     pub(super) preview_code_scroll: UniformListScrollHandle,
     pub(super) preview_markdown_scroll: MarkdownVirtualListScrollHandle,
     pub(super) preview_audio: RodioAudioPreviewBackend,
@@ -233,7 +232,6 @@ impl Default for FileManagerState {
             preview_markdown_source: false,
             preview_image_zoom: 1.0,
             preview_image_rotation: 0,
-            preview_pdf_zoom: 1.0,
             preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
             preview_audio: RodioAudioPreviewBackend::default(),

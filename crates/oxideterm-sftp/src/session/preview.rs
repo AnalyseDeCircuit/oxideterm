@@ -39,9 +39,10 @@ impl SftpSession {
                 .await;
         }
         if extension == "pdf" || mime_type == "application/pdf" {
-            return self
-                .preview_asset(&canonical_path, file_size, &mime_type, AssetFileKind::Pdf)
-                .await;
+            return Ok(PreviewContent::Unsupported {
+                mime_type,
+                reason: "PDF preview is disabled.".to_string(),
+            });
         }
         if is_office_extension(&extension) {
             return self

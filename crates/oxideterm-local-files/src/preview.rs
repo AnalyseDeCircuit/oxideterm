@@ -54,13 +54,7 @@ pub fn read_local_preview(path: &str) -> LocalPreview {
         };
     }
     if ext == "pdf" {
-        if file_size > MAX_PREVIEW_SIZE {
-            return LocalPreview::TooLarge { size: file_size };
-        }
-        return LocalPreview::Pdf {
-            path: path.to_string(),
-            mime_type: "application/pdf".to_string(),
-        };
+        return LocalPreview::Unsupported("fileManager.openExternal".to_string());
     }
     if archive_extensions().contains(&ext.as_str()) {
         return match list_local_archive_contents(path) {
