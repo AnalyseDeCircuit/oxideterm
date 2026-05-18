@@ -49,7 +49,7 @@
     "@codemirror/lang-xml": "^6.1.0",
     "@codemirror/lang-yaml": "^6.1.2",
     "@codemirror/language": "^6.12.1",
-    "@codemirror/legacy-modes": "^6.5.2",
+    "@codemirror/legacy-modes": "^6.5.3",
     "@codemirror/search": "^6.7.0",
     "@codemirror/state": "^6.6.0",
     "@codemirror/theme-one-dark": "^6.1.3",
