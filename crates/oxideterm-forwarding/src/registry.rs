@@ -8,8 +8,8 @@ use oxideterm_ssh::SshConnectionHandle;
 
 use crate::{
     ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardRule, ForwardingError,
-    ForwardingManager, PersistedForward, PortDetectionProfiler, PortDetectionSnapshot,
-    SavedForwardError, SavedForwardStore, SavedForwardsSyncSnapshot,
+    ForwardingManager, OwnedForwardImportRecord, PersistedForward, PortDetectionProfiler,
+    PortDetectionSnapshot, SavedForwardError, SavedForwardStore, SavedForwardsSyncSnapshot,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -348,6 +348,22 @@ impl ForwardingRegistry {
             return Ok(0);
         };
         store.delete_owned_forwards(owner_connection_id)
+    }
+
+    pub fn apply_owned_forward_import_records(
+        &self,
+        records: &[OwnedForwardImportRecord],
+        replace_owner_connection_ids: &HashSet<String>,
+        merge_owner_connection_ids: &HashSet<String>,
+    ) -> Result<usize, SavedForwardError> {
+        let Some(store) = &self.saved_store else {
+            return Ok(0);
+        };
+        store.apply_owned_forward_import_records(
+            records,
+            replace_owner_connection_ids,
+            merge_owner_connection_ids,
+        )
     }
 
     pub fn load_persisted_forwards(&self, session_id: &str) -> Vec<PersistedForward> {

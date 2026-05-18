@@ -12,6 +12,7 @@ mod new_connection;
 mod notification_center;
 mod pane_tree;
 mod plugin_manager;
+mod plugin_settings_store;
 mod quick_commands;
 mod session_manager;
 mod settings;

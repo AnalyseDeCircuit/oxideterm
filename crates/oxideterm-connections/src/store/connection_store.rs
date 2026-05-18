@@ -231,6 +231,106 @@ impl ConnectionStore {
         Ok(self.get(&id).map(ConnectionInfo::from).expect("imported"))
     }
 
+    pub fn upsert_imported_connection(
+        &mut self,
+        mut connection: SavedConnection,
+    ) -> Result<ConnectionInfo> {
+        let group = normalize_optional_group_name(connection.group.as_deref())?;
+        let now = Utc::now();
+        if connection.id.trim().is_empty() {
+            connection.id = Uuid::new_v4().to_string();
+        }
+        let id = connection.id.clone();
+        let existing = self.get(&id).cloned();
+        let old_keychain_ids = existing
+            .as_ref()
+            .map(collect_connection_keychain_ids)
+            .unwrap_or_default();
+        let existing_auth = existing.as_ref().map(|conn| conn.auth.clone());
+
+        connection.version = CONFIG_VERSION;
+        connection.name = non_empty(connection.name.trim(), "Connection name")?.to_string();
+        connection.group = group.clone();
+        connection.host = non_empty(connection.host.trim(), "Host")?.to_string();
+        connection.port = connection.port.max(1);
+        connection.username = non_empty(connection.username.trim(), "Username")?.to_string();
+        connection.auth = self.materialize_auth(connection.auth, existing_auth.as_ref())?;
+        connection.proxy_chain = self.materialize_proxy_chain(connection.proxy_chain)?;
+        if let Some(existing) = existing.as_ref() {
+            connection.created_at = existing.created_at;
+            connection.last_used_at = existing.last_used_at;
+        } else if connection.created_at.timestamp() <= 0 {
+            connection.created_at = now;
+        }
+        connection.updated_at = Some(now);
+
+        let next_keychain_ids =
+            collect_keychain_ids_for_parts(&connection.auth, &connection.proxy_chain);
+        if let Some(index) = self
+            .data
+            .connections
+            .iter()
+            .position(|candidate| candidate.id == id)
+        {
+            self.data.connections[index] = connection;
+        } else {
+            self.data.connections.push(connection);
+        }
+        if let Some(group) = group {
+            self.ensure_group(group)?;
+        }
+        self.normalize();
+        self.save()?;
+        for keychain_id in old_keychain_ids
+            .iter()
+            .filter(|keychain_id| !next_keychain_ids.contains(*keychain_id))
+        {
+            let _ = self.keychain.delete(keychain_id);
+        }
+        Ok(ConnectionInfo::from(
+            self.get(&id).expect("connection imported"),
+        ))
+    }
+
+    pub fn upsert_imported_connections_transaction(
+        &mut self,
+        connections: Vec<SavedConnection>,
+    ) -> Result<Vec<ConnectionInfo>> {
+        let original_data = self.data.clone();
+        let original_keychain = self.snapshot_keychain_entries(&original_data);
+        let mut touched_keychain_ids = HashSet::new();
+        let mut stale_old_keychain_ids = HashSet::new();
+        let mut imported_ids = Vec::new();
+
+        let result = (|| {
+            for connection in connections {
+                let staged = self.stage_imported_connection(connection)?;
+                touched_keychain_ids.extend(staged.touched_keychain_ids);
+                stale_old_keychain_ids.extend(staged.stale_old_keychain_ids);
+                imported_ids.push(staged.id);
+            }
+            self.normalize();
+            self.save()?;
+            Ok::<(), anyhow::Error>(())
+        })();
+
+        if let Err(error) = result {
+            self.data = original_data;
+            let _ = self.save();
+            self.rollback_keychain_entries(&touched_keychain_ids, &original_keychain);
+            return Err(error);
+        }
+
+        for keychain_id in &stale_old_keychain_ids {
+            let _ = self.keychain.delete(keychain_id);
+        }
+
+        Ok(imported_ids
+            .iter()
+            .filter_map(|id| self.get(id).map(ConnectionInfo::from))
+            .collect())
+    }
+
     pub fn get_connection_password(&self, id: &str) -> Result<SecretString> {
         let conn = self
             .get(id)
@@ -407,6 +507,118 @@ impl ConnectionStore {
                 })
             })
             .collect()
+    }
+
+    fn stage_imported_connection(
+        &mut self,
+        mut connection: SavedConnection,
+    ) -> Result<StagedImportedConnection> {
+        let group = normalize_optional_group_name(connection.group.as_deref())?;
+        let now = Utc::now();
+        if connection.id.trim().is_empty() {
+            connection.id = Uuid::new_v4().to_string();
+        }
+        let id = connection.id.clone();
+        let existing = self.get(&id).cloned();
+        let old_keychain_ids = existing
+            .as_ref()
+            .map(collect_connection_keychain_ids)
+            .unwrap_or_default();
+        let existing_auth = existing.as_ref().map(|conn| conn.auth.clone());
+
+        connection.version = CONFIG_VERSION;
+        connection.name = non_empty(connection.name.trim(), "Connection name")?.to_string();
+        connection.group = group.clone();
+        connection.host = non_empty(connection.host.trim(), "Host")?.to_string();
+        connection.port = connection.port.max(1);
+        connection.username = non_empty(connection.username.trim(), "Username")?.to_string();
+        for hop in &connection.proxy_chain {
+            non_empty(hop.host.trim(), "Proxy host")?;
+            non_empty(hop.username.trim(), "Proxy username")?;
+        }
+
+        let auth = self.materialize_auth(connection.auth, existing_auth.as_ref())?;
+        let mut touched_keychain_ids = collect_keychain_ids_for_auth(&auth);
+        let mut proxy_chain = Vec::with_capacity(connection.proxy_chain.len());
+        for hop in connection.proxy_chain {
+            let hop_auth = self.materialize_auth(hop.auth, None)?;
+            touched_keychain_ids.extend(collect_keychain_ids_for_auth(&hop_auth));
+            proxy_chain.push(SavedProxyHop {
+                host: non_empty(hop.host.trim(), "Proxy host")?.to_string(),
+                port: hop.port.max(1),
+                username: non_empty(hop.username.trim(), "Proxy username")?.to_string(),
+                auth: hop_auth,
+                agent_forwarding: hop.agent_forwarding,
+            });
+        }
+
+        connection.auth = auth;
+        connection.proxy_chain = proxy_chain;
+        if let Some(existing) = existing.as_ref() {
+            connection.created_at = existing.created_at;
+            connection.last_used_at = existing.last_used_at;
+        } else if connection.created_at.timestamp() <= 0 {
+            connection.created_at = now;
+        }
+        connection.updated_at = Some(now);
+
+        let next_keychain_ids =
+            collect_keychain_ids_for_parts(&connection.auth, &connection.proxy_chain);
+        let stale_old_keychain_ids = old_keychain_ids
+            .into_iter()
+            .filter(|keychain_id| !next_keychain_ids.contains(keychain_id))
+            .collect::<Vec<_>>();
+
+        if let Some(index) = self
+            .data
+            .connections
+            .iter()
+            .position(|candidate| candidate.id == id)
+        {
+            self.data.connections[index] = connection;
+        } else {
+            self.data.connections.push(connection);
+        }
+        if let Some(group) = group {
+            self.ensure_group(group)?;
+        }
+
+        Ok(StagedImportedConnection {
+            id,
+            touched_keychain_ids,
+            stale_old_keychain_ids,
+        })
+    }
+
+    fn snapshot_keychain_entries(
+        &self,
+        data: &ConnectionStoreData,
+    ) -> HashMap<String, Option<SecretString>> {
+        data.connections
+            .iter()
+            .flat_map(collect_connection_keychain_ids)
+            .map(|keychain_id| {
+                let value = self.keychain.get(&keychain_id).ok();
+                (keychain_id, value)
+            })
+            .collect()
+    }
+
+    fn rollback_keychain_entries(
+        &self,
+        touched_keychain_ids: &HashSet<String>,
+        original_keychain: &HashMap<String, Option<SecretString>>,
+    ) {
+        for keychain_id in touched_keychain_ids {
+            match original_keychain.get(keychain_id) {
+                Some(Some(secret)) => {
+                    let _ = self.keychain.store(keychain_id, secret);
+                }
+                Some(None) | None => {
+                    let _ = self.keychain.delete(keychain_id);
+                }
+            }
+        }
     }
 
     fn clone_auth_secret(&self, auth: &SavedAuth) -> Result<SavedAuth> {

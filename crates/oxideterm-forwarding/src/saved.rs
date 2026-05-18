@@ -60,6 +60,18 @@ pub struct PersistedForwardDto {
     pub description: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OwnedForwardImportRecord {
+    pub owner_connection_id: String,
+    pub forward_type: String,
+    pub bind_address: String,
+    pub bind_port: u16,
+    pub target_host: String,
+    pub target_port: u16,
+    pub description: Option<String>,
+    pub auto_start: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedForwardSyncRecord {
@@ -344,6 +356,39 @@ impl SavedForwardStore {
         Ok(count)
     }
 
+    pub fn apply_owned_forward_import_records(
+        &self,
+        records: &[OwnedForwardImportRecord],
+        replace_owner_connection_ids: &HashSet<String>,
+        merge_owner_connection_ids: &HashSet<String>,
+    ) -> Result<usize, SavedForwardError> {
+        let mut data = self.lock_data();
+        let backup_forwards = data.forwards.clone();
+        let backup_tombstones = data.tombstones.clone();
+        let result = (|| {
+            let SavedForwardData {
+                forwards,
+                tombstones,
+            } = &mut *data;
+            apply_owned_forward_import_records_locked(
+                forwards,
+                tombstones,
+                records,
+                replace_owner_connection_ids,
+                merge_owner_connection_ids,
+            )?;
+            self.save_locked(&mut data)?;
+            Ok::<usize, SavedForwardError>(records.len())
+        })();
+
+        if result.is_err() {
+            data.forwards = backup_forwards;
+            data.tombstones = backup_tombstones;
+            let _ = self.save_locked(&mut data);
+        }
+        result
+    }
+
     pub fn export_snapshot(&self) -> Result<SavedForwardsSyncSnapshot, SavedForwardError> {
         let (forwards, tombstones) = self.load_sync_state();
         build_saved_forwards_sync_snapshot(forwards, tombstones)
@@ -598,6 +643,155 @@ fn sha256_hex<T: Serialize>(value: &T) -> Result<String, SavedForwardError> {
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ForwardIdentity {
+    forward_type: String,
+    bind_address: String,
+    bind_port: u16,
+    target_host: String,
+    target_port: u16,
+}
+
+impl ForwardIdentity {
+    fn from_import(record: &OwnedForwardImportRecord) -> Self {
+        Self {
+            forward_type: record.forward_type.clone(),
+            bind_address: record.bind_address.clone(),
+            bind_port: record.bind_port,
+            target_host: record.target_host.clone(),
+            target_port: record.target_port,
+        }
+    }
+
+    fn from_persisted(forward: &PersistedForward) -> Self {
+        Self {
+            forward_type: forward.forward_type.as_str().to_string(),
+            bind_address: forward.rule.bind_address.clone(),
+            bind_port: forward.rule.bind_port,
+            target_host: forward.rule.target_host.clone(),
+            target_port: forward.rule.target_port,
+        }
+    }
+}
+
+fn apply_owned_forward_import_records_locked(
+    forwards: &mut Vec<PersistedForward>,
+    tombstones: &mut Vec<DeletedPersistedForwardTombstone>,
+    records: &[OwnedForwardImportRecord],
+    replace_owner_connection_ids: &HashSet<String>,
+    merge_owner_connection_ids: &HashSet<String>,
+) -> Result<(), SavedForwardError> {
+    let imported_by_owner = records.iter().fold(
+        HashMap::<&str, Vec<&OwnedForwardImportRecord>>::new(),
+        |mut map, record| {
+            map.entry(record.owner_connection_id.as_str())
+                .or_default()
+                .push(record);
+            map
+        },
+    );
+    let now = Utc::now();
+
+    for owner_connection_id in replace_owner_connection_ids {
+        let mut removed = Vec::new();
+        forwards.retain(|forward| {
+            if forward.owner_connection_id.as_deref() == Some(owner_connection_id.as_str()) {
+                removed.push(forward.id.clone());
+                false
+            } else {
+                true
+            }
+        });
+        for id in removed {
+            upsert_tombstone(
+                tombstones,
+                DeletedPersistedForwardTombstone {
+                    id,
+                    deleted_at: now,
+                },
+            );
+        }
+    }
+
+    for (owner_connection_id, owner_records) in imported_by_owner {
+        let should_merge = merge_owner_connection_ids.contains(owner_connection_id)
+            && !replace_owner_connection_ids.contains(owner_connection_id);
+        if should_merge {
+            merge_imported_owner_forwards(forwards, owner_connection_id, owner_records)?;
+        } else {
+            for record in owner_records {
+                forwards.push(import_record_to_persisted(record, Utc::now())?);
+            }
+        }
+    }
+
+    let forward_ids = forwards
+        .iter()
+        .map(|forward| forward.id.clone())
+        .collect::<HashSet<_>>();
+    tombstones.retain(|tombstone| !forward_ids.contains(&tombstone.id));
+    Ok(())
+}
+
+fn merge_imported_owner_forwards(
+    forwards: &mut Vec<PersistedForward>,
+    owner_connection_id: &str,
+    records: Vec<&OwnedForwardImportRecord>,
+) -> Result<(), SavedForwardError> {
+    let mut existing_by_identity = forwards
+        .iter()
+        .enumerate()
+        .filter(|(_, forward)| forward.owner_connection_id.as_deref() == Some(owner_connection_id))
+        .map(|(index, forward)| (ForwardIdentity::from_persisted(forward), index))
+        .collect::<HashMap<_, _>>();
+    let merged_at = Utc::now();
+
+    for record in records {
+        let identity = ForwardIdentity::from_import(record);
+        if let Some(index) = existing_by_identity.get(&identity).copied() {
+            if let Some(existing) = forwards.get_mut(index) {
+                existing.auto_start = record.auto_start;
+                existing.rule.description = record.description.clone().unwrap_or_default();
+                existing.owner_connection_id = Some(owner_connection_id.to_string());
+                existing.updated_at = Some(merged_at);
+            }
+        } else {
+            let persisted = import_record_to_persisted(record, merged_at)?;
+            existing_by_identity.insert(identity, forwards.len());
+            forwards.push(persisted);
+        }
+    }
+    Ok(())
+}
+
+fn import_record_to_persisted(
+    record: &OwnedForwardImportRecord,
+    persisted_at: DateTime<Utc>,
+) -> Result<PersistedForward, SavedForwardError> {
+    let forward_type = ForwardType::try_from_tauri_str(&record.forward_type)?;
+    let rule = ForwardRule {
+        id: uuid::Uuid::new_v4().to_string(),
+        forward_type,
+        bind_address: record.bind_address.clone(),
+        bind_port: record.bind_port,
+        target_host: record.target_host.clone(),
+        target_port: record.target_port,
+        status: ForwardStatus::Stopped,
+        description: record.description.clone().unwrap_or_default(),
+    };
+    Ok(PersistedForward {
+        id: rule.id.clone(),
+        session_id: String::new(),
+        owner_connection_id: Some(record.owner_connection_id.clone()),
+        forward_type,
+        rule,
+        created_at: persisted_at,
+        updated_at: Some(persisted_at),
+        auto_start: record.auto_start,
+        version: persisted_forward_version(),
+    })
+}
+
 fn upsert_forward(forwards: &mut Vec<PersistedForward>, forward: PersistedForward) {
     if let Some(existing) = forwards
         .iter_mut()
@@ -673,6 +867,19 @@ mod tests {
         rule.id = id.to_string();
         rule.description = "web".to_string();
         rule
+    }
+
+    fn import_record(owner: &str, port: u16, description: &str) -> OwnedForwardImportRecord {
+        OwnedForwardImportRecord {
+            owner_connection_id: owner.to_string(),
+            forward_type: "local".to_string(),
+            bind_address: "127.0.0.1".to_string(),
+            bind_port: port,
+            target_host: "localhost".to_string(),
+            target_port: 3000,
+            description: Some(description.to_string()),
+            auto_start: true,
+        }
     }
 
     #[test]
@@ -753,6 +960,84 @@ mod tests {
             tombstones
                 .iter()
                 .any(|tombstone| tombstone.id == "forward-1")
+        );
+    }
+
+    #[test]
+    fn apply_owned_forward_import_records_replaces_owner_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SavedForwardStore::load(dir.path().join("forwards.json")).unwrap();
+        store
+            .sync_persisted_forward_rule(
+                "old-forward",
+                "node:prod",
+                Some("connection-1".to_string()),
+                sample_rule("old-forward", 8080),
+            )
+            .unwrap();
+        let mut replace = HashSet::new();
+        replace.insert("connection-1".to_string());
+
+        let imported = store
+            .apply_owned_forward_import_records(
+                &[import_record("connection-1", 9090, "imported")],
+                &replace,
+                &HashSet::new(),
+            )
+            .unwrap();
+        let saved = store.load_owned_forwards("connection-1");
+        let (_forwards, tombstones) = store.load_sync_state();
+
+        assert_eq!(imported, 1);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].rule.bind_port, 9090);
+        assert_eq!(saved[0].rule.description, "imported");
+        assert!(
+            tombstones
+                .iter()
+                .any(|tombstone| tombstone.id == "old-forward")
+        );
+    }
+
+    #[test]
+    fn apply_owned_forward_import_records_merges_by_forward_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SavedForwardStore::load(dir.path().join("forwards.json")).unwrap();
+        store
+            .sync_persisted_forward_rule(
+                "forward-1",
+                "node:prod",
+                Some("connection-1".to_string()),
+                sample_rule("forward-1", 8080),
+            )
+            .unwrap();
+        let mut merge = HashSet::new();
+        merge.insert("connection-1".to_string());
+
+        store
+            .apply_owned_forward_import_records(
+                &[
+                    import_record("connection-1", 8080, "merged"),
+                    import_record("connection-1", 9090, "new"),
+                ],
+                &HashSet::new(),
+                &merge,
+            )
+            .unwrap();
+        let saved = store.load_owned_forwards("connection-1");
+
+        assert_eq!(saved.len(), 2);
+        let merged = saved
+            .iter()
+            .find(|forward| forward.rule.bind_port == 8080)
+            .unwrap();
+        assert_eq!(merged.id, "forward-1");
+        assert_eq!(merged.rule.description, "merged");
+        assert!(merged.auto_start);
+        assert!(
+            saved
+                .iter()
+                .any(|forward| forward.rule.bind_port == 9090 && forward.rule.description == "new")
         );
     }
 

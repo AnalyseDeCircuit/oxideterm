@@ -584,4 +584,38 @@ mod tests {
             SecretString::from("jump-key-secret")
         );
     }
+
+    #[test]
+    fn imported_connection_transaction_rolls_back_staged_config_on_later_error() {
+        let mut store = load_empty_store("import-transaction-rollback");
+        let good = SavedConnection {
+            id: "good".to_string(),
+            version: CONFIG_VERSION,
+            name: "Good".to_string(),
+            group: None,
+            host: "good.example.com".to_string(),
+            port: 22,
+            username: "me".to_string(),
+            auth: SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from("secret")),
+            },
+            proxy_chain: Vec::new(),
+            options: ConnectionOptions::default(),
+            created_at: chrono::Utc::now(),
+            last_used_at: None,
+            updated_at: None,
+            color: None,
+            tags: Vec::new(),
+        };
+        let mut bad = good.clone();
+        bad.id = "bad".to_string();
+        bad.name = "Bad".to_string();
+        bad.host.clear();
+
+        let result = store.upsert_imported_connections_transaction(vec![good, bad]);
+
+        assert!(result.is_err());
+        assert!(store.connections().is_empty());
+    }
 }

@@ -254,3 +254,10 @@ pub struct ConnectionStore {
     data: ConnectionStoreData,
     keychain: ConnectionKeychain,
 }
+
+#[derive(Debug)]
+struct StagedImportedConnection {
+    id: String,
+    touched_keychain_ids: Vec<String>,
+    stale_old_keychain_ids: Vec<String>,
+}

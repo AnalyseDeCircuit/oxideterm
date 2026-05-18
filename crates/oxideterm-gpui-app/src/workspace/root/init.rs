@@ -35,10 +35,7 @@ impl WorkspaceApp {
             Ok((store, state)) => (store, state),
             Err(error) => {
                 eprintln!("failed to load AI chat store: {error}");
-                (
-                    oxideterm_ai::AiChatPersistenceStore::new(ai_chat_path),
-                    oxideterm_ai::AiChatState::default(),
-                )
+                return Err(error);
             }
         };
         let ai_rag_data_dir = default_rag_data_dir();

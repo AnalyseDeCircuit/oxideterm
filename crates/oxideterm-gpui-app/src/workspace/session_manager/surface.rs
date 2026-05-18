@@ -50,6 +50,12 @@ impl WorkspaceApp {
             .when(self.session_manager.show_import, |surface| {
                 surface.child(self.render_ssh_config_import_dialog(cx))
             })
+            .when_some(self.session_manager.oxide_import_dialog.as_ref(), |surface, _| {
+                surface.child(self.render_oxide_import_dialog(cx))
+            })
+            .when_some(self.session_manager.oxide_export_dialog.as_ref(), |surface, _| {
+                surface.child(self.render_oxide_export_dialog(cx))
+            })
             .when_some(
                 self.session_manager
                 .row_context_menu_connection_id
@@ -96,10 +102,17 @@ impl WorkspaceApp {
         }
         match key {
             "escape" => {
-                if input == SessionManagerInput::AutoRouteDisplayName {
-                    self.close_auto_route_modal(cx);
-                } else {
-                    self.session_manager.focused_input = None;
+                match input {
+                    SessionManagerInput::AutoRouteDisplayName => self.close_auto_route_modal(cx),
+                    SessionManagerInput::OxideImportPassword
+                    | SessionManagerInput::OxideExportPassword
+                    | SessionManagerInput::OxideExportConfirmPassword
+                    | SessionManagerInput::OxideExportDescription => {
+                        self.session_manager.focused_input = None;
+                    }
+                    _ => {
+                        self.session_manager.focused_input = None;
+                    }
                 }
                 self.ime_marked_text = None;
                 cx.notify();
@@ -115,13 +128,41 @@ impl WorkspaceApp {
             }
             "backspace" => {
                 match input {
-                    SessionManagerInput::Search => self.session_manager.search_query.pop(),
-                    SessionManagerInput::SavedSearch => {
-                        self.session_manager.saved_search_query.pop()
+                    SessionManagerInput::Search => {
+                        self.session_manager.search_query.pop();
                     }
-                    SessionManagerInput::NewGroup => self.session_manager.new_group_name.pop(),
+                    SessionManagerInput::SavedSearch => {
+                        self.session_manager.saved_search_query.pop();
+                    }
+                    SessionManagerInput::NewGroup => {
+                        self.session_manager.new_group_name.pop();
+                    }
                     SessionManagerInput::AutoRouteDisplayName => {
-                        self.auto_route_modal.display_name.pop()
+                        self.auto_route_modal.display_name.pop();
+                    }
+                    SessionManagerInput::OxideImportPassword => {
+                        if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
+                            dialog.password.pop();
+                            dialog.error = None;
+                        }
+                    }
+                    SessionManagerInput::OxideExportPassword => {
+                        if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
+                            dialog.password.pop();
+                            dialog.error = None;
+                        }
+                    }
+                    SessionManagerInput::OxideExportConfirmPassword => {
+                        if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
+                            dialog.confirm_password.pop();
+                            dialog.error = None;
+                        }
+                    }
+                    SessionManagerInput::OxideExportDescription => {
+                        if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
+                            dialog.description.pop();
+                            dialog.error = None;
+                        }
                     }
                 };
                 if input == SessionManagerInput::Search {

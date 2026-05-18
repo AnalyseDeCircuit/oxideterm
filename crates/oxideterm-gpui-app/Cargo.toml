@@ -45,6 +45,7 @@ oxideterm-workspace = { path = "../oxideterm-workspace" }
 oxideterm-wsl-graphics = { path = "../oxideterm-wsl-graphics" }
 parking_lot.workspace = true
 regex.workspace = true
+redb = "2.1"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

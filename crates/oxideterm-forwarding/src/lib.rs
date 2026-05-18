@@ -34,6 +34,7 @@ pub use profiler::PortDetectionProfiler;
 pub use registry::ForwardingRegistry;
 pub use saved::{
     ApplySavedForwardsSyncSnapshotResult, DeletedPersistedForwardTombstone,
-    FORWARD_TOMBSTONE_RETENTION_DAYS, PersistedForward, PersistedForwardDto, SavedForwardError,
-    SavedForwardStore, SavedForwardSyncRecord, SavedForwardsSyncSnapshot,
+    FORWARD_TOMBSTONE_RETENTION_DAYS, OwnedForwardImportRecord, PersistedForward,
+    PersistedForwardDto, SavedForwardError, SavedForwardStore, SavedForwardSyncRecord,
+    SavedForwardsSyncSnapshot,
 };

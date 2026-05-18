@@ -23,6 +23,8 @@ pub(crate) enum LucideIcon {
     Bot,
     Brain,
     Check,
+    CheckCircle,
+    CheckSquare,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
@@ -139,6 +141,8 @@ impl LucideIcon {
             Self::Bot => "lucide/bot.svg",
             Self::Brain => "lucide/brain.svg",
             Self::Check => "lucide/check.svg",
+            Self::CheckCircle => "lucide/check-circle.svg",
+            Self::CheckSquare => "lucide/check-square.svg",
             Self::ChevronDown => "lucide/chevron-down.svg",
             Self::ChevronLeft => "lucide/chevron-left.svg",
             Self::ChevronRight => "lucide/chevron-right.svg",
@@ -259,6 +263,8 @@ impl AssetSource for NativeAssets {
             "lucide/bot.svg" => BOT,
             "lucide/brain.svg" => BRAIN,
             "lucide/check.svg" => CHECK,
+            "lucide/check-circle.svg" => CHECK_CIRCLE,
+            "lucide/check-square.svg" => CHECK_SQUARE,
             "lucide/chevron-down.svg" => CHEVRON_DOWN,
             "lucide/chevron-left.svg" => CHEVRON_LEFT,
             "lucide/chevron-right.svg" => CHEVRON_RIGHT,
@@ -386,6 +392,8 @@ impl AssetSource for NativeAssets {
                 "bot.svg",
                 "brain.svg",
                 "check.svg",
+                "check-circle.svg",
+                "check-square.svg",
                 "chevron-down.svg",
                 "chevron-left.svg",
                 "chevron-right.svg",
@@ -512,6 +520,8 @@ const BELL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height=
 const BOOK_OPEN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>"#;
 const BOT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>"#;
 const CHECK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"#;
+const CHECK_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>"#;
+const CHECK_SQUARE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><rect width="18" height="18" x="3" y="3" rx="2"/></svg>"#;
 const CHEVRON_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"#;
 const CHEVRON_LEFT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"#;
 const CHEVRON_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;

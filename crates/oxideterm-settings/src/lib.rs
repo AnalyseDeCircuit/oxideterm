@@ -4,6 +4,7 @@
 mod migration;
 mod model;
 mod normalize;
+mod oxide_snapshot;
 mod store;
 
 pub use migration::{
@@ -13,6 +14,10 @@ pub use migration::{
 };
 pub use model::*;
 pub use normalize::{SanitizedSettings, sanitize_settings_value};
+pub use oxide_snapshot::{
+    ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS, OXIDE_SETTINGS_FORMAT,
+    OXIDE_SETTINGS_VERSION, export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
+};
 pub use store::{
     SETTINGS_FILENAME, SettingsLoadResult, SettingsSaveResult, SettingsStore, default_settings_path,
 };

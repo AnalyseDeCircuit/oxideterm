@@ -126,14 +126,14 @@ impl WorkspaceApp {
                     .child(self.render_toolbar_link_icon(
                         LucideIcon::Download,
                         "sessionManager.toolbar.import",
-                        true,
+                        SessionTransferAction::ImportOxide,
                         show_transfer_labels,
                         cx,
                     ))
                     .child(self.render_toolbar_link_icon(
                         LucideIcon::Upload,
                         "sessionManager.toolbar.export",
-                        false,
+                        SessionTransferAction::ExportOxide,
                         show_transfer_labels,
                         cx,
                     )),

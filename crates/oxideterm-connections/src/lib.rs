@@ -1,5 +1,6 @@
 mod draft;
 mod keychain;
+pub mod oxide_file;
 mod secret;
 mod ssh_config;
 mod ssh_keys;

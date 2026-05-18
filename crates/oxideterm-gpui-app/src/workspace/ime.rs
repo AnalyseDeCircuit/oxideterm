@@ -463,6 +463,26 @@ impl WorkspaceApp {
                         SessionManagerInput::AutoRouteDisplayName => {
                             self.auto_route_modal.display_name.clone()
                         }
+                        SessionManagerInput::OxideImportPassword => self
+                            .session_manager
+                            .oxide_import_dialog
+                            .as_ref()
+                            .map(|dialog| dialog.password.clone())?,
+                        SessionManagerInput::OxideExportPassword => self
+                            .session_manager
+                            .oxide_export_dialog
+                            .as_ref()
+                            .map(|dialog| dialog.password.clone())?,
+                        SessionManagerInput::OxideExportConfirmPassword => self
+                            .session_manager
+                            .oxide_export_dialog
+                            .as_ref()
+                            .map(|dialog| dialog.confirm_password.clone())?,
+                        SessionManagerInput::OxideExportDescription => self
+                            .session_manager
+                            .oxide_export_dialog
+                            .as_ref()
+                            .map(|dialog| dialog.description.clone())?,
                     })
                 } else {
                     None
@@ -651,6 +671,38 @@ impl WorkspaceApp {
                                 replacement_range,
                                 text,
                             );
+                        }
+                        SessionManagerInput::OxideImportPassword => {
+                            if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut()
+                            {
+                                replace_utf16(&mut dialog.password, replacement_range, text);
+                                dialog.error = None;
+                            }
+                        }
+                        SessionManagerInput::OxideExportPassword => {
+                            if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut()
+                            {
+                                replace_utf16(&mut dialog.password, replacement_range, text);
+                                dialog.error = None;
+                            }
+                        }
+                        SessionManagerInput::OxideExportConfirmPassword => {
+                            if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut()
+                            {
+                                replace_utf16(
+                                    &mut dialog.confirm_password,
+                                    replacement_range,
+                                    text,
+                                );
+                                dialog.error = None;
+                            }
+                        }
+                        SessionManagerInput::OxideExportDescription => {
+                            if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut()
+                            {
+                                replace_utf16(&mut dialog.description, replacement_range, text);
+                                dialog.error = None;
+                            }
                         }
                     }
                     cx.notify();

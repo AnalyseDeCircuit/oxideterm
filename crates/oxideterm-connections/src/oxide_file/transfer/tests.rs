@@ -1,0 +1,580 @@
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_store(name: &str) -> ConnectionStore {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-oxide-file-{name}-{}.json",
+            Uuid::new_v4()
+        ));
+        ConnectionStore::load(path).unwrap()
+    }
+
+    fn saved_connection(id: &str, name: &str) -> SavedConnection {
+        SavedConnection {
+            id: id.to_string(),
+            version: CONFIG_VERSION,
+            name: name.to_string(),
+            group: Some("Ops".to_string()),
+            host: "example.com".to_string(),
+            port: 2222,
+            username: "deploy".to_string(),
+            auth: SavedAuth::Key {
+                key_path: "~/.ssh/id_ed25519".to_string(),
+                has_passphrase: true,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: Some(SecretString::from("phrase")),
+            },
+            proxy_chain: vec![SavedProxyHop {
+                host: "jump.example.com".to_string(),
+                port: 22,
+                username: "jump".to_string(),
+                auth: SavedAuth::Agent,
+                agent_forwarding: false,
+            }],
+            options: ConnectionOptions {
+                keep_alive_interval: 30,
+                compression: true,
+                jump_host: None,
+                term_type: Some("xterm-256color".to_string()),
+                agent_forwarding: true,
+            },
+            created_at: Utc::now(),
+            last_used_at: None,
+            updated_at: Some(Utc::now()),
+            color: Some("#ff6a00".to_string()),
+            tags: vec!["prod".to_string()],
+        }
+    }
+
+    #[test]
+    fn export_import_roundtrip_preserves_connections_and_payload_sections() {
+        let mut source = temp_store("source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions {
+                description: Some("backup".to_string()),
+                app_settings_json: Some(
+                    r#"{"format":"oxide-settings-sections-v1","sectionIds":["ai","localTerminal"],"settings":{"ai":{"enabled":true},"localTerminal":{"customEnvVars":{"FOO":"bar"}}}}"#
+                        .to_string(),
+                ),
+                quick_commands_json: Some(
+                    r#"{"commands":[{"id":"1"}],"categories":[{}]}"#.to_string(),
+                ),
+                forwards: vec![OxideForwardRecord {
+                    connection_id: "conn-1".to_string(),
+                    forward_type: "local".to_string(),
+                    bind_address: "127.0.0.1".to_string(),
+                    bind_port: 8080,
+                    target_host: "127.0.0.1".to_string(),
+                    target_port: 80,
+                    description: Some("web".to_string()),
+                    auto_start: true,
+                }],
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        assert_eq!(file.metadata.num_connections, 1);
+        assert_eq!(file.metadata.quick_commands_count, Some(1));
+        assert_eq!(file.metadata.quick_command_categories_count, Some(1));
+
+        let preview = preview_oxide_import(
+            &temp_store("preview"),
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(preview.total_connections, 1);
+        assert_eq!(preview.unchanged, vec!["Prod".to_string()]);
+        assert_eq!(preview.total_forwards, 1);
+        assert_eq!(preview.forward_details.len(), 1);
+        assert_eq!(
+            preview.forward_details[0].description,
+            "web (L:8080 -> 127.0.0.1:80)"
+        );
+        assert_eq!(preview.records.len(), 1);
+        assert_eq!(preview.records[0].action, "import");
+        assert_eq!(preview.records[0].reason_code, "new-connection");
+        assert!(preview.has_quick_commands);
+        assert_eq!(
+            preview.app_settings_section_ids,
+            vec!["localTerminal".to_string()]
+        );
+        assert!(preview.app_settings_contains_local_terminal_env_vars);
+
+        let mut target = temp_store("target");
+        let result = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(result.imported, 1);
+        assert_eq!(result.imported_forwards, 1);
+        assert_eq!(result.forward_records.len(), 1);
+        assert_eq!(result.forward_records[0].forward_type, "local");
+        assert!(result.quick_commands_json.is_some());
+
+        let imported = target.connections().first().unwrap();
+        assert_eq!(imported.name, "Prod");
+        assert_eq!(imported.host, "example.com");
+        assert_eq!(imported.port, 2222);
+        assert_eq!(imported.options.keep_alive_interval, 30);
+        assert!(imported.options.compression);
+        assert_eq!(imported.proxy_chain.len(), 1);
+        assert!(
+            target
+                .get_connection_passphrase(&imported.id)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn transfer_progress_matches_tauri_stage_lifecycle() {
+        let mut source = temp_store("progress-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+
+        let mut export_progress = Vec::new();
+        let bytes = export_connections_to_oxide_with_progress(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions::default(),
+            |stage, current, total| export_progress.push((stage.to_string(), current, total)),
+        )
+        .unwrap();
+        assert_eq!(
+            export_progress,
+            vec![
+                ("collecting_connections".to_string(), 1, 10),
+                ("collecting_portable_secrets".to_string(), 2, 10),
+                ("computing_checksum".to_string(), 3, 10),
+                ("building_metadata".to_string(), 4, 10),
+                ("generating_salt_nonce".to_string(), 5, 10),
+                ("deriving_key".to_string(), 6, 10),
+                ("serializing_payload".to_string(), 7, 10),
+                ("encrypting_payload".to_string(), 8, 10),
+                ("finalizing_file".to_string(), 9, 10),
+                ("serializing_file".to_string(), 10, 10),
+            ]
+        );
+
+        let mut preview_progress = Vec::new();
+        preview_oxide_import_with_progress(
+            &temp_store("progress-preview"),
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+            |stage, current, total| preview_progress.push((stage.to_string(), current, total)),
+        )
+        .unwrap();
+        assert_eq!(
+            preview_progress,
+            vec![
+                ("parsing_file".to_string(), 1, 8),
+                ("deriving_key".to_string(), 2, 8),
+                ("decrypting_payload".to_string(), 3, 8),
+                ("deserializing_payload".to_string(), 4, 8),
+                ("verifying_checksum".to_string(), 5, 8),
+                ("collecting_existing".to_string(), 6, 8),
+                ("building_preview".to_string(), 7, 8),
+                ("analyzing_preview".to_string(), 8, 8),
+            ]
+        );
+
+        let mut apply_progress = Vec::new();
+        let mut target = temp_store("progress-apply");
+        apply_oxide_import_with_options_with_progress(
+            &mut target,
+            &bytes,
+            "secret!",
+            OxideImportOptions::default(),
+            |stage, current, total| apply_progress.push((stage.to_string(), current, total)),
+        )
+        .unwrap();
+        assert_eq!(
+            apply_progress,
+            vec![
+                ("parsing_file".to_string(), 1, 10),
+                ("deriving_key".to_string(), 2, 10),
+                ("decrypting_payload".to_string(), 3, 10),
+                ("deserializing_payload".to_string(), 4, 10),
+                ("verifying_checksum".to_string(), 5, 10),
+                ("filtering_selection".to_string(), 6, 10),
+                ("collecting_existing".to_string(), 7, 10),
+                ("preparing_connections".to_string(), 8, 10),
+                ("applying_connections".to_string(), 9, 10),
+                ("saving_config".to_string(), 10, 10),
+            ]
+        );
+    }
+
+    #[test]
+    fn rename_strategy_matches_copy_suffix_contract() {
+        let mut store = temp_store("rename");
+        store
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+
+        let payload = vec![EncryptedConnection {
+            name: "Prod".to_string(),
+            group: None,
+            host: "example.org".to_string(),
+            port: 22,
+            username: "me".to_string(),
+            auth: EncryptedAuth::Agent,
+            color: None,
+            tags: Vec::new(),
+            options: ConnectionOptions::default(),
+            proxy_chain: Vec::new(),
+            forwards: Vec::new(),
+        }];
+
+        let plans = plan_import(&store, &payload, ImportConflictStrategy::Rename);
+        assert!(matches!(
+            plans.first(),
+            Some(PlannedImportAction::Rename(name)) if name == "Prod (Copy)"
+        ));
+    }
+
+    #[test]
+    fn replace_strategy_only_replaces_first_same_name_record() {
+        let mut store = temp_store("replace-duplicate");
+        store
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+
+        let payload = vec![
+            encrypted_agent_connection("Prod", "one.example.com"),
+            encrypted_agent_connection("Prod", "two.example.com"),
+        ];
+
+        let plans = plan_import(&store, &payload, ImportConflictStrategy::Replace);
+        assert!(matches!(
+            plans.first(),
+            Some(PlannedImportAction::Replace(_))
+        ));
+        assert!(matches!(
+            plans.get(1),
+            Some(PlannedImportAction::Rename(name)) if name == "Prod (Copy)"
+        ));
+    }
+
+    #[test]
+    fn export_missing_connection_id_errors_like_tauri() {
+        let source = temp_store("missing-export-id");
+        let error = export_connections_to_oxide(
+            &source,
+            &["missing".to_string()],
+            "secret!",
+            OxideExportOptions::default(),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("Connection missing not found"));
+    }
+
+    #[test]
+    fn export_quick_command_metadata_counts_are_optional_like_tauri() {
+        let mut source = temp_store("quick-command-metadata");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions {
+                quick_commands_json: Some(r#"{"commands":[]}"#.to_string()),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+
+        assert_eq!(file.metadata.has_quick_commands, Some(true));
+        assert_eq!(file.metadata.quick_commands_count, None);
+        assert_eq!(file.metadata.quick_command_categories_count, None);
+    }
+
+    #[test]
+    fn export_converts_legacy_jump_host_to_proxy_chain() {
+        let mut source = temp_store("legacy-jump-export");
+        let mut jump = saved_connection("jump-1", "Jump");
+        jump.host = "jump.example.com".to_string();
+        jump.username = "jump".to_string();
+        jump.proxy_chain.clear();
+        source.upsert_imported_connection(jump).unwrap();
+
+        let mut target = saved_connection("target-1", "Target");
+        target.proxy_chain.clear();
+        target.options.jump_host = Some("jump-1".to_string());
+        source.upsert_imported_connection(target).unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["target-1".to_string()],
+            "secret!",
+            OxideExportOptions::default(),
+        )
+        .unwrap();
+        let payload = decrypt_payload(&bytes, "secret!").unwrap();
+        let exported = payload.connections.first().unwrap();
+
+        assert_eq!(exported.proxy_chain.len(), 1);
+        assert_eq!(exported.proxy_chain[0].host, "jump.example.com");
+        assert_eq!(exported.proxy_chain[0].username, "jump");
+        assert_eq!(exported.options.jump_host.as_deref(), Some("jump-1"));
+    }
+
+    #[test]
+    fn preflight_does_not_count_proxy_auth_kinds() {
+        let mut source = temp_store("preflight-proxy-counts");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+
+        let result = preflight_export(&source, &["conn-1".to_string()], false, 0);
+
+        assert_eq!(result.connections_with_keys, 1);
+        assert_eq!(result.connections_with_agent, 0);
+        assert_eq!(result.connections_with_passwords, 0);
+    }
+
+    #[test]
+    fn import_options_filter_selection_and_skip_forward_persistence() {
+        let mut source = temp_store("selected-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+        source
+            .upsert_imported_connection(saved_connection("conn-2", "Staging"))
+            .unwrap();
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string(), "conn-2".to_string()],
+            "secret!",
+            OxideExportOptions {
+                forwards: vec![
+                    OxideForwardRecord {
+                        connection_id: "conn-1".to_string(),
+                        forward_type: "local".to_string(),
+                        bind_address: "127.0.0.1".to_string(),
+                        bind_port: 8080,
+                        target_host: "127.0.0.1".to_string(),
+                        target_port: 80,
+                        description: Some("prod".to_string()),
+                        auto_start: true,
+                    },
+                    OxideForwardRecord {
+                        connection_id: "conn-2".to_string(),
+                        forward_type: "remote".to_string(),
+                        bind_address: "127.0.0.1".to_string(),
+                        bind_port: 9090,
+                        target_host: "127.0.0.1".to_string(),
+                        target_port: 90,
+                        description: Some("staging".to_string()),
+                        auto_start: false,
+                    },
+                ],
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+
+        let mut target = temp_store("selected-target");
+        let result = apply_oxide_import_with_options(
+            &mut target,
+            &bytes,
+            "secret!",
+            OxideImportOptions {
+                selected_names: Some(vec!["Prod".to_string()]),
+                import_forwards: false,
+                ..OxideImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.imported, 1);
+        assert_eq!(target.connections().len(), 1);
+        assert_eq!(target.connections()[0].name, "Prod");
+        assert_eq!(result.imported_forwards, 0);
+        assert_eq!(result.skipped_forwards, 1);
+        assert!(result.forward_records.is_empty());
+    }
+
+    #[test]
+    fn renamed_import_counts_as_imported_like_tauri() {
+        let mut source = temp_store("rename-count-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions::default(),
+        )
+        .unwrap();
+
+        let mut target = temp_store("rename-count-target");
+        target
+            .upsert_imported_connection(saved_connection("existing", "Prod"))
+            .unwrap();
+        let result = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+
+        assert_eq!(result.imported, 1);
+        assert_eq!(result.renamed, 1);
+        assert_eq!(target.connections().len(), 2);
+        assert!(
+            target
+                .connections()
+                .iter()
+                .any(|connection| connection.name == "Prod (Copy)")
+        );
+    }
+
+    #[test]
+    fn replace_and_merge_import_report_forward_owner_operations() {
+        let mut source = temp_store("forward-op-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions {
+                forwards: vec![OxideForwardRecord {
+                    connection_id: "conn-1".to_string(),
+                    forward_type: "local".to_string(),
+                    bind_address: "127.0.0.1".to_string(),
+                    bind_port: 8080,
+                    target_host: "127.0.0.1".to_string(),
+                    target_port: 80,
+                    description: None,
+                    auto_start: true,
+                }],
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+
+        let mut replace_target = temp_store("forward-op-replace");
+        replace_target
+            .upsert_imported_connection(saved_connection("existing", "Prod"))
+            .unwrap();
+        let replaced = apply_oxide_import(
+            &mut replace_target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Replace,
+        )
+        .unwrap();
+        assert_eq!(
+            replaced.forward_replace_owner_ids,
+            vec!["existing".to_string()]
+        );
+        assert!(replaced.forward_merge_owner_ids.is_empty());
+
+        let mut merge_target = temp_store("forward-op-merge");
+        merge_target
+            .upsert_imported_connection(saved_connection("existing", "Prod"))
+            .unwrap();
+        let merged = apply_oxide_import(
+            &mut merge_target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Merge,
+        )
+        .unwrap();
+        assert_eq!(merged.forward_merge_owner_ids, vec!["existing".to_string()]);
+        assert!(merged.forward_replace_owner_ids.is_empty());
+    }
+
+    #[test]
+    fn import_portable_secrets_default_skip_and_opt_in_import() {
+        let mut source = temp_store("portable-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions {
+                portable_secrets: vec![EncryptedPortableSecret {
+                    kind: "ai_provider_key".to_string(),
+                    id: "deepseek".to_string(),
+                    secret: Zeroizing::new("sk-test".to_string()),
+                }],
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+
+        let mut default_target = temp_store("portable-default-target");
+        let skipped = apply_oxide_import_with_options(
+            &mut default_target,
+            &bytes,
+            "secret!",
+            OxideImportOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(skipped.imported_portable_secrets, 0);
+        assert_eq!(skipped.skipped_portable_secrets, 1);
+        assert!(skipped.portable_secrets.is_empty());
+
+        let mut opt_in_target = temp_store("portable-opt-in-target");
+        let imported = apply_oxide_import_with_options(
+            &mut opt_in_target,
+            &bytes,
+            "secret!",
+            OxideImportOptions {
+                import_portable_secrets: true,
+                ..OxideImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(imported.imported_portable_secrets, 1);
+        assert_eq!(imported.skipped_portable_secrets, 0);
+        assert_eq!(imported.portable_secrets.len(), 1);
+    }
+
+    fn encrypted_agent_connection(name: &str, host: &str) -> EncryptedConnection {
+        EncryptedConnection {
+            name: name.to_string(),
+            group: None,
+            host: host.to_string(),
+            port: 22,
+            username: "me".to_string(),
+            auth: EncryptedAuth::Agent,
+            color: None,
+            tags: Vec::new(),
+            options: ConnectionOptions::default(),
+            proxy_chain: Vec::new(),
+            forwards: Vec::new(),
+        }
+    }
+}

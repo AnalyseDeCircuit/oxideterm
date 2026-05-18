@@ -135,6 +135,57 @@ impl AiProviderKeyStore {
         }
     }
 
+    pub fn get_provider_keys(
+        &self,
+        provider_ids: &[String],
+    ) -> Result<Vec<(String, Zeroizing<String>)>> {
+        let mut secrets = Vec::new();
+        let mut missing = Vec::new();
+        {
+            let cache = self.cache.read();
+            for provider_id in provider_ids {
+                if let Some(cached) = cache.get(provider_id) {
+                    secrets.push((provider_id.clone(), Zeroizing::new(cached.to_string())));
+                } else {
+                    missing.push(provider_id.clone());
+                }
+            }
+        }
+
+        if missing.is_empty() {
+            return Ok(secrets);
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if crate::touch_id::is_biometric_available() {
+                crate::touch_id::authenticate(AI_KEYCHAIN_TOUCH_ID_REASON)
+                    .map_err(anyhow::Error::msg)
+                    .context("failed to authenticate AI provider key export")?;
+            }
+
+            for provider_id in missing {
+                if let Some(secret) = self.load_provider_key_from_macos_after_auth(&provider_id)? {
+                    self.cache
+                        .write()
+                        .insert(provider_id.clone(), Zeroizing::new(secret.to_string()));
+                    secrets.push((provider_id, secret));
+                }
+            }
+            return Ok(secrets);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            for provider_id in missing {
+                if let Some(secret) = self.get_provider_key(&provider_id)? {
+                    secrets.push((provider_id, secret));
+                }
+            }
+            Ok(secrets)
+        }
+    }
+
     fn begin_provider_key_read(&self, provider_id: &str) -> ProviderKeyReadTicket {
         let mut reads = self
             .in_flight_reads
@@ -198,23 +249,7 @@ impl AiProviderKeyStore {
                     })?;
             }
 
-            let account = self.account(provider_id);
-            if let Ok(secret) = mac_keychain::get(&self.service, &account) {
-                return Ok(Some(Zeroizing::new(secret)));
-            }
-
-            match self.entry(provider_id)?.get_password() {
-                Ok(secret) => {
-                    // Older native builds used keyring's default macOS ACL. After
-                    // the explicit biometric gate succeeds, migrate to Tauri's
-                    // `security -A` storage so future reads avoid binary ACL prompts.
-                    let _ = mac_keychain::store(&self.service, &account, &secret);
-                    Ok(Some(Zeroizing::new(secret)))
-                }
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(error) => Err(error)
-                    .with_context(|| format!("failed to load AI provider key for {provider_id}")),
-            }
+            self.load_provider_key_from_macos_after_auth(provider_id)
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -225,6 +260,30 @@ impl AiProviderKeyStore {
                 Err(error) => Err(error)
                     .with_context(|| format!("failed to load AI provider key for {provider_id}")),
             }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn load_provider_key_from_macos_after_auth(
+        &self,
+        provider_id: &str,
+    ) -> Result<Option<Zeroizing<String>>> {
+        let account = self.account(provider_id);
+        if let Ok(secret) = mac_keychain::get(&self.service, &account) {
+            return Ok(Some(Zeroizing::new(secret)));
+        }
+
+        match self.entry(provider_id)?.get_password() {
+            Ok(secret) => {
+                // Older native builds used keyring's default macOS ACL. After
+                // the explicit biometric gate succeeds, migrate to Tauri's
+                // `security -A` storage so future reads avoid binary ACL prompts.
+                let _ = mac_keychain::store(&self.service, &account, &secret);
+                Ok(Some(Zeroizing::new(secret)))
+            }
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error)
+                .with_context(|| format!("failed to load AI provider key for {provider_id}")),
         }
     }
 

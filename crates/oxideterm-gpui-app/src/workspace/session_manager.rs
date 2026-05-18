@@ -1,13 +1,26 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    time::Duration,
+};
 
+use crate::workspace::quick_commands::QuickCommandImportStrategy;
 use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
-    SavedProxyHop, SecretString, SshConfigHost, list_ssh_config_hosts, resolve_ssh_config_alias,
-    save_request_from_draft, saved_connection_from_ssh_host,
+    SavedProxyHop, SecretString, SshConfigHost, list_ssh_config_hosts,
+    oxide_file::{
+        ExportPreflightResult, ImportConflictStrategy, ImportPreview, ImportResultEnvelope,
+        OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord, OxideImportOptions,
+        OxideMetadata, apply_oxide_import_with_options_with_progress,
+        export_connections_to_oxide_with_progress, preflight_export,
+        preview_oxide_import_with_progress,
+    },
+    resolve_ssh_config_alias, save_request_from_draft, saved_connection_from_ssh_host,
 };
+use oxideterm_forwarding::{ForwardType, OwnedForwardImportRecord, PersistedForward};
 use oxideterm_gpui_ui::{
     IconBadgeMetrics, TauriTableCellOptions, TauriTableCellStyle, TauriTableColors,
     TauriTableMetrics,
@@ -19,6 +32,10 @@ use oxideterm_gpui_ui::{
     tauri_table_cell, tauri_table_checkbox_cell, tauri_table_header, tauri_table_row,
     tauri_table_sort_header, tauri_table_spacer_cell,
     text_input::{text_caret, text_input_anchor_probe},
+};
+use oxideterm_settings::{
+    ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS,
+    export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
 };
 use oxideterm_ssh::{AuthMethod, ProxyHopConfig};
 
@@ -60,6 +77,26 @@ const MANAGER_ROW_MENU_HEIGHT: f32 = 112.0;
 const MANAGER_ROW_CONTEXT_MENU_HEIGHT: f32 = 180.0;
 const MANAGER_RESPONSIVE_SM: f32 = 640.0;
 const MANAGER_RESPONSIVE_MD: f32 = 768.0;
+const OXIDE_APP_SETTINGS_SECTIONS: &[&str] = ALL_OXIDE_SETTINGS_SECTIONS;
+const OXIDE_MODAL_WIDTH: f32 = 672.0; // Tauri max-w-2xl
+const OXIDE_MODAL_MAX_HEIGHT_RATIO: f32 = 0.85; // Tauri max-h-[85vh]
+const OXIDE_MODAL_HEADER_PX: f32 = 24.0; // Tauri px-6
+const OXIDE_MODAL_HEADER_PY: f32 = 16.0; // Tauri py-4
+const OXIDE_MODAL_BODY_P: f32 = 24.0; // Tauri p-6
+const OXIDE_MODAL_SECTION_GAP: f32 = 16.0; // Tauri space-y-4
+const OXIDE_MODAL_CARD_P: f32 = 12.0; // Tauri p-3
+const OXIDE_MODAL_LIST_MAX_H: f32 = 256.0; // Tauri max-h-64
+const OXIDE_MODAL_FORWARDS_MAX_H: f32 = 208.0; // Tauri max-h-52
+const OXIDE_BLUE_500: u32 = 0x3b82f6;
+const OXIDE_GREEN_500: u32 = 0x22c55e;
+const OXIDE_YELLOW_500: u32 = 0xeab308;
+const OXIDE_RED_500: u32 = 0xef4444;
+const OXIDE_ORANGE_500: u32 = 0xf97316;
+const OXIDE_SLATE_400: u32 = 0x94a3b8;
+const OXIDE_TONE_BG_ALPHA: u32 = 0x1a; // Tauri *-500/10
+const OXIDE_TONE_BORDER_ALPHA: u32 = 0x33; // Tauri *-500/20
+const OXIDE_SUBCARD_BG_ALPHA: u32 = 0x99; // Tauri bg-theme-bg-elevated/60 and bg-theme-bg/60
+const OXIDE_NEW_BADGE_BG_ALPHA: u32 = 0x26; // Tauri bg-green-500/15
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum SessionManagerInput {
@@ -67,6 +104,10 @@ pub(super) enum SessionManagerInput {
     SavedSearch,
     NewGroup,
     AutoRouteDisplayName,
+    OxideImportPassword,
+    OxideExportPassword,
+    OxideExportConfirmPassword,
+    OxideExportDescription,
 }
 
 impl SessionManagerInput {
@@ -76,6 +117,10 @@ impl SessionManagerInput {
             Self::SavedSearch => 2,
             Self::NewGroup => 3,
             Self::AutoRouteDisplayName => 4,
+            Self::OxideImportPassword => 5,
+            Self::OxideExportPassword => 6,
+            Self::OxideExportConfirmPassword => 7,
+            Self::OxideExportDescription => 8,
         }
     }
 }
@@ -95,6 +140,59 @@ pub(super) enum SessionSortField {
 pub(super) enum SortDirection {
     Asc,
     Desc,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SessionTransferAction {
+    ImportOxide,
+    ExportOxide,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct OxideImportResultView {
+    pub(super) imported: usize,
+    pub(super) skipped: usize,
+    pub(super) merged: usize,
+    pub(super) replaced: usize,
+    pub(super) renamed: usize,
+    pub(super) renames: Vec<(String, String)>,
+    pub(super) errors: Vec<String>,
+    pub(super) imported_forwards: usize,
+    pub(super) skipped_forwards: usize,
+    pub(super) imported_app_settings: bool,
+    pub(super) skipped_app_settings: bool,
+    pub(super) imported_quick_commands: usize,
+    pub(super) skipped_quick_commands: bool,
+    pub(super) quick_commands_errors: Vec<String>,
+    pub(super) imported_plugin_settings: usize,
+    pub(super) skipped_plugin_settings: bool,
+    pub(super) imported_portable_secrets: usize,
+    pub(super) skipped_portable_secrets: usize,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct OxideTransferProgress {
+    pub(super) stage: String,
+    pub(super) current: usize,
+    pub(super) total: usize,
+}
+
+impl OxideTransferProgress {
+    pub(super) fn new(stage: impl Into<String>, current: usize, total: usize) -> Self {
+        Self {
+            stage: stage.into(),
+            current,
+            total,
+        }
+    }
+
+    pub(super) fn percent(&self) -> usize {
+        if self.total == 0 {
+            0
+        } else {
+            ((self.current.min(self.total) * 100) / self.total).min(100)
+        }
+    }
 }
 
 impl SortDirection {
@@ -128,6 +226,8 @@ pub(super) struct SessionManagerState {
     pub(super) ssh_config_hosts: Vec<SshConfigHost>,
     pub(super) selected_import_aliases: HashSet<String>,
     pub(super) show_batch_move: bool,
+    pub(super) oxide_import_dialog: Option<OxideImportDialogState>,
+    pub(super) oxide_export_dialog: Option<OxideExportDialogState>,
     pub(super) status: Option<String>,
 }
 
@@ -154,7 +254,127 @@ impl Default for SessionManagerState {
             ssh_config_hosts: Vec::new(),
             selected_import_aliases: HashSet::new(),
             show_batch_move: false,
+            oxide_import_dialog: None,
+            oxide_export_dialog: None,
             status: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct OxideImportDialogState {
+    pub(super) file_path: Option<PathBuf>,
+    pub(super) file_data: Option<Vec<u8>>,
+    pub(super) metadata_summary: Option<String>,
+    pub(super) metadata: Option<OxideMetadata>,
+    pub(super) password: String,
+    pub(super) conflict_strategy: ImportConflictStrategy,
+    pub(super) preview: Option<ImportPreview>,
+    pub(super) selected_names: HashSet<String>,
+    pub(super) import_app_settings: bool,
+    pub(super) selected_app_settings_sections: HashSet<String>,
+    pub(super) expanded_app_settings_sections: HashSet<String>,
+    pub(super) import_quick_commands: bool,
+    pub(super) import_plugin_settings: bool,
+    pub(super) selected_plugin_ids: HashSet<String>,
+    pub(super) import_forwards: bool,
+    pub(super) import_portable_secrets: bool,
+    pub(super) busy: bool,
+    pub(super) operation_generation: u64,
+    pub(super) progress_stage: Option<OxideTransferProgress>,
+    pub(super) error: Option<String>,
+    pub(super) result_summary: Option<String>,
+    pub(super) result: Option<OxideImportResultView>,
+}
+
+impl Default for OxideImportDialogState {
+    fn default() -> Self {
+        Self {
+            file_path: None,
+            file_data: None,
+            metadata_summary: None,
+            metadata: None,
+            password: String::new(),
+            conflict_strategy: ImportConflictStrategy::Rename,
+            preview: None,
+            selected_names: HashSet::new(),
+            import_app_settings: true,
+            selected_app_settings_sections: OXIDE_APP_SETTINGS_SECTIONS
+                .iter()
+                .map(|section| (*section).to_string())
+                .collect(),
+            expanded_app_settings_sections: HashSet::new(),
+            import_quick_commands: true,
+            import_plugin_settings: true,
+            selected_plugin_ids: HashSet::new(),
+            import_forwards: true,
+            import_portable_secrets: false,
+            busy: false,
+            operation_generation: 0,
+            progress_stage: None,
+            error: None,
+            result_summary: None,
+            result: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct OxideExportDialogState {
+    pub(super) selected_ids: HashSet<String>,
+    pub(super) available_forwards: Vec<PersistedForward>,
+    pub(super) selected_forward_ids: HashSet<String>,
+    pub(super) include_app_settings: bool,
+    pub(super) selected_app_settings_sections: HashSet<String>,
+    pub(super) include_local_terminal_env_vars: bool,
+    pub(super) include_quick_commands: bool,
+    pub(super) include_plugin_settings: bool,
+    pub(super) plugin_groups: HashMap<String, usize>,
+    pub(super) selected_plugin_ids: HashSet<String>,
+    pub(super) include_forwards: bool,
+    pub(super) include_portable_secrets: bool,
+    pub(super) embed_keys: bool,
+    pub(super) password: String,
+    pub(super) confirm_password: String,
+    pub(super) description: String,
+    pub(super) busy: bool,
+    pub(super) operation_generation: u64,
+    pub(super) progress_stage: Option<OxideTransferProgress>,
+    pub(super) last_export_timestamp: Option<i64>,
+    pub(super) preflight: Option<ExportPreflightResult>,
+    pub(super) error: Option<String>,
+    pub(super) result_summary: Option<String>,
+}
+
+impl Default for OxideExportDialogState {
+    fn default() -> Self {
+        Self {
+            selected_ids: HashSet::new(),
+            available_forwards: Vec::new(),
+            selected_forward_ids: HashSet::new(),
+            include_app_settings: true,
+            selected_app_settings_sections: DEFAULT_OXIDE_SETTINGS_SECTIONS
+                .iter()
+                .map(|section| (*section).to_string())
+                .collect(),
+            include_local_terminal_env_vars: false,
+            include_quick_commands: true,
+            include_plugin_settings: true,
+            plugin_groups: HashMap::new(),
+            selected_plugin_ids: HashSet::new(),
+            include_forwards: true,
+            include_portable_secrets: false,
+            embed_keys: false,
+            password: String::new(),
+            confirm_password: String::new(),
+            description: String::new(),
+            busy: false,
+            operation_generation: 0,
+            progress_stage: None,
+            last_export_timestamp: None,
+            preflight: None,
+            error: None,
+            result_summary: None,
         }
     }
 }
@@ -164,7 +384,16 @@ include!("session_manager/tree.rs");
 include!("session_manager/table.rs");
 include!("session_manager/controls.rs");
 include!("session_manager/dialogs.rs");
+include!("session_manager/oxide_dialog_common.rs");
+include!("session_manager/oxide_import_dialogs.rs");
+include!("session_manager/oxide_import_preview_dialogs.rs");
+include!("session_manager/oxide_import_result_dialogs.rs");
+include!("session_manager/oxide_export_dialogs.rs");
+include!("session_manager/oxide_export_selection_dialogs.rs");
+include!("session_manager/oxide_export_summary_dialogs.rs");
+include!("session_manager/oxide_dialog_helpers.rs");
 include!("session_manager/actions.rs");
+include!("session_manager/oxide_actions.rs");
 include!("session_manager/helpers.rs");
 include!("session_manager/auto_route.rs");
 include!("session_manager/tests.rs");

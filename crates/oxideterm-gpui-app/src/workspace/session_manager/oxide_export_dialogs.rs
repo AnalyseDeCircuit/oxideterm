@@ -1,0 +1,113 @@
+impl WorkspaceApp {
+    fn render_oxide_export_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let Some(dialog) = self.session_manager.oxide_export_dialog.as_ref() else {
+            return div().into_any_element();
+        };
+        let connection_count = dialog.selected_ids.len();
+        let connections = self.connection_store.connections();
+        dialog_backdrop()
+            .child(
+                div()
+                    .w(px(OXIDE_MODAL_WIDTH))
+                    .max_h(relative(OXIDE_MODAL_MAX_HEIGHT_RATIO))
+                    .flex()
+                    .flex_col()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.bg_panel))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .px(px(OXIDE_MODAL_HEADER_PX))
+                            .py(px(OXIDE_MODAL_HEADER_PY))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .border_b_1()
+                            .border_color(rgb(theme.border))
+                            .child(
+                                div()
+                                    .text_size(px(20.0))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme.text_heading))
+                                    .child("导出配置到 .oxide 文件"),
+                            )
+                            .child(self.render_oxide_close_button(false, cx)),
+                    )
+                    .child(
+                        div()
+                            .id("oxide-export-dialog-scroll")
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .overflow_y_scroll()
+                            .p(px(OXIDE_MODAL_BODY_P))
+                            .flex()
+                            .flex_col()
+                            .gap(px(OXIDE_MODAL_SECTION_GAP))
+                            .child(self.render_oxide_connection_selection(
+                                &connections,
+                                connection_count,
+                                cx,
+                            ))
+                            .child(self.render_oxide_export_options(dialog, cx))
+                            .child(self.render_oxide_export_preflight(
+                                dialog.preflight.clone(),
+                                oxide_export_connection_count(dialog) > 0
+                                    || dialog.include_portable_secrets,
+                                dialog.embed_keys,
+                            ))
+                            .child(self.render_oxide_labeled_input(
+                                "描述（可选）".to_string(),
+                                self.render_session_text_input(
+                                    SessionManagerInput::OxideExportDescription,
+                                    &dialog.description,
+                                    "例如：生产服务器".to_string(),
+                                    cx,
+                                ),
+                            ))
+                            .child(self.render_oxide_option_row(
+                                "嵌入私钥".to_string(),
+                                "包含私钥文件内容以便携带式备份。导入时密钥将被提取到 ~/.ssh/imported/ 目录。".to_string(),
+                                dialog.embed_keys,
+                                cx.listener(|this, _event, _window, cx| {
+                                    if let Some(dialog) =
+                                        this.session_manager.oxide_export_dialog.as_mut()
+                                    {
+                                        dialog.embed_keys = !dialog.embed_keys;
+                                    }
+                                    this.refresh_oxide_export_preflight();
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }),
+                            ))
+                            .child(self.render_oxide_export_content_summary(dialog))
+                            .child(self.render_oxide_export_password_input(dialog, cx))
+                            .child(self.render_oxide_labeled_input(
+                                "确认密码 *".to_string(),
+                                self.render_session_password_input(
+                                    SessionManagerInput::OxideExportConfirmPassword,
+                                    &dialog.confirm_password,
+                                    "重新输入密码".to_string(),
+                                    cx,
+                                ),
+                            ))
+                            .child(self.render_oxide_security_notice(dialog))
+                            .when_some(dialog.progress_stage.clone(), |body, progress| {
+                                body.child(self.render_oxide_progress(progress, Some(dialog.embed_keys)))
+                            })
+                            .when_some(dialog.result_summary.clone(), |body, result| {
+                                body.child(self.render_oxide_status_line(result, false))
+                            })
+                            .when_some(dialog.error.clone(), |body, error| {
+                                body.child(self.render_oxide_error_banner(error))
+                            })
+                            .child(self.render_oxide_export_footer(dialog, cx)),
+                    )
+            )
+            .into_any_element()
+    }
+
+
+}

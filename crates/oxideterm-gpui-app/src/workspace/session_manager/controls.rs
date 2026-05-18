@@ -65,7 +65,7 @@ impl WorkspaceApp {
         &self,
         icon: LucideIcon,
         label_key: &str,
-        opens_import: bool,
+        transfer_action: SessionTransferAction,
         show_label: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -88,8 +88,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if opens_import {
-                        this.open_ssh_config_import(cx);
+                    match transfer_action {
+                        SessionTransferAction::ImportOxide => this.open_oxide_import_dialog(cx),
+                        SessionTransferAction::ExportOxide => this.open_oxide_export_dialog(cx),
                     }
                     cx.stop_propagation();
                 }),
@@ -196,5 +197,20 @@ impl WorkspaceApp {
             },
         )
         .into_any_element()
+    }
+
+    pub(super) fn render_session_password_input(
+        &self,
+        target: SessionManagerInput,
+        value: &str,
+        placeholder: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let masked = if value.is_empty() {
+            String::new()
+        } else {
+            "•".repeat(value.chars().count())
+        };
+        self.render_session_text_input(target, &masked, placeholder, cx)
     }
 }
