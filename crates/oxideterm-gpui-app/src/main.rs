@@ -65,7 +65,14 @@ actions!(
         TerminalRecording,
         PaletteEventLog,
         PaletteAiSidebar,
-        PaletteBroadcast
+        PaletteBroadcast,
+        PaletteDisconnectAll,
+        PaletteReconnectAll,
+        PaletteCancelReconnect,
+        PaletteHealthCheck,
+        PaletteResetPanes,
+        PaletteDetachTerminal,
+        PaletteCleanupDead
     ]
 );
 

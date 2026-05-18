@@ -1,7 +1,8 @@
 impl WorkspaceApp {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Result<Self> {
         let focus_handle = cx.focus_handle();
-        let settings_store = SettingsStore::load_default()?;
+        let mut settings_store = SettingsStore::load_default()?;
+        settings_store.settings_mut().sidebar_ui.zen_mode = false;
         let connection_store = ConnectionStore::load(default_connections_path())?;
         let settings = settings_store.settings().clone();
         let local_shells = scan_shells();
@@ -117,6 +118,8 @@ impl WorkspaceApp {
             terminal_broadcast_menu_open: false,
             terminal_quick_commands_open: false,
             terminal_quick_command_pending: None,
+            detached_local_terminals: HashMap::new(),
+            detached_local_terminals_popover_open: false,
             terminal_cast_player: None,
             terminal_cast_seek_dragging: false,
             command_palette: CommandPaletteState {
@@ -124,6 +127,7 @@ impl WorkspaceApp {
                 raw_query: String::new(),
                 mode: PaletteMode::All,
                 selected_index: 0,
+                scroll_handle: ScrollHandle::new(),
                 ssh_config_hosts: Vec::new(),
                 ssh_config_hosts_loading: false,
                 error: None,
@@ -132,13 +136,15 @@ impl WorkspaceApp {
                 open: false,
                 query: String::new(),
             },
+            settings_reset_confirm_open: false,
             quick_commands: QuickCommandsState::load(settings_store.path()),
             split_drag: None,
             sidebar_resizing: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,
             sidebar_width: settings.sidebar_ui.width as f32,
             ai_sidebar_resizing: false,
-            ai_sidebar_width: settings.sidebar_ui.ai_sidebar_width as f32,
+            ai_sidebar_width: (settings.sidebar_ui.ai_sidebar_width as f32)
+                .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH),
             ai_overlay_window_size: Some(current_window_size(window)),
             ai_overlay_window_bounds_subscription: None,
             knowledge_window_activation_subscription: None,
@@ -166,6 +172,10 @@ impl WorkspaceApp {
             ai_model_selector_provider_online: HashMap::new(),
             ai_model_selector_probe_generations: HashMap::new(),
             ai_chat,
+            ai_chat_list_state: ListState::new(0, ListAlignment::Top, px(AI_CHAT_LIST_OVERDRAW_PX)),
+            ai_chat_list_cache: RefCell::new(AiChatListStateCache::default()),
+            ai_markdown_cache: RefCell::new(AiMarkdownDocumentCache::default()),
+            ai_context_token_cache: RefCell::new(AiContextTokenBreakdownCache::default()),
             ai_chat_store,
             ai_runtime_epoch: uuid::Uuid::new_v4().to_string(),
             ai_command_record_sequence: 0,
@@ -364,6 +374,7 @@ impl WorkspaceApp {
             connection_trace_toasts: HashMap::new(),
             connection_trace_nodes: HashMap::new(),
             connection_trace_attempt_seq: 0,
+            zen_hint_expires_at: None,
             workspace_tooltip: None,
             workspace_tooltip_pending: None,
             workspace_tooltip_generation: 0,

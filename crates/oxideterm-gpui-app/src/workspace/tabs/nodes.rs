@@ -2509,4 +2509,34 @@ impl WorkspaceApp {
             .find(|connection| connection.key == connection_key)
             .map(|connection| readiness_for_connection_state(&connection.state))
     }
+
+    pub(super) fn reconnect_all_link_down_nodes_from_palette(&mut self, cx: &mut Context<Self>) {
+        let link_down_connections = self
+            .ssh_registry
+            .list_connection_summaries()
+            .into_iter()
+            .filter(|summary| summary.state == ConnectionPoolEntryState::LinkDown)
+            .map(|summary| summary.id)
+            .collect::<HashSet<_>>();
+        if link_down_connections.is_empty() {
+            return;
+        }
+
+        let mut node_ids = self
+            .ssh_nodes
+            .keys()
+            .filter(|node_id| {
+                self.node_router
+                    .connection_id_for_node(node_id)
+                    .is_some_and(|connection_id| link_down_connections.contains(&connection_id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        node_ids.sort_by(|left, right| left.0.cmp(&right.0));
+        node_ids.dedup();
+
+        for node_id in node_ids {
+            self.schedule_grace_period_reconnect(&node_id, cx);
+        }
+    }
 }

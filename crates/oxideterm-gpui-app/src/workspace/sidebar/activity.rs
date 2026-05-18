@@ -90,7 +90,11 @@ impl WorkspaceApp {
             bar = bar.child(self.render_activity_icon(section, icon, cx));
         }
 
-        bar.child(div().flex_1())
+        let mut bottom = div()
+            .relative()
+            .flex()
+            .flex_col()
+            .items_center()
             .child(
                 div()
                     .w(px(self.tokens.metrics.divider_width))
@@ -101,7 +105,13 @@ impl WorkspaceApp {
                 bottom_items
                     .into_iter()
                     .map(|(section, icon)| self.render_activity_icon(section, icon, cx)),
-            )
+            );
+        if let Some(popover) = self.render_detached_local_terminals_popover(cx) {
+            bottom = bottom.child(popover);
+        }
+
+        bar.child(div().flex_1())
+            .child(bottom)
             .into_any_element()
     }
 
@@ -135,12 +145,24 @@ impl WorkspaceApp {
                 self.notification_center.event_log.unread_count
             };
             notification_count.saturating_add(event_count)
+        } else if section == SidebarSection::Workspace {
+            self.visible_local_terminal_session_count()
+                .saturating_add(self.detached_local_terminals.len())
+                .min(u32::MAX as usize) as u32
         } else {
             0
         };
         let badge_is_error = section == SidebarSection::Notifications
             && ((!self.notification_center.notifications.dnd_enabled && self.notification_center.notifications.unread_critical_count > 0)
                 || (!self.notification_center.event_log.dnd_enabled && self.notification_center.event_log.unread_errors > 0));
+        let badge_color = if badge_is_error {
+            0xef4444
+        } else if section == SidebarSection::Workspace && !self.detached_local_terminals.is_empty()
+        {
+            0xf59e0b
+        } else {
+            theme.accent
+        };
         div()
             .id(("activity-icon", section as u64))
             .relative()
@@ -196,7 +218,7 @@ impl WorkspaceApp {
                         .items_center()
                         .justify_center()
                         .rounded_full()
-                        .bg(rgb(if badge_is_error { 0xef4444 } else { theme.accent }))
+                        .bg(rgb(badge_color))
                         .text_color(rgb(0xffffff))
                         .text_size(px(9.0))
                         .child(if badge_count > 99 {
@@ -237,10 +259,14 @@ impl WorkspaceApp {
                     } else if section == SidebarSection::Network {
                         this.open_topology_tab(window, cx);
                     } else if section == SidebarSection::Workspace {
-                        // Tauri treats the bottom square as a local-terminal action,
-                        // not as a sidebar content section. Keep the current sidebar
-                        // selection unchanged when it opens a terminal tab.
-                        let _ = this.create_local_terminal_tab(window, cx);
+                        // Tauri treats the bottom square as a local-terminal action.
+                        if !this.detached_local_terminals.is_empty() {
+                            this.detached_local_terminals_popover_open =
+                                !this.detached_local_terminals_popover_open;
+                            cx.notify();
+                        } else {
+                            let _ = this.create_local_terminal_tab(window, cx);
+                        }
                     } else if section == SidebarSection::Files {
                         this.open_file_manager_tab(window, cx);
                     } else if section == SidebarSection::Monitor && cfg!(target_os = "macos") {

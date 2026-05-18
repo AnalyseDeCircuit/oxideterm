@@ -12,9 +12,12 @@ const COMMAND_PALETTE_WIDTH: f32 = 560.0;
 const COMMAND_PALETTE_FALLBACK_TOP: f32 = 96.0;
 const COMMAND_PALETTE_TOP_RATIO: f32 = 0.15;
 const COMMAND_PALETTE_LIST_MAX_HEIGHT: f32 = 400.0;
-const COMMAND_PALETTE_ROW_HEIGHT: f32 = 40.0;
+const COMMAND_PALETTE_INPUT_HEIGHT: f32 = 40.0;
+const COMMAND_PALETTE_ICON_SLOT: f32 = 16.0;
+const COMMAND_PALETTE_ITEM_GAP: f32 = 10.0; // Tauri CommandItem gap-2.5.
 const COMMAND_PALETTE_BACKDROP_ALPHA: u32 = 0x66; // Tauri bg-black/40.
 const COMMAND_PALETTE_SELECTED_ALPHA: u32 = 0x26; // Tauri accent/15.
+const COMMAND_PALETTE_MODE_BADGE_ALPHA: u32 = 0x33; // Tauri accent/20.
 const QUICK_CONNECT_REQUIRES_AT: char = '@';
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,13 +57,20 @@ enum PaletteAction {
     },
     QuickConnectAlias(String),
     Sidebar(SidebarSection),
+    OpenSavedConnections,
     OpenSessionManager,
     OpenConnectionPool,
-    OpenConnectionMonitor,
     OpenTopology,
     OpenPluginManager,
-    OpenNotificationCenter,
     CloseAllTabs,
+    DisconnectAll,
+    ReconnectAll,
+    CancelReconnect,
+    HealthCheck,
+    ResetPanes,
+    DetachTerminal,
+    CleanupDead,
+    ResetSettings,
     ThemeNext(bool),
     CursorStyle(SettingsCursorStyle),
     ToggleFps,
@@ -90,6 +100,9 @@ impl WorkspaceApp {
         self.command_palette.selected_index = 0;
         self.command_palette.error = None;
         self.ime_marked_text = None;
+        self.command_palette
+            .scroll_handle
+            .set_offset(gpui::point(px(0.0), px(0.0)));
         self.load_command_palette_ssh_config_hosts(cx);
         cx.notify();
     }
@@ -164,12 +177,42 @@ impl WorkspaceApp {
                 if count > 0 {
                     self.command_palette.selected_index =
                         (self.command_palette.selected_index + 1).min(count - 1);
+                    self.scroll_selected_command_palette_item_into_view();
                     cx.notify();
                 }
             }
             "arrowup" | "up" => {
                 self.command_palette.selected_index =
                     self.command_palette.selected_index.saturating_sub(1);
+                self.scroll_selected_command_palette_item_into_view();
+                cx.notify();
+            }
+            "pagedown" => {
+                let count = self.filtered_command_palette_items().len();
+                if count > 0 {
+                    self.command_palette.selected_index =
+                        (self.command_palette.selected_index + 8).min(count - 1);
+                    self.scroll_selected_command_palette_item_into_view();
+                }
+                cx.notify();
+            }
+            "pageup" => {
+                self.command_palette.selected_index =
+                    self.command_palette.selected_index.saturating_sub(8);
+                self.scroll_selected_command_palette_item_into_view();
+                cx.notify();
+            }
+            "home" => {
+                self.command_palette.selected_index = 0;
+                self.scroll_selected_command_palette_item_into_view();
+                cx.notify();
+            }
+            "end" => {
+                let count = self.filtered_command_palette_items().len();
+                if count > 0 {
+                    self.command_palette.selected_index = count - 1;
+                    self.scroll_selected_command_palette_item_into_view();
+                }
                 cx.notify();
             }
             "backspace" if !event.keystroke.modifiers.platform => {
@@ -194,7 +237,24 @@ impl WorkspaceApp {
         self.command_palette.mode = mode;
         self.command_palette.selected_index = 0;
         self.command_palette.error = None;
+        self.command_palette
+            .scroll_handle
+            .set_offset(gpui::point(px(0.0), px(0.0)));
         cx.notify();
+    }
+
+    fn scroll_selected_command_palette_item_into_view(&self) {
+        let ranked_items = self.ranked_command_palette_items();
+        if let Some(child_index) =
+            command_palette_scroll_child_index(&ranked_items, self.command_palette.selected_index)
+        {
+            // Tauri cmdk reveals the selected item automatically; GPUI scroll
+            // children include section headings, so we map the selected item
+            // index to the actual scroll child index before requesting reveal.
+            self.command_palette
+                .scroll_handle
+                .scroll_to_item(child_index);
+        }
     }
 
     pub(super) fn handle_shortcuts_modal_key(
@@ -268,13 +328,24 @@ impl WorkspaceApp {
                 self.open_ssh_config_alias_from_palette(alias, window, cx);
             }
             PaletteAction::Sidebar(section) => self.set_sidebar_section(section, cx),
+            PaletteAction::OpenSavedConnections => self.open_session_manager_tab(window, cx),
             PaletteAction::OpenSessionManager => self.open_session_manager_tab(window, cx),
             PaletteAction::OpenConnectionPool => self.open_connection_pool_tab(window, cx),
-            PaletteAction::OpenConnectionMonitor => self.open_connection_monitor_tab(window, cx),
             PaletteAction::OpenTopology => self.open_topology_tab(window, cx),
             PaletteAction::OpenPluginManager => self.open_plugin_manager_tab(window, cx),
-            PaletteAction::OpenNotificationCenter => self.open_notification_center_tab(window, cx),
             PaletteAction::CloseAllTabs => self.close_all_tabs_from_palette(window, cx),
+            PaletteAction::DisconnectAll => self.disconnect_all_ssh_nodes_from_palette(window, cx),
+            PaletteAction::ReconnectAll => self.reconnect_all_link_down_nodes_from_palette(cx),
+            PaletteAction::CancelReconnect => self.cancel_all_reconnects_from_palette(cx),
+            PaletteAction::HealthCheck => self.run_connection_health_check_from_palette(cx),
+            PaletteAction::ResetPanes => self.reset_active_tab_to_single_pane(window, cx),
+            PaletteAction::DetachTerminal => {
+                self.detach_active_local_terminal_from_palette(window, cx);
+            }
+            PaletteAction::CleanupDead => {
+                self.cleanup_dead_local_terminal_sessions_from_palette(cx)
+            }
+            PaletteAction::ResetSettings => self.open_reset_settings_confirm_from_palette(cx),
             PaletteAction::ThemeNext(forward) => self.step_terminal_theme(forward, cx),
             PaletteAction::CursorStyle(cursor_style) => {
                 self.edit_settings(|settings| settings.terminal.cursor_style = cursor_style, cx);
@@ -289,6 +360,134 @@ impl WorkspaceApp {
             }
         }
         cx.notify();
+    }
+
+    pub(super) fn push_command_palette_toast(
+        &self,
+        title: String,
+        description: Option<String>,
+        variant: TerminalNoticeVariant,
+    ) {
+        let _ = self.terminal_notice_tx.send(TerminalNotice {
+            title,
+            description,
+            status_text: None,
+            progress: None,
+            variant,
+        });
+    }
+
+    pub(super) fn i18n_replace(&self, key: &str, replacements: &[(&str, String)]) -> String {
+        let mut text = self.i18n.t(key);
+        for (name, value) in replacements {
+            text = text.replace(&format!("{{{{{name}}}}}"), value);
+        }
+        text
+    }
+
+    pub(super) fn disconnect_all_ssh_nodes_from_palette(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut root_ids = self.node_router.export_tree_snapshot().root_ids;
+        if root_ids.is_empty() {
+            root_ids = self.ssh_nodes.keys().cloned().collect();
+        }
+        root_ids.sort_by(|left, right| left.0.cmp(&right.0));
+        root_ids.dedup();
+
+        let mut disconnected = 0usize;
+        for node_id in root_ids {
+            if self.ssh_nodes.contains_key(&node_id) {
+                self.disconnect_ssh_node(&node_id, window, cx);
+                disconnected += 1;
+            }
+        }
+
+        let _ = disconnected;
+    }
+
+    pub(super) fn cancel_all_reconnects_from_palette(&mut self, cx: &mut Context<Self>) {
+        let active_jobs = self
+            .reconnect_orchestrator
+            .jobs()
+            .into_iter()
+            .filter(|job| job.ended_at.is_none())
+            .map(|job| NodeId::new(job.node_id))
+            .collect::<Vec<_>>();
+        for node_id in active_jobs {
+            self.cancel_reconnect_for_node(&node_id, cx);
+        }
+    }
+
+    pub(super) fn run_connection_health_check_from_palette(&mut self, cx: &mut Context<Self>) {
+        let summaries = self.ssh_registry.list_connection_summaries();
+        let total = summaries.len();
+        let healthy = summaries
+            .iter()
+            .filter(|summary| {
+                matches!(
+                    summary.state,
+                    ConnectionPoolEntryState::Active | ConnectionPoolEntryState::Idle
+                )
+            })
+            .count();
+        self.connection_monitor.pool_stats = Some(self.ssh_registry.monitor_stats());
+        self.connection_monitor.pool_summaries = summaries;
+        self.push_command_palette_toast(
+            self.i18n_replace(
+                "command_palette.health_result",
+                &[
+                    ("healthy", healthy.to_string()),
+                    ("total", total.to_string()),
+                ],
+            ),
+            None,
+            TerminalNoticeVariant::Success,
+        );
+        cx.notify();
+    }
+
+    pub(super) fn open_reset_settings_confirm_from_palette(&mut self, cx: &mut Context<Self>) {
+        self.settings_reset_confirm_open = true;
+        cx.notify();
+    }
+
+    pub(super) fn render_settings_reset_confirm_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        confirm_dialog(
+            &self.tokens,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Danger,
+                title: div()
+                    .child(self.i18n.t("command_palette.cmd_reset_settings"))
+                    .into_any_element(),
+                description: Some(
+                    div()
+                        .child(self.i18n.t("command_palette.confirm_reset_settings"))
+                        .into_any_element(),
+                ),
+                cancel_label: div()
+                    .child(self.i18n.t("common.actions.cancel"))
+                    .into_any_element(),
+                confirm_label: div()
+                    .child(self.i18n.t("command_palette.cmd_reset_settings"))
+                    .into_any_element(),
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.settings_reset_confirm_open = false;
+                cx.stop_propagation();
+                cx.notify();
+            }),
+            cx.listener(|this, _event, _window, cx| {
+                this.settings_reset_confirm_open = false;
+                this.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
+                cx.stop_propagation();
+            }),
+        )
     }
 
     fn record_command_palette_mru(&mut self, id: &str) {
@@ -395,11 +594,17 @@ impl WorkspaceApp {
                 Err(error) => self.command_palette.error = Some(error.to_string()),
             },
             Ok(None) => {
-                self.command_palette.error =
-                    Some(self.i18n.t("command_palette.quick_connect_alias_not_found"));
+                self.command_palette.error = Some(
+                    self.i18n
+                        .t("command_palette.quick_connect_alias_not_found")
+                        .replace("{{alias}}", &alias),
+                );
             }
             Err(error) => {
-                let message = self.i18n.t("command_palette.quick_connect_resolve_failed");
+                let message = self
+                    .i18n
+                    .t("command_palette.quick_connect_resolve_failed")
+                    .replace("{{alias}}", &alias);
                 self.command_palette.error = Some(format!("{message}: {error}"));
             }
         }
@@ -520,14 +725,15 @@ impl WorkspaceApp {
             return None;
         }
         if let Some((username, host, port)) = parse_user_host_port(query) {
+            let target = format!("{username}@{host}:{port}");
             return Some(PaletteItem {
-                id: format!("quick-connect:{query}"),
-                label: self.quick_connect_label(query),
+                id: "quick_connect".to_string(),
+                label: self.quick_connect_label(&target),
                 section: PaletteSection::QuickConnect,
                 icon: LucideIcon::Zap,
-                detail: Some(format!("{username}@{host}:{port}")),
+                detail: None,
                 shortcut: None,
-                value: query.to_string(),
+                value: format!("quick_connect {target}"),
                 action: PaletteAction::QuickConnectHost {
                     username,
                     host,
@@ -548,9 +754,9 @@ impl WorkspaceApp {
                 label: self.quick_connect_label(&alias),
                 section: PaletteSection::QuickConnect,
                 icon: LucideIcon::Zap,
-                detail: Some(self.i18n.t("command_palette.ssh_config_alias")),
+                detail: None,
                 shortcut: None,
-                value: alias.clone(),
+                value: format!("quick_connect {alias}"),
                 action: PaletteAction::QuickConnectAlias(alias),
                 disabled: false,
             });
@@ -665,16 +871,14 @@ impl WorkspaceApp {
     }
 
     fn quick_connect_label(&self, target: &str) -> String {
-        self.i18n
-            .t("command_palette.quick_connect")
-            .replace("{{target}}", target)
+        format!("{}: {target}", self.i18n.t("command_palette.quick_connect"))
     }
 
     pub(super) fn render_command_palette(&self, cx: &mut Context<Self>) -> AnyElement {
         let ranked_items = self.ranked_command_palette_items();
         let (mode, _) = parse_command_palette_mode(&self.command_palette.raw_query);
         let query_text = if self.command_palette.raw_query.is_empty() {
-            self.i18n.t("command_palette.placeholder")
+            self.i18n.t(command_palette_placeholder_key(mode))
         } else {
             self.command_palette.raw_query.clone()
         };
@@ -699,72 +903,90 @@ impl WorkspaceApp {
             );
         }
 
-        let mut panel = dialog_content(&self.tokens)
+        let panel = dialog_content(&self.tokens)
             .w(px(COMMAND_PALETTE_WIDTH))
             .rounded(px(self.tokens.radii.lg))
             .shadow_xl()
             .child(
                 div()
-                    .h(px(48.0))
-                    .px(px(12.0))
                     .flex()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(rgb(self.tokens.ui.border))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Search,
-                        16.0,
-                        rgb(self.tokens.ui.text_muted),
-                    ))
-                    .when(mode != PaletteMode::All, |row| {
-                        row.child(self.render_command_palette_mode_badge(mode))
+                    .flex_col()
+                    .overflow_hidden()
+                    .rounded(px(self.tokens.radii.md))
+                    .bg(rgb(self.tokens.ui.bg))
+                    .child(
+                        div()
+                            .h(px(COMMAND_PALETTE_INPUT_HEIGHT))
+                            .px(px(12.0))
+                            .flex()
+                            .items_center()
+                            .border_b_1()
+                            .border_color(rgb(self.tokens.ui.border))
+                            .when(mode != PaletteMode::All, |row| {
+                                row.child(self.render_command_palette_mode_badge(mode))
+                            })
+                            .child(self.render_command_palette_icon_slot(
+                                LucideIcon::Search,
+                                rgb(self.tokens.ui.text_muted),
+                            ))
+                            .child(
+                                div()
+                                    .ml(px(8.0))
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(px(14.0))
+                                    .line_height(px(20.0))
+                                    .text_color(if self.command_palette.raw_query.is_empty() {
+                                        rgb(self.tokens.ui.text_muted)
+                                    } else {
+                                        rgb(self.tokens.ui.text)
+                                    })
+                                    .child(query_text),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .id("command-palette-scroll")
+                            .max_h(px(COMMAND_PALETTE_LIST_MAX_HEIGHT))
+                            .vertical_scrollbar(&self.command_palette.scroll_handle)
+                            .child(
+                                div()
+                                    .id("command-palette-scroll-area")
+                                    .max_h(px(COMMAND_PALETTE_LIST_MAX_HEIGHT))
+                                    .overflow_y_scroll()
+                                    .track_scroll(&self.command_palette.scroll_handle)
+                                    .py(px(4.0))
+                                    .children(rows),
+                            ),
+                    )
+                    .when_some(self.command_palette.error.as_ref(), |root, error| {
+                        root.child(
+                            div()
+                                .border_t_1()
+                                .border_color(rgb(self.tokens.ui.border))
+                                .px(px(12.0))
+                                .py(px(8.0))
+                                .text_size(px(12.0))
+                                .text_color(rgb(self.tokens.ui.error))
+                                .child(error.clone()),
+                        )
                     })
                     .child(
                         div()
-                            .ml(px(8.0))
-                            .flex_1()
-                            .min_w_0()
-                            .text_size(px(14.0))
-                            .text_color(if self.command_palette.raw_query.is_empty() {
-                                rgb(self.tokens.ui.text_muted)
-                            } else {
-                                rgb(self.tokens.ui.text)
-                            })
-                            .child(query_text),
+                            .border_t_1()
+                            .border_color(rgb(self.tokens.ui.border))
+                            .px(px(12.0))
+                            .py(px(6.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(12.0))
+                            .text_size(px(11.0))
+                            .line_height(px(16.0))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("command_palette.footer_hint")),
                     ),
-            )
-            .child(
-                div()
-                    .max_h(px(COMMAND_PALETTE_LIST_MAX_HEIGHT))
-                    .overflow_y_scrollbar()
-                    .py(px(6.0))
-                    .children(rows),
             );
-        if let Some(error) = self.command_palette.error.as_ref() {
-            panel = panel.child(
-                div()
-                    .border_t_1()
-                    .border_color(rgb(self.tokens.ui.border))
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .text_size(px(12.0))
-                    .text_color(rgb(self.tokens.ui.error))
-                    .child(error.clone()),
-            );
-        }
-        panel = panel.child(
-            div()
-                .border_t_1()
-                .border_color(rgb(self.tokens.ui.border))
-                .px(px(12.0))
-                .py(px(6.0))
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .text_size(px(11.0))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("command_palette.footer_hint")),
-        );
         let palette_top = self
             .ai_overlay_window_size
             .map(|(_, height)| height * COMMAND_PALETTE_TOP_RATIO)
@@ -792,7 +1014,9 @@ impl WorkspaceApp {
             .ml(px(8.0))
             .mr(px(2.0))
             .rounded(px(self.tokens.radii.xs))
-            .bg(rgba((self.tokens.ui.accent << 8) | 0x33))
+            .bg(rgba(
+                (self.tokens.ui.accent << 8) | COMMAND_PALETTE_MODE_BADGE_ALPHA,
+            ))
             .px(px(6.0))
             .py(px(2.0))
             .text_size(px(12.0))
@@ -813,6 +1037,7 @@ impl WorkspaceApp {
             .px(px(12.0))
             .py(px(6.0))
             .text_size(px(12.0))
+            .line_height(px(16.0))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(self.i18n.t(section_label_key(section)))
@@ -827,28 +1052,28 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let selected = index == self.command_palette.selected_index;
         let item = ranked.item.clone();
-        let mut label_column = div().flex().flex_col().min_w_0().gap(px(2.0)).child(
+        let mut label_row = div().flex().flex_1().items_center().min_w_0().child(
             self.render_highlighted_palette_text(&ranked.item.label, &ranked.highlights, selected),
         );
         if let Some(detail) = ranked.item.detail.as_ref() {
-            label_column = label_column.child(
+            label_row = label_row.child(
                 div()
-                    .text_size(px(12.0))
-                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .ml(px(4.0))
+                    .min_w_0()
                     .truncate()
+                    .text_size(px(12.0))
+                    .line_height(px(16.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
                     .child(detail.clone()),
             );
         }
         div()
             .id(("command-palette-row", index))
-            .min_h(px(COMMAND_PALETTE_ROW_HEIGHT))
             .px(px(12.0))
             .py(px(6.0))
-            .mx(px(6.0))
-            .rounded(px(self.tokens.radii.sm))
             .flex()
             .items_center()
-            .gap(px(10.0))
+            .gap(px(COMMAND_PALETTE_ITEM_GAP))
             .bg(if selected {
                 rgba((self.tokens.ui.accent << 8) | COMMAND_PALETTE_SELECTED_ALPHA)
             } else {
@@ -860,6 +1085,14 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.text)
             })
             .cursor(CursorStyle::PointingHand)
+            .on_mouse_move(
+                cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                    if this.command_palette.selected_index != index {
+                        this.command_palette.selected_index = index;
+                        cx.notify();
+                    }
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
@@ -867,16 +1100,15 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
-            .child(Self::render_lucide_icon(
+            .child(self.render_command_palette_icon_slot(
                 ranked.item.icon,
-                16.0,
                 if selected {
                     rgb(self.tokens.ui.accent)
                 } else {
                     rgb(self.tokens.ui.text_muted)
                 },
             ))
-            .child(label_column)
+            .child(label_row)
             .when(ranked.item.disabled, |row| {
                 row.child(
                     div()
@@ -894,17 +1126,29 @@ impl WorkspaceApp {
                 row.child(
                     div()
                         .ml_auto()
-                        .rounded(px(self.tokens.radii.sm))
-                        .border_1()
-                        .border_color(rgb(self.tokens.ui.border))
-                        .px(px(8.0))
-                        .py(px(4.0))
                         .text_size(px(12.0))
+                        .line_height(px(16.0))
                         .font_family("monospace")
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(shortcut.clone()),
                 )
             })
+            .into_any_element()
+    }
+
+    fn render_command_palette_icon_slot(&self, icon: LucideIcon, color: Rgba) -> AnyElement {
+        div()
+            .w(px(COMMAND_PALETTE_ICON_SLOT))
+            .h(px(COMMAND_PALETTE_ICON_SLOT))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(Self::render_lucide_icon(
+                icon,
+                COMMAND_PALETTE_ICON_SLOT,
+                color,
+            ))
             .into_any_element()
     }
 
@@ -914,7 +1158,13 @@ impl WorkspaceApp {
         highlights: &[usize],
         selected: bool,
     ) -> AnyElement {
-        let mut label = div().flex().items_center().min_w_0().text_size(px(14.0));
+        let mut label = div()
+            .flex()
+            .items_center()
+            .min_w_0()
+            .truncate()
+            .text_size(px(14.0))
+            .line_height(px(20.0));
         let highlight_set = highlights.iter().copied().collect::<HashSet<_>>();
         for (index, ch) in text.chars().enumerate() {
             let highlighted = highlight_set.contains(&index);
@@ -1098,6 +1348,25 @@ pub(super) fn parse_command_palette_mode(raw_query: &str) -> (PaletteMode, Strin
     }
 }
 
+fn command_palette_scroll_child_index(
+    ranked_items: &[RankedItem],
+    selected_index: usize,
+) -> Option<usize> {
+    let mut previous_section = None;
+    let mut child_index = 0;
+    for (item_index, ranked) in ranked_items.iter().enumerate() {
+        if previous_section != Some(ranked.item.section) {
+            previous_section = Some(ranked.item.section);
+            child_index += 1;
+        }
+        if item_index == selected_index {
+            return Some(child_index);
+        }
+        child_index += 1;
+    }
+    None
+}
+
 fn rank_palette_section(items: Vec<PaletteItem>, query: &str) -> Vec<RankedItem> {
     let mut ranked = items
         .into_iter()
@@ -1185,13 +1454,22 @@ fn parse_user_host_port(query: &str) -> Option<(String, String, u16)> {
 
 fn section_label_key(section: PaletteSection) -> &'static str {
     match section {
-        PaletteSection::QuickConnect => "command_palette.sections.quick_connect",
-        PaletteSection::Recent => "command_palette.sections.recent",
-        PaletteSection::Commands => "command_palette.sections.commands",
-        PaletteSection::Sessions => "command_palette.sections.sessions",
-        PaletteSection::Connections => "command_palette.sections.connections",
-        PaletteSection::Plugins => "command_palette.sections.plugins",
-        PaletteSection::Help => "command_palette.sections.help",
+        PaletteSection::QuickConnect => "command_palette.quick_connect",
+        PaletteSection::Recent => "command_palette.section_recent",
+        PaletteSection::Commands => "command_palette.section_commands",
+        PaletteSection::Sessions => "command_palette.section_sessions",
+        PaletteSection::Connections => "command_palette.section_connections",
+        PaletteSection::Plugins => "command_palette.section_plugins",
+        PaletteSection::Help => "command_palette.section_help",
+    }
+}
+
+fn command_palette_placeholder_key(mode: PaletteMode) -> &'static str {
+    match mode {
+        PaletteMode::All => "command_palette.placeholder",
+        PaletteMode::Commands => "command_palette.placeholder_commands",
+        PaletteMode::Sessions => "command_palette.placeholder_sessions",
+        PaletteMode::Connections => "command_palette.placeholder_connections",
     }
 }
 
@@ -1214,10 +1492,15 @@ fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
     }
 }
 
-fn keybinding_command(id: &'static str, action_id: &'static str, icon: LucideIcon) -> CommandSpec {
+fn keybinding_command(
+    id: &'static str,
+    label_key: &'static str,
+    action_id: &'static str,
+    icon: LucideIcon,
+) -> CommandSpec {
     CommandSpec {
         id,
-        label_key: Cow::Owned(format!("settings_view.keybindings.actions.{action_id}")),
+        label_key: label_key.into(),
         icon,
         shortcut_action: Some(action_id),
         action: PaletteAction::Keybinding(action_id),
@@ -1226,206 +1509,313 @@ fn keybinding_command(id: &'static str, action_id: &'static str, icon: LucideIco
 
 fn command_palette_specs() -> Vec<CommandSpec> {
     vec![
-        keybinding_command("cmd:new_terminal", "app.newTerminal", LucideIcon::Terminal),
-        keybinding_command("cmd:new_connection", "app.newConnection", LucideIcon::Plus),
-        keybinding_command("cmd:settings", "app.settings", LucideIcon::Settings),
+        keybinding_command(
+            "cmd:new_terminal",
+            "command_palette.cmd_new_terminal",
+            "app.newTerminal",
+            LucideIcon::Terminal,
+        ),
+        keybinding_command(
+            "cmd:new_connection",
+            "command_palette.cmd_new_connection",
+            "app.newConnection",
+            LucideIcon::Plus,
+        ),
+        keybinding_command(
+            "cmd:settings",
+            "command_palette.cmd_settings",
+            "app.settings",
+            LucideIcon::Settings,
+        ),
         keybinding_command(
             "cmd:toggle_sidebar",
+            "command_palette.cmd_toggle_sidebar",
             "app.toggleSidebar",
             LucideIcon::PanelLeft,
         ),
-        keybinding_command("cmd:zen_mode", "app.zenMode", LucideIcon::AppWindow),
+        keybinding_command(
+            "cmd:zen_mode",
+            "command_palette.cmd_zen_mode",
+            "app.zenMode",
+            LucideIcon::AppWindow,
+        ),
         keybinding_command(
             "cmd:toggle_panel",
+            "command_palette.cmd_toggle_panel",
             "palette.eventLog",
             LucideIcon::LayoutList,
         ),
         keybinding_command(
             "cmd:toggle_ai_sidebar",
+            "command_palette.cmd_toggle_ai_sidebar",
             "palette.aiSidebar",
             LucideIcon::PanelLeft,
         ),
-        keybinding_command("cmd:close_tab", "app.closeTab", LucideIcon::X),
+        keybinding_command(
+            "cmd:close_tab",
+            "command_palette.cmd_close_tab",
+            "app.closeTab",
+            LucideIcon::X,
+        ),
         keybinding_command(
             "cmd:split_horizontal",
+            "command_palette.cmd_split_horizontal",
             "split.horizontal",
             LucideIcon::SplitSquareHorizontal,
         ),
         keybinding_command(
             "cmd:split_vertical",
+            "command_palette.cmd_split_vertical",
             "split.vertical",
             LucideIcon::SplitSquareVertical,
         ),
         keybinding_command(
             "cmd:broadcast_toggle",
+            "command_palette.cmd_broadcast_toggle",
             "palette.broadcast",
             LucideIcon::Radio,
         ),
-        keybinding_command("cmd:next_tab", "app.nextTab", LucideIcon::ChevronRight),
-        keybinding_command("cmd:prev_tab", "app.prevTab", LucideIcon::ChevronLeft),
+        keybinding_command(
+            "cmd:next_tab",
+            "command_palette.cmd_next_tab",
+            "app.nextTab",
+            LucideIcon::ChevronRight,
+        ),
+        keybinding_command(
+            "cmd:prev_tab",
+            "command_palette.cmd_prev_tab",
+            "app.prevTab",
+            LucideIcon::ChevronLeft,
+        ),
         keybinding_command(
             "cmd:close_other_tabs",
+            "command_palette.cmd_close_other_tabs",
             "app.closeOtherTabs",
             LucideIcon::Layers,
         ),
         CommandSpec {
             id: "cmd:close_all_tabs",
-            label_key: "command_palette.commands.close_all_tabs".into(),
+            label_key: "command_palette.cmd_close_all_tabs".into(),
             icon: LucideIcon::Layers,
             shortcut_action: None,
             action: PaletteAction::CloseAllTabs,
         },
-        keybinding_command("cmd:go_back", "app.navBack", LucideIcon::ArrowDownRight),
-        keybinding_command("cmd:go_forward", "app.navForward", LucideIcon::ArrowRight),
+        keybinding_command(
+            "cmd:go_back",
+            "command_palette.cmd_go_back",
+            "app.navBack",
+            LucideIcon::ArrowDownRight,
+        ),
+        keybinding_command(
+            "cmd:go_forward",
+            "command_palette.cmd_go_forward",
+            "app.navForward",
+            LucideIcon::ArrowRight,
+        ),
         CommandSpec {
             id: "cmd:open_connection_manager",
-            label_key: "command_palette.commands.open_connection_manager".into(),
+            label_key: "command_palette.cmd_open_connection_manager".into(),
             icon: LucideIcon::FolderOpen,
             shortcut_action: None,
             action: PaletteAction::OpenSessionManager,
         },
         CommandSpec {
             id: "cmd:theme_next",
-            label_key: "command_palette.commands.theme_next".into(),
+            label_key: "command_palette.cmd_theme_next".into(),
             icon: LucideIcon::Sparkles,
             shortcut_action: None,
             action: PaletteAction::ThemeNext(true),
         },
         CommandSpec {
             id: "cmd:theme_prev",
-            label_key: "command_palette.commands.theme_prev".into(),
+            label_key: "command_palette.cmd_theme_prev".into(),
             icon: LucideIcon::Sparkles,
             shortcut_action: None,
             action: PaletteAction::ThemeNext(false),
         },
-        keybinding_command("cmd:font_increase", "app.fontIncrease", LucideIcon::Plus),
+        keybinding_command(
+            "cmd:font_increase",
+            "command_palette.cmd_font_increase",
+            "app.fontIncrease",
+            LucideIcon::Plus,
+        ),
         keybinding_command(
             "cmd:font_decrease",
+            "command_palette.cmd_font_decrease",
             "app.fontDecrease",
             LucideIcon::ArrowDown,
         ),
-        keybinding_command("cmd:font_reset", "app.fontReset", LucideIcon::RotateCcw),
+        keybinding_command(
+            "cmd:font_reset",
+            "command_palette.cmd_font_reset",
+            "app.fontReset",
+            LucideIcon::RotateCcw,
+        ),
         CommandSpec {
             id: "cmd:cursor_block",
-            label_key: "command_palette.commands.cursor_block".into(),
+            label_key: "command_palette.cmd_cursor_block".into(),
             icon: LucideIcon::Square,
             shortcut_action: None,
             action: PaletteAction::CursorStyle(SettingsCursorStyle::Block),
         },
         CommandSpec {
             id: "cmd:cursor_bar",
-            label_key: "command_palette.commands.cursor_bar".into(),
+            label_key: "command_palette.cmd_cursor_bar".into(),
             icon: LucideIcon::Terminal,
             shortcut_action: None,
             action: PaletteAction::CursorStyle(SettingsCursorStyle::Bar),
         },
         CommandSpec {
             id: "cmd:cursor_underline",
-            label_key: "command_palette.commands.cursor_underline".into(),
+            label_key: "command_palette.cmd_cursor_underline".into(),
             icon: LucideIcon::ArrowDown,
             shortcut_action: None,
             action: PaletteAction::CursorStyle(SettingsCursorStyle::Underline),
         },
         CommandSpec {
             id: "cmd:sidebar_sessions",
-            label_key: "command_palette.commands.sidebar_sessions".into(),
+            label_key: "command_palette.cmd_sidebar_sessions".into(),
             icon: LucideIcon::ListTree,
             shortcut_action: None,
             action: PaletteAction::Sidebar(SidebarSection::Sessions),
         },
         CommandSpec {
             id: "cmd:sidebar_saved",
-            label_key: "command_palette.commands.sidebar_saved".into(),
+            label_key: "command_palette.cmd_sidebar_saved".into(),
             icon: LucideIcon::Server,
             shortcut_action: None,
-            action: PaletteAction::Sidebar(SidebarSection::Connections),
+            action: PaletteAction::OpenSavedConnections,
         },
         CommandSpec {
             id: "cmd:sidebar_sftp",
-            label_key: "command_palette.commands.sidebar_sftp".into(),
+            label_key: "command_palette.cmd_sidebar_sftp".into(),
             icon: LucideIcon::HardDrive,
             shortcut_action: None,
             action: PaletteAction::Sidebar(SidebarSection::Terminal),
         },
         CommandSpec {
             id: "cmd:sidebar_forwards",
-            label_key: "command_palette.commands.sidebar_forwards".into(),
+            label_key: "command_palette.cmd_sidebar_forwards".into(),
             icon: LucideIcon::ArrowLeftRight,
             shortcut_action: None,
             action: PaletteAction::Sidebar(SidebarSection::Activity),
         },
         CommandSpec {
             id: "cmd:sidebar_connections",
-            label_key: "command_palette.commands.sidebar_connections".into(),
+            label_key: "command_palette.cmd_sidebar_connections".into(),
             icon: LucideIcon::Network,
             shortcut_action: None,
             action: PaletteAction::Sidebar(SidebarSection::Network),
         },
         CommandSpec {
             id: "cmd:sidebar_ai",
-            label_key: "command_palette.commands.sidebar_ai".into(),
+            label_key: "command_palette.cmd_sidebar_ai".into(),
             icon: LucideIcon::Bot,
             shortcut_action: None,
             action: PaletteAction::Keybinding("palette.aiSidebar"),
         },
         CommandSpec {
             id: "cmd:open_connection_pool",
-            label_key: "command_palette.commands.open_connection_pool".into(),
+            label_key: "command_palette.cmd_open_connection_pool".into(),
             icon: LucideIcon::Activity,
             shortcut_action: None,
             action: PaletteAction::OpenConnectionPool,
         },
         CommandSpec {
-            id: "cmd:open_connection_monitor",
-            label_key: "command_palette.commands.open_connection_monitor".into(),
-            icon: LucideIcon::Gauge,
+            id: "cmd:disconnect_all",
+            label_key: "command_palette.cmd_disconnect_all".into(),
+            icon: LucideIcon::Power,
             shortcut_action: None,
-            action: PaletteAction::OpenConnectionMonitor,
+            action: PaletteAction::DisconnectAll,
+        },
+        CommandSpec {
+            id: "cmd:reconnect_all",
+            label_key: "command_palette.cmd_reconnect_all".into(),
+            icon: LucideIcon::RefreshCw,
+            shortcut_action: None,
+            action: PaletteAction::ReconnectAll,
+        },
+        CommandSpec {
+            id: "cmd:cancel_reconnect",
+            label_key: "command_palette.cmd_cancel_reconnect".into(),
+            icon: LucideIcon::StopCircle,
+            shortcut_action: None,
+            action: PaletteAction::CancelReconnect,
+        },
+        CommandSpec {
+            id: "cmd:health_check",
+            label_key: "command_palette.cmd_health_check".into(),
+            icon: LucideIcon::Activity,
+            shortcut_action: None,
+            action: PaletteAction::HealthCheck,
         },
         CommandSpec {
             id: "cmd:shell_launcher",
-            label_key: "settings_view.keybindings.actions.app.shellLauncher".into(),
+            label_key: "command_palette.cmd_shell_launcher".into(),
             icon: LucideIcon::Terminal,
             shortcut_action: Some("app.shellLauncher"),
             action: PaletteAction::Keybinding("app.shellLauncher"),
         },
         CommandSpec {
+            id: "cmd:detach_terminal",
+            label_key: "command_palette.cmd_detach_terminal".into(),
+            icon: LucideIcon::Archive,
+            shortcut_action: None,
+            action: PaletteAction::DetachTerminal,
+        },
+        CommandSpec {
+            id: "cmd:cleanup_dead",
+            label_key: "command_palette.cmd_cleanup_dead".into(),
+            icon: LucideIcon::Trash2,
+            shortcut_action: None,
+            action: PaletteAction::CleanupDead,
+        },
+        CommandSpec {
             id: "cmd:toggle_fps",
-            label_key: "command_palette.commands.toggle_fps".into(),
+            label_key: "command_palette.cmd_toggle_fps".into(),
             icon: LucideIcon::Gauge,
             shortcut_action: None,
             action: PaletteAction::ToggleFps,
         },
         keybinding_command(
             "cmd:close_pane",
+            "command_palette.cmd_close_pane",
             "split.closePane",
             LucideIcon::PanelLeftClose,
         ),
         keybinding_command(
             "cmd:focus_next_pane",
+            "command_palette.cmd_focus_next_pane",
             "split.navRight",
             LucideIcon::CornerDownLeft,
         ),
         CommandSpec {
+            id: "cmd:reset_panes",
+            label_key: "command_palette.cmd_reset_panes".into(),
+            icon: LucideIcon::Layers,
+            shortcut_action: None,
+            action: PaletteAction::ResetPanes,
+        },
+        CommandSpec {
             id: "cmd:open_plugin_manager",
-            label_key: "command_palette.commands.open_plugin_manager".into(),
+            label_key: "command_palette.cmd_open_plugin_manager".into(),
             icon: LucideIcon::Puzzle,
             shortcut_action: None,
             action: PaletteAction::OpenPluginManager,
         },
         CommandSpec {
             id: "cmd:open_topology",
-            label_key: "command_palette.commands.open_topology".into(),
+            label_key: "command_palette.cmd_open_topology".into(),
             icon: LucideIcon::Network,
             shortcut_action: None,
             action: PaletteAction::OpenTopology,
         },
         CommandSpec {
-            id: "cmd:open_notification_center",
-            label_key: "command_palette.commands.open_notification_center".into(),
-            icon: LucideIcon::Bell,
+            id: "cmd:reset_settings",
+            label_key: "command_palette.cmd_reset_settings".into(),
+            icon: LucideIcon::AlertTriangle,
             shortcut_action: None,
-            action: PaletteAction::OpenNotificationCenter,
+            action: PaletteAction::ResetSettings,
         },
     ]
 }
@@ -1433,7 +1823,7 @@ fn command_palette_specs() -> Vec<CommandSpec> {
 fn help_palette_specs() -> Vec<CommandSpec> {
     vec![CommandSpec {
         id: "cmd:show_shortcuts",
-        label_key: "settings_view.keybindings.actions.app.showShortcuts".into(),
+        label_key: "command_palette.cmd_show_shortcuts".into(),
         icon: LucideIcon::Keyboard,
         shortcut_action: Some("app.showShortcuts"),
         action: PaletteAction::Keybinding("app.showShortcuts"),

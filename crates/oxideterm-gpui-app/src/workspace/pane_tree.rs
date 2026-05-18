@@ -107,6 +107,55 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn reset_active_tab_to_single_pane(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(active_index) = self.active_tab_index() else {
+            return;
+        };
+        let Some(active_pane_id) = self.tabs[active_index].active_pane_id else {
+            return;
+        };
+        let Some(root_pane) = self.tabs[active_index].root_pane.as_ref().cloned() else {
+            return;
+        };
+        if root_pane.pane_count() <= 1 {
+            return;
+        }
+        let Some(active_session_id) = root_pane.session_id_for_pane(active_pane_id) else {
+            return;
+        };
+
+        let mut pane_ids = Vec::new();
+        root_pane.collect_pane_ids(&mut pane_ids);
+        let mut session_ids = Vec::new();
+        root_pane.collect_session_ids(&mut session_ids);
+
+        for session_id in session_ids
+            .into_iter()
+            .filter(|session_id| *session_id != active_session_id)
+        {
+            self.unregister_ssh_terminal_session(session_id);
+        }
+        for pane_id in pane_ids
+            .into_iter()
+            .filter(|pane_id| *pane_id != active_pane_id)
+        {
+            if let Some(pane) = self.panes.remove(&pane_id) {
+                let _ = pane.update(cx, |pane, _cx| pane.shutdown());
+            }
+        }
+
+        let tab = &mut self.tabs[active_index];
+        tab.root_pane = Some(PaneNode::leaf(active_pane_id, active_session_id));
+        tab.active_pane_id = Some(active_pane_id);
+        self.needs_active_pane_focus = true;
+        self.focus_active_pane(window, cx);
+        cx.notify();
+    }
+
     pub(super) fn start_split_drag(
         &mut self,
         group_id: PaneId,

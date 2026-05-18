@@ -323,6 +323,14 @@ impl TerminalPane {
         self.title.clone()
     }
 
+    pub fn shared_session(&self) -> SharedTerminalSession {
+        self.terminal.clone()
+    }
+
+    pub fn buffer_line_count(&self) -> usize {
+        self.terminal.lock().snapshot().lines.len()
+    }
+
     pub fn shell_integration_status(&self) -> ShellIntegrationStatus {
         self.shell_integration_status.clone()
     }

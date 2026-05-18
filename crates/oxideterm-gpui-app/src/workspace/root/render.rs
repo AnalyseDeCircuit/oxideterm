@@ -85,6 +85,7 @@ impl Render for WorkspaceApp {
             cx,
         );
         let toast_layer = self.render_workspace_toasts();
+        let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
 
         div()
             .id("workspace-root")
@@ -97,6 +98,9 @@ impl Render for WorkspaceApp {
             .font_family(settings_ui_font_family(
                 &self.settings_store.settings().appearance.ui_font_family,
             ))
+            .when(self.sidebar_resizing || self.ai_sidebar_resizing, |root| {
+                root.cursor(CursorStyle::ResizeColumn)
+            })
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
@@ -111,6 +115,17 @@ impl Render for WorkspaceApp {
                     if event.keystroke.key.as_str() == "escape" {
                         this.cancel_host_key_challenge(cx);
                     }
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if !this.command_palette.open
+                    && this.keybinding_recording_action_id.is_none()
+                    && crate::keybindings::keystroke_matches_action(
+                        &event.keystroke,
+                        "app.commandPalette",
+                        &this.settings_store.settings().keybindings.overrides,
+                    )
+                {
+                    this.open_command_palette(cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.auto_route_modal.open {
@@ -431,6 +446,27 @@ impl Render for WorkspaceApp {
             .on_action(cx.listener(|this, _: &PaletteBroadcast, _window, cx| {
                 this.toggle_terminal_broadcast(cx);
             }))
+            .on_action(cx.listener(|this, _: &PaletteDisconnectAll, window, cx| {
+                this.disconnect_all_ssh_nodes_from_palette(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PaletteReconnectAll, _window, cx| {
+                this.reconnect_all_link_down_nodes_from_palette(cx);
+            }))
+            .on_action(cx.listener(|this, _: &PaletteCancelReconnect, _window, cx| {
+                this.cancel_all_reconnects_from_palette(cx);
+            }))
+            .on_action(cx.listener(|this, _: &PaletteHealthCheck, _window, cx| {
+                this.run_connection_health_check_from_palette(cx);
+            }))
+            .on_action(cx.listener(|this, _: &PaletteResetPanes, window, cx| {
+                this.reset_active_tab_to_single_pane(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PaletteDetachTerminal, window, cx| {
+                this.detach_active_local_terminal_from_palette(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PaletteCleanupDead, _window, cx| {
+                this.cleanup_dead_local_terminal_sessions_from_palette(cx);
+            }))
             .on_action(cx.listener(|this, _: &SwitchLocaleEnglish, window, cx| {
                 this.switch_locale(Locale::En, window, cx);
             }))
@@ -502,8 +538,8 @@ impl Render for WorkspaceApp {
                     .flex()
                     .flex_row()
                     .overflow_hidden()
-                    .child(self.render_activity_bar(cx))
-                    .when(!self.sidebar_collapsed, |layout| {
+                    .when(!zen_mode, |layout| layout.child(self.render_activity_bar(cx)))
+                    .when(!zen_mode && !self.sidebar_collapsed, |layout| {
                         layout.child(self.render_sidebar_region(cx))
                     })
                     .child(
@@ -513,7 +549,7 @@ impl Render for WorkspaceApp {
                             .flex_col()
                             .min_w(px(self.tokens.metrics.min_main_width))
                             .overflow_hidden()
-                            .child(self.render_tab_bar(cx))
+                            .when(!zen_mode, |main| main.child(self.render_tab_bar(cx)))
                             .when(self.search.visible, |main| {
                                 main.child(self.render_search_bar(cx))
                             })
@@ -575,6 +611,9 @@ impl Render for WorkspaceApp {
             })
             .when(self.ai_delete_message_confirm.is_some(), |root| {
                 root.child(self.render_ai_delete_message_confirm_dialog(cx))
+            })
+            .when(self.settings_reset_confirm_open, |root| {
+                root.child(self.render_settings_reset_confirm_dialog(cx))
             })
             .when_some(self.render_ai_sidebar_floating_overlay(window, cx), |root, overlay| {
                 root.child(overlay)
@@ -691,11 +730,49 @@ impl Render for WorkspaceApp {
             .when_some(self.workspace_tooltip.clone(), |root, tooltip| {
                 root.child(self.render_workspace_tooltip(tooltip))
             })
+            .when(
+                self.zen_hint_expires_at
+                    .is_some_and(|expires_at| expires_at > Instant::now()),
+                |root| root.child(self.render_zen_mode_hint()),
+            )
             .when_some(toast_layer, |root, layer| root.child(layer))
             .child(WorkspaceImeElement::new(
                 cx.entity(),
                 self.focus_handle.clone(),
             ))
+    }
+}
+
+impl WorkspaceApp {
+    fn render_zen_mode_hint(&self) -> AnyElement {
+        let key = if cfg!(target_os = "macos") {
+            "zen_mode.hint"
+        } else {
+            "zen_mode.hint_other"
+        };
+
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom(px(24.0))
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .bg(rgba((self.tokens.ui.bg_elevated << 8) | 0xe6))
+                    .px(px(16.0))
+                    .py(px(8.0))
+                    .text_size(px(14.0))
+                    .line_height(px(20.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .shadow_lg()
+                    .child(self.i18n.t(key)),
+            )
+            .into_any_element()
     }
 }
 

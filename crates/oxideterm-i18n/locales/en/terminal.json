@@ -136,5 +136,18 @@
   },
   "workspace": {
     "new_local_terminal": "New Local Terminal"
+  },
+  "local_shell": {
+    "toast": {
+      "detached": "Session backgrounded",
+      "detached_desc": "{{shell}} is running in the background",
+      "attached": "Session resumed"
+    },
+    "background": {
+      "title": "Background Sessions",
+      "lines": "lines",
+      "resume": "Resume",
+      "kill": "Kill"
+    }
   }
 }

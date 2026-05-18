@@ -57,6 +57,7 @@ pub fn ai_chat_panel(tokens: &ThemeTokens) -> Div {
     // panel an explicit full-width clipping flex root.
     div()
         .w_full()
+        .min_w_0()
         .h_full()
         .min_h_0()
         .flex()
@@ -70,6 +71,7 @@ pub fn ai_chat_scroll_area(tokens: &ThemeTokens, id: impl Into<ElementId>) -> St
     div()
         .id(id)
         .w_full()
+        .min_w_0()
         .flex_1()
         .min_h_0()
         .overflow_y_scroll()
@@ -326,6 +328,8 @@ pub fn ai_autocomplete_item(
 
 pub fn ai_message(tokens: &ThemeTokens, role: AiMessageRole) -> Div {
     div()
+        .w_full()
+        .min_w_0()
         .px(px(tokens.spacing.three))
         .py(px(tokens.spacing.three))
         .child(ai_message_header_row(tokens, role))
@@ -390,6 +394,7 @@ pub fn ai_message_body(
 ) -> Div {
     div()
         .w_full()
+        .min_w_0()
         .mt(px(tokens.spacing.one))
         .when(role == AiMessageRole::User, |body| {
             body.rounded(px(tokens.radii.md))

@@ -853,6 +853,24 @@ impl WorkspaceApp {
         )
         .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW);
         let system_prompt = settings.ai.custom_system_prompt.trim();
+        let conversation = self.ai_chat.active_conversation();
+        let cache_key = AiContextTokenBreakdownKey {
+            conversation_id: conversation.map(|conversation| conversation.id.clone()),
+            conversation_fingerprint: ai_conversation_token_fingerprint(conversation),
+            provider_id: provider_id.to_string(),
+            model: model.clone(),
+            max_tokens,
+            system_prompt_fingerprint: ai_text_shape_fingerprint(system_prompt),
+            tool_use_enabled: settings.ai.tool_use.enabled,
+        };
+        {
+            let cache = self.ai_context_token_cache.borrow();
+            if cache.key.as_ref() == Some(&cache_key)
+                && let Some(cached) = cache.breakdown_without_draft.as_ref()
+            {
+                return ai_context_breakdown_with_draft(cached.clone(), &self.ai_chat_draft);
+            }
+        }
         let system_instructions = ai_estimated_tokens(if system_prompt.is_empty() {
             DEFAULT_AI_SYSTEM_PROMPT
         } else {
@@ -864,9 +882,7 @@ impl WorkspaceApp {
             0
         };
         let reserved_output = ai_response_reserve(max_tokens);
-        let message_tokens = self
-            .ai_chat
-            .active_conversation()
+        let message_tokens = conversation
             .map(|conversation| {
                 conversation
                     .messages
@@ -878,25 +894,24 @@ impl WorkspaceApp {
                     .sum::<usize>()
             })
             .unwrap_or(0);
-        let tool_results = self
-            .ai_chat
-            .active_conversation()
-            .map(ai_conversation_tool_result_tokens)
-            .unwrap_or(0);
-        let messages = message_tokens.saturating_add(ai_estimated_tokens(&self.ai_chat_draft));
-        AiContextTokenBreakdown {
+        let tool_results = conversation.map(ai_conversation_tool_result_tokens).unwrap_or(0);
+        let breakdown_without_draft = AiContextTokenBreakdown {
             system_instructions,
             tool_definitions,
             reserved_output,
-            messages,
+            messages: message_tokens,
             tool_results,
             total: system_instructions
                 .saturating_add(tool_definitions)
                 .saturating_add(reserved_output)
-                .saturating_add(messages)
+                .saturating_add(message_tokens)
                 .saturating_add(tool_results),
             max_tokens,
-        }
+        };
+        let mut cache = self.ai_context_token_cache.borrow_mut();
+        cache.key = Some(cache_key);
+        cache.breakdown_without_draft = Some(breakdown_without_draft.clone());
+        ai_context_breakdown_with_draft(breakdown_without_draft, &self.ai_chat_draft)
     }
 
     fn ai_should_show_context_chips(&self, cx: &mut Context<Self>) -> bool {
@@ -1064,14 +1079,93 @@ fn ai_context_percent(tokens: usize, max_tokens: usize) -> String {
     }
 }
 
-struct AiContextTokenBreakdown {
-    system_instructions: usize,
-    tool_definitions: usize,
-    reserved_output: usize,
-    messages: usize,
-    tool_results: usize,
-    total: usize,
-    max_tokens: usize,
+fn ai_context_breakdown_with_draft(
+    mut breakdown: AiContextTokenBreakdown,
+    draft: &str,
+) -> AiContextTokenBreakdown {
+    let draft_tokens = ai_estimated_tokens(draft);
+    breakdown.messages = breakdown.messages.saturating_add(draft_tokens);
+    breakdown.total = breakdown.total.saturating_add(draft_tokens);
+    breakdown
+}
+
+fn ai_conversation_token_fingerprint(conversation: Option<&AiConversation>) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let Some(conversation) = conversation else {
+        return 0;
+    };
+    std::hash::Hash::hash(&conversation.id, &mut hasher);
+    std::hash::Hash::hash(&conversation.messages.len(), &mut hasher);
+    for message in &conversation.messages {
+        std::hash::Hash::hash(&message.id, &mut hasher);
+        std::hash::Hash::hash(&ai_role_fingerprint(&message.role), &mut hasher);
+        std::hash::Hash::hash(&message.is_streaming, &mut hasher);
+        std::hash::Hash::hash(&message.timestamp_ms, &mut hasher);
+        ai_hash_text_shape(&message.content, &mut hasher);
+        if let Some(context) = message.context.as_deref() {
+            ai_hash_text_shape(context, &mut hasher);
+        }
+        if let Some(thinking) = message.thinking_content.as_deref() {
+            ai_hash_text_shape(thinking, &mut hasher);
+        }
+        std::hash::Hash::hash(&message.tool_calls.len(), &mut hasher);
+        for tool_call in &message.tool_calls {
+            ai_hash_tool_call_shape(tool_call, &mut hasher);
+        }
+    }
+    std::hash::Hasher::finish(&hasher)
+}
+
+fn ai_role_fingerprint(role: &AiChatRole) -> u8 {
+    match role {
+        AiChatRole::User => 0,
+        AiChatRole::Assistant => 1,
+        AiChatRole::System => 2,
+        AiChatRole::Tool => 3,
+    }
+}
+
+fn ai_text_shape_fingerprint(text: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    ai_hash_text_shape(text, &mut hasher);
+    std::hash::Hasher::finish(&hasher)
+}
+
+fn ai_hash_text_shape(text: &str, hasher: &mut std::collections::hash_map::DefaultHasher) {
+    let bytes = text.as_bytes();
+    std::hash::Hash::hash(&bytes.len(), hasher);
+    let head = bytes.len().min(32);
+    std::hash::Hash::hash(&&bytes[..head], hasher);
+    if bytes.len() > head {
+        let tail = bytes.len().saturating_sub(32);
+        std::hash::Hash::hash(&&bytes[tail..], hasher);
+    }
+}
+
+fn ai_hash_tool_call_shape(
+    tool_call: &serde_json::Value,
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+) {
+    for key in ["id", "name", "status", "risk"] {
+        if let Some(value) = tool_call.get(key).and_then(serde_json::Value::as_str) {
+            ai_hash_text_shape(value, hasher);
+        }
+    }
+    if let Some(arguments) = tool_call
+        .get("arguments")
+        .and_then(serde_json::Value::as_str)
+    {
+        ai_hash_text_shape(arguments, hasher);
+    }
+    if let Some(output) = tool_call
+        .get("result")
+        .and_then(|result| result.get("output"))
+        .and_then(serde_json::Value::as_str)
+    {
+        ai_hash_text_shape(output, hasher);
+    } else {
+        std::hash::Hash::hash(&tool_call.as_object().map(|object| object.len()), hasher);
+    }
 }
 
 fn ai_conversation_tool_result_tokens(conversation: &AiConversation) -> usize {

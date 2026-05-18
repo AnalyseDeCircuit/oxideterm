@@ -136,5 +136,18 @@
   },
   "workspace": {
     "new_local_terminal": "新建本地终端"
+  },
+  "local_shell": {
+    "toast": {
+      "detached": "会话已移至后台",
+      "detached_desc": "{{shell}} 正在后台运行",
+      "attached": "会话已恢复"
+    },
+    "background": {
+      "title": "后台会话",
+      "lines": "行",
+      "resume": "恢复",
+      "kill": "终止"
+    }
   }
 }

@@ -90,18 +90,18 @@ impl WorkspaceApp {
     }
 
     pub(super) fn set_ai_sidebar_width(&mut self, width: f32, cx: &mut Context<Self>) {
-        self.ai_sidebar_width = width.clamp(280.0, 500.0);
+        self.ai_sidebar_width = width.clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);
         cx.notify();
     }
 
     pub(super) fn start_ai_sidebar_resize(
         &mut self,
-        event: &MouseDownEvent,
-        window: &Window,
+        _event: &MouseDownEvent,
+        _window: &Window,
         cx: &mut Context<Self>,
     ) {
         self.ai_sidebar_resizing = true;
-        self.set_ai_sidebar_width(self.ai_sidebar_width_from_cursor(event.position.x, window), cx);
+        cx.notify();
     }
 
     pub(super) fn update_ai_sidebar_resize(
@@ -133,6 +133,6 @@ impl WorkspaceApp {
 
     fn ai_sidebar_width_from_cursor(&self, cursor_x: Pixels, window: &Window) -> f32 {
         let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
-        (window_width - f32::from(cursor_x)).clamp(280.0, 500.0)
+        (window_width - f32::from(cursor_x)).clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH)
     }
 }

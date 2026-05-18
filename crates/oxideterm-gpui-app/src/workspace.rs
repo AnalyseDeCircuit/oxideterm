@@ -7,6 +7,7 @@ mod graphics;
 mod ide;
 mod ime;
 mod launcher;
+mod local_terminal_background;
 mod new_connection;
 mod notification_center;
 mod pane_tree;
@@ -21,6 +22,7 @@ mod terminal_cast;
 mod terminal_command_bar;
 
 use std::{
+    cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
     fs,
     path::PathBuf,
@@ -34,10 +36,11 @@ use std::{
 use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, CursorStyle,
-    FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render, RenderImage, Rgba,
-    ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, Timer, Window, anchored,
-    deferred, div, prelude::*, px, relative, rgb, rgba, svg,
+    FocusHandle, Focusable, IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions,
+    Pixels, Render, RenderImage, Rgba, ScrollHandle, ScrollWheelEvent, SharedString,
+    StatefulInteractiveElement, Styled, StyledImage, Subscription, Timer, Window, anchored,
+    deferred, div, list, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
@@ -61,6 +64,7 @@ use oxideterm_gpui_terminal::{
     TerminalUiPreferences, TerminalUiTheme,
 };
 use oxideterm_gpui_ui::{
+    ConfirmDialogVariant, ConfirmDialogView, confirm_dialog,
     modal::popover_backdrop,
     toast::{ToastVariant, ToastView},
     toaster::toaster,
@@ -85,9 +89,9 @@ use oxideterm_render_policy::{
     DetectedGraphics, EffectiveRenderPolicy, RenderProfile, compute_render_policy,
 };
 use oxideterm_settings::{
-    BackgroundFit, CursorStyle as SettingsCursorStyle, FrostedGlassMode, HighlightRuleRenderMode,
-    Language, PersistedSettings, SettingsStore, TerminalEncoding as SettingsTerminalEncoding,
-    default_settings_path,
+    AI_SIDEBAR_MAX_WIDTH, AI_SIDEBAR_MIN_WIDTH, BackgroundFit, CursorStyle as SettingsCursorStyle,
+    FrostedGlassMode, HighlightRuleRenderMode, Language, PersistedSettings, SettingsStore,
+    TerminalEncoding as SettingsTerminalEncoding, default_settings_path,
 };
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
@@ -146,13 +150,16 @@ use crate::{
     CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Find, FindNext,
     FindPrev, FontDecrease, FontIncrease, FontReset, GoToTab1, GoToTab2, GoToTab3, GoToTab4,
     GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewConnection, NewTerminal, NextTab,
-    OpenSettings, PaletteAiSidebar, PaletteBroadcast, PaletteEventLog, Paste, PrevTab,
-    ShellLauncher, ShowShortcuts, SplitHorizontal, SplitNavLeft, SplitNavRight, SplitVertical,
-    SwitchLocaleChinese, SwitchLocaleEnglish, SwitchLocaleFrench, SwitchLocaleGerman,
-    SwitchLocaleItalian, SwitchLocaleJapanese, SwitchLocaleKorean, SwitchLocalePortugueseBrazil,
-    SwitchLocaleSpanish, SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese, TerminalAiPanel,
-    TerminalRecording, ToggleSidebar, ZenMode,
+    OpenSettings, PaletteAiSidebar, PaletteBroadcast, PaletteCancelReconnect, PaletteCleanupDead,
+    PaletteDetachTerminal, PaletteDisconnectAll, PaletteEventLog, PaletteHealthCheck,
+    PaletteReconnectAll, PaletteResetPanes, Paste, PrevTab, ShellLauncher, ShowShortcuts,
+    SplitHorizontal, SplitNavLeft, SplitNavRight, SplitVertical, SwitchLocaleChinese,
+    SwitchLocaleEnglish, SwitchLocaleFrench, SwitchLocaleGerman, SwitchLocaleItalian,
+    SwitchLocaleJapanese, SwitchLocaleKorean, SwitchLocalePortugueseBrazil, SwitchLocaleSpanish,
+    SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese, TerminalAiPanel, TerminalRecording,
+    ToggleSidebar, ZenMode,
 };
+use oxideterm_gpui_markdown::{MarkdownBlockLayout, MarkdownDocument};
 use oxideterm_gpui_settings_view::{
     ActiveSurface, SettingsInput, SettingsSelect, SettingsSlider, SettingsTab, TerminalSettingsPage,
 };
@@ -245,12 +252,84 @@ struct AiProviderKeyStatusDelivery {
     has_key: bool,
 }
 
+#[derive(Default)]
+struct AiMarkdownDocumentCache {
+    documents: HashMap<String, AiCachedMarkdownDocument>,
+    insertion_order: VecDeque<String>,
+}
+
+#[derive(Clone)]
+struct AiCachedMarkdownDocument {
+    document: MarkdownDocument,
+    layout: MarkdownBlockLayout,
+}
+
+const AI_MARKDOWN_DOCUMENT_CACHE_MAX_ENTRIES: usize = 128;
+const AI_CHAT_LIST_OVERDRAW_PX: f32 = 640.0;
+const AI_MARKDOWN_WINDOW_OVERDRAW_PX: f32 = 720.0;
+const AI_MARKDOWN_CONTENT_OFFSET_PX: f32 = 56.0;
+
+#[derive(Clone, Debug)]
+enum AiChatListItem {
+    TrimNotice { sequence: u64, count: usize },
+    Message { id: String },
+    BottomSpacer,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AiMessageViewport {
+    top: f32,
+    height: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AiChatListViewportSnapshot {
+    item_ix: usize,
+    offset_in_item: f32,
+    height: f32,
+}
+
+#[derive(Default)]
+struct AiChatListStateCache {
+    conversation_id: Option<String>,
+    signatures: Vec<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AiContextTokenBreakdown {
+    system_instructions: usize,
+    tool_definitions: usize,
+    reserved_output: usize,
+    messages: usize,
+    tool_results: usize,
+    total: usize,
+    max_tokens: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AiContextTokenBreakdownKey {
+    conversation_id: Option<String>,
+    conversation_fingerprint: u64,
+    provider_id: String,
+    model: String,
+    max_tokens: usize,
+    system_prompt_fingerprint: u64,
+    tool_use_enabled: bool,
+}
+
+#[derive(Default)]
+struct AiContextTokenBreakdownCache {
+    key: Option<AiContextTokenBreakdownKey>,
+    breakdown_without_draft: Option<AiContextTokenBreakdown>,
+}
+
 #[derive(Clone, Debug)]
 struct CommandPaletteState {
     open: bool,
     raw_query: String,
     mode: PaletteMode,
     selected_index: usize,
+    scroll_handle: ScrollHandle,
     ssh_config_hosts: Vec<oxideterm_connections::SshConfigHost>,
     ssh_config_hosts_loading: bool,
     error: Option<String>,
@@ -312,10 +391,13 @@ pub(crate) struct WorkspaceApp {
     terminal_broadcast_menu_open: bool,
     terminal_quick_commands_open: bool,
     terminal_quick_command_pending: Option<String>,
+    detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
+    detached_local_terminals_popover_open: bool,
     terminal_cast_player: Option<TerminalCastPlayerState>,
     terminal_cast_seek_dragging: bool,
     command_palette: CommandPaletteState,
     shortcuts_modal: ShortcutsModalState,
+    settings_reset_confirm_open: bool,
     quick_commands: QuickCommandsState,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
@@ -348,6 +430,10 @@ pub(crate) struct WorkspaceApp {
     ai_model_selector_provider_online: HashMap<String, bool>,
     ai_model_selector_probe_generations: HashMap<String, u64>,
     ai_chat: oxideterm_ai::AiChatState,
+    ai_chat_list_state: ListState,
+    ai_chat_list_cache: RefCell<AiChatListStateCache>,
+    ai_markdown_cache: RefCell<AiMarkdownDocumentCache>,
+    ai_context_token_cache: RefCell<AiContextTokenBreakdownCache>,
     ai_chat_store: oxideterm_ai::AiChatPersistenceStore,
     ai_runtime_epoch: String,
     ai_command_record_sequence: u64,
@@ -543,6 +629,7 @@ pub(crate) struct WorkspaceApp {
     connection_trace_toasts: HashMap<String, ActiveConnectionTrace>,
     connection_trace_nodes: HashMap<NodeId, ConnectionTraceNodeContext>,
     connection_trace_attempt_seq: u64,
+    zen_hint_expires_at: Option<Instant>,
     workspace_tooltip: Option<WorkspaceTooltip>,
     workspace_tooltip_pending: Option<WorkspaceTooltipPending>,
     workspace_tooltip_generation: u64,
@@ -709,6 +796,15 @@ struct WorkspaceTooltipPending {
 struct WorkspaceTerminalEndpointSession {
     endpoint: TerminalEndpoint,
     session: SharedTerminalSession,
+}
+
+#[derive(Clone)]
+struct DetachedLocalTerminalSession {
+    session_id: TerminalSessionId,
+    title: String,
+    session: SharedTerminalSession,
+    detached_at: Instant,
+    buffer_lines: usize,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

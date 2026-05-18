@@ -72,11 +72,28 @@ impl WorkspaceApp {
 
     pub(super) fn toggle_zen_mode(&mut self, cx: &mut Context<Self>) {
         let settings = self.settings_store.settings_mut();
-        settings.sidebar_ui.zen_mode = !settings.sidebar_ui.zen_mode;
-        if settings.sidebar_ui.zen_mode {
+        let entering = !settings.sidebar_ui.zen_mode;
+        settings.sidebar_ui.zen_mode = entering;
+        if entering {
+            self.sidebar_collapsed = true;
+            settings.sidebar_ui.collapsed = true;
+            settings.sidebar_ui.ai_sidebar_collapsed = true;
             self.clear_ai_sidebar_keyboard_focus();
+            const ZEN_HINT_TTL: Duration = Duration::from_millis(2500);
+            self.zen_hint_expires_at = Some(Instant::now() + ZEN_HINT_TTL);
+            cx.spawn(async move |weak, cx| {
+                Timer::after(ZEN_HINT_TTL).await;
+                let _ = weak.update(cx, |this, cx| {
+                    this.zen_hint_expires_at = None;
+                    cx.notify();
+                });
+            })
+            .detach();
+        } else {
+            self.sidebar_collapsed = false;
+            settings.sidebar_ui.collapsed = false;
+            self.zen_hint_expires_at = None;
         }
-        let _ = self.settings_store.save();
         cx.notify();
     }
 

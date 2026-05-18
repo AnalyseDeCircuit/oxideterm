@@ -127,14 +127,25 @@ impl WorkspaceApp {
 
     fn resolved_ai_execution_profile(&self) -> ResolvedAiExecutionProfile {
         let settings = self.settings_store.settings();
-        resolve_ai_execution_profile(
+        let active_profile_id = self.active_ai_conversation_profile_id();
+        let mut profile = resolve_ai_execution_profile(
             &settings.ai.execution_profiles,
-            self.active_ai_conversation_profile_id().as_deref(),
+            active_profile_id.as_deref(),
             settings.ai.active_provider_id.as_deref(),
             settings.ai.active_model.as_deref(),
             ai_reasoning_effort_value(settings.ai.reasoning_effort).as_deref(),
             ai_tool_use_policy_from_settings(&settings.ai.tool_use),
-        )
+        );
+        let default_profile_id = settings
+            .ai
+            .execution_profiles
+            .get("defaultProfileId")
+            .and_then(serde_json::Value::as_str);
+        if profile.profile_id.as_deref() == default_profile_id {
+            profile.provider_id = settings.ai.active_provider_id.clone();
+            profile.model = settings.ai.active_model.clone();
+        }
+        profile
     }
 
     fn active_ai_conversation_profile_id(&self) -> Option<String> {

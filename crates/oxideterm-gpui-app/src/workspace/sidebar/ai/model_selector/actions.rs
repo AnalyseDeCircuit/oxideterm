@@ -200,6 +200,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let previous_model = self.settings_store.settings().ai.active_model.clone();
+        let profile_id = self.active_ai_conversation_profile_id().or_else(|| {
+            self.settings_store
+                .settings()
+                .ai
+                .execution_profiles
+                .get("defaultProfileId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        });
         self.edit_settings(
             |settings| {
                 ai_select_provider_model(
@@ -208,6 +217,12 @@ impl WorkspaceApp {
                     &mut settings.ai.active_model,
                     &provider_id,
                     model.clone(),
+                );
+                Self::sync_ai_execution_profile_model(
+                    &mut settings.ai.execution_profiles,
+                    profile_id.as_deref(),
+                    &provider_id,
+                    &model,
                 );
             },
             cx,
@@ -243,8 +258,43 @@ impl WorkspaceApp {
         }
     }
 
-
-
+    fn sync_ai_execution_profile_model(
+        execution_profiles: &mut serde_json::Value,
+        profile_id: Option<&str>,
+        provider_id: &str,
+        model: &str,
+    ) {
+        let Some(profile_id) = profile_id.filter(|profile_id| !profile_id.trim().is_empty()) else {
+            return;
+        };
+        let Some(profiles) = execution_profiles
+            .get_mut("profiles")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            return;
+        };
+        let Some(profile) = profiles
+            .iter_mut()
+            .filter_map(serde_json::Value::as_object_mut)
+            .find(|profile| {
+                profile
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(profile_id)
+            })
+        else {
+            return;
+        };
+        profile.insert(
+            "providerId".to_string(),
+            serde_json::Value::String(provider_id.to_string()),
+        );
+        profile.insert(
+            "model".to_string(),
+            serde_json::Value::String(model.to_string()),
+        );
+        profile.insert("updatedAt".to_string(), serde_json::json!(ai_now_ms()));
+    }
 }
 
 pub(super) struct AiModelSelectorProbeDelivery {

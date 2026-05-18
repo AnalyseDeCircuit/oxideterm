@@ -100,7 +100,10 @@ impl WorkspaceApp {
             return;
         }
         let node_router = self.node_router.clone();
-        cx.spawn(async move |weak, cx| {
+        let runtime = self.forwarding_runtime.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cache_key_for_task = cache_key.clone();
+        runtime.spawn(async move {
             let result = tokio::time::timeout(std::time::Duration::from_millis(800), async {
                 let shared = node_router
                     .acquire_sftp(&node_id)
@@ -132,7 +135,19 @@ impl WorkspaceApp {
             .await
             .ok()
             .and_then(Result::ok);
-            clear_terminal_path_request_pending(&cache_key);
+            let _ = tx.send(result);
+            clear_terminal_path_request_pending(&cache_key_for_task);
+        });
+        cx.spawn(async move |weak, cx| {
+            let result = loop {
+                match rx.try_recv() {
+                    Ok(result) => break result,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        Timer::after(Duration::from_millis(16)).await;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break None,
+                }
+            };
             if let Some(entries) = result {
                 put_cached_terminal_path_entries(cache_key, entries);
                 let _ = weak.update(cx, |_this, cx| cx.notify());

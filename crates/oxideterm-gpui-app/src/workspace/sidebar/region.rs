@@ -30,7 +30,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_ai_right_sidebar_region(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_ai_right_sidebar_region(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .relative()
@@ -127,7 +127,7 @@ impl WorkspaceApp {
                     .left_0()
                     .top_0()
                     .bottom_0()
-                    .w(px(4.0))
+                    .w(px(self.tokens.metrics.sidebar_resize_handle_width))
                     .cursor(CursorStyle::ResizeColumn)
                     .bg(if self.ai_sidebar_resizing {
                         rgb(theme.accent)

@@ -3,6 +3,7 @@ impl WorkspaceApp {
         &self,
         conversation: &AiConversation,
         message: &AiChatMessage,
+        viewport: Option<AiMessageViewport>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if message
@@ -217,9 +218,9 @@ impl WorkspaceApp {
         if editing {
             body = body.child(self.render_ai_message_edit_body(cx));
         } else if has_structured_parts {
-            body = self.render_ai_turn_parts(body, message, cx);
+            body = self.render_ai_turn_parts(body, message, viewport, cx);
         } else if !message.content.is_empty() {
-            body = body.child(self.render_ai_message_content(message));
+            body = body.child(self.render_ai_message_content(message, viewport));
             if !message.tool_calls.is_empty() {
                 body = body.child(self.render_ai_tool_calls(message, cx));
             }
@@ -442,7 +443,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_ai_message_content(&self, message: &AiChatMessage) -> AnyElement {
+    fn render_ai_message_content(
+        &self,
+        message: &AiChatMessage,
+        viewport: Option<AiMessageViewport>,
+    ) -> AnyElement {
         if message.role == AiChatRole::User {
             return div()
                 .w_full()
@@ -464,11 +469,28 @@ impl WorkspaceApp {
         options.base_font_size = 13.0;
         options.block_gap = 8.0;
         let content = ai_visible_suggestion_content(&message.content);
+        let cached = self.cached_ai_markdown_document(&content, &options, !message.is_streaming);
+        let rendered = viewport
+            .filter(|_| !message.is_streaming)
+            .map(|viewport| {
+                markdown_render::render_document_windowed(
+                    &cached.document,
+                    &cached.layout,
+                    &self.tokens,
+                    &options,
+                    viewport.top,
+                    viewport.height,
+                    AI_MARKDOWN_WINDOW_OVERDRAW_PX,
+                )
+            })
+            .unwrap_or_else(|| {
+                markdown_render::render_document(&cached.document, &self.tokens, &options)
+            });
         div()
             .w_full()
             .min_w_0()
             .text_color(rgb(self.tokens.ui.text))
-            .child(markdown_with_options(&self.tokens, &content, &options))
+            .child(rendered)
             .into_any_element()
     }
 
@@ -524,6 +546,7 @@ impl WorkspaceApp {
         &self,
         mut body: Div,
         message: &AiChatMessage,
+        viewport: Option<AiMessageViewport>,
         cx: &mut Context<Self>,
     ) -> Div {
         let Some(parts) = ai_turn_parts(message) else {
@@ -588,7 +611,7 @@ impl WorkspaceApp {
                         segment.id = format!("{}-text-{segment_index}", message.id);
                         segment.content = text;
                         segment.tool_calls.clear();
-                        body = body.child(self.render_ai_message_content(&segment));
+                        body = body.child(self.render_ai_message_content(&segment, viewport));
                         segment_index = segment_index.saturating_add(1);
                     }
                 }

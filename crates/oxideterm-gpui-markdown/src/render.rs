@@ -23,6 +23,8 @@ use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument
 use crate::options::MarkdownOptions;
 use crate::style;
 
+const WINDOWED_MARKDOWN_MIN_ITEMS: usize = 24;
+
 /// Render a complete markdown document into a vertical GPUI container.
 pub fn render_document(
     document: &MarkdownDocument,
@@ -30,6 +32,8 @@ pub fn render_document(
     opts: &MarkdownOptions,
 ) -> AnyElement {
     let mut content = div()
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
         .gap(px(opts.block_gap))
@@ -37,6 +41,100 @@ pub fn render_document(
 
     if opts.enable_footnotes && !document.footnotes.is_empty() {
         content = content.child(render_footnotes(&document.footnotes, tokens, opts));
+    }
+
+    if opts.enable_async_images {
+        image_cache(retain_all(opts.image_cache_id))
+            .child(content)
+            .into_any_element()
+    } else {
+        content.into_any_element()
+    }
+}
+
+/// Render a markdown document by keeping its estimated full height while only
+/// building GPUI elements for blocks near the visible portion.
+pub fn render_document_windowed(
+    document: &MarkdownDocument,
+    layout: &MarkdownBlockLayout,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    viewport_top: f32,
+    viewport_height: f32,
+    overdraw: f32,
+) -> AnyElement {
+    let items = layout.items();
+    if items.len() < WINDOWED_MARKDOWN_MIN_ITEMS || viewport_height <= 0.0 {
+        return render_document(document, tokens, opts);
+    }
+
+    let item_sizes = layout.item_sizes();
+    let total_height = estimated_markdown_height(&item_sizes, opts.block_gap);
+    if total_height <= viewport_height + overdraw * 2.0 {
+        return render_document(document, tokens, opts);
+    }
+
+    let window_top = (viewport_top - overdraw).max(0.0);
+    let window_bottom = (viewport_top + viewport_height + overdraw).min(total_height);
+    let mut cursor_y = 0.0;
+    let mut top_spacer = 0.0;
+    let mut bottom_spacer = 0.0;
+    let mut rendered = Vec::new();
+
+    for (index, item) in items.iter().enumerate() {
+        let item_height = item_sizes
+            .get(index)
+            .map(|size| f32::from(size.height))
+            .unwrap_or_default();
+        let item_top = cursor_y;
+        let item_bottom = item_top + item_height;
+        if item_bottom >= window_top && item_top <= window_bottom {
+            if rendered.is_empty() {
+                top_spacer = item_top;
+            }
+            match item {
+                MarkdownLayoutItem::Block(block) => {
+                    rendered.push(render_block(block, tokens, opts));
+                }
+                MarkdownLayoutItem::Footnotes(footnotes) => {
+                    rendered.push(render_footnotes(footnotes, tokens, opts));
+                }
+            }
+            bottom_spacer = (total_height - item_bottom).max(0.0);
+        }
+        cursor_y = item_bottom;
+        if index + 1 < items.len() {
+            cursor_y += opts.block_gap;
+        }
+    }
+
+    if rendered.is_empty() {
+        let content = div().w_full().min_w_0().h(px(total_height));
+        return if opts.enable_async_images {
+            image_cache(retain_all(opts.image_cache_id))
+                .child(content)
+                .into_any_element()
+        } else {
+            content.into_any_element()
+        };
+    }
+
+    let mut content = div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(opts.block_gap));
+    if top_spacer > 0.0 {
+        content = content.child(div().w_full().h(px((top_spacer - opts.block_gap).max(0.0))));
+    }
+    content = content.children(rendered);
+    if bottom_spacer > 0.0 {
+        content = content.child(
+            div()
+                .w_full()
+                .h(px((bottom_spacer - opts.block_gap).max(0.0))),
+        );
     }
 
     if opts.enable_async_images {
@@ -93,9 +191,16 @@ where
     }
 }
 
+fn estimated_markdown_height(item_sizes: &[gpui::Size<gpui::Pixels>], block_gap: f32) -> f32 {
+    let items_height: f32 = item_sizes.iter().map(|size| f32::from(size.height)).sum();
+    items_height + block_gap * item_sizes.len().saturating_sub(1) as f32
+}
+
 /// Render a list of blocks into a vertical GPUI container.
 pub fn render_blocks(blocks: &[Block], tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
     div()
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
         .gap(px(opts.block_gap))
@@ -132,10 +237,15 @@ fn render_heading(
 ) -> AnyElement {
     let font_size = style::heading_font_size(level, opts);
     div()
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
         .child(
             div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
                 .text_size(font_size)
                 .text_color(style::heading_color(tokens))
                 .child(render_styled_inlines(inlines, tokens, opts)),
@@ -151,6 +261,9 @@ fn render_paragraph(
     opts: &MarkdownOptions,
 ) -> AnyElement {
     div()
+        .w_full()
+        .min_w_0()
+        .whitespace_normal()
         .text_size(style::body_font_size(opts))
         .text_color(style::text_color(tokens))
         .child(render_styled_inlines(inlines, tokens, opts))
@@ -167,6 +280,7 @@ fn render_code_block(
 ) -> AnyElement {
     let mut container = div()
         .w_full()
+        .min_w_0()
         .bg(style::code_bg_color(tokens))
         .rounded(px(tokens.radii.sm))
         .p(px(opts.code_block_padding))
@@ -287,6 +401,8 @@ fn render_unordered_list(
     opts: &MarkdownOptions,
 ) -> AnyElement {
     div()
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
         .gap(px(tokens.spacing.one))
@@ -306,6 +422,8 @@ fn render_ordered_list(
     opts: &MarkdownOptions,
 ) -> AnyElement {
     div()
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
         .gap(px(tokens.spacing.one))
@@ -335,6 +453,8 @@ fn render_list_item(
     };
 
     let mut col = div()
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
         .text_size(style::body_font_size(opts))
@@ -351,6 +471,8 @@ fn render_list_item(
                 .child(
                     div()
                         .flex_1()
+                        .min_w_0()
+                        .whitespace_normal()
                         .text_color(style::text_color(tokens))
                         .child(render_styled_inlines(&item.inlines, tokens, opts)),
                 ),

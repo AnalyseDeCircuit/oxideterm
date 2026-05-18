@@ -281,7 +281,8 @@ impl WorkspaceApp {
             .set_mode(crate::workspace::ide::node_agent_mode_from_settings(&settings));
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_width = settings.sidebar_ui.width as f32;
-        self.ai_sidebar_width = settings.sidebar_ui.ai_sidebar_width as f32;
+        self.ai_sidebar_width =
+            (settings.sidebar_ui.ai_sidebar_width as f32).clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);
         let panes = self
             .panes
             .iter()

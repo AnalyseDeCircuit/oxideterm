@@ -71,6 +71,10 @@ pub struct TreeUiState {
     pub extra: ExtraFields,
 }
 
+pub const AI_SIDEBAR_MIN_WIDTH: f32 = 280.0;
+pub const AI_SIDEBAR_MAX_WIDTH: f32 = 500.0;
+pub const AI_SIDEBAR_DEFAULT_WIDTH: i64 = 340;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SidebarUiState {
@@ -91,10 +95,9 @@ impl Default for SidebarUiState {
             active_section: "sessions".to_string(),
             width: 300,
             ai_sidebar_collapsed: true,
-            ai_sidebar_width: 340,
+            ai_sidebar_width: AI_SIDEBAR_DEFAULT_WIDTH,
             zen_mode: false,
             extra: ExtraFields::new(),
         }
     }
 }
-

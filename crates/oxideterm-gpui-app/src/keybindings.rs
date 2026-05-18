@@ -751,6 +751,9 @@ pub(crate) fn startup_key_bindings(overrides: &Map<String, Value>) -> Vec<KeyBin
                 NoAction {},
                 Some(CONTEXT),
             ));
+            if definition.id == "app.commandPalette" {
+                bindings.push(KeyBinding::new(&default_keystroke, NoAction {}, None));
+            }
         }
         if definition.terminal_behavior != TerminalBehavior::Always {
             continue;
@@ -776,6 +779,9 @@ pub(crate) fn runtime_rebind_key_bindings(
             NoAction {},
             Some(CONTEXT),
         ));
+        if action_id == "app.commandPalette" {
+            bindings.push(KeyBinding::new(&previous_keystroke, NoAction {}, None));
+        }
     }
     if action_id == "split.closePane"
         && action_definition(action_id)
@@ -798,6 +804,13 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
         ($action:expr) => {
             bindings.push(KeyBinding::new(&keystroke, $action, Some(CONTEXT)))
         };
+        ($action:expr, global) => {
+            bindings.push(KeyBinding::new(&keystroke, $action, None))
+        };
+        ($action:expr, workspace_and_global) => {{
+            bindings.push(KeyBinding::new(&keystroke, $action.clone(), Some(CONTEXT)));
+            bindings.push(KeyBinding::new(&keystroke, $action, None));
+        }};
     }
     match action_id {
         "app.newTerminal" => push_binding!(NewTerminal),
@@ -807,7 +820,7 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
         "app.newConnection" => push_binding!(NewConnection),
         "app.settings" => push_binding!(OpenSettings),
         "app.toggleSidebar" => push_binding!(ToggleSidebar),
-        "app.commandPalette" => push_binding!(CommandPalette),
+        "app.commandPalette" => push_binding!(CommandPalette, workspace_and_global),
         "app.zenMode" => push_binding!(ZenMode),
         "app.nextTab" => push_binding!(NextTab),
         "app.prevTab" => push_binding!(PrevTab),

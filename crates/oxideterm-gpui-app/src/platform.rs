@@ -4,11 +4,15 @@ use oxideterm_i18n::{I18n, Locale};
 use oxideterm_settings::PersistedSettings;
 
 use crate::{
-    ClosePane, CloseTab, Copy, Find, FindNext, FindPrev, NewTerminal, NextTab, OpenSettings, Paste,
-    PrevTab, Quit, SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish,
-    SwitchLocaleFrench, SwitchLocaleGerman, SwitchLocaleItalian, SwitchLocaleJapanese,
-    SwitchLocaleKorean, SwitchLocalePortugueseBrazil, SwitchLocaleSpanish,
-    SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese,
+    CloseOtherTabs, ClosePane, CloseTab, CommandPalette, Copy, Find, FindNext, FindPrev,
+    FontDecrease, FontIncrease, FontReset, NewConnection, NewTerminal, NextTab, OpenSettings,
+    PaletteAiSidebar, PaletteBroadcast, PaletteCancelReconnect, PaletteCleanupDead,
+    PaletteDetachTerminal, PaletteDisconnectAll, PaletteEventLog, PaletteHealthCheck,
+    PaletteReconnectAll, PaletteResetPanes, Paste, PrevTab, Quit, ShellLauncher, ShowShortcuts,
+    SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish, SwitchLocaleFrench,
+    SwitchLocaleGerman, SwitchLocaleItalian, SwitchLocaleJapanese, SwitchLocaleKorean,
+    SwitchLocalePortugueseBrazil, SwitchLocaleSpanish, SwitchLocaleTraditionalChinese,
+    SwitchLocaleVietnamese, TerminalRecording, ToggleSidebar, ZenMode,
 };
 
 pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
@@ -18,9 +22,9 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
             items: vec![
                 MenuItem::os_submenu(i18n.t("menu.services"), SystemMenuType::Services),
                 MenuItem::separator(),
-                MenuItem::action(i18n.t("menu.new_terminal"), NewTerminal),
+                MenuItem::action(i18n.t("command_palette.title"), CommandPalette),
                 MenuItem::action(i18n.t("menu.settings"), OpenSettings),
-                MenuItem::action(i18n.t("menu.close_tab"), CloseTab),
+                MenuItem::action(i18n.t("command_palette.cmd_show_shortcuts"), ShowShortcuts),
                 MenuItem::separator(),
                 MenuItem::action(i18n.t("menu.quit"), Quit),
             ],
@@ -39,14 +43,83 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
         Menu {
             name: i18n.t("menu.terminal").into(),
             items: vec![
+                MenuItem::action(i18n.t("command_palette.cmd_new_terminal"), NewTerminal),
+                MenuItem::action(i18n.t("command_palette.cmd_shell_launcher"), ShellLauncher),
+                MenuItem::action(i18n.t("command_palette.cmd_new_connection"), NewConnection),
+                MenuItem::separator(),
                 MenuItem::action(i18n.t("menu.split_horizontal"), SplitHorizontal),
                 MenuItem::action(i18n.t("menu.split_vertical"), SplitVertical),
                 MenuItem::action(i18n.t("menu.close_pane"), ClosePane),
+                MenuItem::separator(),
+                MenuItem::action(
+                    i18n.t("command_palette.cmd_broadcast_toggle"),
+                    PaletteBroadcast,
+                ),
+                MenuItem::action(
+                    i18n.t("settings_view.keybindings.actions.terminal.recording"),
+                    TerminalRecording,
+                ),
+                MenuItem::action(
+                    i18n.t("command_palette.cmd_detach_terminal"),
+                    PaletteDetachTerminal,
+                ),
+                MenuItem::action(
+                    i18n.t("command_palette.cmd_cleanup_dead"),
+                    PaletteCleanupDead,
+                ),
+                MenuItem::separator(),
+                MenuItem::action(i18n.t("command_palette.cmd_reset_panes"), PaletteResetPanes),
+            ],
+        },
+        Menu {
+            name: i18n.t("menu.view").into(),
+            items: vec![
+                MenuItem::action(i18n.t("command_palette.title"), CommandPalette),
+                MenuItem::action(i18n.t("command_palette.cmd_toggle_sidebar"), ToggleSidebar),
+                MenuItem::action(i18n.t("command_palette.cmd_toggle_panel"), PaletteEventLog),
+                MenuItem::action(
+                    i18n.t("command_palette.cmd_toggle_ai_sidebar"),
+                    PaletteAiSidebar,
+                ),
+                MenuItem::separator(),
+                MenuItem::action(i18n.t("command_palette.cmd_font_increase"), FontIncrease),
+                MenuItem::action(i18n.t("command_palette.cmd_font_decrease"), FontDecrease),
+                MenuItem::action(i18n.t("command_palette.cmd_font_reset"), FontReset),
+                MenuItem::separator(),
+                MenuItem::action(i18n.t("command_palette.cmd_zen_mode"), ZenMode),
+            ],
+        },
+        Menu {
+            name: i18n.t("command_palette.cmd_sidebar_connections").into(),
+            items: vec![
+                MenuItem::action(
+                    i18n.t("command_palette.cmd_disconnect_all"),
+                    PaletteDisconnectAll,
+                ),
+                MenuItem::action(
+                    i18n.t("command_palette.cmd_reconnect_all"),
+                    PaletteReconnectAll,
+                ),
+                MenuItem::action(
+                    i18n.t("command_palette.cmd_cancel_reconnect"),
+                    PaletteCancelReconnect,
+                ),
+                MenuItem::separator(),
+                MenuItem::action(
+                    i18n.t("command_palette.cmd_health_check"),
+                    PaletteHealthCheck,
+                ),
             ],
         },
         Menu {
             name: i18n.t("menu.window").into(),
             items: vec![
+                MenuItem::action(i18n.t("menu.close_tab"), CloseTab),
+                MenuItem::action(
+                    i18n.t("command_palette.cmd_close_other_tabs"),
+                    CloseOtherTabs,
+                ),
+                MenuItem::separator(),
                 MenuItem::action(i18n.t("menu.next_tab"), NextTab),
                 MenuItem::action(i18n.t("menu.previous_tab"), PrevTab),
             ],
