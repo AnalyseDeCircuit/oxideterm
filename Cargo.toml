@@ -16,6 +16,7 @@ members = [
   "crates/oxideterm-notification-center",
   "crates/oxideterm-topology",
   "crates/oxideterm-backend-classification",
+  "crates/oxideterm-cloud-sync",
   "crates/oxideterm-ide-core",
   "crates/oxideterm-ide-fs",
   "crates/oxideterm-forwarding",

@@ -618,4 +618,62 @@ mod tests {
         assert!(result.is_err());
         assert!(store.connections().is_empty());
     }
+
+    #[test]
+    fn saved_connection_sync_snapshot_exports_delete_tombstones() {
+        let mut store = load_empty_store("sync-tombstone-export");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        store.delete("conn-1").unwrap();
+
+        let snapshot = store.export_saved_connections_snapshot().unwrap();
+
+        assert_eq!(snapshot.records.len(), 1);
+        let record = &snapshot.records[0];
+        assert_eq!(record.id, "conn-1");
+        assert!(record.deleted);
+        assert!(record.payload.is_none());
+        assert!(!record.revision.is_empty());
+    }
+
+    #[test]
+    fn saved_connection_sync_apply_delete_removes_connection() {
+        let mut target = load_empty_store("sync-delete-target");
+        target.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+
+        let mut source = load_empty_store("sync-delete-source");
+        source.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        source.delete("conn-1").unwrap();
+        let snapshot = source.export_saved_connections_snapshot().unwrap();
+
+        let outcome = target
+            .apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Merge)
+            .unwrap();
+
+        assert_eq!(outcome.result.applied, 1);
+        assert_eq!(outcome.deleted_connection_ids, vec!["conn-1".to_string()]);
+        assert!(target.get("conn-1").is_none());
+    }
+
+    #[test]
+    fn saved_connection_sync_apply_skip_reports_name_conflict() {
+        let mut source = load_empty_store("sync-name-source");
+        let mut source_req = request("remote-id", SavedAuth::Agent);
+        source_req.name = "Shared".to_string();
+        source.upsert(source_req).unwrap();
+        let snapshot = source.export_saved_connections_snapshot().unwrap();
+
+        let mut target = load_empty_store("sync-name-target");
+        let mut target_req = request("local-id", SavedAuth::Agent);
+        target_req.name = "Shared".to_string();
+        target.upsert(target_req).unwrap();
+        let outcome = target
+            .apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Skip)
+            .unwrap();
+
+        assert_eq!(outcome.result.applied, 0);
+        assert_eq!(outcome.result.skipped, 1);
+        assert_eq!(outcome.result.conflicts, 1);
+        assert!(target.get("local-id").is_some());
+        assert!(target.get("remote-id").is_none());
+    }
 }

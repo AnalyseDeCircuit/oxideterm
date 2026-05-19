@@ -90,6 +90,7 @@
     "cmd_reset_panes": "重置为单窗格",
     "cmd_focus_next_pane": "聚焦下一个窗格",
     "cmd_open_plugin_manager": "打开插件管理器",
+    "cmd_open_cloud_sync": "打开云同步",
     "cmd_open_topology": "打开拓扑视图",
     "cmd_reset_settings": "重置所有设置",
     "confirm_reset_settings": "确定要将所有设置重置为默认值吗？",
@@ -139,6 +140,77 @@
   },
   "plugin": {
     "manager_title": "插件管理器",
+    "cloud_sync": {
+      "panel_title": "Oxide 云同步",
+      "native_description": "用于 OxideTerm 的加密自托管同步。",
+      "native_service_pending": "正在把 native service 接到内置兼容层。",
+      "native_service_ready": "内置 native 同步服务已连接到兼容层。",
+      "native_scope_summary": "默认同步的应用设置分区：{{sections}}。",
+      "history_empty": "暂无同步记录。",
+      "backend": {
+        "webdav": "WebDAV",
+        "http_json": "HTTP JSON",
+        "dropbox": "Dropbox",
+        "s3": "S3",
+        "git": "Git"
+      },
+      "actions": {
+        "check": "检查远端",
+        "upload": "立即上传",
+        "pull_preview": "拉取预览",
+        "apply_preview": "应用预览",
+        "refresh": "刷新"
+      },
+      "status": {
+        "ready": "同步就绪",
+        "uploading": "正在上传",
+        "checking": "正在检查",
+        "remote_update": "远端有更新",
+        "conflict": "存在冲突",
+        "error": "同步错误"
+      },
+      "progress": {
+        "fetch_metadata": "获取远端元数据",
+        "preflight": "预检查",
+        "exporting": "导出快照",
+        "uploading": "上传对象",
+        "downloading": "下载对象",
+        "previewing": "生成导入预览",
+        "importing": "应用导入",
+        "creating_backup": "创建备份",
+        "done": "完成"
+      },
+      "preview": {
+        "app_settings": "应用设置",
+        "plugin_settings_label": "插件设置"
+      },
+      "fields": {
+        "backend": "后端类型",
+        "namespace": "命名空间",
+        "local_dirty": "本地有未同步变更",
+        "remote_revision": "远端版本",
+        "connections": "连接快照",
+        "forwards": "端口转发快照",
+        "upload_units": "上传单元",
+        "last_sync": "上次同步",
+        "last_upload": "上次上传",
+        "last_check": "上次检查"
+      },
+      "sections": {
+        "connection_settings": "连接设置",
+        "pending_preview": "待应用的远端预览",
+        "history": "同步历史",
+        "notes": "注意事项"
+      },
+      "errors": {
+        "legacy_not_supported": "远端是旧版 .oxide 快照；native 结构化预览尚不能直接应用该格式。"
+      },
+      "common": {
+        "no": "否",
+        "yes": "是",
+        "error": "错误"
+      }
+    },
     "native_description": "native 插件宿主尚未启用。",
     "native_empty_title": "native 暂未启用插件系统",
     "native_empty_description": "OxideTerm native 会保留插件入口，但非 WebView 插件 API 仍在设计中。这里暂不提供安装、启用、市场或运行时操作。",

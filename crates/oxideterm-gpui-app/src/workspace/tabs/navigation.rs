@@ -163,6 +163,10 @@ impl WorkspaceApp {
                 self.active_surface = ActiveSurface::Terminal;
                 self.active_sidebar_section = SidebarSection::Extensions;
             }
+            Some(TabKind::CloudSync) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Extensions;
+            }
             _ => {
                 self.active_surface = ActiveSurface::Terminal;
             }

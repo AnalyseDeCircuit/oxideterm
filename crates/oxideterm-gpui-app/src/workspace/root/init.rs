@@ -89,6 +89,9 @@ impl WorkspaceApp {
         );
         let ai_key_store = oxideterm_ai::AiProviderKeyStore::new();
         let ai_mcp_registry = oxideterm_ai::McpRegistry::new(ai_key_store.clone());
+        let cloud_sync_store = oxideterm_cloud_sync::state::CloudSyncStateStore::load(
+            oxideterm_cloud_sync::state::default_cloud_sync_state_path(settings_store.path()),
+        )?;
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
@@ -343,6 +346,12 @@ impl WorkspaceApp {
             launcher: LauncherState::new(settings.launcher.enabled),
             graphics: GraphicsState::new(),
             connection_monitor: ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx),
+            cloud_sync_store,
+            cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService::new(),
+            cloud_sync_pending_preview: None,
+            cloud_sync_progress: None,
+            cloud_sync_rx: None,
+            cloud_sync_polling: false,
             sftp_worker_tx,
             sftp_worker_rx,
             forwarding_worker_tx,

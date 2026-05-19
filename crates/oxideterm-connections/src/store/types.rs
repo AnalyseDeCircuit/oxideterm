@@ -1,6 +1,7 @@
 use crate::{SecretString, keychain::ConnectionKeychain};
 
 pub const CONFIG_VERSION: u32 = 1;
+pub const CONNECTION_TOMBSTONE_RETENTION_DAYS: i64 = 30;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -172,7 +173,7 @@ impl SavedConnection {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectionInfo {
     pub id: String,
     pub name: String,
@@ -189,6 +190,8 @@ pub struct ConnectionInfo {
     pub color: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_connect_command: Option<String>,
 }
 
 impl From<&SavedConnection> for ConnectionInfo {
@@ -209,6 +212,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             color: conn.color.clone(),
             tags: conn.tags.clone(),
             agent_forwarding: conn.options.agent_forwarding,
+            post_connect_command: None,
         }
     }
 }
@@ -236,6 +240,8 @@ pub struct ConnectionStoreData {
     pub connections: Vec<SavedConnection>,
     #[serde(default)]
     pub groups: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connection_tombstones: Vec<DeletedConnectionTombstone>,
 }
 
 impl Default for ConnectionStoreData {
@@ -244,7 +250,76 @@ impl Default for ConnectionStoreData {
             version: CONFIG_VERSION,
             connections: Vec::new(),
             groups: Vec::new(),
+            connection_tombstones: Vec::new(),
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DeletedConnectionTombstone {
+    pub id: String,
+    pub deleted_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedConnectionSyncRecord {
+    pub id: String,
+    pub revision: String,
+    pub updated_at: String,
+    pub deleted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<ConnectionInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedConnectionsSyncSnapshot {
+    pub revision: String,
+    pub exported_at: String,
+    pub records: Vec<SavedConnectionSyncRecord>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplySavedConnectionsSyncSnapshotResult {
+    pub applied: usize,
+    pub skipped: usize,
+    pub conflicts: usize,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ApplySavedConnectionsSyncOutcome {
+    pub result: ApplySavedConnectionsSyncSnapshotResult,
+    pub deleted_connection_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSyncMetadata {
+    pub saved_connections_revision: String,
+    pub saved_connections_updated_at: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SavedConnectionsConflictStrategy {
+    Skip,
+    Replace,
+    Merge,
+}
+
+impl SavedConnectionsConflictStrategy {
+    pub fn parse(value: Option<&str>) -> Result<Self> {
+        match value.unwrap_or("skip") {
+            "skip" => Ok(Self::Skip),
+            "replace" => Ok(Self::Replace),
+            "merge" => Ok(Self::Merge),
+            other => bail!("Unsupported saved connection conflict strategy: {other}"),
+        }
+    }
+
+    fn preserves_local_auth(self) -> bool {
+        matches!(self, Self::Merge)
     }
 }
 

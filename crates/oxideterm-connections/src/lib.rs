@@ -18,7 +18,9 @@ pub use ssh_config::{
 };
 pub use ssh_keys::{SshKeyInfo, list_available_ssh_keys};
 pub use store::{
-    AuthType, CONFIG_VERSION, ConnectionInfo, ConnectionOptions, ConnectionStore,
-    ConnectionStoreData, ProxyHopInfo, SaveConnectionRequest, SavedAuth, SavedConnection,
-    SavedProxyHop, validate_group_name,
+    ApplySavedConnectionsSyncOutcome, ApplySavedConnectionsSyncSnapshotResult, AuthType,
+    CONFIG_VERSION, ConnectionInfo, ConnectionOptions, ConnectionStore, ConnectionStoreData,
+    DeletedConnectionTombstone, LocalSyncMetadata, ProxyHopInfo, SaveConnectionRequest, SavedAuth,
+    SavedConnection, SavedConnectionSyncRecord, SavedConnectionsConflictStrategy,
+    SavedConnectionsSyncSnapshot, SavedProxyHop, validate_group_name,
 };

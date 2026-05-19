@@ -127,10 +127,11 @@ impl ConnectionStore {
             .get(id)
             .map(collect_connection_keychain_ids)
             .unwrap_or_default();
-        let before = self.data.connections.len();
-        self.data.connections.retain(|conn| conn.id != id);
-        let deleted = self.data.connections.len() != before;
+        let deleted = self
+            .remove_connection_with_tombstone_at(id, Utc::now())
+            .is_some();
         if deleted {
+            self.normalize();
             self.save()?;
             for keychain_id in keychain_ids {
                 let _ = self.keychain.delete(&keychain_id);
@@ -691,6 +692,7 @@ impl ConnectionStore {
     }
 
     fn normalize(&mut self) {
+        self.data.connection_tombstones = active_connection_tombstones(&self.data.connection_tombstones);
         self.data
             .groups
             .sort_by(|left, right| left.to_lowercase().cmp(&right.to_lowercase()));
@@ -709,5 +711,55 @@ impl ConnectionStore {
         self.data
             .connections
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    }
+
+    fn add_connection(&mut self, connection: SavedConnection) {
+        self.data
+            .connections
+            .retain(|candidate| candidate.id != connection.id);
+        self.data
+            .connection_tombstones
+            .retain(|tombstone| tombstone.id != connection.id);
+        self.data.connections.push(connection);
+    }
+
+    fn remove_connection_without_tombstone(&mut self, id: &str) -> Option<SavedConnection> {
+        let position = self
+            .data
+            .connections
+            .iter()
+            .position(|connection| connection.id == id)?;
+        Some(self.data.connections.remove(position))
+    }
+
+    fn remove_connection_with_tombstone_at(
+        &mut self,
+        id: &str,
+        deleted_at: DateTime<Utc>,
+    ) -> Option<SavedConnection> {
+        let removed = self.remove_connection_without_tombstone(id)?;
+        self.upsert_connection_tombstone(removed.id.clone(), deleted_at);
+        Some(removed)
+    }
+
+    fn upsert_connection_tombstone(&mut self, id: String, deleted_at: DateTime<Utc>) -> bool {
+        self.data.connection_tombstones =
+            active_connection_tombstones(&self.data.connection_tombstones);
+        if let Some(existing) = self
+            .data
+            .connection_tombstones
+            .iter_mut()
+            .find(|tombstone| tombstone.id == id)
+        {
+            if existing.deleted_at >= deleted_at {
+                return false;
+            }
+            existing.deleted_at = deleted_at;
+            return true;
+        }
+        self.data
+            .connection_tombstones
+            .push(DeletedConnectionTombstone { id, deleted_at });
+        true
     }
 }

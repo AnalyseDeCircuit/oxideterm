@@ -45,6 +45,7 @@ impl Render for WorkspaceApp {
                             | TabKind::Topology
                             | TabKind::NotificationCenter
                             | TabKind::PluginManager
+                            | TabKind::CloudSync
                     )
                 })
             && !self.search.visible
@@ -73,6 +74,7 @@ impl Render for WorkspaceApp {
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
                 (TabKind::SessionManager, _) => self.render_session_manager_surface(window, cx),
                 (TabKind::PluginManager, _) => self.render_plugin_manager_surface(),
+                (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
                 (_, Some(root_pane)) => self.render_terminal_surface(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
             }
