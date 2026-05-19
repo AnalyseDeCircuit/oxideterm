@@ -50,6 +50,7 @@ impl WorkspaceApp {
                 TabKind::Forwards => LucideIcon::ArrowLeftRight,
                 TabKind::SessionManager => LucideIcon::LayoutList,
                 TabKind::PluginManager => LucideIcon::Puzzle,
+                TabKind::CloudSync => LucideIcon::RefreshCw,
                 TabKind::Settings => LucideIcon::Settings,
             };
             let tab_text = self.tab_display_title(tab);

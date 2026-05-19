@@ -6590,6 +6590,27 @@ name = "oxideterm-backend-classification"
 version = "0.1.0"
 
 [[package]]
+name = "oxideterm-cloud-sync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "hmac",
+ "keyring",
+ "oxideterm-connections",
+ "oxideterm-forwarding",
+ "oxideterm-settings",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "uuid",
+ "whoami",
+]
+
+[[package]]
 name = "oxideterm-code-editor"
 version = "0.1.0"
 dependencies = [
@@ -6706,6 +6727,7 @@ dependencies = [
  "objc2-foundation",
  "oxideterm-ai",
  "oxideterm-backend-classification",
+ "oxideterm-cloud-sync",
  "oxideterm-code-editor",
  "oxideterm-connection-monitor",
  "oxideterm-connections",

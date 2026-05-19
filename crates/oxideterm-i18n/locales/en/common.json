@@ -90,6 +90,7 @@
     "cmd_reset_panes": "Reset to Single Pane",
     "cmd_focus_next_pane": "Focus Next Pane",
     "cmd_open_plugin_manager": "Open Plugin Manager",
+    "cmd_open_cloud_sync": "Open Cloud Sync",
     "cmd_open_topology": "Open Topology View",
     "cmd_reset_settings": "Reset All Settings",
     "confirm_reset_settings": "Are you sure you want to reset all settings to defaults?",
@@ -139,6 +140,77 @@
   },
   "plugin": {
     "manager_title": "Plugin Manager",
+    "cloud_sync": {
+      "panel_title": "Oxide Cloud Sync",
+      "native_description": "Encrypted self-hosted sync for OxideTerm.",
+      "native_service_pending": "The native service is being wired to the built-in compatibility layer.",
+      "native_service_ready": "The built-in native sync service is connected to the compatibility layer.",
+      "native_scope_summary": "Default synced app sections: {{sections}}.",
+      "history_empty": "No sync history yet.",
+      "backend": {
+        "webdav": "WebDAV",
+        "http_json": "HTTP JSON",
+        "dropbox": "Dropbox",
+        "s3": "S3",
+        "git": "Git"
+      },
+      "actions": {
+        "check": "Check Remote",
+        "upload": "Upload Now",
+        "pull_preview": "Pull Preview",
+        "apply_preview": "Apply Preview",
+        "refresh": "Refresh"
+      },
+      "status": {
+        "ready": "Sync Ready",
+        "uploading": "Uploading",
+        "checking": "Checking",
+        "remote_update": "Remote Update",
+        "conflict": "Conflict",
+        "error": "Sync Error"
+      },
+      "progress": {
+        "fetch_metadata": "Fetching remote metadata",
+        "preflight": "Preflight",
+        "exporting": "Exporting snapshot",
+        "uploading": "Uploading objects",
+        "downloading": "Downloading objects",
+        "previewing": "Building import preview",
+        "importing": "Applying import",
+        "creating_backup": "Creating backup",
+        "done": "Done"
+      },
+      "preview": {
+        "app_settings": "App Settings",
+        "plugin_settings_label": "Plugin Settings"
+      },
+      "fields": {
+        "backend": "Backend",
+        "namespace": "Namespace",
+        "local_dirty": "Local Dirty",
+        "remote_revision": "Remote Revision",
+        "connections": "Connections Snapshot",
+        "forwards": "Forwards Snapshot",
+        "upload_units": "Upload Units",
+        "last_sync": "Last Sync",
+        "last_upload": "Last Upload",
+        "last_check": "Last Check"
+      },
+      "sections": {
+        "connection_settings": "Connection Settings",
+        "pending_preview": "Pending Remote Preview",
+        "history": "Sync History",
+        "notes": "Notes"
+      },
+      "errors": {
+        "legacy_not_supported": "The remote is a legacy .oxide snapshot; native structured preview cannot apply that format yet."
+      },
+      "common": {
+        "no": "No",
+        "yes": "Yes",
+        "error": "Error"
+      }
+    },
     "native_description": "Native plugin hosting is not enabled yet.",
     "native_empty_title": "Plugin system not available in native",
     "native_empty_description": "OxideTerm native keeps the plugin entry reserved while the non-WebView plugin API is designed. No plugin install, enable, marketplace, or runtime actions are exposed here yet.",

@@ -1,4 +1,5 @@
 mod actions;
+mod cloud_sync;
 mod command_palette;
 mod connection_monitor;
 mod file_manager;
@@ -602,6 +603,12 @@ pub(crate) struct WorkspaceApp {
     launcher: LauncherState,
     graphics: GraphicsState,
     connection_monitor: ConnectionMonitorState,
+    cloud_sync_store: oxideterm_cloud_sync::state::CloudSyncStateStore,
+    cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService,
+    cloud_sync_pending_preview: Option<cloud_sync::CloudSyncPendingPreview>,
+    cloud_sync_progress: Option<oxideterm_cloud_sync::progress::CloudSyncProgress>,
+    cloud_sync_rx: Option<std::sync::mpsc::Receiver<cloud_sync::CloudSyncDelivery>>,
+    cloud_sync_polling: bool,
     sftp_worker_tx: std::sync::mpsc::Sender<sftp::SftpWorkerResult>,
     sftp_worker_rx: std::sync::mpsc::Receiver<sftp::SftpWorkerResult>,
     forwarding_worker_tx: std::sync::mpsc::Sender<forwards::ForwardingWorkerResult>,

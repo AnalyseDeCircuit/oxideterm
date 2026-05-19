@@ -30,3 +30,4 @@ target/
 tauri版本代码/*
 .deps
 docs/native-editor-ide-plan.md
+docs/native-cloud-sync-plan.md

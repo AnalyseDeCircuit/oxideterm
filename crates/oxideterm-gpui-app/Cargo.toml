@@ -16,6 +16,7 @@ gpui.workspace = true
 image.workspace = true
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
 oxideterm-ai = { path = "../oxideterm-ai" }
+oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-code-editor = { path = "../oxideterm-code-editor", features = ["syntax"] }

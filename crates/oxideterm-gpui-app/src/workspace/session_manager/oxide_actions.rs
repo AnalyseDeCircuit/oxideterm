@@ -1000,7 +1000,10 @@ impl WorkspaceApp {
     }
 
     #[allow(dead_code)]
-    fn apply_oxide_import_forward_records(&mut self, envelope: &mut ImportResultEnvelope) -> usize {
+    pub(super) fn apply_oxide_import_forward_records(
+        &mut self,
+        envelope: &mut ImportResultEnvelope,
+    ) -> usize {
         if envelope.forward_records.is_empty() {
             return 0;
         }
@@ -1037,7 +1040,7 @@ impl WorkspaceApp {
     }
 
     #[allow(dead_code)]
-    fn apply_oxide_import_quick_commands(
+    pub(super) fn apply_oxide_import_quick_commands(
         &mut self,
         quick_commands_json: Option<&str>,
         should_import: bool,
@@ -1059,7 +1062,7 @@ impl WorkspaceApp {
     }
 
     #[allow(dead_code)]
-    fn apply_oxide_import_plugin_settings(
+    pub(super) fn apply_oxide_import_plugin_settings(
         &mut self,
         plugin_settings: &[oxideterm_connections::oxide_file::EncryptedPluginSetting],
         should_import: bool,
@@ -1087,7 +1090,7 @@ impl WorkspaceApp {
     }
 
     #[allow(dead_code)]
-    fn apply_oxide_import_app_settings(
+    pub(super) fn apply_oxide_import_app_settings(
         &mut self,
         app_settings_json: Option<&str>,
         should_import: bool,
@@ -1120,7 +1123,10 @@ impl WorkspaceApp {
     }
 
     #[allow(dead_code)]
-    fn apply_oxide_import_portable_secrets(&mut self, envelope: &mut ImportResultEnvelope) {
+    pub(super) fn apply_oxide_import_portable_secrets(
+        &mut self,
+        envelope: &mut ImportResultEnvelope,
+    ) {
         let total = envelope.portable_secrets.len();
         if total == 0 {
             return;
