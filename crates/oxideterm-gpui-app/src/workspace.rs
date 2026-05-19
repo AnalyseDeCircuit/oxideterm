@@ -130,7 +130,10 @@ use self::actions::SearchBarState;
 use self::connection_monitor::ConnectionMonitorState;
 use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
-use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
+use self::ime::{
+    WorkspaceImeDragSelection, WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
+    keystroke_commits_platform_text,
+};
 use self::launcher::LauncherState;
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionField,
@@ -521,6 +524,9 @@ pub(crate) struct WorkspaceApp {
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
     text_input_anchors: HashMap<TextInputAnchorId, TextInputAnchor>,
     ime_marked_text: Option<String>,
+    selected_ime_target: Option<WorkspaceImeTarget>,
+    selected_ime_range: Option<WorkspaceImeSelection>,
+    ime_drag_selection: Option<WorkspaceImeDragSelection>,
     focused_settings_input: Option<SettingsInput>,
     settings_input_draft: String,
     settings_slider_drag: Option<SettingsSlider>,
@@ -605,10 +611,19 @@ pub(crate) struct WorkspaceApp {
     connection_monitor: ConnectionMonitorState,
     cloud_sync_store: oxideterm_cloud_sync::state::CloudSyncStateStore,
     cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService,
+    cloud_sync_form: cloud_sync::CloudSyncFormDraft,
+    cloud_sync_open_select: Option<cloud_sync::CloudSyncSelect>,
+    cloud_sync_confirm: Option<cloud_sync::CloudSyncConfirm>,
     cloud_sync_pending_preview: Option<cloud_sync::CloudSyncPendingPreview>,
+    cloud_sync_preview_selection: Option<cloud_sync::CloudSyncPreviewSelection>,
     cloud_sync_progress: Option<oxideterm_cloud_sync::progress::CloudSyncProgress>,
     cloud_sync_rx: Option<std::sync::mpsc::Receiver<cloud_sync::CloudSyncDelivery>>,
     cloud_sync_polling: bool,
+    cloud_sync_active_action: Option<&'static str>,
+    cloud_sync_auto_upload_generation: u64,
+    cloud_sync_dirty_refresh_scheduled: bool,
+    cloud_sync_dirty_refresh_generation: u64,
+    cloud_sync_upload_after_current: bool,
     sftp_worker_tx: std::sync::mpsc::Sender<sftp::SftpWorkerResult>,
     sftp_worker_rx: std::sync::mpsc::Receiver<sftp::SftpWorkerResult>,
     forwarding_worker_tx: std::sync::mpsc::Sender<forwards::ForwardingWorkerResult>,

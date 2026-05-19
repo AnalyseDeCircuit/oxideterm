@@ -377,7 +377,7 @@ impl WorkspaceApp {
                                                     .on_mouse_down(
                                                         MouseButton::Left,
                                                         cx.listener(
-                                                            |this, _event, window, cx| {
+                                                            move |this, event: &gpui::MouseDownEvent, window, cx| {
                                                                 if let Some(player) = this
                                                                     .terminal_cast_player
                                                                     .as_mut()
@@ -389,6 +389,12 @@ impl WorkspaceApp {
                                                                     false;
                                                                 this.ime_marked_text = None;
                                                                 window.focus(&this.focus_handle);
+                                                                this.begin_ime_selection(
+                                                                    search_target,
+                                                                    event.position,
+                                                                    event.modifiers.shift,
+                                                                    cx,
+                                                                );
                                                                 cx.stop_propagation();
                                                                 cx.notify();
                                                             },

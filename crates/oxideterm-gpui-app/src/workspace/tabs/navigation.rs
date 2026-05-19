@@ -165,7 +165,6 @@ impl WorkspaceApp {
             }
             Some(TabKind::CloudSync) => {
                 self.active_surface = ActiveSurface::Terminal;
-                self.active_sidebar_section = SidebarSection::Extensions;
             }
             _ => {
                 self.active_surface = ActiveSurface::Terminal;
@@ -725,14 +724,16 @@ impl WorkspaceApp {
     fn tab_visual_width(&self, tab: &Tab) -> f32 {
         let metrics = self.tokens.metrics;
         let title = self.tab_display_title(tab);
-        let cjk_width_adjustment = if title.chars().any(|ch| !ch.is_ascii()) {
-            metrics.tab_font_size * 2.0
-        } else {
-            0.0
-        };
-        let title_width =
-            title.chars().count() as f32 * metrics.tab_font_size * metrics.tab_title_width_ratio
-                + cjk_width_adjustment;
+        let title_width = title
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii() {
+                    metrics.tab_font_size * metrics.tab_title_width_ratio
+                } else {
+                    metrics.tab_font_size
+                }
+            })
+            .sum::<f32>();
         let fixed_width = metrics.tab_padding_x * 2.0
             + metrics.tab_icon_size
             + metrics.tab_gap * 2.0

@@ -486,6 +486,7 @@ impl WorkspaceApp {
         );
 
         self.apply_oxide_import_portable_secrets(&mut envelope);
+        self.queue_cloud_sync_dirty_refresh(cx);
 
         let result = OxideClientStateImportResult {
             envelope,
@@ -986,6 +987,7 @@ impl WorkspaceApp {
         );
 
         self.apply_oxide_import_portable_secrets(&mut envelope);
+        self.queue_cloud_sync_dirty_refresh(cx);
 
         Ok(OxideClientStateImportResult {
             envelope,

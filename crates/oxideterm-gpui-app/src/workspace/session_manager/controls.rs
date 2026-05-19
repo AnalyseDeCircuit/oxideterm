@@ -181,11 +181,17 @@ impl WorkspaceApp {
                 )
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, _event, window, cx| {
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                         this.session_manager.focused_input = Some(target);
                         this.ime_marked_text = None;
                         this.needs_active_pane_focus = false;
                         window.focus(&this.focus_handle);
+                        this.begin_ime_selection(
+                            WorkspaceImeTarget::SessionManager(target),
+                            event.position,
+                            event.modifiers.shift,
+                            cx,
+                        );
                         cx.notify();
                         cx.stop_propagation();
                     }),

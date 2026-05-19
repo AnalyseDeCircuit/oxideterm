@@ -46,6 +46,28 @@ pub struct CloudSyncHistoryEntry {
     pub remote_revision: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudSyncRollbackBackupMetadata {
+    pub num_connections: usize,
+    #[serde(default)]
+    pub connection_names: Vec<String>,
+    pub has_app_settings: bool,
+    pub plugin_settings_count: usize,
+    pub forwards: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudSyncRollbackBackup {
+    pub id: String,
+    pub created_at: String,
+    pub source_revision: Option<String>,
+    pub size_bytes: usize,
+    pub bytes_base64: String,
+    pub metadata: Option<CloudSyncRollbackBackupMetadata>,
+}
+
 impl CloudSyncHistoryEntry {
     pub fn new(
         action: impl Into<String>,
@@ -119,6 +141,8 @@ pub struct CloudSyncPersistedState {
     pub secret_hints: BTreeMap<String, bool>,
     #[serde(default)]
     pub sync_history: Vec<CloudSyncHistoryEntry>,
+    #[serde(default)]
+    pub rollback_backups: Vec<CloudSyncRollbackBackup>,
 }
 
 impl Default for CloudSyncPersistedState {
@@ -149,6 +173,7 @@ impl Default for CloudSyncPersistedState {
             last_error: None,
             secret_hints: BTreeMap::new(),
             sync_history: Vec::new(),
+            rollback_backups: Vec::new(),
         }
     }
 }
@@ -177,6 +202,12 @@ impl CloudSyncPersistedState {
         self.sync_history.retain(|item| item.id != entry.id);
         self.sync_history.insert(0, entry);
         self.sync_history.truncate(MAX_SYNC_HISTORY);
+    }
+
+    pub fn append_rollback_backup(&mut self, backup: CloudSyncRollbackBackup) {
+        self.rollback_backups.retain(|item| item.id != backup.id);
+        self.rollback_backups.insert(0, backup);
+        self.rollback_backups.truncate(crate::MAX_ROLLBACK_BACKUPS);
     }
 }
 
@@ -276,6 +307,38 @@ mod tests {
         assert_eq!(
             state.sync_history[0].id,
             format!("id-{}", MAX_SYNC_HISTORY + 2)
+        );
+    }
+
+    #[test]
+    fn rollback_backups_are_deduped_and_capped_like_tauri_storage() {
+        let mut state = CloudSyncPersistedState::default();
+        let backup = CloudSyncRollbackBackup {
+            id: "same".into(),
+            created_at: "2026-05-19T00:00:00Z".into(),
+            source_revision: Some("rev-1".into()),
+            size_bytes: 4,
+            bytes_base64: "dGVzdA==".into(),
+            metadata: None,
+        };
+        state.append_rollback_backup(backup.clone());
+        state.append_rollback_backup(backup);
+        assert_eq!(state.rollback_backups.len(), 1);
+
+        for index in 0..(crate::MAX_ROLLBACK_BACKUPS + 2) {
+            state.append_rollback_backup(CloudSyncRollbackBackup {
+                id: format!("backup-{index}"),
+                created_at: "2026-05-19T00:00:00Z".into(),
+                source_revision: None,
+                size_bytes: 0,
+                bytes_base64: String::new(),
+                metadata: None,
+            });
+        }
+        assert_eq!(state.rollback_backups.len(), crate::MAX_ROLLBACK_BACKUPS);
+        assert_eq!(
+            state.rollback_backups[0].id,
+            format!("backup-{}", crate::MAX_ROLLBACK_BACKUPS + 1)
         );
     }
 }

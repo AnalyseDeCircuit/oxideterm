@@ -1,14 +1,72 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::{Mutex, OnceLock},
+};
 
 use anyhow::{Context, Result};
 use keyring::Entry;
 
-use crate::{AuthMode, BackendType, secret_keys};
+use crate::{AuthMode, BackendType, CLOUD_SYNC_PLUGIN_ID, secret_keys};
 
-const CLOUD_SYNC_KEYCHAIN_SERVICE: &str = "com.oxideterm.cloud-sync";
+const CLOUD_SYNC_KEYCHAIN_SERVICE: &str = "com.oxideterm.ai";
+const LEGACY_NATIVE_CLOUD_SYNC_KEYCHAIN_SERVICE: &str = "com.oxideterm.cloud-sync";
+static SECRET_SESSION_CACHE: OnceLock<Mutex<BTreeMap<String, Option<String>>>> = OnceLock::new();
+
+#[cfg(target_os = "macos")]
+mod mac_keychain {
+    use std::process::Command;
+
+    pub fn store(service: &str, account: &str, password: &str) -> Result<(), String> {
+        let _ = Command::new("security")
+            .args(["delete-generic-password", "-s", service, "-a", account])
+            .output();
+
+        let output = Command::new("security")
+            .args([
+                "add-generic-password",
+                "-s",
+                service,
+                "-a",
+                account,
+                "-w",
+                password,
+                "-A",
+            ])
+            .output()
+            .map_err(|error| format!("security CLI: {error}"))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("security add-generic-password: {}", stderr.trim()))
+        }
+    }
+
+    pub fn get(service: &str, account: &str) -> Result<String, String> {
+        let output = Command::new("security")
+            .args(["find-generic-password", "-s", service, "-a", account, "-w"])
+            .output()
+            .map_err(|error| format!("security CLI: {error}"))?;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout)
+                .trim_end_matches('\n')
+                .to_string())
+        } else {
+            Err("not found".to_string())
+        }
+    }
+
+    pub fn delete(service: &str, account: &str) {
+        let _ = Command::new("security")
+            .args(["delete-generic-password", "-s", service, "-a", account])
+            .output();
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SecretReadMode {
@@ -33,11 +91,24 @@ pub trait CloudSyncSecretProvider {
         key: &str,
         mode: SecretReadMode,
     ) -> Result<Option<String>, CloudSyncSecretError>;
+
+    fn get_many_secrets(
+        &mut self,
+        keys: &[&str],
+        mode: SecretReadMode,
+    ) -> Result<BTreeMap<String, Option<String>>, CloudSyncSecretError> {
+        let mut values = BTreeMap::new();
+        for key in keys {
+            values.insert((*key).to_string(), self.get_secret(key, mode)?);
+        }
+        Ok(values)
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct CloudSyncKeychainSecretProvider {
     service: String,
+    legacy_service: String,
     hints: BTreeMap<String, bool>,
 }
 
@@ -45,19 +116,22 @@ impl CloudSyncKeychainSecretProvider {
     pub fn new(hints: BTreeMap<String, bool>) -> Self {
         Self {
             service: CLOUD_SYNC_KEYCHAIN_SERVICE.to_string(),
+            legacy_service: LEGACY_NATIVE_CLOUD_SYNC_KEYCHAIN_SERVICE.to_string(),
             hints,
         }
     }
 
     pub fn store_secret(&mut self, key: &str, value: Option<&str>) -> Result<()> {
         if let Some(value) = value.filter(|value| !value.is_empty()) {
-            Entry::new(&self.service, &self.account(key))?
-                .set_password(value)
-                .with_context(|| format!("failed to store cloud sync secret {key}"))?;
+            self.store_current_secret(key, value)?;
+            self.delete_legacy_secret(key)?;
             self.hints.insert(key.to_string(), true);
+            clear_session_cached_secret(&self.cache_key(key));
         } else {
-            let _ = Entry::new(&self.service, &self.account(key))?.delete_credential();
+            self.delete_current_secret(key)?;
+            self.delete_legacy_secret(key)?;
             self.hints.insert(key.to_string(), false);
+            clear_session_cached_secret(&self.cache_key(key));
         }
         Ok(())
     }
@@ -67,7 +141,91 @@ impl CloudSyncKeychainSecretProvider {
     }
 
     fn account(&self, key: &str) -> String {
+        format!("{}@{}", whoami::username(), plugin_secret_account_id(key))
+    }
+
+    fn cache_key(&self, key: &str) -> String {
+        format!("{}:{}", self.service, self.account(key))
+    }
+
+    fn legacy_account(&self, key: &str) -> String {
         format!("{}@{}", whoami::username(), key)
+    }
+
+    fn store_current_secret(&self, key: &str, value: &str) -> Result<()> {
+        let account = self.account(key);
+        #[cfg(target_os = "macos")]
+        {
+            mac_keychain::store(&self.service, &account, value).map_err(|error| {
+                anyhow::anyhow!("failed to store cloud sync secret {key}: {error}")
+            })?;
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Entry::new(&self.service, &account)?
+                .set_password(value)
+                .with_context(|| format!("failed to store cloud sync secret {key}"))
+        }
+    }
+
+    fn get_current_secret(&self, key: &str) -> Result<Option<String>, CloudSyncSecretError> {
+        let account = self.account(key);
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(value) = mac_keychain::get(&self.service, &account) {
+                return Ok(Some(value));
+            }
+        }
+
+        match Entry::new(&self.service, &account)
+            .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?
+            .get_password()
+        {
+            Ok(value) => {
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = mac_keychain::store(&self.service, &account, &value);
+                }
+                Ok(Some(value))
+            }
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(CloudSyncSecretError::AccessFailed(error.to_string())),
+        }
+    }
+
+    fn get_legacy_secret(&self, key: &str) -> Result<Option<String>, CloudSyncSecretError> {
+        match Entry::new(&self.legacy_service, &self.legacy_account(key))
+            .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?
+            .get_password()
+        {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(CloudSyncSecretError::AccessFailed(error.to_string())),
+        }
+    }
+
+    fn delete_current_secret(&self, key: &str) -> Result<()> {
+        let account = self.account(key);
+        #[cfg(target_os = "macos")]
+        {
+            mac_keychain::delete(&self.service, &account);
+        }
+        match Entry::new(&self.service, &account)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => {
+                Err(error).with_context(|| format!("failed to delete cloud sync secret {key}"))
+            }
+        }
+    }
+
+    fn delete_legacy_secret(&self, key: &str) -> Result<()> {
+        match Entry::new(&self.legacy_service, &self.legacy_account(key))?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error)
+                .with_context(|| format!("failed to delete legacy cloud sync secret {key}")),
+        }
     }
 }
 
@@ -81,24 +239,121 @@ impl CloudSyncSecretProvider for CloudSyncKeychainSecretProvider {
         key: &str,
         mode: SecretReadMode,
     ) -> Result<Option<String>, CloudSyncSecretError> {
+        let cache_key = self.cache_key(key);
+        if let Some(value) = session_cached_secret(&cache_key) {
+            self.hints.insert(key.to_string(), value.is_some());
+            return Ok(value);
+        }
+
         if matches!(mode, SecretReadMode::Silent) {
             return Ok(None);
         }
-        match Entry::new(&self.service, &self.account(key))
-            .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?
-            .get_password()
-        {
-            Ok(value) => {
-                self.hints.insert(key.to_string(), true);
-                Ok(Some(value))
-            }
-            Err(keyring::Error::NoEntry) => {
-                self.hints.insert(key.to_string(), false);
-                Ok(None)
-            }
-            Err(error) => Err(CloudSyncSecretError::AccessFailed(error.to_string())),
+        if let Some(value) = self.get_current_secret(key)? {
+            self.hints.insert(key.to_string(), true);
+            set_session_cached_secret(cache_key, Some(value.clone()));
+            return Ok(Some(value));
         }
+
+        if let Some(value) = self.get_legacy_secret(key)? {
+            self.store_current_secret(key, &value)
+                .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?;
+            self.delete_legacy_secret(key)
+                .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?;
+            self.hints.insert(key.to_string(), true);
+            set_session_cached_secret(cache_key, Some(value.clone()));
+            return Ok(Some(value));
+        }
+
+        self.hints.insert(key.to_string(), false);
+        set_session_cached_secret(cache_key, None);
+        Ok(None)
     }
+
+    fn get_many_secrets(
+        &mut self,
+        keys: &[&str],
+        mode: SecretReadMode,
+    ) -> Result<BTreeMap<String, Option<String>>, CloudSyncSecretError> {
+        let mut values = BTreeMap::new();
+        let mut missing = Vec::new();
+
+        for key in keys {
+            let cache_key = self.cache_key(key);
+            if let Some(value) = session_cached_secret(&cache_key) {
+                self.hints.insert((*key).to_string(), value.is_some());
+                values.insert((*key).to_string(), value);
+            } else {
+                missing.push(*key);
+            }
+        }
+
+        if matches!(mode, SecretReadMode::Silent) {
+            for key in missing {
+                values.insert(key.to_string(), None);
+            }
+            return Ok(values);
+        }
+
+        for key in missing {
+            let cache_key = self.cache_key(key);
+            if let Some(value) = self.get_current_secret(key)? {
+                self.hints.insert(key.to_string(), true);
+                set_session_cached_secret(cache_key, Some(value.clone()));
+                values.insert(key.to_string(), Some(value));
+                continue;
+            }
+
+            if let Some(value) = self.get_legacy_secret(key)? {
+                self.store_current_secret(key, &value)
+                    .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?;
+                self.delete_legacy_secret(key)
+                    .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?;
+                self.hints.insert(key.to_string(), true);
+                set_session_cached_secret(cache_key, Some(value.clone()));
+                values.insert(key.to_string(), Some(value));
+                continue;
+            }
+
+            self.hints.insert(key.to_string(), false);
+            set_session_cached_secret(cache_key, None);
+            values.insert(key.to_string(), None);
+        }
+
+        Ok(values)
+    }
+}
+
+fn secret_session_cache() -> &'static Mutex<BTreeMap<String, Option<String>>> {
+    SECRET_SESSION_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn session_cached_secret(key: &str) -> Option<Option<String>> {
+    secret_session_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(key).cloned())
+}
+
+fn set_session_cached_secret(key: String, value: Option<String>) {
+    if let Ok(mut cache) = secret_session_cache().lock() {
+        cache.insert(key, value);
+    }
+}
+
+fn clear_session_cached_secret(key: &str) {
+    if let Ok(mut cache) = secret_session_cache().lock() {
+        cache.remove(key);
+    }
+}
+
+fn plugin_secret_account_id(key: &str) -> String {
+    format!(
+        "plugin-secret:{}:{}:{}:{}",
+        CLOUD_SYNC_PLUGIN_ID.len(),
+        CLOUD_SYNC_PLUGIN_ID,
+        key.len(),
+        key
+    )
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -176,8 +431,16 @@ pub fn get_action_secrets(
         }));
     }
 
-    for (key, assign) in &reads {
-        assign(&mut secrets, provider.get_secret(key, mode)?);
+    if matches!(mode, SecretReadMode::Prompt) && !reads.is_empty() {
+        let keys = reads.iter().map(|(key, _)| *key).collect::<Vec<_>>();
+        let values = provider.get_many_secrets(&keys, mode)?;
+        for (key, assign) in &reads {
+            assign(&mut secrets, values.get(*key).cloned().unwrap_or(None));
+        }
+    } else {
+        for (key, assign) in &reads {
+            assign(&mut secrets, provider.get_secret(key, mode)?);
+        }
     }
 
     if matches!(mode, SecretReadMode::Silent)
@@ -217,6 +480,7 @@ mod tests {
         hints: HashSet<String>,
         values: HashMap<String, String>,
         reads: Vec<(String, SecretReadMode)>,
+        batch_reads: Vec<(Vec<String>, SecretReadMode)>,
     }
 
     impl CloudSyncSecretProvider for TestSecrets {
@@ -235,6 +499,28 @@ mod tests {
             }
             Ok(self.values.get(key).cloned())
         }
+
+        fn get_many_secrets(
+            &mut self,
+            keys: &[&str],
+            mode: SecretReadMode,
+        ) -> Result<BTreeMap<String, Option<String>>, CloudSyncSecretError> {
+            self.batch_reads
+                .push((keys.iter().map(|key| (*key).to_string()).collect(), mode));
+            let mut values = BTreeMap::new();
+            for key in keys {
+                values.insert((*key).to_string(), self.values.get(*key).cloned());
+            }
+            Ok(values)
+        }
+    }
+
+    #[test]
+    fn plugin_secret_account_id_matches_tauri_namespace() {
+        assert_eq!(
+            plugin_secret_account_id(secret_keys::BASIC_PASSWORD),
+            "plugin-secret:24:com.oxideterm.cloud-sync:14:basic-password"
+        );
     }
 
     #[test]
@@ -260,6 +546,12 @@ mod tests {
 
     #[test]
     fn prompt_read_batches_expected_backend_and_sync_secrets_contract() {
+        let cache_provider =
+            CloudSyncKeychainSecretProvider::new(std::collections::BTreeMap::new());
+        clear_session_cached_secret(&cache_provider.cache_key(secret_keys::SYNC_PASSWORD));
+        clear_session_cached_secret(&cache_provider.cache_key(secret_keys::BASIC_USERNAME));
+        clear_session_cached_secret(&cache_provider.cache_key(secret_keys::BASIC_PASSWORD));
+
         let mut provider = TestSecrets {
             values: HashMap::from([
                 (secret_keys::SYNC_PASSWORD.to_string(), "sync".to_string()),
@@ -279,17 +571,41 @@ mod tests {
         assert_eq!(secrets.sync_password.as_deref(), Some("sync"));
         assert_eq!(secrets.basic_username.as_deref(), Some("user"));
         assert_eq!(secrets.basic_password.as_deref(), Some("pass"));
+        assert!(provider.reads.is_empty());
         assert_eq!(
-            provider
-                .reads
-                .iter()
-                .map(|(key, _)| key.as_str())
-                .collect::<Vec<_>>(),
-            vec![
-                secret_keys::SYNC_PASSWORD,
-                secret_keys::BASIC_USERNAME,
-                secret_keys::BASIC_PASSWORD
-            ]
+            provider.batch_reads,
+            vec![(
+                vec![
+                    secret_keys::SYNC_PASSWORD.to_string(),
+                    secret_keys::BASIC_USERNAME.to_string(),
+                    secret_keys::BASIC_PASSWORD.to_string(),
+                ],
+                SecretReadMode::Prompt,
+            )]
         );
+    }
+
+    #[test]
+    fn prompt_read_populates_session_cache_used_by_silent_reads_like_tauri() {
+        let mut keychain_provider =
+            CloudSyncKeychainSecretProvider::new(std::collections::BTreeMap::new());
+        let cache_key = keychain_provider.cache_key(secret_keys::TOKEN);
+        clear_session_cached_secret(&cache_key);
+        set_session_cached_secret(cache_key.clone(), Some("cached-token".to_string()));
+
+        let settings = CloudSyncSettings {
+            auth_mode: AuthMode::Bearer,
+            ..CloudSyncSettings::default()
+        };
+        let secrets = get_action_secrets(
+            &settings,
+            &mut keychain_provider,
+            false,
+            SecretReadMode::Silent,
+        )
+        .unwrap();
+
+        assert_eq!(secrets.token.as_deref(), Some("cached-token"));
+        clear_session_cached_secret(&cache_key);
     }
 }

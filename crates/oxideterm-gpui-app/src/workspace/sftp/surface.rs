@@ -502,7 +502,7 @@ impl WorkspaceApp {
             .items_center()
             .overflow_hidden()
             .text_size(px(SFTP_TEXT_SM))
-            .on_scroll_wheel(cx.listener(move |this, event, window, cx| {
+            .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, window, cx| {
                 this.handle_sftp_breadcrumb_scroll(pane, event, window, cx);
             }))
             .child(

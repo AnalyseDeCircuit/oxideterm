@@ -248,6 +248,15 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t(tab.description_key())),
             )
+            .when(tab == SettingsTab::Keybindings, |header| {
+                header.child(
+                    div()
+                        .mt(px(2.0))
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xb3))
+                        .child(self.i18n.t("settings_view.keybindings.intl_keyboard_note")),
+                )
+            })
             .into_any_element()
     }
 

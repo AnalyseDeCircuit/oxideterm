@@ -8,9 +8,10 @@ use chrono::Utc;
 use oxideterm_connections::{
     ConnectionStore, SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
     oxide_file::{
-        ImportConflictStrategy, ImportPreview, ImportResultEnvelope, OxideExportOptions, OxideFile,
-        OxideImportOptions, OxideMetadata, apply_oxide_import_with_options,
-        apply_oxide_import_with_options_with_progress, export_connections_to_oxide_with_progress,
+        AppSettingsSectionPreview, ImportConflictStrategy, ImportPreview, ImportResultEnvelope,
+        OxideExportOptions, OxideFile, OxideImportOptions, OxideMetadata,
+        apply_oxide_import_with_options, apply_oxide_import_with_options_with_progress,
+        export_connections_to_oxide_with_progress, preflight_export,
         preview_oxide_import_with_progress,
     },
 };
@@ -30,6 +31,7 @@ use crate::{
         CloudSyncApplyOutcome, CloudSyncLocalSnapshot, apply_structured_snapshots,
         build_local_snapshot,
     },
+    state::CloudSyncHistorySummary,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -155,7 +157,7 @@ impl CloudSyncOperationService {
         secret_provider: &mut impl CloudSyncSecretProvider,
         options: UploadOptions,
         progress: Option<&mut dyn CloudSyncProgressSink>,
-    ) -> Result<Option<UploadOutcome>> {
+    ) -> std::result::Result<Option<UploadOutcome>, CloudSyncUploadError> {
         let Some(_permit) = self
             .guard
             .begin(CloudSyncOperationKind::Upload, options.skip_if_busy)?
@@ -191,7 +193,9 @@ impl CloudSyncOperationService {
                 .unwrap_or_default()
                 .is_empty()
         {
-            bail!("missing_sync_password: cloud sync password is required");
+            return Err(
+                anyhow::anyhow!("missing_sync_password: cloud sync password is required").into(),
+            );
         }
 
         let export_units = local_snapshot.upload_units;
@@ -203,14 +207,32 @@ impl CloudSyncOperationService {
             .fetch_remote_metadata(settings, &secrets)
             .await?;
         if !options.force && remote_metadata.exists {
-            ensure_no_remote_conflict(
+            if let Err(error) = ensure_no_remote_conflict(
                 &local_snapshot,
                 &remote_metadata,
+                options.previous_remote_revision.as_deref(),
                 options.previous_remote_sections.as_ref(),
-            )?;
+            ) {
+                return Err(CloudSyncUploadError {
+                    message: error.to_string(),
+                    remote_metadata: Some(remote_metadata),
+                    revision_sequence_consumed: None,
+                });
+            }
         }
 
         report_progress(progress, CloudSyncProgressStage::Preflight, 2, total);
+        if local_snapshot.scope.sync_connections {
+            let connection_ids = connection_store
+                .connections()
+                .iter()
+                .map(|connection| connection.id.clone())
+                .collect::<Vec<_>>();
+            let preflight = preflight_export(connection_store, &connection_ids, false, 0);
+            if !preflight.can_export {
+                return Err(anyhow::anyhow!("preflight_failed: export preflight failed").into());
+            }
+        }
         let revision = revision_id(Utc::now(), &options.device_id, options.revision_sequence);
         let uploaded_at = Utc::now().to_rfc3339();
         let plan = self
@@ -226,7 +248,8 @@ impl CloudSyncOperationService {
                 progress,
                 total,
             )
-            .await?;
+            .await
+            .map_err(|error| upload_error_after_revision(error, options.revision_sequence))?;
 
         let mut completed_uploads = 0usize;
         for object in &plan.objects {
@@ -238,7 +261,8 @@ impl CloudSyncOperationService {
                     object.bytes.clone(),
                     Some(&object.content_type),
                 )
-                .await?;
+                .await
+                .map_err(|error| upload_error_after_revision(error, options.revision_sequence))?;
             completed_uploads += 1;
             report_progress(
                 progress,
@@ -250,8 +274,15 @@ impl CloudSyncOperationService {
 
         let metadata_write = self
             .backend
-            .write_remote_metadata(settings, &secrets, &serde_json::to_value(&plan.manifest)?)
-            .await?;
+            .write_remote_metadata(
+                settings,
+                &secrets,
+                &serde_json::to_value(&plan.manifest).map_err(|error| {
+                    upload_error_after_revision(error, options.revision_sequence)
+                })?,
+            )
+            .await
+            .map_err(|error| upload_error_after_revision(error, options.revision_sequence))?;
         completed_uploads += 1;
         report_progress(
             progress,
@@ -263,6 +294,7 @@ impl CloudSyncOperationService {
 
         Ok(Some(UploadOutcome {
             revision,
+            revision_sequence: options.revision_sequence,
             etag: metadata_write.etag,
             local_snapshot,
             manifest: plan.manifest,
@@ -298,6 +330,7 @@ impl CloudSyncOperationService {
 
     pub async fn pull_structured_preview(
         &self,
+        connection_store: &ConnectionStore,
         settings: &CloudSyncSettings,
         secret_provider: &mut impl CloudSyncSecretProvider,
         progress: Option<&mut dyn CloudSyncProgressSink>,
@@ -332,20 +365,12 @@ impl CloudSyncOperationService {
                 .and_then(|sections| sections.get("pluginSettings"))
                 .and_then(|value| value.as_object())
                 .is_some_and(|entries| !entries.is_empty());
-        let _preview_secrets = if needs_password {
+        let sync_password = if needs_password {
             let secrets =
                 get_action_secrets(settings, secret_provider, true, SecretReadMode::Prompt)?;
-            if secrets
-                .sync_password
-                .as_deref()
-                .unwrap_or_default()
-                .is_empty()
-            {
-                bail!("missing_sync_password: cloud sync password is required");
-            }
-            secrets
+            Some(required_sync_password(secrets.sync_password.as_deref())?.to_string())
         } else {
-            metadata_secrets.clone()
+            None
         };
 
         let manifest = manifest_from_metadata(&metadata)
@@ -363,7 +388,9 @@ impl CloudSyncOperationService {
             connections_snapshot: None,
             forwards_snapshot: None,
             app_settings_entries: std::collections::BTreeMap::new(),
+            app_settings_sections: std::collections::BTreeMap::new(),
             plugin_settings_entries: std::collections::BTreeMap::new(),
+            plugin_settings_counts: std::collections::BTreeMap::new(),
         };
 
         let mut completed = 2usize;
@@ -397,6 +424,29 @@ impl CloudSyncOperationService {
             let object = self
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
+            if let Some(password) = sync_password.as_deref() {
+                let import_preview = preview_oxide_import_with_progress(
+                    connection_store,
+                    &object.bytes,
+                    password,
+                    ImportConflictStrategy::Replace,
+                    |_stage, _current, _total| {},
+                )
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let section_preview = import_preview
+                    .app_settings_sections
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| AppSettingsSectionPreview {
+                        id: section_id.clone(),
+                        field_keys: Vec::new(),
+                        field_values: Default::default(),
+                        contains_env_vars: false,
+                    });
+                preview
+                    .app_settings_sections
+                    .insert(section_id.clone(), section_preview);
+            }
             preview
                 .app_settings_entries
                 .insert(section_id.clone(), object.bytes);
@@ -415,6 +465,19 @@ impl CloudSyncOperationService {
             let object = self
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
+            if let Some(password) = sync_password.as_deref() {
+                let import_preview = preview_oxide_import_with_progress(
+                    connection_store,
+                    &object.bytes,
+                    password,
+                    ImportConflictStrategy::Replace,
+                    |_stage, _current, _total| {},
+                )
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                preview
+                    .plugin_settings_counts
+                    .insert(plugin_id.clone(), import_preview.plugin_settings_count);
+            }
             preview
                 .plugin_settings_entries
                 .insert(plugin_id.clone(), object.bytes);
@@ -497,7 +560,9 @@ impl CloudSyncOperationService {
         settings_store: &mut SettingsStore,
         _settings: &CloudSyncSettings,
         preview: StructuredPreview,
-        secret_provider: &mut impl CloudSyncSecretProvider,
+        selection: StructuredApplySelection,
+        conflict_strategy: ConflictStrategy,
+        sync_password: Option<&str>,
         progress: Option<&mut dyn CloudSyncProgressSink>,
     ) -> Result<Option<ApplyStructuredPreviewOutcome>> {
         let Some(_permit) = self
@@ -508,33 +573,59 @@ impl CloudSyncOperationService {
         };
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
-        let selection = preview.full_selection();
-        let needs_password =
-            !preview.app_settings_entries.is_empty() || !preview.plugin_settings_entries.is_empty();
+        let app_settings_entry_ids = selection
+            .app_settings_sections
+            .iter()
+            .filter(|section_id| preview.app_settings_entries.contains_key(*section_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let plugin_entry_ids = selection
+            .plugin_ids
+            .iter()
+            .filter(|plugin_id| preview.plugin_settings_entries.contains_key(*plugin_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let needs_password = !app_settings_entry_ids.is_empty() || !plugin_entry_ids.is_empty();
         let sync_password = if needs_password {
-            let password = secret_provider
-                .get_secret(crate::secret_keys::SYNC_PASSWORD, SecretReadMode::Prompt)?;
-            let password = password.unwrap_or_default();
-            if password.is_empty() {
-                bail!("missing_sync_password: cloud sync password is required");
-            }
-            Some(password)
+            Some(required_sync_password(sync_password)?)
         } else {
             None
         };
 
-        let total = 2
-            + preview.app_settings_entries.len()
-            + preview.plugin_settings_entries.len()
-            + usize::from(preview.connections_snapshot.is_some())
-            + usize::from(preview.forwards_snapshot.is_some());
-        report_progress(progress, CloudSyncProgressStage::CreatingBackup, 1, total);
+        let total = (app_settings_entry_ids.len()
+            + plugin_entry_ids.len()
+            + usize::from(selection.connections && preview.connections_snapshot.is_some())
+            + usize::from(selection.forwards && preview.forwards_snapshot.is_some()))
+        .max(1);
+        report_progress(progress, CloudSyncProgressStage::Importing, 0, total);
 
-        let mut completed = 1usize;
+        let mut completed = 0usize;
+        let content_summary = CloudSyncHistorySummary {
+            connections: preview
+                .connections_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.records.len())
+                .unwrap_or(0),
+            forwards: preview
+                .forwards_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.records.len())
+                .unwrap_or(0),
+            has_app_settings: !preview.app_settings_entries.is_empty(),
+            plugin_settings_count: preview
+                .plugin_settings_counts
+                .values()
+                .copied()
+                .sum::<usize>()
+                .max(preview.plugin_settings_entries.len()),
+        };
         let mut app_settings_snapshots = std::collections::BTreeMap::new();
         let mut plugin_settings_snapshot = Vec::new();
-        if let Some(password) = sync_password.as_deref() {
-            for (section_id, bytes) in &preview.app_settings_entries {
+        if let Some(password) = sync_password {
+            for section_id in &app_settings_entry_ids {
+                let Some(bytes) = preview.app_settings_entries.get(section_id) else {
+                    continue;
+                };
                 let envelope = apply_oxide_import_with_options(
                     connection_store,
                     bytes,
@@ -559,7 +650,10 @@ impl CloudSyncOperationService {
                 );
             }
 
-            for bytes in preview.plugin_settings_entries.values() {
+            for plugin_id in &plugin_entry_ids {
+                let Some(bytes) = preview.plugin_settings_entries.get(plugin_id) else {
+                    continue;
+                };
                 let envelope = apply_oxide_import_with_options(
                     connection_store,
                     bytes,
@@ -583,15 +677,32 @@ impl CloudSyncOperationService {
             }
         }
 
+        let connections_snapshot = if selection.connections {
+            preview.connections_snapshot
+        } else {
+            None
+        };
+        let forwards_snapshot = if selection.forwards {
+            preview.forwards_snapshot
+        } else {
+            None
+        };
+        let connection_conflict_strategy = match conflict_strategy {
+            ConflictStrategy::Skip => SavedConnectionsConflictStrategy::Skip,
+            ConflictStrategy::Replace => SavedConnectionsConflictStrategy::Replace,
+            ConflictStrategy::Merge | ConflictStrategy::Rename => {
+                SavedConnectionsConflictStrategy::Merge
+            }
+        };
         let applied = apply_structured_snapshots(
             connection_store,
             forwarding_registry,
             settings_store,
-            preview.connections_snapshot,
-            preview.forwards_snapshot,
+            connections_snapshot,
+            forwards_snapshot,
             app_settings_snapshots,
             plugin_settings_snapshot,
-            SavedConnectionsConflictStrategy::Merge,
+            connection_conflict_strategy,
         )?;
         completed +=
             usize::from(applied.connections.is_some()) + usize::from(applied.forwards.is_some());
@@ -611,21 +722,36 @@ impl CloudSyncOperationService {
         )?;
         report_progress(progress, CloudSyncProgressStage::Done, total, total);
 
+        let applied_selection = StructuredApplySelection {
+            connections: applied.connections.as_ref().is_some_and(|outcome| {
+                outcome.result.skipped == 0 && outcome.result.conflicts == 0
+            }),
+            forwards: applied
+                .forwards
+                .as_ref()
+                .is_some_and(|outcome| outcome.skipped == 0),
+            app_settings_sections: app_settings_entry_ids,
+            plugin_ids: plugin_entry_ids,
+        };
+
         Ok(Some(ApplyStructuredPreviewOutcome {
             local_snapshot,
             applied,
+            content_summary,
             manifest: preview.manifest,
             remote_metadata: preview.remote_metadata,
-            selection,
+            selection: applied_selection,
         }))
     }
 
     pub fn apply_legacy_preview(
         &self,
         connection_store: &mut ConnectionStore,
-        settings: &CloudSyncSettings,
+        _settings: &CloudSyncSettings,
         preview: &LegacyPreview,
-        secret_provider: &mut impl CloudSyncSecretProvider,
+        sync_password: Option<&str>,
+        import_connections: bool,
+        import_forwards: bool,
         conflict_strategy: ConflictStrategy,
         progress: Option<&mut dyn CloudSyncProgressSink>,
     ) -> Result<Option<ApplyLegacyPreviewOutcome>> {
@@ -638,12 +764,7 @@ impl CloudSyncOperationService {
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
         report_progress(progress, CloudSyncProgressStage::Importing, 1, 2);
-        let secrets = get_action_secrets(settings, secret_provider, true, SecretReadMode::Prompt)?;
-        let password = secrets
-            .sync_password
-            .as_deref()
-            .filter(|password| !password.is_empty())
-            .context("missing_sync_password: cloud sync password is required")?;
+        let password = required_sync_password(sync_password)?;
         let mut import_progress = |stage: &str, current: usize, total: usize| {
             let mapped = match stage {
                 "parsing_file" | "filtering_selection" | "collecting_existing" => {
@@ -658,9 +779,14 @@ impl CloudSyncOperationService {
             &preview.bytes,
             password,
             OxideImportOptions {
+                selected_names: if import_connections {
+                    None
+                } else {
+                    Some(Vec::new())
+                },
                 conflict_strategy: import_strategy_from_cloud(conflict_strategy),
-                import_forwards: true,
-                import_portable_secrets: true,
+                import_forwards,
+                import_portable_secrets: import_connections,
                 ..OxideImportOptions::default()
             },
             &mut import_progress,
@@ -880,15 +1006,73 @@ pub struct UploadOptions {
     pub force: bool,
     pub device_id: String,
     pub revision_sequence: u64,
+    pub previous_remote_revision: Option<String>,
     pub previous_remote_sections: Option<StructuredSectionRevisions>,
 }
 
 #[derive(Clone, Debug)]
 pub struct UploadOutcome {
     pub revision: String,
+    pub revision_sequence: u64,
     pub etag: Option<String>,
     pub local_snapshot: CloudSyncLocalSnapshot,
     pub manifest: crate::StructuredManifest,
+}
+
+#[derive(Clone, Debug)]
+pub struct CloudSyncUploadError {
+    pub message: String,
+    pub remote_metadata: Option<RemoteMetadata>,
+    pub revision_sequence_consumed: Option<u64>,
+}
+
+impl std::fmt::Display for CloudSyncUploadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CloudSyncUploadError {}
+
+impl From<anyhow::Error> for CloudSyncUploadError {
+    fn from(error: anyhow::Error) -> Self {
+        Self {
+            message: error.to_string(),
+            remote_metadata: None,
+            revision_sequence_consumed: None,
+        }
+    }
+}
+
+impl From<crate::secrets::CloudSyncSecretError> for CloudSyncUploadError {
+    fn from(error: crate::secrets::CloudSyncSecretError) -> Self {
+        Self {
+            message: error.to_string(),
+            remote_metadata: None,
+            revision_sequence_consumed: None,
+        }
+    }
+}
+
+impl From<serde_json::Error> for CloudSyncUploadError {
+    fn from(error: serde_json::Error) -> Self {
+        Self {
+            message: error.to_string(),
+            remote_metadata: None,
+            revision_sequence_consumed: None,
+        }
+    }
+}
+
+fn upload_error_after_revision(
+    error: impl std::fmt::Display,
+    revision_sequence: u64,
+) -> CloudSyncUploadError {
+    CloudSyncUploadError {
+        message: error.to_string(),
+        remote_metadata: None,
+        revision_sequence_consumed: Some(revision_sequence),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -898,7 +1082,9 @@ pub struct StructuredPreview {
     pub connections_snapshot: Option<SavedConnectionsSyncSnapshot>,
     pub forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     pub app_settings_entries: std::collections::BTreeMap<String, Vec<u8>>,
+    pub app_settings_sections: std::collections::BTreeMap<String, AppSettingsSectionPreview>,
     pub plugin_settings_entries: std::collections::BTreeMap<String, Vec<u8>>,
+    pub plugin_settings_counts: std::collections::BTreeMap<String, usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -913,6 +1099,7 @@ pub struct LegacyPreview {
 pub struct ApplyStructuredPreviewOutcome {
     pub local_snapshot: CloudSyncLocalSnapshot,
     pub applied: CloudSyncApplyOutcome,
+    pub content_summary: CloudSyncHistorySummary,
     pub manifest: StructuredManifest,
     pub remote_metadata: RemoteMetadata,
     pub selection: StructuredApplySelection,
@@ -932,6 +1119,12 @@ impl StructuredPreview {
             plugin_ids: self.plugin_settings_entries.keys().cloned().collect(),
         }
     }
+}
+
+fn required_sync_password(password: Option<&str>) -> Result<&str> {
+    password
+        .filter(|password| !password.is_empty())
+        .context("missing_sync_password: cloud sync password is required")
 }
 
 fn import_strategy_from_cloud(strategy: ConflictStrategy) -> ImportConflictStrategy {
@@ -959,9 +1152,19 @@ struct StructuredUploadObject {
 fn ensure_no_remote_conflict(
     local_snapshot: &CloudSyncLocalSnapshot,
     remote_metadata: &RemoteMetadata,
+    previous_remote_revision: Option<&str>,
     previous_remote_sections: Option<&StructuredSectionRevisions>,
 ) -> Result<()> {
     if remote_metadata.format.as_deref() != Some(STRUCTURED_MANIFEST_FORMAT) {
+        if local_snapshot.dirty.has_dirty
+            && remote_metadata.revision.as_deref().is_some_and(|revision| {
+                previous_remote_revision.map_or(true, |previous| previous != revision)
+            })
+        {
+            bail!(
+                "remote_changed_before_upload: remote snapshot exists while local state is dirty"
+            );
+        }
         return Ok(());
     }
     if local_snapshot.dirty.has_dirty
@@ -1074,6 +1277,24 @@ fn plugin_id_from_setting_storage_key(storage_key: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn dirty_snapshot() -> CloudSyncLocalSnapshot {
+        CloudSyncLocalSnapshot {
+            metadata: crate::LocalSyncMetadata::default(),
+            scope: crate::SyncScope::default(),
+            dirty: crate::StructuredDirtyInfo {
+                current_state: crate::StructuredLocalState::default(),
+                dirty_sections: crate::StructuredDirtySections {
+                    connections: true,
+                    ..crate::StructuredDirtySections::default()
+                },
+                has_dirty: true,
+            },
+            upload_units: 0,
+            connections_record_count: 0,
+            forwards_record_count: 0,
+        }
+    }
+
     #[test]
     fn operation_guard_skips_or_rejects_concurrent_operation_like_tauri() {
         let guard = CloudSyncOperationGuard::default();
@@ -1111,5 +1332,35 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn upload_conflict_check_rejects_changed_legacy_snapshot_like_tauri() {
+        let metadata = RemoteMetadata {
+            exists: true,
+            revision: Some("remote-new".to_string()),
+            format: None,
+            ..RemoteMetadata::default()
+        };
+
+        let error =
+            ensure_no_remote_conflict(&dirty_snapshot(), &metadata, Some("remote-old"), None)
+                .unwrap_err()
+                .to_string();
+
+        assert!(error.contains("remote_changed_before_upload"));
+    }
+
+    #[test]
+    fn upload_conflict_check_allows_unchanged_legacy_snapshot_like_tauri() {
+        let metadata = RemoteMetadata {
+            exists: true,
+            revision: Some("remote-current".to_string()),
+            format: None,
+            ..RemoteMetadata::default()
+        };
+
+        ensure_no_remote_conflict(&dirty_snapshot(), &metadata, Some("remote-current"), None)
+            .unwrap();
     }
 }

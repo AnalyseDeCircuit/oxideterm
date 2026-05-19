@@ -25,6 +25,7 @@ impl WorkspaceApp {
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
                     marked_text: self.marked_text_for_target(target),
                 },
             )
@@ -33,11 +34,12 @@ impl WorkspaceApp {
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle);
+                    this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
                     cx.stop_propagation();
                 }),
             ),
@@ -200,6 +202,7 @@ impl WorkspaceApp {
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
                     marked_text: self.marked_text_for_target(target),
                 },
             )
@@ -207,11 +210,12 @@ impl WorkspaceApp {
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle);
+                    this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
                     cx.stop_propagation();
                 }),
             ),

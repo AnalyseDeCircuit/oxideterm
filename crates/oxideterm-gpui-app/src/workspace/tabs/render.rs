@@ -12,7 +12,7 @@ impl WorkspaceApp {
             .border_b_1()
             .border_color(rgb(theme.border))
             .bg(rgb(theme.bg))
-            .on_scroll_wheel(cx.listener(|this, event, window, cx| {
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
                 this.handle_tabbar_scroll(event, window, cx);
             }));
 
@@ -50,7 +50,7 @@ impl WorkspaceApp {
                 TabKind::Forwards => LucideIcon::ArrowLeftRight,
                 TabKind::SessionManager => LucideIcon::LayoutList,
                 TabKind::PluginManager => LucideIcon::Puzzle,
-                TabKind::CloudSync => LucideIcon::RefreshCw,
+                TabKind::CloudSync => LucideIcon::Cloud,
                 TabKind::Settings => LucideIcon::Settings,
             };
             let tab_text = self.tab_display_title(tab);

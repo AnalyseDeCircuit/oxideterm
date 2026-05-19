@@ -387,6 +387,7 @@ impl WorkspaceApp {
                         self.open_new_connection_select = None;
                         self.session_manager.status =
                             Some(self.i18n.t("sessionManager.edit_properties.save"));
+                        self.queue_cloud_sync_dirty_refresh(cx);
                         self.focus_active_pane(window, cx);
                     }
                     Err(error) => {
@@ -798,7 +799,10 @@ impl WorkspaceApp {
                         None => return,
                     };
                     match self.connection_store.upsert(request) {
-                        Ok(connection) => Some(connection.id),
+                        Ok(connection) => {
+                            self.queue_cloud_sync_dirty_refresh(cx);
+                            Some(connection.id)
+                        }
                         Err(error) => {
                             if let Some(form) = self.new_connection_form.as_mut() {
                                 form.error = Some(error.to_string());

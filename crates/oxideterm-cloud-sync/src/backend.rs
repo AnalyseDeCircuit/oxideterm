@@ -6,8 +6,11 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use reqwest::{
-    Client, Method, StatusCode, Url,
-    header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, ETAG, HeaderMap, HeaderName, HeaderValue},
+    Client, Method, RequestBuilder, Response, StatusCode, Url,
+    header::{
+        ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ETAG, HeaderMap, HeaderName,
+        HeaderValue,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -164,19 +167,26 @@ impl CloudSyncBackend {
         if !metadata.exists {
             bail!("remote_not_found: no remote snapshot found");
         }
-        assert_snapshot_size(metadata.content_length.unwrap_or(0), "metadata")?;
+        let metadata_source = match config.backend_type {
+            BackendType::HttpJson => "HTTP JSON metadata",
+            BackendType::Dropbox => "Dropbox metadata",
+            BackendType::Git => "Git metadata",
+            BackendType::S3 => "S3 metadata",
+            BackendType::Webdav => "WebDAV metadata",
+        };
+        assert_snapshot_size(metadata.content_length.unwrap_or(0), metadata_source)?;
         let object = match config.backend_type {
             BackendType::HttpJson => {
                 let url = join_url(
                     &config.endpoint,
                     &format!("v1/namespaces/{}/blob", encode_component(&config.namespace)),
                 );
-                let response = self
-                    .client
-                    .get(url)
-                    .headers(self.http_auth_headers(config, secrets)?)
-                    .send()
-                    .await?;
+                let response = execute_cloud_request(
+                    self.client
+                        .get(url)
+                        .headers(self.http_auth_headers(config, secrets)?),
+                )
+                .await?;
                 if !response.status().is_success() {
                     bail!(
                         "http_blob_{}: failed to download snapshot",
@@ -186,12 +196,12 @@ impl CloudSyncBackend {
                 response_to_object(response, "HTTP JSON blob").await?
             }
             BackendType::Webdav => {
-                let response = self
-                    .client
-                    .get(join_url(&webdav_namespace_url(config), "latest.oxide"))
-                    .headers(self.http_auth_headers(config, secrets)?)
-                    .send()
-                    .await?;
+                let response = execute_cloud_request(
+                    self.client
+                        .get(join_url(&webdav_namespace_url(config), "latest.oxide"))
+                        .headers(self.http_auth_headers(config, secrets)?),
+                )
+                .await?;
                 if !response.status().is_success() {
                     bail!(
                         "webdav_blob_{}: failed to download snapshot",
@@ -269,20 +279,17 @@ impl CloudSyncBackend {
                 encode_component(&config.namespace)
             ),
         );
-        let response = self
-            .client
-            .get(url)
-            .headers(self.http_auth_headers(config, secrets)?)
-            .send()
-            .await?;
+        let response = execute_cloud_request(
+            self.client
+                .get(url)
+                .headers(self.http_auth_headers(config, secrets)?),
+        )
+        .await?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(RemoteMetadata::missing());
         }
         if !response.status().is_success() {
-            bail!(
-                "http_{}: failed to fetch remote metadata",
-                response.status()
-            );
+            return Err(http_json_error(response, "http", "failed to fetch remote metadata").await);
         }
         normalize_remote_metadata(response.json::<Value>().await?, None)
     }
@@ -293,12 +300,12 @@ impl CloudSyncBackend {
         secrets: &CloudSyncSecrets,
     ) -> Result<RemoteMetadata> {
         require_endpoint(config)?;
-        let response = self
-            .client
-            .get(join_url(&webdav_namespace_url(config), "latest.json"))
-            .headers(self.http_auth_headers(config, secrets)?)
-            .send()
-            .await?;
+        let response = execute_cloud_request(
+            self.client
+                .get(join_url(&webdav_namespace_url(config), "latest.json"))
+                .headers(self.http_auth_headers(config, secrets)?),
+        )
+        .await?;
         if matches!(
             response.status(),
             StatusCode::NOT_FOUND | StatusCode::CONFLICT
@@ -326,7 +333,12 @@ impl CloudSyncBackend {
         else {
             return Ok(RemoteMetadata::missing());
         };
-        let value = serde_json::from_slice::<Value>(&downloaded.bytes)?;
+        let mut value = serde_json::from_slice::<Value>(&downloaded.bytes)?;
+        if value.get("uploadedAt").and_then(Value::as_str).is_none()
+            && let Some(last_modified) = downloaded.last_modified.as_deref()
+        {
+            value["uploadedAt"] = Value::String(last_modified.to_string());
+        }
         normalize_remote_metadata(value, downloaded.etag)
     }
 
@@ -348,7 +360,9 @@ impl CloudSyncBackend {
             file.content.into_bytes()
         };
         let value = serde_json::from_slice::<Value>(&bytes)?;
-        normalize_remote_metadata(value, file.sha)
+        let mut metadata = normalize_remote_metadata(value, file.sha)?;
+        metadata.blob_path.get_or_insert(paths.blob_path);
+        Ok(metadata)
     }
 
     async fn upload_http_json_snapshot(
@@ -366,25 +380,38 @@ impl CloudSyncBackend {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static(OXIDE_CONTENT_TYPE));
         insert_header(&mut headers, "X-OxideTerm-Revision", &payload.revision)?;
         insert_header(&mut headers, "X-OxideTerm-Device-Id", &payload.device_id)?;
+        if let Some(section_revisions) = payload.section_revisions.as_ref() {
+            insert_header(
+                &mut headers,
+                "X-OxideTerm-Section-Revisions",
+                &serde_json::to_string(section_revisions)?,
+            )?;
+        }
         if let Some(previous) = payload.previous_etag.as_deref() {
             insert_header(&mut headers, "If-Match", previous)?;
         } else {
             headers.insert("If-None-Match", HeaderValue::from_static("*"));
         }
-        let response = self
-            .client
-            .put(url)
-            .headers(headers)
-            .body(payload.bytes)
-            .send()
-            .await?;
+        let response =
+            execute_cloud_request(self.client.put(url).headers(headers).body(payload.bytes))
+                .await?;
         let status = response.status();
         let value = response.json::<Value>().await.unwrap_or(Value::Null);
         if status == StatusCode::PRECONDITION_FAILED {
-            bail!("etag_conflict_detected: remote snapshot changed before upload completed");
+            let message = value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("remote snapshot changed before upload completed");
+            bail!("etag_conflict_detected: {message}");
         }
         if !status.is_success() || value.get("ok").and_then(Value::as_bool) == Some(false) {
-            bail!("http_{status}: failed to upload snapshot");
+            return Err(http_json_value_error(
+                status,
+                &value,
+                "http",
+                "failed to upload snapshot",
+            ));
         }
         Ok(RemoteWriteResult {
             revision: value
@@ -413,13 +440,13 @@ impl CloudSyncBackend {
         if let Some(previous) = payload.previous_etag.as_deref() {
             insert_header(&mut blob_headers, "If-Match", previous)?;
         }
-        let blob_response = self
-            .client
-            .put(join_url(&namespace, "latest.oxide"))
-            .headers(blob_headers)
-            .body(payload.bytes.clone())
-            .send()
-            .await?;
+        let blob_response = execute_cloud_request(
+            self.client
+                .put(join_url(&namespace, "latest.oxide"))
+                .headers(blob_headers)
+                .body(payload.bytes.clone()),
+        )
+        .await?;
         if blob_response.status() == StatusCode::PRECONDITION_FAILED {
             bail!("etag_conflict_detected: remote WebDAV snapshot changed before upload completed");
         }
@@ -429,7 +456,8 @@ impl CloudSyncBackend {
                 blob_response.status()
             );
         }
-        let metadata = payload.metadata_json();
+        let mut metadata = payload.metadata_json();
+        metadata["namespace"] = Value::String(config.namespace.clone());
         self.write_remote_metadata(config, secrets, &metadata)
             .await?;
         Ok(RemoteWriteResult {
@@ -446,9 +474,16 @@ impl CloudSyncBackend {
     ) -> Result<RemoteWriteResult> {
         self.ensure_dropbox_namespace(config, secrets).await?;
         let paths = dropbox_paths(config);
-        let metadata_bytes = serde_json::to_vec(&payload.metadata_json())?;
-        self.upload_dropbox_file(&paths.blob_path, payload.bytes, secrets, OXIDE_CONTENT_TYPE)
-            .await?;
+        let mut metadata = payload.metadata_json();
+        metadata["namespace"] = Value::String(config.namespace.clone());
+        let metadata_bytes = serde_json::to_vec(&metadata)?;
+        self.upload_dropbox_file(
+            &paths.blob_path,
+            payload.bytes,
+            secrets,
+            "application/octet-stream",
+        )
+        .await?;
         self.upload_dropbox_file(
             &paths.metadata_path,
             metadata_bytes,
@@ -469,7 +504,9 @@ impl CloudSyncBackend {
         payload: RemoteSnapshotUpload,
     ) -> Result<RemoteWriteResult> {
         let blob_path = git_revision_blob_path(config, &payload.revision);
-        let metadata_bytes = serde_json::to_vec(&payload.metadata_json_with_blob_path(&blob_path))?;
+        let mut metadata = payload.metadata_json_with_blob_path(&blob_path);
+        metadata["namespace"] = Value::String(config.namespace.clone());
+        let metadata_bytes = serde_json::to_vec(&metadata)?;
         self.put_git_file(
             config,
             secrets,
@@ -522,15 +559,10 @@ impl CloudSyncBackend {
             CONTENT_TYPE.as_str(),
             content_type.unwrap_or("application/octet-stream"),
         )?;
-        let response = self
-            .client
-            .put(url)
-            .headers(headers)
-            .body(bytes)
-            .send()
-            .await?;
+        let response =
+            execute_cloud_request(self.client.put(url).headers(headers).body(bytes)).await?;
         if !response.status().is_success() {
-            bail!("http_object_{}: failed to upload object", response.status());
+            return Err(http_json_error(response, "http_object", "failed to upload object").await);
         }
         Ok(response_write_result(response).await)
     }
@@ -549,15 +581,23 @@ impl CloudSyncBackend {
                 encode_path_segments(relative_path)
             ),
         );
-        self.read_object_response(
+        let response = execute_cloud_request(
             self.client
                 .get(url)
-                .headers(self.http_auth_headers(config, secrets)?)
-                .send()
-                .await?,
-            &format!("HTTP JSON object {relative_path}"),
+                .headers(self.http_auth_headers(config, secrets)?),
         )
-        .await
+        .await?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !response.status().is_success() {
+            return Err(
+                http_json_error(response, "http_object", "failed to download object").await,
+            );
+        }
+        response_to_object(response, &format!("HTTP JSON object {relative_path}"))
+            .await
+            .map(Some)
     }
 
     async fn write_webdav_object(
@@ -577,13 +617,13 @@ impl CloudSyncBackend {
             CONTENT_TYPE.as_str(),
             content_type.unwrap_or("application/octet-stream"),
         )?;
-        let response = self
-            .client
-            .put(webdav_object_url(config, relative_path))
-            .headers(headers)
-            .body(bytes)
-            .send()
-            .await?;
+        let response = execute_cloud_request(
+            self.client
+                .put(webdav_object_url(config, relative_path))
+                .headers(headers)
+                .body(bytes),
+        )
+        .await?;
         if !response.status().is_success() {
             bail!(
                 "webdav_object_{}: failed to upload WebDAV object",
@@ -600,11 +640,13 @@ impl CloudSyncBackend {
         relative_path: &str,
     ) -> Result<Option<RemoteObject>> {
         self.read_object_response(
-            self.client
-                .get(webdav_object_url(config, relative_path))
-                .headers(self.http_auth_headers(config, secrets)?)
-                .send()
-                .await?,
+            execute_cloud_request(
+                self.client
+                    .get(webdav_object_url(config, relative_path))
+                    .headers(self.http_auth_headers(config, secrets)?),
+            )
+            .await?,
+            "webdav_object",
             &format!("WebDAV object {relative_path}"),
         )
         .await
@@ -695,15 +737,15 @@ impl CloudSyncBackend {
         );
         let mut headers = self.http_auth_headers(config, secrets)?;
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        let response = self
-            .client
-            .put(url)
-            .headers(headers)
-            .body(serde_json::to_vec(metadata)?)
-            .send()
-            .await?;
+        let response = execute_cloud_request(
+            self.client
+                .put(url)
+                .headers(headers)
+                .body(serde_json::to_vec(metadata)?),
+        )
+        .await?;
         if !response.status().is_success() {
-            bail!("http_meta_{}: failed to write metadata", response.status());
+            return Err(http_json_error(response, "http_meta", "failed to write metadata").await);
         }
         Ok(response_write_result(response).await)
     }
@@ -711,6 +753,7 @@ impl CloudSyncBackend {
     async fn read_object_response(
         &self,
         response: reqwest::Response,
+        error_prefix: &str,
         source: &str,
     ) -> Result<Option<RemoteObject>> {
         if matches!(
@@ -720,7 +763,11 @@ impl CloudSyncBackend {
             return Ok(None);
         }
         if !response.status().is_success() {
-            bail!("object_{}: failed to read object", response.status());
+            bail!(
+                "{}_{}: failed to read object",
+                error_prefix,
+                response.status()
+            );
         }
         response_to_object(response, source).await.map(Some)
     }
@@ -784,22 +831,90 @@ impl CloudSyncBackend {
         config: &CloudSyncSettings,
         secrets: &CloudSyncSecrets,
     ) -> Result<()> {
-        let response = self
-            .client
-            .request(Method::from_bytes(b"MKCOL")?, url)
-            .headers(self.http_auth_headers(config, secrets)?)
-            .send()
-            .await?;
-        if matches!(
-            response.status().as_u16(),
-            200 | 201 | 204 | 301 | 405 | 409
-        ) {
+        let headers = self.http_auth_headers(config, secrets)?;
+        let response = self.mkcol_webdav_collection(url, headers.clone()).await?;
+        if matches!(response.status().as_u16(), 200 | 201 | 204 | 301 | 405) {
             return Ok(());
+        }
+        if response.status() == StatusCode::CONFLICT {
+            if self
+                .webdav_collection_exists(url, headers.clone())
+                .await
+                .unwrap_or(false)
+            {
+                return Ok(());
+            }
+
+            let chain = webdav_collection_chain(url);
+            if chain.len() > 1 {
+                for parent in chain.iter().take(chain.len() - 1) {
+                    let parent_response = self
+                        .mkcol_webdav_collection(parent, headers.clone())
+                        .await?;
+                    if matches!(
+                        parent_response.status().as_u16(),
+                        200 | 201 | 204 | 301 | 405
+                    ) {
+                        continue;
+                    }
+                    if parent_response.status() == StatusCode::CONFLICT
+                        && self
+                            .webdav_collection_exists(parent, headers.clone())
+                            .await
+                            .unwrap_or(false)
+                    {
+                        continue;
+                    }
+                    bail!(
+                        "namespace_create_failed: failed to prepare WebDAV namespace ({})",
+                        parent_response.status()
+                    );
+                }
+            }
+
+            let retry = self.mkcol_webdav_collection(url, headers.clone()).await?;
+            if matches!(retry.status().as_u16(), 200 | 201 | 204 | 301 | 405)
+                || (retry.status() == StatusCode::CONFLICT
+                    && self
+                        .webdav_collection_exists(url, headers)
+                        .await
+                        .unwrap_or(false))
+            {
+                return Ok(());
+            }
+            bail!(
+                "namespace_create_failed: failed to prepare WebDAV namespace ({})",
+                retry.status()
+            );
         }
         bail!(
             "namespace_create_failed: failed to prepare WebDAV namespace ({})",
             response.status()
         )
+    }
+
+    async fn mkcol_webdav_collection(
+        &self,
+        url: &str,
+        headers: HeaderMap,
+    ) -> Result<reqwest::Response> {
+        execute_cloud_request(
+            self.client
+                .request(Method::from_bytes(b"MKCOL")?, trim_trailing_slash(url))
+                .headers(headers),
+        )
+        .await
+    }
+
+    async fn webdav_collection_exists(&self, url: &str, mut headers: HeaderMap) -> Result<bool> {
+        insert_header(&mut headers, "Depth", "0")?;
+        let response = execute_cloud_request(
+            self.client
+                .request(Method::from_bytes(b"PROPFIND")?, trim_trailing_slash(url))
+                .headers(headers),
+        )
+        .await?;
+        Ok(matches!(response.status().as_u16(), 200 | 207 | 301 | 405))
     }
 
     async fn ensure_dropbox_namespace(
@@ -817,16 +932,16 @@ impl CloudSyncBackend {
         for part in parts {
             current.push('/');
             current.push_str(&part);
-            let response = self
-                .client
-                .post(format!("{DROPBOX_API_BASE}/files/create_folder_v2"))
-                .headers(dropbox_headers(secrets)?)
-                .header(CONTENT_TYPE, "application/json")
-                .body(serde_json::to_vec(
-                    &json!({ "path": current, "autorename": false }),
-                )?)
-                .send()
-                .await?;
+            let response = execute_cloud_request(
+                self.client
+                    .post(format!("{DROPBOX_API_BASE}/files/create_folder_v2"))
+                    .headers(dropbox_headers(secrets)?)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(serde_json::to_vec(
+                        &json!({ "path": current, "autorename": false }),
+                    )?),
+            )
+            .await?;
             if response.status().is_success() || response.status() == StatusCode::CONFLICT {
                 continue;
             }
@@ -843,16 +958,16 @@ impl CloudSyncBackend {
         path: &str,
         secrets: &CloudSyncSecrets,
     ) -> Result<Option<RemoteObject>> {
-        let response = self
-            .client
-            .post(format!("{DROPBOX_CONTENT_BASE}/files/download"))
-            .headers(dropbox_headers(secrets)?)
-            .header(
-                "Dropbox-API-Arg",
-                serde_json::to_string(&json!({ "path": path }))?,
-            )
-            .send()
-            .await?;
+        let response = execute_cloud_request(
+            self.client
+                .post(format!("{DROPBOX_CONTENT_BASE}/files/download"))
+                .headers(dropbox_headers(secrets)?)
+                .header(
+                    "Dropbox-API-Arg",
+                    serde_json::to_string(&json!({ "path": path }))?,
+                ),
+        )
+        .await?;
         if response.status() == StatusCode::CONFLICT {
             return Ok(None);
         }
@@ -862,18 +977,25 @@ impl CloudSyncBackend {
                 response.status()
             );
         }
-        let etag = response
+        let dropbox_metadata = response
             .headers()
             .get("Dropbox-API-Result")
             .and_then(|header| header.to_str().ok())
-            .and_then(|text| serde_json::from_str::<Value>(text).ok())
-            .and_then(|value| value.get("rev").and_then(Value::as_str).map(str::to_string));
+            .and_then(|text| serde_json::from_str::<Value>(text).ok());
+        let etag = dropbox_metadata
+            .as_ref()
+            .and_then(|value| value.get("rev").and_then(Value::as_str))
+            .map(str::to_string);
+        let last_modified = dropbox_metadata
+            .as_ref()
+            .and_then(|value| value.get("server_modified").and_then(Value::as_str))
+            .map(str::to_string);
         let bytes = response.bytes().await?.to_vec();
         assert_snapshot_size(bytes.len() as u64, &format!("Dropbox object {path}"))?;
         Ok(Some(RemoteObject {
             bytes,
             etag,
-            last_modified: None,
+            last_modified,
             content_type: None,
         }))
     }
@@ -885,24 +1007,24 @@ impl CloudSyncBackend {
         secrets: &CloudSyncSecrets,
         content_type: &str,
     ) -> Result<Value> {
-        let response = self
-            .client
-            .post(format!("{DROPBOX_CONTENT_BASE}/files/upload"))
-            .headers(dropbox_headers(secrets)?)
-            .header(CONTENT_TYPE, content_type)
-            .header(
-                "Dropbox-API-Arg",
-                serde_json::to_string(&json!({
-                    "path": path,
-                    "mode": "overwrite",
-                    "autorename": false,
-                    "mute": true,
-                    "strict_conflict": false,
-                }))?,
-            )
-            .body(bytes)
-            .send()
-            .await?;
+        let response = execute_cloud_request(
+            self.client
+                .post(format!("{DROPBOX_CONTENT_BASE}/files/upload"))
+                .headers(dropbox_headers(secrets)?)
+                .header(CONTENT_TYPE, content_type)
+                .header(
+                    "Dropbox-API-Arg",
+                    serde_json::to_string(&json!({
+                        "path": path,
+                        "mode": "overwrite",
+                        "autorename": false,
+                        "mute": true,
+                        "strict_conflict": false,
+                    }))?,
+                )
+                .body(bytes),
+        )
+        .await?;
         if !response.status().is_success() {
             bail!(
                 "dropbox_upload_{}: failed to upload Dropbox file",
@@ -918,12 +1040,12 @@ impl CloudSyncBackend {
         secrets: &CloudSyncSecrets,
         path: &str,
     ) -> Result<Option<GitContentFile>> {
-        let response = self
-            .client
-            .get(git_contents_url(config, path, true)?)
-            .headers(git_headers(secrets, "application/vnd.github.object+json")?)
-            .send()
-            .await?;
+        let response = execute_cloud_request(
+            self.client
+                .get(git_contents_url(config, path, true)?)
+                .headers(git_headers(secrets, "application/vnd.github.object+json")?),
+        )
+        .await?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
         }
@@ -939,12 +1061,12 @@ impl CloudSyncBackend {
         secrets: &CloudSyncSecrets,
         path: &str,
     ) -> Result<Option<RemoteObject>> {
-        let response = self
-            .client
-            .get(git_contents_url(config, path, true)?)
-            .headers(git_headers(secrets, "application/vnd.github.raw+json")?)
-            .send()
-            .await?;
+        let response = execute_cloud_request(
+            self.client
+                .get(git_contents_url(config, path, true)?)
+                .headers(git_headers(secrets, "application/vnd.github.raw+json")?),
+        )
+        .await?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
         }
@@ -977,14 +1099,14 @@ impl CloudSyncBackend {
         if let Some(sha) = sha {
             body["sha"] = Value::String(sha.to_string());
         }
-        let response = self
-            .client
-            .put(git_contents_url(config, path, false)?)
-            .headers(git_headers(secrets, "application/vnd.github+json")?)
-            .header(CONTENT_TYPE, "application/json")
-            .body(serde_json::to_vec(&body)?)
-            .send()
-            .await?;
+        let response = execute_cloud_request(
+            self.client
+                .put(git_contents_url(config, path, false)?)
+                .headers(git_headers(secrets, "application/vnd.github+json")?)
+                .header(CONTENT_TYPE, "application/json")
+                .body(serde_json::to_vec(&body)?),
+        )
+        .await?;
         if matches!(response.status().as_u16(), 409 | 422) {
             bail!("etag_conflict_detected: remote Git snapshot changed during upload");
         }
@@ -1164,6 +1286,14 @@ fn normalize_remote_metadata(value: Value, etag: Option<String>) -> Result<Remot
 }
 
 async fn response_to_object(response: reqwest::Response, source: &str) -> Result<RemoteObject> {
+    if let Some(content_length) = response
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        assert_snapshot_size(content_length, source)?;
+    }
     let etag = response
         .headers()
         .get(ETAG)
@@ -1187,6 +1317,49 @@ async fn response_to_object(response: reqwest::Response, source: &str) -> Result
         last_modified,
         content_type,
     })
+}
+
+async fn http_json_error(
+    response: reqwest::Response,
+    code_prefix: &str,
+    fallback: &str,
+) -> anyhow::Error {
+    let status = response.status();
+    let value = response.json::<Value>().await.unwrap_or(Value::Null);
+    http_json_value_error(status, &value, code_prefix, fallback)
+}
+
+fn http_json_value_error(
+    status: StatusCode,
+    value: &Value,
+    code_prefix: &str,
+    fallback: &str,
+) -> anyhow::Error {
+    let fallback_code = format!("{code_prefix}_{}", status.as_u16());
+    let fallback_message = format!("{fallback} ({status})");
+    let code = value
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .unwrap_or(&fallback_code);
+    let message = value
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or(&fallback_message);
+    anyhow::anyhow!("{code}: {message}")
+}
+
+pub(super) async fn execute_cloud_request(request: RequestBuilder) -> Result<Response> {
+    request.send().await.map_err(normalize_network_error)
+}
+
+fn normalize_network_error(error: reqwest::Error) -> anyhow::Error {
+    if error.is_connect() || error.is_timeout() || error.is_request() {
+        anyhow::anyhow!("network_request_failed: {}", error)
+    } else {
+        anyhow::Error::new(error)
+    }
 }
 
 async fn response_write_result(response: reqwest::Response) -> RemoteWriteResult {
@@ -1300,8 +1473,53 @@ fn webdav_namespace_url(config: &CloudSyncSettings) -> String {
     let namespace = encode_path_segments(&config.namespace);
     if namespace.is_empty() {
         endpoint
+    } else if webdav_endpoint_already_scoped(&endpoint, &config.namespace) {
+        endpoint
     } else {
         join_url(&endpoint, &namespace)
+    }
+}
+
+fn webdav_endpoint_already_scoped(endpoint: &str, namespace: &str) -> bool {
+    let Ok(url) = Url::parse(endpoint) else {
+        return false;
+    };
+    if url.host_str() != Some("dav.jianguoyun.com") {
+        return false;
+    }
+    let endpoint_path = trim_slashes(&percent_decode_lossy(url.path())).to_ascii_lowercase();
+    let namespace_path = trim_slashes(namespace).to_ascii_lowercase();
+    !namespace_path.is_empty()
+        && (endpoint_path == namespace_path
+            || endpoint_path.ends_with(&format!("/{namespace_path}")))
+}
+
+fn percent_decode_lossy(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+        {
+            output.push((high << 4) | low);
+            index += 3;
+            continue;
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&output).into_owned()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -1323,6 +1541,31 @@ fn webdav_parent_object_path(relative_path: &str) -> Option<String> {
     }
     segments.pop();
     Some(segments.join("/"))
+}
+
+fn webdav_collection_chain(url: &str) -> Vec<String> {
+    let Ok(mut parsed) = Url::parse(url) else {
+        return vec![trim_trailing_slash(url)];
+    };
+    let path_segments = parsed
+        .path_segments()
+        .map(|segments| {
+            segments
+                .filter(|segment| !segment.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if path_segments.is_empty() {
+        return vec![trim_trailing_slash(url)];
+    }
+
+    let mut urls = Vec::with_capacity(path_segments.len());
+    for index in 0..path_segments.len() {
+        parsed.set_path(&path_segments[..=index].join("/"));
+        urls.push(trim_trailing_slash(parsed.as_str()));
+    }
+    urls
 }
 
 struct DropboxPaths {
@@ -1555,5 +1798,47 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("repository root"));
+    }
+
+    #[test]
+    fn webdav_namespace_url_matches_tauri_jianguoyun_duplicate_guard() {
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::Webdav,
+            endpoint: "https://dav.jianguoyun.com/dav/oxideterm".to_string(),
+            namespace: "oxideterm".to_string(),
+            ..CloudSyncSettings::default()
+        };
+
+        assert_eq!(
+            webdav_namespace_url(&settings),
+            "https://dav.jianguoyun.com/dav/oxideterm"
+        );
+    }
+
+    #[test]
+    fn webdav_namespace_url_appends_namespace_for_regular_endpoints() {
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::Webdav,
+            endpoint: "https://example.com/dav/".to_string(),
+            namespace: "team/default".to_string(),
+            ..CloudSyncSettings::default()
+        };
+
+        assert_eq!(
+            webdav_namespace_url(&settings),
+            "https://example.com/dav/team/default"
+        );
+    }
+
+    #[test]
+    fn webdav_collection_chain_builds_parent_first_paths() {
+        assert_eq!(
+            webdav_collection_chain("https://example.com/dav/team/default"),
+            vec![
+                "https://example.com/dav",
+                "https://example.com/dav/team",
+                "https://example.com/dav/team/default"
+            ]
+        );
     }
 }

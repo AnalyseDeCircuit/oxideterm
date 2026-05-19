@@ -146,10 +146,11 @@ impl WorkspaceApp {
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                     this.ai_model_selector_search_focused = true;
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle);
+                    this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),

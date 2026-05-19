@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use gpui::{
     AnyElement, App, Bounds, Div, Element, ElementId, GlobalElementId, InspectorElementId,
     IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div, prelude::*, px, rgb, rgba,
@@ -28,6 +30,7 @@ pub struct TextInputView<'a> {
     pub caret_visible: bool,
     pub secret: bool,
     pub selected_all: bool,
+    pub selected_range: Option<Range<usize>>,
     pub marked_text: Option<&'a str>,
 }
 
@@ -137,7 +140,17 @@ pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
         marked.to_string()
     };
     let visually_empty = empty && marked.is_empty();
-    let show_selection = view.focused && view.selected_all && !empty && marked.is_empty();
+    let selection_range = if view.focused && !empty && marked.is_empty() {
+        view.selected_range
+            .filter(|range| range.start < range.end)
+            .or_else(|| {
+                view.selected_all
+                    .then_some(0..view.value.encode_utf16().count())
+            })
+    } else {
+        None
+    };
+    let show_selection = selection_range.is_some();
 
     div()
         .h(px(tokens.metrics.ui_control_height))
@@ -168,23 +181,12 @@ pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
                 .when(view.focused && visually_empty, |row| {
                     row.child(text_caret(tokens, view.caret_visible))
                 })
-                .child(
-                    div()
-                        .when(show_selection, |text| {
-                            text.px(px(tokens.metrics.form_selection_padding_x))
-                                .rounded(px(tokens.radii.xs))
-                                .bg(rgb(theme.accent))
-                                .text_color(rgb(theme.accent_text))
-                        })
-                        .text_color(if visually_empty {
-                            rgb(theme.text_muted)
-                        } else if show_selection {
-                            rgb(theme.accent_text)
-                        } else {
-                            rgb(theme.text)
-                        })
-                        .child(display),
-                )
+                .child(text_input_value_segments(
+                    tokens,
+                    &display,
+                    visually_empty,
+                    selection_range,
+                ))
                 .when(view.focused && !marked.is_empty(), |row| {
                     row.child(
                         div()
@@ -205,4 +207,64 @@ pub fn text_caret(tokens: &ThemeTokens, visible: bool) -> Div {
         .h(px(tokens.metrics.form_caret_height))
         .bg(rgb(tokens.ui.accent))
         .opacity(if visible { 1.0 } else { 0.0 })
+}
+
+fn text_input_value_segments(
+    tokens: &ThemeTokens,
+    display: &str,
+    visually_empty: bool,
+    selection_range: Option<Range<usize>>,
+) -> Div {
+    let theme = tokens.ui;
+    let base = div().text_color(if visually_empty {
+        rgb(theme.text_muted)
+    } else {
+        rgb(theme.text)
+    });
+
+    let Some(range) = selection_range else {
+        return base.child(display.to_string());
+    };
+
+    let len = display.encode_utf16().count();
+    let start = range.start.min(len);
+    let end = range.end.min(len);
+    if start >= end {
+        return base.child(display.to_string());
+    }
+
+    let before = utf16_slice(display, 0..start);
+    let selected = utf16_slice(display, start..end);
+    let after = utf16_slice(display, end..len);
+
+    base.flex()
+        .flex_row()
+        .items_center()
+        .when(!before.is_empty(), |row| row.child(before))
+        .child(
+            div()
+                .px(px(tokens.metrics.form_selection_padding_x))
+                .rounded(px(tokens.radii.xs))
+                .bg(rgb(theme.accent))
+                .text_color(rgb(theme.accent_text))
+                .child(selected),
+        )
+        .when(!after.is_empty(), |row| row.child(after))
+}
+
+fn utf16_slice(value: &str, range: Range<usize>) -> String {
+    let start = byte_index_for_utf16(value, range.start);
+    let end = byte_index_for_utf16(value, range.end);
+    value[start..end].to_string()
+}
+
+fn byte_index_for_utf16(value: &str, offset: usize) -> usize {
+    let mut utf16_count = 0;
+    for (byte_index, ch) in value.char_indices() {
+        if utf16_count >= offset {
+            return byte_index;
+        }
+        utf16_count += ch.len_utf16();
+    }
+    value.len()
 }

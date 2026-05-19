@@ -255,7 +255,7 @@ impl UiMetrics {
             tab_title_width_ratio: 0.62,
             tab_font_size: 14.0,
             tab_icon_size: 14.0,
-            tab_close_button_size: 20.0,
+            tab_close_button_size: 16.0,
             tab_close_icon_size: 12.0,
             tab_active_accent_height: 2.0,
             new_tab_button_width: 36.0,

@@ -889,13 +889,13 @@ impl WorkspaceApp {
     fn render_graphics_app_command_input(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let focused = self.graphics.focused_input == Some(GraphicsInput::AppCommand);
-        let marked =
-            self.marked_text_for_target(WorkspaceImeTarget::Graphics(GraphicsInput::AppCommand));
+        let target = WorkspaceImeTarget::Graphics(GraphicsInput::AppCommand);
+        let marked = self.marked_text_for_target(target);
         let workspace = cx.entity();
         div()
             .relative()
             .child(text_input_anchor_probe(
-                WorkspaceImeTarget::Graphics(GraphicsInput::AppCommand).anchor_id(),
+                target.anchor_id(),
                 oxideterm_gpui_ui::text_input(
                     &self.tokens,
                     TextInputView {
@@ -905,6 +905,7 @@ impl WorkspaceApp {
                         caret_visible: self.new_connection_caret_visible,
                         secret: false,
                         selected_all: false,
+                        selected_range: self.ime_selected_range_for_target(target),
                         marked_text: marked,
                     },
                 )
@@ -913,10 +914,11 @@ impl WorkspaceApp {
                 .border_color(rgb(theme.border))
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _event, window, cx| {
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                         this.graphics.focused_input = Some(GraphicsInput::AppCommand);
                         this.new_connection_caret_visible = true;
                         window.focus(&this.focus_handle);
+                        this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
                         cx.notify();
                     }),
                 ),

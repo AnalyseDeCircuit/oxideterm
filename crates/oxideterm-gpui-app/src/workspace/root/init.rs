@@ -92,6 +92,8 @@ impl WorkspaceApp {
         let cloud_sync_store = oxideterm_cloud_sync::state::CloudSyncStateStore::load(
             oxideterm_cloud_sync::state::default_cloud_sync_state_path(settings_store.path()),
         )?;
+        let cloud_sync_form =
+            cloud_sync::CloudSyncFormDraft::from_settings(&cloud_sync_store.state().settings);
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
@@ -261,6 +263,9 @@ impl WorkspaceApp {
             select_anchors: HashMap::new(),
             text_input_anchors: HashMap::new(),
             ime_marked_text: None,
+            selected_ime_target: None,
+            selected_ime_range: None,
+            ime_drag_selection: None,
             focused_settings_input: None,
             settings_input_draft: String::new(),
             settings_slider_drag: None,
@@ -348,10 +353,19 @@ impl WorkspaceApp {
             connection_monitor: ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx),
             cloud_sync_store,
             cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService::new(),
+            cloud_sync_form,
+            cloud_sync_open_select: None,
+            cloud_sync_confirm: None,
             cloud_sync_pending_preview: None,
+            cloud_sync_preview_selection: None,
             cloud_sync_progress: None,
             cloud_sync_rx: None,
             cloud_sync_polling: false,
+            cloud_sync_active_action: None,
+            cloud_sync_auto_upload_generation: 0,
+            cloud_sync_dirty_refresh_scheduled: false,
+            cloud_sync_dirty_refresh_generation: 0,
+            cloud_sync_upload_after_current: false,
             sftp_worker_tx,
             sftp_worker_rx,
             forwarding_worker_tx,
@@ -398,6 +412,7 @@ impl WorkspaceApp {
         if workspace.ai_sidebar_visible() {
             workspace.bootstrap_ai_mcp_registry();
         }
+        workspace.bootstrap_cloud_sync_controller(cx);
         workspace.restore_session_tree_snapshot();
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
         let window_handle = window.window_handle();

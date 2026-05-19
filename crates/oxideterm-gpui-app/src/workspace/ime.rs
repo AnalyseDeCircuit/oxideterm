@@ -1,8 +1,9 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId, InputHandler,
-    InspectorElementId, Keystroke, LayoutId, Pixels, Style, UTF16Selection, Window, point, px,
+    App, Bounds, ClipboardItem, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId,
+    InputHandler, InspectorElementId, Keystroke, LayoutId, Pixels, Point, Style, UTF16Selection,
+    Window, point, px,
 };
 
 use super::WorkspaceApp;
@@ -14,6 +15,7 @@ use super::launcher::LauncherInput;
 use super::new_connection::NewConnectionField;
 use super::quick_commands::QuickCommandInput;
 use super::session_manager::SessionManagerInput;
+use super::settings::settings_input_accepts_newline;
 use super::sftp::SftpInput;
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
@@ -37,6 +39,19 @@ pub(super) enum WorkspaceImeTarget {
     Sftp(SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct WorkspaceImeSelection {
+    target: WorkspaceImeTarget,
+    range: Range<usize>,
+    reversed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct WorkspaceImeDragSelection {
+    target: WorkspaceImeTarget,
+    anchor: usize,
 }
 
 impl WorkspaceImeTarget {
@@ -169,21 +184,24 @@ impl InputHandler for WorkspaceInputHandler {
             let target = view.active_ime_target()?;
             view.text_for_ime_target(target).map(|text| {
                 let text_len = text.encode_utf16().count();
-                let range = match target {
-                    WorkspaceImeTarget::NewConnection(field)
-                        if view
-                            .new_connection_form
-                            .as_ref()
-                            .is_some_and(|form| form.selected_field == Some(field)) =>
-                    {
-                        0..text_len
-                    }
-                    _ => text_len..text_len,
-                };
-                UTF16Selection {
-                    range,
-                    reversed: false,
-                }
+                let (range, reversed) =
+                    if let Some(selection) = view.ime_selection_for_target(target) {
+                        (selection.range, selection.reversed)
+                    } else {
+                        match target {
+                            _ if view.selected_ime_target == Some(target) => (0..text_len, false),
+                            WorkspaceImeTarget::NewConnection(field)
+                                if view
+                                    .new_connection_form
+                                    .as_ref()
+                                    .is_some_and(|form| form.selected_field == Some(field)) =>
+                            {
+                                (0..text_len, false)
+                            }
+                            _ => (text_len..text_len, false),
+                        }
+                    };
+                UTF16Selection { range, reversed }
             })
         })
     }
@@ -273,11 +291,14 @@ impl InputHandler for WorkspaceInputHandler {
 
     fn character_index_for_point(
         &mut self,
-        _point: gpui::Point<Pixels>,
+        point: gpui::Point<Pixels>,
         _window: &mut Window,
-        _cx: &mut App,
+        cx: &mut App,
     ) -> Option<usize> {
-        None
+        self.view.update(cx, |view, _cx| {
+            let target = view.active_ime_target()?;
+            view.ime_index_for_position(target, point)
+        })
     }
 
     fn apple_press_and_hold_enabled(&mut self) -> bool {
@@ -423,6 +444,151 @@ impl WorkspaceApp {
         (self.active_ime_target() == Some(target))
             .then_some(self.ime_marked_text.as_deref())
             .flatten()
+    }
+
+    pub(super) fn ime_selected_range_for_target(
+        &self,
+        target: WorkspaceImeTarget,
+    ) -> Option<Range<usize>> {
+        self.ime_selection_range_for_target(target)
+            .filter(|range| range.start < range.end)
+    }
+
+    fn ime_selection_range_for_target(&self, target: WorkspaceImeTarget) -> Option<Range<usize>> {
+        self.ime_selection_for_target(target)
+            .map(|selection| selection.range)
+            .or_else(|| {
+                if self.selected_ime_target == Some(target) {
+                    self.text_for_ime_target(target)
+                        .map(|text| 0..text.encode_utf16().count())
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn ime_selection_for_target(
+        &self,
+        target: WorkspaceImeTarget,
+    ) -> Option<WorkspaceImeSelection> {
+        self.selected_ime_range
+            .as_ref()
+            .filter(|selection| selection.target == target)
+            .cloned()
+    }
+
+    pub(super) fn clear_ime_selection(&mut self) {
+        self.selected_ime_target = None;
+        self.selected_ime_range = None;
+        self.ime_drag_selection = None;
+    }
+
+    pub(super) fn begin_ime_selection(
+        &mut self,
+        target: WorkspaceImeTarget,
+        position: Point<Pixels>,
+        extend: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.ime_index_for_position(target, position) else {
+            self.clear_ime_selection();
+            cx.notify();
+            return;
+        };
+
+        let anchor = if extend {
+            self.selected_ime_range
+                .as_ref()
+                .filter(|selection| selection.target == target)
+                .map(|selection| {
+                    if selection.reversed {
+                        selection.range.end
+                    } else {
+                        selection.range.start
+                    }
+                })
+                .unwrap_or(index)
+        } else {
+            index
+        };
+        self.ime_drag_selection = Some(WorkspaceImeDragSelection { target, anchor });
+        self.set_ime_selection_from_anchor(target, anchor, index);
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    pub(super) fn update_ime_selection_drag(
+        &mut self,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(drag) = self.ime_drag_selection else {
+            return;
+        };
+        let Some(index) = self.ime_index_for_position(drag.target, position) else {
+            return;
+        };
+        self.set_ime_selection_from_anchor(drag.target, drag.anchor, index);
+        cx.notify();
+    }
+
+    pub(super) fn finish_ime_selection_drag(&mut self) {
+        self.ime_drag_selection = None;
+    }
+
+    fn set_ime_selection_from_anchor(
+        &mut self,
+        target: WorkspaceImeTarget,
+        anchor: usize,
+        index: usize,
+    ) {
+        self.selected_ime_target = None;
+        if anchor == index {
+            self.selected_ime_range = Some(WorkspaceImeSelection {
+                target,
+                range: index..index,
+                reversed: false,
+            });
+        } else if index < anchor {
+            self.selected_ime_range = Some(WorkspaceImeSelection {
+                target,
+                range: index..anchor,
+                reversed: true,
+            });
+        } else {
+            self.selected_ime_range = Some(WorkspaceImeSelection {
+                target,
+                range: anchor..index,
+                reversed: false,
+            });
+        }
+    }
+
+    fn ime_index_for_position(
+        &self,
+        target: WorkspaceImeTarget,
+        position: Point<Pixels>,
+    ) -> Option<usize> {
+        let text = self.text_for_ime_target(target)?;
+        let text_len = text.encode_utf16().count();
+        if text_len == 0 {
+            return Some(0);
+        }
+
+        let bounds = self.text_input_anchors.get(&target.anchor_id())?.bounds;
+        let padding = px(self.tokens.metrics.ui_control_padding_x);
+        let left = bounds.left() + padding;
+        let right = bounds.right() - padding;
+        let width = right - left;
+        if width <= px(1.0) || position.x <= left {
+            return Some(0);
+        }
+        if position.x >= right {
+            return Some(text_len);
+        }
+
+        let ratio = ((position.x - left) / width).clamp(0.0, 1.0);
+        Some(((text_len as f32) * ratio).round() as usize)
     }
 
     fn active_ime_text(&self) -> Option<String> {
@@ -577,7 +743,121 @@ impl WorkspaceApp {
             return;
         };
         self.ime_marked_text = None;
+        self.clear_ime_selection();
         self.replace_ime_target_text(target, replacement_range, text, cx);
+    }
+
+    pub(super) fn handle_active_text_input_edit_shortcut(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !keystroke.modifiers.platform {
+            return false;
+        }
+        match keystroke.key.as_str() {
+            "a" => self.select_all_active_text_input(cx),
+            "c" => self.copy_active_text_input(cx),
+            "x" => self.cut_active_text_input(cx),
+            "v" => self.paste_active_text_input(cx),
+            _ => false,
+        }
+    }
+
+    pub(super) fn handle_active_text_input_delete_selection(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if keystroke.modifiers.platform || keystroke.modifiers.control {
+            return false;
+        }
+        if !matches!(keystroke.key.as_str(), "backspace" | "delete") {
+            return false;
+        }
+        let Some(target) = self.active_ime_target() else {
+            return false;
+        };
+        let Some(text) = self.text_for_ime_target(target) else {
+            return false;
+        };
+        let range = if let Some(range) = self.ime_selected_range_for_target(target) {
+            range
+        } else if let Some(caret) = self.ime_selection_range_for_target(target) {
+            let caret = caret.start.min(text.encode_utf16().count());
+            match keystroke.key.as_str() {
+                "backspace" if caret > 0 => previous_utf16_boundary(&text, caret)..caret,
+                "delete" if caret < text.encode_utf16().count() => {
+                    caret..next_utf16_boundary(&text, caret)
+                }
+                _ => return false,
+            }
+        } else {
+            return false;
+        };
+        self.clear_ime_selection();
+        self.replace_ime_target_text(target, Some(range), "", cx);
+        true
+    }
+
+    pub(super) fn copy_active_text_input(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(target) = self.active_ime_target() else {
+            return false;
+        };
+        let Some(text) = self.text_for_ime_target(target) else {
+            return false;
+        };
+        let selection = self.ime_selected_range_for_target(target);
+        let copied = selection
+            .map(|range| utf16_slice(&text, range))
+            .unwrap_or(text);
+        cx.write_to_clipboard(ClipboardItem::new_string(copied));
+        true
+    }
+
+    pub(super) fn cut_active_text_input(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(target) = self.active_ime_target() else {
+            return false;
+        };
+        let Some(text) = self.text_for_ime_target(target) else {
+            return false;
+        };
+        let range = self
+            .ime_selected_range_for_target(target)
+            .unwrap_or_else(|| 0..text.encode_utf16().count());
+        cx.write_to_clipboard(ClipboardItem::new_string(utf16_slice(&text, range.clone())));
+        self.clear_ime_selection();
+        self.replace_ime_target_text(target, Some(range), "", cx);
+        true
+    }
+
+    pub(super) fn paste_active_text_input(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(target) = self.active_ime_target() else {
+            return false;
+        };
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return true;
+        };
+        let text = normalize_clipboard_text_for_ime_target(target, &text);
+        let replacement_range = self.ime_selection_range_for_target(target);
+        self.clear_ime_selection();
+        self.replace_ime_target_text(target, replacement_range, &text, cx);
+        true
+    }
+
+    pub(super) fn select_all_active_text_input(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(target) = self.active_ime_target() else {
+            return false;
+        };
+        if self.text_for_ime_target(target).is_none() {
+            return false;
+        }
+        self.selected_ime_target = Some(target);
+        self.selected_ime_range = None;
+        self.ime_drag_selection = None;
+        self.ime_marked_text = None;
+        cx.notify();
+        true
     }
 
     fn replace_ime_target_text(
@@ -909,6 +1189,24 @@ fn replace_utf16(value: &mut String, range: Option<Range<usize>>, replacement: &
     value.replace_range(start..end, replacement);
 }
 
+fn normalize_clipboard_text_for_ime_target(target: WorkspaceImeTarget, text: &str) -> String {
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    if ime_target_accepts_newline(target) {
+        normalized
+    } else {
+        normalized.lines().collect::<Vec<_>>().join(" ")
+    }
+}
+
+fn ime_target_accepts_newline(target: WorkspaceImeTarget) -> bool {
+    match target {
+        WorkspaceImeTarget::Settings(input) => settings_input_accepts_newline(input),
+        WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => true,
+        WorkspaceImeTarget::SessionManager(SessionManagerInput::OxideExportDescription) => true,
+        _ => false,
+    }
+}
+
 fn utf16_slice(value: &str, range: Range<usize>) -> String {
     let start = byte_index_for_utf16(value, range.start);
     let end = byte_index_for_utf16(value, range.end);
@@ -924,6 +1222,31 @@ fn byte_index_for_utf16(value: &str, offset: usize) -> usize {
         utf16_count += ch.len_utf16();
     }
     value.len()
+}
+
+fn previous_utf16_boundary(value: &str, offset: usize) -> usize {
+    let mut previous = 0;
+    let mut utf16_count = 0;
+    for ch in value.chars() {
+        if utf16_count >= offset {
+            break;
+        }
+        previous = utf16_count;
+        utf16_count += ch.len_utf16();
+    }
+    previous
+}
+
+fn next_utf16_boundary(value: &str, offset: usize) -> usize {
+    let mut utf16_count = 0;
+    for ch in value.chars() {
+        let next = utf16_count + ch.len_utf16();
+        if utf16_count >= offset {
+            return next;
+        }
+        utf16_count = next;
+    }
+    value.encode_utf16().count()
 }
 
 #[cfg(test)]

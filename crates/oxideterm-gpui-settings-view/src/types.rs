@@ -167,6 +167,21 @@ pub enum SettingsInput {
     AiMcpHeaderValue(usize),
     KnowledgeCollectionName,
     KnowledgeDocumentTitle,
+    CloudSyncEndpoint,
+    CloudSyncNamespace,
+    CloudSyncS3Bucket,
+    CloudSyncS3Region,
+    CloudSyncGitRepository,
+    CloudSyncGitBranch,
+    CloudSyncToken,
+    CloudSyncGitToken,
+    CloudSyncBasicUsername,
+    CloudSyncBasicPassword,
+    CloudSyncAccessKeyId,
+    CloudSyncSecretAccessKey,
+    CloudSyncSessionToken,
+    CloudSyncSyncPassword,
+    CloudSyncAutoUploadInterval,
 }
 
 impl SettingsInput {
@@ -222,6 +237,21 @@ impl SettingsInput {
             Self::AiMcpHeaderValue(index) => 25_301 + index as u64 * 2,
             Self::KnowledgeCollectionName => 26_000,
             Self::KnowledgeDocumentTitle => 26_001,
+            Self::CloudSyncEndpoint => 27_000,
+            Self::CloudSyncNamespace => 27_001,
+            Self::CloudSyncS3Bucket => 27_002,
+            Self::CloudSyncS3Region => 27_003,
+            Self::CloudSyncGitRepository => 27_004,
+            Self::CloudSyncGitBranch => 27_005,
+            Self::CloudSyncToken => 27_006,
+            Self::CloudSyncGitToken => 27_007,
+            Self::CloudSyncBasicUsername => 27_008,
+            Self::CloudSyncBasicPassword => 27_009,
+            Self::CloudSyncAccessKeyId => 27_010,
+            Self::CloudSyncSecretAccessKey => 27_011,
+            Self::CloudSyncSessionToken => 27_012,
+            Self::CloudSyncSyncPassword => 27_013,
+            Self::CloudSyncAutoUploadInterval => 27_014,
         }
     }
 }

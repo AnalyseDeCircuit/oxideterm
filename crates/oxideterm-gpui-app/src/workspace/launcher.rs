@@ -273,8 +273,8 @@ impl WorkspaceApp {
     fn render_launcher_wsl_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let focused = self.launcher.focused_input == Some(LauncherInput::Search);
-        let marked =
-            self.marked_text_for_target(WorkspaceImeTarget::Launcher(LauncherInput::Search));
+        let target = WorkspaceImeTarget::Launcher(LauncherInput::Search);
+        let marked = self.marked_text_for_target(target);
         let workspace = cx.entity();
         div()
             .px(px(LAUNCHER_WSL_HEADER_PADDING_X))
@@ -286,7 +286,7 @@ impl WorkspaceApp {
                 div()
                     .relative()
                     .child(text_input_anchor_probe(
-                        WorkspaceImeTarget::Launcher(LauncherInput::Search).anchor_id(),
+                        target.anchor_id(),
                         oxideterm_gpui_ui::text_input(
                             &self.tokens,
                             TextInputView {
@@ -296,6 +296,7 @@ impl WorkspaceApp {
                                 caret_visible: self.new_connection_caret_visible,
                                 secret: false,
                                 selected_all: false,
+                                selected_range: self.ime_selected_range_for_target(target),
                                 marked_text: marked,
                             },
                         )
@@ -305,10 +306,16 @@ impl WorkspaceApp {
                         .border_color(rgba((theme.border << 8) | LAUNCHER_WSL_BORDER_ALPHA_50))
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|this, _event, window, cx| {
+                            cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                                 this.launcher.focused_input = Some(LauncherInput::Search);
                                 this.new_connection_caret_visible = true;
                                 window.focus(&this.focus_handle);
+                                this.begin_ime_selection(
+                                    target,
+                                    event.position,
+                                    event.modifiers.shift,
+                                    cx,
+                                );
                                 cx.notify();
                             }),
                         ),
@@ -710,8 +717,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let focused = self.launcher.focused_input == Some(LauncherInput::Search);
-        let marked =
-            self.marked_text_for_target(WorkspaceImeTarget::Launcher(LauncherInput::Search));
+        let target = WorkspaceImeTarget::Launcher(LauncherInput::Search);
+        let marked = self.marked_text_for_target(target);
         let workspace = cx.entity();
         div()
             .flex()
@@ -727,7 +734,7 @@ impl WorkspaceApp {
                     .w_full()
                     .max_w(px(LAUNCHER_SEARCH_WIDTH))
                     .child(text_input_anchor_probe(
-                        WorkspaceImeTarget::Launcher(LauncherInput::Search).anchor_id(),
+                        target.anchor_id(),
                         oxideterm_gpui_ui::text_input(
                             &self.tokens,
                             TextInputView {
@@ -737,6 +744,7 @@ impl WorkspaceApp {
                                 caret_visible: self.new_connection_caret_visible,
                                 secret: false,
                                 selected_all: false,
+                                selected_range: self.ime_selected_range_for_target(target),
                                 marked_text: marked,
                             },
                         )
@@ -747,10 +755,16 @@ impl WorkspaceApp {
                         .border_color(rgba((0xffffff << 8) | LAUNCHER_WHITE_ALPHA_08))
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|this, _event, window, cx| {
+                            cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                                 this.launcher.focused_input = Some(LauncherInput::Search);
                                 this.new_connection_caret_visible = true;
                                 window.focus(&this.focus_handle);
+                                this.begin_ime_selection(
+                                    target,
+                                    event.position,
+                                    event.modifiers.shift,
+                                    cx,
+                                );
                                 cx.notify();
                             }),
                         ),

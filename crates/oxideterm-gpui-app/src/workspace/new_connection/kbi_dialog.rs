@@ -200,19 +200,26 @@ impl WorkspaceApp {
                             caret_visible: self.new_connection_caret_visible,
                             secret: !prompt.echo,
                             selected_all: false,
+                            selected_range: self.ime_selected_range_for_target(target),
                             marked_text: self.marked_text_for_target(target),
                         },
                     )
                     .id(("kbi-prompt", index))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |this, _event, window, cx| {
+                        cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                             if let Some(challenge) = this.keyboard_interactive_challenge.as_mut() {
                                 challenge.focused_prompt = index;
                             }
                             this.ime_marked_text = None;
                             this.new_connection_caret_visible = true;
                             window.focus(&this.focus_handle);
+                            this.begin_ime_selection(
+                                target,
+                                event.position,
+                                event.modifiers.shift,
+                                cx,
+                            );
                             cx.stop_propagation();
                             cx.notify();
                         }),

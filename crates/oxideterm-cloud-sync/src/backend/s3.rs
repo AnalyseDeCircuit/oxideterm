@@ -13,8 +13,9 @@ use sha2::Sha256;
 
 use super::{
     CloudSyncBackend, RemoteMetadata, RemoteObject, RemoteSnapshotUpload, RemoteWriteResult,
-    assert_snapshot_size, digest_hex, encode_component, encode_path_segments, insert_header,
-    normalize_remote_metadata, response_to_object, response_write_result, trim_slashes,
+    assert_snapshot_size, digest_hex, encode_component, encode_path_segments,
+    execute_cloud_request, insert_header, normalize_remote_metadata, response_to_object,
+    response_write_result, trim_slashes,
 };
 use crate::{CloudSyncSettings, OXIDE_CONTENT_TYPE, secrets::CloudSyncSecrets};
 
@@ -47,7 +48,9 @@ impl CloudSyncBackend {
             .get(ETAG)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
-        normalize_remote_metadata(response.json::<Value>().await?, etag)
+        let mut metadata = normalize_remote_metadata(response.json::<Value>().await?, etag)?;
+        metadata.blob_key.get_or_insert(s3_paths(config).blob_key);
+        Ok(metadata)
     }
 
     pub(super) async fn upload_s3_snapshot(
@@ -77,6 +80,7 @@ impl CloudSyncBackend {
         }
 
         let mut metadata = payload.metadata_json_with_blob_path(&blob_key);
+        metadata["namespace"] = Value::String(config.namespace.clone());
         metadata["blobKey"] = Value::String(blob_key);
         let mut metadata_headers = HeaderMap::new();
         metadata_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -207,7 +211,7 @@ impl CloudSyncBackend {
         if !bytes.is_empty() {
             request = request.body(bytes);
         }
-        Ok(request.send().await?)
+        execute_cloud_request(request).await
     }
 }
 

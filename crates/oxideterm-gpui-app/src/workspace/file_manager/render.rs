@@ -849,6 +849,7 @@ impl WorkspaceApp {
                         caret_visible: self.new_connection_caret_visible,
                         secret: false,
                         selected_all: false,
+                        selected_range: self.ime_selected_range_for_target(target),
                         marked_text: self.marked_text_for_target(target),
                     },
                 )
@@ -856,11 +857,12 @@ impl WorkspaceApp {
                 .bg(file_manager_bg(theme.bg_sunken, has_background))
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _event, window, cx| {
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                         window.focus(&this.focus_handle);
                         this.file_manager.focused_input = Some(FileManagerInput::Filter);
                         this.file_manager.context_menu = None;
                         this.ime_marked_text = None;
+                        this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),

@@ -747,13 +747,19 @@ impl WorkspaceApp {
                 false
             }
         };
+        if created {
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
         cx.notify();
         created
     }
 
     fn delete_settings_connection_group(&mut self, group: String, cx: &mut Context<Self>) {
         match self.connection_store.delete_group(&group) {
-            Ok(()) => self.settings_connection_status = None,
+            Ok(()) => {
+                self.settings_connection_status = None;
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
             Err(error) => {
                 self.settings_connection_status = Some(
                     self.i18n
@@ -806,6 +812,7 @@ impl WorkspaceApp {
                         .t("settings_view.errors.import_success")
                         .replace("{{name}}", &alias),
                 );
+                self.queue_cloud_sync_dirty_refresh(cx);
             }
             Ok(false) => {
                 self.settings_connection_status = Some(
@@ -868,6 +875,9 @@ impl WorkspaceApp {
             parts.push(errors.join(", "));
         }
         self.settings_connection_status = (!parts.is_empty()).then(|| parts.join("; "));
+        if imported > 0 {
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
         cx.notify();
     }
 

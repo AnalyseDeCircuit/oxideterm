@@ -342,7 +342,7 @@ impl WorkspaceApp {
                 cx.notify();
                 true
             }
-            "backspace" if !modifiers.platform && !modifiers.control => {
+            "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
                 self.settings_input_draft.pop();
                 self.apply_settings_input_draft(input, cx);
                 true
@@ -356,6 +356,7 @@ impl WorkspaceApp {
         if let Some(input) = self.focused_settings_input.take() {
             self.clear_settings_input_draft(input);
             self.ime_marked_text = None;
+            self.clear_ime_selection();
             changed = true;
         }
         if self.open_settings_select.take().is_some() {
@@ -463,7 +464,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn focus_settings_input(
+    pub(in crate::workspace) fn focus_settings_input(
         &mut self,
         input: SettingsInput,
         current_value: String,
@@ -471,6 +472,7 @@ impl WorkspaceApp {
     ) {
         self.open_settings_select = None;
         self.focused_settings_input = Some(input);
+        self.clear_ime_selection();
         self.settings_input_draft = current_value;
         self.new_connection_caret_visible = true;
         cx.notify();
@@ -483,7 +485,7 @@ impl WorkspaceApp {
         self.settings_input_draft.clear();
     }
 
-    fn current_settings_input_value(&self, input: SettingsInput) -> String {
+    pub(in crate::workspace) fn current_settings_input_value(&self, input: SettingsInput) -> String {
         let settings = self.settings_store.settings();
         match input {
             SettingsInput::TerminalFontSize => settings.terminal.font_size.to_string(),
@@ -733,6 +735,23 @@ impl WorkspaceApp {
                 .unwrap_or_default(),
             SettingsInput::KnowledgeCollectionName => self.knowledge_new_collection_name.clone(),
             SettingsInput::KnowledgeDocumentTitle => self.knowledge_new_document_title.clone(),
+            SettingsInput::CloudSyncEndpoint => self.cloud_sync_form.endpoint.clone(),
+            SettingsInput::CloudSyncNamespace => self.cloud_sync_form.namespace.clone(),
+            SettingsInput::CloudSyncS3Bucket => self.cloud_sync_form.s3_bucket.clone(),
+            SettingsInput::CloudSyncS3Region => self.cloud_sync_form.s3_region.clone(),
+            SettingsInput::CloudSyncGitRepository => self.cloud_sync_form.git_repository.clone(),
+            SettingsInput::CloudSyncGitBranch => self.cloud_sync_form.git_branch.clone(),
+            SettingsInput::CloudSyncToken => self.cloud_sync_form.token.clone(),
+            SettingsInput::CloudSyncGitToken => self.cloud_sync_form.git_token.clone(),
+            SettingsInput::CloudSyncBasicUsername => self.cloud_sync_form.basic_username.clone(),
+            SettingsInput::CloudSyncBasicPassword => self.cloud_sync_form.basic_password.clone(),
+            SettingsInput::CloudSyncAccessKeyId => self.cloud_sync_form.access_key_id.clone(),
+            SettingsInput::CloudSyncSecretAccessKey => self.cloud_sync_form.secret_access_key.clone(),
+            SettingsInput::CloudSyncSessionToken => self.cloud_sync_form.session_token.clone(),
+            SettingsInput::CloudSyncSyncPassword => self.cloud_sync_form.sync_password.clone(),
+            SettingsInput::CloudSyncAutoUploadInterval => {
+                self.cloud_sync_form.auto_upload_interval_mins.clone()
+            }
         }
     }
 
@@ -1164,6 +1183,75 @@ impl WorkspaceApp {
                 self.knowledge_new_document_title = self.settings_input_draft.clone();
                 cx.notify();
             }
+            SettingsInput::CloudSyncEndpoint => {
+                self.cloud_sync_form.endpoint = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::CloudSyncNamespace => {
+                self.cloud_sync_form.namespace = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::CloudSyncS3Bucket => {
+                self.cloud_sync_form.s3_bucket = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::CloudSyncS3Region => {
+                self.cloud_sync_form.s3_region = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::CloudSyncGitRepository => {
+                self.cloud_sync_form.git_repository = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::CloudSyncGitBranch => {
+                self.cloud_sync_form.git_branch = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::CloudSyncToken => {
+                self.cloud_sync_form.token = self.settings_input_draft.clone();
+                self.cloud_sync_form.token_touched = true;
+                cx.notify();
+            }
+            SettingsInput::CloudSyncGitToken => {
+                self.cloud_sync_form.git_token = self.settings_input_draft.clone();
+                self.cloud_sync_form.git_token_touched = true;
+                cx.notify();
+            }
+            SettingsInput::CloudSyncBasicUsername => {
+                self.cloud_sync_form.basic_username = self.settings_input_draft.clone();
+                self.cloud_sync_form.basic_username_touched = true;
+                cx.notify();
+            }
+            SettingsInput::CloudSyncBasicPassword => {
+                self.cloud_sync_form.basic_password = self.settings_input_draft.clone();
+                self.cloud_sync_form.basic_password_touched = true;
+                cx.notify();
+            }
+            SettingsInput::CloudSyncAccessKeyId => {
+                self.cloud_sync_form.access_key_id = self.settings_input_draft.clone();
+                self.cloud_sync_form.access_key_id_touched = true;
+                cx.notify();
+            }
+            SettingsInput::CloudSyncSecretAccessKey => {
+                self.cloud_sync_form.secret_access_key = self.settings_input_draft.clone();
+                self.cloud_sync_form.secret_access_key_touched = true;
+                cx.notify();
+            }
+            SettingsInput::CloudSyncSessionToken => {
+                self.cloud_sync_form.session_token = self.settings_input_draft.clone();
+                self.cloud_sync_form.session_token_touched = true;
+                cx.notify();
+            }
+            SettingsInput::CloudSyncSyncPassword => {
+                self.cloud_sync_form.sync_password = self.settings_input_draft.clone();
+                self.cloud_sync_form.sync_password_touched = true;
+                cx.notify();
+            }
+            SettingsInput::CloudSyncAutoUploadInterval => {
+                self.cloud_sync_form.auto_upload_interval_mins =
+                    self.settings_input_draft.clone();
+                cx.notify();
+            }
         }
     }
 
@@ -1322,7 +1410,7 @@ impl WorkspaceApp {
     }
 }
 
-fn settings_input_accepts_newline(input: SettingsInput) -> bool {
+pub(super) fn settings_input_accepts_newline(input: SettingsInput) -> bool {
     matches!(
         input,
         SettingsInput::TerminalCommandBarFocusHandoff
@@ -1336,7 +1424,16 @@ fn settings_input_accepts_newline(input: SettingsInput) -> bool {
 fn settings_input_is_secret(input: SettingsInput) -> bool {
     matches!(
         input,
-        SettingsInput::AiProviderApiKey(_) | SettingsInput::AiMcpAuthToken
+        SettingsInput::AiProviderApiKey(_)
+            | SettingsInput::AiMcpAuthToken
+            | SettingsInput::CloudSyncToken
+            | SettingsInput::CloudSyncGitToken
+            | SettingsInput::CloudSyncBasicUsername
+            | SettingsInput::CloudSyncBasicPassword
+            | SettingsInput::CloudSyncAccessKeyId
+            | SettingsInput::CloudSyncSecretAccessKey
+            | SettingsInput::CloudSyncSessionToken
+            | SettingsInput::CloudSyncSyncPassword
     )
 }
 

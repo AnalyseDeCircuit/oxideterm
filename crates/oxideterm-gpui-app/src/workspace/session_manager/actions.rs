@@ -174,6 +174,7 @@ impl WorkspaceApp {
                 self.session_manager.focused_input = None;
                 self.session_manager.status =
                     Some(self.i18n.t("sessionManager.toast.group_created"));
+                self.queue_cloud_sync_dirty_refresh(cx);
             }
             Err(error) => {
                 self.session_manager.status = Some(format!(
@@ -201,6 +202,7 @@ impl WorkspaceApp {
             self.session_manager.selected_ids.remove(id);
             self.session_manager.status =
                 Some(self.i18n.t("sessionManager.toast.connection_deleted"));
+            self.queue_cloud_sync_dirty_refresh(cx);
         }
         cx.notify();
     }
@@ -228,6 +230,9 @@ impl WorkspaceApp {
         self.session_manager.selected_ids.clear();
         self.session_manager.show_batch_move = false;
         self.session_manager.status = Some(connections_deleted_label(&self.i18n, deleted));
+        if deleted > 0 {
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
         cx.notify();
     }
 
@@ -237,6 +242,7 @@ impl WorkspaceApp {
             Ok(Some(_)) => {
                 self.session_manager.status =
                     Some(self.i18n.t("sessionManager.toast.connection_duplicated"));
+                self.queue_cloud_sync_dirty_refresh(cx);
             }
             Ok(None) => {}
             Err(error) => self.session_manager.status = Some(error.to_string()),
@@ -283,6 +289,9 @@ impl WorkspaceApp {
                 ));
                 self.session_manager.selected_ids.clear();
                 self.session_manager.show_batch_move = false;
+                if count > 0 {
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                }
             }
             Err(error) => self.session_manager.status = Some(error.to_string()),
         }
@@ -347,6 +356,9 @@ impl WorkspaceApp {
         } else {
             Some(format!("Imported {imported}; {}", errors.join(", ")))
         };
+        if imported > 0 {
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
         cx.notify();
     }
 }

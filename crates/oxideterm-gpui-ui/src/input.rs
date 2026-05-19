@@ -43,6 +43,7 @@ pub fn input(tokens: &ThemeTokens, view: InputView<'_>) -> Div {
             caret_visible: view.caret_visible,
             secret: view.input_type == InputType::Password,
             selected_all: view.selected_all,
+            selected_range: None,
             marked_text: None,
         },
     )

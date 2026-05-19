@@ -1188,154 +1188,372 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_shortcuts_modal(&self, _cx: &mut Context<Self>) -> AnyElement {
-        let rows = self.filtered_shortcut_rows();
+        let categories = self.filtered_shortcut_categories();
         let query_text = if self.shortcuts_modal.query.is_empty() {
-            self.i18n.t("settings_view.keybindings.search_placeholder")
+            self.i18n.t("shortcuts_modal.search_placeholder")
         } else {
             self.shortcuts_modal.query.clone()
         };
+        let shortcut_count = categories
+            .iter()
+            .map(|category| category.rows.len())
+            .sum::<usize>();
         dialog_backdrop()
             .child(
                 dialog_content(&self.tokens)
-                    .w(px(760.0))
-                    .max_h(px(640.0))
+                    .w(px(600.0))
                     .child(
                         div()
-                            .px(px(24.0))
-                            .py(px(18.0))
+                            .h(px(44.0))
+                            .px(px(16.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(12.0))
                             .border_b_1()
                             .border_color(rgb(self.tokens.ui.border))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Search,
+                                16.0,
+                                rgb(self.tokens.ui.text_muted),
+                            ))
                             .child(
                                 div()
-                                    .text_size(px(18.0))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(self.tokens.ui.text_heading))
-                                    .child(self.i18n.t("layout.empty.keyboard_shortcuts")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(14.0))
-                                    .h(px(44.0))
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .border_1()
-                                    .border_color(rgb(self.tokens.ui.border))
-                                    .bg(rgb(self.tokens.ui.bg))
-                                    .px(px(14.0))
-                                    .flex()
-                                    .items_center()
-                                    .text_size(px(15.0))
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
                                     .text_color(if self.shortcuts_modal.query.is_empty() {
                                         rgb(self.tokens.ui.text_muted)
                                     } else {
                                         rgb(self.tokens.ui.text)
                                     })
                                     .child(query_text),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .rounded(px(self.tokens.radii.sm))
+                                    .border_1()
+                                    .border_color(rgb(self.tokens.ui.border))
+                                    .bg(rgb(self.tokens.ui.bg))
+                                    .px(px(6.0))
+                                    .py(px(2.0))
+                                    .font_family(settings_mono_font_family(
+                                        self.settings_store.settings(),
+                                    ))
+                                    .text_size(px(10.0))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(if cfg!(target_os = "macos") {
+                                        "⌘/".to_string()
+                                    } else {
+                                        "Ctrl+/".to_string()
+                                    }),
                             ),
                     )
                     .child(
                         div()
-                            .max_h(px(500.0))
+                            .max_h(px(420.0))
                             .overflow_y_scrollbar()
-                            .p(px(16.0))
-                            .children(rows),
+                            .px(px(16.0))
+                            .py(px(8.0))
+                            .child(if categories.is_empty() {
+                                div()
+                                    .py(px(40.0))
+                                    .text_center()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(self.i18n.t("shortcuts_modal.no_results"))
+                                    .into_any_element()
+                            } else {
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(16.0))
+                                    .children(
+                                        categories.into_iter().map(|category| {
+                                            self.render_shortcut_category(category)
+                                        }),
+                                    )
+                                    .into_any_element()
+                            }),
+                    )
+                    .child(
+                        div()
+                            .px(px(16.0))
+                            .py(px(12.0))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .border_t_1()
+                            .border_color(rgb(self.tokens.ui.border))
+                            .bg(rgb(self.tokens.ui.bg_panel))
+                            .text_size(px(11.0))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("shortcuts_modal.footer_hint"))
+                            .child(
+                                div()
+                                    .font_family(settings_mono_font_family(
+                                        self.settings_store.settings(),
+                                    ))
+                                    .child(format!(
+                                        "{} {}",
+                                        shortcut_count,
+                                        self.i18n.t("shortcuts_modal.shortcut_count")
+                                    )),
+                            ),
                     ),
             )
             .into_any_element()
     }
 
-    fn filtered_shortcut_rows(&self) -> Vec<AnyElement> {
+    fn filtered_shortcut_categories(&self) -> Vec<ShortcutModalCategory> {
         let query = self.shortcuts_modal.query.trim().to_lowercase();
-        let side = crate::keybindings::KeybindingSide::current();
-        let overrides = &self.settings_store.settings().keybindings.overrides;
-        let mut rows = Vec::new();
-        for definition in crate::keybindings::ACTION_DEFINITIONS.iter() {
-            let label = self.i18n.t(&definition.label_key());
-            let scope = self.i18n.t(definition.scope.label_key());
-            let shortcut = crate::keybindings::format_combo(&crate::keybindings::effective_combo(
-                definition, overrides, side,
-            ));
-            if !query.is_empty()
-                && !label.to_lowercase().contains(&query)
-                && !shortcut.to_lowercase().contains(&query)
-                && !scope.to_lowercase().contains(&query)
-            {
-                continue;
-            }
-            rows.push((scope, label, shortcut));
-        }
-        for (category_key, shortcut_rows) in shortcut_reference_rows() {
-            let scope = self.i18n.t(category_key);
-            for (label_key, mac, other) in shortcut_rows {
-                let label = self.i18n.t(label_key);
-                let shortcut = if cfg!(target_os = "macos") {
-                    mac
+        self.shortcut_modal_categories()
+            .into_iter()
+            .filter_map(|mut category| {
+                category.rows.retain(|row| {
+                    query.is_empty()
+                        || row.label.to_lowercase().contains(&query)
+                        || row.shortcut.to_lowercase().contains(&query)
+                        || category.title.to_lowercase().contains(&query)
+                });
+                if category.rows.is_empty() {
+                    None
                 } else {
-                    other
+                    Some(category)
                 }
-                .to_string();
-                if !query.is_empty()
-                    && !label.to_lowercase().contains(&query)
-                    && !shortcut.to_lowercase().contains(&query)
-                    && !scope.to_lowercase().contains(&query)
-                {
-                    continue;
-                }
-                rows.push((scope.clone(), label, shortcut));
-            }
-        }
-        let row_count = rows.len();
-        rows.into_iter()
-            .enumerate()
-            .map(|(index, (scope, label, shortcut))| {
-                self.render_shortcut_row(scope, label, shortcut, index + 1 < row_count)
             })
             .collect()
     }
 
-    fn render_shortcut_row(
-        &self,
-        scope: String,
-        label: String,
-        shortcut: String,
-        show_separator: bool,
-    ) -> AnyElement {
-        div()
-            .min_h(px(38.0))
-            .px(px(10.0))
-            .flex()
-            .items_center()
-            .justify_between()
-            .when(show_separator, |row| {
-                row.border_b_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+    fn shortcut_modal_categories(&self) -> Vec<ShortcutModalCategory> {
+        let side = crate::keybindings::KeybindingSide::current();
+        let overrides = &self.settings_store.settings().keybindings.overrides;
+        let binding = |action_id: &str| {
+            crate::keybindings::action_definition(action_id).map(|definition| {
+                crate::keybindings::format_combo(&crate::keybindings::effective_combo(
+                    definition, overrides, side,
+                ))
             })
+        };
+        let registry_row = |action_id: &str, label_key: &str| {
+            binding(action_id).map(|shortcut| ShortcutModalRow {
+                label: self.i18n.t(label_key),
+                shortcut,
+            })
+        };
+        let tab_range = binding("app.goToTab1").map(|shortcut| ShortcutModalRow {
+            label: self.i18n.t("settings_view.help.shortcut_go_to_tab"),
+            shortcut: format!("{}1-9", shortcut.trim_end_matches('1')),
+        });
+        let pane_nav = binding("split.navLeft").map(|shortcut| ShortcutModalRow {
+            label: self.i18n.t("settings_view.help.shortcut_nav_pane"),
+            shortcut: format!("{}Arrow", shortcut.trim_end_matches('←')),
+        });
+
+        let mut categories = vec![
+            ShortcutModalCategory::new(
+                self.i18n.t("settings_view.help.category_app"),
+                [
+                    registry_row("app.newTerminal", "settings_view.help.shortcut_new_tab"),
+                    registry_row(
+                        "app.shellLauncher",
+                        "settings_view.help.shortcut_shell_launcher",
+                    ),
+                    registry_row("app.closeTab", "settings_view.help.shortcut_close_tab"),
+                    registry_row(
+                        "app.closeOtherTabs",
+                        "settings_view.help.shortcut_close_other_tabs",
+                    ),
+                    registry_row("app.nextTab", "settings_view.help.shortcut_next_tab"),
+                    registry_row("app.prevTab", "settings_view.help.shortcut_prev_tab"),
+                    tab_range,
+                    registry_row(
+                        "app.newConnection",
+                        "settings_view.help.shortcut_new_connection",
+                    ),
+                    registry_row("app.navBack", "settings_view.help.shortcut_nav_back"),
+                    registry_row("app.navForward", "settings_view.help.shortcut_nav_forward"),
+                    registry_row(
+                        "app.commandPalette",
+                        "settings_view.help.shortcut_command_palette",
+                    ),
+                    registry_row(
+                        "app.toggleSidebar",
+                        "settings_view.help.shortcut_toggle_sidebar",
+                    ),
+                    registry_row("app.settings", "settings_view.help.shortcut_settings"),
+                    registry_row("app.zenMode", "settings_view.help.shortcut_zen_mode"),
+                    registry_row(
+                        "app.showShortcuts",
+                        "settings_view.help.shortcut_keyboard_shortcuts",
+                    ),
+                    registry_row(
+                        "app.fontIncrease",
+                        "settings_view.help.shortcut_font_increase",
+                    ),
+                    registry_row(
+                        "app.fontDecrease",
+                        "settings_view.help.shortcut_font_decrease",
+                    ),
+                    registry_row("app.fontReset", "settings_view.help.shortcut_font_reset"),
+                ]
+                .into_iter()
+                .flatten()
+                .collect(),
+            ),
+            ShortcutModalCategory::new(
+                self.i18n.t("settings_view.help.category_terminal"),
+                [
+                    registry_row("terminal.search", "settings_view.help.shortcut_find"),
+                    registry_row("terminal.paste", "settings_view.help.shortcut_paste"),
+                    registry_row("terminal.aiPanel", "settings_view.help.shortcut_ai_panel"),
+                    registry_row(
+                        "terminal.recording",
+                        "settings_view.help.shortcut_recording",
+                    ),
+                    registry_row(
+                        "terminal.closePanel",
+                        "settings_view.help.shortcut_close_panel",
+                    ),
+                ]
+                .into_iter()
+                .flatten()
+                .collect(),
+            ),
+            ShortcutModalCategory::new(
+                self.i18n.t("settings_view.help.category_split"),
+                [
+                    registry_row("split.horizontal", "settings_view.help.shortcut_split_h"),
+                    registry_row("split.vertical", "settings_view.help.shortcut_split_v"),
+                    registry_row("split.closePane", "settings_view.help.shortcut_close_pane"),
+                    pane_nav,
+                ]
+                .into_iter()
+                .flatten()
+                .collect(),
+            ),
+        ];
+
+        for (category_key, shortcut_rows) in shortcut_reference_rows() {
+            categories.push(ShortcutModalCategory::new(
+                self.i18n.t(category_key),
+                shortcut_rows
+                    .into_iter()
+                    .map(|(label_key, mac, other)| ShortcutModalRow {
+                        label: self.i18n.t(label_key),
+                        shortcut: if cfg!(target_os = "macos") {
+                            mac.to_string()
+                        } else {
+                            other.to_string()
+                        },
+                    })
+                    .collect(),
+            ));
+        }
+
+        categories.push(ShortcutModalCategory::new(
+            self.i18n.t("settings_view.help.category_palette"),
+            [
+                registry_row("palette.eventLog", "settings_view.help.shortcut_event_log"),
+                registry_row(
+                    "palette.aiSidebar",
+                    "settings_view.help.shortcut_ai_sidebar",
+                ),
+                registry_row("palette.broadcast", "settings_view.help.shortcut_broadcast"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+        ));
+
+        categories
+    }
+
+    fn render_shortcut_category(&self, category: ShortcutModalCategory) -> AnyElement {
+        let row_count = category.rows.len();
+        div()
+            .flex()
+            .flex_col()
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .w(px(120.0))
-                            .text_size(px(12.0))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(scope),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(14.0))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(label),
-                    ),
+                    .gap(px(6.0))
+                    .mb(px(8.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Keyboard,
+                        12.0,
+                        rgb(self.tokens.ui.text_muted),
+                    ))
+                    .child(category.title.to_uppercase()),
             )
             .child(
                 div()
-                    .text_size(px(12.0))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(shortcut),
+                    .flex()
+                    .flex_col()
+                    .children(category.rows.into_iter().enumerate().map(|(index, row)| {
+                        self.render_shortcut_modal_row(row, index + 1 < row_count)
+                    })),
             )
             .into_any_element()
     }
+
+    fn render_shortcut_modal_row(&self, row: ShortcutModalRow, show_separator: bool) -> AnyElement {
+        div()
+            .py(px(6.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(16.0))
+            .when(show_separator, |item| {
+                item.border_b_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
+            })
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(row.label),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .rounded(px(self.tokens.radii.sm))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .bg(rgb(self.tokens.ui.bg_panel))
+                    .px(px(8.0))
+                    .py(px(2.0))
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(row.shortcut),
+            )
+            .into_any_element()
+    }
+}
+
+#[derive(Clone)]
+struct ShortcutModalCategory {
+    title: String,
+    rows: Vec<ShortcutModalRow>,
+}
+
+impl ShortcutModalCategory {
+    fn new(title: String, rows: Vec<ShortcutModalRow>) -> Self {
+        Self { title, rows }
+    }
+}
+
+#[derive(Clone)]
+struct ShortcutModalRow {
+    label: String,
+    shortcut: String,
 }
 
 pub(super) fn parse_command_palette_mode(raw_query: &str) -> (PaletteMode, String) {
@@ -1490,7 +1708,7 @@ fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
         TabKind::Sftp => LucideIcon::HardDrive,
         TabKind::Ide => LucideIcon::Code2,
         TabKind::PluginManager => LucideIcon::Puzzle,
-        TabKind::CloudSync => LucideIcon::RefreshCw,
+        TabKind::CloudSync => LucideIcon::Cloud,
         TabKind::Settings => LucideIcon::Settings,
         TabKind::SessionManager => LucideIcon::LayoutList,
     }
@@ -1810,7 +2028,7 @@ fn command_palette_specs() -> Vec<CommandSpec> {
         CommandSpec {
             id: "cmd:open_cloud_sync",
             label_key: "command_palette.cmd_open_cloud_sync".into(),
-            icon: LucideIcon::RefreshCw,
+            icon: LucideIcon::Cloud,
             shortcut_action: None,
             action: PaletteAction::OpenCloudSync,
         },

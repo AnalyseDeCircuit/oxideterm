@@ -436,6 +436,7 @@ impl WorkspaceApp {
                                 self.forwarding_view.skip_health_check = false;
                                 self.forwarding_view.editing_forward = None;
                                 self.forwarding_view.focused_input = None;
+                                self.queue_cloud_sync_dirty_refresh(cx);
                             }
                             Err(error) => self.forwarding_view.error = Some(error),
                         }

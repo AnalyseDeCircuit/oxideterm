@@ -119,6 +119,12 @@ impl Render for WorkspaceApp {
                     }
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_active_text_input_delete_selection(&event.keystroke, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if !this.command_palette.open
                     && this.keybinding_recording_action_id.is_none()
                     && crate::keybindings::keystroke_matches_action(
@@ -289,9 +295,7 @@ impl Render for WorkspaceApp {
                     let _ = this.handle_file_manager_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.active_surface == ActiveSurface::Settings
-                    && this.focused_settings_input.is_some()
-                {
+                } else if this.focused_settings_input.is_some() {
                     if keystroke_commits_platform_text(&event.keystroke) {
                         return;
                     }
@@ -320,7 +324,7 @@ impl Render for WorkspaceApp {
                     cx.stop_propagation();
                 }
             }))
-            .on_key_down(cx.listener(|this, event, window, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 this.handle_workspace_key(event, window, cx);
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
@@ -329,6 +333,7 @@ impl Render for WorkspaceApp {
                 this.update_split_drag(event, window, cx);
                 this.update_settings_slider_drag(event, cx);
                 this.update_terminal_cast_seek_drag(event, cx);
+                this.update_ime_selection_drag(event.position, cx);
             }))
             .on_mouse_down(
                 MouseButton::Left,
@@ -344,6 +349,7 @@ impl Render for WorkspaceApp {
                     this.finish_split_drag(cx);
                     this.finish_settings_slider_drag(cx);
                     this.finish_terminal_cast_seek_drag(cx);
+                    this.finish_ime_selection_drag();
                     if this.launcher.pressed_app_path.take().is_some() {
                         cx.notify();
                     }
@@ -395,11 +401,17 @@ impl Render for WorkspaceApp {
                 this.focus_adjacent_pane(true, window, cx);
             }))
             .on_action(cx.listener(|this, _: &Copy, _window, cx| {
+                if this.copy_active_text_input(cx) {
+                    return;
+                }
                 if this.new_connection_form.is_none() {
                     this.copy(cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &Paste, _window, cx| {
+                if this.paste_active_text_input(cx) {
+                    return;
+                }
                 if this.new_connection_form.is_some() {
                     this.paste_into_new_connection_field(cx);
                 } else {
@@ -616,6 +628,9 @@ impl Render for WorkspaceApp {
             })
             .when(self.settings_reset_confirm_open, |root| {
                 root.child(self.render_settings_reset_confirm_dialog(cx))
+            })
+            .when(self.cloud_sync_confirm.is_some(), |root| {
+                root.child(self.render_cloud_sync_confirm_dialog(cx))
             })
             .when_some(self.render_ai_sidebar_floating_overlay(window, cx), |root, overlay| {
                 root.child(overlay)

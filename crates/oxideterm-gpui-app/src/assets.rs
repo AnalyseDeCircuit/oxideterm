@@ -30,6 +30,7 @@ pub(crate) enum LucideIcon {
     ChevronRight,
     Circle,
     Clock,
+    Cloud,
     Code2,
     Copy,
     CornerDownLeft,
@@ -148,6 +149,7 @@ impl LucideIcon {
             Self::ChevronRight => "lucide/chevron-right.svg",
             Self::Circle => "lucide/circle.svg",
             Self::Clock => "lucide/clock.svg",
+            Self::Cloud => "lucide/cloud.svg",
             Self::Code2 => "lucide/code-2.svg",
             Self::Copy => "lucide/copy.svg",
             Self::CornerDownLeft => "lucide/corner-down-left.svg",
@@ -270,6 +272,7 @@ impl AssetSource for NativeAssets {
             "lucide/chevron-right.svg" => CHEVRON_RIGHT,
             "lucide/circle.svg" => CIRCLE,
             "lucide/clock.svg" => CLOCK,
+            "lucide/cloud.svg" => CLOUD,
             "lucide/code-2.svg" => CODE_2,
             "lucide/copy.svg" => COPY,
             "lucide/corner-down-left.svg" => CORNER_DOWN_LEFT,
@@ -398,6 +401,7 @@ impl AssetSource for NativeAssets {
                 "chevron-left.svg",
                 "chevron-right.svg",
                 "clock.svg",
+                "cloud.svg",
                 "code-2.svg",
                 "copy.svg",
                 "corner-down-left.svg",
@@ -527,6 +531,7 @@ const CHEVRON_LEFT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24"
 const CHEVRON_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;
 const CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>"#;
 const CLOCK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>"#;
+const CLOUD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>"#;
 const CODE_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>"#;
 const COPY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>"#;
 const CORNER_DOWN_LEFT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>"#;

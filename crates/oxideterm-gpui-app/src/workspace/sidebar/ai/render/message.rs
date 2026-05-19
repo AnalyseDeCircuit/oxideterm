@@ -1196,6 +1196,7 @@ impl WorkspaceApp {
                 caret_visible: self.new_connection_caret_visible,
                 secret: false,
                 selected_all: false,
+                selected_range: self.ime_selected_range_for_target(target),
                 marked_text: self.marked_text_for_target(target),
             },
         )
@@ -1205,12 +1206,13 @@ impl WorkspaceApp {
         .cursor(CursorStyle::IBeam)
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(|this, _event, window, cx| {
+            cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                 this.ai_editing_message_focused = true;
                 this.ai_chat_input_focused = false;
                 this.ai_model_selector_search_focused = false;
                 this.ime_marked_text = None;
                 window.focus(&this.focus_handle);
+                this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),

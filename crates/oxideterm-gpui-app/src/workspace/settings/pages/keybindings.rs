@@ -38,26 +38,16 @@ impl WorkspaceApp {
             rows.push(self.keybinding_no_results());
         }
 
-        rows.push(self.keybinding_reference_tables());
-
         rows
     }
 
     fn keybinding_toolbar(&self, modified: usize, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
         div()
             .w_full()
             .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .line_height(px(18.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("settings_view.keybindings.intl_keyboard_note")),
-            )
             .child(
                 div()
                     .w_full()
@@ -126,6 +116,7 @@ impl WorkspaceApp {
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
                     marked_text: self.marked_text_for_target(target),
                 },
             )
@@ -146,7 +137,7 @@ impl WorkspaceApp {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                     this.focus_settings_input(
                         SettingsInput::KeybindingSearch,
                         this.keybinding_search_query.clone(),
@@ -154,6 +145,7 @@ impl WorkspaceApp {
                     );
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle);
+                    this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
                     cx.stop_propagation();
                 }),
             ),
@@ -277,7 +269,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .bg(rgb(theme.bg_panel))
+                    .bg(rgba((theme.bg_panel << 8) | 0x80))
                     .border_b_1()
                     .border_color(rgb(theme.border))
                     .child(
@@ -330,8 +322,8 @@ impl WorkspaceApp {
         div()
             .w_full()
             .min_w(px(0.0))
-            .px(px(14.0))
-            .py(px(10.0))
+            .px(px(20.0))
+            .py(px(12.0))
             .flex()
             .items_center()
             .justify_between()
@@ -344,8 +336,8 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_w(px(0.0))
                     .flex()
-                    .flex_col()
-                    .gap(px(3.0))
+                    .items_center()
+                    .gap(px(12.0))
                     .child(
                         div()
                             .truncate()
@@ -354,20 +346,7 @@ impl WorkspaceApp {
                             .text_color(rgb(theme.text))
                             .child(self.i18n.t(&definition.label_key())),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t(definition.scope.label_key()))
-                            .when(modified, |meta| {
-                                meta.child(
-                                    self.keybinding_modified_badge(),
-                                )
-                            }),
-                    ),
+                    .when(modified, |label| label.child(self.keybinding_modified_badge())),
             )
             .child(
                 div()
@@ -612,151 +591,6 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             }),
         )
-    }
-
-    fn keybinding_reference_tables(&self) -> AnyElement {
-        let categories = [
-            (
-                "settings_view.help.category_file_manager",
-                vec![
-                    ("settings_view.help.shortcut_select_all", "⌘A", "Ctrl+A"),
-                    ("settings_view.help.shortcut_copy", "⌘C", "Ctrl+C"),
-                    ("settings_view.help.shortcut_cut", "⌘X", "Ctrl+X"),
-                    ("settings_view.help.shortcut_paste", "⌘V", "Ctrl+V"),
-                    ("settings_view.help.shortcut_rename", "F2", "F2"),
-                    ("settings_view.help.shortcut_delete", "Delete", "Delete"),
-                    ("settings_view.help.shortcut_quick_look", "Space", "Space"),
-                    ("settings_view.help.shortcut_open", "Enter", "Enter"),
-                ],
-            ),
-            (
-                "settings_view.help.category_sftp",
-                vec![
-                    ("settings_view.help.shortcut_select_all", "⌘A", "Ctrl+A"),
-                    ("settings_view.help.shortcut_quick_look", "Space", "Space"),
-                    ("settings_view.help.shortcut_sftp_enter_dir", "Enter", "Enter"),
-                    ("settings_view.help.shortcut_sftp_upload", "→", "→"),
-                    ("settings_view.help.shortcut_sftp_download", "←", "←"),
-                    ("settings_view.help.shortcut_rename", "F2", "F2"),
-                    ("settings_view.help.shortcut_delete", "Delete", "Delete"),
-                ],
-            ),
-            (
-                "settings_view.help.category_editor",
-                vec![
-                    ("settings_view.help.shortcut_save", "⌘S", "Ctrl+S"),
-                    ("settings_view.help.shortcut_find", "⌘F", "Ctrl+F"),
-                    ("settings_view.help.shortcut_copy", "⌘C", "Ctrl+C"),
-                    ("settings_view.help.shortcut_paste", "⌘V", "Ctrl+V"),
-                    ("settings_view.help.shortcut_close", "Esc", "Esc"),
-                ],
-            ),
-        ];
-
-        let theme = self.tokens.ui;
-        let mut section = div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(14.0))
-            .pt(px(6.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(theme.text))
-                    .child(self.i18n.t("settings_view.help.shortcuts")),
-            );
-
-        for (title_key, rows) in categories {
-            let mut table = div()
-                .w_full()
-                .min_w(px(0.0))
-                .rounded(px(self.tokens.radii.lg))
-                .border_1()
-                .border_color(rgb(theme.border))
-                .overflow_hidden()
-                .child(
-                    div()
-                        .h(px(36.0))
-                        .px(px(14.0))
-                        .flex()
-                        .items_center()
-                        .bg(rgb(theme.bg_panel))
-                        .border_b_1()
-                        .border_color(rgb(theme.border))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t(title_key).to_uppercase()),
-                );
-            let row_count = rows.len();
-            for (index, (label_key, mac, other)) in rows.into_iter().enumerate() {
-                table = table.child(self.keybinding_reference_row(
-                    label_key,
-                    mac,
-                    other,
-                    index + 1 < row_count,
-                ));
-            }
-            section = section.child(table);
-        }
-
-        section.into_any_element()
-    }
-
-    fn keybinding_reference_row(
-        &self,
-        label_key: &str,
-        mac: &str,
-        other: &str,
-        show_separator: bool,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .px(px(14.0))
-            .py(px(9.0))
-            .flex()
-            .items_center()
-            .gap(px(12.0))
-            .when(show_separator, |row| {
-                row.border_b_1().border_color(rgb(theme.border))
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(theme.text))
-                    .child(self.i18n.t(label_key)),
-            )
-            .child(self.keybinding_badge(mac))
-            .child(self.keybinding_badge(other))
-            .into_any_element()
-    }
-
-    fn keybinding_badge(&self, value: &str) -> AnyElement {
-        div()
-            .flex_none()
-            .min_w(px(72.0))
-            .h(px(28.0))
-            .px(px(10.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg))
-            .flex()
-            .items_center()
-            .justify_center()
-            .font_family(settings_mono_font_family(self.settings_store.settings()))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text))
-            .child(value.to_string())
-            .into_any_element()
     }
 
 }

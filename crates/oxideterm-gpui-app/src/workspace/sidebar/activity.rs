@@ -10,6 +10,7 @@ impl WorkspaceApp {
             (SidebarSection::Activity, LucideIcon::Activity),
             (SidebarSection::Network, LucideIcon::Network),
             (SidebarSection::Extensions, LucideIcon::Puzzle),
+            (SidebarSection::CloudSync, LucideIcon::Cloud),
             (SidebarSection::Assistant, LucideIcon::Sparkles),
         ];
         let bottom_items = [
@@ -125,6 +126,9 @@ impl WorkspaceApp {
         let active = if section == SidebarSection::Notifications {
             self.active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::NotificationCenter)
+        } else if section == SidebarSection::CloudSync {
+            self.active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::CloudSync)
         } else if section == SidebarSection::Assistant {
             self.ai_sidebar_visible()
         } else {
@@ -277,6 +281,8 @@ impl WorkspaceApp {
                         this.open_notification_center_tab(window, cx);
                     } else if section == SidebarSection::Assistant {
                         let _ = this.toggle_ai_sidebar(cx);
+                    } else if section == SidebarSection::CloudSync {
+                        this.open_cloud_sync_tab(window, cx);
                     } else if section == SidebarSection::Extensions {
                         this.open_plugin_manager_tab(window, cx);
                     } else {
@@ -296,6 +302,7 @@ impl WorkspaceApp {
             SidebarSection::Activity => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Network => self.i18n.t("sidebar.panels.connection_matrix"),
             SidebarSection::Extensions => self.i18n.t("sidebar.panels.plugins"),
+            SidebarSection::CloudSync => self.i18n.t("plugin.cloud_sync.panel_title"),
             SidebarSection::Assistant => self.i18n.t("sidebar.panels.ai"),
             SidebarSection::Automation => self.i18n.t("sidebar.panels.activity"),
             SidebarSection::Workspace => self.i18n.t("sidebar.actions.new_local_terminal"),
