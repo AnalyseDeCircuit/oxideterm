@@ -2,8 +2,8 @@ use std::ops::Range;
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId,
-    InputHandler, InspectorElementId, Keystroke, LayoutId, Pixels, Point, Style, UTF16Selection,
-    Window, point, px,
+    InputHandler, InspectorElementId, Keystroke, LayoutId, Pixels, Point, SharedString, Style,
+    TextRun, UTF16Selection, Window, font, point, px, rgb,
 };
 
 use super::WorkspaceApp;
@@ -18,7 +18,10 @@ use super::session_manager::SessionManagerInput;
 use super::settings::settings_input_accepts_newline;
 use super::sftp::SftpInput;
 use oxideterm_gpui_settings_view::SettingsInput;
-use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
+use oxideterm_gpui_ui::{
+    tauri_ui_font_family,
+    text_input::{TextInputAnchor, TextInputAnchorId},
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum WorkspaceImeTarget {
@@ -292,12 +295,12 @@ impl InputHandler for WorkspaceInputHandler {
     fn character_index_for_point(
         &mut self,
         point: gpui::Point<Pixels>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) -> Option<usize> {
         self.view.update(cx, |view, _cx| {
             let target = view.active_ime_target()?;
-            view.ime_index_for_position(target, point)
+            view.ime_index_for_position(target, point, window)
         })
     }
 
@@ -332,7 +335,7 @@ impl WorkspaceApp {
 
         if let Some(form) = self.new_connection_form.as_ref()
             && form.field_focused
-            && connection_field_accepts_ime(form.focused_field)
+            && self.new_connection_field_accepts_ime(form.focused_field)
         {
             return Some(WorkspaceImeTarget::NewConnection(form.focused_field));
         }
@@ -451,7 +454,6 @@ impl WorkspaceApp {
         target: WorkspaceImeTarget,
     ) -> Option<Range<usize>> {
         self.ime_selection_range_for_target(target)
-            .filter(|range| range.start < range.end)
     }
 
     fn ime_selection_range_for_target(&self, target: WorkspaceImeTarget) -> Option<Range<usize>> {
@@ -461,6 +463,11 @@ impl WorkspaceApp {
                 if self.selected_ime_target == Some(target) {
                     self.text_for_ime_target(target)
                         .map(|text| 0..text.encode_utf16().count())
+                } else if self.active_ime_target() == Some(target) {
+                    self.text_for_ime_target(target).map(|text| {
+                        let end = text.encode_utf16().count();
+                        end..end
+                    })
                 } else {
                     None
                 }
@@ -488,9 +495,10 @@ impl WorkspaceApp {
         target: WorkspaceImeTarget,
         position: Point<Pixels>,
         extend: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = self.ime_index_for_position(target, position) else {
+        let Some(index) = self.ime_index_for_position(target, position, window) else {
             self.clear_ime_selection();
             cx.notify();
             return;
@@ -520,16 +528,30 @@ impl WorkspaceApp {
     pub(super) fn update_ime_selection_drag(
         &mut self,
         position: Point<Pixels>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(drag) = self.ime_drag_selection else {
             return;
         };
-        let Some(index) = self.ime_index_for_position(drag.target, position) else {
+        let Some(index) = self.ime_index_for_position(drag.target, position, window) else {
             return;
         };
         self.set_ime_selection_from_anchor(drag.target, drag.anchor, index);
         cx.notify();
+    }
+
+    pub(super) fn update_ime_selection_drag_from_mouse_move(
+        &mut self,
+        event: &gpui::MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !event.dragging() || self.ime_drag_selection.is_none() {
+            return;
+        }
+        self.update_ime_selection_drag(event.position, window, cx);
+        cx.stop_propagation();
     }
 
     pub(super) fn finish_ime_selection_drag(&mut self) {
@@ -568,6 +590,7 @@ impl WorkspaceApp {
         &self,
         target: WorkspaceImeTarget,
         position: Point<Pixels>,
+        window: &mut Window,
     ) -> Option<usize> {
         let text = self.text_for_ime_target(target)?;
         let text_len = text.encode_utf16().count();
@@ -587,13 +610,97 @@ impl WorkspaceApp {
             return Some(text_len);
         }
 
-        let ratio = ((position.x - left) / width).clamp(0.0, 1.0);
-        Some(((text_len as f32) * ratio).round() as usize)
+        let relative_x = (position.x - left).clamp(px(0.0), width);
+        Some(self.ime_index_for_relative_x(target, &text, relative_x, window))
     }
 
     fn active_ime_text(&self) -> Option<String> {
         let target = self.active_ime_target()?;
         self.text_for_ime_target(target)
+    }
+
+    fn new_connection_field_accepts_ime(&self, field: NewConnectionField) -> bool {
+        if field == NewConnectionField::Password
+            && self.editing_saved_connection_id.is_some()
+            && self.saved_connection_prompt_action.is_none()
+            && self
+                .new_connection_form
+                .as_ref()
+                .is_some_and(|form| !form.password_loaded)
+        {
+            return false;
+        }
+        true
+    }
+
+    fn ime_index_for_relative_x(
+        &self,
+        target: WorkspaceImeTarget,
+        text: &str,
+        relative_x: Pixels,
+        window: &mut Window,
+    ) -> usize {
+        let text_len = text.encode_utf16().count();
+        if text_len == 0 {
+            return 0;
+        }
+
+        if self.ime_target_is_secret(target) {
+            return self.secret_ime_index_for_relative_x(text, relative_x, window);
+        }
+
+        let shaped = self.shape_ime_text(text, window);
+        let byte_index = shaped.closest_index_for_x(relative_x.clamp(px(0.0), shaped.width));
+        utf16_offset_for_byte_index(text, byte_index)
+    }
+
+    fn secret_ime_index_for_relative_x(
+        &self,
+        text: &str,
+        relative_x: Pixels,
+        window: &mut Window,
+    ) -> usize {
+        let display = "•".repeat(text.chars().count());
+        if display.is_empty() {
+            return 0;
+        }
+        let shaped = self.shape_ime_text(&display, window);
+        let display_byte_index =
+            shaped.closest_index_for_x(relative_x.clamp(px(0.0), shaped.width));
+        let display_byte_index =
+            floor_char_boundary(&display, display_byte_index.min(display.len()));
+        let display_chars = display[..display_byte_index].chars().count();
+        utf16_offset_for_char_index(text, display_chars)
+    }
+
+    fn shape_ime_text(&self, text: &str, window: &mut Window) -> gpui::ShapedLine {
+        let font = font(tauri_ui_font_family(
+            &self.settings_store.settings().appearance.ui_font_family,
+        ));
+        let shared = SharedString::from(text.to_string());
+        let run = TextRun {
+            len: shared.len(),
+            font,
+            color: rgb(self.tokens.ui.text).into(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        window
+            .text_system()
+            .shape_line(shared, px(self.tokens.metrics.ui_text_sm), &[run], None)
+    }
+
+    fn ime_target_is_secret(&self, target: WorkspaceImeTarget) -> bool {
+        matches!(
+            target,
+            WorkspaceImeTarget::NewConnection(
+                NewConnectionField::Password
+                    | NewConnectionField::Passphrase
+                    | NewConnectionField::JumpPassword
+                    | NewConnectionField::JumpPassphrase
+            ) | WorkspaceImeTarget::KeyboardInteractive(_)
+        )
     }
 
     fn text_for_ime_target(&self, target: WorkspaceImeTarget) -> Option<String> {
@@ -700,31 +807,7 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::NewConnection(field) => {
                 let form = self.new_connection_form.as_ref()?;
-                Some(match field {
-                    NewConnectionField::Name => form.name.clone(),
-                    NewConnectionField::Host => form.host.clone(),
-                    NewConnectionField::Username => form.username.clone(),
-                    NewConnectionField::Group => form.group.clone(),
-                    NewConnectionField::Color => form.color.clone(),
-                    NewConnectionField::JumpHost => form
-                        .jump_server_form
-                        .as_ref()
-                        .map(|jump_form| jump_form.host.clone())?,
-                    NewConnectionField::JumpUsername => form
-                        .jump_server_form
-                        .as_ref()
-                        .map(|jump_form| jump_form.username.clone())?,
-                    NewConnectionField::Port
-                    | NewConnectionField::Password
-                    | NewConnectionField::KeyPath
-                    | NewConnectionField::CertPath
-                    | NewConnectionField::Passphrase
-                    | NewConnectionField::JumpPort
-                    | NewConnectionField::JumpPassword
-                    | NewConnectionField::JumpKeyPath
-                    | NewConnectionField::JumpCertPath
-                    | NewConnectionField::JumpPassphrase => return None,
-                })
+                new_connection_field_value(form, field).map(str::to_string)
             }
             WorkspaceImeTarget::KeyboardInteractive(index) => self
                 .keyboard_interactive_challenge
@@ -742,9 +825,16 @@ impl WorkspaceApp {
         let Some(target) = self.active_ime_target() else {
             return;
         };
+        let caret = replacement_range
+            .as_ref()
+            .map(|range| range.start + text.encode_utf16().count());
         self.ime_marked_text = None;
-        self.clear_ime_selection();
         self.replace_ime_target_text(target, replacement_range, text, cx);
+        if let Some(caret) = caret {
+            self.set_ime_selection_from_anchor(target, caret, caret);
+        } else {
+            self.clear_ime_selection();
+        }
     }
 
     pub(super) fn handle_active_text_input_edit_shortcut(
@@ -781,7 +871,10 @@ impl WorkspaceApp {
         let Some(text) = self.text_for_ime_target(target) else {
             return false;
         };
-        let range = if let Some(range) = self.ime_selected_range_for_target(target) {
+        let range = if let Some(range) = self
+            .ime_selected_range_for_target(target)
+            .filter(|range| range.start < range.end)
+        {
             range
         } else if let Some(caret) = self.ime_selection_range_for_target(target) {
             let caret = caret.start.min(text.encode_utf16().count());
@@ -795,8 +888,10 @@ impl WorkspaceApp {
         } else {
             return false;
         };
+        let caret = range.start;
         self.clear_ime_selection();
         self.replace_ime_target_text(target, Some(range), "", cx);
+        self.set_ime_selection_from_anchor(target, caret, caret);
         true
     }
 
@@ -807,10 +902,13 @@ impl WorkspaceApp {
         let Some(text) = self.text_for_ime_target(target) else {
             return false;
         };
-        let selection = self.ime_selected_range_for_target(target);
-        let copied = selection
-            .map(|range| utf16_slice(&text, range))
-            .unwrap_or(text);
+        let Some(selection) = self
+            .ime_selected_range_for_target(target)
+            .filter(|range| range.start < range.end)
+        else {
+            return true;
+        };
+        let copied = utf16_slice(&text, selection);
         cx.write_to_clipboard(ClipboardItem::new_string(copied));
         true
     }
@@ -822,12 +920,17 @@ impl WorkspaceApp {
         let Some(text) = self.text_for_ime_target(target) else {
             return false;
         };
-        let range = self
+        let Some(range) = self
             .ime_selected_range_for_target(target)
-            .unwrap_or_else(|| 0..text.encode_utf16().count());
+            .filter(|range| range.start < range.end)
+        else {
+            return true;
+        };
+        let caret = range.start;
         cx.write_to_clipboard(ClipboardItem::new_string(utf16_slice(&text, range.clone())));
         self.clear_ime_selection();
         self.replace_ime_target_text(target, Some(range), "", cx);
+        self.set_ime_selection_from_anchor(target, caret, caret);
         true
     }
 
@@ -840,8 +943,14 @@ impl WorkspaceApp {
         };
         let text = normalize_clipboard_text_for_ime_target(target, &text);
         let replacement_range = self.ime_selection_range_for_target(target);
+        let caret = replacement_range
+            .as_ref()
+            .map(|range| range.start + text.encode_utf16().count());
         self.clear_ime_selection();
         self.replace_ime_target_text(target, replacement_range, &text, cx);
+        if let Some(caret) = caret {
+            self.set_ime_selection_from_anchor(target, caret, caret);
+        }
         true
     }
 
@@ -1099,17 +1208,29 @@ fn is_terminal_tab(tab: &oxideterm_workspace::Tab) -> bool {
     )
 }
 
-fn connection_field_accepts_ime(field: NewConnectionField) -> bool {
-    matches!(
-        field,
-        NewConnectionField::Name
-            | NewConnectionField::Host
-            | NewConnectionField::Username
-            | NewConnectionField::Group
-            | NewConnectionField::Color
-            | NewConnectionField::JumpHost
-            | NewConnectionField::JumpUsername
-    )
+fn new_connection_field_value(
+    form: &super::new_connection::NewConnectionForm,
+    field: NewConnectionField,
+) -> Option<&str> {
+    Some(match field {
+        NewConnectionField::Name => &form.name,
+        NewConnectionField::Host => &form.host,
+        NewConnectionField::Port => &form.port,
+        NewConnectionField::Username => &form.username,
+        NewConnectionField::Password => &form.password,
+        NewConnectionField::KeyPath => &form.key_path,
+        NewConnectionField::CertPath => &form.cert_path,
+        NewConnectionField::Passphrase => &form.passphrase,
+        NewConnectionField::Group => &form.group,
+        NewConnectionField::Color => &form.color,
+        NewConnectionField::JumpHost => &form.jump_server_form.as_ref()?.host,
+        NewConnectionField::JumpPort => &form.jump_server_form.as_ref()?.port,
+        NewConnectionField::JumpUsername => &form.jump_server_form.as_ref()?.username,
+        NewConnectionField::JumpPassword => &form.jump_server_form.as_ref()?.password,
+        NewConnectionField::JumpKeyPath => &form.jump_server_form.as_ref()?.key_path,
+        NewConnectionField::JumpCertPath => &form.jump_server_form.as_ref()?.cert_path,
+        NewConnectionField::JumpPassphrase => &form.jump_server_form.as_ref()?.passphrase,
+    })
 }
 
 fn connection_field_value_mut(
@@ -1222,6 +1343,22 @@ fn byte_index_for_utf16(value: &str, offset: usize) -> usize {
         utf16_count += ch.len_utf16();
     }
     value.len()
+}
+
+fn utf16_offset_for_byte_index(value: &str, byte_offset: usize) -> usize {
+    let byte_offset = floor_char_boundary(value, byte_offset.min(value.len()));
+    value[..byte_offset].encode_utf16().count()
+}
+
+fn utf16_offset_for_char_index(value: &str, char_offset: usize) -> usize {
+    value.chars().take(char_offset).map(char::len_utf16).sum()
+}
+
+fn floor_char_boundary(value: &str, mut byte_offset: usize) -> usize {
+    while byte_offset > 0 && !value.is_char_boundary(byte_offset) {
+        byte_offset -= 1;
+    }
+    byte_offset
 }
 
 fn previous_utf16_boundary(value: &str, offset: usize) -> usize {

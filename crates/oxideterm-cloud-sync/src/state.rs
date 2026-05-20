@@ -88,7 +88,7 @@ impl CloudSyncHistoryEntry {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudSyncPersistedState {
     #[serde(default)]
@@ -220,7 +220,7 @@ pub struct CloudSyncStateStore {
 impl CloudSyncStateStore {
     pub fn load(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
-        let state = match fs::read_to_string(&path) {
+        let mut state = match fs::read_to_string(&path) {
             Ok(contents) if !contents.trim().is_empty() => serde_json::from_str(&contents)
                 .with_context(|| format!("failed to parse cloud sync state {}", path.display()))?,
             Ok(_) => CloudSyncPersistedState::default(),
@@ -233,6 +233,7 @@ impl CloudSyncStateStore {
                 });
             }
         };
+        reset_runtime_state(&mut state);
         Ok(Self { path, state })
     }
 
@@ -270,6 +271,15 @@ pub fn default_cloud_sync_state_path(settings_path: &Path) -> PathBuf {
         .parent()
         .map(|parent| parent.join("cloud_sync.json"))
         .unwrap_or_else(|| PathBuf::from("cloud_sync.json"))
+}
+
+fn reset_runtime_state(state: &mut CloudSyncPersistedState) {
+    state.status = CloudSyncStatus::Idle;
+    state.local_dirty = false;
+    state.local_dirty_sections = None;
+    state.auto_upload_blocked_by_conflict = false;
+    state.conflict_details = None;
+    state.last_error = None;
 }
 
 #[cfg(test)]
@@ -339,6 +349,37 @@ mod tests {
         assert_eq!(
             state.rollback_backups[0].id,
             format!("backup-{}", crate::MAX_ROLLBACK_BACKUPS + 1)
+        );
+    }
+
+    #[test]
+    fn load_resets_runtime_only_state_like_tauri_store_bootstrap() {
+        let mut state = CloudSyncPersistedState {
+            status: CloudSyncStatus::Error,
+            local_dirty: true,
+            local_dirty_sections: Some(StructuredDirtySections::default()),
+            auto_upload_blocked_by_conflict: true,
+            conflict_details: Some(CloudSyncConflictDetails {
+                revision: Some("rev".into()),
+                device_id: Some("device".into()),
+                updated_at: Some("now".into()),
+            }),
+            last_error: Some("boom".into()),
+            last_known_remote_revision: Some("keep-revision".into()),
+            ..CloudSyncPersistedState::default()
+        };
+
+        reset_runtime_state(&mut state);
+
+        assert_eq!(state.status, CloudSyncStatus::Idle);
+        assert!(!state.local_dirty);
+        assert!(state.local_dirty_sections.is_none());
+        assert!(!state.auto_upload_blocked_by_conflict);
+        assert!(state.conflict_details.is_none());
+        assert!(state.last_error.is_none());
+        assert_eq!(
+            state.last_known_remote_revision.as_deref(),
+            Some("keep-revision")
         );
     }
 }

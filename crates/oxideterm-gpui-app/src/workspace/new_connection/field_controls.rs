@@ -382,9 +382,14 @@ impl WorkspaceApp {
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle);
-                    this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
+                    this.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
                     cx.stop_propagation();
                     cx.notify();
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                 }),
             ),
             move |anchor, _window, cx| {

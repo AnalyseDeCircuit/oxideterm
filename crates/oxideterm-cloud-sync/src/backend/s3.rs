@@ -41,7 +41,8 @@ impl CloudSyncBackend {
             return Ok(RemoteMetadata::missing());
         }
         if !response.status().is_success() {
-            bail!("s3_{}: failed to fetch S3 metadata", response.status());
+            let status = response.status().as_u16();
+            bail!("s3_{}: Failed to fetch S3 metadata ({})", status, status);
         }
         let etag = response
             .headers()
@@ -73,10 +74,8 @@ impl CloudSyncBackend {
             )
             .await?;
         if !blob_response.status().is_success() {
-            bail!(
-                "s3_blob_{}: failed to upload S3 blob",
-                blob_response.status()
-            );
+            let status = blob_response.status().as_u16();
+            bail!("s3_blob_{}: Failed to upload S3 blob ({})", status, status);
         }
 
         let mut metadata = payload.metadata_json_with_blob_path(&blob_key);
@@ -103,9 +102,11 @@ impl CloudSyncBackend {
             bail!("etag_conflict_detected: remote S3 snapshot changed before upload completed");
         }
         if !metadata_response.status().is_success() {
+            let status = metadata_response.status().as_u16();
             bail!(
-                "s3_meta_{}: failed to upload S3 metadata",
-                metadata_response.status()
+                "s3_meta_{}: Failed to upload S3 metadata ({})",
+                status,
+                status
             );
         }
         Ok(RemoteWriteResult {
@@ -144,9 +145,11 @@ impl CloudSyncBackend {
             )
             .await?;
         if !response.status().is_success() {
+            let status = response.status().as_u16();
             bail!(
-                "s3_object_{}: failed to upload S3 object",
-                response.status()
+                "s3_object_{}: Failed to upload S3 object ({})",
+                status,
+                status
             );
         }
         Ok(response_write_result(response).await)
@@ -172,9 +175,11 @@ impl CloudSyncBackend {
             return Ok(None);
         }
         if !response.status().is_success() {
+            let status = response.status().as_u16();
             bail!(
-                "s3_object_{}: failed to download S3 object",
-                response.status()
+                "s3_object_{}: Failed to download S3 object ({})",
+                status,
+                status
             );
         }
         let object = response_to_object(response, &format!("S3 object {relative_path}")).await?;

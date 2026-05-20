@@ -1,7 +1,7 @@
 impl WorkspaceApp {
-    pub(super) fn render_tab_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_tab_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let scroll_x = self.tab_scroll_x.max(0.0);
+        let scroll_x = self.tabbar_effective_scroll_x(window);
         let mut bar = div()
             .h(px(self.tokens.metrics.tabbar_height))
             .flex()
@@ -25,9 +25,15 @@ impl WorkspaceApp {
             .relative()
             .left(px(-scroll_x));
 
-        for tab in &self.tabs {
+        for (tab_index, tab) in self.tabs.iter().enumerate() {
             let tab_id = tab.id;
             let active = Some(tab_id) == self.active_tab_id;
+            let drag_state = self.tab_drag.as_ref();
+            let drag_active = drag_state.is_some_and(|drag| drag.active);
+            let is_being_dragged = drag_state.is_some_and(|drag| drag.tab_id == tab_id);
+            let show_drop_indicator = drag_state.is_some_and(|drag| {
+                drag.active && drag.drop_target_index == tab_index && drag.from_index != tab_index
+            });
             let tab_width = self.tab_visual_width(tab);
             let reconnect_node_id = self.reconnect_node_id_for_tab(tab);
             let reconnect_job = reconnect_node_id
@@ -89,12 +95,29 @@ impl WorkspaceApp {
                     } else {
                         rgb(theme.text_muted)
                     })
+                    .opacity(if is_being_dragged && drag_active {
+                        0.5
+                    } else {
+                        1.0
+                    })
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |this, _event, window, cx| {
-                            this.set_active_tab(tab_id, window, cx);
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            this.start_tab_drag_candidate(tab_id, tab_index, event, window, cx);
+                            cx.stop_propagation();
                         }),
                     )
+                    .when(show_drop_indicator, |tab| {
+                        tab.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .top_0()
+                                .bottom_0()
+                                .w(px(2.0))
+                                .bg(rgb(theme.accent)),
+                        )
+                    })
                     .when(active || show_reconnect_progress, |tab| {
                         tab.child(
                             div()

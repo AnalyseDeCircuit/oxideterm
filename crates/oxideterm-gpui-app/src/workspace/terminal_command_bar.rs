@@ -458,10 +458,16 @@ impl WorkspaceApp {
                                 WorkspaceImeTarget::TerminalCommandBar,
                                 event.position,
                                 event.modifiers.shift,
+                                window,
                                 cx,
                             );
                             cx.stop_propagation();
                             cx.notify();
+                        }),
+                    )
+                    .on_mouse_move(
+                        cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                            this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                         }),
                     )
                     .child(Self::render_lucide_icon(

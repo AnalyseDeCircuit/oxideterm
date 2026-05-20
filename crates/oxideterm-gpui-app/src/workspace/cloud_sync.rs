@@ -10,18 +10,18 @@ use gpui_component::scroll::ScrollableElement;
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,
     MAX_ROLLBACK_BACKUP_BYTES, PREVIEW_RECORD_LIMIT, STRUCTURED_MANIFEST_FORMAT,
-    StructuredApplySelection, StructuredSectionRevisions, build_manifest_section_revisions,
-    compute_structured_dirty_sections, merge_structured_baseline,
+    StructuredApplySelection, StructuredManifest, StructuredSectionRevisions,
+    build_manifest_section_revisions, compute_structured_dirty_sections, merge_structured_baseline,
     operation::{
         ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, LegacyPreview, StructuredPreview,
         UploadOptions, UploadOutcome,
     },
-    progress::{CloudSyncProgress, CloudSyncProgressStage},
+    progress::{CloudSyncProgress, CloudSyncProgressSink, CloudSyncProgressStage},
     secret_keys,
     secrets::{
-        CloudSyncKeychainSecretProvider, CloudSyncSecretProvider, SecretReadMode,
-        backend_uses_auth_mode, backend_uses_basic, backend_uses_git_token,
-        backend_uses_s3_credentials, backend_uses_token,
+        CloudSyncKeychainSecretProvider, SecretReadMode, backend_uses_auth_mode,
+        backend_uses_basic, backend_uses_git_token, backend_uses_s3_credentials,
+        backend_uses_token, get_action_secrets,
     },
     service::{CloudSyncLocalSnapshot, build_local_snapshot},
     state::{
@@ -731,7 +731,7 @@ impl WorkspaceApp {
 
     fn render_cloud_sync_progress(&self, progress: &CloudSyncProgress) -> AnyElement {
         let theme = self.tokens.ui;
-        let ratio = if progress.total == 0 {
+        let ratio = if progress.total <= 0.0 {
             0.0
         } else {
             (progress.current as f32 / progress.total as f32).clamp(0.0, 1.0)
@@ -752,7 +752,11 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(theme.text))
                     .child(self.cloud_sync_progress_stage_label(progress.stage))
-                    .child(format!("{}/{}", progress.current, progress.total)),
+                    .child(format!(
+                        "{}/{}",
+                        cloud_sync_progress_unit(progress.current),
+                        cloud_sync_progress_unit(progress.total)
+                    )),
             )
             .child(
                 div()
@@ -1856,11 +1860,22 @@ impl WorkspaceApp {
                         this.focus_settings_input(input, current, cx);
                         this.ime_marked_text = None;
                         window.focus(&this.focus_handle);
-                        this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
+                        this.begin_ime_selection(
+                            target,
+                            event.position,
+                            event.modifiers.shift,
+                            window,
+                            cx,
+                        );
                         this.cloud_sync_open_select = None;
                         cx.stop_propagation();
                     }),
-                ),
+                )
+                .on_mouse_move(cx.listener(
+                    |this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    },
+                )),
                 move |anchor, _window, cx| {
                     let _ = workspace.update(cx, |this, cx| {
                         this.update_text_input_anchor(anchor, cx);
@@ -2368,10 +2383,10 @@ impl WorkspaceApp {
             .cloud_sync_form
             .auto_upload_interval_mins
             .trim()
-            .parse::<u32>()
+            .parse::<f64>()
             .ok()
-            .filter(|value| *value > 0)
-            .unwrap_or(60);
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or(60.0);
         let auth_mode = match self.cloud_sync_form.backend_type {
             BackendType::Dropbox => AuthMode::Bearer,
             BackendType::Git | BackendType::S3 => AuthMode::None,
@@ -2422,7 +2437,7 @@ impl WorkspaceApp {
         let secret_result = self.store_cloud_sync_touched_secrets(&mut provider);
         self.cloud_sync_store.state_mut().settings = settings;
         self.cloud_sync_store.state_mut().secret_hints = provider.hints().clone();
-        self.cloud_sync_form.auto_upload_interval_mins = interval.to_string();
+        self.cloud_sync_form.auto_upload_interval_mins = cloud_sync_number_string(interval);
         self.reset_cloud_sync_secret_drafts();
         if let Err(error) = secret_result.and_then(|_| self.cloud_sync_store.save()) {
             self.cloud_sync_store.state_mut().last_error = Some(error.to_string());
@@ -2788,8 +2803,8 @@ impl WorkspaceApp {
                             .state()
                             .settings
                             .auto_upload_interval_mins
-                            .max(5);
-                        Some(Duration::from_secs(u64::from(interval) * 60))
+                            .max(5.0);
+                        Some(Duration::from_secs_f64(interval * 60.0))
                     })
                     .ok()
                     .flatten();
@@ -2944,6 +2959,12 @@ impl WorkspaceApp {
             .state()
             .last_known_remote_revision
             .clone();
+        let last_synced_structured_state = self
+            .cloud_sync_store
+            .state()
+            .last_synced_structured_state
+            .clone();
+        let raw_sync_scope = self.cloud_sync_store.state().sync_scope.clone();
         let connection_store = self.connection_store.clone();
         let forwarding_registry = self.forwarding_registry.clone();
         let settings_store = self.settings_store.clone();
@@ -2971,6 +2992,8 @@ impl WorkspaceApp {
                         revision_sequence,
                         previous_remote_revision,
                         previous_remote_sections,
+                        last_synced_structured_state,
+                        raw_sync_scope: Some(raw_sync_scope),
                         automatic,
                         skip_if_busy,
                         ..UploadOptions::default()
@@ -3083,6 +3106,7 @@ impl WorkspaceApp {
         // preview succeeds or fails.
         self.cloud_sync_store.state_mut().last_error = None;
         self.save_cloud_sync_state();
+        let settings = self.cloud_sync_store.state().settings.clone();
         let hints = self.cloud_sync_store.state().secret_hints.clone();
         let connection_store = self.connection_store.clone();
         let (tx, rx) = mpsc::channel();
@@ -3092,32 +3116,45 @@ impl WorkspaceApp {
         self.forwarding_runtime.spawn(async move {
             let mut provider = CloudSyncKeychainSecretProvider::new(hints);
             let progress_tx = tx.clone();
-            let progress = move |progress| {
+            let mut progress = move |progress| {
                 let _ = progress_tx.send(CloudSyncDelivery::Progress(progress));
             };
             progress(CloudSyncProgress {
-                stage: CloudSyncProgressStage::PreviewingImport,
-                current: 1,
-                total: 2,
+                stage: CloudSyncProgressStage::Validating,
+                current: 1.0,
+                total: 2.0,
                 message: None,
             });
-            let result = preview_cloud_sync_rollback_backup(
-                &connection_store,
-                backup.clone(),
-                &mut provider,
-            )
-            .map(|preview| CloudSyncPendingPreview::Legacy {
-                preview,
-                source: CloudSyncPreviewSource::Backup {
-                    id: backup.id,
-                    created_at: backup.created_at,
-                },
-            })
-            .map_err(|error| error.to_string());
+            let result =
+                match get_action_secrets(&settings, &mut provider, true, SecretReadMode::Prompt) {
+                    Ok(secrets) => {
+                        let password = secrets.sync_password.unwrap_or_default();
+                        if non_empty_secret(&password).is_none() {
+                            Err("missing_sync_password: cloud sync password is required"
+                                .to_string())
+                        } else {
+                            preview_cloud_sync_rollback_backup(
+                                &connection_store,
+                                backup.clone(),
+                                &password,
+                                Some(&mut progress),
+                            )
+                            .map(|preview| CloudSyncPendingPreview::Legacy {
+                                preview,
+                                source: CloudSyncPreviewSource::Backup {
+                                    id: backup.id,
+                                    created_at: backup.created_at,
+                                },
+                            })
+                            .map_err(|error| error.to_string())
+                        }
+                    }
+                    Err(error) => Err(error.to_string()),
+                };
             progress(CloudSyncProgress {
                 stage: CloudSyncProgressStage::Done,
-                current: 2,
-                total: 2,
+                current: 2.0,
+                total: 2.0,
                 message: None,
             });
             let _ = tx.send(CloudSyncDelivery::RestoreBackupPreviewFinished(
@@ -3159,6 +3196,8 @@ impl WorkspaceApp {
                         ..
                     }
             );
+        let apply_total_units =
+            cloud_sync_apply_total_units(&preview, &selection, create_rollback_backup);
         self.cloud_sync_store.state_mut().last_error = None;
         self.save_cloud_sync_state();
         let mut connection_store = self.connection_store.clone();
@@ -3179,7 +3218,7 @@ impl WorkspaceApp {
         self.forwarding_runtime.spawn(async move {
             let mut provider = CloudSyncKeychainSecretProvider::new(hints);
             let progress_tx = tx.clone();
-            let mut progress = move |progress| {
+            let progress = move |progress| {
                 let _ = progress_tx.send(CloudSyncDelivery::Progress(progress));
             };
             let apply_requires_password = match &preview {
@@ -3191,19 +3230,23 @@ impl WorkspaceApp {
             };
             let needs_sync_password = apply_requires_password || create_rollback_backup;
             let sync_password = if needs_sync_password {
-                match provider.get_secret(secret_keys::SYNC_PASSWORD, SecretReadMode::Prompt) {
-                    Ok(Some(password)) if non_empty_secret(&password).is_some() => Some(password),
-                    Ok(_) => {
-                        let _ = tx.send(CloudSyncDelivery::ApplyPreviewFinished(
-                            CloudSyncActionResult {
-                                result: Err(
-                                    "missing_sync_password: cloud sync password is required"
-                                        .to_string(),
-                                ),
-                                secret_hints: provider.hints().clone(),
-                            },
-                        ));
-                        return;
+                match get_action_secrets(&settings, &mut provider, true, SecretReadMode::Prompt) {
+                    Ok(secrets) => {
+                        let password = secrets.sync_password.unwrap_or_default();
+                        if non_empty_secret(&password).is_some() {
+                            Some(password)
+                        } else {
+                            let _ = tx.send(CloudSyncDelivery::ApplyPreviewFinished(
+                                CloudSyncActionResult {
+                                    result: Err(
+                                        "missing_sync_password: cloud sync password is required"
+                                            .to_string(),
+                                    ),
+                                    secret_hints: provider.hints().clone(),
+                                },
+                            ));
+                            return;
+                        }
                     }
                     Err(error) => {
                         let _ = tx.send(CloudSyncDelivery::ApplyPreviewFinished(
@@ -3216,13 +3259,24 @@ impl WorkspaceApp {
                     }
                 }
             } else {
-                None
+                match get_action_secrets(&settings, &mut provider, false, SecretReadMode::Prompt) {
+                    Ok(_) => None,
+                    Err(error) => {
+                        let _ = tx.send(CloudSyncDelivery::ApplyPreviewFinished(
+                            CloudSyncActionResult {
+                                result: Err(error.to_string()),
+                                secret_hints: provider.hints().clone(),
+                            },
+                        ));
+                        return;
+                    }
+                }
             };
             if create_rollback_backup {
                 progress(CloudSyncProgress {
                     stage: CloudSyncProgressStage::CreatingBackup,
-                    current: 1,
-                    total: 2,
+                    current: 0.1,
+                    total: apply_total_units,
                     message: None,
                 });
                 match create_cloud_sync_rollback_backup(
@@ -3249,11 +3303,20 @@ impl WorkspaceApp {
                 }
                 progress(CloudSyncProgress {
                     stage: CloudSyncProgressStage::CreatingBackup,
-                    current: 2,
-                    total: 2,
+                    current: 1.0,
+                    total: apply_total_units,
                     message: None,
                 });
             }
+            let mut apply_progress = |update: CloudSyncProgress| {
+                let offset = if create_rollback_backup { 1.0 } else { 0.0 };
+                progress(CloudSyncProgress {
+                    stage: update.stage,
+                    current: (offset + update.current).min(apply_total_units),
+                    total: apply_total_units,
+                    message: update.message,
+                });
+            };
             let result = match preview {
                 CloudSyncPendingPreview::Structured(preview) => service
                     .apply_structured_preview(
@@ -3265,7 +3328,7 @@ impl WorkspaceApp {
                         selection.structured_selection(),
                         selection.conflict_strategy.clone(),
                         sync_password.as_deref(),
-                        Some(&mut progress),
+                        Some(&mut apply_progress),
                     )
                     .map(|outcome| {
                         CloudSyncApplyOutcome::Structured(
@@ -3281,7 +3344,7 @@ impl WorkspaceApp {
                         selection.import_connections,
                         selection.import_forwards,
                         selection.conflict_strategy.clone(),
-                        Some(&mut progress),
+                        Some(&mut apply_progress),
                     )
                     .map(|outcome| CloudSyncApplyOutcome::Legacy {
                         preview,
@@ -3541,16 +3604,17 @@ impl WorkspaceApp {
     }
 
     fn finish_cloud_sync_upload(&mut self, outcome: UploadOutcome, automatic: bool) {
-        let now = Utc::now().to_rfc3339();
         let remote_sections = build_manifest_section_revisions(&outcome.manifest);
         let revision = outcome.manifest.revision.clone();
+        let uploaded_at = outcome.manifest.uploaded_at.clone();
+        let history_summary = history_summary_from_manifest(&outcome.manifest);
         {
             let state = self.cloud_sync_store.state_mut();
             state.status = CloudSyncStatus::Idle;
             state.last_error = None;
             state.revision_seq = state.revision_seq.max(outcome.revision_sequence);
-            state.last_sync_at = Some(now.clone());
-            state.last_upload_at = Some(now);
+            state.last_sync_at = Some(uploaded_at.clone());
+            state.last_upload_at = Some(uploaded_at);
             state.last_known_remote_revision = Some(revision.clone());
             state.last_known_remote_etag = outcome.etag.clone();
             state.remote_format = Some(outcome.manifest.format.clone());
@@ -3568,7 +3632,7 @@ impl WorkspaceApp {
             state.conflict_details = None;
             state.append_history(CloudSyncHistoryEntry::new(
                 "upload",
-                history_summary_from_snapshot(&outcome.local_snapshot),
+                history_summary,
                 true,
                 None,
                 Some(revision.clone()),
@@ -4064,8 +4128,11 @@ impl WorkspaceApp {
             CloudSyncProgressStage::Downloading => {
                 self.i18n.t("plugin.cloud_sync.progress.downloading")
             }
+            CloudSyncProgressStage::Validating => {
+                self.i18n.t("plugin.cloud_sync.progress.validating")
+            }
             CloudSyncProgressStage::PreviewingImport => {
-                self.i18n.t("plugin.cloud_sync.progress.previewing")
+                self.i18n.t("plugin.cloud_sync.progress.previewing_import")
             }
             CloudSyncProgressStage::Importing => {
                 self.i18n.t("plugin.cloud_sync.progress.importing")
@@ -4169,12 +4236,49 @@ fn legacy_apply_covers_full_remote(
                     .all(|id| selection.selected_plugin_ids.contains(*id))))
 }
 
-fn history_summary_from_snapshot(snapshot: &CloudSyncLocalSnapshot) -> CloudSyncHistorySummary {
+fn cloud_sync_apply_total_units(
+    preview: &CloudSyncPendingPreview,
+    selection: &CloudSyncPreviewSelection,
+    create_rollback_backup: bool,
+) -> f64 {
+    let rollback_units = usize::from(create_rollback_backup);
+    let import_units = match preview {
+        CloudSyncPendingPreview::Structured(preview) => {
+            let structured_selection = selection.structured_selection();
+            usize::from(structured_selection.connections && preview.connections_snapshot.is_some())
+                + usize::from(structured_selection.forwards && preview.forwards_snapshot.is_some())
+                + structured_selection
+                    .app_settings_sections
+                    .iter()
+                    .filter(|section_id| preview.app_settings_entries.contains_key(*section_id))
+                    .count()
+                + structured_selection
+                    .plugin_ids
+                    .iter()
+                    .filter(|plugin_id| preview.plugin_settings_entries.contains_key(*plugin_id))
+                    .count()
+        }
+        CloudSyncPendingPreview::Legacy { .. } => 1,
+    };
+    (rollback_units + import_units).max(1) as f64
+}
+
+fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSyncHistorySummary {
     CloudSyncHistorySummary {
-        connections: snapshot.connections_record_count,
-        forwards: snapshot.forwards_record_count,
-        has_app_settings: snapshot.scope.sync_app_settings,
-        plugin_settings_count: snapshot.metadata.plugin_settings_revisions.len(),
+        connections: manifest
+            .sections
+            .connections
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
+        forwards: manifest
+            .sections
+            .forwards
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
+        has_app_settings: !manifest.sections.app_settings.is_empty(),
+        plugin_settings_count: manifest.sections.plugin_settings.len(),
     }
 }
 
@@ -4184,6 +4288,14 @@ fn history_summary_from_legacy_preview(preview: &LegacyPreview) -> CloudSyncHist
         forwards: preview.preview.total_forwards,
         has_app_settings: preview.preview.has_app_settings,
         plugin_settings_count: preview.preview.plugin_settings_count,
+    }
+}
+
+fn cloud_sync_number_string(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{value:.0}")
+    } else {
+        value.to_string()
     }
 }
 
@@ -4420,33 +4532,37 @@ fn format_cloud_sync_bytes(bytes: usize) -> String {
 fn preview_cloud_sync_rollback_backup(
     connection_store: &ConnectionStore,
     backup: CloudSyncRollbackBackup,
-    provider: &mut CloudSyncKeychainSecretProvider,
+    password: &str,
+    progress: Option<&mut dyn CloudSyncProgressSink>,
 ) -> anyhow::Result<LegacyPreview> {
-    let password = provider
-        .get_secret(secret_keys::SYNC_PASSWORD, SecretReadMode::Prompt)?
-        .unwrap_or_default();
-    if password.is_empty() {
-        anyhow::bail!("missing_sync_password: cloud sync password is required");
-    }
     let bytes = BASE64.decode(backup.bytes_base64.as_bytes())?;
     let metadata = OxideFile::from_bytes(&bytes)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?
         .metadata;
+    let mut noop = |_| {};
+    let progress = progress.unwrap_or(&mut noop);
     let preview = preview_oxide_import_with_progress(
         connection_store,
         &bytes,
-        &password,
+        password,
         ImportConflictStrategy::Replace,
-        |_stage, _current, _total| {},
+        |_stage, current, total| {
+            let fraction = if total == 0 {
+                0.0
+            } else {
+                (current as f64 / total as f64).clamp(0.0, 1.0)
+            };
+            progress.report(CloudSyncProgress {
+                stage: CloudSyncProgressStage::PreviewingImport,
+                current: (1.0 + fraction).min(2.0),
+                total: 2.0,
+                message: None,
+            });
+        },
     )
     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     Ok(LegacyPreview {
-        remote_metadata: oxideterm_cloud_sync::backend::RemoteMetadata {
-            exists: true,
-            revision: backup.source_revision,
-            uploaded_at: Some(backup.created_at),
-            ..oxideterm_cloud_sync::backend::RemoteMetadata::default()
-        },
+        remote_metadata: oxideterm_cloud_sync::backend::RemoteMetadata::default(),
         bytes,
         metadata,
         preview,
@@ -4617,6 +4733,14 @@ fn cloud_sync_format_timestamp(value: &str) -> String {
                 .to_string()
         })
         .unwrap_or_else(|_| value.to_string())
+}
+
+fn cloud_sync_progress_unit(value: f64) -> String {
+    if (value.fract()).abs() < f64::EPSILON {
+        format!("{}", value as usize)
+    } else {
+        format!("{value:.1}")
+    }
 }
 
 fn non_empty_secret(value: &str) -> Option<&str> {

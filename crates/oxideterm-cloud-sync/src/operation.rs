@@ -10,21 +10,22 @@ use oxideterm_connections::{
     oxide_file::{
         AppSettingsSectionPreview, ImportConflictStrategy, ImportPreview, ImportResultEnvelope,
         OxideExportOptions, OxideFile, OxideImportOptions, OxideMetadata,
-        apply_oxide_import_with_options, apply_oxide_import_with_options_with_progress,
-        export_connections_to_oxide_with_progress, preflight_export,
-        preview_oxide_import_with_progress,
+        apply_oxide_import_with_options_with_progress, export_connections_to_oxide_with_progress,
+        preflight_export, preview_oxide_import_with_progress,
     },
 };
 use oxideterm_forwarding::{ForwardingRegistry, SavedForwardsSyncSnapshot};
 use oxideterm_settings::{SettingsStore, export_oxide_settings_snapshot_json};
 
 use crate::{
-    CloudSyncSettings, ConflictStrategy, STRUCTURED_MANIFEST_CONTENT_TYPE,
-    STRUCTURED_MANIFEST_FORMAT, StructuredApplySelection, StructuredManifest,
+    CloudSyncSettings, ConflictStrategy, RawSyncScope, STRUCTURED_MANIFEST_CONTENT_TYPE,
+    STRUCTURED_MANIFEST_FORMAT, StructuredApplySelection, StructuredLocalState, StructuredManifest,
     StructuredManifestSections, StructuredObjectEntry, StructuredSectionRevisions,
     backend::{CloudSyncBackend, RemoteMetadata},
     connections_object_path, forwards_object_path,
-    progress::{CloudSyncProgressSink, CloudSyncProgressStage, report_progress},
+    progress::{
+        CloudSyncProgressSink, CloudSyncProgressStage, report_fractional_progress, report_progress,
+    },
     revision_id,
     secrets::{CloudSyncSecretProvider, SecretReadMode, get_action_secrets},
     service::{
@@ -129,7 +130,6 @@ impl CloudSyncOperationService {
         };
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
-        report_progress(progress, CloudSyncProgressStage::FetchMetadata, 1, 2);
         let secrets = get_action_secrets(
             settings,
             secret_provider,
@@ -140,6 +140,7 @@ impl CloudSyncOperationService {
                 SecretReadMode::Prompt
             },
         )?;
+        report_progress(progress, CloudSyncProgressStage::FetchMetadata, 1, 2);
         let metadata = self
             .backend
             .fetch_remote_metadata(settings, &secrets)
@@ -171,8 +172,8 @@ impl CloudSyncOperationService {
             connection_store,
             forwarding_registry,
             settings_store,
-            None,
-            None,
+            options.last_synced_structured_state.as_ref(),
+            options.raw_sync_scope.as_ref(),
         )?;
         let requires_password =
             local_snapshot.scope.sync_app_settings || local_snapshot.scope.sync_plugin_settings;
@@ -235,6 +236,7 @@ impl CloudSyncOperationService {
         }
         let revision = revision_id(Utc::now(), &options.device_id, options.revision_sequence);
         let uploaded_at = Utc::now().to_rfc3339();
+        report_progress(progress, CloudSyncProgressStage::Exporting, 2, total);
         let plan = self
             .build_structured_upload_plan(
                 connection_store,
@@ -252,6 +254,12 @@ impl CloudSyncOperationService {
             .map_err(|error| upload_error_after_revision(error, options.revision_sequence))?;
 
         let mut completed_uploads = 0usize;
+        report_progress(
+            progress,
+            CloudSyncProgressStage::UploadingBlob,
+            2 + export_units,
+            total,
+        );
         for object in &plan.objects {
             self.backend
                 .write_remote_object(
@@ -340,9 +348,9 @@ impl CloudSyncOperationService {
         };
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
-        report_progress(progress, CloudSyncProgressStage::FetchMetadata, 1, 4);
         let metadata_secrets =
             get_action_secrets(settings, secret_provider, false, SecretReadMode::Prompt)?;
+        report_progress(progress, CloudSyncProgressStage::FetchMetadata, 1, 4);
         let metadata = self
             .backend
             .fetch_remote_metadata(settings, &metadata_secrets)
@@ -375,12 +383,14 @@ impl CloudSyncOperationService {
 
         let manifest = manifest_from_metadata(&metadata)
             .context("failed to decode structured cloud sync manifest")?;
-        let total_units = 4 + count_manifest_objects(&manifest);
+        let encrypted_entry_count =
+            manifest.sections.app_settings.len() + manifest.sections.plugin_settings.len();
+        let total_units = 4.0;
         report_progress(
             progress,
-            CloudSyncProgressStage::Downloading,
+            CloudSyncProgressStage::PreviewingImport,
             2,
-            total_units,
+            total_units as usize,
         );
         let mut preview = StructuredPreview {
             remote_metadata: metadata,
@@ -393,32 +403,18 @@ impl CloudSyncOperationService {
             plugin_settings_counts: std::collections::BTreeMap::new(),
         };
 
-        let mut completed = 2usize;
+        let mut completed_encrypted_entries = 0usize;
         if let Some(entry) = preview.manifest.sections.connections.as_ref() {
             let object = self
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
             preview.connections_snapshot = Some(serde_json::from_slice(&object.bytes)?);
-            completed += 1;
-            report_progress(
-                progress,
-                CloudSyncProgressStage::PreviewingImport,
-                completed,
-                total_units,
-            );
         }
         if let Some(entry) = preview.manifest.sections.forwards.as_ref() {
             let object = self
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
             preview.forwards_snapshot = Some(serde_json::from_slice(&object.bytes)?);
-            completed += 1;
-            report_progress(
-                progress,
-                CloudSyncProgressStage::PreviewingImport,
-                completed,
-                total_units,
-            );
         }
         for (section_id, entry) in &preview.manifest.sections.app_settings {
             let object = self
@@ -430,7 +426,19 @@ impl CloudSyncOperationService {
                     &object.bytes,
                     password,
                     ImportConflictStrategy::Replace,
-                    |_stage, _current, _total| {},
+                    |stage, current, total| {
+                        let fraction = fractional_import_progress(current, total);
+                        report_fractional_progress(
+                            progress,
+                            host_import_progress_stage(stage, true),
+                            structured_preview_progress_current(
+                                completed_encrypted_entries,
+                                encrypted_entry_count,
+                                fraction,
+                            ),
+                            total_units,
+                        );
+                    },
                 )
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 let section_preview = import_preview
@@ -450,11 +458,15 @@ impl CloudSyncOperationService {
             preview
                 .app_settings_entries
                 .insert(section_id.clone(), object.bytes);
-            completed += 1;
-            report_progress(
+            completed_encrypted_entries += 1;
+            report_fractional_progress(
                 progress,
                 CloudSyncProgressStage::PreviewingImport,
-                completed,
+                structured_preview_progress_current(
+                    completed_encrypted_entries,
+                    encrypted_entry_count,
+                    0.0,
+                ),
                 total_units,
             );
         }
@@ -471,7 +483,19 @@ impl CloudSyncOperationService {
                     &object.bytes,
                     password,
                     ImportConflictStrategy::Replace,
-                    |_stage, _current, _total| {},
+                    |stage, current, total| {
+                        let fraction = fractional_import_progress(current, total);
+                        report_fractional_progress(
+                            progress,
+                            host_import_progress_stage(stage, true),
+                            structured_preview_progress_current(
+                                completed_encrypted_entries,
+                                encrypted_entry_count,
+                                fraction,
+                            ),
+                            total_units,
+                        );
+                    },
                 )
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 preview
@@ -481,20 +505,22 @@ impl CloudSyncOperationService {
             preview
                 .plugin_settings_entries
                 .insert(plugin_id.clone(), object.bytes);
-            completed += 1;
-            report_progress(
+            completed_encrypted_entries += 1;
+            report_fractional_progress(
                 progress,
                 CloudSyncProgressStage::PreviewingImport,
-                completed,
+                structured_preview_progress_current(
+                    completed_encrypted_entries,
+                    encrypted_entry_count,
+                    0.0,
+                ),
                 total_units,
             );
         }
-        report_progress(
-            progress,
-            CloudSyncProgressStage::Done,
-            total_units,
-            total_units,
-        );
+        if encrypted_entry_count == 0 {
+            report_progress(progress, CloudSyncProgressStage::PreviewingImport, 3, 4);
+        }
+        report_progress(progress, CloudSyncProgressStage::Done, 4, 4);
         Ok(Some(preview))
     }
 
@@ -511,7 +537,7 @@ impl CloudSyncOperationService {
         };
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
-        report_progress(progress, CloudSyncProgressStage::Downloading, 1, 4);
+        report_progress(progress, CloudSyncProgressStage::FetchMetadata, 1, 4);
         let secrets = get_action_secrets(settings, secret_provider, true, SecretReadMode::Prompt)?;
         let password = secrets
             .sync_password
@@ -522,19 +548,18 @@ impl CloudSyncOperationService {
             .backend
             .download_remote_snapshot(settings, &secrets)
             .await?;
-        report_progress(progress, CloudSyncProgressStage::Preflight, 2, 4);
+        report_progress(progress, CloudSyncProgressStage::Validating, 2, 4);
         let metadata = OxideFile::from_bytes(&remote.bytes)
             .map_err(|error| anyhow::anyhow!(error.to_string()))?
             .metadata;
         let mut preview_progress = |stage: &str, current: usize, total: usize| {
-            let mapped_stage = match stage {
-                "parsing_file" | "collecting_existing" | "building_preview" => {
-                    CloudSyncProgressStage::PreviewingImport
-                }
-                _ => CloudSyncProgressStage::PreviewingImport,
-            };
-            let current = 2 + usize::from(total > 0 && current >= total);
-            report_progress(progress, mapped_stage, current.min(3), 4);
+            let fraction = fractional_import_progress(current, total);
+            report_fractional_progress(
+                progress,
+                host_import_progress_stage(stage, true),
+                (2.0 + fraction).min(3.0),
+                4.0,
+            );
         };
         let preview = preview_oxide_import_with_progress(
             connection_store,
@@ -626,15 +651,24 @@ impl CloudSyncOperationService {
                 let Some(bytes) = preview.app_settings_entries.get(section_id) else {
                     continue;
                 };
-                let envelope = apply_oxide_import_with_options(
+                let envelope = apply_oxide_import_with_options_with_progress(
                     connection_store,
                     bytes,
                     password,
                     OxideImportOptions {
                         selected_names: Some(Vec::new()),
-                        conflict_strategy: ImportConflictStrategy::Merge,
+                        conflict_strategy: ImportConflictStrategy::Replace,
                         import_forwards: false,
                         import_portable_secrets: false,
+                    },
+                    |stage, current, import_total| {
+                        let fraction = fractional_import_progress(current, import_total);
+                        report_fractional_progress(
+                            progress,
+                            host_import_progress_stage(stage, false),
+                            (completed as f64 + fraction).min(total as f64),
+                            total as f64,
+                        );
                     },
                 )
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -654,15 +688,24 @@ impl CloudSyncOperationService {
                 let Some(bytes) = preview.plugin_settings_entries.get(plugin_id) else {
                     continue;
                 };
-                let envelope = apply_oxide_import_with_options(
+                let envelope = apply_oxide_import_with_options_with_progress(
                     connection_store,
                     bytes,
                     password,
                     OxideImportOptions {
                         selected_names: Some(Vec::new()),
-                        conflict_strategy: ImportConflictStrategy::Merge,
+                        conflict_strategy: ImportConflictStrategy::Replace,
                         import_forwards: false,
                         import_portable_secrets: false,
+                    },
+                    |stage, current, import_total| {
+                        let fraction = fractional_import_progress(current, import_total);
+                        report_fractional_progress(
+                            progress,
+                            host_import_progress_stage(stage, false),
+                            (completed as f64 + fraction).min(total as f64),
+                            total as f64,
+                        );
                     },
                 )
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -763,16 +806,16 @@ impl CloudSyncOperationService {
         };
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
-        report_progress(progress, CloudSyncProgressStage::Importing, 1, 2);
+        let total = 1.0;
+        report_fractional_progress(progress, CloudSyncProgressStage::Importing, 0.0, total);
         let password = required_sync_password(sync_password)?;
         let mut import_progress = |stage: &str, current: usize, total: usize| {
-            let mapped = match stage {
-                "parsing_file" | "filtering_selection" | "collecting_existing" => {
-                    CloudSyncProgressStage::PreviewingImport
-                }
-                _ => CloudSyncProgressStage::Importing,
-            };
-            report_progress(progress, mapped, current.min(total.max(1)), total.max(1));
+            report_fractional_progress(
+                progress,
+                host_import_progress_stage(stage, false),
+                fractional_import_progress(current, total),
+                1.0,
+            );
         };
         let envelope = apply_oxide_import_with_options_with_progress(
             connection_store,
@@ -792,7 +835,7 @@ impl CloudSyncOperationService {
             &mut import_progress,
         )
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        report_progress(progress, CloudSyncProgressStage::Done, 2, 2);
+        report_fractional_progress(progress, CloudSyncProgressStage::Done, total, total);
         Ok(Some(ApplyLegacyPreviewOutcome { envelope }))
     }
 
@@ -907,7 +950,14 @@ impl CloudSyncOperationService {
                         app_settings_json: Some(app_settings_json),
                         ..OxideExportOptions::default()
                     },
-                    |_stage, _current, _total| {},
+                    |_stage, current, export_total| {
+                        report_fractional_progress(
+                            progress,
+                            CloudSyncProgressStage::Exporting,
+                            export_progress_current(completed_exports, current, export_total),
+                            total as f64,
+                        );
+                    },
                 )
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 let path = crate::app_settings_object_path(section_id, section_revision);
@@ -966,7 +1016,14 @@ impl CloudSyncOperationService {
                         plugin_settings,
                         ..OxideExportOptions::default()
                     },
-                    |_stage, _current, _total| {},
+                    |_stage, current, export_total| {
+                        report_fractional_progress(
+                            progress,
+                            CloudSyncProgressStage::Exporting,
+                            export_progress_current(completed_exports, current, export_total),
+                            total as f64,
+                        );
+                    },
                 )
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 let path = crate::plugin_settings_object_path(&plugin_id, plugin_revision);
@@ -1008,6 +1065,8 @@ pub struct UploadOptions {
     pub revision_sequence: u64,
     pub previous_remote_revision: Option<String>,
     pub previous_remote_sections: Option<StructuredSectionRevisions>,
+    pub last_synced_structured_state: Option<StructuredLocalState>,
+    pub raw_sync_scope: Option<RawSyncScope>,
 }
 
 #[derive(Clone, Debug)]
@@ -1072,6 +1131,68 @@ fn upload_error_after_revision(
         message: error.to_string(),
         remote_metadata: None,
         revision_sequence_consumed: Some(revision_sequence),
+    }
+}
+
+fn fractional_import_progress(current: usize, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        (current as f64 / total as f64).clamp(0.0, 1.0)
+    }
+}
+
+fn export_progress_current(completed_exports: usize, current: usize, total: usize) -> f64 {
+    let fraction = if total == 0 {
+        0.0
+    } else {
+        (current as f64 / total as f64).clamp(0.0, 0.95)
+    };
+    2.0 + completed_exports as f64 + fraction
+}
+
+fn structured_preview_progress_current(
+    completed_entries: usize,
+    total_entries: usize,
+    active_fraction: f64,
+) -> f64 {
+    if total_entries == 0 {
+        3.0
+    } else {
+        let fraction = ((completed_entries as f64 + active_fraction.clamp(0.0, 1.0))
+            / total_entries as f64)
+            .clamp(0.0, 1.0);
+        (2.0 + fraction).min(3.0)
+    }
+}
+
+fn host_import_progress_stage(stage: &str, preview: bool) -> CloudSyncProgressStage {
+    match stage {
+        "parsing_file"
+        | "deriving_key"
+        | "decrypting_payload"
+        | "deserializing_payload"
+        | "verifying_checksum" => {
+            if preview {
+                CloudSyncProgressStage::PreviewingImport
+            } else {
+                CloudSyncProgressStage::Importing
+            }
+        }
+        "collecting_existing" | "building_preview" | "analyzing_preview" => {
+            CloudSyncProgressStage::PreviewingImport
+        }
+        "filtering_selection"
+        | "preparing_connections"
+        | "applying_connections"
+        | "saving_config" => CloudSyncProgressStage::Importing,
+        _ => {
+            if preview {
+                CloudSyncProgressStage::PreviewingImport
+            } else {
+                CloudSyncProgressStage::Importing
+            }
+        }
     }
 }
 
@@ -1212,18 +1333,6 @@ fn has_structured_conflict(
         }
     }
     false
-}
-
-fn count_manifest_objects(manifest: &StructuredManifest) -> usize {
-    usize::from(manifest.sections.connections.is_some())
-        + usize::from(manifest.sections.forwards.is_some())
-        + manifest.sections.app_settings.len()
-        + manifest
-            .sections
-            .plugin_settings
-            .keys()
-            .filter(|plugin_id| plugin_id.as_str() != crate::CLOUD_SYNC_PLUGIN_ID)
-            .count()
 }
 
 fn manifest_from_metadata(metadata: &RemoteMetadata) -> Result<StructuredManifest> {

@@ -333,7 +333,8 @@ impl Render for WorkspaceApp {
                 this.update_split_drag(event, window, cx);
                 this.update_settings_slider_drag(event, cx);
                 this.update_terminal_cast_seek_drag(event, cx);
-                this.update_ime_selection_drag(event.position, cx);
+                this.update_ime_selection_drag(event.position, window, cx);
+                this.update_tab_drag(event, window, cx);
             }))
             .on_mouse_down(
                 MouseButton::Left,
@@ -343,13 +344,14 @@ impl Render for WorkspaceApp {
             )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                cx.listener(|this, event: &MouseUpEvent, window, cx| {
                     this.finish_sidebar_resize(cx);
                     this.finish_ai_sidebar_resize(cx);
                     this.finish_split_drag(cx);
                     this.finish_settings_slider_drag(cx);
                     this.finish_terminal_cast_seek_drag(cx);
                     this.finish_ime_selection_drag();
+                    this.finish_tab_drag(event, window, cx);
                     if this.launcher.pressed_app_path.take().is_some() {
                         cx.notify();
                     }
@@ -563,7 +565,7 @@ impl Render for WorkspaceApp {
                             .flex_col()
                             .min_w(px(self.tokens.metrics.min_main_width))
                             .overflow_hidden()
-                            .when(!zen_mode, |main| main.child(self.render_tab_bar(cx)))
+                            .when(!zen_mode, |main| main.child(self.render_tab_bar(window, cx)))
                             .when(self.search.visible, |main| {
                                 main.child(self.render_search_bar(cx))
                             })

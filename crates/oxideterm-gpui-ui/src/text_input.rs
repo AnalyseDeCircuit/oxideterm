@@ -6,6 +6,8 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
+const TEXT_INPUT_SELECTION_BG_ALPHA: u32 = 0x40; // Tauri ::selection uses theme-selection at ~25%.
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct TextInputAnchorId(pub u64);
 
@@ -140,17 +142,21 @@ pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
         marked.to_string()
     };
     let visually_empty = empty && marked.is_empty();
-    let selection_range = if view.focused && !empty && marked.is_empty() {
-        view.selected_range
-            .filter(|range| range.start < range.end)
-            .or_else(|| {
-                view.selected_all
-                    .then_some(0..view.value.encode_utf16().count())
-            })
+    let input_range = if view.focused && !empty && marked.is_empty() {
+        view.selected_range.or_else(|| {
+            view.selected_all
+                .then_some(0..view.value.encode_utf16().count())
+        })
     } else {
         None
     };
+    let selection_range = input_range.clone().filter(|range| range.start < range.end);
+    let caret_offset = input_range
+        .as_ref()
+        .filter(|range| range.start == range.end)
+        .map(|range| range.start);
     let show_selection = selection_range.is_some();
+    let show_positioned_caret = caret_offset.is_some() && !show_selection;
 
     div()
         .h(px(tokens.metrics.ui_control_height))
@@ -186,6 +192,8 @@ pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
                     &display,
                     visually_empty,
                     selection_range,
+                    caret_offset,
+                    view.caret_visible,
                 ))
                 .when(view.focused && !marked.is_empty(), |row| {
                     row.child(
@@ -195,9 +203,10 @@ pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
                             .child(marked_display),
                     )
                 })
-                .when(view.focused && !visually_empty && !show_selection, |row| {
-                    row.child(text_caret(tokens, view.caret_visible))
-                }),
+                .when(
+                    view.focused && !visually_empty && !show_selection && !show_positioned_caret,
+                    |row| row.child(text_caret(tokens, view.caret_visible)),
+                ),
         )
 }
 
@@ -214,6 +223,8 @@ fn text_input_value_segments(
     display: &str,
     visually_empty: bool,
     selection_range: Option<Range<usize>>,
+    caret_offset: Option<usize>,
+    caret_visible: bool,
 ) -> Div {
     let theme = tokens.ui;
     let base = div().text_color(if visually_empty {
@@ -223,6 +234,9 @@ fn text_input_value_segments(
     });
 
     let Some(range) = selection_range else {
+        if let Some(offset) = caret_offset {
+            return text_input_value_with_caret(tokens, base, display, offset, caret_visible);
+        }
         return base.child(display.to_string());
     };
 
@@ -245,10 +259,30 @@ fn text_input_value_segments(
             div()
                 .px(px(tokens.metrics.form_selection_padding_x))
                 .rounded(px(tokens.radii.xs))
-                .bg(rgb(theme.accent))
-                .text_color(rgb(theme.accent_text))
+                .bg(rgba((theme.accent << 8) | TEXT_INPUT_SELECTION_BG_ALPHA))
+                .text_color(rgb(theme.text))
                 .child(selected),
         )
+        .when(!after.is_empty(), |row| row.child(after))
+}
+
+fn text_input_value_with_caret(
+    tokens: &ThemeTokens,
+    base: Div,
+    display: &str,
+    offset: usize,
+    caret_visible: bool,
+) -> Div {
+    let len = display.encode_utf16().count();
+    let offset = offset.min(len);
+    let before = utf16_slice(display, 0..offset);
+    let after = utf16_slice(display, offset..len);
+
+    base.flex()
+        .flex_row()
+        .items_center()
+        .when(!before.is_empty(), |row| row.child(before))
+        .child(text_caret(tokens, caret_visible))
         .when(!after.is_empty(), |row| row.child(after))
 }
 

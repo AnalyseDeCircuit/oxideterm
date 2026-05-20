@@ -188,9 +188,11 @@ impl CloudSyncBackend {
                 )
                 .await?;
                 if !response.status().is_success() {
+                    let status = response.status().as_u16();
                     bail!(
-                        "http_blob_{}: failed to download snapshot",
-                        response.status()
+                        "http_blob_{}: Failed to download snapshot ({})",
+                        status,
+                        status
                     );
                 }
                 response_to_object(response, "HTTP JSON blob").await?
@@ -203,9 +205,11 @@ impl CloudSyncBackend {
                 )
                 .await?;
                 if !response.status().is_success() {
+                    let status = response.status().as_u16();
                     bail!(
-                        "webdav_blob_{}: failed to download snapshot",
-                        response.status()
+                        "webdav_blob_{}: Failed to download WebDAV snapshot ({})",
+                        status,
+                        status
                     );
                 }
                 response_to_object(response, "WebDAV blob").await?
@@ -250,9 +254,11 @@ impl CloudSyncBackend {
                     bail!("remote_not_found: no remote S3 snapshot found");
                 }
                 if !response.status().is_success() {
+                    let status = response.status().as_u16();
                     bail!(
-                        "s3_blob_{}: failed to download S3 snapshot",
-                        response.status()
+                        "s3_blob_{}: Failed to download S3 snapshot ({})",
+                        status,
+                        status
                     );
                 }
                 response_to_object(response, "S3 blob").await?
@@ -289,7 +295,7 @@ impl CloudSyncBackend {
             return Ok(RemoteMetadata::missing());
         }
         if !response.status().is_success() {
-            return Err(http_json_error(response, "http", "failed to fetch remote metadata").await);
+            return Err(http_json_error(response, "http", "Failed to fetch remote metadata").await);
         }
         normalize_remote_metadata(response.json::<Value>().await?, None)
     }
@@ -313,9 +319,11 @@ impl CloudSyncBackend {
             return Ok(RemoteMetadata::missing());
         }
         if !response.status().is_success() {
+            let status = response.status().as_u16();
             bail!(
-                "webdav_{}: failed to fetch WebDAV metadata",
-                response.status()
+                "webdav_{}: Failed to fetch WebDAV metadata ({})",
+                status,
+                status
             );
         }
         normalize_remote_metadata(response.json::<Value>().await?, None)
@@ -410,7 +418,7 @@ impl CloudSyncBackend {
                 status,
                 &value,
                 "http",
-                "failed to upload snapshot",
+                "Failed to upload snapshot",
             ));
         }
         Ok(RemoteWriteResult {
@@ -451,9 +459,11 @@ impl CloudSyncBackend {
             bail!("etag_conflict_detected: remote WebDAV snapshot changed before upload completed");
         }
         if !blob_response.status().is_success() {
+            let status = blob_response.status().as_u16();
             bail!(
-                "webdav_blob_{}: failed to upload WebDAV blob",
-                blob_response.status()
+                "webdav_blob_{}: Failed to upload WebDAV blob ({})",
+                status,
+                status
             );
         }
         let mut metadata = payload.metadata_json();
@@ -562,7 +572,7 @@ impl CloudSyncBackend {
         let response =
             execute_cloud_request(self.client.put(url).headers(headers).body(bytes)).await?;
         if !response.status().is_success() {
-            return Err(http_json_error(response, "http_object", "failed to upload object").await);
+            return Err(http_json_error(response, "http_object", "Failed to upload object").await);
         }
         Ok(response_write_result(response).await)
     }
@@ -592,7 +602,7 @@ impl CloudSyncBackend {
         }
         if !response.status().is_success() {
             return Err(
-                http_json_error(response, "http_object", "failed to download object").await,
+                http_json_error(response, "http_object", "Failed to download object").await,
             );
         }
         response_to_object(response, &format!("HTTP JSON object {relative_path}"))
@@ -625,9 +635,11 @@ impl CloudSyncBackend {
         )
         .await?;
         if !response.status().is_success() {
+            let status = response.status().as_u16();
             bail!(
-                "webdav_object_{}: failed to upload WebDAV object",
-                response.status()
+                "webdav_object_{}: Failed to upload WebDAV object ({})",
+                status,
+                status
             );
         }
         Ok(response_write_result(response).await)
@@ -745,7 +757,7 @@ impl CloudSyncBackend {
         )
         .await?;
         if !response.status().is_success() {
-            return Err(http_json_error(response, "http_meta", "failed to write metadata").await);
+            return Err(http_json_error(response, "http_meta", "Failed to write metadata").await);
         }
         Ok(response_write_result(response).await)
     }
@@ -763,10 +775,12 @@ impl CloudSyncBackend {
             return Ok(None);
         }
         if !response.status().is_success() {
+            let status = response.status().as_u16();
             bail!(
-                "{}_{}: failed to read object",
+                "{}_{}: Failed to download WebDAV object ({})",
                 error_prefix,
-                response.status()
+                status,
+                status
             );
         }
         response_to_object(response, source).await.map(Some)
@@ -866,8 +880,8 @@ impl CloudSyncBackend {
                         continue;
                     }
                     bail!(
-                        "namespace_create_failed: failed to prepare WebDAV namespace ({})",
-                        parent_response.status()
+                        "namespace_create_failed: Failed to prepare WebDAV namespace ({})",
+                        parent_response.status().as_u16()
                     );
                 }
             }
@@ -883,13 +897,13 @@ impl CloudSyncBackend {
                 return Ok(());
             }
             bail!(
-                "namespace_create_failed: failed to prepare WebDAV namespace ({})",
-                retry.status()
+                "namespace_create_failed: Failed to prepare WebDAV namespace ({})",
+                retry.status().as_u16()
             );
         }
         bail!(
-            "namespace_create_failed: failed to prepare WebDAV namespace ({})",
-            response.status()
+            "namespace_create_failed: Failed to prepare WebDAV namespace ({})",
+            response.status().as_u16()
         )
     }
 
@@ -945,9 +959,11 @@ impl CloudSyncBackend {
             if response.status().is_success() || response.status() == StatusCode::CONFLICT {
                 continue;
             }
+            let status = response.status().as_u16();
             bail!(
-                "dropbox_folder_{}: failed to prepare Dropbox namespace",
-                response.status()
+                "dropbox_folder_{}: Failed to prepare Dropbox namespace ({})",
+                status,
+                status
             );
         }
         Ok(())
@@ -972,9 +988,11 @@ impl CloudSyncBackend {
             return Ok(None);
         }
         if !response.status().is_success() {
+            let status = response.status().as_u16();
             bail!(
-                "dropbox_download_{}: failed to download Dropbox file",
-                response.status()
+                "dropbox_download_{}: Failed to download Dropbox file ({})",
+                status,
+                status
             );
         }
         let dropbox_metadata = response
@@ -1026,9 +1044,11 @@ impl CloudSyncBackend {
         )
         .await?;
         if !response.status().is_success() {
+            let status = response.status().as_u16();
             bail!(
-                "dropbox_upload_{}: failed to upload Dropbox file",
-                response.status()
+                "dropbox_upload_{}: Failed to upload Dropbox file ({})",
+                status,
+                status
             );
         }
         Ok(response.json::<Value>().await.unwrap_or(Value::Null))
@@ -1050,7 +1070,8 @@ impl CloudSyncBackend {
             return Ok(None);
         }
         if !response.status().is_success() {
-            bail!("git_{}: failed to fetch Git content", response.status());
+            let status = response.status().as_u16();
+            bail!("git_{}: Failed to fetch Git content ({})", status, status);
         }
         Ok(Some(response.json::<GitContentFile>().await?))
     }
@@ -1071,9 +1092,11 @@ impl CloudSyncBackend {
             return Ok(None);
         }
         if !response.status().is_success() {
+            let status = response.status().as_u16();
             bail!(
-                "git_blob_{}: failed to download Git content",
-                response.status()
+                "git_blob_{}: Failed to download Git content ({})",
+                status,
+                status
             );
         }
         response_to_object(response, "Git blob").await.map(Some)
@@ -1107,16 +1130,21 @@ impl CloudSyncBackend {
                 .body(serde_json::to_vec(&body)?),
         )
         .await?;
-        if matches!(response.status().as_u16(), 409 | 422) {
-            bail!("etag_conflict_detected: remote Git snapshot changed during upload");
+        let status = response.status();
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
+        let response_message = value.get("message").and_then(Value::as_str);
+        if matches!(status.as_u16(), 409 | 422) {
+            let message = response_message.unwrap_or("Remote Git snapshot changed during upload");
+            bail!("etag_conflict_detected: {message}");
         }
-        if !response.status().is_success() {
-            bail!(
-                "git_write_{}: failed to update Git content",
-                response.status()
-            );
+        if !status.is_success() {
+            let status = status.as_u16();
+            let message = response_message
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("Failed to update Git content ({status})"));
+            bail!("git_write_{}: {}", status, message);
         }
-        Ok(response.json::<Value>().await.unwrap_or(Value::Null))
+        Ok(value)
     }
 }
 
@@ -1335,8 +1363,9 @@ fn http_json_value_error(
     code_prefix: &str,
     fallback: &str,
 ) -> anyhow::Error {
-    let fallback_code = format!("{code_prefix}_{}", status.as_u16());
-    let fallback_message = format!("{fallback} ({status})");
+    let status_code = status.as_u16();
+    let fallback_code = format!("{code_prefix}_{status_code}");
+    let fallback_message = format!("{fallback} ({status_code})");
     let code = value
         .get("error")
         .and_then(|error| error.get("code"))
@@ -1798,6 +1827,38 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("repository root"));
+    }
+
+    #[test]
+    fn http_json_error_fallback_uses_tauri_numeric_status_text() {
+        let error = http_json_value_error(
+            StatusCode::UNAUTHORIZED,
+            &Value::Null,
+            "http",
+            "Failed to fetch remote metadata",
+        )
+        .to_string();
+
+        assert_eq!(error, "http_401: Failed to fetch remote metadata (401)");
+    }
+
+    #[test]
+    fn http_json_error_prefers_remote_error_payload_like_tauri() {
+        let value = json!({
+            "error": {
+                "code": "etag_conflict_detected",
+                "message": "Remote changed"
+            }
+        });
+        let error = http_json_value_error(
+            StatusCode::PRECONDITION_FAILED,
+            &value,
+            "http",
+            "Failed to upload snapshot",
+        )
+        .to_string();
+
+        assert_eq!(error, "etag_conflict_detected: Remote changed");
     }
 
     #[test]

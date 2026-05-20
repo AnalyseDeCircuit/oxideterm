@@ -750,11 +750,22 @@ impl WorkspaceApp {
                         window.focus(&this.focus_handle);
                         this.file_manager.focused_input = Some(FileManagerInput::DialogValue);
                         this.ime_marked_text = None;
-                        this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
+                        this.begin_ime_selection(
+                            target,
+                            event.position,
+                            event.modifiers.shift,
+                            window,
+                            cx,
+                        );
                         cx.stop_propagation();
                         cx.notify();
                     }),
-                ),
+                )
+                .on_mouse_move(cx.listener(
+                    |this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    },
+                )),
                 move |anchor, _window, cx| {
                     let _ = workspace.update(cx, |this, cx| {
                         this.update_text_input_anchor(anchor, cx);
@@ -807,11 +818,22 @@ impl WorkspaceApp {
                         window.focus(&this.focus_handle);
                         this.file_manager.focused_input = Some(FileManagerInput::DialogValue);
                         this.ime_marked_text = None;
-                        this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
+                        this.begin_ime_selection(
+                            target,
+                            event.position,
+                            event.modifiers.shift,
+                            window,
+                            cx,
+                        );
                         cx.stop_propagation();
                         cx.notify();
                     }),
-                ),
+                )
+                .on_mouse_move(cx.listener(
+                    |this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    },
+                )),
                 move |anchor, _window, cx| {
                     let _ = workspace.update(cx, |this, cx| {
                         this.update_text_input_anchor(anchor, cx);

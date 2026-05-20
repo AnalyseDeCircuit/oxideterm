@@ -1,11 +1,11 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CloudSyncProgress {
     pub stage: CloudSyncProgressStage,
-    pub current: usize,
-    pub total: usize,
+    pub current: f64,
+    pub total: f64,
     pub message: Option<String>,
 }
 
@@ -17,6 +17,7 @@ pub enum CloudSyncProgressStage {
     Exporting,
     UploadingBlob,
     Downloading,
+    Validating,
     PreviewingImport,
     Importing,
     CreatingBackup,
@@ -41,6 +42,20 @@ pub fn report_progress(
     stage: CloudSyncProgressStage,
     current: usize,
     total: usize,
+) {
+    sink.report(CloudSyncProgress {
+        stage,
+        current: current as f64,
+        total: total as f64,
+        message: None,
+    });
+}
+
+pub fn report_fractional_progress(
+    sink: &mut dyn CloudSyncProgressSink,
+    stage: CloudSyncProgressStage,
+    current: f64,
+    total: f64,
 ) {
     sink.report(CloudSyncProgress {
         stage,

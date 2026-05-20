@@ -659,14 +659,19 @@ impl WorkspaceApp {
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(
                 MouseButton::Left,
-            cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                let current = this.current_settings_input_value(input);
-                this.focus_settings_input(input, current, cx);
-                this.ime_marked_text = None;
-                window.focus(&this.focus_handle);
-                this.begin_ime_selection(target, event.position, event.modifiers.shift, cx);
-                cx.stop_propagation();
-            }),
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    let current = this.current_settings_input_value(input);
+                    this.focus_settings_input(input, current, cx);
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle);
+                    this.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                }),
             ),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {

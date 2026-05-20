@@ -1,3 +1,5 @@
+const TAB_DRAG_THRESHOLD_PX: f32 = 10.0;
+
 impl WorkspaceApp {
     pub(super) fn observe_active_tab_for_history(&mut self) {
         let active_tab_id = self.active_tab_id;
@@ -667,6 +669,14 @@ impl WorkspaceApp {
         (window_width - sidebar_width - ai_sidebar_width).max(0.0)
     }
 
+    fn tabbar_left_x(&self) -> f32 {
+        if self.sidebar_collapsed {
+            self.tokens.metrics.activity_bar_width
+        } else {
+            self.sidebar_width
+        }
+    }
+
     fn tabbar_content_width(&self) -> f32 {
         self.tokens.metrics.tabbar_leading_offset
             + self
@@ -682,6 +692,18 @@ impl WorkspaceApp {
 
     fn clamp_tab_scroll(&mut self, window: &Window) {
         self.tab_scroll_x = self.tab_scroll_x.clamp(0.0, self.tabbar_max_scroll(window));
+    }
+
+    fn tabbar_has_overflow(&self, window: &Window) -> bool {
+        self.tabbar_max_scroll(window) > 1.0
+    }
+
+    pub(super) fn tabbar_effective_scroll_x(&self, window: &Window) -> f32 {
+        if self.tabbar_has_overflow(window) {
+            self.tab_scroll_x.clamp(0.0, self.tabbar_max_scroll(window))
+        } else {
+            0.0
+        }
     }
 
     pub(super) fn reveal_active_tab(&mut self, window: &Window) {
@@ -742,12 +764,136 @@ impl WorkspaceApp {
         (title_width + fixed_width).clamp(metrics.tab_min_width, metrics.tab_max_width)
     }
 
+    fn tab_drop_target_index_for_x(
+        &self,
+        client_x: f32,
+        window: &Window,
+        tab_widths: &[f32],
+    ) -> usize {
+        if tab_widths.is_empty() {
+            return 0;
+        }
+        let tabbar_x = client_x - self.tabbar_left_x() + self.tabbar_effective_scroll_x(window)
+            - self.tokens.metrics.tabbar_leading_offset;
+        let mut left = 0.0;
+        for (index, width) in tab_widths.iter().copied().enumerate() {
+            let midpoint = left + width / 2.0;
+            if tabbar_x < midpoint {
+                return index;
+            }
+            left += width;
+        }
+        tab_widths.len() - 1
+    }
+
+    pub(super) fn start_tab_drag_candidate(
+        &mut self,
+        tab_id: TabId,
+        index: usize,
+        event: &MouseDownEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if index >= self.tabs.len() || self.tabs.get(index).is_none_or(|tab| tab.id != tab_id) {
+            return;
+        }
+        let start_x = f32::from(event.position.x);
+        let tab_widths = self
+            .tabs
+            .iter()
+            .map(|tab| self.tab_visual_width(tab))
+            .collect::<Vec<_>>();
+        let drop_target_index = self.tab_drop_target_index_for_x(start_x, window, &tab_widths);
+        self.tab_drag = Some(TabDragState {
+            tab_id,
+            from_index: index,
+            start_x,
+            current_x: start_x,
+            tab_widths,
+            active: false,
+            drop_target_index,
+        });
+        cx.notify();
+    }
+
+    pub(super) fn update_tab_drag(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        let Some(mut drag) = self.tab_drag.clone() else {
+            return;
+        };
+        drag.current_x = f32::from(event.position.x);
+        let delta = (drag.current_x - drag.start_x).abs();
+        // Tauri TabBar uses a 10px pointer threshold before a pointer gesture
+        // becomes a reorder; below that threshold the later mouse-up is a click.
+        if delta > TAB_DRAG_THRESHOLD_PX {
+            drag.active = true;
+            drag.drop_target_index =
+                self.tab_drop_target_index_for_x(drag.current_x, window, &drag.tab_widths);
+        } else {
+            drag.drop_target_index = drag.from_index;
+        }
+        self.tab_drag = Some(drag);
+        cx.notify();
+    }
+
+    pub(super) fn finish_tab_drag(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.button != MouseButton::Left {
+            return;
+        }
+        let Some(drag) = self.tab_drag.take() else {
+            return;
+        };
+        if drag.active {
+            self.move_tab(drag.from_index, drag.drop_target_index, window, cx);
+        } else if self.tabs.get(drag.from_index).is_some_and(|tab| tab.id == drag.tab_id) {
+            self.set_active_tab(drag.tab_id, window, cx);
+        }
+        cx.notify();
+    }
+
+    fn move_tab(
+        &mut self,
+        from_index: usize,
+        to_index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if from_index == to_index || from_index >= self.tabs.len() || to_index >= self.tabs.len() {
+            return;
+        }
+        let moved = self.tabs.remove(from_index);
+        self.tabs.insert(to_index, moved);
+        self.clamp_tab_scroll(window);
+        self.reveal_active_tab(window);
+        cx.notify();
+    }
+
     pub(super) fn handle_tabbar_scroll(
         &mut self,
         event: &ScrollWheelEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.tabbar_has_overflow(window) {
+            if self.tab_scroll_x != 0.0 {
+                self.tab_scroll_x = 0.0;
+                cx.notify();
+            }
+            cx.stop_propagation();
+            return;
+        }
         let delta = event
             .delta
             .pixel_delta(px(self.tokens.metrics.tabbar_height));

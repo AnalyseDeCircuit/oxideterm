@@ -137,7 +137,7 @@ impl Default for AuthMode {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudSyncSettings {
     #[serde(default)]
@@ -159,7 +159,7 @@ pub struct CloudSyncSettings {
     #[serde(default)]
     pub auto_upload_enabled: bool,
     #[serde(default = "default_auto_upload_interval_mins")]
-    pub auto_upload_interval_mins: u32,
+    pub auto_upload_interval_mins: f64,
     #[serde(default)]
     pub default_conflict_strategy: ConflictStrategy,
 }
@@ -686,8 +686,8 @@ fn default_git_branch() -> String {
     "main".to_string()
 }
 
-fn default_auto_upload_interval_mins() -> u32 {
-    60
+fn default_auto_upload_interval_mins() -> f64 {
+    60.0
 }
 
 fn unique_known_app_sections(sections: &[String]) -> Vec<String> {
@@ -788,6 +788,18 @@ mod tests {
             strings(&["general", "localTerminal"])
         );
         assert_eq!(scope.plugin_ids, Some(strings(&["plugin-a", "plugin-b"])));
+    }
+
+    #[test]
+    fn preserves_fractional_auto_upload_interval_like_tauri_settings() {
+        let settings: CloudSyncSettings =
+            serde_json::from_str(r#"{"autoUploadIntervalMins":7.5}"#).unwrap();
+
+        assert_eq!(settings.auto_upload_interval_mins, 7.5);
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["autoUploadIntervalMins"],
+            serde_json::json!(7.5)
+        );
     }
 
     #[test]

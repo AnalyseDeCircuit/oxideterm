@@ -40,9 +40,9 @@ use gpui::{
     AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, CursorStyle,
     FocusHandle, Focusable, IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions,
-    Pixels, Render, RenderImage, Rgba, ScrollHandle, ScrollWheelEvent, SharedString,
-    StatefulInteractiveElement, Styled, StyledImage, Subscription, Timer, Window, anchored,
-    deferred, div, list, prelude::*, px, relative, rgb, rgba, svg,
+    Pixels, Render, RenderImage, Rgba, ScrollStrategy, ScrollWheelEvent, SharedString, Styled,
+    StyledImage, Subscription, Timer, UniformListScrollHandle, Window, anchored, deferred, div,
+    list, prelude::*, px, relative, rgb, rgba, svg, uniform_list,
 };
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
@@ -334,7 +334,7 @@ struct CommandPaletteState {
     raw_query: String,
     mode: PaletteMode,
     selected_index: usize,
-    scroll_handle: ScrollHandle,
+    scroll_handle: UniformListScrollHandle,
     ssh_config_hosts: Vec<oxideterm_connections::SshConfigHost>,
     ssh_config_hosts_loading: bool,
     error: Option<String>,
@@ -352,6 +352,18 @@ enum PaletteMode {
 struct ShortcutsModalState {
     open: bool,
     query: String,
+    scroll_handle: UniformListScrollHandle,
+}
+
+#[derive(Clone, Debug)]
+struct TabDragState {
+    tab_id: TabId,
+    from_index: usize,
+    start_x: f32,
+    current_x: f32,
+    tab_widths: Vec<f32>,
+    active: bool,
+    drop_target_index: usize,
 }
 
 impl Default for AiMcpServerDraft {
@@ -381,6 +393,7 @@ pub(crate) struct WorkspaceApp {
     tab_navigation_index: Option<usize>,
     tab_navigation_replaying: bool,
     tab_navigation_observed_tab: Option<TabId>,
+    tab_drag: Option<TabDragState>,
     panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
     tab_scroll_x: f32,
     next_tab_id: u64,
