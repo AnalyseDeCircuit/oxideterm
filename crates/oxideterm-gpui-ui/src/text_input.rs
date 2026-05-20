@@ -1,8 +1,9 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, App, Bounds, Div, Element, ElementId, GlobalElementId, InspectorElementId,
-    IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div, prelude::*, px, rgb, rgba,
+    AnyElement, App, Bounds, CursorStyle, Div, Element, ElementId, GlobalElementId,
+    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div,
+    prelude::*, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -177,7 +178,7 @@ pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
         } else {
             rgb(theme.text)
         })
-        .cursor_pointer()
+        .cursor(CursorStyle::IBeam)
         .overflow_hidden()
         .child(
             div()
@@ -218,7 +219,7 @@ pub fn text_caret(tokens: &ThemeTokens, visible: bool) -> Div {
         .opacity(if visible { 1.0 } else { 0.0 })
 }
 
-fn text_input_value_segments(
+pub fn text_input_value_segments(
     tokens: &ThemeTokens,
     display: &str,
     visually_empty: bool,
@@ -226,11 +227,31 @@ fn text_input_value_segments(
     caret_offset: Option<usize>,
     caret_visible: bool,
 ) -> Div {
+    text_input_value_segments_with_color(
+        tokens,
+        display,
+        visually_empty,
+        selection_range,
+        caret_offset,
+        caret_visible,
+        None,
+    )
+}
+
+pub fn text_input_value_segments_with_color(
+    tokens: &ThemeTokens,
+    display: &str,
+    visually_empty: bool,
+    selection_range: Option<Range<usize>>,
+    caret_offset: Option<usize>,
+    caret_visible: bool,
+    text_color: Option<u32>,
+) -> Div {
     let theme = tokens.ui;
     let base = div().text_color(if visually_empty {
         rgb(theme.text_muted)
     } else {
-        rgb(theme.text)
+        rgb(text_color.unwrap_or(theme.text))
     });
 
     let Some(range) = selection_range else {

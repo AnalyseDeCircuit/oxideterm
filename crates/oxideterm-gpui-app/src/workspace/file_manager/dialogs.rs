@@ -750,13 +750,7 @@ impl WorkspaceApp {
                         window.focus(&this.focus_handle);
                         this.file_manager.focused_input = Some(FileManagerInput::DialogValue);
                         this.ime_marked_text = None;
-                        this.begin_ime_selection(
-                            target,
-                            event.position,
-                            event.modifiers.shift,
-                            window,
-                            cx,
-                        );
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -818,13 +812,7 @@ impl WorkspaceApp {
                         window.focus(&this.focus_handle);
                         this.file_manager.focused_input = Some(FileManagerInput::DialogValue);
                         this.ime_marked_text = None;
-                        this.begin_ime_selection(
-                            target,
-                            event.position,
-                            event.modifiers.shift,
-                            window,
-                            cx,
-                        );
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -1057,15 +1045,18 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.propKind"),
                 file_type,
                 false,
+                cx,
             ))
             .child(self.render_file_manager_property_row_value(
                 self.i18n.t("fileManager.size"),
-                self.render_file_manager_property_size(details.size),
+                self.render_file_manager_property_size(details.size, cx),
+                cx,
             ))
             .child(self.render_file_manager_property_row_text(
                 self.i18n.t("fileManager.propLocation"),
                 details.location.clone(),
                 false,
+                cx,
             ))
             .child(self.render_file_manager_property_separator(has_background));
 
@@ -1074,18 +1065,21 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.created"),
                 format_full_timestamp(Some(created)),
                 false,
+                cx,
             ));
         }
         body = body.child(self.render_file_manager_property_row_text(
             self.i18n.t("fileManager.modified"),
             format_full_timestamp(details.modified),
             false,
+            cx,
         ));
         if let Some(accessed) = details.accessed {
             body = body.child(self.render_file_manager_property_row_text(
                 self.i18n.t("fileManager.propAccessed"),
                 format_full_timestamp(Some(accessed)),
                 false,
+                cx,
             ));
         }
 
@@ -1095,6 +1089,7 @@ impl WorkspaceApp {
                 self.render_file_manager_property_row_value(
                     self.i18n.t("fileManager.permissions"),
                     self.render_file_manager_property_permissions(mode),
+                    cx,
                 )
             } else {
                 self.render_file_manager_property_row_text(
@@ -1105,6 +1100,7 @@ impl WorkspaceApp {
                         self.i18n.t("fileManager.readwrite")
                     },
                     false,
+                    cx,
                 )
             });
 
@@ -1113,6 +1109,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.symlink"),
                 self.i18n.t("fileManager.propYes"),
                 false,
+                cx,
             ));
         }
         if !is_dir && let Some(mime_type) = details.mime_type.clone() {
@@ -1120,6 +1117,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.mimeType"),
                 mime_type,
                 true,
+                cx,
             ));
         }
 
@@ -1134,24 +1132,32 @@ impl WorkspaceApp {
                             .replace("{{files}}", &files.to_string())
                             .replace("{{dirs}}", &dirs.to_string()),
                         false,
+                        cx,
                     ),
                 );
             }
             if let Some(total_size) = details.total_size {
                 body = body.child(self.render_file_manager_property_row_value(
                     self.i18n.t("fileManager.propTotalSize"),
-                    self.render_file_manager_property_size(total_size),
+                    self.render_file_manager_property_size(total_size, cx),
+                    cx,
                 ));
             }
         } else {
             body = body.child(self.render_file_manager_property_separator(has_background));
             if let Some(checksum) = self.file_manager.properties_checksum.clone() {
                 body = body
-                    .child(self.render_file_manager_property_row_text("MD5", checksum.md5, true))
+                    .child(self.render_file_manager_property_row_text(
+                        "MD5",
+                        checksum.md5,
+                        true,
+                        cx,
+                    ))
                     .child(self.render_file_manager_property_row_text(
                         "SHA-256",
                         checksum.sha256,
                         true,
+                        cx,
                     ));
             } else {
                 body = body.child(self.render_file_manager_checksum_row(cx));
@@ -1166,24 +1172,35 @@ impl WorkspaceApp {
         label: impl Into<String>,
         value: impl Into<String>,
         mono: bool,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
+        let label = label.into();
+        let value = value.into();
         let mut value_el = div()
             .flex_1()
             .min_w(px(0.0))
             .text_color(rgb(self.tokens.ui.text))
-            .child(value.into());
+            .child(self.render_selectable_text_scoped(
+                "file-manager-property-value",
+                (&label, mono),
+                value,
+                self.tokens.ui.text,
+                cx,
+            ));
         if mono {
             value_el =
                 value_el.font_family(settings_mono_font_family(self.settings_store.settings()));
         }
-        self.render_file_manager_property_row_value(label, value_el.into_any_element())
+        self.render_file_manager_property_row_value(label, value_el.into_any_element(), cx)
     }
 
     fn render_file_manager_property_row_value(
         &self,
         label: impl Into<String>,
         value: AnyElement,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
+        let label = label.into();
         div()
             .flex()
             .items_start()
@@ -1197,7 +1214,13 @@ impl WorkspaceApp {
                     .flex_none()
                     .text_align(gpui::TextAlign::Right)
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(label.into()),
+                    .child(self.render_selectable_text_scoped(
+                        "file-manager-property-label",
+                        label.clone(),
+                        label,
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .child(value)
             .into_any_element()
@@ -1211,24 +1234,35 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_file_manager_property_size(&self, size: u64) -> AnyElement {
+    fn render_file_manager_property_size(&self, size: u64, cx: &mut Context<Self>) -> AnyElement {
         let mut value = div()
             .flex()
             .items_baseline()
             .gap(px(4.0))
             .flex_wrap()
             .text_color(rgb(self.tokens.ui.text))
-            .child(format_file_size(size));
+            .child(self.render_selectable_text_scoped(
+                "file-manager-property-size",
+                size,
+                format_file_size(size),
+                self.tokens.ui.text,
+                cx,
+            ));
         if size >= 1024 {
-            value = value.child(
-                div()
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(format!(
-                        "({} {})",
-                        format_number_with_separators(size),
-                        self.i18n.t("fileManager.propBytes")
-                    )),
+            let bytes = format!(
+                "({} {})",
+                format_number_with_separators(size),
+                self.i18n.t("fileManager.propBytes")
             );
+            value = value.child(div().text_color(rgb(self.tokens.ui.text_muted)).child(
+                self.render_selectable_text_scoped(
+                    "file-manager-property-size-bytes",
+                    size,
+                    bytes,
+                    self.tokens.ui.text_muted,
+                    cx,
+                ),
+            ));
         }
         value.into_any_element()
     }
@@ -1294,6 +1328,7 @@ impl WorkspaceApp {
                     }),
                 )
                 .into_any_element(),
+            cx,
         )
     }
 }

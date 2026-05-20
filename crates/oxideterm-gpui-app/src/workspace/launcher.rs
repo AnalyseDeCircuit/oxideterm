@@ -310,13 +310,7 @@ impl WorkspaceApp {
                                 this.launcher.focused_input = Some(LauncherInput::Search);
                                 this.new_connection_caret_visible = true;
                                 window.focus(&this.focus_handle);
-                                this.begin_ime_selection(
-                                    target,
-                                    event.position,
-                                    event.modifiers.shift,
-                                    window,
-                                    cx,
-                                );
+                                this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                                 cx.notify();
                             }),
                         )
@@ -765,13 +759,7 @@ impl WorkspaceApp {
                                 this.launcher.focused_input = Some(LauncherInput::Search);
                                 this.new_connection_caret_visible = true;
                                 window.focus(&this.focus_handle);
-                                this.begin_ime_selection(
-                                    target,
-                                    event.position,
-                                    event.modifiers.shift,
-                                    window,
-                                    cx,
-                                );
+                                this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                                 cx.notify();
                             }),
                         )

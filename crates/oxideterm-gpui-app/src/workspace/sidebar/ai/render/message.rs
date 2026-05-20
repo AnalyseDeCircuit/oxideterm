@@ -63,7 +63,15 @@ impl WorkspaceApp {
                                 .text_size(px(12.0))
                                 .line_height(px(19.0))
                                 .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xb3))
-                                .child(message.content.clone()),
+                                .child(self.render_selectable_text(
+                                    crate::workspace::selectable_text::selectable_text_id(
+                                        "ai-compaction-anchor",
+                                        &message.id,
+                                    ),
+                                    message.content.clone(),
+                                    self.tokens.ui.text_muted,
+                                    cx,
+                                )),
                         ),
                 )
                 .into_any_element();
@@ -220,7 +228,7 @@ impl WorkspaceApp {
         } else if has_structured_parts {
             body = self.render_ai_turn_parts(body, message, viewport, cx);
         } else if !message.content.is_empty() {
-            body = body.child(self.render_ai_message_content(message, viewport));
+            body = body.child(self.render_ai_message_content(message, viewport, cx));
             if !message.tool_calls.is_empty() {
                 body = body.child(self.render_ai_tool_calls(message, cx));
             }
@@ -447,19 +455,34 @@ impl WorkspaceApp {
         &self,
         message: &AiChatMessage,
         viewport: Option<AiMessageViewport>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         if message.role == AiChatRole::User {
+            let group_id = crate::workspace::selectable_text::selectable_text_id(
+                "ai-user-message",
+                &message.id,
+            );
             return div()
                 .w_full()
                 .min_w_0()
                 .text_size(px(13.0))
                 .line_height(px(20.0))
                 .text_color(rgb(self.tokens.ui.text))
-                .children(message.content.split('\n').map(|line| {
+                .children(message.content.split('\n').enumerate().map(|(line_index, line)| {
                     div()
                         .w_full()
                         .min_w_0()
-                        .child(line.to_string())
+                        .child(self.render_selectable_text_in_group(
+                            group_id,
+                            crate::workspace::selectable_text::selectable_text_id(
+                                "ai-user-message-fragment",
+                                (group_id, line_index),
+                            ),
+                            line_index,
+                            line.to_string(),
+                            self.tokens.ui.text,
+                            cx,
+                        ))
                         .into_any_element()
                 }))
                 .into_any_element();
@@ -470,10 +493,33 @@ impl WorkspaceApp {
         options.block_gap = 8.0;
         let content = ai_visible_suggestion_content(&message.content);
         let cached = self.cached_ai_markdown_document(&content, &options, !message.is_streaming);
+        let group_id = crate::workspace::selectable_text::selectable_text_id(
+            "ai-markdown-message",
+            &message.id,
+        );
+        let mut text_order = 0usize;
+        let mut render_text = |key: String,
+                               text: gpui::SharedString,
+                               runs: Vec<gpui::TextRun>|
+         -> AnyElement {
+            let order = text_order;
+            text_order = text_order.saturating_add(1);
+            self.render_selectable_styled_text_in_group(
+                group_id,
+                crate::workspace::selectable_text::selectable_text_id(
+                    "ai-markdown-fragment",
+                    (group_id, order, &key),
+                ),
+                order,
+                text,
+                runs,
+                cx,
+            )
+        };
         let rendered = viewport
             .filter(|_| !message.is_streaming)
             .map(|viewport| {
-                markdown_render::render_document_windowed(
+                markdown_render::render_document_windowed_selectable(
                     &cached.document,
                     &cached.layout,
                     &self.tokens,
@@ -481,10 +527,16 @@ impl WorkspaceApp {
                     viewport.top,
                     viewport.height,
                     AI_MARKDOWN_WINDOW_OVERDRAW_PX,
+                    &mut render_text,
                 )
             })
             .unwrap_or_else(|| {
-                markdown_render::render_document(&cached.document, &self.tokens, &options)
+                markdown_render::render_document_selectable(
+                    &cached.document,
+                    &self.tokens,
+                    &options,
+                    &mut render_text,
+                )
             });
         div()
             .w_full()
@@ -611,7 +663,7 @@ impl WorkspaceApp {
                         segment.id = format!("{}-text-{segment_index}", message.id);
                         segment.content = text;
                         segment.tool_calls.clear();
-                        body = body.child(self.render_ai_message_content(&segment, viewport));
+                        body = body.child(self.render_ai_message_content(&segment, viewport, cx));
                         segment_index = segment_index.saturating_add(1);
                     }
                 }
@@ -648,7 +700,15 @@ impl WorkspaceApp {
                                 .px(px(self.tokens.spacing.three))
                                 .py(px(self.tokens.spacing.two))
                                 .text_color(rgb(self.tokens.ui.error))
-                                .child(text.to_string()),
+                                .child(self.render_selectable_text(
+                                    crate::workspace::selectable_text::selectable_text_id(
+                                        "ai-turn-warning",
+                                        (&message.id, segment_index),
+                                    ),
+                                    text.to_string(),
+                                    self.tokens.ui.error,
+                                    cx,
+                                )),
                         );
                         segment_index = segment_index.saturating_add(1);
                     }
@@ -1212,7 +1272,7 @@ impl WorkspaceApp {
                 this.ai_model_selector_search_focused = false;
                 this.ime_marked_text = None;
                 window.focus(&this.focus_handle);
-                this.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
+                this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),

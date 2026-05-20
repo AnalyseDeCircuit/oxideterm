@@ -146,6 +146,138 @@ pub fn render_document_windowed(
     }
 }
 
+pub fn render_document_selectable(
+    document: &MarkdownDocument,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    let mut content = div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(opts.block_gap))
+        .child(render_selectable_blocks(
+            &document.blocks,
+            tokens,
+            opts,
+            "b",
+            render_text,
+        ));
+
+    if opts.enable_footnotes && !document.footnotes.is_empty() {
+        content = content.child(render_footnotes(&document.footnotes, tokens, opts));
+    }
+
+    if opts.enable_async_images {
+        image_cache(retain_all(opts.image_cache_id))
+            .child(content)
+            .into_any_element()
+    } else {
+        content.into_any_element()
+    }
+}
+
+pub fn render_document_windowed_selectable(
+    document: &MarkdownDocument,
+    layout: &MarkdownBlockLayout,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    viewport_top: f32,
+    viewport_height: f32,
+    overdraw: f32,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    let items = layout.items();
+    if items.len() < WINDOWED_MARKDOWN_MIN_ITEMS || viewport_height <= 0.0 {
+        return render_document_selectable(document, tokens, opts, render_text);
+    }
+
+    let item_sizes = layout.item_sizes();
+    let total_height = estimated_markdown_height(&item_sizes, opts.block_gap);
+    if total_height <= viewport_height + overdraw * 2.0 {
+        return render_document_selectable(document, tokens, opts, render_text);
+    }
+
+    let window_top = (viewport_top - overdraw).max(0.0);
+    let window_bottom = (viewport_top + viewport_height + overdraw).min(total_height);
+    let mut cursor_y = 0.0;
+    let mut top_spacer = 0.0;
+    let mut bottom_spacer = 0.0;
+    let mut rendered = Vec::new();
+
+    for (index, item) in items.iter().enumerate() {
+        let item_height = item_sizes
+            .get(index)
+            .map(|size| f32::from(size.height))
+            .unwrap_or_default();
+        let item_top = cursor_y;
+        let item_bottom = item_top + item_height;
+        if item_bottom >= window_top && item_top <= window_bottom {
+            if rendered.is_empty() {
+                top_spacer = item_top;
+            }
+            match item {
+                MarkdownLayoutItem::Block(block) => {
+                    rendered.push(render_selectable_block(
+                        block,
+                        tokens,
+                        opts,
+                        &format!("w:{index}"),
+                        render_text,
+                    ));
+                }
+                MarkdownLayoutItem::Footnotes(footnotes) => {
+                    rendered.push(render_footnotes(footnotes, tokens, opts));
+                }
+            }
+            bottom_spacer = (total_height - item_bottom).max(0.0);
+        }
+        cursor_y = item_bottom;
+        if index + 1 < items.len() {
+            cursor_y += opts.block_gap;
+        }
+    }
+
+    if rendered.is_empty() {
+        let content = div().w_full().min_w_0().h(px(total_height));
+        return if opts.enable_async_images {
+            image_cache(retain_all(opts.image_cache_id))
+                .child(content)
+                .into_any_element()
+        } else {
+            content.into_any_element()
+        };
+    }
+
+    let mut content = div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(opts.block_gap));
+    if top_spacer > 0.0 {
+        content = content.child(div().w_full().h(px((top_spacer - opts.block_gap).max(0.0))));
+    }
+    content = content.children(rendered);
+    if bottom_spacer > 0.0 {
+        content = content.child(
+            div()
+                .w_full()
+                .h(px((bottom_spacer - opts.block_gap).max(0.0))),
+        );
+    }
+
+    if opts.enable_async_images {
+        image_cache(retain_all(opts.image_cache_id))
+            .child(content)
+            .into_any_element()
+    } else {
+        content.into_any_element()
+    }
+}
+
 /// Render a complete markdown document through a block-level virtual list.
 pub fn render_document_virtual<V>(
     view: Entity<V>,
@@ -208,6 +340,25 @@ pub fn render_blocks(blocks: &[Block], tokens: &ThemeTokens, opts: &MarkdownOpti
         .into_any_element()
 }
 
+fn render_selectable_blocks(
+    blocks: &[Block],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(opts.block_gap))
+        .children(blocks.iter().enumerate().map(|(index, block)| {
+            render_selectable_block(block, tokens, opts, &format!("{path}:{index}"), render_text)
+        }))
+        .into_any_element()
+}
+
 fn render_block(block: &Block, tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
     match block {
         Block::Heading { level, inlines } => render_heading(*level, inlines, tokens, opts),
@@ -224,6 +375,39 @@ fn render_block(block: &Block, tokens: &ThemeTokens, opts: &MarkdownOptions) -> 
             alignments: _,
             rows,
         } => render_table(headers, rows, tokens, opts),
+    }
+}
+
+fn render_selectable_block(
+    block: &Block,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    match block {
+        Block::Heading { level, inlines } => {
+            render_selectable_heading(*level, inlines, tokens, opts, path, render_text)
+        }
+        Block::Paragraph { inlines } => {
+            render_selectable_paragraph(inlines, tokens, opts, path, render_text)
+        }
+        Block::CodeBlock { language, code } => {
+            render_selectable_code_block(language.as_deref(), code, tokens, opts, path, render_text)
+        }
+        Block::UnorderedList { items } => {
+            render_selectable_unordered_list(items, tokens, opts, path, render_text)
+        }
+        Block::OrderedList { start, items } => {
+            render_selectable_ordered_list(*start, items, tokens, opts, path, render_text)
+        }
+        Block::HorizontalRule => render_hr(tokens),
+        Block::Blockquote { blocks } => {
+            render_selectable_blockquote(blocks, tokens, opts, path, render_text)
+        }
+        Block::Table { headers, rows, .. } => {
+            render_selectable_table(headers, rows, tokens, opts, path, render_text)
+        }
     }
 }
 
@@ -253,6 +437,38 @@ fn render_heading(
         .into_any_element()
 }
 
+fn render_selectable_heading(
+    level: u8,
+    inlines: &[Inline],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    let font_size = style::heading_font_size(level, opts);
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .whitespace_normal()
+                .text_size(font_size)
+                .text_color(style::heading_color(tokens))
+                .child(render_selectable_inlines(
+                    path,
+                    inlines,
+                    tokens,
+                    opts,
+                    render_text,
+                )),
+        )
+        .into_any_element()
+}
+
 // ─── paragraphs ─────────────────────────────────────────────────────────
 
 fn render_paragraph(
@@ -267,6 +483,29 @@ fn render_paragraph(
         .text_size(style::body_font_size(opts))
         .text_color(style::text_color(tokens))
         .child(render_styled_inlines(inlines, tokens, opts))
+        .into_any_element()
+}
+
+fn render_selectable_paragraph(
+    inlines: &[Inline],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .whitespace_normal()
+        .text_size(style::body_font_size(opts))
+        .text_color(style::text_color(tokens))
+        .child(render_selectable_inlines(
+            path,
+            inlines,
+            tokens,
+            opts,
+            render_text,
+        ))
         .into_any_element()
 }
 
@@ -317,6 +556,57 @@ fn render_code_block(
     container.child(code_element).into_any_element()
 }
 
+fn render_selectable_code_block(
+    language: Option<&str>,
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    let mut container = div()
+        .w_full()
+        .min_w_0()
+        .bg(style::code_bg_color(tokens))
+        .rounded(px(tokens.radii.sm))
+        .p(px(opts.code_block_padding))
+        .text_size(style::code_font_size(opts))
+        .text_color(style::text_color(tokens));
+
+    if let Some(lang) = language {
+        container = container.child(
+            div()
+                .flex()
+                .flex_row()
+                .justify_end()
+                .text_size(style::code_label_font_size(opts))
+                .text_color(style::muted_color(tokens))
+                .child(SharedString::from(lang.to_string())),
+        );
+    }
+
+    let code_element: AnyElement = if let Some(lang) = language {
+        if let Some(runs) = highlight::highlight_code(lang, code, opts) {
+            let (text, text_runs) = highlight::highlighted_runs_to_text_runs(&runs);
+            render_text(format!("{path}:code"), text, text_runs)
+        } else {
+            render_text(
+                format!("{path}:code"),
+                SharedString::from(code.to_string()),
+                vec![plain_code_run(code, tokens, opts)],
+            )
+        }
+    } else {
+        render_text(
+            format!("{path}:code"),
+            SharedString::from(code.to_string()),
+            vec![plain_code_run(code, tokens, opts)],
+        )
+    };
+
+    container.child(code_element).into_any_element()
+}
+
 // ─── blockquote ─────────────────────────────────────────────────────────
 
 fn render_blockquote(blocks: &[Block], tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
@@ -338,6 +628,40 @@ fn render_blockquote(blocks: &[Block], tokens: &ThemeTokens, opts: &MarkdownOpti
                 .bg(style::code_bg_color(tokens))
                 .rounded(px(tokens.radii.sm))
                 .child(render_blocks(blocks, tokens, opts)),
+        )
+        .into_any_element()
+}
+
+fn render_selectable_blockquote(
+    blocks: &[Block],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    div()
+        .flex()
+        .flex_row()
+        .child(
+            div()
+                .w(px(opts.blockquote_border_width))
+                .bg(style::blockquote_border_color(tokens))
+                .rounded(px(tokens.radii.sm))
+                .flex_shrink_0(),
+        )
+        .child(
+            div()
+                .flex_1()
+                .pl(px(opts.list_indent))
+                .bg(style::code_bg_color(tokens))
+                .rounded(px(tokens.radii.sm))
+                .child(render_selectable_blocks(
+                    blocks,
+                    tokens,
+                    opts,
+                    &format!("{path}:quote"),
+                    render_text,
+                )),
         )
         .into_any_element()
 }
@@ -393,6 +717,69 @@ fn render_table(
         .into_any_element()
 }
 
+fn render_selectable_table(
+    headers: &[Vec<Inline>],
+    rows: &[Vec<Vec<Inline>>],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    let col_count = headers.len().max(1);
+
+    let header_row = div()
+        .flex()
+        .flex_row()
+        .bg(style::table_header_bg(tokens))
+        .border_b_1()
+        .border_color(style::table_border_color(tokens))
+        .children(headers.iter().enumerate().map(|(ci, cell)| {
+            div()
+                .flex_1()
+                .p(px(tokens.spacing.two))
+                .font_weight(FontWeight::BOLD)
+                .text_color(style::heading_color(tokens))
+                .child(render_selectable_inlines(
+                    &format!("{path}:th:{ci}"),
+                    cell,
+                    tokens,
+                    opts,
+                    render_text,
+                ))
+        }));
+
+    let body_rows = rows.iter().enumerate().map(|(ri, row)| {
+        div()
+            .flex()
+            .flex_row()
+            .border_b_1()
+            .border_color(style::table_border_color(tokens))
+            .children((0..col_count).map(|ci| {
+                let cell: &[Inline] = row.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
+                div()
+                    .flex_1()
+                    .p(px(tokens.spacing.two))
+                    .text_color(style::text_color(tokens))
+                    .child(render_selectable_inlines(
+                        &format!("{path}:td:{ri}:{ci}"),
+                        cell,
+                        tokens,
+                        opts,
+                        render_text,
+                    ))
+            }))
+    });
+
+    div()
+        .w_full()
+        .border_1()
+        .border_color(style::table_border_color(tokens))
+        .rounded(px(tokens.radii.sm))
+        .child(header_row)
+        .children(body_rows)
+        .into_any_element()
+}
+
 // ─── lists ──────────────────────────────────────────────────────────────
 
 fn render_unordered_list(
@@ -431,6 +818,62 @@ fn render_ordered_list(
         .children(items.iter().enumerate().map(|(i, item)| {
             let marker = format!("{}.", start + i as u64);
             render_list_item(&marker, item, tokens, opts)
+        }))
+        .into_any_element()
+}
+
+fn render_selectable_unordered_list(
+    items: &[ListItem],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(tokens.spacing.one))
+        .pl(px(opts.list_indent))
+        .children(items.iter().enumerate().map(|(index, item)| {
+            render_selectable_list_item(
+                "•",
+                item,
+                tokens,
+                opts,
+                &format!("{path}:li:{index}"),
+                render_text,
+            )
+        }))
+        .into_any_element()
+}
+
+fn render_selectable_ordered_list(
+    start: u64,
+    items: &[ListItem],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(tokens.spacing.one))
+        .pl(px(opts.list_indent))
+        .children(items.iter().enumerate().map(|(index, item)| {
+            let marker = format!("{}.", start + index as u64);
+            render_selectable_list_item(
+                &marker,
+                item,
+                tokens,
+                opts,
+                &format!("{path}:li:{index}"),
+                render_text,
+            )
         }))
         .into_any_element()
 }
@@ -487,6 +930,73 @@ fn render_list_item(
                     .map(|block| render_block(block, tokens, opts)),
             ),
         );
+    }
+
+    col.into_any_element()
+}
+
+fn render_selectable_list_item(
+    marker: &str,
+    item: &ListItem,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    let effective_marker = if opts.enable_task_lists {
+        match item.checked {
+            Some(true) => "☑",
+            Some(false) => "☐",
+            None => marker,
+        }
+    } else {
+        marker
+    };
+
+    let mut col = div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .text_size(style::body_font_size(opts))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .gap(px(tokens.spacing.two))
+                .child(
+                    div()
+                        .text_color(style::muted_color(tokens))
+                        .child(SharedString::from(effective_marker.to_string())),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .text_color(style::text_color(tokens))
+                        .child(render_selectable_inlines(
+                            path,
+                            &item.inlines,
+                            tokens,
+                            opts,
+                            render_text,
+                        )),
+                ),
+        );
+
+    if !item.children.is_empty() {
+        col = col.child(div().flex().flex_col().mt(px(tokens.spacing.one)).children(
+            item.children.iter().enumerate().map(|(index, block)| {
+                render_selectable_block(
+                    block,
+                    tokens,
+                    opts,
+                    &format!("{path}:child:{index}"),
+                    render_text,
+                )
+            }),
+        ));
     }
 
     col.into_any_element()
@@ -592,6 +1102,42 @@ fn render_styled_inlines(
         .into_any_element()
 }
 
+fn render_selectable_inlines(
+    key: &str,
+    inlines: &[Inline],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    let mut flat: Vec<FlatRun> = Vec::new();
+    collect_runs(inlines, false, false, false, false, false, &mut flat);
+
+    if flat.is_empty() {
+        return div().into_any_element();
+    }
+
+    let has_images_or_math = flat
+        .iter()
+        .any(|run| run.image_url.is_some() || run.math_latex.is_some());
+    if has_images_or_math {
+        return render_selectable_mixed_inlines(key, &flat, tokens, opts, render_text);
+    }
+
+    let mut text = String::new();
+    let mut runs: Vec<TextRun> = Vec::new();
+    for run in &flat {
+        let start = text.len();
+        text.push_str(&run.text);
+        let len = text.len() - start;
+        if len == 0 {
+            continue;
+        }
+        runs.push(text_run_for_flat(run, len, tokens, opts));
+    }
+
+    render_text(key.to_string(), SharedString::from(text), runs)
+}
+
 /// Render a sequence of flat runs that contains at least one image or formula.
 /// Text segments are grouped into `StyledText` elements; images and RaTeX
 /// formulas are rendered as GPUI image nodes.
@@ -616,6 +1162,61 @@ fn render_mixed_inlines(
                         .with_runs(std::mem::take(run_buf))
                         .into_any_element(),
                 );
+            }
+        };
+
+    for run in flat {
+        if let Some(ref url) = run.image_url {
+            flush_text(&mut text_buf, &mut run_buf, &mut children);
+            children.push(render_image(url, opts));
+        } else if let Some(ref latex) = run.math_latex {
+            flush_text(&mut text_buf, &mut run_buf, &mut children);
+            children.push(render_math(latex, false, tokens, opts));
+        } else {
+            let start = text_buf.len();
+            text_buf.push_str(&run.text);
+            let len = text_buf.len() - start;
+            if len > 0 {
+                run_buf.push(text_run_for_flat(run, len, tokens, opts));
+            }
+        }
+    }
+
+    flush_text(&mut text_buf, &mut run_buf, &mut children);
+
+    div()
+        .flex()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
+        .gap(px(opts.block_gap * 0.35))
+        .children(children)
+        .into_any_element()
+}
+
+fn render_selectable_mixed_inlines(
+    key: &str,
+    flat: &[FlatRun],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    if flat.iter().any(|run| run.math_display) {
+        return render_mixed_inlines(flat, tokens, opts);
+    }
+
+    let mut children: Vec<AnyElement> = Vec::new();
+    let mut text_buf = String::new();
+    let mut run_buf: Vec<TextRun> = Vec::new();
+    let mut text_index = 0usize;
+
+    let mut flush_text =
+        |text_buf: &mut String, run_buf: &mut Vec<TextRun>, children: &mut Vec<AnyElement>| {
+            if !text_buf.is_empty() {
+                let text = SharedString::from(std::mem::take(text_buf));
+                let runs = std::mem::take(run_buf);
+                children.push(render_text(format!("{key}:text:{text_index}"), text, runs));
+                text_index = text_index.saturating_add(1);
             }
         };
 
@@ -832,6 +1433,17 @@ fn text_run_for_flat(
         background_color,
         underline,
         strikethrough,
+    }
+}
+
+fn plain_code_run(code: &str, tokens: &ThemeTokens, opts: &MarkdownOptions) -> TextRun {
+    TextRun {
+        len: code.len(),
+        font: style::code_font(opts),
+        color: style::text_color(tokens),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
     }
 }
 

@@ -671,7 +671,13 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text_heading))
-                            .child(self.i18n.t("sessionManager.auto_route.display_name")),
+                            .child(self.render_selectable_text_scoped(
+                                "auto-route-details-label",
+                                "display_name",
+                                self.i18n.t("sessionManager.auto_route.display_name"),
+                                theme.text_heading,
+                                cx,
+                            )),
                     )
                     .child(self.render_session_text_input(
                         SessionManagerInput::AutoRouteDisplayName,
@@ -691,7 +697,13 @@ impl WorkspaceApp {
                         div()
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text_heading))
-                            .child(self.i18n.t("sessionManager.auto_route.connection_info")),
+                            .child(self.render_selectable_text_scoped(
+                                "auto-route-details-label",
+                                "connection_info",
+                                self.i18n.t("sessionManager.auto_route.connection_info"),
+                                theme.text_heading,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -700,20 +712,38 @@ impl WorkspaceApp {
                             .px_2()
                             .py_1()
                             .font_family("monospace")
-                            .child(format!("{}@{}:{}", node.username, node.host, node.port)),
+                            .child(self.render_selectable_text_scoped(
+                                "auto-route-connection-info",
+                                &node.id,
+                                format!("{}@{}:{}", node.username, node.host, node.port),
+                                theme.text_muted,
+                                cx,
+                            )),
                     )
                     .child(
-                        div().child(format!(
-                            "{}: {}",
-                            self.i18n.t("sessionManager.auto_route.auth.label"),
-                            self.i18n.t(node.auth_type.label_key())
+                        div().child(self.render_selectable_text_scoped(
+                            "auto-route-auth-info",
+                            &node.id,
+                            format!(
+                                "{}: {}",
+                                self.i18n.t("sessionManager.auto_route.auth.label"),
+                                self.i18n.t(node.auth_type.label_key())
+                            ),
+                            theme.text_muted,
+                            cx,
                         )),
                     )
                     .when(node.auth_type == TopologyAuthType::Password, |details| {
                         details.child(
                             div()
                                 .text_color(rgb(0xf59e0b))
-                                .child(self.i18n.t("sessionManager.auto_route.auth.password_warning")),
+                                .child(self.render_selectable_text_scoped(
+                                    "auto-route-password-warning",
+                                    &node.id,
+                                    self.i18n.t("sessionManager.auto_route.auth.password_warning"),
+                                    0xf59e0b,
+                                    cx,
+                                )),
                         )
                     })
                     .when(!node.neighbors.is_empty(), |details| {

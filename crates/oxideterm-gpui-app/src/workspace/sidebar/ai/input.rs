@@ -41,12 +41,17 @@ impl WorkspaceApp {
         let focused = self.ai_chat_input_focused;
         let autocomplete_items = self.ai_chat_autocomplete_items();
         let marked_text = self.marked_text_for_target(target).unwrap_or_default();
+        let selected_range = self.ime_selected_range_for_target(target);
         let showing_placeholder = self.ai_chat_draft.is_empty() && marked_text.is_empty();
         let input_text = if showing_placeholder {
             placeholder
         } else {
             self.ai_chat_draft.clone()
         };
+        let caret_offset = selected_range
+            .as_ref()
+            .filter(|range| range.start == range.end)
+            .map(|range| range.start);
         let mut input = div()
             .w_full()
             .min_h(px(20.0))
@@ -63,8 +68,31 @@ impl WorkspaceApp {
             .opacity(if enabled { 1.0 } else { 0.5 })
             .cursor(CursorStyle::IBeam);
         let lines: Vec<&str> = input_text.split('\n').collect();
+        let mut line_start = 0;
         for (index, line) in lines.iter().enumerate() {
             let is_last_line = index + 1 == lines.len();
+            let line_len = line.encode_utf16().count();
+            let line_end = line_start + line_len;
+            let line_range = line_start..line_end;
+            let line_selection = if showing_placeholder {
+                None
+            } else {
+                selected_range.as_ref().and_then(|selection| {
+                    let start = selection.start.max(line_range.start).min(line_range.end);
+                    let end = selection.end.max(line_range.start).min(line_range.end);
+                    (start < end).then_some(start - line_range.start..end - line_range.start)
+                })
+            };
+            let line_caret = if showing_placeholder {
+                None
+            } else {
+                caret_offset
+                    .filter(|offset| {
+                        *offset >= line_range.start
+                            && (*offset <= line_range.end || (is_last_line && *offset == line_end))
+                    })
+                    .map(|offset| offset.saturating_sub(line_range.start).min(line_len))
+            };
             input = input.child(
                 div()
                     .w_full()
@@ -74,11 +102,27 @@ impl WorkspaceApp {
                     .when(focused && showing_placeholder && index == 0, |line| {
                         line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
                     })
-                    .child(div().truncate().child((*line).to_string()))
-                    .when(focused && is_last_line && !showing_placeholder, |line| {
+                    .child(ai_input_line_segments(
+                        &self.tokens,
+                        line,
+                        line_selection,
+                        line_caret,
+                        self.new_connection_caret_visible,
+                    ))
+                    .when(
+                        focused
+                            && is_last_line
+                            && !showing_placeholder
+                            && selected_range.is_none(),
+                        |line| {
+                            line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                        },
+                    )
+                    .when(focused && is_last_line && !showing_placeholder && !marked_text.is_empty(), |line| {
                         line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
                     }),
             );
+            line_start = line_end + 1;
         }
         if focused && !marked_text.is_empty() {
             input = input.child(
@@ -95,7 +139,7 @@ impl WorkspaceApp {
                 this.ai_model_selector_search_focused = false;
                 this.ime_marked_text = None;
                 window.focus(&this.focus_handle);
-                this.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
+                this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
@@ -1007,7 +1051,7 @@ impl WorkspaceApp {
         chips.into_any_element()
     }
 
-    fn ai_chat_autocomplete_items(&self) -> Vec<AiAutocompleteCandidate> {
+    pub(in crate::workspace) fn ai_chat_autocomplete_items(&self) -> Vec<AiAutocompleteCandidate> {
         if !self.ai_chat_input_focused || self.ai_chat_autocomplete_suppressed {
             return Vec::new();
         }
@@ -1064,6 +1108,68 @@ impl WorkspaceApp {
         cx.notify();
     }
 }
+
+fn ai_input_line_segments(
+    tokens: &oxideterm_theme::ThemeTokens,
+    line: &str,
+    selection_range: Option<std::ops::Range<usize>>,
+    caret_offset: Option<usize>,
+    caret_visible: bool,
+) -> Div {
+    let base = div().min_w_0().max_w_full().overflow_hidden().flex().items_center();
+    let len = line.encode_utf16().count();
+    if let Some(range) = selection_range {
+        let start = range.start.min(len);
+        let end = range.end.min(len);
+        if start < end {
+            let before = ai_utf16_slice(line, 0..start);
+            let selected = ai_utf16_slice(line, start..end);
+            let after = ai_utf16_slice(line, end..len);
+            return base
+                .when(!before.is_empty(), |row| row.child(before))
+                .child(
+                    div()
+                        .px(px(tokens.metrics.form_selection_padding_x))
+                        .rounded(px(tokens.radii.xs))
+                        .bg(rgba((tokens.ui.accent << 8) | AI_INPUT_SELECTION_BG_ALPHA))
+                        .text_color(rgb(tokens.ui.text))
+                        .child(selected),
+                )
+                .when(!after.is_empty(), |row| row.child(after));
+        }
+    }
+
+    if let Some(offset) = caret_offset {
+        let offset = offset.min(len);
+        let before = ai_utf16_slice(line, 0..offset);
+        let after = ai_utf16_slice(line, offset..len);
+        return base
+            .when(!before.is_empty(), |row| row.child(before))
+            .child(text_caret(tokens, caret_visible))
+            .when(!after.is_empty(), |row| row.child(after));
+    }
+
+    base.child(line.to_string())
+}
+
+fn ai_utf16_slice(value: &str, range: std::ops::Range<usize>) -> String {
+    let start = ai_byte_index_for_utf16(value, range.start);
+    let end = ai_byte_index_for_utf16(value, range.end);
+    value[start..end].to_string()
+}
+
+fn ai_byte_index_for_utf16(value: &str, offset: usize) -> usize {
+    let mut utf16_count = 0;
+    for (byte_index, ch) in value.char_indices() {
+        if utf16_count >= offset {
+            return byte_index;
+        }
+        utf16_count += ch.len_utf16();
+    }
+    value.len()
+}
+
+const AI_INPUT_SELECTION_BG_ALPHA: u32 = 0x40; // Mirrors the shared Tauri-style text selection tint.
 
 fn ai_format_tokens(tokens: usize) -> String {
     if tokens >= 1000 {

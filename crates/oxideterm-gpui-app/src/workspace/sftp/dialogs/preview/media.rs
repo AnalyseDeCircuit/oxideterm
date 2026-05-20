@@ -243,7 +243,7 @@ impl WorkspaceApp {
         detail: &str,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        self.render_sftp_native_asset_status(title, path, mime_type, detail)
+        self.render_sftp_native_asset_status(title, path, mime_type, detail, cx)
             .child(self.render_sftp_external_open_button(path.to_string(), cx))
     }
 
@@ -253,6 +253,7 @@ impl WorkspaceApp {
         path: &str,
         mime_type: &str,
         detail: &str,
+        cx: &mut Context<Self>,
     ) -> gpui::Div {
         let theme = self.tokens.ui;
         div()
@@ -273,16 +274,40 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(SFTP_TEXT_SM))
                     .text_color(rgb(theme.text))
-                    .child(title.to_string()),
+                    .child(self.render_selectable_text_scoped(
+                        "sftp-native-asset-title",
+                        path,
+                        title.to_string(),
+                        theme.text,
+                        cx,
+                    )),
             )
-            .child(mime_type.to_string())
-            .child(div().max_w(px(680.0)).child(detail.to_string()))
+            .child(self.render_selectable_text_scoped(
+                "sftp-native-asset-mime",
+                path,
+                mime_type.to_string(),
+                theme.text_muted,
+                cx,
+            ))
+            .child(div().max_w(px(680.0)).child(self.render_selectable_text_scoped(
+                "sftp-native-asset-detail",
+                path,
+                detail.to_string(),
+                theme.text_muted,
+                cx,
+            )))
             .child(
                 div()
                     .max_w(px(680.0))
                     .truncate()
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .child(path.to_string()),
+                    .child(self.render_selectable_text_scoped(
+                        "sftp-native-asset-path",
+                        path,
+                        path.to_string(),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
     }
 

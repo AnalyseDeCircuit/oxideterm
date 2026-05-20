@@ -17,7 +17,13 @@ impl WorkspaceApp {
             .py(px(8.0))
             .text_size(px(SFTP_TEXT_XS))
             .text_color(rgb(self.tokens.ui.text))
-            .child(format!("SFTP waiting for connection sync: {error}"))
+            .child(self.render_selectable_text_scoped(
+                "sftp-init-error",
+                (),
+                format!("SFTP waiting for connection sync: {error}"),
+                self.tokens.ui.text,
+                cx,
+            ))
             .child(self.render_sftp_text_button(
                 "Retry".to_string(),
                 false,

@@ -6,6 +6,7 @@ impl WorkspaceApp {
         remote_path: &str,
         remote_content: &str,
         _has_background: bool,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let lines = compute_sftp_diff(local_content, remote_content);
@@ -46,20 +47,38 @@ impl WorkspaceApp {
                                 div()
                                     .text_color(rgb(0xfca5a5))
                                     .font_weight(gpui::FontWeight::MEDIUM)
-                                    .child(format!("{}:", self.i18n.t("sftp.diff.local"))),
+                                    .child(self.render_selectable_text_scoped(
+                                        "sftp-diff-local-label",
+                                        (),
+                                        format!("{}:", self.i18n.t("sftp.diff.local")),
+                                        0xfca5a5,
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
                                     .min_w(px(0.0))
                                     .truncate()
                                     .text_color(rgb(theme.text_muted))
-                                    .child(sftp_file_name(local_path)),
+                                    .child(self.render_selectable_text_scoped(
+                                        "sftp-diff-local-path",
+                                        local_path,
+                                        sftp_file_name(local_path),
+                                        theme.text_muted,
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
                                     .ml_auto()
                                     .text_color(rgb(SFTP_RED))
-                                    .child(format!("-{}", stats.removed)),
+                                    .child(self.render_selectable_text_scoped(
+                                        "sftp-diff-local-removed",
+                                        (),
+                                        format!("-{}", stats.removed),
+                                        SFTP_RED,
+                                        cx,
+                                    )),
                             ),
                     )
                     .child(
@@ -80,20 +99,38 @@ impl WorkspaceApp {
                                 div()
                                     .text_color(rgb(0x86efac))
                                     .font_weight(gpui::FontWeight::MEDIUM)
-                                    .child(format!("{}:", self.i18n.t("sftp.diff.remote"))),
+                                    .child(self.render_selectable_text_scoped(
+                                        "sftp-diff-remote-label",
+                                        (),
+                                        format!("{}:", self.i18n.t("sftp.diff.remote")),
+                                        0x86efac,
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
                                     .min_w(px(0.0))
                                     .truncate()
                                     .text_color(rgb(theme.text_muted))
-                                    .child(sftp_file_name(remote_path)),
+                                    .child(self.render_selectable_text_scoped(
+                                        "sftp-diff-remote-path",
+                                        remote_path,
+                                        sftp_file_name(remote_path),
+                                        theme.text_muted,
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
                                     .ml_auto()
                                     .text_color(rgb(SFTP_GREEN))
-                                    .child(format!("+{}", stats.added)),
+                                    .child(self.render_selectable_text_scoped(
+                                        "sftp-diff-remote-added",
+                                        (),
+                                        format!("+{}", stats.added),
+                                        SFTP_GREEN,
+                                        cx,
+                                    )),
                             ),
                     ),
             )

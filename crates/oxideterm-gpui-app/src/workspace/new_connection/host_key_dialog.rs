@@ -256,11 +256,13 @@ impl WorkspaceApp {
                                 body.child(self.render_host_key_value(
                                     self.i18n.t("ssh.host_key.key_type_label"),
                                     key_type,
+                                    cx,
                                 ))
                                 .child(
                                     self.render_host_key_value(
                                         self.i18n.t("ssh.host_key.fingerprint_label"),
                                         fingerprint,
+                                        cx,
                                     ),
                                 )
                             }),
@@ -308,7 +310,12 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_host_key_value(&self, label: String, value: String) -> AnyElement {
+    fn render_host_key_value(
+        &self,
+        label: String,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .flex_col()
@@ -317,7 +324,7 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.form_label_font_size))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(label),
+                    .child(label.clone()),
             )
             .child(
                 div()
@@ -327,7 +334,15 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.form_text_font_size))
                     .text_color(rgb(self.tokens.ui.text))
                     .font_family(SharedString::from("SF Mono"))
-                    .child(value),
+                    .child(self.render_selectable_text(
+                        crate::workspace::selectable_text::selectable_text_id(
+                            "host-key-value",
+                            (&label, &value),
+                        ),
+                        value,
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

@@ -862,13 +862,7 @@ impl WorkspaceApp {
                         this.file_manager.focused_input = Some(FileManagerInput::Filter);
                         this.file_manager.context_menu = None;
                         this.ime_marked_text = None;
-                        this.begin_ime_selection(
-                            target,
-                            event.position,
-                            event.modifiers.shift,
-                            window,
-                            cx,
-                        );
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -932,7 +926,13 @@ impl WorkspaceApp {
                         .bg(rgba((FILE_MANAGER_RED << 8) | 0x14))
                         .text_size(px(FILE_MANAGER_TEXT_XS))
                         .text_color(rgb(FILE_MANAGER_RED))
-                        .child(error.clone()),
+                        .child(self.render_selectable_text_scoped(
+                            "file-manager-list-error",
+                            (),
+                            error.clone(),
+                            FILE_MANAGER_RED,
+                            cx,
+                        )),
                 )
                 .into_any_element();
         }

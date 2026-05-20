@@ -273,6 +273,7 @@ impl WorkspaceApp {
                 if dialog.selected_app_settings_sections.is_empty() {
                     children.push(self.render_oxide_section_empty_warning(
                         "尚未选择任何应用设置分组".to_string(),
+                        cx,
                     ));
                 }
                 options.child(self.render_oxide_card(None, children))

@@ -24,7 +24,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         if let Some(error) = self.sftp_view.preview_font_error.as_ref() {
             return self
-                .render_sftp_native_asset_status("Font", path, mime_type, error)
+                .render_sftp_native_asset_status("Font", path, mime_type, error, cx)
                 .into_any_element();
         }
         let Some(font_family) = self.sftp_view.preview_font_family.clone() else {
