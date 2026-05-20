@@ -4,6 +4,7 @@ impl WorkspaceApp {
         preflight: Option<ExportPreflightResult>,
         show_card: bool,
         embed_keys: bool,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let mut section = div().flex().flex_col().gap(px(8.0)).child(
@@ -19,7 +20,13 @@ impl WorkspaceApp {
                     16.0,
                     rgb(theme.text),
                 ))
-                .child("导出概览"),
+                .child(self.render_selectable_text_scoped(
+                    "oxide-export-preflight-heading",
+                    (),
+                    "导出概览",
+                    theme.text,
+                    cx,
+                )),
         );
         let Some(preflight) = preflight.filter(|_| show_card) else {
             return section.into_any_element();
@@ -50,16 +57,29 @@ impl WorkspaceApp {
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(theme.text_muted))
                         .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)))
-                        .child(label)
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-export-preflight-stat",
+                            label.clone(),
+                            label,
+                            theme.text_muted,
+                            cx,
+                        ))
                 }))
                 .into_any_element(),
         ];
         if preflight.portable_secret_count > 0 {
+            let label = format!("将打包 {} 项便携秘密项。", preflight.portable_secret_count);
             card_children.push(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
-                    .child(format!("将打包 {} 项便携秘密项。", preflight.portable_secret_count))
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-export-preflight-portable-secret",
+                        (),
+                        label,
+                        theme.text_muted,
+                        cx,
+                    ))
                     .into_any_element(),
             );
         }
@@ -71,6 +91,7 @@ impl WorkspaceApp {
                     preflight.connections_with_passwords
                 ),
                 Vec::new(),
+                cx,
             ));
         }
         if embed_keys && !preflight.missing_keys.is_empty() {
@@ -82,16 +103,21 @@ impl WorkspaceApp {
                     .iter()
                     .map(|(name, path)| format!("{name}: {path}"))
                     .collect(),
+                cx,
             ));
         }
         if preflight.total_key_bytes > 0 {
+            let label = format!("密钥数据总计：{}", oxide_format_bytes(preflight.total_key_bytes));
             card_children.push(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
-                    .child(format!(
-                        "密钥数据总计：{}",
-                        oxide_format_bytes(preflight.total_key_bytes)
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-export-preflight-key-bytes",
+                        (),
+                        label,
+                        theme.text_muted,
+                        cx,
                     ))
                     .into_any_element(),
             );
@@ -101,7 +127,11 @@ impl WorkspaceApp {
         section.into_any_element()
     }
 
-    fn render_oxide_export_content_summary(&self, dialog: &OxideExportDialogState) -> AnyElement {
+    fn render_oxide_export_content_summary(
+        &self,
+        dialog: &OxideExportDialogState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut items = Vec::new();
         let connection_count = oxide_export_connection_count(dialog);
         if connection_count > 0 {
@@ -145,17 +175,30 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child("尚未选择导出内容")
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-export-content-summary-empty",
+                        (),
+                        "尚未选择导出内容",
+                        self.tokens.ui.text_muted,
+                        cx,
+                    ))
                     .into_any_element(),
             ]
         } else {
             items
                 .into_iter()
-                .map(|item| {
+                .enumerate()
+                .map(|(index, item)| {
                     div()
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(format!("• {item}"))
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-export-content-summary-item",
+                            index,
+                            format!("• {item}"),
+                            self.tokens.ui.text_muted,
+                            cx,
+                        ))
                         .into_any_element()
                 })
                 .collect()
@@ -163,7 +206,11 @@ impl WorkspaceApp {
         self.render_oxide_card(Some((LucideIcon::Shield, "所选内容".to_string())), content)
     }
 
-    fn render_oxide_security_notice(&self, dialog: &OxideExportDialogState) -> AnyElement {
+    fn render_oxide_security_notice(
+        &self,
+        dialog: &OxideExportDialogState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.render_oxide_tone_notice(
             OXIDE_BLUE_500,
             "🔒 安全提示".to_string(),
@@ -190,6 +237,7 @@ impl WorkspaceApp {
                 "会话数据不会包含——仅连接配置".to_string(),
                 "请妥善保管加密密码，丢失无法恢复".to_string(),
             ],
+            cx,
         )
     }
 
@@ -230,6 +278,7 @@ impl WorkspaceApp {
         color: u32,
         title: String,
         lines: Vec<String>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .px(px(8.0))
@@ -254,7 +303,13 @@ impl WorkspaceApp {
                         12.0,
                         rgb(color),
                     ))
-                    .child(title),
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-export-compact-warning-title",
+                        title.clone(),
+                        title,
+                        color,
+                        cx,
+                    )),
             )
             .when(!lines.is_empty(), |notice| {
                 notice.child(
@@ -264,11 +319,17 @@ impl WorkspaceApp {
                         .flex()
                         .flex_col()
                         .gap(px(2.0))
-                        .children(lines.into_iter().map(|line| {
+                        .children(lines.into_iter().enumerate().map(|(index, line)| {
                             div()
                                 .opacity(0.8)
                                 .line_height(px(16.0))
-                                .child(format!("• {line}"))
+                                .child(self.render_selectable_text_scoped(
+                                    "oxide-export-compact-warning-line",
+                                    index,
+                                    format!("• {line}"),
+                                    color,
+                                    cx,
+                                ))
                         })),
                 )
             })

@@ -15,6 +15,7 @@ mod pane_tree;
 mod plugin_manager;
 mod plugin_settings_store;
 mod quick_commands;
+mod selectable_text;
 mod session_manager;
 mod settings;
 mod sftp;
@@ -41,8 +42,8 @@ use gpui::{
     FocusHandle, Focusable, IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions,
     Pixels, Render, RenderImage, Rgba, ScrollStrategy, ScrollWheelEvent, SharedString, Styled,
-    StyledImage, Subscription, Timer, UniformListScrollHandle, Window, anchored, deferred, div,
-    list, prelude::*, px, relative, rgb, rgba, svg, uniform_list,
+    StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle, Window, anchored,
+    deferred, div, list, prelude::*, px, relative, rgb, rgba, svg, uniform_list,
 };
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
@@ -385,6 +386,16 @@ impl Default for AiMcpServerDraft {
     }
 }
 
+#[derive(Clone)]
+pub(super) struct SelectableTextFragmentState {
+    pub group_id: u64,
+    pub order: usize,
+    pub generation: u64,
+    pub text: String,
+    pub layout: TextLayout,
+    pub anchor: TextInputAnchor,
+}
+
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
     tabs: Vec<Tab>,
@@ -536,6 +547,10 @@ pub(crate) struct WorkspaceApp {
     ai_provider_remove_confirm: Option<(String, String)>,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
     text_input_anchors: HashMap<TextInputAnchorId, TextInputAnchor>,
+    selectable_text_values: HashMap<u64, String>,
+    selectable_text_layouts: HashMap<u64, TextLayout>,
+    selectable_text_fragments: HashMap<u64, SelectableTextFragmentState>,
+    selectable_text_generation: u64,
     ime_marked_text: Option<String>,
     selected_ime_target: Option<WorkspaceImeTarget>,
     selected_ime_range: Option<WorkspaceImeSelection>,

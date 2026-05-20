@@ -82,6 +82,7 @@ impl WorkspaceApp {
                                                 "解密并预览后，可以选择要导入的连接、应用设置分组、插件偏好和端口转发".to_string(),
                                                 "文件中包含的密钥口令会安全存入系统钥匙串；已保存的服务器密码不会出现在文件中".to_string(),
                                             ],
+                                            cx,
                                         )),
                                 )
                             })
@@ -89,7 +90,7 @@ impl WorkspaceApp {
                                 body.child(self.render_oxide_progress(progress, None))
                             })
                             .when_some(dialog.metadata.clone().filter(|_| !has_result), |body, metadata| {
-                                body.child(self.render_oxide_import_file_info(metadata))
+                                body.child(self.render_oxide_import_file_info(metadata, cx))
                             })
                             .when(dialog.file_data.is_some() && !has_result, |body| {
                                 body.child(self.render_oxide_labeled_input(
@@ -110,10 +111,14 @@ impl WorkspaceApp {
                                 body.child(self.render_oxide_import_preview(preview, cx))
                             })
                             .when_some(dialog.result.clone(), |body, result| {
-                                body.child(self.render_oxide_import_result_summary(result, preview.clone()))
+                                body.child(self.render_oxide_import_result_summary(
+                                    result,
+                                    preview.clone(),
+                                    cx,
+                                ))
                             })
                             .when_some(dialog.error.clone().filter(|_| !has_result), |body, error| {
-                                body.child(self.render_oxide_error_banner(error))
+                                body.child(self.render_oxide_error_banner(error, cx))
                             })
                             .when(dialog.file_data.is_some() && !has_result, |body| {
                                 body.child(self.render_oxide_import_footer(dialog, cx))
@@ -127,7 +132,11 @@ impl WorkspaceApp {
     }
 
 
-    fn render_oxide_import_file_info(&self, metadata: OxideMetadata) -> AnyElement {
+    fn render_oxide_import_file_info(
+        &self,
+        metadata: OxideMetadata,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut rows = vec![
             (
                 "导出时间:".to_string(),
@@ -170,10 +179,16 @@ impl WorkspaceApp {
                 .text_size(px(self.tokens.metrics.ui_text_sm))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(rgb(self.tokens.ui.text))
-                .child("文件信息")
+                .child(self.render_selectable_text_scoped(
+                    "oxide-import-file-info-heading",
+                    (),
+                    "文件信息",
+                    self.tokens.ui.text,
+                    cx,
+                ))
                 .into_any_element(),
         ];
-        children.extend(rows.into_iter().map(|(label, value)| {
+        children.extend(rows.into_iter().enumerate().map(|(index, (label, value))| {
             div()
                 .flex()
                 .items_baseline()
@@ -183,9 +198,26 @@ impl WorkspaceApp {
                 .child(
                     div()
                         .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(label),
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-file-info-label",
+                            index,
+                            label,
+                            self.tokens.ui.text_muted,
+                            cx,
+                        )),
                 )
-                .child(div().flex_1().min_w(px(0.0)).child(value))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-file-info-value",
+                            index,
+                            value,
+                            self.tokens.ui.text,
+                            cx,
+                        )),
+                )
                 .into_any_element()
         }));
         children.push(
@@ -194,7 +226,13 @@ impl WorkspaceApp {
                 .text_size(px(self.tokens.metrics.ui_text_xs))
                 .line_height(px(16.0))
                 .text_color(rgb(self.tokens.ui.text_muted))
-                .child("预览后可按连接、应用设置分组、插件偏好和端口转发进行部分导入")
+                .child(self.render_selectable_text_scoped(
+                    "oxide-import-file-info-note",
+                    (),
+                    "预览后可按连接、应用设置分组、插件偏好和端口转发进行部分导入",
+                    self.tokens.ui.text_muted,
+                    cx,
+                ))
                 .into_any_element(),
         );
         if !metadata.connection_names.is_empty() {
@@ -205,12 +243,18 @@ impl WorkspaceApp {
                 .flex()
                 .flex_col()
                 .gap(px(4.0));
-            for name in metadata.connection_names {
+            for (index, name) in metadata.connection_names.into_iter().enumerate() {
                 list = list.child(
                     div()
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(format!("• {name}")),
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-file-info-connection-name",
+                            index,
+                            format!("• {name}"),
+                            self.tokens.ui.text_muted,
+                            cx,
+                        )),
                 );
             }
             children.push(
@@ -219,7 +263,13 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(self.tokens.ui.text))
-                    .child("连接列表:")
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-import-file-info-connections-heading",
+                        (),
+                        "连接列表:",
+                        self.tokens.ui.text,
+                        cx,
+                    ))
                     .into_any_element(),
             );
             children.push(list.into_any_element());

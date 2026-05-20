@@ -107,18 +107,32 @@ impl WorkspaceApp {
                         div()
                             .flex()
                             .gap(px(16.0))
-                            .child(format!(
-                                "{} {}, {} {}",
-                                self.i18n.t("sftp.preview.line"),
-                                line,
-                                self.i18n.t("sftp.preview.column"),
-                                column
+                            .child(self.render_selectable_text_scoped(
+                                "sftp-editor-cursor-position",
+                                (),
+                                format!(
+                                    "{} {}, {} {}",
+                                    self.i18n.t("sftp.preview.line"),
+                                    line,
+                                    self.i18n.t("sftp.preview.column"),
+                                    column
+                                ),
+                                theme.text_muted,
+                                cx,
                             ))
-                            .child(language)
-                            .child(format!(
-                                "{} {}",
-                                self.i18n.t("sftp.preview.encoding"),
-                                encoding
+                            .child(self.render_selectable_text_scoped(
+                                "sftp-editor-language",
+                                (),
+                                language,
+                                theme.text_muted,
+                                cx,
+                            ))
+                            .child(self.render_selectable_text_scoped(
+                                "sftp-editor-encoding",
+                                (),
+                                format!("{} {}", self.i18n.t("sftp.preview.encoding"), encoding),
+                                theme.text_muted,
+                                cx,
                             )),
                     )
                 .child(self.render_sftp_editor_status(status, cx)),
@@ -155,7 +169,15 @@ impl WorkspaceApp {
                                 SFTP_ICON_MD,
                                 rgb(SFTP_ORANGE),
                             ))
-                            .child(div().max_w(px(320.0)).truncate().child(message)),
+                            .child(div().max_w(px(320.0)).truncate().child(
+                                self.render_selectable_text_scoped(
+                                    "sftp-editor-save-error",
+                                    (),
+                                    message,
+                                    SFTP_ORANGE,
+                                    cx,
+                                ),
+                            )),
                     )
                     .child(
                         div()

@@ -881,7 +881,7 @@ impl WorkspaceApp {
                     this.quick_commands.focused_input = Some(input);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle);
-                    this.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),

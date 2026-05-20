@@ -23,9 +23,14 @@ use oxideterm_gpui_ui::{
     text_input::{TextInputAnchor, TextInputAnchorId},
 };
 
+const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
+const READ_ONLY_TEXT_LINE_HEIGHT_ESTIMATE: f32 = 28.0;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum WorkspaceImeTarget {
+    ReadOnlyText(u64),
     CommandPalette,
+    ShortcutsModalSearch,
     Search,
     TerminalCommandBar,
     TerminalCastSearch,
@@ -60,7 +65,9 @@ pub(super) struct WorkspaceImeDragSelection {
 impl WorkspaceImeTarget {
     pub(super) fn anchor_id(self) -> TextInputAnchorId {
         let id = match self {
+            Self::ReadOnlyText(id) => id.wrapping_add(50_000),
             Self::CommandPalette => 4,
+            Self::ShortcutsModalSearch => 5,
             Self::Search => 1,
             Self::TerminalCommandBar => 2,
             Self::TerminalCastSearch => 3,
@@ -348,6 +355,10 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::CommandPalette);
         }
 
+        if self.shortcuts_modal.open {
+            return Some(WorkspaceImeTarget::ShortcutsModalSearch);
+        }
+
         if self.terminal_quick_commands_open
             && let Some(input) = self.quick_commands.focused_input
         {
@@ -440,6 +451,16 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::TerminalCastSearch);
         }
 
+        if let Some(selection) = self.selected_ime_range.as_ref()
+            && matches!(selection.target, WorkspaceImeTarget::ReadOnlyText(_))
+        {
+            return Some(selection.target);
+        }
+
+        if let Some(target @ WorkspaceImeTarget::ReadOnlyText(_)) = self.selected_ime_target {
+            return Some(target);
+        }
+
         self.search.visible.then_some(WorkspaceImeTarget::Search)
     }
 
@@ -525,6 +546,49 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(super) fn begin_ime_selection_from_mouse_down(
+        &mut self,
+        target: WorkspaceImeTarget,
+        event: &gpui::MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.click_count <= 1 || event.modifiers.shift {
+            self.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
+            return;
+        }
+
+        let Some(index) = self.ime_index_for_position(target, event.position, window) else {
+            self.clear_ime_selection();
+            cx.notify();
+            return;
+        };
+        let Some(text) = self.text_for_ime_target(target) else {
+            self.clear_ime_selection();
+            cx.notify();
+            return;
+        };
+        let text_len = text.encode_utf16().count();
+        let range = if event.click_count >= 3 {
+            if ime_target_accepts_newline(target) {
+                line_range_for_utf16_offset(&text, index)
+            } else {
+                0..text_len
+            }
+        } else {
+            word_range_for_utf16_offset(&text, index)
+        };
+        self.selected_ime_target = None;
+        self.selected_ime_range = Some(WorkspaceImeSelection {
+            target,
+            range,
+            reversed: false,
+        });
+        self.ime_drag_selection = None;
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
     pub(super) fn update_ime_selection_drag(
         &mut self,
         position: Point<Pixels>,
@@ -598,20 +662,105 @@ impl WorkspaceApp {
             return Some(0);
         }
 
+        if let WorkspaceImeTarget::ReadOnlyText(id) = target
+            && let Some(layout) = self.selectable_text_layouts.get(&id)
+        {
+            let byte_index = match layout.index_for_position(position) {
+                Ok(index) | Err(index) => index.min(text.len()),
+            };
+            return Some(utf16_offset_for_byte_index(&text, byte_index));
+        }
+
+        if let WorkspaceImeTarget::ReadOnlyText(id) = target
+            && let Some(index) = self.selectable_text_group_index_for_position(id, position)
+        {
+            return Some(index.min(text_len));
+        }
+
         let bounds = self.text_input_anchors.get(&target.anchor_id())?.bounds;
-        let padding = px(self.tokens.metrics.ui_control_padding_x);
+        let padding = if ime_target_is_read_only(target) {
+            px(0.0)
+        } else {
+            px(self.tokens.metrics.ui_control_padding_x)
+        };
         let left = bounds.left() + padding;
         let right = bounds.right() - padding;
         let width = right - left;
         if width <= px(1.0) || position.x <= left {
+            if ime_target_accepts_newline(target) {
+                return Some(self.multiline_ime_index_for_position(
+                    target,
+                    &text,
+                    bounds,
+                    position,
+                    px(0.0),
+                    window,
+                ));
+            }
             return Some(0);
         }
         if position.x >= right {
+            if ime_target_accepts_newline(target) {
+                return Some(self.multiline_ime_index_for_position(
+                    target, &text, bounds, position, width, window,
+                ));
+            }
             return Some(text_len);
         }
 
         let relative_x = (position.x - left).clamp(px(0.0), width);
+        if ime_target_accepts_newline(target) {
+            return Some(self.multiline_ime_index_for_position(
+                target, &text, bounds, position, relative_x, window,
+            ));
+        }
         Some(self.ime_index_for_relative_x(target, &text, relative_x, window))
+    }
+
+    fn multiline_ime_index_for_position(
+        &self,
+        target: WorkspaceImeTarget,
+        text: &str,
+        bounds: Bounds<Pixels>,
+        position: Point<Pixels>,
+        relative_x: Pixels,
+        window: &mut Window,
+    ) -> usize {
+        let lines = if ime_target_is_read_only(target) {
+            soft_wrapped_line_ranges_utf16(
+                text,
+                f32::from(bounds.size.width),
+                f32::from(bounds.size.height),
+            )
+        } else {
+            line_ranges_utf16(text)
+        };
+        if lines.is_empty() {
+            return 0;
+        }
+        let line_height = self.ime_target_line_height(target, bounds, lines.len());
+        let relative_y = (position.y - bounds.top()).max(px(0.0));
+        let line_index =
+            ((relative_y / line_height).floor() as usize).min(lines.len().saturating_sub(1));
+        let line_range = lines[line_index].clone();
+        let line_text = utf16_slice(text, line_range.clone());
+        line_range.start + self.ime_index_for_relative_x(target, &line_text, relative_x, window)
+    }
+
+    fn ime_target_line_height(
+        &self,
+        target: WorkspaceImeTarget,
+        bounds: Bounds<Pixels>,
+        line_count: usize,
+    ) -> Pixels {
+        match target {
+            WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => px(20.0),
+            _ if ime_target_is_read_only(target) && line_count > 0 => {
+                let inferred = f32::from(bounds.size.height) / line_count as f32;
+                px(inferred.clamp(16.0, 40.0))
+            }
+            _ => px(self.tokens.metrics.ui_control_height),
+        }
     }
 
     fn active_ime_text(&self) -> Option<String> {
@@ -705,7 +854,13 @@ impl WorkspaceApp {
 
     fn text_for_ime_target(&self, target: WorkspaceImeTarget) -> Option<String> {
         match target {
+            WorkspaceImeTarget::ReadOnlyText(id) => self
+                .selectable_text_values
+                .get(&id)
+                .cloned()
+                .or_else(|| self.selectable_text_group_text(id)),
             WorkspaceImeTarget::CommandPalette => Some(self.command_palette.raw_query.clone()),
+            WorkspaceImeTarget::ShortcutsModalSearch => Some(self.shortcuts_modal.query.clone()),
             WorkspaceImeTarget::Search => Some(self.search.query.clone()),
             WorkspaceImeTarget::TerminalCommandBar => self
                 .terminal_command_bar_focused
@@ -848,6 +1003,13 @@ impl WorkspaceApp {
         match keystroke.key.as_str() {
             "a" => self.select_all_active_text_input(cx),
             "c" => self.copy_active_text_input(cx),
+            "x" | "v"
+                if self
+                    .active_ime_target()
+                    .is_some_and(ime_target_is_read_only) =>
+            {
+                true
+            }
             "x" => self.cut_active_text_input(cx),
             "v" => self.paste_active_text_input(cx),
             _ => false,
@@ -859,10 +1021,10 @@ impl WorkspaceApp {
         keystroke: &Keystroke,
         cx: &mut Context<Self>,
     ) -> bool {
-        if keystroke.modifiers.platform || keystroke.modifiers.control {
-            return false;
-        }
-        if !matches!(keystroke.key.as_str(), "backspace" | "delete") {
+        if !matches!(
+            keystroke.key.as_str(),
+            "backspace" | "delete" | "h" | "d" | "k" | "u"
+        ) {
             return false;
         }
         let Some(target) = self.active_ime_target() else {
@@ -878,13 +1040,12 @@ impl WorkspaceApp {
             range
         } else if let Some(caret) = self.ime_selection_range_for_target(target) {
             let caret = caret.start.min(text.encode_utf16().count());
-            match keystroke.key.as_str() {
-                "backspace" if caret > 0 => previous_utf16_boundary(&text, caret)..caret,
-                "delete" if caret < text.encode_utf16().count() => {
-                    caret..next_utf16_boundary(&text, caret)
-                }
-                _ => return false,
-            }
+            let Some(range) =
+                self.text_input_delete_range_for_caret(target, &text, caret, keystroke)
+            else {
+                return false;
+            };
+            range
         } else {
             return false;
         };
@@ -892,6 +1053,156 @@ impl WorkspaceApp {
         self.clear_ime_selection();
         self.replace_ime_target_text(target, Some(range), "", cx);
         self.set_ime_selection_from_anchor(target, caret, caret);
+        true
+    }
+
+    pub(super) fn handle_active_text_input_navigation(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(target) = self.active_ime_target() else {
+            return false;
+        };
+        if target == WorkspaceImeTarget::TerminalCommandBar
+            && self.terminal_command_bar_should_accept_inline_suggestion(keystroke, cx)
+        {
+            return false;
+        }
+        if target == WorkspaceImeTarget::TerminalCommandBar
+            && matches!(
+                keystroke.key.as_str(),
+                "up" | "arrowup" | "down" | "arrowdown"
+            )
+        {
+            return false;
+        }
+        if target == WorkspaceImeTarget::CommandPalette
+            && matches!(
+                keystroke.key.as_str(),
+                "home" | "end" | "up" | "arrowup" | "down" | "arrowdown" | "pageup" | "pagedown"
+            )
+        {
+            return false;
+        }
+        if target == WorkspaceImeTarget::AiChatInput
+            && !keystroke.modifiers.shift
+            && !keystroke.modifiers.platform
+            && !keystroke.modifiers.alt
+            && !keystroke.modifiers.control
+            && matches!(
+                keystroke.key.as_str(),
+                "up" | "arrowup" | "down" | "arrowdown"
+            )
+            && !self.ai_chat_autocomplete_items().is_empty()
+        {
+            return false;
+        }
+        let Some(text) = self.text_for_ime_target(target) else {
+            return false;
+        };
+        let text_len = text.encode_utf16().count();
+        let Some(selection) = self.ime_selection_for_navigation(target, text_len) else {
+            return false;
+        };
+        let Some(next) =
+            self.text_input_navigation_destination(target, &text, &selection, keystroke)
+        else {
+            return false;
+        };
+
+        if keystroke.modifiers.shift {
+            let anchor = selection_anchor(&selection);
+            self.set_ime_selection_from_anchor(target, anchor, next);
+        } else {
+            self.set_ime_selection_from_anchor(target, next, next);
+        }
+        self.ime_marked_text = None;
+        self.ime_drag_selection = None;
+        self.new_connection_caret_visible = true;
+        cx.notify();
+        true
+    }
+
+    pub(super) fn handle_active_text_input_newline(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if keystroke.key.as_str() != "enter"
+            || keystroke.modifiers.platform
+            || keystroke.modifiers.alt
+            || keystroke.modifiers.control
+        {
+            return false;
+        }
+        let Some(target) = self.active_ime_target() else {
+            return false;
+        };
+        if ime_target_is_read_only(target) {
+            return false;
+        }
+        if !ime_target_accepts_newline(target) {
+            return false;
+        }
+        if matches!(
+            target,
+            WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit
+        ) && !keystroke.modifiers.shift
+        {
+            return false;
+        }
+        let Some(replacement_range) = self.ime_selection_range_for_target(target) else {
+            return false;
+        };
+        let caret = replacement_range.start + 1;
+        self.clear_ime_selection();
+        self.replace_ime_target_text(target, Some(replacement_range), "\n", cx);
+        self.set_ime_selection_from_anchor(target, caret, caret);
+        self.ime_marked_text = None;
+        self.new_connection_caret_visible = true;
+        cx.notify();
+        true
+    }
+
+    pub(super) fn handle_active_text_input_transpose(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if keystroke.key.as_str() != "t"
+            || !keystroke.modifiers.control
+            || keystroke.modifiers.platform
+            || keystroke.modifiers.alt
+        {
+            return false;
+        }
+        let Some(target) = self.active_ime_target() else {
+            return false;
+        };
+        if ime_target_is_read_only(target) {
+            return false;
+        }
+        let Some(text) = self.text_for_ime_target(target) else {
+            return false;
+        };
+        let Some(selection) = self.ime_selection_range_for_target(target) else {
+            return false;
+        };
+        if selection.start < selection.end {
+            return true;
+        }
+        let Some((next_text, next_caret)) = transpose_text_at_utf16_offset(&text, selection.start)
+        else {
+            return true;
+        };
+        self.clear_ime_selection();
+        let text_len = text.encode_utf16().count();
+        self.replace_ime_target_text(target, Some(0..text_len), &next_text, cx);
+        self.set_ime_selection_from_anchor(target, next_caret, next_caret);
+        self.ime_marked_text = None;
+        self.new_connection_caret_visible = true;
+        cx.notify();
         true
     }
 
@@ -938,6 +1249,9 @@ impl WorkspaceApp {
         let Some(target) = self.active_ime_target() else {
             return false;
         };
+        if ime_target_is_read_only(target) {
+            return true;
+        }
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return true;
         };
@@ -969,6 +1283,182 @@ impl WorkspaceApp {
         true
     }
 
+    fn ime_selection_for_navigation(
+        &self,
+        target: WorkspaceImeTarget,
+        text_len: usize,
+    ) -> Option<WorkspaceImeSelection> {
+        self.ime_selection_for_target(target)
+            .or_else(|| {
+                (self.selected_ime_target == Some(target)).then_some(WorkspaceImeSelection {
+                    target,
+                    range: 0..text_len,
+                    reversed: false,
+                })
+            })
+            .or_else(|| {
+                (self.active_ime_target() == Some(target)).then_some(WorkspaceImeSelection {
+                    target,
+                    range: text_len..text_len,
+                    reversed: false,
+                })
+            })
+    }
+
+    fn text_input_navigation_destination(
+        &self,
+        target: WorkspaceImeTarget,
+        text: &str,
+        selection: &WorkspaceImeSelection,
+        keystroke: &Keystroke,
+    ) -> Option<usize> {
+        let text_len = text.encode_utf16().count();
+        let key = keystroke.key.as_str();
+        let focus = selection_focus(selection);
+        let has_selection = selection.range.start < selection.range.end;
+        let is_multiline = ime_target_accepts_newline(target);
+        let destination = match key {
+            "a" if keystroke.modifiers.control => {
+                if is_multiline {
+                    line_start_for_utf16_offset(text, focus)
+                } else {
+                    0
+                }
+            }
+            "e" if keystroke.modifiers.control => {
+                if is_multiline {
+                    line_end_for_utf16_offset(text, focus)
+                } else {
+                    text_len
+                }
+            }
+            "b" if keystroke.modifiers.control => previous_utf16_boundary(text, focus),
+            "f" if keystroke.modifiers.control => next_utf16_boundary(text, focus),
+            "p" if keystroke.modifiers.control && is_multiline => {
+                vertical_line_navigation_destination(text, focus, false)
+            }
+            "n" if keystroke.modifiers.control && is_multiline => {
+                vertical_line_navigation_destination(text, focus, true)
+            }
+            "left" | "arrowleft" if keystroke.modifiers.platform && is_multiline => {
+                line_start_for_utf16_offset(text, focus)
+            }
+            "right" | "arrowright" if keystroke.modifiers.platform && is_multiline => {
+                line_end_for_utf16_offset(text, focus)
+            }
+            "left" | "arrowleft" if keystroke.modifiers.platform => 0,
+            "right" | "arrowright" if keystroke.modifiers.platform => text_len,
+            "left" | "arrowleft" if keystroke.modifiers.alt || keystroke.modifiers.control => {
+                previous_word_boundary(text, focus)
+            }
+            "right" | "arrowright" if keystroke.modifiers.alt || keystroke.modifiers.control => {
+                next_word_boundary(text, focus)
+            }
+            "left" | "arrowleft" if !keystroke.modifiers.shift && has_selection => {
+                selection.range.start
+            }
+            "right" | "arrowright" if !keystroke.modifiers.shift && has_selection => {
+                selection.range.end
+            }
+            "left" | "arrowleft" => previous_utf16_boundary(text, focus),
+            "right" | "arrowright" => next_utf16_boundary(text, focus),
+            "up" | "arrowup" if keystroke.modifiers.platform => 0,
+            "down" | "arrowdown" if keystroke.modifiers.platform => text_len,
+            "pageup" => 0,
+            "pagedown" => text_len,
+            "up" | "arrowup" if is_multiline => {
+                vertical_line_navigation_destination(text, focus, false)
+            }
+            "down" | "arrowdown" if is_multiline => {
+                vertical_line_navigation_destination(text, focus, true)
+            }
+            "up" | "arrowup" => 0,
+            "down" | "arrowdown" => text_len,
+            "home" if is_multiline => line_start_for_utf16_offset(text, focus),
+            "end" if is_multiline => line_end_for_utf16_offset(text, focus),
+            "home" => 0,
+            "end" => text_len,
+            _ => return None,
+        };
+        Some(destination.min(text_len))
+    }
+
+    fn text_input_delete_range_for_caret(
+        &self,
+        target: WorkspaceImeTarget,
+        text: &str,
+        caret: usize,
+        keystroke: &Keystroke,
+    ) -> Option<Range<usize>> {
+        let text_len = text.encode_utf16().count();
+        let is_multiline = ime_target_accepts_newline(target);
+        match keystroke.key.as_str() {
+            "backspace" if keystroke.modifiers.platform && is_multiline => {
+                let line_start = line_start_for_utf16_offset(text, caret);
+                Some(line_start..caret)
+            }
+            "delete" if keystroke.modifiers.platform && is_multiline => {
+                let line_end = line_end_for_utf16_offset(text, caret);
+                Some(caret..line_end)
+            }
+            "backspace" if keystroke.modifiers.platform && caret > 0 => Some(0..caret),
+            "delete" if keystroke.modifiers.platform && caret < text_len => Some(caret..text_len),
+            "h" if keystroke.modifiers.control && caret > 0 => {
+                Some(previous_utf16_boundary(text, caret)..caret)
+            }
+            "d" if keystroke.modifiers.control && caret < text_len => {
+                Some(caret..next_utf16_boundary(text, caret))
+            }
+            "k" if keystroke.modifiers.control && caret < text_len => {
+                Some(caret..control_k_delete_end(text, caret))
+            }
+            "u" if keystroke.modifiers.control => {
+                Some(line_start_for_utf16_offset(text, caret)..caret)
+            }
+            "backspace"
+                if (keystroke.modifiers.alt || keystroke.modifiers.control) && caret > 0 =>
+            {
+                Some(previous_word_boundary(text, caret)..caret)
+            }
+            "delete"
+                if (keystroke.modifiers.alt || keystroke.modifiers.control) && caret < text_len =>
+            {
+                Some(caret..next_word_boundary(text, caret))
+            }
+            "backspace"
+                if !keystroke.modifiers.platform && !keystroke.modifiers.control && caret > 0 =>
+            {
+                Some(previous_utf16_boundary(text, caret)..caret)
+            }
+            "delete"
+                if !keystroke.modifiers.platform
+                    && !keystroke.modifiers.control
+                    && caret < text_len =>
+            {
+                Some(caret..next_utf16_boundary(text, caret))
+            }
+            "backspace" | "delete" => Some(caret..caret),
+            "h" | "d" | "k" | "u" if keystroke.modifiers.control => Some(caret..caret),
+            _ => None,
+        }
+    }
+
+    fn terminal_command_bar_should_accept_inline_suggestion(
+        &self,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        matches!(keystroke.key.as_str(), "right" | "arrowright")
+            && !keystroke.modifiers.shift
+            && !keystroke.modifiers.platform
+            && !keystroke.modifiers.alt
+            && !keystroke.modifiers.control
+            && self
+                .terminal_command_bar_visible_suggestions(cx)
+                .iter()
+                .any(|candidate| candidate.inline_safe)
+    }
+
     fn replace_ime_target_text(
         &mut self,
         target: WorkspaceImeTarget,
@@ -977,11 +1467,18 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match target {
+            WorkspaceImeTarget::ReadOnlyText(_) => {}
             WorkspaceImeTarget::CommandPalette => {
                 replace_utf16(&mut self.command_palette.raw_query, replacement_range, text);
                 let (mode, _) = parse_command_palette_mode(&self.command_palette.raw_query);
                 self.command_palette.mode = mode;
                 self.command_palette.selected_index = 0;
+                self.new_connection_caret_visible = true;
+                cx.notify();
+            }
+            WorkspaceImeTarget::ShortcutsModalSearch => {
+                replace_utf16(&mut self.shortcuts_modal.query, replacement_range, text);
+                self.shortcuts_modal.scroll_handle = gpui::UniformListScrollHandle::new();
                 self.new_connection_caret_visible = true;
                 cx.notify();
             }
@@ -1321,11 +1818,16 @@ fn normalize_clipboard_text_for_ime_target(target: WorkspaceImeTarget, text: &st
 
 fn ime_target_accepts_newline(target: WorkspaceImeTarget) -> bool {
     match target {
+        WorkspaceImeTarget::ReadOnlyText(_) => true,
         WorkspaceImeTarget::Settings(input) => settings_input_accepts_newline(input),
         WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => true,
         WorkspaceImeTarget::SessionManager(SessionManagerInput::OxideExportDescription) => true,
         _ => false,
     }
+}
+
+fn ime_target_is_read_only(target: WorkspaceImeTarget) -> bool {
+    matches!(target, WorkspaceImeTarget::ReadOnlyText(_))
 }
 
 fn utf16_slice(value: &str, range: Range<usize>) -> String {
@@ -1352,6 +1854,17 @@ fn utf16_offset_for_byte_index(value: &str, byte_offset: usize) -> usize {
 
 fn utf16_offset_for_char_index(value: &str, char_offset: usize) -> usize {
     value.chars().take(char_offset).map(char::len_utf16).sum()
+}
+
+fn char_index_for_utf16(value: &str, offset: usize) -> usize {
+    let mut utf16_count = 0;
+    for (char_index, ch) in value.chars().enumerate() {
+        if utf16_count >= offset {
+            return char_index;
+        }
+        utf16_count += ch.len_utf16();
+    }
+    value.chars().count()
 }
 
 fn floor_char_boundary(value: &str, mut byte_offset: usize) -> usize {
@@ -1386,11 +1899,306 @@ fn next_utf16_boundary(value: &str, offset: usize) -> usize {
     value.encode_utf16().count()
 }
 
+fn selection_focus(selection: &WorkspaceImeSelection) -> usize {
+    if selection.reversed {
+        selection.range.start
+    } else {
+        selection.range.end
+    }
+}
+
+fn selection_anchor(selection: &WorkspaceImeSelection) -> usize {
+    if selection.reversed {
+        selection.range.end
+    } else {
+        selection.range.start
+    }
+}
+
+fn previous_word_boundary(value: &str, offset: usize) -> usize {
+    let current = byte_index_for_utf16(value, offset);
+    let prefix = &value[..current];
+    let mut saw_word = false;
+    for (byte_index, ch) in prefix.char_indices().rev() {
+        if ch.is_whitespace() {
+            if saw_word {
+                return prefix[..byte_index + ch.len_utf8()].encode_utf16().count();
+            }
+        } else {
+            saw_word = true;
+        }
+    }
+    0
+}
+
+fn next_word_boundary(value: &str, offset: usize) -> usize {
+    let current = byte_index_for_utf16(value, offset);
+    let suffix = &value[current..];
+    let mut saw_word = false;
+    for (relative_byte, ch) in suffix.char_indices() {
+        if ch.is_whitespace() {
+            if saw_word {
+                return value[..current + relative_byte].encode_utf16().count();
+            }
+        } else {
+            saw_word = true;
+        }
+    }
+    value.encode_utf16().count()
+}
+
+fn word_range_for_utf16_offset(value: &str, offset: usize) -> Range<usize> {
+    let text_len = value.encode_utf16().count();
+    if text_len == 0 {
+        return 0..0;
+    }
+    let mut byte_index = byte_index_for_utf16(value, offset.min(text_len));
+    if byte_index == value.len() && byte_index > 0 {
+        byte_index = previous_char_start(value, byte_index);
+    }
+    if value[byte_index..]
+        .chars()
+        .next()
+        .is_some_and(char::is_whitespace)
+        && byte_index > 0
+    {
+        let previous = previous_char_start(value, byte_index);
+        if !value[previous..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
+        {
+            byte_index = previous;
+        }
+    }
+
+    let mut start = byte_index;
+    while start > 0 {
+        let previous = previous_char_start(value, start);
+        let Some(ch) = value[previous..].chars().next() else {
+            break;
+        };
+        if ch.is_whitespace() {
+            break;
+        }
+        start = previous;
+    }
+
+    let mut end = byte_index;
+    while end < value.len() {
+        let Some(ch) = value[end..].chars().next() else {
+            break;
+        };
+        if ch.is_whitespace() {
+            break;
+        }
+        end += ch.len_utf8();
+    }
+
+    utf16_offset_for_byte_index(value, start)..utf16_offset_for_byte_index(value, end)
+}
+
+fn line_range_for_utf16_offset(value: &str, offset: usize) -> Range<usize> {
+    let ranges = line_ranges_utf16(value);
+    let text_len = value.encode_utf16().count();
+    ranges
+        .iter()
+        .find(|range| offset <= range.end)
+        .cloned()
+        .unwrap_or(text_len..text_len)
+}
+
+fn line_start_for_utf16_offset(value: &str, offset: usize) -> usize {
+    line_range_for_utf16_offset(value, offset).start
+}
+
+fn line_end_for_utf16_offset(value: &str, offset: usize) -> usize {
+    line_range_for_utf16_offset(value, offset).end
+}
+
+fn control_k_delete_end(value: &str, offset: usize) -> usize {
+    let line_end = line_end_for_utf16_offset(value, offset);
+    if line_end > offset {
+        return line_end;
+    }
+    next_utf16_boundary(value, offset)
+}
+
+fn transpose_text_at_utf16_offset(value: &str, offset: usize) -> Option<(String, usize)> {
+    let mut chars: Vec<char> = value.chars().collect();
+    if chars.len() < 2 {
+        return None;
+    }
+    let text_len = value.encode_utf16().count();
+    let right = if offset >= text_len {
+        chars.len() - 1
+    } else {
+        char_index_for_utf16(value, offset).min(chars.len() - 1)
+    };
+    if right == 0 {
+        return None;
+    }
+    let left = right - 1;
+    chars.swap(left, right);
+    let next_caret = if offset >= text_len {
+        text_len
+    } else {
+        utf16_offset_for_char_index(&chars.iter().collect::<String>(), right + 1)
+    };
+    Some((chars.into_iter().collect(), next_caret))
+}
+
+fn vertical_line_navigation_destination(value: &str, offset: usize, down: bool) -> usize {
+    let ranges = line_ranges_utf16(value);
+    if ranges.is_empty() {
+        return 0;
+    }
+    let line_index = ranges
+        .iter()
+        .position(|range| offset <= range.end)
+        .unwrap_or_else(|| ranges.len().saturating_sub(1));
+    let current = &ranges[line_index];
+    let column = offset.saturating_sub(current.start);
+    if down {
+        let Some(next) = ranges.get(line_index + 1) else {
+            return value.encode_utf16().count();
+        };
+        next.start + column.min(next.end.saturating_sub(next.start))
+    } else {
+        if line_index == 0 {
+            return 0;
+        }
+        let previous = &ranges[line_index - 1];
+        previous.start + column.min(previous.end.saturating_sub(previous.start))
+    }
+}
+
+fn line_ranges_utf16(value: &str) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    let mut offset = 0;
+    for ch in value.chars() {
+        if ch == '\n' {
+            ranges.push(start..offset);
+            offset += ch.len_utf16();
+            start = offset;
+        } else {
+            offset += ch.len_utf16();
+        }
+    }
+    ranges.push(start..offset);
+    ranges
+}
+
+fn soft_wrapped_line_ranges_utf16(
+    value: &str,
+    max_width_px: f32,
+    bounds_height_px: f32,
+) -> Vec<Range<usize>> {
+    let hard_ranges = line_ranges_utf16(value);
+    if value.is_empty() || max_width_px <= 1.0 {
+        return hard_ranges;
+    }
+
+    let target_lines = (bounds_height_px / READ_ONLY_TEXT_LINE_HEIGHT_ESTIMATE)
+        .round()
+        .max(hard_ranges.len() as f32) as usize;
+    let mut scale = 1.0;
+    for _ in 0..8 {
+        let lines = soft_wrapped_line_ranges_with_scale(value, max_width_px, scale);
+        if lines.len() == target_lines || target_lines <= hard_ranges.len() {
+            return lines;
+        }
+        if lines.len() < target_lines {
+            scale *= 1.12;
+        } else {
+            scale *= 0.92;
+        }
+    }
+    soft_wrapped_line_ranges_with_scale(value, max_width_px, scale)
+}
+
+fn soft_wrapped_line_ranges_with_scale(
+    value: &str,
+    max_width_px: f32,
+    scale: f32,
+) -> Vec<Range<usize>> {
+    let mut lines = Vec::new();
+    let mut line_start = 0usize;
+    let mut line_width = 0.0f32;
+    let mut offset = 0usize;
+    let mut last_break: Option<(usize, f32)> = None;
+
+    for ch in value.chars() {
+        let char_len = ch.len_utf16();
+        if ch == '\n' {
+            lines.push(line_start..offset);
+            offset += char_len;
+            line_start = offset;
+            line_width = 0.0;
+            last_break = None;
+            continue;
+        }
+
+        let char_width = estimated_read_only_char_width(ch) * scale;
+        if line_width + char_width > max_width_px && offset > line_start {
+            if let Some((break_offset, break_width)) = last_break.take()
+                && break_offset > line_start
+            {
+                lines.push(line_start..break_offset);
+                line_start = break_offset;
+                line_width = (line_width - break_width).max(0.0);
+            } else {
+                lines.push(line_start..offset);
+                line_start = offset;
+                line_width = 0.0;
+            }
+        }
+
+        line_width += char_width;
+        offset += char_len;
+        if ch.is_whitespace() || matches!(ch, '-' | '/' | '\\' | ',' | '.' | ';' | ':') {
+            last_break = Some((offset, line_width));
+        }
+    }
+
+    lines.push(line_start..offset);
+    lines
+}
+
+fn estimated_read_only_char_width(ch: char) -> f32 {
+    if ch == '\t' {
+        READ_ONLY_TEXT_EM_WIDTH * 1.8
+    } else if ch.is_whitespace() {
+        READ_ONLY_TEXT_EM_WIDTH * 0.35
+    } else if ch.is_ascii() {
+        READ_ONLY_TEXT_EM_WIDTH * 0.58
+    } else if ch.len_utf16() > 1 {
+        READ_ONLY_TEXT_EM_WIDTH * 1.1
+    } else {
+        READ_ONLY_TEXT_EM_WIDTH
+    }
+}
+
+fn previous_char_start(value: &str, byte_index: usize) -> usize {
+    value[..byte_index]
+        .char_indices()
+        .next_back()
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::{Keystroke, Modifiers};
 
-    use super::keystroke_commits_platform_text;
+    use super::{
+        control_k_delete_end, keystroke_commits_platform_text, line_end_for_utf16_offset,
+        line_range_for_utf16_offset, line_start_for_utf16_offset, next_utf16_boundary,
+        next_word_boundary, previous_utf16_boundary, previous_word_boundary,
+        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
+        vertical_line_navigation_destination, word_range_for_utf16_offset,
+    };
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
         Keystroke {
@@ -1445,5 +2253,88 @@ mod tests {
                 ..Modifiers::default()
             }
         )));
+    }
+
+    #[test]
+    fn read_only_soft_wrap_ranges_follow_visual_line_count() {
+        let text = "你好！我是 OxideSens，你的终端助手。我可以帮助你处理终端命令、SSH 连接、文件操作、脚本调试等等。";
+        let ranges = soft_wrapped_line_ranges_utf16(text, 260.0, 112.0);
+        assert!(ranges.len() >= 3, "{ranges:?}");
+        assert_eq!(ranges.first().map(|range| range.start), Some(0));
+        assert_eq!(
+            ranges.last().map(|range| range.end),
+            Some(text.encode_utf16().count())
+        );
+        for pair in ranges.windows(2) {
+            assert_eq!(pair[0].end, pair[1].start);
+        }
+    }
+
+    #[test]
+    fn utf16_navigation_keeps_emoji_boundaries() {
+        let value = "a😄b";
+        assert_eq!(next_utf16_boundary(value, 0), 1);
+        assert_eq!(next_utf16_boundary(value, 1), 3);
+        assert_eq!(previous_utf16_boundary(value, 3), 1);
+        assert_eq!(previous_utf16_boundary(value, 4), 3);
+    }
+
+    #[test]
+    fn word_navigation_matches_browser_style_runs() {
+        let value = "alpha beta  gamma";
+        assert_eq!(previous_word_boundary(value, 12), 6);
+        assert_eq!(
+            previous_word_boundary(value, value.encode_utf16().count()),
+            12
+        );
+        assert_eq!(next_word_boundary(value, 0), 5);
+        assert_eq!(next_word_boundary(value, 6), 10);
+    }
+
+    #[test]
+    fn double_click_word_range_handles_edges() {
+        assert_eq!(word_range_for_utf16_offset("root", 1), 0..4);
+        assert_eq!(word_range_for_utf16_offset("alpha beta", 7), 6..10);
+        assert_eq!(word_range_for_utf16_offset("alpha beta", 5), 0..5);
+    }
+
+    #[test]
+    fn multiline_arrow_navigation_preserves_column() {
+        let value = "abc\nde\nfghi";
+        assert_eq!(vertical_line_navigation_destination(value, 2, true), 6);
+        assert_eq!(vertical_line_navigation_destination(value, 6, true), 9);
+        assert_eq!(vertical_line_navigation_destination(value, 9, false), 6);
+    }
+
+    #[test]
+    fn multiline_line_ranges_match_textarea_navigation() {
+        let value = "one\ntwo\nthree";
+        assert_eq!(line_range_for_utf16_offset(value, 1), 0..3);
+        assert_eq!(line_range_for_utf16_offset(value, 5), 4..7);
+        assert_eq!(line_start_for_utf16_offset(value, 10), 8);
+        assert_eq!(line_end_for_utf16_offset(value, 10), 13);
+    }
+
+    #[test]
+    fn control_k_matches_textarea_line_delete() {
+        let value = "one\ntwo\nthree";
+        assert_eq!(control_k_delete_end(value, 5), 7);
+        assert_eq!(control_k_delete_end(value, 7), 8);
+    }
+
+    #[test]
+    fn control_t_transposes_utf16_characters() {
+        assert_eq!(
+            transpose_text_at_utf16_offset("abcd", 2),
+            Some(("acbd".to_string(), 3))
+        );
+        assert_eq!(
+            transpose_text_at_utf16_offset("a😄b", 3),
+            Some(("ab😄".to_string(), 4))
+        );
+        assert_eq!(
+            transpose_text_at_utf16_offset("abcd", 4),
+            Some(("abdc".to_string(), 4))
+        );
     }
 }

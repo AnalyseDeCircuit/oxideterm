@@ -1268,6 +1268,7 @@ impl WorkspaceApp {
             "settings_view.general.language",
             "settings_view.general.language_hint",
             control.into_any_element(),
+            cx,
         )
     }
 
@@ -1307,7 +1308,7 @@ impl WorkspaceApp {
             },
         ));
 
-        self.setting_row(label_key, hint_key, control.into_any_element())
+        self.setting_row(label_key, hint_key, control.into_any_element(), cx)
     }
 
     fn bool_row(
@@ -1329,6 +1330,7 @@ impl WorkspaceApp {
                     }),
                 )
                 .into_any_element(),
+            cx,
         )
     }
 
@@ -1366,10 +1368,18 @@ impl WorkspaceApp {
                 }),
             )
             .into_any_element();
-        self.setting_row(label_key, hint_key, control)
+        self.setting_row(label_key, hint_key, control, cx)
     }
 
-    fn setting_row(&self, label_key: &str, hint_key: &str, control: AnyElement) -> AnyElement {
+    fn setting_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        control: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = self.i18n.t(label_key);
+        let hint = self.i18n.t(hint_key);
         div()
             .w_full()
             .min_w(px(0.0))
@@ -1391,13 +1401,25 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t(label_key)),
+                            .child(self.render_selectable_text_scoped(
+                                "settings-row-label",
+                                label_key,
+                                label,
+                                self.tokens.ui.text,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t(hint_key)),
+                            .child(self.render_selectable_text_scoped(
+                                "settings-row-hint",
+                                hint_key,
+                                hint,
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .child(control)

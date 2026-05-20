@@ -196,7 +196,7 @@ impl WorkspaceApp {
                     )),
             )
             .when(self.file_manager.preview_show_metadata, |dialog| {
-                dialog.child(self.render_file_manager_preview_metadata(has_background))
+                dialog.child(self.render_file_manager_preview_metadata(has_background, cx))
             })
             .child(
                 div()
@@ -236,6 +236,7 @@ impl WorkspaceApp {
                     language.as_deref(),
                     &entry.name,
                     has_background,
+                    cx,
                 ),
             Some(LocalPreview::Markdown { content })
                 if self.file_manager.preview_markdown_source =>
@@ -245,6 +246,7 @@ impl WorkspaceApp {
                     Some("markdown"),
                     &entry.name,
                     has_background,
+                    cx,
                 )
             }
             Some(LocalPreview::Markdown { content }) => {
@@ -795,10 +797,13 @@ impl WorkspaceApp {
         language: Option<&str>,
         filename: &str,
         has_background: bool,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         if content.is_empty() {
-            return self
-                .render_file_manager_preview_text_status(&self.i18n.t("fileManager.emptyFile"));
+            return self.render_file_manager_preview_text_status(
+                &self.i18n.t("fileManager.emptyFile"),
+                cx,
+            );
         }
         let theme = self.tokens.ui;
         let opts = MarkdownOptions::from_theme(&self.tokens);
@@ -1066,7 +1071,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_file_manager_preview_metadata(&self, has_background: bool) -> AnyElement {
+    fn render_file_manager_preview_metadata(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(metadata) = self.file_manager.preview_metadata.as_ref() else {
             return div().into_any_element();
         };
@@ -1081,12 +1090,14 @@ impl WorkspaceApp {
             self.i18n.t("fileManager.size"),
             format_file_size(metadata.size),
             false,
+            cx,
         ));
         grid = grid.child(self.render_file_manager_metadata_item(
             LucideIcon::Clock,
             self.i18n.t("fileManager.modified"),
             self.format_file_manager_quicklook_timestamp(metadata.modified),
             false,
+            cx,
         ));
         if let Some(created) = metadata.created {
             grid = grid.child(self.render_file_manager_metadata_item(
@@ -1094,6 +1105,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.created"),
                 self.format_file_manager_quicklook_timestamp(Some(created)),
                 false,
+                cx,
             ));
         }
         let permissions = metadata
@@ -1111,6 +1123,7 @@ impl WorkspaceApp {
             self.i18n.t("fileManager.permissions"),
             permissions,
             metadata.mode.is_some(),
+            cx,
         ));
         if let Some(mime_type) = metadata.mime_type.as_ref() {
             grid = grid.child(self.render_file_manager_metadata_item(
@@ -1118,6 +1131,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.type"),
                 mime_type.clone(),
                 false,
+                cx,
             ));
         }
         if metadata.is_symlink {
@@ -1126,6 +1140,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.symlink"),
                 self.i18n.t("fileManager.symlink"),
                 false,
+                cx,
             ));
         }
         div()
@@ -1148,12 +1163,19 @@ impl WorkspaceApp {
         label: String,
         value: String,
         mono_value: bool,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut value_el = div()
             .min_w(px(0.0))
             .truncate()
             .text_color(rgb(self.tokens.ui.text))
-            .child(value);
+            .child(self.render_selectable_text_scoped(
+                "file-manager-preview-metadata",
+                (&label, mono_value),
+                value,
+                self.tokens.ui.text,
+                cx,
+            ));
         if mono_value {
             value_el =
                 value_el.font_family(settings_mono_font_family(self.settings_store.settings()));
@@ -1168,11 +1190,15 @@ impl WorkspaceApp {
                 FILE_MANAGER_ICON_MD,
                 rgb(self.tokens.ui.text_muted),
             ))
-            .child(
-                div()
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(format!("{label}:")),
-            )
+            .child(div().text_color(rgb(self.tokens.ui.text_muted)).child(
+                self.render_selectable_text_scoped(
+                    "file-manager-preview-metadata-label",
+                    &label,
+                    format!("{label}:"),
+                    self.tokens.ui.text_muted,
+                    cx,
+                ),
+            ))
             .child(value_el)
             .into_any_element()
     }
@@ -1226,7 +1252,7 @@ impl WorkspaceApp {
         title: String,
         description: Option<String>,
         _has_background: bool,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .h(px(520.0))
@@ -1241,20 +1267,38 @@ impl WorkspaceApp {
                 40.0,
                 rgb(self.tokens.ui.text_muted),
             ))
-            .child(div().text_size(px(FILE_MANAGER_TEXT_SM)).child(title))
+            .child(div().text_size(px(FILE_MANAGER_TEXT_SM)).child(
+                self.render_selectable_text_scoped(
+                    "file-manager-preview-status-title",
+                    &title,
+                    title.clone(),
+                    self.tokens.ui.text_muted,
+                    cx,
+                ),
+            ))
             .when_some(description, |el, description| {
                 el.child(
                     div()
                         .max_w(px(520.0))
                         .text_center()
                         .text_size(px(FILE_MANAGER_TEXT_XS))
-                        .child(description),
+                        .child(self.render_selectable_text_scoped(
+                            "file-manager-preview-status-description",
+                            &title,
+                            description,
+                            self.tokens.ui.text_muted,
+                            cx,
+                        )),
                 )
             })
             .into_any_element()
     }
 
-    fn render_file_manager_preview_text_status(&self, text: &str) -> AnyElement {
+    fn render_file_manager_preview_text_status(
+        &self,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .h(px(520.0))
             .flex()
@@ -1262,7 +1306,13 @@ impl WorkspaceApp {
             .justify_center()
             .text_size(px(FILE_MANAGER_TEXT_SM))
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(text.to_string())
+            .child(self.render_selectable_text_scoped(
+                "file-manager-preview-text-status",
+                (),
+                text.to_string(),
+                self.tokens.ui.text_muted,
+                cx,
+            ))
             .into_any_element()
     }
 }

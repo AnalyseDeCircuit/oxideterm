@@ -10,21 +10,25 @@ impl WorkspaceApp {
                         "settings_view.help.app_name",
                         "settings_view.help.version_info",
                         "OxideTerm Native".to_string(),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.version",
                         "settings_view.help.version_info",
                         env!("CARGO_PKG_VERSION").to_string(),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.license",
                         "settings_view.help.resources",
                         "GPL-3.0-only".to_string(),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.portable_mode",
                         "settings_view.help.portable_mode_hint",
                         self.i18n.t("settings_view.help.updates_manual_only"),
+                        cx,
                     ),
                     self.cycle_row(
                         "settings_view.help.update_channel",
@@ -43,31 +47,37 @@ impl WorkspaceApp {
                         "settings_view.help.shortcut_new_tab",
                         "settings_view.help.category_app",
                         "Cmd+T".to_string(),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.shortcut_close_tab",
                         "settings_view.help.category_app",
                         "Cmd+W".to_string(),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.shortcut_find",
                         "settings_view.help.category_terminal",
                         "Cmd+F".to_string(),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.shortcut_split_h",
                         "settings_view.help.category_split",
                         "Cmd+Shift+E".to_string(),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.shortcut_split_v",
                         "settings_view.help.category_split",
                         "Cmd+Shift+D".to_string(),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.shortcut_settings",
                         "settings_view.help.category_app",
                         "Cmd+,".to_string(),
+                        cx,
                     ),
                 ],
             ),
@@ -79,16 +89,19 @@ impl WorkspaceApp {
                         "settings_view.help.open_logs",
                         "settings_view.help.open_logs_hint",
                         self.i18n.t("common.disabled"),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.memory_diagnostics_title",
                         "settings_view.help.memory_diagnostics_hint",
                         self.i18n.t("common.disabled"),
+                        cx,
                     ),
                     self.value_row(
                         "settings_view.help.check_update",
                         "settings_view.help.updates_manual_only_hint",
                         self.i18n.t("settings_view.help.updates_manual_only"),
+                        cx,
                     ),
                 ],
             ),
@@ -111,7 +124,7 @@ impl WorkspaceApp {
                 }),
             )
             .into_any_element();
-        self.setting_row(label_key, hint_key, control)
+        self.setting_row(label_key, hint_key, control, cx)
     }
 
     fn language_label(&self, language: Language) -> String {

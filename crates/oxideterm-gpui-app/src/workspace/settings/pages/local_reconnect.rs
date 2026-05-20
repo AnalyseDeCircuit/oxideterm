@@ -22,6 +22,7 @@ impl WorkspaceApp {
                     300.0,
                     cx,
                 ),
+                cx,
             ),
         );
         shell_rows.push(self.card_separator());
@@ -40,6 +41,7 @@ impl WorkspaceApp {
                     self.tokens.metrics.settings_select_width,
                     cx,
                 ),
+                cx,
             ),
         );
 
@@ -87,6 +89,7 @@ impl WorkspaceApp {
                         300.0,
                         cx,
                     ),
+                    cx,
                 ),
             );
         }

@@ -3,7 +3,10 @@ use oxideterm_connections::{
     list_ssh_config_hosts, resolve_ssh_config_alias, saved_connection_from_ssh_host,
 };
 use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_oxide_theme};
-use oxideterm_gpui_ui::modal::{dialog_backdrop, dialog_content};
+use oxideterm_gpui_ui::{
+    modal::{dialog_backdrop, dialog_content},
+    text_input::{text_input_anchor_probe, text_input_value_segments},
+};
 use oxideterm_theme::BUILT_IN_THEMES;
 use std::borrow::Cow;
 
@@ -275,6 +278,85 @@ impl WorkspaceApp {
                 .scroll_handle
                 .scroll_to_item(child_index, ScrollStrategy::Center);
         }
+    }
+
+    fn render_overlay_query_input(
+        &self,
+        target: WorkspaceImeTarget,
+        value: &str,
+        placeholder: String,
+        text_size: f32,
+        line_height: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let visually_empty = value.is_empty();
+        let display = if visually_empty {
+            placeholder
+        } else {
+            value.to_string()
+        };
+        let selected_range = self.ime_selected_range_for_target(target);
+        let selection_range = selected_range
+            .as_ref()
+            .filter(|range| range.start < range.end)
+            .cloned();
+        let caret_offset = selected_range
+            .as_ref()
+            .filter(|range| range.start == range.end)
+            .map(|range| range.start);
+        let marked_text = self.marked_text_for_target(target).unwrap_or_default();
+        let workspace = cx.entity();
+
+        text_input_anchor_probe(
+            target.anchor_id(),
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .text_size(px(text_size))
+                .line_height(px(line_height))
+                .text_color(if visually_empty {
+                    rgb(self.tokens.ui.text_muted)
+                } else {
+                    rgb(self.tokens.ui.text)
+                })
+                .cursor(gpui::CursorStyle::IBeam)
+                .overflow_hidden()
+                .child(text_input_value_segments(
+                    &self.tokens,
+                    &display,
+                    visually_empty,
+                    selection_range,
+                    caret_offset,
+                    self.new_connection_caret_visible,
+                ))
+                .when(!marked_text.is_empty(), |input| {
+                    input.child(
+                        div()
+                            .underline()
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(marked_text.to_string()),
+                    )
+                })
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        window.focus(&this.focus_handle);
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                })),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
     }
 
     pub(super) fn handle_shortcuts_modal_key(
@@ -939,20 +1021,16 @@ impl WorkspaceApp {
                                 LucideIcon::Search,
                                 rgb(self.tokens.ui.text_muted),
                             ))
-                            .child(
-                                div()
-                                    .ml(px(8.0))
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_size(px(14.0))
-                                    .line_height(px(20.0))
-                                    .text_color(if self.command_palette.raw_query.is_empty() {
-                                        rgb(self.tokens.ui.text_muted)
-                                    } else {
-                                        rgb(self.tokens.ui.text)
-                                    })
-                                    .child(query_text),
-                            ),
+                            .child(div().ml(px(8.0)).flex_1().min_w_0().child(
+                                self.render_overlay_query_input(
+                                    WorkspaceImeTarget::CommandPalette,
+                                    &self.command_palette.raw_query,
+                                    query_text,
+                                    14.0,
+                                    20.0,
+                                    cx,
+                                ),
+                            )),
                     )
                     .child(
                         div()
@@ -1264,18 +1342,14 @@ impl WorkspaceApp {
                                 16.0,
                                 rgb(self.tokens.ui.text_muted),
                             ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(if self.shortcuts_modal.query.is_empty() {
-                                        rgb(self.tokens.ui.text_muted)
-                                    } else {
-                                        rgb(self.tokens.ui.text)
-                                    })
-                                    .child(query_text),
-                            )
+                            .child(self.render_overlay_query_input(
+                                WorkspaceImeTarget::ShortcutsModalSearch,
+                                &self.shortcuts_modal.query,
+                                query_text,
+                                self.tokens.metrics.ui_text_sm,
+                                20.0,
+                                cx,
+                            ))
                             .child(
                                 div()
                                     .flex_none()

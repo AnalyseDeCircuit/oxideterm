@@ -3,6 +3,7 @@ impl WorkspaceApp {
         &self,
         result: OxideImportResultView,
         preview: Option<ImportPreview>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let has_error = !result.errors.is_empty();
         let tone = if has_error {
@@ -36,37 +37,51 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(18.0))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(format!("✓ 导入成功: {} 个连接", result.imported)),
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-import-result-title",
+                        result.imported,
+                        format!("✓ 导入成功: {} 个连接", result.imported),
+                        tone,
+                        cx,
+                    )),
             );
         if result.skipped > 0 {
             card = card.child(self.render_oxide_import_result_line(format!(
                 "跳过: {}",
                 result.skipped
-            )));
+            ), tone, cx));
         }
         if result.merged > 0 {
             card = card.child(self.render_oxide_import_result_line(format!(
                 "已合并: {}",
                 result.merged
-            )));
+            ), tone, cx));
         }
         if result.imported_app_settings {
             card = card.child(self.render_oxide_import_result_line(
                 "已恢复全局 OxideTerm 设置。".to_string(),
+                tone,
+                cx,
             ));
         }
         if skipped_app_settings {
-            card = card.child(self.render_oxide_import_result_line("已跳过应用设置".to_string()));
+            card = card.child(self.render_oxide_import_result_line(
+                "已跳过应用设置".to_string(),
+                tone,
+                cx,
+            ));
         }
         if result.imported_quick_commands > 0 {
             card = card.child(self.render_oxide_import_result_line(format!(
                 "已导入 {} 项快捷命令。",
                 result.imported_quick_commands
-            )));
+            ), tone, cx));
         }
         if result.skipped_quick_commands {
             card = card.child(self.render_oxide_import_result_line(
                 "已跳过快捷命令".to_string(),
+                tone,
+                cx,
             ));
         }
         if !result.quick_commands_errors.is_empty() {
@@ -81,7 +96,13 @@ impl WorkspaceApp {
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .line_height(px(16.0))
                         .opacity(0.9)
-                        .child(format!("• {error}")),
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-quick-error",
+                            error,
+                            format!("• {error}"),
+                            tone,
+                            cx,
+                        )),
                 );
             }
             card = card.child(quick_errors);
@@ -90,34 +111,40 @@ impl WorkspaceApp {
             card = card.child(self.render_oxide_import_result_line(format!(
                 "已恢复 {} 项插件偏好设置。",
                 result.imported_plugin_settings
-            )));
+            ), tone, cx));
         }
         if skipped_plugin_settings {
             card = card.child(self.render_oxide_import_result_line(
                 "已跳过插件偏好设置".to_string(),
+                tone,
+                cx,
             ));
         }
         if result.imported_portable_secrets > 0 {
             card = card.child(self.render_oxide_import_result_line(format!(
                 "已恢复 {} 项便携秘密项。",
                 result.imported_portable_secrets
-            )));
+            ), tone, cx));
         }
         if skipped_portable_secrets {
             card = card.child(self.render_oxide_import_result_line(
                 "已跳过便携秘密项".to_string(),
+                tone,
+                cx,
             ));
         }
         if skipped_forwards {
             card = card.child(self.render_oxide_import_result_line(
                 "已跳过端口转发".to_string(),
+                tone,
+                cx,
             ));
         }
         if result.replaced > 0 {
             card = card.child(self.render_oxide_import_result_line(format!(
                 "已替换: {}",
                 result.replaced
-            )));
+            ), tone, cx));
         }
         if result.renamed > 0 {
             let mut renamed = div()
@@ -130,15 +157,28 @@ impl WorkspaceApp {
                         .text_size(px(self.tokens.metrics.ui_text_sm))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(rgb(OXIDE_YELLOW_500))
-                        .child(format!("⚠️ 因冲突被重命名: {}", result.renamed)),
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-renamed-title",
+                            result.renamed,
+                            format!("⚠️ 因冲突被重命名: {}", result.renamed),
+                            OXIDE_YELLOW_500,
+                            cx,
+                        )),
                 );
             for (original, renamed_name) in &result.renames {
+                let line = format!("• \"{original}\" → \"{renamed_name}\"");
                 renamed = renamed.child(
                     div()
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .line_height(px(16.0))
                         .opacity(0.9)
-                        .child(format!("• \"{original}\" → \"{renamed_name}\"")),
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-rename-line",
+                            (original, renamed_name),
+                            line,
+                            OXIDE_YELLOW_500,
+                            cx,
+                        )),
                 );
             }
             card = card.child(renamed);
@@ -153,7 +193,13 @@ impl WorkspaceApp {
                     div()
                         .text_size(px(self.tokens.metrics.ui_text_sm))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child("错误:"),
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-error-title",
+                            (),
+                            "错误:",
+                            tone,
+                            cx,
+                        )),
                 );
             for error in &result.errors {
                 error_block = error_block.child(
@@ -161,7 +207,13 @@ impl WorkspaceApp {
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .line_height(px(16.0))
                         .opacity(0.9)
-                        .child(format!("• {error}")),
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-error-line",
+                            error,
+                            format!("• {error}"),
+                            tone,
+                            cx,
+                        )),
                 );
             }
             card = card.child(error_block);
@@ -178,17 +230,34 @@ impl WorkspaceApp {
                         .text_align(gpui::TextAlign::Center)
                         .text_size(px(self.tokens.metrics.ui_text_sm))
                         .text_color(rgb(self.tokens.ui.text_muted))
-                        .child("窗口将在 2 秒后自动关闭..."),
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-autoclose",
+                            (),
+                            "窗口将在 2 秒后自动关闭...",
+                            self.tokens.ui.text_muted,
+                            cx,
+                        )),
                 )
             })
             .into_any_element()
     }
 
-    fn render_oxide_import_result_line(&self, text: String) -> AnyElement {
+    fn render_oxide_import_result_line(
+        &self,
+        text: String,
+        color: u32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .line_height(px(20.0))
-            .child(text)
+            .child(self.render_selectable_text_scoped(
+                "oxide-import-result-line",
+                (),
+                text,
+                color,
+                cx,
+            ))
             .into_any_element()
     }
 

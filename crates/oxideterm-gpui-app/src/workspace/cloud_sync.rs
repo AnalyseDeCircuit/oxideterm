@@ -443,10 +443,12 @@ impl WorkspaceApp {
                                     .child(self.render_cloud_sync_fact(
                                         "plugin.cloud_sync.fields.backend",
                                         backend_label,
+                                        cx,
                                     ))
                                     .child(self.render_cloud_sync_fact(
                                         "plugin.cloud_sync.fields.namespace",
                                         settings.namespace,
+                                        cx,
                                     ))
                                     .child(
                                         self.render_cloud_sync_fact(
@@ -463,6 +465,7 @@ impl WorkspaceApp {
                                                 .unwrap_or_else(|_| {
                                                     self.i18n.t("plugin.cloud_sync.common.error")
                                                 }),
+                                            cx,
                                         ),
                                     )
                                     .child(
@@ -473,10 +476,15 @@ impl WorkspaceApp {
                                                 .as_deref()
                                                 .map(cloud_sync_format_timestamp)
                                                 .unwrap_or_else(|| "—".to_string()),
+                                            cx,
                                         ),
                                     ),
                             )
-                            .child(self.render_cloud_sync_meta(&state, local_snapshot.as_ref().ok())),
+                            .child(self.render_cloud_sync_meta(
+                                &state,
+                                local_snapshot.as_ref().ok(),
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -545,7 +553,7 @@ impl WorkspaceApp {
                     .when(!state.rollback_backups.is_empty(), |panel| {
                         panel.child(self.render_cloud_sync_rollback_backups(&state, busy, cx))
                     })
-                    .child(self.render_cloud_sync_history(&state))
+                    .child(self.render_cloud_sync_history(&state, cx))
                     .child(self.render_cloud_sync_config(cx))
                     .child(self.render_cloud_sync_notes(local_snapshot.as_ref().ok())),
             )
@@ -855,6 +863,7 @@ impl WorkspaceApp {
         &self,
         state: &CloudSyncPersistedState,
         local_snapshot: Option<&CloudSyncLocalSnapshot>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let counts = local_snapshot
@@ -881,6 +890,7 @@ impl WorkspaceApp {
                         .last_known_remote_revision
                         .clone()
                         .unwrap_or_else(|| "—".to_string()),
+                    cx,
                 ),
             )
             .child(
@@ -890,6 +900,7 @@ impl WorkspaceApp {
                         .remote_device_id
                         .clone()
                         .unwrap_or_else(|| "—".to_string()),
+                    cx,
                 ),
             )
             .child(
@@ -900,19 +911,37 @@ impl WorkspaceApp {
                         .as_deref()
                         .map(cloud_sync_format_timestamp)
                         .unwrap_or_else(|| "—".to_string()),
+                    cx,
                 ),
             )
-            .child(
-                self.render_cloud_sync_meta_line("plugin.cloud_sync.fields.local_counts", counts),
-            )
+            .child(self.render_cloud_sync_meta_line(
+                "plugin.cloud_sync.fields.local_counts",
+                counts,
+                cx,
+            ))
             .into_any_element()
     }
 
-    fn render_cloud_sync_meta_line(&self, label_key: &str, value: String) -> AnyElement {
+    fn render_cloud_sync_meta_line(
+        &self,
+        label_key: &str,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = self.i18n.t(label_key);
+        let text = format!("{label}: {value}");
         div()
             .min_w(px(0.0))
             .overflow_hidden()
-            .child(format!("{}: {}", self.i18n.t(label_key), value))
+            .child(self.render_selectable_text(
+                crate::workspace::selectable_text::selectable_text_id(
+                    "cloud-sync-meta",
+                    (&label, &value),
+                ),
+                text,
+                self.tokens.ui.text_muted,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -967,10 +996,12 @@ impl WorkspaceApp {
                     .child(self.render_cloud_sync_fact(
                         "plugin.cloud_sync.preview.connection_count",
                         summary.connections.to_string(),
+                        cx,
                     ))
                     .child(self.render_cloud_sync_fact(
                         "plugin.cloud_sync.preview.total_forwards",
                         summary.forwards.to_string(),
+                        cx,
                     )),
             )
             .child(
@@ -981,6 +1012,7 @@ impl WorkspaceApp {
                     .child(self.render_cloud_sync_fact(
                         "plugin.cloud_sync.preview.plugin_settings_label",
                         summary.plugin_settings_count.to_string(),
+                        cx,
                     ))
                     .child(self.render_cloud_sync_fact(
                         "plugin.cloud_sync.preview.embedded_keys_label",
@@ -989,6 +1021,7 @@ impl WorkspaceApp {
                         } else {
                             self.i18n.t("plugin.cloud_sync.common.no")
                         },
+                        cx,
                     )),
             );
         if !source_is_backup && state.local_dirty {
@@ -1005,11 +1038,11 @@ impl WorkspaceApp {
         }
         card = card.child(self.render_cloud_sync_preview_selection(&summary, &selection, cx));
         if !summary.forward_details.is_empty() {
-            card = card.child(self.render_cloud_sync_forward_details(&summary.forward_details));
+            card = card.child(self.render_cloud_sync_forward_details(&summary.forward_details, cx));
         }
         for (action, records) in summary.grouped_records() {
             if !records.is_empty() {
-                card = card.child(self.render_cloud_sync_record_group(action, &records));
+                card = card.child(self.render_cloud_sync_record_group(action, &records, cx));
             }
         }
         card.child(
@@ -1272,10 +1305,15 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_cloud_sync_forward_details(&self, details: &[CloudSyncForwardDetail]) -> AnyElement {
+    fn render_cloud_sync_forward_details(
+        &self,
+        details: &[CloudSyncForwardDetail],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut block = self.render_cloud_sync_preview_block(
             self.i18n
                 .t("plugin.cloud_sync.preview.forward_details_title"),
+            cx,
         );
         for detail in details.iter().take(PREVIEW_RECORD_LIMIT) {
             block = block.child(self.render_cloud_sync_list_item(
@@ -1284,6 +1322,7 @@ impl WorkspaceApp {
                     "{} · {}",
                     detail.owner_connection_name, detail.direction
                 )),
+                cx,
             ));
         }
         if details.len() > PREVIEW_RECORD_LIMIT {
@@ -1297,19 +1336,24 @@ impl WorkspaceApp {
         &self,
         action: &'static str,
         records: &[CloudSyncPreviewRecord],
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut block = self.render_cloud_sync_preview_block(self.i18n.t(match action {
-            "import" => "plugin.cloud_sync.preview.will_import",
-            "merge" => "plugin.cloud_sync.preview.will_merge",
-            "replace" => "plugin.cloud_sync.preview.will_replace",
-            "skip" => "plugin.cloud_sync.preview.will_skip",
-            "rename" => "plugin.cloud_sync.preview.will_rename",
-            _ => "plugin.cloud_sync.preview.records_header",
-        }));
+        let mut block = self.render_cloud_sync_preview_block(
+            self.i18n.t(match action {
+                "import" => "plugin.cloud_sync.preview.will_import",
+                "merge" => "plugin.cloud_sync.preview.will_merge",
+                "replace" => "plugin.cloud_sync.preview.will_replace",
+                "skip" => "plugin.cloud_sync.preview.will_skip",
+                "rename" => "plugin.cloud_sync.preview.will_rename",
+                _ => "plugin.cloud_sync.preview.records_header",
+            }),
+            cx,
+        );
         for record in records.iter().take(PREVIEW_RECORD_LIMIT) {
             block = block.child(self.render_cloud_sync_list_item(
                 record.name.clone(),
                 Some(self.format_cloud_sync_preview_record(record)),
+                cx,
             ));
         }
         if records.len() > PREVIEW_RECORD_LIMIT {
@@ -1319,7 +1363,7 @@ impl WorkspaceApp {
         block.into_any_element()
     }
 
-    fn render_cloud_sync_preview_block(&self, title: String) -> gpui::Div {
+    fn render_cloud_sync_preview_block(&self, title: String, cx: &mut Context<Self>) -> gpui::Div {
         let theme = self.tokens.ui;
         div()
             .w_full()
@@ -1337,12 +1381,40 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text_heading))
-                    .child(title),
+                    .child(self.render_selectable_text_scoped(
+                        "cloud-sync-preview-block-title",
+                        title.clone(),
+                        title,
+                        theme.text_heading,
+                        cx,
+                    )),
             )
     }
 
-    fn render_cloud_sync_list_item(&self, title: String, meta: Option<String>) -> AnyElement {
+    fn render_cloud_sync_list_item(
+        &self,
+        title: String,
+        meta: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let mono = cloud_sync_value_prefers_mono(&title);
+        let mut title_el = div()
+            .min_w(px(0.0))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(rgb(theme.text))
+            .child(self.render_selectable_text_scoped(
+                "cloud-sync-list-title",
+                title.clone(),
+                title,
+                theme.text,
+                cx,
+            ));
+        if mono {
+            title_el =
+                title_el.font_family(settings_mono_font_family(self.settings_store.settings()));
+        }
         div()
             .w_full()
             .min_w(px(0.0))
@@ -1350,19 +1422,19 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(2.0))
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(theme.text))
-                    .child(self.render_cloud_sync_fact_value(title)),
-            )
+            .child(title_el)
             .when_some(meta, |item, meta| {
                 item.child(
                     div()
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(theme.text_muted))
-                        .child(meta),
+                        .child(self.render_selectable_text_scoped(
+                            "cloud-sync-list-meta",
+                            meta.clone(),
+                            meta,
+                            theme.text_muted,
+                            cx,
+                        )),
                 )
             })
             .into_any_element()
@@ -1490,7 +1562,11 @@ impl WorkspaceApp {
         card.into_any_element()
     }
 
-    fn render_cloud_sync_history(&self, state: &CloudSyncPersistedState) -> AnyElement {
+    fn render_cloud_sync_history(
+        &self,
+        state: &CloudSyncPersistedState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let mut card = div()
             .rounded(px(self.tokens.radii.md))
@@ -1517,13 +1593,17 @@ impl WorkspaceApp {
             );
         } else {
             for entry in state.sync_history.iter().take(10) {
-                card = card.child(self.render_cloud_sync_history_entry(entry));
+                card = card.child(self.render_cloud_sync_history_entry(entry, cx));
             }
         }
         card.into_any_element()
     }
 
-    fn render_cloud_sync_history_entry(&self, entry: &CloudSyncHistoryEntry) -> AnyElement {
+    fn render_cloud_sync_history_entry(
+        &self,
+        entry: &CloudSyncHistoryEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let summary = self.i18n_replace(
             "plugin.cloud_sync.history.summary_line",
@@ -1552,16 +1632,32 @@ impl WorkspaceApp {
                     .text_size(px(13.0))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text))
-                    .child(self.cloud_sync_history_action_label(&entry.action)),
+                    .child(self.render_selectable_text(
+                        crate::workspace::selectable_text::selectable_text_id(
+                            "cloud-sync-history-action",
+                            (&entry.id, &entry.action),
+                        ),
+                        self.cloud_sync_history_action_label(&entry.action),
+                        theme.text,
+                        cx,
+                    )),
             )
             .child(
                 div()
                     .line_height(px(18.0))
                     .text_color(rgb(theme.text_muted))
-                    .child(format!(
-                        "{} · {}",
-                        cloud_sync_format_timestamp(&entry.timestamp),
-                        summary
+                    .child(self.render_selectable_text(
+                        crate::workspace::selectable_text::selectable_text_id(
+                            "cloud-sync-history-summary",
+                            (&entry.id, &entry.timestamp),
+                        ),
+                        format!(
+                            "{} · {}",
+                            cloud_sync_format_timestamp(&entry.timestamp),
+                            summary
+                        ),
+                        theme.text_muted,
+                        cx,
                     )),
             )
             .when_some(entry.error.as_ref(), |item, error| {
@@ -1569,7 +1665,15 @@ impl WorkspaceApp {
                     div()
                         .line_height(px(18.0))
                         .text_color(rgb(theme.error))
-                        .child(self.format_cloud_sync_error(error)),
+                        .child(self.render_selectable_text(
+                            crate::workspace::selectable_text::selectable_text_id(
+                                "cloud-sync-history-error",
+                                (&entry.id, error),
+                            ),
+                            self.format_cloud_sync_error(error),
+                            theme.error,
+                            cx,
+                        )),
                 )
             })
             .into_any_element()
@@ -1860,13 +1964,7 @@ impl WorkspaceApp {
                         this.focus_settings_input(input, current, cx);
                         this.ime_marked_text = None;
                         window.focus(&this.focus_handle);
-                        this.begin_ime_selection(
-                            target,
-                            event.position,
-                            event.modifiers.shift,
-                            window,
-                            cx,
-                        );
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         this.cloud_sync_open_select = None;
                         cx.stop_propagation();
                     }),
@@ -2636,8 +2734,14 @@ impl WorkspaceApp {
         }
     }
 
-    fn render_cloud_sync_fact(&self, label_key: &str, value: String) -> AnyElement {
+    fn render_cloud_sync_fact(
+        &self,
+        label_key: &str,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let label = self.i18n.t(label_key).to_uppercase();
         div()
             .min_w(px(0.0))
             .rounded(px(self.tokens.radii.md))
@@ -2650,23 +2754,28 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t(label_key).to_uppercase()),
+                    .child(label.clone()),
             )
-            .child(self.render_cloud_sync_fact_value(value))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .when(cloud_sync_value_prefers_mono(&value), |item| {
+                        item.font_family(settings_mono_font_family(self.settings_store.settings()))
+                    })
+                    .child(self.render_selectable_text(
+                        crate::workspace::selectable_text::selectable_text_id(
+                            "cloud-sync-fact",
+                            (&label, &value),
+                        ),
+                        value,
+                        self.tokens.ui.text,
+                        cx,
+                    )),
+            )
             .into_any_element()
-    }
-
-    fn render_cloud_sync_fact_value(&self, value: String) -> AnyElement {
-        let mut value_el = div()
-            .min_w(px(0.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(rgb(self.tokens.ui.text));
-        if cloud_sync_value_prefers_mono(&value) {
-            value_el =
-                value_el.font_family(settings_mono_font_family(self.settings_store.settings()));
-        }
-        value_el.child(value).into_any_element()
     }
 
     fn open_cloud_sync_import_confirm(&mut self) {

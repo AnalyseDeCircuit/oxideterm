@@ -57,6 +57,7 @@ impl WorkspaceApp {
                     &remote_path,
                     &remote_content,
                     has_background,
+                    cx,
                 ),
                 Some(self.i18n.t("sftp.diff.close")),
             ),
@@ -155,7 +156,13 @@ impl WorkspaceApp {
                                             self.settings_store.settings(),
                                         ))
                                     })
-                                    .child(title),
+                                    .child(self.render_selectable_text_scoped(
+                                        "sftp-dialog-title",
+                                        &title,
+                                        title.clone(),
+                                        theme.text_heading,
+                                        cx,
+                                    )),
                             )
                             .when(show_description, |header| {
                                 header.child(
@@ -172,22 +179,40 @@ impl WorkspaceApp {
                                             desc.flex()
                                                 .items_center()
                                                 .gap(px(4.0))
-                                                .child(description.clone())
+                                                .child(self.render_selectable_text_scoped(
+                                                    "sftp-dialog-description",
+                                                    &title,
+                                                    description.clone(),
+                                                    theme.text_muted,
+                                                    cx,
+                                                ))
                                                 .when(remaining > 0, |desc| {
                                                     desc.child(
                                                         div().text_color(rgb(SFTP_ORANGE)).child(
-                                                            self.i18n
-                                                                .t("sftp.conflict.remaining")
-                                                                .replace(
-                                                                    "{{count}}",
-                                                                    &remaining.to_string(),
-                                                                ),
+                                                            self.render_selectable_text_scoped(
+                                                                "sftp-conflict-remaining",
+                                                                remaining,
+                                                                self.i18n
+                                                                    .t("sftp.conflict.remaining")
+                                                                    .replace(
+                                                                        "{{count}}",
+                                                                        &remaining.to_string(),
+                                                                    ),
+                                                                SFTP_ORANGE,
+                                                                cx,
+                                                            ),
                                                         ),
                                                     )
                                                 })
                                         })
                                         .when(!matches!(dialog, SftpDialog::Conflict), |desc| {
-                                            desc.child(description)
+                                            desc.child(self.render_selectable_text_scoped(
+                                                "sftp-dialog-description",
+                                                &title,
+                                                description,
+                                                theme.text_muted,
+                                                cx,
+                                            ))
                                         }),
                                 )
                             }),

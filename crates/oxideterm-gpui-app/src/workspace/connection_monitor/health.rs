@@ -176,6 +176,7 @@ impl WorkspaceApp {
                 threshold_color(Some(cpu)),
                 Some(cpu as f32),
                 history.iter().map(|metric| metric.cpu_percent).collect(),
+                cx,
             ));
         }
         if !is_rtt_only && metrics.memory_used.is_some() && metrics.memory_total.is_some() {
@@ -190,6 +191,7 @@ impl WorkspaceApp {
                 threshold_color(metrics.memory_percent),
                 metrics.memory_percent.map(|value| value as f32),
                 history.iter().map(|metric| metric.memory_percent).collect(),
+                cx,
             ));
         }
         if !is_rtt_only && metrics.disk_used.is_some() && metrics.disk_total.is_some() {
@@ -204,12 +206,13 @@ impl WorkspaceApp {
                 threshold_color(metrics.disk_percent),
                 metrics.disk_percent.map(|value| value as f32),
                 history.iter().map(|metric| metric.disk_percent).collect(),
+                cx,
             ));
         }
         if !is_rtt_only
             && (metrics.net_rx_bytes_per_sec.is_some() || metrics.net_tx_bytes_per_sec.is_some())
         {
-            panel = panel.child(self.render_network_metric_card(metrics));
+            panel = panel.child(self.render_network_metric_card(metrics, cx));
         }
 
         panel
@@ -228,7 +231,8 @@ impl WorkspaceApp {
                                 metrics.load_avg_5.unwrap_or_default(),
                                 metrics.load_avg_15.unwrap_or_default()
                             ),
-                            rgb(self.tokens.ui.text),
+                            self.tokens.ui.text,
+                            cx,
                         ))
                     })
                     .child(
@@ -239,7 +243,8 @@ impl WorkspaceApp {
                                 .ssh_rtt_ms
                                 .map(|rtt| format!("{rtt} ms"))
                                 .unwrap_or_else(|| "—".to_string()),
-                            rgb(rtt_color(metrics.ssh_rtt_ms)),
+                            rtt_color(metrics.ssh_rtt_ms),
+                            cx,
                         ),
                     ),
             )
@@ -258,7 +263,13 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .font_family("monospace")
-                            .child(metrics_source_label(metrics.source)),
+                            .child(self.render_selectable_text_scoped(
+                                "monitor-metric-source",
+                                (),
+                                metrics_source_label(metrics.source),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .into_any_element()
@@ -456,6 +467,7 @@ impl WorkspaceApp {
         color: u32,
         progress_value: Option<f32>,
         history: Vec<Option<f64>>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -480,14 +492,20 @@ impl WorkspaceApp {
                             .text_size(px(12.0))
                             .text_color(rgb(theme.text_muted))
                             .child(Self::render_lucide_icon(icon, 14.0, rgb(theme.text_muted)))
-                            .child(label),
+                            .child(label.clone()),
                     )
                     .child(
                         div()
                             .font_family("monospace")
                             .text_size(px(12.0))
                             .text_color(rgb(color))
-                            .child(value),
+                            .child(self.render_selectable_text_scoped(
+                                "monitor-metric-value",
+                                &label,
+                                value,
+                                color,
+                                cx,
+                            )),
                     ),
             )
             .child(progress(&self.tokens, progress_value, false).h(px(6.0)))
@@ -498,8 +516,14 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_network_metric_card(&self, metrics: &ResourceMetrics) -> AnyElement {
+    fn render_network_metric_card(
+        &self,
+        metrics: &ResourceMetrics,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let rx_rate = format_rate(metrics.net_rx_bytes_per_sec.unwrap_or_default());
+        let tx_rate = format_rate(metrics.net_tx_bytes_per_sec.unwrap_or_default());
         div()
             .rounded(px(self.tokens.radii.md))
             .border_1()
@@ -538,8 +562,12 @@ impl WorkspaceApp {
                                 12.0,
                                 rgb(MONITOR_EMERALD),
                             ))
-                            .child(format_rate(
-                                metrics.net_rx_bytes_per_sec.unwrap_or_default(),
+                            .child(self.render_selectable_text_scoped(
+                                "monitor-network-rx",
+                                (),
+                                rx_rate,
+                                self.tokens.ui.text,
+                                cx,
                             )),
                     )
                     .child(
@@ -552,8 +580,12 @@ impl WorkspaceApp {
                                 12.0,
                                 rgb(MONITOR_AMBER),
                             ))
-                            .child(format_rate(
-                                metrics.net_tx_bytes_per_sec.unwrap_or_default(),
+                            .child(self.render_selectable_text_scoped(
+                                "monitor-network-tx",
+                                (),
+                                tx_rate,
+                                self.tokens.ui.text,
+                                cx,
                             )),
                     ),
             )
@@ -565,7 +597,8 @@ impl WorkspaceApp {
         icon: LucideIcon,
         label: String,
         value: String,
-        value_color: Rgba,
+        value_color: u32,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -583,14 +616,20 @@ impl WorkspaceApp {
                     .text_size(px(12.0))
                     .text_color(rgb(theme.text_muted))
                     .child(Self::render_lucide_icon(icon, 14.0, rgb(theme.text_muted)))
-                    .child(label),
+                    .child(label.clone()),
             )
             .child(
                 div()
                     .font_family("monospace")
                     .text_size(px(12.0))
-                    .text_color(value_color)
-                    .child(value),
+                    .text_color(rgb(value_color))
+                    .child(self.render_selectable_text_scoped(
+                        "monitor-compact-metric-value",
+                        &label,
+                        value,
+                        value_color,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

@@ -209,11 +209,11 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.settings_page_gap))
-            .child(self.render_settings_page_header(self.active_settings_tab))
+            .child(self.render_settings_page_header(self.active_settings_tab, cx))
             .child(separator(&self.tokens, SeparatorOrientation::Horizontal))
             .children(match self.active_settings_tab {
                 SettingsTab::General => self.settings_general(cx),
-                SettingsTab::Portable => self.settings_portable(),
+                SettingsTab::Portable => self.settings_portable(cx),
                 SettingsTab::Terminal => self.settings_terminal(cx),
                 SettingsTab::Appearance => self.settings_appearance(cx),
                 SettingsTab::Local => self.settings_local(cx),
@@ -230,7 +230,13 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_settings_page_header(&self, tab: SettingsTab) -> AnyElement {
+    fn render_settings_page_header(
+        &self,
+        tab: SettingsTab,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title = self.i18n.t(tab.title_key());
+        let description = self.i18n.t(tab.description_key());
         div()
             .flex()
             .flex_col()
@@ -240,21 +246,40 @@ impl WorkspaceApp {
                     .text_size(px(24.0))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(self.tokens.ui.text_heading))
-                    .child(self.i18n.t(tab.title_key())),
+                    .child(self.render_selectable_text_scoped(
+                        "settings-page-title",
+                        tab.title_key(),
+                        title,
+                        self.tokens.ui.text_heading,
+                        cx,
+                    )),
             )
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_base))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(tab.description_key())),
+                    .child(self.render_selectable_text_scoped(
+                        "settings-page-description",
+                        tab.description_key(),
+                        description,
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .when(tab == SettingsTab::Keybindings, |header| {
+                let note = self.i18n.t("settings_view.keybindings.intl_keyboard_note");
                 header.child(
                     div()
                         .mt(px(2.0))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xb3))
-                        .child(self.i18n.t("settings_view.keybindings.intl_keyboard_note")),
+                        .child(self.render_selectable_text_scoped(
+                            "settings-keybindings-note",
+                            "keybindings",
+                            note,
+                            self.tokens.ui.text_muted,
+                            cx,
+                        )),
                 )
             })
             .into_any_element()

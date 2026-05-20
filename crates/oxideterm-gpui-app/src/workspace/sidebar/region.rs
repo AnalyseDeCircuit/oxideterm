@@ -504,7 +504,7 @@ impl WorkspaceApp {
         } else {
             filtered
                 .into_iter()
-                .map(|entry| self.render_event_log_row(entry))
+                .map(|entry| self.render_event_log_row(entry, cx))
                 .collect::<Vec<_>>()
         };
 
@@ -753,7 +753,13 @@ impl WorkspaceApp {
                                                 gpui::FontWeight::NORMAL
                                             })
                                             .text_color(rgb(theme.text_heading))
-                                            .child(entry.title.clone()),
+                                            .child(self.render_selectable_text_scoped(
+                                                "notification-title",
+                                                entry.id,
+                                                entry.title.clone(),
+                                                theme.text_heading,
+                                                cx,
+                                            )),
                                     )
                                     .when(status_unread && !self.notification_center.notifications.dnd_enabled, |row| {
                                         row.child(
@@ -770,7 +776,13 @@ impl WorkspaceApp {
                                         .mt_1()
                                         .text_size(px(11.0))
                                         .text_color(rgb(theme.text_muted))
-                                        .child(detail),
+                                        .child(self.render_selectable_text_scoped(
+                                            "notification-body",
+                                            id,
+                                            detail,
+                                            theme.text_muted,
+                                            cx,
+                                        )),
                                 )
                             })
                             .child(
@@ -779,7 +791,13 @@ impl WorkspaceApp {
                                     .truncate()
                                     .text_size(px(10.0))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(format!("{timestamp} | {kind} | {scope}")),
+                                    .child(self.render_selectable_text_scoped(
+                                        "notification-meta",
+                                        id,
+                                        format!("{timestamp} | {kind} | {scope}"),
+                                        theme.text_muted,
+                                        cx,
+                                    )),
                             ),
                     )
                     .child(
@@ -822,7 +840,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_event_log_row(&self, entry: &WorkspaceEventLogEntry) -> AnyElement {
+    fn render_event_log_row(
+        &self,
+        entry: &WorkspaceEventLogEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let (icon, accent) = match entry.severity {
             WorkspaceEventSeverity::Info => (LucideIcon::Info, theme.accent),
@@ -876,7 +898,13 @@ impl WorkspaceApp {
                                     .text_size(px(12.0))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(theme.text_heading))
-                                    .child(self.resolve_event_log_title(entry)),
+                                    .child(self.render_selectable_text_scoped(
+                                        "event-log-title",
+                                        entry.id,
+                                        self.resolve_event_log_title(entry),
+                                        theme.text_heading,
+                                        cx,
+                                    )),
                             )
                             .when_some(self.resolve_event_log_detail(entry), |body, detail| {
                                 body.child(
@@ -884,7 +912,13 @@ impl WorkspaceApp {
                                         .mt_1()
                                         .text_size(px(11.0))
                                         .text_color(rgb(theme.text_muted))
-                                        .child(detail),
+                                        .child(self.render_selectable_text_scoped(
+                                            "event-log-detail",
+                                            entry.id,
+                                            detail,
+                                            theme.text_muted,
+                                            cx,
+                                        )),
                                 )
                             })
                             .child(
@@ -893,7 +927,13 @@ impl WorkspaceApp {
                                     .truncate()
                                     .text_size(px(10.0))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(format!("{timestamp} | {meta}")),
+                                    .child(self.render_selectable_text_scoped(
+                                        "event-log-meta",
+                                        entry.id,
+                                        format!("{timestamp} | {meta}"),
+                                        theme.text_muted,
+                                        cx,
+                                    )),
                             ),
                     ),
             )

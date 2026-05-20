@@ -57,6 +57,7 @@ impl WorkspaceApp {
                                 oxide_export_connection_count(dialog) > 0
                                     || dialog.include_portable_secrets,
                                 dialog.embed_keys,
+                                cx,
                             ))
                             .child(self.render_oxide_labeled_input(
                                 "描述（可选）".to_string(),
@@ -82,7 +83,7 @@ impl WorkspaceApp {
                                     cx.stop_propagation();
                                 }),
                             ))
-                            .child(self.render_oxide_export_content_summary(dialog))
+                            .child(self.render_oxide_export_content_summary(dialog, cx))
                             .child(self.render_oxide_export_password_input(dialog, cx))
                             .child(self.render_oxide_labeled_input(
                                 "确认密码 *".to_string(),
@@ -93,15 +94,15 @@ impl WorkspaceApp {
                                     cx,
                                 ),
                             ))
-                            .child(self.render_oxide_security_notice(dialog))
+                            .child(self.render_oxide_security_notice(dialog, cx))
                             .when_some(dialog.progress_stage.clone(), |body, progress| {
                                 body.child(self.render_oxide_progress(progress, Some(dialog.embed_keys)))
                             })
                             .when_some(dialog.result_summary.clone(), |body, result| {
-                                body.child(self.render_oxide_status_line(result, false))
+                                body.child(self.render_oxide_status_line(result, false, cx))
                             })
                             .when_some(dialog.error.clone(), |body, error| {
-                                body.child(self.render_oxide_error_banner(error))
+                                body.child(self.render_oxide_error_banner(error, cx))
                             })
                             .child(self.render_oxide_export_footer(dialog, cx)),
                     )

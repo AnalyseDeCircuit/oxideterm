@@ -552,7 +552,7 @@ impl WorkspaceApp {
                         this.ime_marked_text = None;
                         this.needs_active_pane_focus = false;
                         window.focus(&this.focus_handle);
-                        this.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.notify();
                         cx.stop_propagation();
                     }),

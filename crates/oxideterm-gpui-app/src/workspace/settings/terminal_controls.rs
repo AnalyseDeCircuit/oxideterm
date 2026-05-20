@@ -39,7 +39,7 @@ impl WorkspaceApp {
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle);
-                    this.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -135,6 +135,7 @@ impl WorkspaceApp {
             "settings_view.terminal.font_size",
             "settings_view.terminal.font_size_hint",
             control,
+            cx,
         )
     }
 
@@ -155,6 +156,7 @@ impl WorkspaceApp {
                 self.tokens.metrics.settings_number_input_width,
                 cx,
             ),
+            cx,
         )
     }
 
@@ -177,6 +179,7 @@ impl WorkspaceApp {
                     }),
                 )
                 .into_any_element(),
+            cx,
         )
     }
 
@@ -220,7 +223,7 @@ impl WorkspaceApp {
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle);
-                    this.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                 }),
             )

@@ -236,6 +236,7 @@ impl WorkspaceApp {
         color: u32,
         title: String,
         lines: Vec<String>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .px_4()
@@ -252,13 +253,26 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(title),
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-tone-title",
+                        (title.clone(), color),
+                        title.clone(),
+                        color,
+                        cx,
+                    )),
             )
-            .children(lines.into_iter().map(|line| {
+            .children(lines.into_iter().enumerate().map(|(index, line)| {
+                let text = format!("• {line}");
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .line_height(px(16.0))
-                    .child(format!("• {line}"))
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-tone-line",
+                        (color, index),
+                        text,
+                        color,
+                        cx,
+                    ))
             }))
             .into_any_element()
     }
@@ -373,11 +387,21 @@ impl WorkspaceApp {
         )
     }
 
-    fn render_oxide_section_empty_warning(&self, text: String) -> AnyElement {
+    fn render_oxide_section_empty_warning(
+        &self,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(OXIDE_YELLOW_500))
-            .child(text)
+            .child(self.render_selectable_text_scoped(
+                "oxide-empty-warning",
+                (),
+                text,
+                OXIDE_YELLOW_500,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -453,7 +477,17 @@ impl WorkspaceApp {
         checkbox(&self.tokens, label, checked).on_mouse_down(MouseButton::Left, listener)
     }
 
-    fn render_oxide_status_line(&self, text: String, error: bool) -> AnyElement {
+    fn render_oxide_status_line(
+        &self,
+        text: String,
+        error: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let color = if error {
+            self.tokens.ui.error
+        } else {
+            self.tokens.ui.text_muted
+        };
         div()
             .px_3()
             .py_2()
@@ -465,16 +499,18 @@ impl WorkspaceApp {
                 self.tokens.ui.border
             }))
             .text_size(px(self.tokens.metrics.ui_text_sm))
-            .text_color(rgb(if error {
-                self.tokens.ui.error
-            } else {
-                self.tokens.ui.text_muted
-            }))
-            .child(text)
+            .text_color(rgb(color))
+            .child(self.render_selectable_text_scoped(
+                "oxide-status-line",
+                error,
+                text,
+                color,
+                cx,
+            ))
             .into_any_element()
     }
 
-    fn render_oxide_error_banner(&self, text: String) -> AnyElement {
+    fn render_oxide_error_banner(&self, text: String, cx: &mut Context<Self>) -> AnyElement {
         div()
             .px_3()
             .py_2()
@@ -484,7 +520,13 @@ impl WorkspaceApp {
             .bg(rgba((OXIDE_RED_500 << 8) | OXIDE_TONE_BG_ALPHA))
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(rgb(OXIDE_RED_500))
-            .child(text)
+            .child(self.render_selectable_text_scoped(
+                "oxide-error-banner",
+                (),
+                text,
+                OXIDE_RED_500,
+                cx,
+            ))
             .into_any_element()
     }
 

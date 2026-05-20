@@ -35,7 +35,13 @@ impl WorkspaceApp {
                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(rgb(theme.text))
-                                .child("导入预览"),
+                                .child(self.render_selectable_text_scoped(
+                                    "oxide-import-preview-heading",
+                                    (),
+                                    "导入预览",
+                                    theme.text,
+                                    cx,
+                                )),
                         ),
                 )
                 .child(
@@ -65,10 +71,16 @@ impl WorkspaceApp {
             div()
                 .text_size(px(self.tokens.metrics.ui_text_sm))
                 .text_color(rgb(theme.text))
-                .child(format!(
-                    "将导入 {} 个连接 — 已选 {} 个",
-                    preview.total_connections,
-                    selected_names.len()
+                .child(self.render_selectable_text_scoped(
+                    "oxide-import-preview-summary",
+                    (),
+                    format!(
+                        "将导入 {} 个连接 — 已选 {} 个",
+                        preview.total_connections,
+                        selected_names.len()
+                    ),
+                    theme.text,
+                    cx,
                 ))
                 .into_any_element(),
         ];
@@ -94,6 +106,7 @@ impl WorkspaceApp {
                 OXIDE_BLUE_500,
                 "包含嵌入私钥".to_string(),
                 vec!["私钥将被提取到 ~/.ssh/imported/ 目录".to_string()],
+                cx,
             ));
         }
 
@@ -487,10 +500,18 @@ impl WorkspaceApp {
                                 .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(rgb(self.tokens.ui.text))
-                                .child("顶层设置变更"),
+                                .child(self.render_selectable_text_scoped(
+                                    "oxide-import-app-settings-changes-heading",
+                                    &section.id,
+                                    "顶层设置变更",
+                                    self.tokens.ui.text,
+                                    cx,
+                                )),
                         );
                         for key in &section.field_keys {
                             if let Some(value) = section.field_values.get(key) {
+                                let line =
+                                    format!("{}: {}", oxide_settings_field_label(key), value);
                                 values = values.child(
                                     div()
                                         .rounded(px(self.tokens.radii.sm))
@@ -499,10 +520,12 @@ impl WorkspaceApp {
                                         .py(px(6.0))
                                         .text_size(px(self.tokens.metrics.ui_text_xs))
                                         .text_color(rgb(self.tokens.ui.text_muted))
-                                        .child(format!(
-                                            "{}: {}",
-                                            oxide_settings_field_label(key),
-                                            value
+                                        .child(self.render_selectable_text_scoped(
+                                            "oxide-import-app-settings-change",
+                                            key,
+                                            line,
+                                            self.tokens.ui.text_muted,
+                                            cx,
                                         )),
                                 );
                             }
@@ -585,7 +608,13 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(format!("此文件还会恢复 {} 项插件偏好设置。", preview.plugin_settings_count))
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-import-plugin-settings-summary",
+                        (),
+                        format!("此文件还会恢复 {} 项插件偏好设置。", preview.plugin_settings_count),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    ))
                     .into_any_element(),
             );
         }
@@ -682,6 +711,7 @@ impl WorkspaceApp {
                     OXIDE_BLUE_500,
                     format!("此文件还包含 {} 项便携秘密项，例如 AI 提供商密钥。", preview.portable_secret_count),
                     Vec::new(),
+                    cx,
                 ),
             ],
         )
@@ -716,7 +746,7 @@ impl WorkspaceApp {
                 .flex()
                 .flex_col()
                 .gap(px(4.0));
-            for detail in &preview.forward_details {
+            for (index, detail) in preview.forward_details.iter().enumerate() {
                 list = list.child(
                     div()
                         .rounded(px(self.tokens.radii.md))
@@ -725,9 +755,12 @@ impl WorkspaceApp {
                         .py(px(6.0))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(format!(
-                            "{} · {}",
-                            detail.owner_connection_name, detail.description
+                        .child(self.render_selectable_text_scoped(
+                            "oxide-import-forward-detail",
+                            index,
+                            format!("{} · {}", detail.owner_connection_name, detail.description),
+                            self.tokens.ui.text_muted,
+                            cx,
                         )),
                 );
             }

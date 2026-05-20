@@ -262,13 +262,20 @@ impl WorkspaceApp {
         tabs.into_any_element()
     }
 
-    fn value_row(&self, label_key: &str, hint_key: &str, value: String) -> AnyElement {
+    fn value_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.setting_row(
             label_key,
             hint_key,
             select_trigger(&self.tokens, value, false, false)
                 .w(px(self.tokens.metrics.settings_select_width))
                 .into_any_element(),
+            cx,
         )
     }
 
@@ -388,11 +395,40 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
+        if self.forwarding_view.focused_input.take().is_some() {
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if self.file_manager.focused_input.take().is_some() {
+            self.ime_marked_text = None;
+            changed = true;
+        }
         if self.launcher.focused_input.take().is_some() {
             self.ime_marked_text = None;
             changed = true;
         }
         if self.graphics.focused_input.take().is_some() {
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if self.sftp_view.focused_input.take().is_some() {
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if self.ai_model_selector_search_focused || self.ai_model_selector_open {
+            self.ai_model_selector_search_focused = false;
+            self.ai_model_selector_open = false;
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if self.ai_chat_input_focused {
+            self.ai_chat_input_focused = false;
+            self.ai_chat_autocomplete_suppressed = true;
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if self.ai_editing_message_focused {
+            self.ai_editing_message_focused = false;
             self.ime_marked_text = None;
             changed = true;
         }
@@ -405,6 +441,7 @@ impl WorkspaceApp {
             changed = true;
         }
         if changed {
+            self.clear_ime_selection();
             self.new_connection_caret_visible = true;
             cx.notify();
         }
