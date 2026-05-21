@@ -16,10 +16,12 @@ fn close_terminal_quick_commands_popover_state(
     open: &mut bool,
     pending_command: &mut Option<String>,
     focused_input: &mut Option<QuickCommandInput>,
+    highlighted_command: &mut Option<String>,
 ) {
     *open = false;
     *pending_command = None;
     *focused_input = None;
+    *highlighted_command = None;
 }
 
 fn insert_quick_command_into_command_bar_state(
@@ -29,10 +31,16 @@ fn insert_quick_command_into_command_bar_state(
     open: &mut bool,
     pending_command: &mut Option<String>,
     focused_input: &mut Option<QuickCommandInput>,
+    highlighted_command: &mut Option<String>,
 ) {
     *draft = command.to_string();
     *command_bar_focused = true;
-    close_terminal_quick_commands_popover_state(open, pending_command, focused_input);
+    close_terminal_quick_commands_popover_state(
+        open,
+        pending_command,
+        focused_input,
+        highlighted_command,
+    );
 }
 
 fn quick_command_draft_can_save(draft: &QuickCommandDraft) -> bool {
@@ -43,12 +51,95 @@ fn quick_command_category_draft_can_save(draft: &QuickCommandCategoryDraft) -> b
     !draft.name.trim().is_empty()
 }
 
+fn quick_command_editor_tab_target(
+    input: QuickCommandInput,
+    forward: bool,
+) -> Option<QuickCommandInput> {
+    // Tauri quick command editors use ordinary DOM focus, so Tab/Shift+Tab
+    // walks editable fields in source order. GPUI currently only models the
+    // text-field focus targets here, so cycle that subset instead of letting
+    // the root focused-input capture swallow Tab at the editor edges.
+    const COMMAND_EDITOR_FIELDS: &[QuickCommandInput] = &[
+        QuickCommandInput::CommandName,
+        QuickCommandInput::CommandText,
+        QuickCommandInput::CommandDescription,
+        QuickCommandInput::CommandHostPattern,
+    ];
+    let index = COMMAND_EDITOR_FIELDS
+        .iter()
+        .position(|candidate| *candidate == input)?;
+    if forward {
+        COMMAND_EDITOR_FIELDS
+            .get(index + 1)
+            .copied()
+            .or_else(|| COMMAND_EDITOR_FIELDS.first().copied())
+    } else {
+        index
+            .checked_sub(1)
+            .and_then(|previous| COMMAND_EDITOR_FIELDS.get(previous).copied())
+            .or_else(|| COMMAND_EDITOR_FIELDS.last().copied())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum QuickCommandKeyDirection {
+    Next,
+    Previous,
+}
+
+fn quick_command_highlighted_index(
+    visible_commands: &[QuickCommand],
+    highlighted_command: Option<&str>,
+) -> Option<usize> {
+    highlighted_command.and_then(|id| {
+        visible_commands
+            .iter()
+            .position(|command| command.id.as_str() == id)
+    })
+}
+
+fn quick_command_keyboard_highlight(
+    visible_commands: &[QuickCommand],
+    highlighted_command: Option<&str>,
+    direction: QuickCommandKeyDirection,
+) -> Option<String> {
+    if visible_commands.is_empty() {
+        return None;
+    }
+    let current = quick_command_highlighted_index(visible_commands, highlighted_command);
+    let next = match direction {
+        QuickCommandKeyDirection::Next => current
+            .map(|index| (index + 1).min(visible_commands.len() - 1))
+            .unwrap_or(0),
+        QuickCommandKeyDirection::Previous => current
+            .map(|index| index.saturating_sub(1))
+            .unwrap_or(visible_commands.len() - 1),
+    };
+    Some(visible_commands[next].id.clone())
+}
+
+fn quick_command_highlight_at(visible_commands: &[QuickCommand], index: usize) -> Option<String> {
+    visible_commands
+        .get(index.min(visible_commands.len().saturating_sub(1)))
+        .map(|command| command.id.clone())
+}
+
 impl WorkspaceApp {
+    fn visible_quick_commands_for_active_terminal(&self) -> Vec<QuickCommand> {
+        let active_label = self
+            .active_tab()
+            .map(|tab| self.tab_display_title(tab))
+            .unwrap_or_default();
+        self.quick_commands
+            .visible_commands_for_targets(&[active_label])
+    }
+
     pub(super) fn close_terminal_quick_commands_popover(&mut self) {
         close_terminal_quick_commands_popover_state(
             &mut self.terminal_quick_commands_open,
             &mut self.terminal_quick_command_pending,
             &mut self.quick_commands.focused_input,
+            &mut self.quick_commands.highlighted_command,
         );
     }
 
@@ -60,6 +151,7 @@ impl WorkspaceApp {
             &mut self.terminal_quick_commands_open,
             &mut self.terminal_quick_command_pending,
             &mut self.quick_commands.focused_input,
+            &mut self.quick_commands.highlighted_command,
         );
     }
 
@@ -73,7 +165,80 @@ impl WorkspaceApp {
         };
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+        if input == QuickCommandInput::Search {
+            match key {
+                "escape" if !modifiers.platform && !modifiers.control => {
+                    // Tauri keeps Escape as the browser-like popover dismissal
+                    // path for the Command Bar quick commands surface.
+                    self.close_terminal_quick_commands_popover();
+                    self.terminal_command_bar_focused = true;
+                    self.ime_marked_text = None;
+                    cx.notify();
+                    return;
+                }
+                "arrowdown" | "down" if !modifiers.platform && !modifiers.control => {
+                    let visible_commands = self.visible_quick_commands_for_active_terminal();
+                    self.quick_commands.highlighted_command = quick_command_keyboard_highlight(
+                        &visible_commands,
+                        self.quick_commands.highlighted_command.as_deref(),
+                        QuickCommandKeyDirection::Next,
+                    );
+                    cx.notify();
+                    return;
+                }
+                "arrowup" | "up" if !modifiers.platform && !modifiers.control => {
+                    let visible_commands = self.visible_quick_commands_for_active_terminal();
+                    self.quick_commands.highlighted_command = quick_command_keyboard_highlight(
+                        &visible_commands,
+                        self.quick_commands.highlighted_command.as_deref(),
+                        QuickCommandKeyDirection::Previous,
+                    );
+                    cx.notify();
+                    return;
+                }
+                "home" if !modifiers.platform && !modifiers.control => {
+                    let visible_commands = self.visible_quick_commands_for_active_terminal();
+                    self.quick_commands.highlighted_command =
+                        quick_command_highlight_at(&visible_commands, 0);
+                    cx.notify();
+                    return;
+                }
+                "end" if !modifiers.platform && !modifiers.control => {
+                    let visible_commands = self.visible_quick_commands_for_active_terminal();
+                    self.quick_commands.highlighted_command =
+                        visible_commands.last().map(|command| command.id.clone());
+                    cx.notify();
+                    return;
+                }
+                "enter" if !modifiers.platform && !modifiers.control => {
+                    let visible_commands = self.visible_quick_commands_for_active_terminal();
+                    let selected_index = quick_command_highlighted_index(
+                        &visible_commands,
+                        self.quick_commands.highlighted_command.as_deref(),
+                    )
+                    .unwrap_or(0);
+                    if let Some(command) = visible_commands.get(selected_index) {
+                        let command_text = command.command.clone();
+                        self.insert_quick_command_into_command_bar(&command_text);
+                        cx.notify();
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
         match key {
+            "tab" if !modifiers.platform && !modifiers.control => {
+                if self.quick_commands.command_editor.is_some()
+                    && let Some(next_input) =
+                        quick_command_editor_tab_target(input, !modifiers.shift)
+                {
+                    self.quick_commands.focused_input = Some(next_input);
+                    self.clear_ime_selection();
+                    self.ime_marked_text = None;
+                    cx.notify();
+                }
+            }
             "escape" => {
                 self.quick_commands.focused_input = None;
                 self.ime_marked_text = None;
@@ -95,6 +260,9 @@ impl WorkspaceApp {
             }
             "backspace" if !modifiers.platform && !modifiers.control => {
                 self.quick_command_input_value_mut(input).pop();
+                if input == QuickCommandInput::Search {
+                    self.quick_commands.highlighted_command = None;
+                }
                 cx.notify();
             }
             _ => {}
@@ -183,13 +351,7 @@ impl WorkspaceApp {
 
     pub(super) fn render_quick_commands_popover(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let active_label = self
-            .active_tab()
-            .map(|tab| self.tab_display_title(tab))
-            .unwrap_or_default();
-        let visible_commands = self
-            .quick_commands
-            .visible_commands_for_targets(&[active_label]);
+        let visible_commands = self.visible_quick_commands_for_active_terminal();
         let mut popover = div()
             .absolute()
             .bottom(px(56.0))
@@ -210,6 +372,12 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             })
             .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_scroll_wheel(|_, _, cx| {
+                // Match Tauri's popover scroll boundary: wheel input inside
+                // the quick command surface must not close the overlay or leak
+                // to the terminal behind it.
                 cx.stop_propagation();
             });
 
@@ -332,6 +500,7 @@ impl WorkspaceApp {
                                         this.quick_commands.command_editor = None;
                                         this.quick_commands.category_editor = None;
                                         this.quick_commands.focused_input = None;
+                                        this.quick_commands.highlighted_command = None;
                                         cx.stop_propagation();
                                         cx.notify();
                                     }
@@ -400,6 +569,7 @@ impl WorkspaceApp {
                                         let category_id = category_id.clone();
                                         move |this, _event, _window, cx| {
                                             this.quick_commands.delete_category(&category_id);
+                                            this.quick_commands.highlighted_command = None;
                                             cx.stop_propagation();
                                             cx.notify();
                                         }
@@ -546,7 +716,8 @@ impl WorkspaceApp {
         let mut list = div()
             .flex_1()
             .min_h(px(0.0))
-            .overflow_hidden()
+            .overflow_y_scrollbar()
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .p(px(8.0))
             .flex()
             .flex_col()
@@ -568,6 +739,9 @@ impl WorkspaceApp {
         let command_for_run = command.command.clone();
         let command_for_edit = command.clone();
         let command_id = command.id.clone();
+        let command_id_for_hover = command.id.clone();
+        let highlighted =
+            self.quick_commands.highlighted_command.as_deref() == Some(command.id.as_str());
         let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
             "quick-command-row",
             command.id.as_str(),
@@ -580,11 +754,29 @@ impl WorkspaceApp {
             .items_center()
             .gap(px(8.0))
             .text_color(rgb(theme.text_muted))
+            .bg(if highlighted {
+                rgba((theme.bg_hover << 8) | 0xb3)
+            } else {
+                rgba(0x00000000)
+            })
             .hover(move |style| {
                 style
                     .bg(rgba((theme.bg_hover << 8) | 0xb3))
                     .text_color(rgb(theme.text))
             })
+            .on_mouse_move(
+                cx.listener(move |this, _event: &gpui::MouseMoveEvent, _window, cx| {
+                    // Mouse hover and ArrowUp/ArrowDown share the same active
+                    // row state, matching browser menu focus without changing
+                    // row-safe selectable click bubbling.
+                    if this.quick_commands.highlighted_command.as_deref()
+                        != Some(command_id_for_hover.as_str())
+                    {
+                        this.quick_commands.highlighted_command = Some(command_id_for_hover.clone());
+                        cx.notify();
+                    }
+                }),
+            )
             .child(
                 div()
                     .flex_1()
@@ -734,6 +926,7 @@ impl WorkspaceApp {
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         this.quick_commands.delete_command(&command_id);
+                        this.quick_commands.highlighted_command = None;
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -976,6 +1169,7 @@ impl WorkspaceApp {
                         this.quick_commands.command_editor = None;
                         this.quick_commands.category_editor = None;
                         this.quick_commands.focused_input = None;
+                        this.quick_commands.highlighted_command = None;
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -1064,6 +1258,7 @@ impl WorkspaceApp {
             host_pattern: String::new(),
         });
         self.quick_commands.focused_input = Some(QuickCommandInput::CommandName);
+        self.quick_commands.highlighted_command = None;
         cx.notify();
     }
 
@@ -1078,6 +1273,7 @@ impl WorkspaceApp {
             host_pattern: command.host_pattern.unwrap_or_default(),
         });
         self.quick_commands.focused_input = Some(QuickCommandInput::CommandName);
+        self.quick_commands.highlighted_command = None;
         cx.notify();
     }
 
@@ -1089,6 +1285,7 @@ impl WorkspaceApp {
             icon: QuickCommandIcon::Zap,
         });
         self.quick_commands.focused_input = Some(QuickCommandInput::CategoryName);
+        self.quick_commands.highlighted_command = None;
         cx.notify();
     }
 
@@ -1104,6 +1301,7 @@ impl WorkspaceApp {
             icon: category.icon,
         });
         self.quick_commands.focused_input = Some(QuickCommandInput::CategoryName);
+        self.quick_commands.highlighted_command = None;
         cx.notify();
     }
 
@@ -1119,6 +1317,7 @@ impl WorkspaceApp {
         };
         self.quick_commands.upsert_command(draft);
         self.quick_commands.focused_input = None;
+        self.quick_commands.highlighted_command = None;
         cx.notify();
     }
 
@@ -1134,6 +1333,7 @@ impl WorkspaceApp {
         };
         self.quick_commands.upsert_category(draft);
         self.quick_commands.focused_input = None;
+        self.quick_commands.highlighted_command = None;
         cx.notify();
     }
 }
@@ -1147,17 +1347,20 @@ mod terminal_command_bar_quick_command_tests {
         let mut open = true;
         let mut pending_command = Some("rm -rf /tmp/example".to_string());
         let mut focused_input = Some(QuickCommandInput::Search);
+        let mut highlighted_command = Some("qc-risky".to_string());
         let command_bar_focused = true;
 
         close_terminal_quick_commands_popover_state(
             &mut open,
             &mut pending_command,
             &mut focused_input,
+            &mut highlighted_command,
         );
 
         assert!(!open);
         assert_eq!(pending_command, None);
         assert_eq!(focused_input, None);
+        assert_eq!(highlighted_command, None);
         assert!(command_bar_focused);
     }
 
@@ -1168,6 +1371,7 @@ mod terminal_command_bar_quick_command_tests {
         let mut open = true;
         let mut pending_command = Some("docker system prune".to_string());
         let mut focused_input = Some(QuickCommandInput::Search);
+        let mut highlighted_command = Some("qc-docker".to_string());
 
         insert_quick_command_into_command_bar_state(
             &mut draft,
@@ -1176,6 +1380,7 @@ mod terminal_command_bar_quick_command_tests {
             &mut open,
             &mut pending_command,
             &mut focused_input,
+            &mut highlighted_command,
         );
 
         assert_eq!(draft, "git status");
@@ -1183,6 +1388,90 @@ mod terminal_command_bar_quick_command_tests {
         assert!(!open);
         assert_eq!(pending_command, None);
         assert_eq!(focused_input, None);
+        assert_eq!(highlighted_command, None);
+    }
+
+    #[test]
+    fn quick_command_keyboard_highlight_clamps_like_browser_menu_focus() {
+        let commands = vec![
+            QuickCommand {
+                id: "first".to_string(),
+                name: "First".to_string(),
+                command: "pwd".to_string(),
+                category: "system".to_string(),
+                description: None,
+                host_pattern: None,
+                created_at: 0,
+                updated_at: 0,
+            },
+            QuickCommand {
+                id: "second".to_string(),
+                name: "Second".to_string(),
+                command: "ls".to_string(),
+                category: "system".to_string(),
+                description: None,
+                host_pattern: None,
+                created_at: 0,
+                updated_at: 0,
+            },
+        ];
+
+        assert_eq!(
+            quick_command_keyboard_highlight(&commands, None, QuickCommandKeyDirection::Next),
+            Some("first".to_string())
+        );
+        assert_eq!(
+            quick_command_keyboard_highlight(
+                &commands,
+                Some("first"),
+                QuickCommandKeyDirection::Next
+            ),
+            Some("second".to_string())
+        );
+        assert_eq!(
+            quick_command_keyboard_highlight(
+                &commands,
+                Some("second"),
+                QuickCommandKeyDirection::Next
+            ),
+            Some("second".to_string())
+        );
+        assert_eq!(
+            quick_command_keyboard_highlight(&commands, None, QuickCommandKeyDirection::Previous),
+            Some("second".to_string())
+        );
+        assert_eq!(
+            quick_command_keyboard_highlight(
+                &commands,
+                Some("missing"),
+                QuickCommandKeyDirection::Next
+            ),
+            Some("first".to_string())
+        );
+        assert_eq!(
+            quick_command_keyboard_highlight(&[], None, QuickCommandKeyDirection::Next),
+            None
+        );
+    }
+
+    #[test]
+    fn quick_command_editor_tab_cycles_text_fields_without_swallowing_focus() {
+        assert_eq!(
+            quick_command_editor_tab_target(QuickCommandInput::CommandName, true),
+            Some(QuickCommandInput::CommandText)
+        );
+        assert_eq!(
+            quick_command_editor_tab_target(QuickCommandInput::CommandHostPattern, true),
+            Some(QuickCommandInput::CommandName)
+        );
+        assert_eq!(
+            quick_command_editor_tab_target(QuickCommandInput::CommandName, false),
+            Some(QuickCommandInput::CommandHostPattern)
+        );
+        assert_eq!(
+            quick_command_editor_tab_target(QuickCommandInput::Search, true),
+            None
+        );
     }
 
     #[test]

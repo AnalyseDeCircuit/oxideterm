@@ -39,6 +39,11 @@ impl WorkspaceApp {
                 0xf2,
             ))
             .shadow_lg()
+            .on_scroll_wheel(|_, _, cx| {
+                // Browser context menus are wheel boundaries: a wheel over the
+                // menu should not scroll the file list or dismiss the popover.
+                cx.stop_propagation();
+            })
             .when_some(menu.file.clone(), |menu_el, file| {
                 if file.file_type == LocalFileType::Directory {
                     menu_el.child(self.render_file_manager_context_menu_item(
@@ -335,30 +340,26 @@ impl WorkspaceApp {
                     cx.notify();
                 }),
                 cx,
-            ))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_this, _event, _window, cx| {
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element();
+            ));
 
         popover_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.file_manager.context_menu = None;
+                cx.listener(|this, _event, window, cx| {
+                    // File manager context menus are transient overlays; use
+                    // the workspace-level closer so focus restoration and other
+                    // open popovers stay in one browser-like path.
+                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(|this, _event, _window, cx| {
-                    this.file_manager.context_menu = None;
+                cx.listener(|this, _event, window, cx| {
+                    // Right-clicking outside a browser context menu closes it
+                    // before the next menu owner can decide what to show.
+                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .child(
@@ -367,7 +368,7 @@ impl WorkspaceApp {
                         .anchor(Corner::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(popup),
+                        .child(overlay_content_boundary(popup)),
                 )
                 .with_priority(100),
             )

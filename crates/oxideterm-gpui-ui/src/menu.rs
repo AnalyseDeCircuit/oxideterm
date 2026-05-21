@@ -1,4 +1,4 @@
-use gpui::{Div, IntoElement, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
+use gpui::{CursorStyle, Div, IntoElement, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
 use oxideterm_theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,7 +46,14 @@ pub fn menu_item(
         .text_size(px(tokens.metrics.ui_text_sm))
         .text_color(rgb(tokens.ui.text))
         .opacity(if disabled { 0.5 } else { 1.0 })
-        .cursor_pointer()
+        // Browser/Radix menu items expose disabled state as both visual
+        // opacity and a non-clickable cursor; callers still decide whether to
+        // attach handlers, but the primitive should not imply activation.
+        .cursor(if disabled {
+            CursorStyle::OperationNotAllowed
+        } else {
+            CursorStyle::PointingHand
+        })
         .when(
             matches!(
                 kind,

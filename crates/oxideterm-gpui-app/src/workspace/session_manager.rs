@@ -24,9 +24,11 @@ use oxideterm_forwarding::{ForwardType, OwnedForwardImportRecord, PersistedForwa
 use oxideterm_gpui_ui::{
     IconBadgeMetrics, TauriTableCellOptions, TauriTableCellStyle, TauriTableColors,
     TauriTableMetrics,
-    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_focus_visible, button_with,
+    },
     checkbox, icon_badge,
-    modal::{dismissible_dialog_backdrop, popover_backdrop},
+    modal::{dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop},
     modal_body, modal_container, modal_footer, modal_overlay,
     surface::{color_for_background, color_for_background_or_alpha},
     tauri_table_checkbox_cell, tauri_table_header, tauri_table_row, tauri_table_spacer_cell,
@@ -146,6 +148,46 @@ pub(super) enum SortDirection {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SessionManagerBasicDialogFooterAction {
+    Cancel,
+    Primary,
+}
+
+fn next_session_manager_basic_dialog_focus(
+    include_text_input: bool,
+    text_input_focused: bool,
+    current_footer: Option<SessionManagerBasicDialogFooterAction>,
+    forward: bool,
+) -> (bool, Option<SessionManagerBasicDialogFooterAction>) {
+    // Native dialogs do not get DOM tab order for free. This models the same
+    // small focus cycle used by the Tauri/Radix dialogs without hard-coding it
+    // into every footer renderer.
+    if include_text_input && text_input_focused {
+        return (
+            false,
+            Some(if forward {
+                SessionManagerBasicDialogFooterAction::Cancel
+            } else {
+                SessionManagerBasicDialogFooterAction::Primary
+            }),
+        );
+    }
+
+    match (include_text_input, current_footer, forward) {
+        (true, Some(SessionManagerBasicDialogFooterAction::Cancel), false)
+        | (true, Some(SessionManagerBasicDialogFooterAction::Primary), true) => (true, None),
+        (_, Some(SessionManagerBasicDialogFooterAction::Cancel), _) => {
+            (false, Some(SessionManagerBasicDialogFooterAction::Primary))
+        }
+        (_, Some(SessionManagerBasicDialogFooterAction::Primary), _) => {
+            (false, Some(SessionManagerBasicDialogFooterAction::Cancel))
+        }
+        (_, None, true) => (false, Some(SessionManagerBasicDialogFooterAction::Cancel)),
+        (_, None, false) => (false, Some(SessionManagerBasicDialogFooterAction::Primary)),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SessionTransferAction {
     ImportOxide,
     ExportOxide,
@@ -226,6 +268,7 @@ pub(super) struct SessionManagerState {
     pub(super) show_new_group: bool,
     pub(super) new_group_name: String,
     pub(super) show_import: bool,
+    pub(super) focused_basic_dialog_footer_action: Option<SessionManagerBasicDialogFooterAction>,
     pub(super) ssh_config_hosts: Vec<SshConfigHost>,
     pub(super) selected_import_aliases: HashSet<String>,
     pub(super) show_batch_move: bool,
@@ -256,6 +299,7 @@ impl Default for SessionManagerState {
             show_new_group: false,
             new_group_name: String::new(),
             show_import: false,
+            focused_basic_dialog_footer_action: None,
             ssh_config_hosts: Vec::new(),
             selected_import_aliases: HashSet::new(),
             show_batch_move: false,
@@ -289,9 +333,17 @@ pub(super) struct OxideImportDialogState {
     pub(super) busy: bool,
     pub(super) operation_generation: u64,
     pub(super) progress_stage: Option<OxideTransferProgress>,
+    pub(super) focused_footer_action: Option<OxideDialogFooterAction>,
     pub(super) error: Option<String>,
     pub(super) result_summary: Option<String>,
     pub(super) result: Option<OxideImportResultView>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum OxideDialogFooterAction {
+    Cancel,
+    Secondary,
+    Primary,
 }
 
 impl Default for OxideImportDialogState {
@@ -319,6 +371,7 @@ impl Default for OxideImportDialogState {
             busy: false,
             operation_generation: 0,
             progress_stage: None,
+            focused_footer_action: Some(OxideDialogFooterAction::Secondary),
             error: None,
             result_summary: None,
             result: None,
@@ -347,6 +400,7 @@ pub(super) struct OxideExportDialogState {
     pub(super) busy: bool,
     pub(super) operation_generation: u64,
     pub(super) progress_stage: Option<OxideTransferProgress>,
+    pub(super) focused_footer_action: Option<OxideDialogFooterAction>,
     pub(super) last_export_timestamp: Option<i64>,
     pub(super) preflight: Option<ExportPreflightResult>,
     pub(super) error: Option<String>,
@@ -378,6 +432,7 @@ impl Default for OxideExportDialogState {
             busy: false,
             operation_generation: 0,
             progress_stage: None,
+            focused_footer_action: Some(OxideDialogFooterAction::Cancel),
             last_export_timestamp: None,
             preflight: None,
             error: None,

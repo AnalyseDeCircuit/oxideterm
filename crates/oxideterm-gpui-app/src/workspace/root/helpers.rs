@@ -635,11 +635,127 @@ impl WorkspaceApp {
         // popovers and input focus before the overlay starts trapping events.
         self.open_settings_select = None;
         self.focused_settings_input = None;
+        self.cloud_sync_focused_select = None;
         self.settings_slider_drag = None;
         self.ime_marked_text = None;
         self.workspace_tooltip = None;
         self.workspace_tooltip_pending = None;
         self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+    }
+
+    pub(super) fn dismiss_transient_workspace_overlays(&mut self) -> bool {
+        let mut changed = false;
+
+        // Match browser/Radix outside-click behavior for non-modal UI only.
+        // Auth prompts, confirm dialogs, QuickLook, and SFTP editor shells keep
+        // their dedicated dialog_backdrop() close policy and are intentionally
+        // excluded from this shared background dismiss path.
+        if self.open_settings_select.take().is_some() {
+            changed = true;
+        }
+        if self.open_new_connection_select.take().is_some() {
+            changed = true;
+        }
+        if self.cloud_sync_open_select.take().is_some() {
+            self.cloud_sync_select_highlighted = None;
+            changed = true;
+        }
+        if self.cloud_sync_focused_select.take().is_some() {
+            // Outside pointer focus in the browser leaves the Radix trigger;
+            // mirror that owner release so the native focus ring cannot linger.
+            changed = true;
+        }
+        if self.connection_monitor.selector_open {
+            self.connection_monitor.selector_open = false;
+            changed = true;
+        }
+        if self.session_manager.show_batch_move {
+            self.session_manager.show_batch_move = false;
+            changed = true;
+        }
+        if self
+            .session_manager
+            .row_context_menu_connection_id
+            .take()
+            .is_some()
+        {
+            changed = true;
+        }
+        if self.session_manager.row_menu_connection_id.take().is_some() {
+            changed = true;
+        }
+        if self.file_manager.context_menu.take().is_some() {
+            changed = true;
+        }
+        if self.sftp_view.dismiss_context_menu() {
+            changed = true;
+        }
+        if self.terminal_broadcast_menu_open {
+            self.terminal_broadcast_menu_open = false;
+            changed = true;
+        }
+        if self.detached_local_terminals_popover_open {
+            self.detached_local_terminals_popover_open = false;
+            changed = true;
+        }
+        if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
+            self.close_terminal_quick_commands_popover();
+            changed = true;
+        }
+        if self.terminal_command_suggestions_open {
+            self.terminal_command_suggestions_open = false;
+            self.terminal_command_suggestion_highlighted = None;
+            changed = true;
+        }
+        if self.has_ai_sidebar_floating_overlay() {
+            self.close_ai_sidebar_popovers();
+            changed = true;
+        }
+        if self.workspace_tooltip.is_some() || self.workspace_tooltip_pending.is_some() {
+            self.workspace_tooltip = None;
+            self.workspace_tooltip_pending = None;
+            self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+            changed = true;
+        }
+        if changed {
+            self.ime_marked_text = None;
+        }
+
+        changed
+    }
+
+    pub(super) fn dismiss_transient_workspace_overlays_from_outside_pointer(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = self.dismiss_transient_workspace_overlays();
+        if changed {
+            // Radix restores focus to the trigger/outside target after closing
+            // transient popovers. Native tracks most triggers as workspace
+            // state, so returning focus to the Workspace root keeps keyboard
+            // routing alive while leaving feature focus flags unchanged.
+            window.focus(&self.focus_handle);
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(super) fn handle_transient_workspace_overlay_escape(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.key.as_str() != "escape" || event.keystroke.modifiers.platform {
+            return false;
+        }
+        if self.dismiss_transient_workspace_overlays() {
+            window.focus(&self.focus_handle);
+            cx.notify();
+            return true;
+        }
+        false
     }
 
     fn restore_session_tree_snapshot(&mut self) {

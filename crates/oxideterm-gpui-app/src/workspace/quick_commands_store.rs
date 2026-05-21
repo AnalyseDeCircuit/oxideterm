@@ -11,6 +11,7 @@ impl QuickCommandsState {
             active_category: "system".to_string(),
             query: String::new(),
             focused_input: None,
+            highlighted_command: None,
             command_editor: None,
             category_editor: None,
             last_persist_error: None,
@@ -167,6 +168,7 @@ impl QuickCommandsState {
         self.categories = default_quick_command_categories();
         self.commands = default_quick_commands();
         self.active_category = "system".to_string();
+        self.highlighted_command = None;
         self.command_editor = None;
         self.category_editor = None;
         self.persist();

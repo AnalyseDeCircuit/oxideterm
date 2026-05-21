@@ -160,6 +160,9 @@ pub fn ai_context_popover(tokens: &ThemeTokens) -> Div {
         .border_color(bg_alpha(tokens, tokens.ui.border, AI_HEADER_BORDER_ALPHA))
         .bg(rgb(tokens.ui.bg_panel))
         .shadow_lg()
+        // Keep wheel input local to the popover, matching browser popover
+        // scroll chaining rules even when the compact panel has no scrollbar.
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
 }
 
 pub fn ai_context_popover_header(

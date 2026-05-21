@@ -126,7 +126,7 @@ impl WorkspaceApp {
         true
     }
 
-    fn start_ai_summarize_conversation(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn start_ai_summarize_conversation(&mut self, cx: &mut Context<Self>) {
         let conversation = match self.ai_chat.active_conversation() {
             Some(conversation) if conversation.messages.len() >= 4 => conversation.clone(),
             _ => return,

@@ -17,14 +17,88 @@ impl WorkspaceApp {
                     .insert(provider.id.clone());
             }
             self.ai_model_selector_search_focused = true;
+            self.ai_model_selector_highlighted_model = None;
             self.refresh_ai_model_selector_provider_statuses(cx);
             window.focus(&self.focus_handle);
         } else {
             self.ai_model_selector_search_focused = false;
             self.ai_model_selector_search_query.clear();
+            self.ai_model_selector_highlighted_model = None;
         }
         self.ime_marked_text = None;
         cx.notify();
+    }
+
+    fn ai_model_selector_visible_model_keys(&self) -> Vec<(String, String)> {
+        let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
+        let searching = !self.ai_model_selector_search_query.trim().is_empty();
+        // Tauri renders models as focusable dropdown items only for expanded
+        // providers, while search mode expands matching providers. Keep the
+        // keyboard target list identical to the rendered, selectable rows.
+        model_selector_visible_provider_groups(&providers, &self.ai_model_selector_search_query)
+            .into_iter()
+            .filter(|group| {
+                searching || self.ai_model_selector_expanded_providers.contains(&group.provider.id)
+            })
+            .filter(|group| {
+                self.ai_model_selector_has_key(&group.provider)
+                    && self.ai_model_selector_provider_is_online(&group.provider)
+            })
+            .flat_map(|group| {
+                let provider_id = group.provider.id;
+                group
+                    .visible_models
+                    .into_iter()
+                    .map(move |model| (provider_id.clone(), model))
+            })
+            .collect()
+    }
+
+    fn move_ai_model_selector_highlight(&mut self, delta: isize) {
+        let rows = self.ai_model_selector_visible_model_keys();
+        if rows.is_empty() {
+            self.ai_model_selector_highlighted_model = None;
+            return;
+        }
+        let current = self
+            .ai_model_selector_highlighted_model
+            .as_ref()
+            .and_then(|highlighted| rows.iter().position(|row| row == highlighted));
+        let next = match (current, delta.is_negative()) {
+            (Some(index), false) => (index + delta as usize).min(rows.len() - 1),
+            (Some(index), true) => index.saturating_sub(delta.unsigned_abs()),
+            (None, false) => 0,
+            (None, true) => rows.len() - 1,
+        };
+        self.ai_model_selector_highlighted_model = rows.get(next).cloned();
+    }
+
+    fn set_ai_model_selector_highlight_edge(&mut self, last: bool) {
+        let rows = self.ai_model_selector_visible_model_keys();
+        // Home/End in Radix-style menu focus moves to the first/last selectable
+        // model row, not to provider headers or disabled provider messages.
+        self.ai_model_selector_highlighted_model = if last {
+            rows.last().cloned()
+        } else {
+            rows.first().cloned()
+        };
+    }
+
+    fn select_highlighted_ai_model(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some((provider_id, model)) = self.ai_model_selector_highlighted_model.clone() else {
+            return false;
+        };
+        if !self
+            .ai_model_selector_visible_model_keys()
+            .iter()
+            .any(|row| row == &(provider_id.clone(), model.clone()))
+        {
+            self.ai_model_selector_highlighted_model = None;
+            return false;
+        }
+        self.select_ai_model_from_selector(provider_id, model, cx);
+        self.ai_model_selector_highlighted_model = None;
+        true
     }
 
     fn refresh_ai_model_selector_provider_statuses(&mut self, cx: &mut Context<Self>) {
@@ -233,6 +307,7 @@ impl WorkspaceApp {
         self.ai_model_selector_open = false;
         self.ai_model_selector_search_focused = false;
         self.ai_model_selector_search_query.clear();
+        self.ai_model_selector_highlighted_model = None;
         cx.notify();
     }
 

@@ -363,6 +363,7 @@ impl WorkspaceApp {
             !oxide_export_has_selected_content(dialog),
             String::new(),
             primary_label,
+            dialog.focused_footer_action,
             cx.listener(|_this, _event, _window, cx| {
                 cx.stop_propagation();
             }),

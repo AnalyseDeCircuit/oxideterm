@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, Bounds, Div, Element, ElementId, GlobalElementId, InspectorElementId,
-    InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Stateful,
+    AnyElement, App, Bounds, CursorStyle, Div, Element, ElementId, GlobalElementId,
+    InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Stateful,
     StatefulInteractiveElement, Styled, Window, div, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
@@ -185,6 +185,14 @@ pub fn select_trigger(
             tokens.ui.text
         }))
         .opacity(if disabled { 0.5 } else { 1.0 })
+        // Native select triggers are shared by settings/new-connection/Cloud
+        // Sync. Mirror browser disabled affordance at the primitive level so
+        // disabled selects do not still look clickable.
+        .cursor(if disabled {
+            CursorStyle::OperationNotAllowed
+        } else {
+            CursorStyle::PointingHand
+        })
         .child(div().flex_1().min_w(px(0.0)).truncate().child(value.into()))
         .child(
             div()

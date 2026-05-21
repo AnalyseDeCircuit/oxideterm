@@ -51,13 +51,33 @@ const CLOUD_SYNC_STAT_PADDING: f32 = 8.0;
 const CLOUD_SYNC_BG_MIX_ALPHA: u32 = 0x80;
 const CLOUD_SYNC_LIST_BORDER_ALPHA: u32 = 0xA6;
 const CLOUD_SYNC_LIST_BG_ALPHA: u32 = 0x8C;
-type CloudSyncOptionListener = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+const CLOUD_SYNC_SELECT_HIGHLIGHT_ALPHA: u32 = 0x26; // Radix SelectItem focus:bg-theme-bg-hover.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CloudSyncSelect {
     Backend,
     AuthMode,
     ConflictStrategy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CloudSyncSelectAction {
+    Backend(BackendType),
+    AuthMode(AuthMode),
+    ConflictStrategy(ConflictStrategy),
+}
+
+#[derive(Clone, Debug)]
+struct CloudSyncSelectOption {
+    label: String,
+    selected: bool,
+    action: CloudSyncSelectAction,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SelectKeyDirection {
+    Previous,
+    Next,
 }
 
 #[derive(Clone, Debug)]
@@ -449,6 +469,16 @@ impl WorkspaceApp {
             .id("cloud-sync-scroll")
             .size_full()
             .selectable_overflow_y_scrollbar(&cloud_sync_scroll)
+            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                if this.cloud_sync_open_select.is_some() {
+                    // A wheel on the scroll container outside the inline select
+                    // dismisses the popup while preserving the trigger focus,
+                    // matching Radix Select inside a scrollable settings pane.
+                    this.cloud_sync_open_select = None;
+                    this.cloud_sync_select_highlighted = None;
+                    cx.notify();
+                }
+            }))
             .bg(rgb(theme.bg))
             .text_color(rgb(theme.text))
             .text_size(px(self.tokens.metrics.ui_text_sm))
@@ -547,7 +577,7 @@ impl WorkspaceApp {
                                 busy,
                                 cx.listener(|this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
                                     this.start_cloud_sync_upload(false, cx);
-                                    this.cloud_sync_open_select = None;
+                                    this.clear_cloud_sync_select_focus();
                         cx.stop_propagation();
                                 }),
                             ))
@@ -557,7 +587,7 @@ impl WorkspaceApp {
                                 busy,
                                 cx.listener(|this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
                                     this.start_cloud_sync_check(cx);
-                                    this.cloud_sync_open_select = None;
+                                    this.clear_cloud_sync_select_focus();
                         cx.stop_propagation();
                                 }),
                             ))
@@ -567,7 +597,7 @@ impl WorkspaceApp {
                                 busy,
                                 cx.listener(|this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
                                     this.start_cloud_sync_pull_preview(cx);
-                                    this.cloud_sync_open_select = None;
+                                    this.clear_cloud_sync_select_focus();
                         cx.stop_propagation();
                                 }),
                             ))
@@ -577,7 +607,7 @@ impl WorkspaceApp {
                                 busy || !has_rollback_backup,
                                 cx.listener(|this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
                                     this.open_cloud_sync_restore_confirm(None);
-                                    this.cloud_sync_open_select = None;
+                                    this.clear_cloud_sync_select_focus();
                         cx.stop_propagation();
                                     cx.notify();
                                 }),
@@ -588,7 +618,7 @@ impl WorkspaceApp {
                                 busy,
                                 cx.listener(|this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
                                     this.save_cloud_sync_configuration(cx);
-                                    this.cloud_sync_open_select = None;
+                                    this.clear_cloud_sync_select_focus();
                         cx.stop_propagation();
                                     cx.notify();
                                 }),
@@ -1217,7 +1247,7 @@ impl WorkspaceApp {
                          _window,
                          cx: &mut Context<WorkspaceApp>| {
                             this.open_cloud_sync_import_confirm();
-                            this.cloud_sync_open_select = None;
+                            this.clear_cloud_sync_select_focus();
                             cx.stop_propagation();
                             cx.notify();
                         },
@@ -1234,7 +1264,7 @@ impl WorkspaceApp {
                          cx: &mut Context<WorkspaceApp>| {
                             this.cloud_sync_pending_preview = None;
                             this.cloud_sync_preview_selection = None;
-                            this.cloud_sync_open_select = None;
+                            this.clear_cloud_sync_select_focus();
                             cx.stop_propagation();
                             cx.notify();
                         },
@@ -2151,7 +2181,7 @@ impl WorkspaceApp {
                 |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
                     this.cloud_sync_form.auto_upload_enabled =
                         !this.cloud_sync_form.auto_upload_enabled;
-                    this.cloud_sync_open_select = None;
+                    this.clear_cloud_sync_select_focus();
                     cx.stop_propagation();
                     cx.notify();
                 },
@@ -2232,7 +2262,7 @@ impl WorkspaceApp {
                         this.ime_marked_text = None;
                         window.focus(&this.focus_handle);
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        this.cloud_sync_open_select = None;
+                        this.clear_cloud_sync_select_focus();
                         cx.stop_propagation();
                     }),
                 )
@@ -2301,7 +2331,8 @@ impl WorkspaceApp {
                             key: secret_key.to_string(),
                             label: label.clone(),
                         });
-                        this.cloud_sync_open_select = None;
+                        this.cloud_sync_confirm_focused_action = Some(ConfirmDialogAction::Cancel);
+                        this.clear_cloud_sync_select_focus();
                         cx.stop_propagation();
                         cx.notify();
                     },
@@ -2321,86 +2352,7 @@ impl WorkspaceApp {
                 ..CloudSyncSettings::default()
             }),
             cx,
-            vec![
-                (
-                    self.i18n.t("plugin.cloud_sync.backend.webdav"),
-                    matches!(self.cloud_sync_form.backend_type, BackendType::Webdav),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.backend_type = BackendType::Webdav;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-                (
-                    self.i18n.t("plugin.cloud_sync.backend.http_json"),
-                    matches!(self.cloud_sync_form.backend_type, BackendType::HttpJson),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.backend_type = BackendType::HttpJson;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-                (
-                    self.i18n.t("plugin.cloud_sync.backend.dropbox"),
-                    matches!(self.cloud_sync_form.backend_type, BackendType::Dropbox),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.backend_type = BackendType::Dropbox;
-                            this.cloud_sync_form.auth_mode = AuthMode::Bearer;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-                (
-                    self.i18n.t("plugin.cloud_sync.backend.git"),
-                    matches!(self.cloud_sync_form.backend_type, BackendType::Git),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.backend_type = BackendType::Git;
-                            this.cloud_sync_form.auth_mode = AuthMode::None;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-                (
-                    self.i18n.t("plugin.cloud_sync.backend.s3"),
-                    matches!(self.cloud_sync_form.backend_type, BackendType::S3),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.backend_type = BackendType::S3;
-                            this.cloud_sync_form.auth_mode = AuthMode::None;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-            ],
+            self.cloud_sync_select_options(CloudSyncSelect::Backend),
         )
     }
 
@@ -2415,53 +2367,7 @@ impl WorkspaceApp {
             CloudSyncSelect::AuthMode,
             current,
             cx,
-            vec![
-                (
-                    self.i18n.t("plugin.cloud_sync.auth.bearer"),
-                    matches!(self.cloud_sync_form.auth_mode, AuthMode::Bearer),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.auth_mode = AuthMode::Bearer;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-                (
-                    self.i18n.t("plugin.cloud_sync.auth.basic"),
-                    matches!(self.cloud_sync_form.auth_mode, AuthMode::Basic),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.auth_mode = AuthMode::Basic;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-                (
-                    self.i18n.t("plugin.cloud_sync.auth.none"),
-                    matches!(self.cloud_sync_form.auth_mode, AuthMode::None),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.auth_mode = AuthMode::None;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-            ],
+            self.cloud_sync_select_options(CloudSyncSelect::AuthMode),
         )
     }
 
@@ -2477,84 +2383,240 @@ impl WorkspaceApp {
             CloudSyncSelect::ConflictStrategy,
             current,
             cx,
-            vec![
-                (
-                    self.i18n.t("plugin.cloud_sync.conflict.merge"),
-                    matches!(
-                        self.cloud_sync_form.default_conflict_strategy,
-                        ConflictStrategy::Merge
-                    ),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.default_conflict_strategy =
-                                ConflictStrategy::Merge;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-                (
-                    self.i18n.t("plugin.cloud_sync.conflict.replace"),
-                    matches!(
-                        self.cloud_sync_form.default_conflict_strategy,
-                        ConflictStrategy::Replace
-                    ),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.default_conflict_strategy =
-                                ConflictStrategy::Replace;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-                (
-                    self.i18n.t("plugin.cloud_sync.conflict.skip"),
-                    matches!(
-                        self.cloud_sync_form.default_conflict_strategy,
-                        ConflictStrategy::Skip
-                    ),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.default_conflict_strategy = ConflictStrategy::Skip;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-                (
-                    self.i18n.t("plugin.cloud_sync.conflict.rename"),
-                    matches!(
-                        self.cloud_sync_form.default_conflict_strategy,
-                        ConflictStrategy::Rename
-                    ),
-                    Box::new(cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.default_conflict_strategy =
-                                ConflictStrategy::Rename;
-                            this.cloud_sync_open_select = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    )),
-                ),
-            ],
+            self.cloud_sync_select_options(CloudSyncSelect::ConflictStrategy),
         )
+    }
+
+    fn cloud_sync_select_options(&self, select: CloudSyncSelect) -> Vec<CloudSyncSelectOption> {
+        match select {
+            CloudSyncSelect::Backend => [
+                (BackendType::Webdav, "plugin.cloud_sync.backend.webdav"),
+                (BackendType::HttpJson, "plugin.cloud_sync.backend.http_json"),
+                (BackendType::Dropbox, "plugin.cloud_sync.backend.dropbox"),
+                (BackendType::Git, "plugin.cloud_sync.backend.git"),
+                (BackendType::S3, "plugin.cloud_sync.backend.s3"),
+            ]
+            .into_iter()
+            .map(|(backend, label_key)| CloudSyncSelectOption {
+                label: self.i18n.t(label_key),
+                selected: self.cloud_sync_form.backend_type == backend,
+                action: CloudSyncSelectAction::Backend(backend),
+            })
+            .collect(),
+            CloudSyncSelect::AuthMode => [
+                (AuthMode::Bearer, "plugin.cloud_sync.auth.bearer"),
+                (AuthMode::Basic, "plugin.cloud_sync.auth.basic"),
+                (AuthMode::None, "plugin.cloud_sync.auth.none"),
+            ]
+            .into_iter()
+            .map(|(auth_mode, label_key)| CloudSyncSelectOption {
+                label: self.i18n.t(label_key),
+                selected: self.cloud_sync_form.auth_mode == auth_mode,
+                action: CloudSyncSelectAction::AuthMode(auth_mode),
+            })
+            .collect(),
+            CloudSyncSelect::ConflictStrategy => [
+                (ConflictStrategy::Merge, "plugin.cloud_sync.conflict.merge"),
+                (
+                    ConflictStrategy::Replace,
+                    "plugin.cloud_sync.conflict.replace",
+                ),
+                (ConflictStrategy::Skip, "plugin.cloud_sync.conflict.skip"),
+                (
+                    ConflictStrategy::Rename,
+                    "plugin.cloud_sync.conflict.rename",
+                ),
+            ]
+            .into_iter()
+            .map(|(strategy, label_key)| CloudSyncSelectOption {
+                label: self.i18n.t(label_key),
+                selected: self.cloud_sync_form.default_conflict_strategy == strategy,
+                action: CloudSyncSelectAction::ConflictStrategy(strategy),
+            })
+            .collect(),
+        }
+    }
+
+    fn cloud_sync_selected_option_index(&self, select: CloudSyncSelect) -> usize {
+        self.cloud_sync_select_options(select)
+            .iter()
+            .position(|option| option.selected)
+            .unwrap_or(0)
+    }
+
+    fn cloud_sync_focusable_selects(&self) -> Vec<CloudSyncSelect> {
+        let mut selects = vec![CloudSyncSelect::Backend];
+        if backend_uses_auth_mode(&self.cloud_sync_form.backend_type) {
+            selects.push(CloudSyncSelect::AuthMode);
+        }
+        selects.push(CloudSyncSelect::ConflictStrategy);
+        selects
+    }
+
+    fn move_cloud_sync_select_focus(&mut self, select: CloudSyncSelect, forward: bool) {
+        let selects = self.cloud_sync_focusable_selects();
+        self.cloud_sync_focused_select = next_cloud_sync_select_focus(&selects, select, forward);
+    }
+
+    fn open_cloud_sync_select_for_keyboard(&mut self, select: CloudSyncSelect) {
+        self.cloud_sync_focused_select = Some(select);
+        self.cloud_sync_open_select = Some(select);
+        self.cloud_sync_select_highlighted =
+            Some((select, self.cloud_sync_selected_option_index(select)));
+    }
+
+    fn clear_cloud_sync_select_focus(&mut self) {
+        // Browser focus leaves a Radix Select trigger when the user activates a
+        // sibling input/button. Keep popup and focus-ring ownership paired.
+        self.cloud_sync_open_select = None;
+        self.cloud_sync_focused_select = None;
+        self.cloud_sync_select_highlighted = None;
+    }
+
+    fn apply_cloud_sync_select_action(
+        &mut self,
+        action: CloudSyncSelectAction,
+        cx: &mut Context<Self>,
+    ) {
+        // Tauri's Radix Select uses the same onValueChange path for mouse and
+        // keyboard selection. Keep native mutations centralized so Enter and
+        // pointer clicks cannot drift apart.
+        let trigger_select = match action {
+            CloudSyncSelectAction::Backend(backend) => {
+                self.cloud_sync_form.backend_type = backend.clone();
+                if matches!(backend, BackendType::Dropbox) {
+                    self.cloud_sync_form.auth_mode = AuthMode::Bearer;
+                } else if matches!(backend, BackendType::Git | BackendType::S3) {
+                    self.cloud_sync_form.auth_mode = AuthMode::None;
+                }
+                CloudSyncSelect::Backend
+            }
+            CloudSyncSelectAction::AuthMode(auth_mode) => {
+                self.cloud_sync_form.auth_mode = auth_mode;
+                CloudSyncSelect::AuthMode
+            }
+            CloudSyncSelectAction::ConflictStrategy(strategy) => {
+                self.cloud_sync_form.default_conflict_strategy = strategy;
+                CloudSyncSelect::ConflictStrategy
+            }
+        };
+        self.cloud_sync_open_select = None;
+        self.cloud_sync_focused_select = Some(trigger_select);
+        self.cloud_sync_select_highlighted = None;
+        cx.notify();
+    }
+
+    pub(super) fn handle_cloud_sync_select_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            return false;
+        }
+
+        if let Some(select) = self.cloud_sync_open_select {
+            return self.handle_open_cloud_sync_select_key(select, event, cx);
+        }
+
+        let Some(select) = self.cloud_sync_focused_select else {
+            return false;
+        };
+
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.cloud_sync_focused_select = None;
+                cx.notify();
+                true
+            }
+            "tab" => {
+                // Radix returns focus to the trigger before browser focus moves
+                // onward. Native keeps the owner explicit so the visual ring and
+                // next-select order stay in sync without DOM tab stops.
+                self.move_cloud_sync_select_focus(select, !event.keystroke.modifiers.shift);
+                cx.notify();
+                true
+            }
+            "enter" | "space" | " " | "arrowdown" | "down" => {
+                self.open_cloud_sync_select_for_keyboard(select);
+                cx.notify();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_open_cloud_sync_select_key(
+        &mut self,
+        select: CloudSyncSelect,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let options = self.cloud_sync_select_options(select);
+        if options.is_empty() {
+            return false;
+        }
+        let current = self
+            .cloud_sync_select_highlighted
+            .filter(|(highlighted_select, _)| *highlighted_select == select)
+            .map(|(_, index)| index)
+            .unwrap_or_else(|| self.cloud_sync_selected_option_index(select));
+
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.cloud_sync_open_select = None;
+                self.cloud_sync_select_highlighted = None;
+                self.cloud_sync_focused_select = Some(select);
+                cx.notify();
+                true
+            }
+            "tab" => {
+                // Tauri/Radix Select closes before Tab leaves the trigger. Walk
+                // the visible Cloud Sync select order here so hidden auth-mode
+                // controls are never reachable by keyboard focus.
+                self.cloud_sync_open_select = None;
+                self.cloud_sync_select_highlighted = None;
+                self.move_cloud_sync_select_focus(select, !event.keystroke.modifiers.shift);
+                cx.notify();
+                true
+            }
+            "arrowdown" | "down" => {
+                self.cloud_sync_select_highlighted = Some((
+                    select,
+                    radix_select_next_index(current, options.len(), SelectKeyDirection::Next),
+                ));
+                cx.notify();
+                true
+            }
+            "arrowup" | "up" => {
+                self.cloud_sync_select_highlighted = Some((
+                    select,
+                    radix_select_next_index(current, options.len(), SelectKeyDirection::Previous),
+                ));
+                cx.notify();
+                true
+            }
+            "home" => {
+                self.cloud_sync_select_highlighted = Some((select, 0));
+                cx.notify();
+                true
+            }
+            "end" => {
+                self.cloud_sync_select_highlighted = Some((select, options.len() - 1));
+                cx.notify();
+                true
+            }
+            "enter" | "space" | " " => {
+                let action = options
+                    .get(current.min(options.len() - 1))
+                    .map(|option| option.action.clone());
+                if let Some(action) = action {
+                    self.apply_cloud_sync_select_action(action, cx);
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     fn render_cloud_sync_select_field(
@@ -2563,7 +2625,7 @@ impl WorkspaceApp {
         select: CloudSyncSelect,
         value: String,
         cx: &mut Context<Self>,
-        options: Vec<(String, bool, CloudSyncOptionListener)>,
+        options: Vec<CloudSyncSelectOption>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let label = self.i18n.t(label_key);
@@ -2587,13 +2649,14 @@ impl WorkspaceApp {
                     )),
             );
         let open = self.cloud_sync_open_select == Some(select);
+        let focused = self.cloud_sync_focused_select == Some(select);
         group = group.child(
             div()
                 .w_full()
                 .h(px(36.0))
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
-                .border_color(if open {
+                .border_color(if open || focused {
                     rgb(theme.accent)
                 } else {
                     rgb(theme.border)
@@ -2613,12 +2676,17 @@ impl WorkspaceApp {
                               _event,
                               _window,
                               cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_open_select =
-                                if this.cloud_sync_open_select == Some(select) {
-                                    None
-                                } else {
-                                    Some(select)
-                                };
+                            this.cloud_sync_focused_select = Some(select);
+                            this.cloud_sync_open_select = if this.cloud_sync_open_select
+                                == Some(select)
+                            {
+                                this.cloud_sync_select_highlighted = None;
+                                None
+                            } else {
+                                this.cloud_sync_select_highlighted =
+                                    Some((select, this.cloud_sync_selected_option_index(select)));
+                                Some(select)
+                            };
                             cx.stop_propagation();
                             cx.notify();
                         },
@@ -2641,15 +2709,27 @@ impl WorkspaceApp {
                 ),
         );
         if open {
+            let highlighted = self
+                .cloud_sync_select_highlighted
+                .filter(|(highlighted_select, _)| *highlighted_select == select)
+                .map(|(_, index)| index)
+                .unwrap_or_else(|| self.cloud_sync_selected_option_index(select));
             let mut menu = div()
                 .w_full()
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
                 .border_color(rgb(theme.border))
                 .bg(rgb(theme.bg_panel))
-                .overflow_hidden();
-            for (label, selected, listener) in options {
-                let option_key = label.clone();
+                .overflow_hidden()
+                // Cloud Sync selects sit inside a settings-like scroll view; a
+                // wheel over the open menu should not scroll the page behind it.
+                .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+            for (index, option) in options.into_iter().enumerate() {
+                let label = option.label.clone();
+                let option_key = option.label.clone();
+                let selected = option.selected;
+                let action = option.action.clone();
+                let option_highlighted = highlighted == index;
                 menu = menu.child(
                     div()
                         .w_full()
@@ -2664,14 +2744,30 @@ impl WorkspaceApp {
                         } else {
                             rgb(theme.text)
                         })
-                        .bg(if selected {
+                        .bg(if option_highlighted {
+                            rgba((theme.bg_hover << 8) | CLOUD_SYNC_SELECT_HIGHLIGHT_ALPHA)
+                        } else if selected {
                             rgba((theme.accent << 8) | 0x1f)
                         } else {
                             rgba(0x00000000)
                         })
                         .cursor_pointer()
                         .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-                        .on_mouse_down(MouseButton::Left, listener)
+                        .on_mouse_move(cx.listener(
+                            move |this, _event: &MouseMoveEvent, _window, cx| {
+                                if this.cloud_sync_select_highlighted != Some((select, index)) {
+                                    this.cloud_sync_select_highlighted = Some((select, index));
+                                    cx.notify();
+                                }
+                            },
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.apply_cloud_sync_select_action(action.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        )
                         .child(self.render_display_text_with_role(
                             SelectableTextRole::NonSelectable,
                             "cloud-sync-select-option",
@@ -3098,6 +3194,7 @@ impl WorkspaceApp {
             return;
         }
         self.cloud_sync_confirm = Some(CloudSyncConfirm::ImportPreview);
+        self.cloud_sync_confirm_focused_action = Some(ConfirmDialogAction::Cancel);
     }
 
     fn open_cloud_sync_restore_confirm(&mut self, backup: Option<(String, String)>) {
@@ -3110,6 +3207,69 @@ impl WorkspaceApp {
         });
         if let Some((id, created_at)) = selected {
             self.cloud_sync_confirm = Some(CloudSyncConfirm::RestoreBackup { id, created_at });
+            self.cloud_sync_confirm_focused_action = Some(ConfirmDialogAction::Cancel);
+        }
+    }
+
+    fn cancel_cloud_sync_confirm(&mut self) {
+        self.cloud_sync_confirm = None;
+        self.cloud_sync_confirm_focused_action = None;
+    }
+
+    fn confirm_cloud_sync_confirm(&mut self, cx: &mut Context<Self>) {
+        let confirm = self.cloud_sync_confirm.take();
+        self.cloud_sync_confirm_focused_action = None;
+        match confirm {
+            Some(CloudSyncConfirm::ImportPreview) => self.start_cloud_sync_apply_preview(cx),
+            Some(CloudSyncConfirm::ClearSecret { key, .. }) => self.clear_cloud_sync_secret(&key),
+            Some(CloudSyncConfirm::RestoreBackup { id, .. }) => {
+                self.start_cloud_sync_restore_backup(id, cx)
+            }
+            None => {}
+        }
+    }
+
+    pub(super) fn handle_cloud_sync_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.cloud_sync_confirm.is_none()
+            || event.keystroke.modifiers.platform
+            || event.keystroke.modifiers.control
+        {
+            return false;
+        }
+
+        let focused = self
+            .cloud_sync_confirm_focused_action
+            .unwrap_or(ConfirmDialogAction::Cancel);
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.cancel_cloud_sync_confirm();
+                cx.notify();
+                true
+            }
+            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
+                // Tauri footer buttons are ordinary DOM buttons in a modal
+                // focus loop. With two actions, Tab and arrow keys both expose
+                // the same explicit native focus-visible target.
+                self.cloud_sync_confirm_focused_action = Some(match focused {
+                    ConfirmDialogAction::Cancel => ConfirmDialogAction::Confirm,
+                    ConfirmDialogAction::Confirm => ConfirmDialogAction::Cancel,
+                });
+                cx.notify();
+                true
+            }
+            "enter" | "space" | " " => {
+                match focused {
+                    ConfirmDialogAction::Cancel => self.cancel_cloud_sync_confirm(),
+                    ConfirmDialogAction::Confirm => self.confirm_cloud_sync_confirm(cx),
+                }
+                cx.notify();
+                true
+            }
+            _ => false,
         }
     }
 
@@ -3152,7 +3312,7 @@ impl WorkspaceApp {
                 self.i18n.t("plugin.cloud_sync.actions.restore_backup"),
             ),
         };
-        confirm_dialog(
+        confirm_dialog_with_focus(
             &self.tokens,
             ConfirmDialogView {
                 variant,
@@ -3199,28 +3359,17 @@ impl WorkspaceApp {
                     ))
                     .into_any_element(),
             },
+            self.cloud_sync_confirm_focused_action,
             cx.listener(
                 |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
-                    this.cloud_sync_confirm = None;
+                    this.cancel_cloud_sync_confirm();
                     cx.stop_propagation();
                     cx.notify();
                 },
             ),
             cx.listener(
                 |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
-                    let confirm = this.cloud_sync_confirm.take();
-                    match confirm {
-                        Some(CloudSyncConfirm::ImportPreview) => {
-                            this.start_cloud_sync_apply_preview(cx)
-                        }
-                        Some(CloudSyncConfirm::ClearSecret { key, .. }) => {
-                            this.clear_cloud_sync_secret(&key)
-                        }
-                        Some(CloudSyncConfirm::RestoreBackup { id, .. }) => {
-                            this.start_cloud_sync_restore_backup(id, cx)
-                        }
-                        None => {}
-                    }
+                    this.confirm_cloud_sync_confirm(cx);
                     cx.stop_propagation();
                     cx.notify();
                 },
@@ -5247,6 +5396,35 @@ fn cloud_sync_platform_label() -> &'static str {
     }
 }
 
+fn radix_select_next_index(
+    current: usize,
+    option_count: usize,
+    direction: SelectKeyDirection,
+) -> usize {
+    if option_count == 0 {
+        return 0;
+    }
+    match direction {
+        SelectKeyDirection::Previous => current.saturating_sub(1),
+        SelectKeyDirection::Next => (current + 1).min(option_count - 1),
+    }
+}
+
+fn next_cloud_sync_select_focus(
+    selects: &[CloudSyncSelect],
+    current: CloudSyncSelect,
+    forward: bool,
+) -> Option<CloudSyncSelect> {
+    let index = selects.iter().position(|candidate| *candidate == current)?;
+    if forward {
+        selects.get(index + 1).copied()
+    } else {
+        index
+            .checked_sub(1)
+            .and_then(|previous| selects.get(previous).copied())
+    }
+}
+
 #[cfg(test)]
 mod cloud_sync_preview_selection_tests {
     use super::*;
@@ -5316,5 +5494,47 @@ mod cloud_sync_preview_selection_tests {
         );
         assert!(!selection.can_apply(&summary));
         assert!(!legacy_apply_covers_full_remote(&summary, &selection));
+    }
+
+    #[test]
+    fn radix_select_keyboard_navigation_clamps_like_native_select() {
+        assert_eq!(
+            radix_select_next_index(0, 3, SelectKeyDirection::Previous),
+            0
+        );
+        assert_eq!(radix_select_next_index(0, 3, SelectKeyDirection::Next), 1);
+        assert_eq!(radix_select_next_index(2, 3, SelectKeyDirection::Next), 2);
+        assert_eq!(radix_select_next_index(0, 0, SelectKeyDirection::Next), 0);
+    }
+
+    #[test]
+    fn cloud_sync_select_focus_tabs_only_through_visible_controls() {
+        let webdav_selects = [
+            CloudSyncSelect::Backend,
+            CloudSyncSelect::AuthMode,
+            CloudSyncSelect::ConflictStrategy,
+        ];
+        let hidden_auth_selects = [CloudSyncSelect::Backend, CloudSyncSelect::ConflictStrategy];
+
+        assert_eq!(
+            next_cloud_sync_select_focus(&webdav_selects, CloudSyncSelect::Backend, true),
+            Some(CloudSyncSelect::AuthMode)
+        );
+        assert_eq!(
+            next_cloud_sync_select_focus(&hidden_auth_selects, CloudSyncSelect::Backend, true),
+            Some(CloudSyncSelect::ConflictStrategy)
+        );
+        assert_eq!(
+            next_cloud_sync_select_focus(
+                &hidden_auth_selects,
+                CloudSyncSelect::ConflictStrategy,
+                true
+            ),
+            None
+        );
+        assert_eq!(
+            next_cloud_sync_select_focus(&webdav_selects, CloudSyncSelect::AuthMode, false),
+            Some(CloudSyncSelect::Backend)
+        );
     }
 }

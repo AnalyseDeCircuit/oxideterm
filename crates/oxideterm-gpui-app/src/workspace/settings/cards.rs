@@ -387,8 +387,7 @@ impl WorkspaceApp {
             changed = true;
         }
         if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
-            self.terminal_quick_commands_open = false;
-            self.terminal_quick_command_pending = None;
+            self.close_terminal_quick_commands_popover();
             changed = true;
         }
         if self.session_manager.focused_input.take().is_some() {

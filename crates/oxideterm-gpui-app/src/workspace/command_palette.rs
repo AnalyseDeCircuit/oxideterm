@@ -4,7 +4,10 @@ use oxideterm_connections::{
 };
 use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_oxide_theme};
 use oxideterm_gpui_ui::{
-    modal::{dialog_content, dismissible_command_palette_backdrop, dismissible_dialog_backdrop},
+    modal::{
+        dialog_content, dismissible_command_palette_backdrop, dismissible_dialog_backdrop,
+        overlay_content_boundary,
+    },
     text_input::{text_input_anchor_probe, text_input_value_segments},
 };
 use oxideterm_theme::BUILT_IN_THEMES;
@@ -557,6 +560,7 @@ impl WorkspaceApp {
 
     pub(super) fn open_reset_settings_confirm_from_palette(&mut self, cx: &mut Context<Self>) {
         self.settings_reset_confirm_open = true;
+        self.reset_standard_confirm_focus();
         cx.notify();
     }
 
@@ -564,7 +568,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        confirm_dialog(
+        confirm_dialog_with_focus(
             &self.tokens,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
@@ -583,13 +587,16 @@ impl WorkspaceApp {
                     .child(self.i18n.t("command_palette.cmd_reset_settings"))
                     .into_any_element(),
             },
+            self.standard_confirm_focus(),
             cx.listener(|this, _event, _window, cx| {
                 this.settings_reset_confirm_open = false;
+                this.clear_standard_confirm_focus();
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
                 this.settings_reset_confirm_open = false;
+                this.clear_standard_confirm_focus();
                 this.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
                 cx.stop_propagation();
             }),
@@ -1000,11 +1007,6 @@ impl WorkspaceApp {
             .w(px(COMMAND_PALETTE_WIDTH))
             .rounded(px(self.tokens.radii.lg))
             .shadow_xl()
-            // Tauri uses Radix DialogContent, so pointer activity inside the
-            // panel must not bubble to the overlay outside-dismiss handler.
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
             .child(
                 div()
                     .flex()
@@ -1105,12 +1107,25 @@ impl WorkspaceApp {
             .justify_center()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
+                cx.listener(|this, _event, window, cx| {
                     this.close_command_palette(cx);
+                    window.focus(&this.focus_handle);
                     cx.stop_propagation();
                 }),
             )
-            .child(div().mt(px(palette_top)).child(panel))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event, window, cx| {
+                    this.close_command_palette(cx);
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(
+                div()
+                    .mt(px(palette_top))
+                    .child(overlay_content_boundary(panel)),
+            )
             .into_any_element()
     }
 
@@ -1358,19 +1373,23 @@ impl WorkspaceApp {
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
+                cx.listener(|this, _event, window, cx| {
                     this.close_shortcuts_modal(cx);
+                    window.focus(&this.focus_handle);
                     cx.stop_propagation();
                 }),
             )
-            .child(
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event, window, cx| {
+                    this.close_shortcuts_modal(cx);
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(overlay_content_boundary(
                 dialog_content(&self.tokens)
                     .w(px(600.0))
-                    // Mirrors Radix DialogContent: clicking or dragging inside
-                    // the shortcuts panel is not an outside click.
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
                     .child(
                         div()
                             .h(px(44.0))
@@ -1461,7 +1480,7 @@ impl WorkspaceApp {
                                     )),
                             ),
                     ),
-            )
+            ))
             .into_any_element()
     }
 

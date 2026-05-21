@@ -156,18 +156,16 @@ impl WorkspaceApp {
             popover_backdrop()
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.close_ai_sidebar_popovers();
+                    cx.listener(|this, _event, window, cx| {
+                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
                 .on_mouse_down(
                     MouseButton::Right,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.close_ai_sidebar_popovers();
+                    cx.listener(|this, _event, window, cx| {
+                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
                 .child(
@@ -176,16 +174,7 @@ impl WorkspaceApp {
                             .anchor(corner)
                             .position(gpui::point(px(anchor_x), px(anchor_y)))
                             .position_mode(AnchoredPositionMode::Window)
-                            .child(
-                                div()
-                                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                                        cx.stop_propagation();
-                                    })
-                                    .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                                        cx.stop_propagation();
-                                    })
-                                    .child(popup),
-                            ),
+                            .child(overlay_content_boundary(div().child(popup))),
                     )
                     .with_priority(100),
                 )
@@ -222,7 +211,10 @@ impl WorkspaceApp {
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
             .bg(rgb(self.tokens.ui.bg_elevated))
-            .shadow_lg();
+            .shadow_lg()
+            // Conversation dropdown mirrors a browser popover list: wheel input
+            // stays with the overlay and cannot scroll the message/sidebar body.
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
 
         if self.ai_chat.conversations.is_empty() {
             list = list.child(
@@ -464,6 +456,7 @@ impl WorkspaceApp {
                         AiHeaderAction::Settings => this.open_ai_settings(window, cx),
                         AiHeaderAction::NewChat => {
                             this.ai_clear_all_confirm_open = true;
+                            this.reset_standard_confirm_focus();
                             cx.notify();
                         }
                     }

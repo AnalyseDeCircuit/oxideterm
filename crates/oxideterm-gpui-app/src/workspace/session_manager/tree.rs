@@ -542,6 +542,9 @@ impl WorkspaceApp {
                 cx.listener(|this, _event, _window, cx| {
                     this.session_manager.show_new_group = true;
                     this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
+                    // The text field is the initial browser focus target; the
+                    // footer owner is established only after Tab enters it.
+                    this.session_manager.focused_basic_dialog_footer_action = None;
                     this.session_manager.new_group_name.clear();
                     this.needs_active_pane_focus = false;
                     cx.notify();

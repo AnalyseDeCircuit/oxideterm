@@ -65,11 +65,18 @@ impl WorkspaceApp {
                     == Some(model.as_str());
             let model_for_click = model.clone();
             let provider_id = provider.id.clone();
+            let highlighted =
+                self.ai_model_selector_highlighted_model
+                    .as_ref()
+                    .is_some_and(|(id, highlighted_model)| {
+                        id == &provider.id && highlighted_model == &model
+                    });
             panel = panel.child(
                 ai_model_selector_model_row(
                     &self.tokens,
                     model,
                     active,
+                    highlighted,
                     active.then(|| {
                         Self::render_lucide_icon(
                             LucideIcon::Check,
@@ -78,6 +85,19 @@ impl WorkspaceApp {
                         )
                     }),
                 )
+                .on_mouse_move({
+                    let provider_id = provider_id.clone();
+                    let model_for_hover = model_for_click.clone();
+                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                        let next = Some((provider_id.clone(), model_for_hover.clone()));
+                        if this.ai_model_selector_highlighted_model != next {
+                            // Pointer hover and keyboard navigation share the
+                            // same active-item state, matching Radix menu focus.
+                            this.ai_model_selector_highlighted_model = next;
+                            cx.notify();
+                        }
+                    })
+                })
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
@@ -86,6 +106,7 @@ impl WorkspaceApp {
                             model_for_click.clone(),
                             cx,
                         );
+                        this.ai_model_selector_highlighted_model = None;
                         cx.stop_propagation();
                     }),
                 ),

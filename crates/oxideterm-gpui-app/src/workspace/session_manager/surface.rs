@@ -1,4 +1,103 @@
 impl WorkspaceApp {
+    pub(super) fn handle_session_manager_basic_dialog_footer_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.session_manager.show_new_group && !self.session_manager.show_import {
+            return false;
+        }
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            return false;
+        }
+
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.close_session_manager_basic_dialog(cx);
+                true
+            }
+            "tab" => {
+                // Browser focus traps walk visible dialog controls in order.
+                // These small native dialogs model the same cycle explicitly:
+                // optional text input, cancel, primary, then wrap.
+                self.move_session_manager_basic_dialog_footer_focus(
+                    !event.keystroke.modifiers.shift,
+                    true,
+                    cx,
+                );
+                true
+            }
+            "arrowleft" | "left" => {
+                self.move_session_manager_basic_dialog_footer_focus(false, false, cx);
+                true
+            }
+            "arrowright" | "right" => {
+                self.move_session_manager_basic_dialog_footer_focus(true, false, cx);
+                true
+            }
+            "enter" | "space" | " " => {
+                if let Some(action) = self.session_manager.focused_basic_dialog_footer_action {
+                    self.activate_session_manager_basic_dialog_footer(action, cx);
+                    return true;
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn move_session_manager_basic_dialog_footer_focus(
+        &mut self,
+        forward: bool,
+        include_text_input: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let (focus_text_input, footer_action) = next_session_manager_basic_dialog_focus(
+            include_text_input && self.session_manager.show_new_group,
+            self.session_manager.focused_input == Some(SessionManagerInput::NewGroup),
+            self.session_manager.focused_basic_dialog_footer_action,
+            forward,
+        );
+        self.session_manager.focused_input =
+            focus_text_input.then_some(SessionManagerInput::NewGroup);
+        self.session_manager.focused_basic_dialog_footer_action = footer_action;
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn activate_session_manager_basic_dialog_footer(
+        &mut self,
+        action: SessionManagerBasicDialogFooterAction,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            SessionManagerBasicDialogFooterAction::Cancel => self.close_session_manager_basic_dialog(cx),
+            SessionManagerBasicDialogFooterAction::Primary if self.session_manager.show_new_group => {
+                self.session_manager.focused_basic_dialog_footer_action = None;
+                self.create_session_group(cx);
+            }
+            SessionManagerBasicDialogFooterAction::Primary if self.session_manager.show_import => {
+                self.session_manager.focused_basic_dialog_footer_action = None;
+                self.import_selected_ssh_hosts(cx);
+            }
+            SessionManagerBasicDialogFooterAction::Primary => {}
+        }
+    }
+
+    fn close_session_manager_basic_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.session_manager.show_new_group {
+            self.session_manager.show_new_group = false;
+            self.session_manager.focused_input = None;
+        }
+        if self.session_manager.show_import {
+            self.session_manager.show_import = false;
+            self.session_manager.selected_import_aliases.clear();
+        }
+        self.session_manager.focused_basic_dialog_footer_action = None;
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
     pub(super) fn render_session_manager_surface(
         &self,
         window: &Window,
@@ -66,18 +165,25 @@ impl WorkspaceApp {
                         popover_backdrop()
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.session_manager.row_context_menu_connection_id = None;
+                                cx.listener(|this, _event, window, cx| {
+                                    // Row menus are transient overlays; route
+                                    // outside dismissal through the shared root
+                                    // path so focus restoration stays uniform.
+                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
+                                        window, cx,
+                                    );
                                     cx.stop_propagation();
-                                    cx.notify();
                                 }),
                             )
                             .on_mouse_down(
                                 MouseButton::Right,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.session_manager.row_context_menu_connection_id = None;
+                                cx.listener(|this, _event, window, cx| {
+                                    // Secondary outside clicks close the current
+                                    // menu before the next row can claim a menu.
+                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
+                                        window, cx,
+                                    );
                                     cx.stop_propagation();
-                                    cx.notify();
                                 }),
                             )
                             .child(self.render_row_context_menu(conn, window, has_background, cx)),

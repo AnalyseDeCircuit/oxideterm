@@ -37,10 +37,9 @@ use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView, button,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
     checkbox::checkbox,
-    confirm_dialog,
     modal::{
         dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
-        dismissible_dialog_backdrop, popover_backdrop,
+        dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop,
     },
     select::{
         OverlayAnchor, SelectAnchorId, select_anchor_probe, select_label, select_option,

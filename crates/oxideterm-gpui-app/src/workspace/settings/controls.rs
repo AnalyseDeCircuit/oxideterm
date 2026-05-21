@@ -1194,30 +1194,22 @@ impl WorkspaceApp {
                 Some(popup)
             }
             _ => None,
-        }?
-        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-            cx.stop_propagation();
-        })
-        .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-            cx.stop_propagation();
-        });
+        }?;
 
         Some(
             popover_backdrop()
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.open_settings_select = None;
+                    cx.listener(|this, _event, window, cx| {
+                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
                 .on_mouse_down(
                     MouseButton::Right,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.open_settings_select = None;
+                    cx.listener(|this, _event, window, cx| {
+                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
                 .child(
@@ -1230,7 +1222,7 @@ impl WorkspaceApp {
                                 px(self.tokens.metrics.settings_select_popup_gap),
                             ))
                             .position_mode(AnchoredPositionMode::Window)
-                            .child(popup),
+                            .child(overlay_content_boundary(popup)),
                     )
                     .with_priority(100),
                 )

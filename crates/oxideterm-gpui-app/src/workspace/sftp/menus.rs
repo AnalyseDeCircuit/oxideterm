@@ -36,6 +36,11 @@ impl WorkspaceApp {
             .border_color(sftp_border(theme.border, has_background))
             .bg(sftp_panel_bg(theme.bg_elevated, has_background, 0xf2))
             .shadow_lg()
+            .on_scroll_wheel(|_, _, cx| {
+                // Keep context-menu wheel input local, matching browser menu
+                // behavior and preventing the file pane behind it from moving.
+                cx.stop_propagation();
+            })
             .when(selected_count > 0, |menu_el| {
                 menu_el.child(self.render_sftp_context_menu_item(
                     if menu.pane == SftpPane::Local {
@@ -149,30 +154,25 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     cx.notify();
                 }),
-            ))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_this, _event, _window, cx| {
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element();
+            ));
 
         popover_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.sftp_view.context_menu = None;
+                cx.listener(|this, _event, window, cx| {
+                    // SFTP menus share the same transient-overlay close path as
+                    // local files so focus restoration and outside clicks match.
+                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(|this, _event, _window, cx| {
-                    this.sftp_view.context_menu = None;
+                cx.listener(|this, _event, window, cx| {
+                    // Browser context menus close on a secondary click outside
+                    // the menu before a new context target is evaluated.
+                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .child(
@@ -181,7 +181,7 @@ impl WorkspaceApp {
                         .anchor(Corner::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(popup),
+                        .child(overlay_content_boundary(popup)),
                 )
                 .with_priority(100),
             )

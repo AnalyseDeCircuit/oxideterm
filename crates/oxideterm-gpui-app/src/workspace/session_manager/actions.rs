@@ -129,6 +129,16 @@ impl WorkspaceApp {
         }
     }
 
+    fn select_connection_for_context_menu(&mut self, id: &str) {
+        // Browser file/table UIs keep an existing multi-selection when the
+        // context target is already selected, but right-clicking an unselected
+        // row first moves selection to that row before opening the menu.
+        if !self.session_manager.selected_ids.contains(id) {
+            self.session_manager.selected_ids.clear();
+            self.session_manager.selected_ids.insert(id.to_string());
+        }
+    }
+
     fn toggle_all_visible_connections(&mut self, cx: &mut Context<Self>) {
         let rows = self.filtered_session_connections();
         let all_selected = !rows.is_empty()
@@ -172,6 +182,7 @@ impl WorkspaceApp {
                 );
                 self.session_manager.show_new_group = false;
                 self.session_manager.focused_input = None;
+                self.session_manager.focused_basic_dialog_footer_action = None;
                 self.session_manager.status =
                     Some(self.i18n.t("sessionManager.toast.group_created"));
                 self.queue_cloud_sync_dirty_refresh(cx);
@@ -315,6 +326,9 @@ impl WorkspaceApp {
                     .collect();
                 self.session_manager.ssh_config_hosts = hosts;
                 self.session_manager.show_import = true;
+                // SSH import opens without a text field; the footer focus ring
+                // is still keyboard-owned and starts unset until Tab is pressed.
+                self.session_manager.focused_basic_dialog_footer_action = None;
                 self.session_manager.status = None;
             }
             Err(error) => self.session_manager.status = Some(error.to_string()),
@@ -351,6 +365,7 @@ impl WorkspaceApp {
         }
         self.session_manager.show_import = false;
         self.session_manager.selected_import_aliases.clear();
+        self.session_manager.focused_basic_dialog_footer_action = None;
         self.session_manager.status = if errors.is_empty() {
             Some(format!("Imported {imported}"))
         } else {

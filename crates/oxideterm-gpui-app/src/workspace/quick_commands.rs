@@ -2,6 +2,7 @@ use super::actions::classify_command_risk;
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use crate::assets::LucideIcon;
+use gpui_component::scroll::ScrollableElement;
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
 use std::{
     collections::{HashMap, HashSet},
@@ -134,6 +135,10 @@ pub(super) struct QuickCommandsState {
     pub active_category: String,
     pub query: String,
     pub focused_input: Option<QuickCommandInput>,
+    // Browser popovers keep one active option for keyboard navigation without
+    // stealing the row click target; store the stable command id instead of a
+    // transient index so filtering and category changes cannot select a stale row.
+    pub highlighted_command: Option<String>,
     pub command_editor: Option<QuickCommandDraft>,
     pub category_editor: Option<QuickCommandCategoryDraft>,
     pub last_persist_error: Option<String>,

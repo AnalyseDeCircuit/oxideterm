@@ -189,6 +189,48 @@ fn oxide_import_has_selected_content(dialog: &OxideImportDialogState) -> bool {
         || (preview.portable_secret_count > 0 && dialog.import_portable_secrets)
 }
 
+fn oxide_import_footer_actions(dialog: &OxideImportDialogState) -> Vec<OxideDialogFooterAction> {
+    // Tauri dialog footers use normal DOM tab order. Model only rendered
+    // footer buttons so preview/result stages do not expose hidden actions.
+    if dialog.result.is_some() {
+        vec![OxideDialogFooterAction::Primary]
+    } else if dialog.preview.is_some() {
+        vec![
+            OxideDialogFooterAction::Secondary,
+            OxideDialogFooterAction::Primary,
+        ]
+    } else {
+        vec![
+            OxideDialogFooterAction::Secondary,
+            OxideDialogFooterAction::Cancel,
+            OxideDialogFooterAction::Primary,
+        ]
+    }
+}
+
+fn next_oxide_footer_action(
+    actions: &[OxideDialogFooterAction],
+    current: Option<OxideDialogFooterAction>,
+    forward: bool,
+) -> Option<OxideDialogFooterAction> {
+    let Some(first) = actions.first().copied() else {
+        return None;
+    };
+    let current = current.unwrap_or(first);
+    let index = actions
+        .iter()
+        .position(|candidate| *candidate == current)
+        .unwrap_or(0);
+    if forward {
+        actions.get(index + 1).copied().or(Some(first))
+    } else {
+        index
+            .checked_sub(1)
+            .and_then(|previous| actions.get(previous).copied())
+            .or_else(|| actions.last().copied())
+    }
+}
+
 fn import_preview_selectable_names(preview: &ImportPreview) -> HashSet<String> {
     let mut names = HashSet::new();
     names.extend(preview.unchanged.iter().cloned());

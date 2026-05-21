@@ -180,6 +180,62 @@ mod tests {
     }
 
     #[test]
+    fn basic_dialog_tab_order_wraps_through_text_input_like_radix_dialog() {
+        let (text_focused, footer) =
+            next_session_manager_basic_dialog_focus(true, true, None, true);
+        assert!(!text_focused);
+        assert_eq!(
+            footer,
+            Some(SessionManagerBasicDialogFooterAction::Cancel)
+        );
+
+        let (text_focused, footer) = next_session_manager_basic_dialog_focus(
+            true,
+            false,
+            Some(SessionManagerBasicDialogFooterAction::Primary),
+            true,
+        );
+        assert!(text_focused);
+        assert_eq!(footer, None);
+
+        let (text_focused, footer) = next_session_manager_basic_dialog_focus(
+            true,
+            false,
+            Some(SessionManagerBasicDialogFooterAction::Cancel),
+            false,
+        );
+        assert!(text_focused);
+        assert_eq!(footer, None);
+    }
+
+    #[test]
+    fn basic_dialog_footer_arrows_stay_inside_footer_actions() {
+        let (text_focused, footer) = next_session_manager_basic_dialog_focus(
+            false,
+            false,
+            Some(SessionManagerBasicDialogFooterAction::Cancel),
+            false,
+        );
+        assert!(!text_focused);
+        assert_eq!(
+            footer,
+            Some(SessionManagerBasicDialogFooterAction::Primary)
+        );
+
+        let (text_focused, footer) = next_session_manager_basic_dialog_focus(
+            false,
+            false,
+            Some(SessionManagerBasicDialogFooterAction::Primary),
+            true,
+        );
+        assert!(!text_focused);
+        assert_eq!(
+            footer,
+            Some(SessionManagerBasicDialogFooterAction::Cancel)
+        );
+    }
+
+    #[test]
     fn saved_proxy_chain_becomes_ssh_config_chain() {
         let path = std::env::temp_dir().join(format!(
             "oxideterm-gpui-session-manager-test-{}-connections.json",

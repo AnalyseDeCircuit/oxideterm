@@ -365,10 +365,11 @@ impl WorkspaceApp {
             return;
         }
         self.ai_delete_message_confirm = Some(message_id);
+        self.reset_standard_confirm_focus();
         cx.notify();
     }
 
-    fn delete_ai_message(&mut self, message_id: &str, cx: &mut Context<Self>) {
+    pub(super) fn delete_ai_message(&mut self, message_id: &str, cx: &mut Context<Self>) {
         let Some(conversation) = self.ai_chat.active_conversation_mut() else {
             return;
         };
@@ -429,7 +430,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn confirm_ai_safety_bypass(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn confirm_ai_safety_bypass(&mut self, cx: &mut Context<Self>) {
         if let Some(conversation_id) = self.ai_chat.active_conversation_id.as_ref() {
             self.ai_safety_bypass_conversations
                 .insert(conversation_id.clone());

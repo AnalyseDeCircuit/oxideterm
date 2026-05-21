@@ -97,6 +97,10 @@ impl WorkspaceApp {
                         this.ai_model_selector_expanded_providers
                             .insert(provider_id.clone());
                     }
+                    // Collapsing/expanding changes which model rows are
+                    // focusable, so clear the active item like Radix does when
+                    // menu content is restructured.
+                    this.ai_model_selector_highlighted_model = None;
                     cx.stop_propagation();
                     cx.notify();
                 }),

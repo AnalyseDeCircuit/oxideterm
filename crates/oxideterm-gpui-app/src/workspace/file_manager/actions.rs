@@ -82,6 +82,14 @@ impl WorkspaceApp {
         }
         if let Some(input) = self.file_manager.focused_input {
             match key {
+                "tab"
+                    if !event.keystroke.modifiers.platform
+                        && !event.keystroke.modifiers.control =>
+                {
+                    self.handle_file_manager_input_tab(input);
+                    cx.notify();
+                    return true;
+                }
                 "escape" => {
                     match input {
                         FileManagerInput::Path => self.cancel_file_manager_path_edit(),
@@ -221,10 +229,36 @@ impl WorkspaceApp {
                 }
                 false
             }
+            "delete" => {
+                // Tauri FileList handles Delete as the selected-file delete
+                // shortcut. Keep it ahead of any navigation fallback.
+                if !self.file_manager.selected.is_empty() {
+                    self.open_file_manager_delete_dialog();
+                    cx.notify();
+                    return true;
+                }
+                false
+            }
             "backspace" => {
+                // Browser/React FileList receives Backspace while the list is
+                // focused: selected rows delete; an empty selection keeps the
+                // native file-manager convenience of navigating to the parent.
+                if !self.file_manager.selected.is_empty() {
+                    self.open_file_manager_delete_dialog();
+                    cx.notify();
+                    return true;
+                }
                 self.navigate_file_manager_parent();
                 cx.notify();
                 true
+            }
+            "f2" | "F2" => {
+                if let Some(file) = self.single_selected_file_manager_file() {
+                    self.open_file_manager_rename_dialog(file.name);
+                    cx.notify();
+                    return true;
+                }
+                false
             }
             _ => false,
         }
@@ -328,6 +362,21 @@ impl WorkspaceApp {
         }
         self.file_manager.editing_path = false;
         self.ime_marked_text = None;
+    }
+
+    fn handle_file_manager_input_tab(&mut self, input: FileManagerInput) {
+        // Tauri FileList inputs are real DOM controls: Tab first blurs the
+        // current text field, and the path editor's onBlur cancels unsubmitted
+        // edits unless the Go button receives focus. Native has no button focus
+        // owner here yet, so preserve the blur/cancel half explicitly.
+        match input {
+            FileManagerInput::Path => self.cancel_file_manager_path_edit(),
+            FileManagerInput::Filter | FileManagerInput::DialogValue => {
+                self.file_manager.focused_input = None;
+                self.ime_marked_text = None;
+            }
+        }
+        self.clear_ime_selection();
     }
 
     pub(super) fn blur_file_manager_inline_inputs(&mut self) {

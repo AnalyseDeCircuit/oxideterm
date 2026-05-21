@@ -130,6 +130,7 @@ impl WorkspaceApp {
                         .and_then(|provider| ai_provider_string(provider, "name"))
                         .unwrap_or_else(|| _name.clone());
                     this.ai_provider_remove_confirm = Some((provider_id, provider_name));
+                    this.reset_standard_confirm_focus();
                 }
                 cx.stop_propagation();
                 cx.notify();

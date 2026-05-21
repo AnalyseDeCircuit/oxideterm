@@ -96,6 +96,7 @@ impl WorkspaceApp {
                         this.ai_model_selector_open = false;
                         this.ai_model_selector_search_focused = false;
                         this.ai_model_selector_search_query.clear();
+                        this.ai_model_selector_highlighted_model = None;
                         this.open_ai_settings(window, cx);
                         cx.stop_propagation();
                     }),
@@ -180,6 +181,7 @@ impl WorkspaceApp {
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
                         this.ai_model_selector_search_query.clear();
+                        this.ai_model_selector_highlighted_model = None;
                         cx.stop_propagation();
                         cx.notify();
                     }),
