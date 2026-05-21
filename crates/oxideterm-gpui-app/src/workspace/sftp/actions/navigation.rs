@@ -77,11 +77,21 @@ impl WorkspaceApp {
         }
         if let Some(input) = self.sftp_view.focused_input {
             match key {
+                "tab" if !event.keystroke.modifiers.platform && !event.keystroke.modifiers.control => {
+                    self.handle_sftp_input_tab(input);
+                    cx.notify();
+                    return true;
+                }
                 "escape" => {
-                    self.sftp_view.focused_input = None;
-                    self.sftp_view.editing_local_path = false;
-                    self.sftp_view.editing_remote_path = false;
-                    self.ime_marked_text = None;
+                    match input {
+                        SftpInput::LocalPath => self.cancel_sftp_path_edit(SftpPane::Local),
+                        SftpInput::RemotePath => self.cancel_sftp_path_edit(SftpPane::Remote),
+                        _ => {
+                            self.sftp_view.focused_input = None;
+                            self.ime_marked_text = None;
+                            self.clear_ime_selection();
+                        }
+                    }
                     cx.notify();
                     return true;
                 }
@@ -252,6 +262,45 @@ impl WorkspaceApp {
         self.sftp_view.context_menu = None;
     }
 
+    fn cancel_sftp_path_edit(&mut self, pane: SftpPane) {
+        // Tauri's editable SFTP path input cancels on DOM blur unless the Go
+        // button takes focus. Native does not model that button focus target
+        // yet, so Tab/Escape restore the current committed path explicitly.
+        match pane {
+            SftpPane::Local => {
+                self.sftp_view.local_path_input = self.sftp_view.local_path.clone();
+                self.sftp_view.editing_local_path = false;
+                if self.sftp_view.focused_input == Some(SftpInput::LocalPath) {
+                    self.sftp_view.focused_input = None;
+                }
+            }
+            SftpPane::Remote => {
+                self.sftp_view.remote_path_input = self.sftp_view.remote_path.clone();
+                self.sftp_view.editing_remote_path = false;
+                if self.sftp_view.focused_input == Some(SftpInput::RemotePath) {
+                    self.sftp_view.focused_input = None;
+                }
+            }
+        }
+        self.ime_marked_text = None;
+        self.clear_ime_selection();
+    }
+
+    fn handle_sftp_input_tab(&mut self, input: SftpInput) {
+        // Browser Tab moves focus out of the current input. Until the native
+        // toolbar buttons have first-class focus targets, mirror the observable
+        // blur side-effect so path edits do not get stuck in captured input mode.
+        match input {
+            SftpInput::LocalPath => self.cancel_sftp_path_edit(SftpPane::Local),
+            SftpInput::RemotePath => self.cancel_sftp_path_edit(SftpPane::Remote),
+            SftpInput::LocalFilter | SftpInput::RemoteFilter | SftpInput::DialogValue => {
+                self.sftp_view.focused_input = None;
+                self.ime_marked_text = None;
+                self.clear_ime_selection();
+            }
+        }
+    }
+
     fn start_sftp_path_edit(&mut self, pane: SftpPane) {
         self.sftp_view.active_pane = pane;
         match pane {
@@ -398,6 +447,7 @@ impl WorkspaceApp {
         let names = self.sftp_selected_names(pane);
         if names.is_empty() {
             self.sftp_view.drag_state = None;
+            self.stop_sftp_drag_autoscroll();
             return;
         }
         self.sftp_view.drag_state = Some(SftpDragState {
@@ -408,28 +458,54 @@ impl WorkspaceApp {
             active: false,
         });
         self.sftp_view.drag_over_pane = None;
+        self.stop_sftp_drag_autoscroll();
     }
 
     fn update_sftp_drag(&mut self, pane: SftpPane, x: f32, y: f32) {
+        if self.update_sftp_drag_activation(x, y) {
+            self.sftp_view.drag_over_pane = Some(pane);
+        }
+    }
+
+    pub(in crate::workspace) fn update_sftp_drag_capture(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        // GPUI does not give DOM-style pointer capture for free. The root view
+        // keeps the candidate alive after the pointer leaves the file list, but
+        // only pane-level move handlers may nominate a drop target.
+        if self.update_sftp_drag_activation(f32::from(position.x), f32::from(position.y)) {
+            self.sftp_view.drag_autoscroll_position = Some(position);
+            if self.apply_sftp_drag_autoscroll(position) {
+                cx.notify();
+            }
+            self.schedule_sftp_drag_autoscroll(cx);
+        } else {
+            self.stop_sftp_drag_autoscroll();
+        }
+    }
+
+    fn update_sftp_drag_activation(&mut self, x: f32, y: f32) -> bool {
         let Some(drag) = self.sftp_view.drag_state.as_mut() else {
-            return;
+            return false;
         };
         let dx = x - drag.start_x;
         let dy = y - drag.start_y;
         if !drag.active && (dx * dx + dy * dy).sqrt() >= 5.0 {
             drag.active = true;
         }
-        if drag.active {
-            self.sftp_view.drag_over_pane = Some(pane);
-        }
+        drag.active
     }
 
     fn finish_sftp_drag(&mut self, pane: SftpPane) {
         let Some(drag) = self.sftp_view.drag_state.take() else {
             self.sftp_view.drag_over_pane = None;
+            self.stop_sftp_drag_autoscroll();
             return;
         };
         self.sftp_view.drag_over_pane = None;
+        self.stop_sftp_drag_autoscroll();
         if !drag.active || drag.source_pane == pane {
             return;
         }
@@ -450,6 +526,59 @@ impl WorkspaceApp {
             }
             _ => {}
         }
+    }
+
+    pub(in crate::workspace) fn cancel_sftp_drag_capture(&mut self) -> bool {
+        // Browser pointer capture always produces a terminal mouse-up. If the
+        // user releases outside both panes, cancel the candidate so hover rings
+        // and pending drag state cannot remain latched.
+        let had_drag = self.sftp_view.drag_state.take().is_some();
+        let had_target = self.sftp_view.drag_over_pane.take().is_some();
+        self.stop_sftp_drag_autoscroll();
+        had_drag || had_target
+    }
+
+    fn schedule_sftp_drag_autoscroll(&mut self, cx: &mut Context<Self>) {
+        if self.sftp_view.drag_autoscroll_scheduled {
+            return;
+        }
+        self.sftp_view.drag_autoscroll_scheduled = true;
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(std::time::Duration::from_millis(16)).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.sftp_view.drag_autoscroll_scheduled = false;
+                let Some(position) = this.sftp_view.drag_autoscroll_position else {
+                    return;
+                };
+                if !this
+                    .sftp_view
+                    .drag_state
+                    .as_ref()
+                    .is_some_and(|drag| drag.active)
+                {
+                    this.stop_sftp_drag_autoscroll();
+                    return;
+                }
+                if this.apply_sftp_drag_autoscroll(position) {
+                    cx.notify();
+                }
+                this.schedule_sftp_drag_autoscroll(cx);
+            });
+        })
+        .detach();
+    }
+
+    fn apply_sftp_drag_autoscroll(&mut self, position: gpui::Point<gpui::Pixels>) -> bool {
+        // Tauri file panes inherit browser drag-scroll behavior from their
+        // overflow containers. Native SFTP uses GPUI uniform lists, so bridge
+        // the pointer position to each pane's tracked scroll handle.
+        uniform_list_edge_autoscroll(&self.sftp_view.local_file_scroll, position)
+            | uniform_list_edge_autoscroll(&self.sftp_view.remote_file_scroll, position)
+    }
+
+    fn stop_sftp_drag_autoscroll(&mut self) {
+        self.sftp_view.drag_autoscroll_position = None;
+        self.sftp_view.drag_autoscroll_scheduled = false;
     }
 
     fn clear_sftp_selection(&mut self, pane: SftpPane) {

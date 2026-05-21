@@ -478,7 +478,7 @@ impl WorkspaceApp {
                             cx.listener(|this, _event, _window, cx| {
                                 this.terminal_broadcast_menu_open =
                                     !this.terminal_broadcast_menu_open;
-                                this.terminal_quick_commands_open = false;
+                                this.close_terminal_quick_commands_popover();
                                 cx.stop_propagation();
                                 cx.notify();
                             }),

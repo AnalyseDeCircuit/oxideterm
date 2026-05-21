@@ -1,4 +1,68 @@
 impl WorkspaceApp {
+    pub(in crate::workspace) fn handle_ai_settings_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.show_ai_enable_confirm {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.show_ai_enable_confirm = false;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    self.edit_settings(
+                        |settings| {
+                            settings.ai.enabled = true;
+                            settings.ai.enabled_confirmed = true;
+                        },
+                        cx,
+                    );
+                    self.show_ai_enable_confirm = false;
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else if self.ai_provider_key_remove_confirm.is_some() {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.ai_provider_key_remove_confirm = None;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    if let Some((index, provider_id)) = self.ai_provider_key_remove_confirm.take()
+                    {
+                        self.remove_ai_provider_api_key(index, &provider_id, cx);
+                    }
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else if self.ai_provider_remove_confirm.is_some() {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.ai_provider_remove_confirm = None;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    if let Some((provider_id, _name)) = self.ai_provider_remove_confirm.take() {
+                        self.remove_ai_provider(&provider_id, cx);
+                    }
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else {
+            false
+        }
+    }
+
     pub(in crate::workspace) fn render_ai_enable_confirm_dialog(
         &self,
         cx: &mut Context<Self>,
@@ -10,6 +74,7 @@ impl WorkspaceApp {
                     // Tauri SettingsView AI confirm is a Radix Dialog bound to
                     // setShowAiConfirm, so outside click is the Cancel path.
                     this.show_ai_enable_confirm = false;
+                    this.clear_standard_confirm_focus();
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -71,35 +136,46 @@ impl WorkspaceApp {
                     .child(
                         dialog_footer(&self.tokens)
                             .child(
-                                button_with(
+                                button_focus_visible(
                                     &self.tokens,
-                                    self.i18n.t("settings_view.ai_confirm.cancel"),
-                                    ButtonOptions {
-                                        variant: ButtonVariant::Ghost,
-                                        size: ButtonSize::Sm,
-                                        radius: ButtonRadius::Md,
-                                        disabled: false,
-                                    },
+                                    button_with(
+                                        &self.tokens,
+                                        self.i18n.t("settings_view.ai_confirm.cancel"),
+                                        ButtonOptions {
+                                            variant: ButtonVariant::Ghost,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: false,
+                                        },
+                                    ),
+                                    self.standard_confirm_focus()
+                                        == Some(ConfirmDialogAction::Cancel),
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
                                         this.show_ai_enable_confirm = false;
+                                        this.clear_standard_confirm_focus();
                                         cx.stop_propagation();
                                         cx.notify();
                                     }),
                                 ),
                             )
                             .child(
-                                button_with(
+                                button_focus_visible(
                                     &self.tokens,
-                                    self.i18n.t("settings_view.ai_confirm.enable"),
-                                    ButtonOptions {
-                                        variant: ButtonVariant::Default,
-                                        size: ButtonSize::Sm,
-                                        radius: ButtonRadius::Md,
-                                        disabled: false,
-                                    },
+                                    button_with(
+                                        &self.tokens,
+                                        self.i18n.t("settings_view.ai_confirm.enable"),
+                                        ButtonOptions {
+                                            variant: ButtonVariant::Default,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: false,
+                                        },
+                                    ),
+                                    self.standard_confirm_focus()
+                                        == Some(ConfirmDialogAction::Confirm),
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -112,6 +188,7 @@ impl WorkspaceApp {
                                             cx,
                                         );
                                         this.show_ai_enable_confirm = false;
+                                        this.clear_standard_confirm_focus();
                                         cx.stop_propagation();
                                     }),
                                 ),
@@ -154,6 +231,7 @@ impl WorkspaceApp {
                     // Tauri provider-key removal uses the shared confirm
                     // dialog; outside close cancels the pending removal.
                     this.ai_provider_key_remove_confirm = None;
+                    this.clear_standard_confirm_focus();
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -209,7 +287,9 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
                             .child(
-                                div()
+                                button_focus_visible(
+                                    &self.tokens,
+                                    div()
                                     .flex_1()
                                     .py(px(10.0))
                                     .border_r_1()
@@ -224,18 +304,24 @@ impl WorkspaceApp {
                                             .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x80))
                                             .text_color(rgb(self.tokens.ui.text))
                                     })
-                                    .child(self.i18n.t("common.actions.cancel"))
+                                    .child(self.i18n.t("common.actions.cancel")),
+                                    self.standard_confirm_focus()
+                                        == Some(ConfirmDialogAction::Cancel),
+                                )
                                     .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.ai_provider_key_remove_confirm = None;
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }),
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.ai_provider_key_remove_confirm = None;
+                                            this.clear_standard_confirm_focus();
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
                                     ),
                             )
                             .child(
-                                div()
+                                button_focus_visible(
+                                    &self.tokens,
+                                    div()
                                     .flex_1()
                                     .py(px(10.0))
                                     .text_align(gpui::TextAlign::Center)
@@ -248,21 +334,25 @@ impl WorkspaceApp {
                                             .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
                                             .text_color(rgb(self.tokens.ui.error))
                                     })
-                                    .child(self.i18n.t("settings_view.ai.remove"))
+                                    .child(self.i18n.t("settings_view.ai.remove")),
+                                    self.standard_confirm_focus()
+                                        == Some(ConfirmDialogAction::Confirm),
+                                )
                                     .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        if let Some((index, provider_id)) =
-                                            this.ai_provider_key_remove_confirm.take()
-                                        {
-                                            this.remove_ai_provider_api_key(
-                                                index,
-                                                &provider_id,
-                                                cx,
-                                            );
-                                        }
-                                        cx.stop_propagation();
-                                    }),
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.clear_standard_confirm_focus();
+                                            if let Some((index, provider_id)) =
+                                                this.ai_provider_key_remove_confirm.take()
+                                            {
+                                                this.remove_ai_provider_api_key(
+                                                    index,
+                                                    &provider_id,
+                                                    cx,
+                                                );
+                                            }
+                                            cx.stop_propagation();
+                                        }),
                                     ),
                             ),
                     ),
@@ -290,6 +380,7 @@ impl WorkspaceApp {
                     // Tauri remove-provider confirm is cancellable via
                     // Dialog onOpenChange(false).
                     this.ai_provider_remove_confirm = None;
+                    this.clear_standard_confirm_focus();
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -345,7 +436,9 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
                             .child(
-                                div()
+                                button_focus_visible(
+                                    &self.tokens,
+                                    div()
                                     .flex_1()
                                     .py(px(10.0))
                                     .border_r_1()
@@ -360,18 +453,24 @@ impl WorkspaceApp {
                                             .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x80))
                                             .text_color(rgb(self.tokens.ui.text))
                                     })
-                                    .child(self.i18n.t("common.actions.cancel"))
+                                    .child(self.i18n.t("common.actions.cancel")),
+                                    self.standard_confirm_focus()
+                                        == Some(ConfirmDialogAction::Cancel),
+                                )
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
                                             this.ai_provider_remove_confirm = None;
+                                            this.clear_standard_confirm_focus();
                                             cx.stop_propagation();
                                             cx.notify();
                                         }),
                                     ),
                             )
                             .child(
-                                div()
+                                button_focus_visible(
+                                    &self.tokens,
+                                    div()
                                     .flex_1()
                                     .py(px(10.0))
                                     .text_align(gpui::TextAlign::Center)
@@ -384,10 +483,14 @@ impl WorkspaceApp {
                                             .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
                                             .text_color(rgb(self.tokens.ui.error))
                                     })
-                                    .child(self.i18n.t("settings_view.ai.remove"))
+                                    .child(self.i18n.t("settings_view.ai.remove")),
+                                    self.standard_confirm_focus()
+                                        == Some(ConfirmDialogAction::Confirm),
+                                )
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
+                                            this.clear_standard_confirm_focus();
                                             if let Some((provider_id, _name)) =
                                                 this.ai_provider_remove_confirm.take()
                                             {

@@ -18,12 +18,25 @@ fn detects_supported_language_extensions_and_shebangs() {
         LanguageId::from_path("PROGRAM.CS"),
         Some(LanguageId::CSharp)
     );
+    assert_eq!(LanguageId::from_path("main.c"), Some(LanguageId::C));
+    assert_eq!(
+        LanguageId::from_path("CMakeLists.txt"),
+        Some(LanguageId::CMake)
+    );
+    assert_eq!(LanguageId::from_path("tool.cmake"), Some(LanguageId::CMake));
+    assert_eq!(LanguageId::from_path("main.cpp"), Some(LanguageId::Cpp));
+    assert_eq!(LanguageId::from_path("seqlist.h"), Some(LanguageId::Cpp));
+    assert_eq!(
+        LanguageId::from_path("Dockerfile.prod"),
+        Some(LanguageId::Dockerfile)
+    );
     assert_eq!(LanguageId::from_path("style.css"), Some(LanguageId::Css));
     assert_eq!(
         LanguageId::from_path("changes.patch"),
         Some(LanguageId::Diff)
     );
     assert_eq!(LanguageId::from_path("mix.exs"), Some(LanguageId::Elixir));
+    assert_eq!(LanguageId::from_path("config.fish"), Some(LanguageId::Fish));
     assert_eq!(LanguageId::from_path("main.go"), Some(LanguageId::Go));
     assert_eq!(LanguageId::from_path("index.html"), Some(LanguageId::Html));
     assert_eq!(LanguageId::from_path("Main.java"), Some(LanguageId::Java));
@@ -35,7 +48,19 @@ fn detects_supported_language_extensions_and_shebangs() {
         LanguageId::from_path("package.json"),
         Some(LanguageId::Json)
     );
+    assert_eq!(LanguageId::from_path("system.lisp"), Some(LanguageId::Lisp));
+    assert_eq!(LanguageId::from_path("init.lua"), Some(LanguageId::Lua));
     assert_eq!(LanguageId::from_path("Makefile"), Some(LanguageId::Make));
+    assert_eq!(
+        LanguageId::from_path("AppDelegate.m"),
+        Some(LanguageId::ObjectiveC)
+    );
+    assert_eq!(LanguageId::from_path("script.pl"), Some(LanguageId::Perl));
+    assert_eq!(LanguageId::from_path("index.php"), Some(LanguageId::Php));
+    assert_eq!(
+        LanguageId::from_path("profile.ps1"),
+        Some(LanguageId::Powershell)
+    );
     assert_eq!(
         LanguageId::from_path("README.md"),
         Some(LanguageId::Markdown)
@@ -49,6 +74,7 @@ fn detects_supported_language_extensions_and_shebangs() {
         Some(LanguageId::Markdown)
     );
     assert_eq!(LanguageId::from_path("main.py"), Some(LanguageId::Python));
+    assert_eq!(LanguageId::from_path("analysis.R"), Some(LanguageId::R));
     assert_eq!(LanguageId::from_path("task.rake"), Some(LanguageId::Ruby));
     assert_eq!(LanguageId::from_path("Main.scala"), Some(LanguageId::Scala));
     assert_eq!(LanguageId::from_path("schema.sql"), Some(LanguageId::Sql));
@@ -60,6 +86,7 @@ fn detects_supported_language_extensions_and_shebangs() {
     );
     assert_eq!(LanguageId::from_path("app.tsx"), Some(LanguageId::Tsx));
     assert_eq!(LanguageId::from_path("compose.yml"), Some(LanguageId::Yaml));
+    assert_eq!(LanguageId::from_path(".zshrc"), Some(LanguageId::Zsh));
     assert_eq!(LanguageId::from_path("main.zig"), Some(LanguageId::Zig));
     assert_eq!(
         LanguageId::detect(None, "#!/usr/bin/env rust-script\nfn main() {}"),
@@ -86,15 +113,29 @@ fn parses_and_highlights_all_supported_languages() {
             LanguageId::CSharp,
             "class Demo { static void Main() { var x = 1; } }\n",
         ),
+        (
+            LanguageId::CMake,
+            "cmake_minimum_required(VERSION 3.20)\nproject(Demo)\n",
+        ),
+        (
+            LanguageId::C,
+            "#include <stdio.h>\nint main(void) { return 0; }\n",
+        ),
+        (
+            LanguageId::Cpp,
+            "#include <iostream>\ntemplate <typename T> class Box { T value; };\n",
+        ),
         (LanguageId::Css, ".root { color: #fff; display: flex; }\n"),
         (
             LanguageId::Diff,
             "diff --git a/a b/a\n@@ -1 +1 @@\n-old\n+new\n",
         ),
+        (LanguageId::Dockerfile, "FROM alpine:3.20\nRUN echo ok\n"),
         (
             LanguageId::Elixir,
             "defmodule Demo do\n  def hello(name), do: \"hi #{name}\"\nend\n",
         ),
+        (LanguageId::Fish, "function greet\n    echo hi\nend\n"),
         (
             LanguageId::Go,
             "package main\nfunc main() { println(\"hi\") }\n",
@@ -115,15 +156,31 @@ fn parses_and_highlights_all_supported_languages() {
             LanguageId::Json,
             "{\"scripts\": {\"build\": \"cargo build\"}}\n",
         ),
+        (
+            LanguageId::Lisp,
+            "(defun hello (name) (format t \"hi ~a\" name))\n",
+        ),
+        (LanguageId::Lua, "local value = 1\nprint(value)\n"),
         (LanguageId::Make, "build:\n\tcargo build\n"),
         (
             LanguageId::Markdown,
             "# Title\n\nSome `code` and [link](https://example.com).\n\n```rust\nfn main() {}\n```\n",
         ),
         (
+            LanguageId::ObjectiveC,
+            "#import <Foundation/Foundation.h>\n@interface Demo : NSObject\n@end\n",
+        ),
+        (LanguageId::Perl, "my $name = \"Ada\";\nprint $name;\n"),
+        (LanguageId::Php, "<?php\nfunction demo() { return 1; }\n"),
+        (
+            LanguageId::Powershell,
+            "param($Name)\nWrite-Host \"Hi $Name\"\n",
+        ),
+        (
             LanguageId::Python,
             "def hello(name):\n    return f\"hi {name}\"\n",
         ),
+        (LanguageId::R, "value <- c(1, 2, 3)\nprint(value)\n"),
         (
             LanguageId::Ruby,
             "class Demo\n  def hello\n    puts \"hi\"\n  end\nend\n",
@@ -151,6 +208,7 @@ fn parses_and_highlights_all_supported_languages() {
             "type User = { name: string };\nconst user: User = { name: \"Ada\" };\n",
         ),
         (LanguageId::Yaml, "name: demo\nitems:\n  - one\n"),
+        (LanguageId::Zsh, "autoload -Uz compinit\ncompinit\n"),
         (
             LanguageId::Zig,
             "pub fn main() void { const x: i32 = 1; }\n",

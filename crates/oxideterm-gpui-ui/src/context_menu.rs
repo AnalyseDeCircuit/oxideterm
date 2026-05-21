@@ -1,6 +1,6 @@
 use gpui::{
-    Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Styled, div, prelude::*, px,
-    rgb, rgba,
+    CursorStyle, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Styled, div,
+    prelude::*, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -193,6 +193,14 @@ pub fn context_menu_item_row(
             CONTEXT_MENU_DISABLED_OPACITY
         } else {
             1.0
+        })
+        // Tauri Radix context-menu disabled rows are visibly and semantically
+        // non-interactive. Keep the native shared row from showing a hand
+        // cursor while retaining caller-specific event ownership.
+        .cursor(if disabled {
+            CursorStyle::OperationNotAllowed
+        } else {
+            CursorStyle::PointingHand
         });
 
     if disabled {

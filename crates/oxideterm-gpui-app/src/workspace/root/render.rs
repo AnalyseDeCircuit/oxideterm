@@ -138,6 +138,27 @@ impl Render for WorkspaceApp {
                 } else if this.handle_active_text_input_navigation(&event.keystroke, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_cloud_sync_confirm_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_ai_settings_confirm_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_ai_sidebar_confirm_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_settings_confirm_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_oxide_dialog_footer_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_cloud_sync_select_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_session_manager_basic_dialog_footer_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if !this.command_palette.open
                     && this.keybinding_recording_action_id.is_none()
                     && crate::keybindings::keystroke_matches_action(
@@ -197,6 +218,9 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_terminal_command_overlay_escape(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_transient_workspace_overlay_escape(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.terminal_command_bar_focused {
@@ -351,15 +375,38 @@ impl Render for WorkspaceApp {
                     this.update_selectable_text_autoscroll(event.position, cx);
                     cx.stop_propagation();
                 }
+                this.update_sftp_drag_capture(event.position, cx);
                 this.update_tab_drag(event, window, cx);
             }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
+                cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                     this.blur_text_inputs(cx);
                     this.clear_read_only_ime_selection(cx);
                 }),
             )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                    // Browser context menus and Radix popovers both treat
+                    // outside pointer activity as a transient-layer dismiss.
+                    // Right-click keeps input focus alone but must not leave an
+                    // old menu/select open behind the next context action.
+                    let _ =
+                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                }),
+            )
+            .on_scroll_wheel(cx.listener(|this, _event: &ScrollWheelEvent, _window, cx| {
+                // Portal backdrops already occlude wheel input. This catches
+                // inline select/popover states that have no full-window layer,
+                // closing them before the same wheel event scrolls the page or
+                // terminal underneath.
+                if this.dismiss_transient_workspace_overlays() {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, window, cx| {
@@ -372,10 +419,14 @@ impl Render for WorkspaceApp {
                     this.finish_ime_selection_drag(cx);
                     this.stop_selectable_text_autoscroll();
                     this.finish_tab_drag(event, window, cx);
+                    let cancelled_sftp_drag = this.cancel_sftp_drag_capture();
                     if this.launcher.pressed_app_path.take().is_some() {
                         cx.notify();
                     }
-                    if was_read_only_dragging {
+                    if cancelled_sftp_drag {
+                        cx.notify();
+                    }
+                    if was_read_only_dragging || cancelled_sftp_drag {
                         cx.stop_propagation();
                     }
                 }),
@@ -708,18 +759,20 @@ impl Render for WorkspaceApp {
                         popover_backdrop()
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.terminal_broadcast_menu_open = false;
+                                cx.listener(|this, _event, window, cx| {
+                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
+                                        window, cx,
+                                    );
                                     cx.stop_propagation();
-                                    cx.notify();
                                 }),
                             )
                             .on_mouse_down(
                                 MouseButton::Right,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.terminal_broadcast_menu_open = false;
+                                cx.listener(|this, _event, window, cx| {
+                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
+                                        window, cx,
+                                    );
                                     cx.stop_propagation();
-                                    cx.notify();
                                 }),
                             )
                             .child(self.render_terminal_broadcast_menu(placement, cx)),
@@ -738,18 +791,20 @@ impl Render for WorkspaceApp {
                         popover_backdrop()
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.close_terminal_quick_commands_popover();
+                                cx.listener(|this, _event, window, cx| {
+                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
+                                        window, cx,
+                                    );
                                     cx.stop_propagation();
-                                    cx.notify();
                                 }),
                             )
                             .on_mouse_down(
                                 MouseButton::Right,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.close_terminal_quick_commands_popover();
+                                cx.listener(|this, _event, window, cx| {
+                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
+                                        window, cx,
+                                    );
                                     cx.stop_propagation();
-                                    cx.notify();
                                 }),
                             )
                             .child(self.render_terminal_quick_commands_popover(cx)),

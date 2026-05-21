@@ -81,6 +81,7 @@ impl WorkspaceApp {
                         cx.listener(move |this, _event, _window, cx| {
                             if !enabled && !this.settings_store.settings().ai.enabled_confirmed {
                                 this.show_ai_enable_confirm = true;
+                                this.reset_standard_confirm_focus();
                                 cx.notify();
                             } else {
                                 this.edit_settings(

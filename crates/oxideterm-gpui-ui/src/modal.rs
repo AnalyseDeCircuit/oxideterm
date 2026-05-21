@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, Div, IntoElement, MouseButton, ParentElement, Rgba, Styled, div, prelude::*, px,
-    rgb, rgba,
+    AnyElement, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Rgba, Styled,
+    div, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -167,6 +167,23 @@ pub fn popover_backdrop() -> Div {
         .bottom_0()
         .bg(backdrop_color(TauriBackdropRole::Popover))
         .occlude()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+}
+
+pub fn overlay_content_boundary<E>(content: E) -> E
+where
+    E: InteractiveElement,
+{
+    // Browser/Radix overlay content is an event island: pointer and wheel input
+    // inside the panel must not bubble to the outside-dismiss layer or scroll
+    // the terminal/page behind it.
+    content
+        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+            cx.stop_propagation();
+        })
+        .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+            cx.stop_propagation();
+        })
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
 }
 

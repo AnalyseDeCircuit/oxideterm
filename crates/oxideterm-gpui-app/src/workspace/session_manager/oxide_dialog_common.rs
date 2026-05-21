@@ -481,6 +481,7 @@ impl WorkspaceApp {
         primary_disabled: bool,
         secondary_label: String,
         primary_label: String,
+        focused_action: Option<OxideDialogFooterAction>,
         secondary_listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         primary_listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         cancel_listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
@@ -493,43 +494,55 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .pt(px(8.0))
             .child(
-                button_with(
+                button_focus_visible(
                     &self.tokens,
-                    self.render_oxide_cancel_button_label(false),
-                    ButtonOptions {
-                        variant: ButtonVariant::Outline,
-                        size: ButtonSize::Sm,
-                        radius: ButtonRadius::Md,
-                        disabled: busy,
-                    },
-                )
-                .on_mouse_down(MouseButton::Left, cancel_listener),
-            )
-            .when(!secondary_label.is_empty(), |footer| {
-                footer.child(
                     button_with(
                         &self.tokens,
-                        secondary_label,
+                        self.render_oxide_cancel_button_label(false),
                         ButtonOptions {
                             variant: ButtonVariant::Outline,
                             size: ButtonSize::Sm,
                             radius: ButtonRadius::Md,
                             disabled: busy,
                         },
+                    ),
+                    focused_action == Some(OxideDialogFooterAction::Cancel),
+                )
+                .on_mouse_down(MouseButton::Left, cancel_listener),
+            )
+            .when(!secondary_label.is_empty(), |footer| {
+                footer.child(
+                    button_focus_visible(
+                        &self.tokens,
+                        button_with(
+                            &self.tokens,
+                            secondary_label,
+                            ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Sm,
+                                radius: ButtonRadius::Md,
+                                disabled: busy,
+                            },
+                        ),
+                        focused_action == Some(OxideDialogFooterAction::Secondary),
                     )
                     .on_mouse_down(MouseButton::Left, secondary_listener),
                 )
             })
             .child(
-                button_with(
+                button_focus_visible(
                     &self.tokens,
-                    primary_label,
-                    ButtonOptions {
-                        variant: ButtonVariant::Default,
-                        size: ButtonSize::Sm,
-                        radius: ButtonRadius::Md,
-                        disabled: busy || primary_disabled,
-                    },
+                    button_with(
+                        &self.tokens,
+                        primary_label,
+                        ButtonOptions {
+                            variant: ButtonVariant::Default,
+                            size: ButtonSize::Sm,
+                            radius: ButtonRadius::Md,
+                            disabled: busy || primary_disabled,
+                        },
+                    ),
+                    focused_action == Some(OxideDialogFooterAction::Primary),
                 )
                 .min_w(px(140.0))
                 .on_mouse_down(MouseButton::Left, primary_listener),

@@ -14,6 +14,7 @@ const CONFIRM_SHADOW_ALPHA: u32 = 0x66; // Tauri shadow-black/40
 const CONFIRM_ICON_BG_ALPHA: u32 = 0x1a; // Tauri bg-*-500/10
 const CONFIRM_ICON_RING_ALPHA: u32 = 0x33; // Tauri ring-*-500/20
 const CONFIRM_ACTION_HOVER_ALPHA: u32 = 0x1a; // Tauri hover:bg-*-500/10
+const CONFIRM_ACTION_FOCUS_RING_ALPHA: u32 = 0xb3; // Tauri focus-visible:ring-theme-accent/70
 const CONFIRM_ICON_SIZE: f32 = 24.0; // Tauri w-6 h-6
 const CONFIRM_ICON_WRAPPER_SIZE: f32 = 48.0; // Tauri w-12 h-12
 const CONFIRM_BODY_PAD_X: f32 = 24.0; // Tauri px-6
@@ -32,6 +33,12 @@ pub enum ConfirmDialogVariant {
     Danger,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConfirmDialogAction {
+    Cancel,
+    Confirm,
+}
+
 pub struct ConfirmDialogView {
     pub variant: ConfirmDialogVariant,
     pub title: AnyElement,
@@ -46,6 +53,16 @@ pub fn confirm_dialog(
     on_cancel: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     on_confirm: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
+    confirm_dialog_with_focus(tokens, view, None, on_cancel, on_confirm)
+}
+
+pub fn confirm_dialog_with_focus(
+    tokens: &ThemeTokens,
+    view: ConfirmDialogView,
+    focused_action: Option<ConfirmDialogAction>,
+    on_cancel: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    on_confirm: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
     let theme = tokens.ui;
     let is_danger = view.variant == ConfirmDialogVariant::Danger;
     let icon_path = if is_danger {
@@ -57,6 +74,12 @@ pub fn confirm_dialog(
     let icon_color = if is_danger { TW_RED_400 } else { theme.accent };
     let confirm_color = if is_danger { TW_RED_400 } else { theme.accent };
     let confirm_hover_color = if is_danger { TW_RED_300 } else { theme.accent };
+    let focus_ring = vec![BoxShadow {
+        color: Hsla::from(rgba((theme.accent << 8) | CONFIRM_ACTION_FOCUS_RING_ALPHA)),
+        offset: point(px(0.0), px(0.0)),
+        blur_radius: px(0.0),
+        spread_radius: px(2.0),
+    }];
     let on_cancel = Rc::new(on_cancel);
     let on_backdrop_cancel = on_cancel.clone();
 
@@ -151,6 +174,13 @@ pub fn confirm_dialog(
                                     button.text_color(rgb(theme.text)).bg(rgb(theme.bg_hover))
                                 })
                                 .cursor_pointer()
+                                // Browser focus-visible on the footer buttons is
+                                // keyboard-owned. GPUI has no DOM tab stop here,
+                                // so callers pass the active action explicitly.
+                                .when(
+                                    focused_action == Some(ConfirmDialogAction::Cancel),
+                                    |button| button.shadow(focus_ring.clone()),
+                                )
                                 .child(view.cancel_label)
                                 .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                                     on_cancel(event, window, cx);
@@ -172,6 +202,10 @@ pub fn confirm_dialog(
                                         .bg(rgba((accent << 8) | CONFIRM_ACTION_HOVER_ALPHA))
                                 })
                                 .cursor_pointer()
+                                .when(
+                                    focused_action == Some(ConfirmDialogAction::Confirm),
+                                    |button| button.shadow(focus_ring),
+                                )
                                 .child(view.confirm_label)
                                 .on_mouse_down(MouseButton::Left, on_confirm),
                         ),

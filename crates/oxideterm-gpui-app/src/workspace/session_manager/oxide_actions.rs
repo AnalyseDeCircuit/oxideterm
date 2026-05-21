@@ -83,6 +83,165 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(super) fn handle_oxide_dialog_footer_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            return false;
+        }
+
+        if self.session_manager.oxide_import_dialog.is_some() {
+            return self.handle_oxide_import_footer_key(event, cx);
+        }
+        if self.session_manager.oxide_export_dialog.is_some() {
+            return self.handle_oxide_export_footer_key(event, cx);
+        }
+        false
+    }
+
+    fn handle_oxide_import_footer_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(dialog) = self.session_manager.oxide_import_dialog.as_ref() else {
+            return false;
+        };
+        if dialog.busy {
+            return false;
+        }
+        let actions = oxide_import_footer_actions(dialog);
+        if actions.is_empty() {
+            return false;
+        }
+
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.session_manager.oxide_import_dialog = None;
+                self.session_manager.focused_input = None;
+                cx.notify();
+                true
+            }
+            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
+                let forward = !event.keystroke.modifiers.shift
+                    && !matches!(event.keystroke.key.as_str(), "arrowleft" | "left");
+                if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
+                    dialog.focused_footer_action =
+                        next_oxide_footer_action(&actions, dialog.focused_footer_action, forward);
+                }
+                cx.notify();
+                true
+            }
+            "enter" | "space" | " " => {
+                let focused = dialog.focused_footer_action.unwrap_or(actions[0]);
+                self.activate_oxide_import_footer_action(focused, cx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn activate_oxide_import_footer_action(
+        &mut self,
+        action: OxideDialogFooterAction,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dialog) = self.session_manager.oxide_import_dialog.as_ref() else {
+            return;
+        };
+        match action {
+            OxideDialogFooterAction::Cancel => {
+                self.session_manager.oxide_import_dialog = None;
+                self.session_manager.focused_input = None;
+                cx.notify();
+            }
+            OxideDialogFooterAction::Secondary if dialog.preview.is_some() => {
+                if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
+                    dialog.preview = None;
+                    dialog.result_summary = None;
+                    dialog.focused_footer_action = Some(OxideDialogFooterAction::Secondary);
+                }
+                cx.notify();
+            }
+            OxideDialogFooterAction::Secondary => self.select_oxide_import_file(cx),
+            OxideDialogFooterAction::Primary if dialog.result.is_some() => {
+                self.session_manager.oxide_import_dialog = None;
+                self.session_manager.focused_input = None;
+                cx.notify();
+            }
+            OxideDialogFooterAction::Primary if dialog.preview.is_some() => {
+                if oxide_import_has_selected_content(dialog) {
+                    self.apply_oxide_import_dialog(cx);
+                } else {
+                    cx.notify();
+                }
+            }
+            OxideDialogFooterAction::Primary => {
+                if !dialog.password.is_empty() {
+                    self.preview_oxide_import_dialog(cx);
+                } else {
+                    cx.notify();
+                }
+            }
+        }
+    }
+
+    fn handle_oxide_export_footer_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(dialog) = self.session_manager.oxide_export_dialog.as_ref() else {
+            return false;
+        };
+        if dialog.busy {
+            return false;
+        }
+        let actions = [OxideDialogFooterAction::Cancel, OxideDialogFooterAction::Primary];
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.session_manager.oxide_export_dialog = None;
+                self.session_manager.focused_input = None;
+                cx.notify();
+                true
+            }
+            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
+                let forward = !event.keystroke.modifiers.shift
+                    && !matches!(event.keystroke.key.as_str(), "arrowleft" | "left");
+                if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
+                    dialog.focused_footer_action =
+                        next_oxide_footer_action(&actions, dialog.focused_footer_action, forward);
+                }
+                cx.notify();
+                true
+            }
+            "enter" | "space" | " " => {
+                match dialog
+                    .focused_footer_action
+                    .unwrap_or(OxideDialogFooterAction::Cancel)
+                {
+                    OxideDialogFooterAction::Cancel => {
+                        self.session_manager.oxide_export_dialog = None;
+                        self.session_manager.focused_input = None;
+                        cx.notify();
+                    }
+                    OxideDialogFooterAction::Primary => {
+                        if oxide_export_has_selected_content(dialog) {
+                            self.export_oxide_dialog(cx);
+                        } else {
+                            cx.notify();
+                        }
+                    }
+                    OxideDialogFooterAction::Secondary => cx.notify(),
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn exportable_saved_forwards(&self) -> Vec<PersistedForward> {
         let connection_ids = self
             .connection_store

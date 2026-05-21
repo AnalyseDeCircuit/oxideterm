@@ -1,5 +1,10 @@
-use gpui::{Div, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
+use gpui::{
+    BoxShadow, CursorStyle, Div, Hsla, ParentElement, Styled, div, point, prelude::*, px, rgb, rgba,
+};
 use oxideterm_theme::ThemeTokens;
+
+const BUTTON_FOCUS_RING_ALPHA: u32 = 0xb3; // Tauri focus-visible:ring-theme-accent/70
+const BUTTON_FOCUS_RING_WIDTH: f32 = 2.0; // Tauri focus-visible:ring-2
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ButtonTone {
@@ -131,6 +136,28 @@ pub fn button_with(tokens: &ThemeTokens, label: String, options: ButtonOptions) 
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(text)
         .opacity(if options.disabled { 0.5 } else { 1.0 })
-        .cursor_pointer()
+        // Tauri/shadcn disabled buttons use opacity plus disabled pointer
+        // semantics. Keep the shared primitive from advertising clickability
+        // when feature code intentionally omits the mouse handler.
+        .cursor(if options.disabled {
+            CursorStyle::OperationNotAllowed
+        } else {
+            CursorStyle::PointingHand
+        })
         .child(label)
+}
+
+pub fn button_focus_visible(tokens: &ThemeTokens, button: Div, focused: bool) -> Div {
+    if !focused {
+        return button;
+    }
+    // GPUI buttons are drawn from workspace-owned keyboard focus rather than
+    // DOM :focus-visible, so the shared primitive applies the same ring when a
+    // caller marks the action as keyboard-focused.
+    button.shadow(vec![BoxShadow {
+        color: Hsla::from(rgba((tokens.ui.accent << 8) | BUTTON_FOCUS_RING_ALPHA)),
+        offset: point(px(0.0), px(0.0)),
+        blur_radius: px(0.0),
+        spread_radius: px(BUTTON_FOCUS_RING_WIDTH),
+    }])
 }

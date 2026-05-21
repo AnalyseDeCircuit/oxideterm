@@ -87,6 +87,7 @@ impl WorkspaceApp {
                             MouseButton::Left,
                             cx.listener(|this, _event, _window, cx| {
                                 this.keybinding_reset_all_confirm_open = true;
+                                this.reset_standard_confirm_focus();
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
@@ -636,7 +637,7 @@ impl WorkspaceApp {
     }
 
     fn render_keybinding_reset_all_confirm_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
-        confirm_dialog(
+        confirm_dialog_with_focus(
             &self.tokens,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
@@ -673,13 +674,16 @@ impl WorkspaceApp {
                     ))
                     .into_any_element(),
             },
+            self.standard_confirm_focus(),
             cx.listener(|this, _event, _window, cx| {
                 this.keybinding_reset_all_confirm_open = false;
+                this.clear_standard_confirm_focus();
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, window, cx| {
                 this.keybinding_reset_all_confirm_open = false;
+                this.clear_standard_confirm_focus();
                 this.reset_all_keybindings(window, cx);
                 cx.stop_propagation();
             }),

@@ -26,8 +26,7 @@ use oxideterm_gpui_markdown::{
 use oxideterm_gpui_settings_view::SettingsTab;
 use oxideterm_settings::AiThinkingStyle;
 use oxideterm_gpui_ui::{
-    ConfirmDialogVariant, ConfirmDialogView, confirm_dialog,
-    TextInputView,
+    ConfirmDialogVariant, ConfirmDialogView, TextInputView,
     ai::{
         AiContextUsage, AiModelSelectorPlacement, AiModelSelectorProviderState, AiSafetyMode,
         AiTone, AiToolCallView, AiToolRisk, AiToolStatus, ai_autocomplete_item,
@@ -48,6 +47,7 @@ use oxideterm_gpui_ui::{
         ai_tool_details, ai_tool_heading, ai_tool_item, ai_tool_item_header, ai_tool_output_pre,
         ai_tool_section_label,
     },
+    modal::overlay_content_boundary,
     tauri_ui_font_family as settings_ui_font_family,
     text_input::{text_caret, text_input, text_input_anchor_probe},
 };

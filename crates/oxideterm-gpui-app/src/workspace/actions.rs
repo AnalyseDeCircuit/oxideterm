@@ -295,6 +295,30 @@ impl WorkspaceApp {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
+        if self.handle_ai_settings_confirm_key(event, cx) {
+            return;
+        }
+
+        if self.handle_ai_sidebar_confirm_key(event, cx) {
+            return;
+        }
+
+        if self.handle_settings_confirm_key(event, window, cx) {
+            return;
+        }
+
+        if self.handle_oxide_dialog_footer_key(event, cx) {
+            return;
+        }
+
+        if self.handle_cloud_sync_confirm_key(event, cx) {
+            return;
+        }
+
+        if self.handle_cloud_sync_select_key(event, cx) {
+            return;
+        }
+
         if self.active_surface == ActiveSurface::Settings && self.open_settings_select.is_some() {
             if key == "escape" && !modifiers.platform {
                 self.open_settings_select = None;
@@ -413,6 +437,172 @@ impl WorkspaceApp {
                 _ => {}
             }
             return;
+        }
+    }
+
+    pub(super) fn standard_confirm_focus(&self) -> Option<ConfirmDialogAction> {
+        Some(
+            self.standard_confirm_focused_action
+                .unwrap_or(ConfirmDialogAction::Cancel),
+        )
+    }
+
+    pub(super) fn reset_standard_confirm_focus(&mut self) {
+        // Tauri/Radix dialogs focus the first footer button when keyboard focus
+        // enters the action row. Native tracks that owner explicitly.
+        self.standard_confirm_focused_action = Some(ConfirmDialogAction::Cancel);
+    }
+
+    pub(super) fn clear_standard_confirm_focus(&mut self) {
+        self.standard_confirm_focused_action = None;
+    }
+
+    pub(super) fn handle_standard_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> Option<ConfirmKeyboardAction> {
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            return None;
+        }
+
+        let focused = self
+            .standard_confirm_focused_action
+            .unwrap_or(ConfirmDialogAction::Cancel);
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.clear_standard_confirm_focus();
+                Some(ConfirmKeyboardAction::Cancel)
+            }
+            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
+                self.standard_confirm_focused_action = Some(match focused {
+                    ConfirmDialogAction::Cancel => ConfirmDialogAction::Confirm,
+                    ConfirmDialogAction::Confirm => ConfirmDialogAction::Cancel,
+                });
+                cx.notify();
+                Some(ConfirmKeyboardAction::Handled)
+            }
+            "enter" | "space" | " " => {
+                self.clear_standard_confirm_focus();
+                Some(match focused {
+                    ConfirmDialogAction::Cancel => ConfirmKeyboardAction::Cancel,
+                    ConfirmDialogAction::Confirm => ConfirmKeyboardAction::Confirm,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn handle_settings_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.settings_reset_confirm_open {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.settings_reset_confirm_open = false;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    self.settings_reset_confirm_open = false;
+                    self.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else if self.keybinding_reset_all_confirm_open {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.keybinding_reset_all_confirm_open = false;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    self.keybinding_reset_all_confirm_open = false;
+                    self.reset_all_keybindings(window, cx);
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else {
+            false
+        }
+    }
+
+    pub(super) fn handle_ai_sidebar_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.ai_safety_confirm_open {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.ai_safety_confirm_open = false;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    self.confirm_ai_safety_bypass(cx);
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else if self.ai_summarize_confirm_open {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.ai_summarize_confirm_open = false;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    self.ai_summarize_confirm_open = false;
+                    self.start_ai_summarize_conversation(cx);
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else if self.ai_clear_all_confirm_open {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.ai_clear_all_confirm_open = false;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    self.clear_ai_conversations();
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else if self.ai_delete_message_confirm.is_some() {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.ai_delete_message_confirm = None;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    if let Some(message_id) = self.ai_delete_message_confirm.take() {
+                        self.delete_ai_message(&message_id, cx);
+                    } else {
+                        cx.notify();
+                    }
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else {
+            false
         }
     }
 

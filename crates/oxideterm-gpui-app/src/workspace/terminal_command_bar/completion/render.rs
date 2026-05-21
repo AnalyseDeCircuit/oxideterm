@@ -57,6 +57,12 @@ impl WorkspaceApp {
             .border_color(rgba((theme.border << 8) | SUGGESTIONS_BORDER_ALPHA))
             .bg(rgba((theme.bg_elevated << 8) | SUGGESTIONS_BG_ALPHA))
             .shadow_lg()
+            .on_scroll_wheel(|_, _, cx| {
+                // Completion popovers are their own wheel boundary; otherwise
+                // root-level overlay dismissal would close suggestions while
+                // the user is trying to inspect them.
+                cx.stop_propagation();
+            })
             .font_family(settings_mono_font_family(self.settings_store.settings()));
 
         let mut index = 0usize;

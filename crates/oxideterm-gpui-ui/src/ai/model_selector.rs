@@ -132,6 +132,9 @@ pub fn ai_model_selector_dropdown(
         .bg(rgb(tokens.ui.bg_elevated))
         .font_family(ai_font_family())
         .shadow_lg()
+        // Tauri dropdown menus are wheel boundaries: scrolling over the model
+        // selector must never move the chat/sidebar underneath the overlay.
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .when(placement == AiModelSelectorPlacement::Down, |panel| panel)
         .when(placement == AiModelSelectorPlacement::Up, |panel| panel)
 }
@@ -376,6 +379,7 @@ pub fn ai_model_selector_model_row(
     tokens: &ThemeTokens,
     model: impl Into<String>,
     active: bool,
+    highlighted: bool,
     check_icon: Option<AnyElement>,
 ) -> Div {
     let model = model.into();
@@ -397,7 +401,14 @@ pub fn ai_model_selector_model_row(
         } else {
             muted_text(tokens, MODEL_SELECTOR_MODEL_INACTIVE_TEXT_ALPHA)
         })
+        .bg(if highlighted {
+            bg_alpha(tokens, tokens.ui.bg_hover, AI_HOVER_BG_ALPHA)
+        } else {
+            rgba(0x00000000)
+        })
         .hover(|style| {
+            // Keyboard highlight and pointer hover use the same Radix menu
+            // active-row treatment; active rows keep their checkmark emphasis.
             if active {
                 style
             } else {

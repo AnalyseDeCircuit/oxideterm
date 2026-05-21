@@ -1,9 +1,9 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
-    AnchoredPositionMode, Corner, Entity, ObjectFit, PathPromptOptions, SharedString,
-    StatefulInteractiveElement, StyledText, Subscription, UniformListScrollHandle, anchored,
-    deferred, prelude::*,
+    AnchoredPositionMode, Corner, Entity, ObjectFit, PathPromptOptions, Pixels, Point,
+    SharedString, StatefulInteractiveElement, StyledText, Subscription, UniformListScrollHandle,
+    anchored, deferred, prelude::*,
 };
 use oxideterm_code_editor::backend::input::{
     Input as CodeEditorInput, InputEvent as CodeEditorInputEvent,
@@ -13,7 +13,7 @@ use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
 };
 use oxideterm_gpui_ui::{
-    modal::{dismissible_dialog_backdrop, popover_backdrop},
+    modal::{dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop},
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{text_caret, text_input_anchor_probe},
 };
@@ -518,6 +518,8 @@ pub(super) struct SftpViewState {
     context_menu: Option<SftpContextMenu>,
     drag_state: Option<SftpDragState>,
     drag_over_pane: Option<SftpPane>,
+    drag_autoscroll_position: Option<Point<Pixels>>,
+    drag_autoscroll_scheduled: bool,
     next_transfer_id: u64,
     next_transfer_batch_id: u64,
 }
@@ -598,6 +600,8 @@ impl Default for SftpViewState {
             context_menu: None,
             drag_state: None,
             drag_over_pane: None,
+            drag_autoscroll_position: None,
+            drag_autoscroll_scheduled: false,
             next_transfer_id: 1,
             next_transfer_batch_id: 1,
         }
@@ -613,6 +617,13 @@ impl SftpViewState {
         let mut files = self.remote_selected.iter().cloned().collect::<Vec<_>>();
         files.sort();
         files
+    }
+
+    pub(super) fn dismiss_context_menu(&mut self) -> bool {
+        // Root-level browser dismiss only needs to know whether a transient
+        // menu existed; SFTP keeps the menu payload private to preserve row
+        // action ownership inside the SFTP module.
+        self.context_menu.take().is_some()
     }
 }
 

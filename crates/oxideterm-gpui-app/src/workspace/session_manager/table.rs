@@ -345,6 +345,7 @@ impl WorkspaceApp {
             cx.listener({
                 let id = conn.id.clone();
                 move |this, event: &MouseDownEvent, _window, cx| {
+                    this.select_connection_for_context_menu(&id);
                     this.session_manager.row_context_menu_connection_id = Some(id.clone());
                     this.session_manager.row_context_menu_x = f32::from(event.position.x);
                     this.session_manager.row_context_menu_y = f32::from(event.position.y);
@@ -794,6 +795,11 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             })
             .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_scroll_wheel(|_, _, cx| {
+                // Match browser context menus: wheel over the menu is handled
+                // by the overlay layer and must not scroll the table below.
                 cx.stop_propagation();
             })
             .child(

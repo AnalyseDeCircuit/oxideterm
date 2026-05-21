@@ -15,10 +15,11 @@ impl WorkspaceApp {
         self.ai_chat_input_focused = false;
         self.ai_model_selector_search_focused = false;
         self.ai_model_selector_open = false;
+        self.ai_model_selector_highlighted_model = None;
         self.ime_marked_text = None;
     }
 
-    fn close_ai_sidebar_popovers(&mut self) {
+    pub(in crate::workspace) fn close_ai_sidebar_popovers(&mut self) {
         self.ai_conversation_list_open = false;
         self.ai_chat_menu_open = false;
         self.ai_profile_selector_open = false;
@@ -27,6 +28,7 @@ impl WorkspaceApp {
         self.ai_model_selector_open = false;
         self.ai_model_selector_search_focused = false;
         self.ai_model_selector_search_query.clear();
+        self.ai_model_selector_highlighted_model = None;
     }
 
     fn cancel_ai_chat_stream(&mut self, cx: &mut Context<Self>) {
@@ -107,7 +109,7 @@ impl WorkspaceApp {
         self.persist_ai_chat_state();
     }
 
-    fn clear_ai_conversations(&mut self) {
+    pub(super) fn clear_ai_conversations(&mut self) {
         self.ai_chat.clear_conversations();
         self.ai_safety_bypass_conversations.clear();
         self.ai_thinking_expansion_state.clear();

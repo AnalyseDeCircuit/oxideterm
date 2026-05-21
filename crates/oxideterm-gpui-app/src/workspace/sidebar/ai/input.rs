@@ -394,6 +394,9 @@ impl WorkspaceApp {
             .bg(rgb(self.tokens.ui.bg_elevated))
             .shadow_lg()
             .py(px(4.0));
+        // Profile dropdown is a floating Radix-style menu in Tauri; wheel
+        // events over it should not route into the sidebar/chat scroll stack.
+        panel = panel.on_scroll_wheel(|_, _, cx| cx.stop_propagation());
 
         for profile in profiles {
             let profile_id = profile
@@ -481,6 +484,9 @@ impl WorkspaceApp {
             .border_color(rgb(self.tokens.ui.border))
             .bg(rgb(self.tokens.ui.bg_elevated))
             .shadow_lg()
+            // Safety mode dropdown follows the same menu wheel boundary as
+            // Tauri DropdownMenuContent.
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .py(px(self.tokens.spacing.one))
             .child(
                 div()
@@ -628,6 +634,7 @@ impl WorkspaceApp {
                         AiSafetyMode::Bypass => {
                             if this.active_ai_safety_mode() != AiSafetyMode::Bypass {
                                 this.ai_safety_confirm_open = true;
+                                this.reset_standard_confirm_focus();
                             }
                             this.ai_safety_menu_open = false;
                             cx.notify();
@@ -643,7 +650,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        confirm_dialog(
+        confirm_dialog_with_focus(
             &self.tokens,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
@@ -690,12 +697,15 @@ impl WorkspaceApp {
                     ))
                     .into_any_element(),
             },
+            self.standard_confirm_focus(),
             cx.listener(|this, _event, _window, cx| {
                 this.ai_safety_confirm_open = false;
+                this.clear_standard_confirm_focus();
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
+                this.clear_standard_confirm_focus();
                 this.confirm_ai_safety_bypass(cx);
                 cx.stop_propagation();
             }),

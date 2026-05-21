@@ -68,7 +68,8 @@ use oxideterm_gpui_terminal::{
     TerminalUiPreferences, TerminalUiTheme,
 };
 use oxideterm_gpui_ui::{
-    ConfirmDialogVariant, ConfirmDialogView, confirm_dialog,
+    ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, button_focus_visible,
+    confirm_dialog_with_focus,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
     toast::{ToastVariant, ToastView},
     toaster::toaster,
@@ -179,7 +180,7 @@ use oxideterm_gpui_ui::typography::{
 pub(super) use selectable_text::{SelectableTextRole, SelectableTextScrollExt};
 pub(super) use virtual_list::{
     TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
-    tauri_virtual_uniform_list, tracked_uniform_list,
+    tauri_virtual_uniform_list, tracked_uniform_list, uniform_list_edge_autoscroll,
 };
 use virtual_list::{VirtualListSignatureCache, sync_virtual_list_state_by_signatures};
 
@@ -356,6 +357,13 @@ enum PaletteMode {
     Connections,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ConfirmKeyboardAction {
+    Cancel,
+    Confirm,
+    Handled,
+}
+
 #[derive(Clone, Debug)]
 struct ShortcutsModalState {
     open: bool,
@@ -463,6 +471,7 @@ pub(crate) struct WorkspaceApp {
     ai_model_selector_search_focused: bool,
     ai_model_selector_search_query: String,
     ai_model_selector_expanded_providers: HashSet<String>,
+    ai_model_selector_highlighted_model: Option<(String, String)>,
     ai_model_selector_provider_online: HashMap<String, bool>,
     ai_model_selector_probe_generations: HashMap<String, u64>,
     ai_chat: oxideterm_ai::AiChatState,
@@ -484,6 +493,7 @@ pub(crate) struct WorkspaceApp {
     ai_summarize_confirm_open: bool,
     ai_clear_all_confirm_open: bool,
     ai_delete_message_confirm: Option<String>,
+    standard_confirm_focused_action: Option<ConfirmDialogAction>,
     ai_safety_bypass_conversations: HashSet<String>,
     ai_chat_draft: String,
     ai_chat_input_focused: bool,
@@ -652,7 +662,10 @@ pub(crate) struct WorkspaceApp {
     cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService,
     cloud_sync_form: cloud_sync::CloudSyncFormDraft,
     cloud_sync_open_select: Option<cloud_sync::CloudSyncSelect>,
+    cloud_sync_focused_select: Option<cloud_sync::CloudSyncSelect>,
+    cloud_sync_select_highlighted: Option<(cloud_sync::CloudSyncSelect, usize)>,
     cloud_sync_confirm: Option<cloud_sync::CloudSyncConfirm>,
+    cloud_sync_confirm_focused_action: Option<ConfirmDialogAction>,
     cloud_sync_pending_preview: Option<cloud_sync::CloudSyncPendingPreview>,
     cloud_sync_preview_selection: Option<cloud_sync::CloudSyncPreviewSelection>,
     cloud_sync_progress: Option<oxideterm_cloud_sync::progress::CloudSyncProgress>,

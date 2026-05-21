@@ -707,6 +707,7 @@ impl WorkspaceApp {
                         }
                         AiContextWarningAction::Summarize => {
                             this.ai_summarize_confirm_open = true;
+                            this.reset_standard_confirm_focus();
                         }
                     }
                     cx.stop_propagation();
@@ -736,7 +737,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        confirm_dialog(
+        confirm_dialog_with_focus(
             &self.tokens,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Default,
@@ -772,13 +773,16 @@ impl WorkspaceApp {
                     ))
                     .into_any_element(),
             },
+            self.standard_confirm_focus(),
             cx.listener(|this, _event, _window, cx| {
                 this.ai_summarize_confirm_open = false;
+                this.clear_standard_confirm_focus();
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
                 this.ai_summarize_confirm_open = false;
+                this.clear_standard_confirm_focus();
                 this.start_ai_summarize_conversation(cx);
                 cx.stop_propagation();
             }),
@@ -789,7 +793,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        confirm_dialog(
+        confirm_dialog_with_focus(
             &self.tokens,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
@@ -825,12 +829,15 @@ impl WorkspaceApp {
                     ))
                     .into_any_element(),
             },
+            self.standard_confirm_focus(),
             cx.listener(|this, _event, _window, cx| {
                 this.ai_clear_all_confirm_open = false;
+                this.clear_standard_confirm_focus();
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
+                this.clear_standard_confirm_focus();
                 this.clear_ai_conversations();
                 cx.stop_propagation();
                 cx.notify();
@@ -842,7 +849,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        confirm_dialog(
+        confirm_dialog_with_focus(
             &self.tokens,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
@@ -878,12 +885,15 @@ impl WorkspaceApp {
                     ))
                     .into_any_element(),
             },
+            self.standard_confirm_focus(),
             cx.listener(|this, _event, _window, cx| {
                 this.ai_delete_message_confirm = None;
+                this.clear_standard_confirm_focus();
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
+                this.clear_standard_confirm_focus();
                 if let Some(message_id) = this.ai_delete_message_confirm.take() {
                     this.delete_ai_message(&message_id, cx);
                 } else {

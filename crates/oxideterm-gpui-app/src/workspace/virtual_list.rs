@@ -1,9 +1,12 @@
 use std::ops::Range;
 
 use gpui::{
-    App, ElementId, IntoElement, ListAlignment, ListState, Pixels, ScrollStrategy, Styled,
-    UniformList, UniformListScrollHandle, Window, uniform_list,
+    App, ElementId, IntoElement, ListAlignment, ListState, Pixels, Point, ScrollStrategy, Styled,
+    UniformList, UniformListScrollHandle, Window, px, uniform_list,
 };
+
+const BROWSER_DRAG_AUTOSCROLL_EDGE_PX: f32 = 48.0;
+const BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX: f32 = 26.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
@@ -94,6 +97,39 @@ pub(crate) fn scroll_tauri_virtual_list_to_index(
     }
 }
 
+pub(crate) fn uniform_list_edge_autoscroll(
+    handle: &UniformListScrollHandle,
+    position: Point<Pixels>,
+) -> bool {
+    // Browser drag interactions keep scrolling the owning list when the cursor
+    // is held near an edge. GPUI exposes the backing ScrollHandle through the
+    // uniform-list state, so keep the math centralized instead of duplicating
+    // per file list or picker.
+    let base_handle = handle.0.borrow().base_handle.clone();
+    let bounds = base_handle.bounds();
+    let max_offset = base_handle.max_offset();
+    if max_offset.height <= px(0.0)
+        || bounds.size.height <= px(1.0)
+        || bounds.size.width <= px(1.0)
+        || position.x < bounds.left()
+        || position.x > bounds.right()
+    {
+        return false;
+    }
+
+    let Some(step) = browser_drag_edge_scroll_step(bounds.top(), bounds.bottom(), position.y)
+    else {
+        return false;
+    };
+    let offset = base_handle.offset();
+    let next_y = (offset.y - px(step)).clamp(-max_offset.height, px(0.0));
+    if next_y == offset.y {
+        return false;
+    }
+    base_handle.set_offset(Point::new(offset.x, next_y));
+    true
+}
+
 pub(super) fn sync_virtual_list_state_by_signatures(
     state: &mut ListState,
     cache: &mut VirtualListSignatureCache,
@@ -126,6 +162,21 @@ pub(super) fn sync_virtual_list_state_by_signatures(
         state.splice(new_len..old_len, 0);
     }
     cache.signatures = signatures.to_vec();
+}
+
+fn browser_drag_edge_scroll_step(top: Pixels, bottom: Pixels, y: Pixels) -> Option<f32> {
+    let edge = BROWSER_DRAG_AUTOSCROLL_EDGE_PX;
+    let top = f32::from(top);
+    let bottom = f32::from(bottom);
+    let y = f32::from(y);
+    let step = if y < top + edge {
+        -((top + edge - y) / edge).clamp(0.0, 1.0) * BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX
+    } else if y > bottom - edge {
+        ((y - (bottom - edge)) / edge).clamp(0.0, 1.0) * BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX
+    } else {
+        0.0
+    };
+    (step.abs() >= 1.0).then_some(step)
 }
 
 #[allow(dead_code)]

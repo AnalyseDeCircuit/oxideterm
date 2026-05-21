@@ -1281,6 +1281,12 @@ impl WorkspaceApp {
             .ime_selected_range_for_target(target)
             .filter(|range| range.start < range.end)
         else {
+            if !collapsed_copy_shortcut_is_owned_by_target(target) {
+                // Browser page selections only own Cmd-C when a real range is
+                // active. A collapsed/read-only target must fall through to the
+                // terminal or app-level copy owner instead of swallowing it.
+                return false;
+            }
             return true;
         };
         let copied = utf16_slice(&text, selection);
@@ -1580,6 +1586,11 @@ impl WorkspaceApp {
                         replacement_range,
                         text,
                     );
+                    if input == QuickCommandInput::Search {
+                        // Browser filtering invalidates the active option until
+                        // ArrowUp/ArrowDown or hover establishes a fresh row.
+                        self.quick_commands.highlighted_command = None;
+                    }
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }
@@ -1706,6 +1717,10 @@ impl WorkspaceApp {
                         replacement_range,
                         text,
                     );
+                    // Search changes rebuild the visible model rows; clear the
+                    // Radix-style active item so keyboard focus cannot point at
+                    // a filtered-out model.
+                    self.ai_model_selector_highlighted_model = None;
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }
@@ -1894,6 +1909,10 @@ fn ime_target_accepts_newline(target: WorkspaceImeTarget) -> bool {
 
 fn ime_target_is_read_only(target: WorkspaceImeTarget) -> bool {
     matches!(target, WorkspaceImeTarget::ReadOnlyText(_))
+}
+
+fn collapsed_copy_shortcut_is_owned_by_target(target: WorkspaceImeTarget) -> bool {
+    !ime_target_is_read_only(target)
 }
 
 fn utf16_slice(value: &str, range: Range<usize>) -> String {
@@ -2259,11 +2278,12 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
 
     use super::{
-        control_k_delete_end, keystroke_commits_platform_text, line_end_for_utf16_offset,
-        line_range_for_utf16_offset, line_start_for_utf16_offset, next_utf16_boundary,
-        next_word_boundary, previous_utf16_boundary, previous_word_boundary,
-        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
-        vertical_line_navigation_destination, word_range_for_utf16_offset,
+        WorkspaceImeTarget, collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
+        keystroke_commits_platform_text, line_end_for_utf16_offset, line_range_for_utf16_offset,
+        line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
+        previous_utf16_boundary, previous_word_boundary, soft_wrapped_line_ranges_utf16,
+        transpose_text_at_utf16_offset, vertical_line_navigation_destination,
+        word_range_for_utf16_offset,
     };
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -2402,5 +2422,15 @@ mod tests {
             transpose_text_at_utf16_offset("abcd", 4),
             Some(("abdc".to_string(), 4))
         );
+    }
+
+    #[test]
+    fn collapsed_read_only_copy_falls_through_to_next_owner() {
+        assert!(!collapsed_copy_shortcut_is_owned_by_target(
+            WorkspaceImeTarget::ReadOnlyText(42)
+        ));
+        assert!(collapsed_copy_shortcut_is_owned_by_target(
+            WorkspaceImeTarget::Search
+        ));
     }
 }
