@@ -213,22 +213,9 @@ fn next_oxide_footer_action(
     current: Option<OxideDialogFooterAction>,
     forward: bool,
 ) -> Option<OxideDialogFooterAction> {
-    let Some(first) = actions.first().copied() else {
-        return None;
-    };
-    let current = current.unwrap_or(first);
-    let index = actions
-        .iter()
-        .position(|candidate| *candidate == current)
-        .unwrap_or(0);
-    if forward {
-        actions.get(index + 1).copied().or(Some(first))
-    } else {
-        index
-            .checked_sub(1)
-            .and_then(|previous| actions.get(previous).copied())
-            .or_else(|| actions.last().copied())
-    }
+    // Import/export dialogs can hide footer buttons by stage, so feed only the
+    // currently rendered buttons into the shared browser-style focus cycle.
+    browser_behavior::FocusCycle::new(actions).next(current, forward)
 }
 
 fn import_preview_selectable_names(preview: &ImportPreview) -> HashSet<String> {

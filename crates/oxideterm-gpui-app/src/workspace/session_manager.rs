@@ -25,7 +25,9 @@ use oxideterm_gpui_ui::{
     IconBadgeMetrics, TauriTableCellOptions, TauriTableCellStyle, TauriTableColors,
     TauriTableMetrics,
     button::{
-        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_focus_visible, button_with,
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
+        ToolbarButtonIconPosition, ToolbarButtonOptions, button_focus_visible, button_with,
+        icon_button, toolbar_button,
     },
     checkbox, icon_badge,
     modal::{dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop},
@@ -153,6 +155,11 @@ pub(super) enum SessionManagerBasicDialogFooterAction {
     Primary,
 }
 
+const SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS: [SessionManagerBasicDialogFooterAction; 2] = [
+    SessionManagerBasicDialogFooterAction::Cancel,
+    SessionManagerBasicDialogFooterAction::Primary,
+];
+
 fn next_session_manager_basic_dialog_focus(
     include_text_input: bool,
     text_input_focused: bool,
@@ -173,18 +180,20 @@ fn next_session_manager_basic_dialog_focus(
         );
     }
 
-    match (include_text_input, current_footer, forward) {
-        (true, Some(SessionManagerBasicDialogFooterAction::Cancel), false)
-        | (true, Some(SessionManagerBasicDialogFooterAction::Primary), true) => (true, None),
-        (_, Some(SessionManagerBasicDialogFooterAction::Cancel), _) => {
-            (false, Some(SessionManagerBasicDialogFooterAction::Primary))
+    if include_text_input {
+        match (current_footer, forward) {
+            (Some(SessionManagerBasicDialogFooterAction::Cancel), false)
+            | (Some(SessionManagerBasicDialogFooterAction::Primary), true) => {
+                return (true, None);
+            }
+            _ => {}
         }
-        (_, Some(SessionManagerBasicDialogFooterAction::Primary), _) => {
-            (false, Some(SessionManagerBasicDialogFooterAction::Cancel))
-        }
-        (_, None, true) => (false, Some(SessionManagerBasicDialogFooterAction::Cancel)),
-        (_, None, false) => (false, Some(SessionManagerBasicDialogFooterAction::Primary)),
     }
+
+    let footer_action =
+        browser_behavior::FocusCycle::new(&SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS)
+            .next(current_footer, forward);
+    (false, footer_action)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -985,15 +985,16 @@ impl WorkspaceApp {
         icon_color: Rgba,
         has_background: bool,
     ) -> gpui::Div {
-        div()
-            .size(px(size))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.sm))
-            .cursor_pointer()
-            .hover(move |button| button.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
-            .child(Self::render_lucide_icon(icon, icon_size, icon_color))
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, icon_size, icon_color),
+            IconButtonOptions {
+                size,
+                has_background,
+                idle_opacity: 1.0,
+                ..IconButtonOptions::compact(size)
+            },
+        )
     }
 
     #[allow(dead_code)]

@@ -29,6 +29,36 @@ pub enum TauriBackdropRole {
     Popover,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OverlayDismissPolicy {
+    ProtectedDialog,
+    DismissibleDialog,
+    ProtectedCommandPalette,
+    DismissibleCommandPalette,
+    DismissibleQuickLook,
+    DismissiblePopover,
+}
+
+impl OverlayDismissPolicy {
+    pub fn backdrop_role(self) -> TauriBackdropRole {
+        match self {
+            Self::ProtectedDialog | Self::DismissibleDialog => TauriBackdropRole::Dialog,
+            Self::ProtectedCommandPalette | Self::DismissibleCommandPalette => {
+                TauriBackdropRole::CommandPalette
+            }
+            Self::DismissibleQuickLook => TauriBackdropRole::QuickLook,
+            Self::DismissiblePopover => TauriBackdropRole::Popover,
+        }
+    }
+
+    pub fn dismisses_on_outside_pointer(self) -> bool {
+        // Protected auth/editor states still need the modal event island, but
+        // outside pointer-down must not silently cancel them unless the Tauri
+        // source proves that behavior for that exact dialog.
+        !matches!(self, Self::ProtectedDialog | Self::ProtectedCommandPalette)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TauriBackdropEffect {
     pub color: Rgba,
@@ -116,12 +146,12 @@ pub fn modal_backdrop(backdrop: Rgba) -> Div {
 pub fn dialog_backdrop() -> Div {
     // Radix DialogOverlay is modal: pointer and wheel events cannot fall through
     // to the background surface while the dialog is open.
-    modal_backdrop_for_role(TauriBackdropRole::Dialog)
+    modal_backdrop_for_policy(OverlayDismissPolicy::ProtectedDialog)
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
-fn modal_backdrop_for_role(role: TauriBackdropRole) -> Div {
-    let effect = backdrop_effect(role);
+fn modal_backdrop_for_policy(policy: OverlayDismissPolicy) -> Div {
+    let effect = backdrop_effect(policy.backdrop_role());
     // Tauri paints these top-layer overlays with CSS backdrop-filter, which
     // samples the already-rendered app behind the element. GPUI 0.2.2 only has
     // window-background blur and shadow blur, so this currently paints the
@@ -134,46 +164,48 @@ fn modal_backdrop_for_role(role: TauriBackdropRole) -> Div {
     modal_backdrop(effect.color)
 }
 
-fn dismissible_modal_backdrop(role: TauriBackdropRole) -> Div {
+fn dismissible_modal_backdrop(policy: OverlayDismissPolicy) -> Div {
     // Tauri shadcn/Radix Dialog keeps the overlay modal, but pointer-down on
     // the overlay itself drives onOpenChange(false). Callers attach their close
     // callback here and stop propagation on the dialog content.
-    modal_backdrop_for_role(role)
+    debug_assert!(policy.dismisses_on_outside_pointer());
+    modal_backdrop_for_policy(policy)
 }
 
 pub fn dismissible_dialog_backdrop() -> Div {
-    dismissible_modal_backdrop(TauriBackdropRole::Dialog)
+    dismissible_modal_backdrop(OverlayDismissPolicy::DismissibleDialog)
 }
 
 pub fn command_palette_backdrop() -> Div {
     // Tauri CommandPalette overrides DialogOverlay with overlayClassName
     // "bg-black/40"; keep that as a named top-layer role instead of letting
     // feature code hand-pick a translucent black.
-    modal_backdrop_for_role(TauriBackdropRole::CommandPalette)
+    modal_backdrop_for_policy(OverlayDismissPolicy::ProtectedCommandPalette)
 }
 
 pub fn dismissible_command_palette_backdrop() -> Div {
     // Same outside-dismiss contract as Radix Dialog, but with CommandPalette's
     // lighter overlayClassName rather than the default DialogOverlay color.
-    dismissible_modal_backdrop(TauriBackdropRole::CommandPalette)
+    dismissible_modal_backdrop(OverlayDismissPolicy::DismissibleCommandPalette)
 }
 
 pub fn quicklook_backdrop() -> Div {
     // Tauri QuickLook uses bg-black/80 with the same backdrop-blur-sm class as
     // DialogOverlay; left-clicking the backdrop itself closes the preview.
-    modal_backdrop_for_role(TauriBackdropRole::QuickLook)
+    dismissible_modal_backdrop(OverlayDismissPolicy::DismissibleQuickLook)
 }
 
 pub fn popover_backdrop() -> Div {
     // Radix popovers/context menus dismiss on outside pointer activity while
     // their portal content remains interactive.
+    let role = OverlayDismissPolicy::DismissiblePopover.backdrop_role();
     div()
         .absolute()
         .top_0()
         .left_0()
         .right_0()
         .bottom_0()
-        .bg(backdrop_color(TauriBackdropRole::Popover))
+        .bg(backdrop_color(role))
         .occlude()
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
 }
@@ -348,5 +380,26 @@ mod tests {
             backdrop_effect_with_blur_allowed(TauriBackdropRole::CommandPalette, true).blur_px,
             Some(TAILWIND_BACKDROP_BLUR_SM_PX)
         );
+    }
+
+    #[test]
+    fn dismiss_policy_keeps_backdrop_role_and_outside_close_separate() {
+        assert_eq!(
+            OverlayDismissPolicy::ProtectedDialog.backdrop_role(),
+            TauriBackdropRole::Dialog
+        );
+        assert!(!OverlayDismissPolicy::ProtectedDialog.dismisses_on_outside_pointer());
+
+        assert_eq!(
+            OverlayDismissPolicy::DismissibleCommandPalette.backdrop_role(),
+            TauriBackdropRole::CommandPalette
+        );
+        assert!(OverlayDismissPolicy::DismissibleCommandPalette.dismisses_on_outside_pointer());
+
+        assert_eq!(
+            OverlayDismissPolicy::DismissiblePopover.backdrop_role(),
+            TauriBackdropRole::Popover
+        );
+        assert!(OverlayDismissPolicy::DismissiblePopover.dismisses_on_outside_pointer());
     }
 }

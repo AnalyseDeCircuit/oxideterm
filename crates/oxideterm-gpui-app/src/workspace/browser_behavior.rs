@@ -14,6 +14,49 @@ impl BrowserFocusOrigin {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FocusCycle<'a, T> {
+    actions: &'a [T],
+}
+
+impl<'a, T> FocusCycle<'a, T>
+where
+    T: Copy + Eq,
+{
+    pub(crate) const fn new(actions: &'a [T]) -> Self {
+        Self { actions }
+    }
+
+    pub(crate) fn next(self, current: Option<T>, forward: bool) -> Option<T> {
+        // GPUI does not provide the browser/Radix footer tab loop. Keep the
+        // wrapping action order in one tested helper instead of duplicating it
+        // in every modal, select, and recorder footer.
+        let Some(first) = self.actions.first().copied() else {
+            return None;
+        };
+        let last = self.actions.last().copied().unwrap_or(first);
+        let Some(current) = current else {
+            return Some(if forward { first } else { last });
+        };
+        let Some(index) = self
+            .actions
+            .iter()
+            .position(|candidate| *candidate == current)
+        else {
+            return Some(if forward { first } else { last });
+        };
+
+        if forward {
+            self.actions.get(index + 1).copied().or(Some(first))
+        } else {
+            index
+                .checked_sub(1)
+                .and_then(|previous| self.actions.get(previous).copied())
+                .or(Some(last))
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BrowserPointerCaptureOwner {
     SidebarResize,
@@ -99,7 +142,7 @@ fn resolve_browser_pointer_capture_owner(
 #[cfg(test)]
 mod tests {
     use super::{
-        BrowserFocusOrigin, BrowserPointerCaptureOwner, BrowserPointerCaptureState,
+        BrowserFocusOrigin, BrowserPointerCaptureOwner, BrowserPointerCaptureState, FocusCycle,
         preserve_or_move_context_selection, resolve_browser_pointer_capture_owner,
     };
     use std::collections::HashSet;
@@ -168,5 +211,32 @@ mod tests {
     fn focus_visible_only_tracks_keyboard_origin() {
         assert!(BrowserFocusOrigin::Keyboard.is_focus_visible());
         assert!(!BrowserFocusOrigin::Pointer.is_focus_visible());
+    }
+
+    #[test]
+    fn focus_cycle_uses_browser_footer_order() {
+        let actions = ["cancel", "confirm", "extra"];
+        let cycle = FocusCycle::new(&actions);
+
+        assert_eq!(cycle.next(None, true), Some("cancel"));
+        assert_eq!(cycle.next(None, false), Some("extra"));
+        assert_eq!(cycle.next(Some("cancel"), true), Some("confirm"));
+        assert_eq!(cycle.next(Some("cancel"), false), Some("extra"));
+        assert_eq!(cycle.next(Some("extra"), true), Some("cancel"));
+    }
+
+    #[test]
+    fn focus_cycle_recovers_from_missing_or_empty_actions() {
+        let actions = ["cancel", "confirm"];
+
+        assert_eq!(
+            FocusCycle::new(&actions).next(Some("stale"), true),
+            Some("cancel")
+        );
+        assert_eq!(
+            FocusCycle::new(&actions).next(Some("stale"), false),
+            Some("confirm")
+        );
+        assert_eq!(FocusCycle::<&str>::new(&[]).next(None, true), None);
     }
 }

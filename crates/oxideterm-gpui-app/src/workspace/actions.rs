@@ -475,10 +475,8 @@ impl WorkspaceApp {
                 Some(ConfirmKeyboardAction::Cancel)
             }
             "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
-                self.standard_confirm_focused_action = Some(match focused {
-                    ConfirmDialogAction::Cancel => ConfirmDialogAction::Confirm,
-                    ConfirmDialogAction::Confirm => ConfirmDialogAction::Cancel,
-                });
+                self.standard_confirm_focused_action =
+                    Some(next_confirm_dialog_footer_focus(Some(focused), true));
                 cx.notify();
                 Some(ConfirmKeyboardAction::Handled)
             }

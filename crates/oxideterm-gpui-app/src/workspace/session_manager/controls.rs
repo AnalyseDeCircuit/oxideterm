@@ -6,18 +6,21 @@ impl WorkspaceApp {
         variant: ButtonVariant,
     ) -> gpui::Div {
         let theme = self.tokens.ui;
-        button_with(
+        toolbar_button(
             &self.tokens,
             label,
-            ButtonOptions {
-                variant,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled: false,
+            Some(Self::render_lucide_icon(icon, 14.0, rgb(theme.text))),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                icon_position: ToolbarButtonIconPosition::Trailing,
+                ..ToolbarButtonOptions::default()
             },
         )
-        .gap(px(6.0))
-        .child(Self::render_lucide_icon(icon, 14.0, rgb(theme.text)))
     }
 
     fn render_toolbar_button(
@@ -29,36 +32,26 @@ impl WorkspaceApp {
         show_label: bool,
     ) -> gpui::Div {
         let theme = self.tokens.ui;
-        let (bg, border, text) = match variant {
-            ButtonVariant::Default => (rgb(theme.text), rgba(0x00000000), rgb(theme.bg)),
-            ButtonVariant::Outline => (
-                rgba(0x00000000),
-                theme_border(theme.border, has_background),
-                rgb(theme.text),
-            ),
-            _ => (
-                theme_panel_bg(theme.bg_panel, has_background),
-                theme_border(theme.border, has_background),
-                rgb(theme.text),
-            ),
+        let icon_color = match variant {
+            ButtonVariant::Default => rgb(theme.bg),
+            _ => rgb(theme.text),
         };
-        div()
-            .h(px(32.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(6.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(border)
-            .bg(bg)
-            .text_color(text)
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(icon, 16.0, text))
-            .when(show_label, |button| button.child(label))
+        toolbar_button(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(icon, 16.0, icon_color)),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                has_background,
+                show_label,
+                ..ToolbarButtonOptions::default()
+            },
+        )
     }
 
     fn render_toolbar_link_icon(

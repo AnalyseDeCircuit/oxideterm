@@ -9,7 +9,10 @@ use std::{
 use gpui::StatefulInteractiveElement;
 use oxideterm_gpui_ui::{
     ButtonTone, TextInputView, button,
-    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, button_with,
+        icon_button,
+    },
     text_input_anchor_probe,
 };
 use oxideterm_launcher::{
@@ -829,49 +832,50 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .id(("launcher-icon-button", launcher_header_action_id(action)))
-            .size(px(20.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.sm))
-            .opacity(if disabled { 0.35 } else { 0.5 })
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text)))
-            .on_mouse_move(cx.listener({
-                let title = title.clone();
-                move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.queue_workspace_tooltip(
-                        format!("launcher-button-{title}"),
-                        title.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, 12.0, rgb(theme.text)),
+            IconButtonOptions {
+                size: 20.0,
+                disabled,
+                idle_opacity: 0.5,
+                ..IconButtonOptions::compact(20.0)
+            },
+        )
+        .id(("launcher-icon-button", launcher_header_action_id(action)))
+        .on_mouse_move(cx.listener({
+            let title = title.clone();
+            move |this, event: &MouseMoveEvent, _window, cx| {
+                this.queue_workspace_tooltip(
+                    format!("launcher-button-{title}"),
+                    title.clone(),
+                    f32::from(event.position.x) + 12.0,
+                    f32::from(event.position.y) + 16.0,
+                    cx,
+                );
+            }
+        }))
+        .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+            if !*hovered {
+                this.clear_workspace_tooltip(&format!("launcher-button-{title}"), cx);
+            }
+        }))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                if disabled {
+                    return;
                 }
-            }))
-            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-                if !*hovered {
-                    this.clear_workspace_tooltip(&format!("launcher-button-{title}"), cx);
+                match action {
+                    LauncherHeaderAction::Refresh => this.refresh_launcher(cx),
+                    LauncherHeaderAction::Disable => {
+                        this.launcher.core.show_disable_confirm = true;
+                        cx.notify();
+                    }
                 }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if disabled {
-                        return;
-                    }
-                    match action {
-                        LauncherHeaderAction::Refresh => this.refresh_launcher(cx),
-                        LauncherHeaderAction::Disable => {
-                            this.launcher.core.show_disable_confirm = true;
-                            cx.notify();
-                        }
-                    }
-                }),
-            )
-            .into_any_element()
+            }),
+        )
+        .into_any_element()
     }
 
     fn render_launcher_disable_confirm(&self, cx: &mut Context<Self>) -> AnyElement {

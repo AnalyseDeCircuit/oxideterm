@@ -3,7 +3,10 @@ use std::{collections::HashMap, sync::mpsc};
 use gpui::Entity;
 use oxideterm_gpui_ui::{
     TextInputView,
-    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, button_with,
+        toolbar_button,
+    },
     text_input_anchor_probe,
 };
 use oxideterm_webview::backend::webview::WebView as GpuiWebView;
@@ -1094,14 +1097,18 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        button_with(
+        toolbar_button(
             &self.tokens,
             self.i18n.t(label_key),
-            ButtonOptions {
-                variant,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+                ..ToolbarButtonOptions::default()
             },
         )
         .on_mouse_down(

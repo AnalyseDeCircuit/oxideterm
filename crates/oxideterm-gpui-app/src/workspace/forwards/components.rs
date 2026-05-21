@@ -133,24 +133,17 @@ impl WorkspaceApp {
         has_background: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
-        div()
-            .size(px(28.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .cursor_pointer()
-            .hover(move |button| {
-                button.bg(forwards_theme_hover_bg(
-                    self.tokens.ui.bg_hover,
-                    has_background,
-                ))
-            })
-            .child(Self::render_lucide_icon(
-                icon,
-                13.0,
-                forwards_palette_color(color),
-            ))
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, 13.0, forwards_palette_color(color)),
+            IconButtonOptions {
+                size: 28.0,
+                radius: ButtonRadius::Md,
+                has_background,
+                idle_opacity: 1.0,
+                ..IconButtonOptions::compact(28.0)
+            },
+        )
             .on_mouse_down(MouseButton::Left, listener)
             .into_any_element()
     }

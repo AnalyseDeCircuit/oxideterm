@@ -35,7 +35,7 @@ use oxideterm_connections::oxide_file::{
 };
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::button::{
-    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, toolbar_button,
 };
 use oxideterm_gpui_ui::select::select_trigger_focus_visible;
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
@@ -867,14 +867,18 @@ impl WorkspaceApp {
         disabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
-        button_with(
+        toolbar_button(
             &self.tokens,
             self.i18n.t(label_key),
-            ButtonOptions {
-                variant,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+                ..ToolbarButtonOptions::default()
             },
         )
         .when(!disabled, |button| {
@@ -3279,10 +3283,8 @@ impl WorkspaceApp {
                 // Tauri footer buttons are ordinary DOM buttons in a modal
                 // focus loop. With two actions, Tab and arrow keys both expose
                 // the same explicit native focus-visible target.
-                self.cloud_sync_confirm_focused_action = Some(match focused {
-                    ConfirmDialogAction::Cancel => ConfirmDialogAction::Confirm,
-                    ConfirmDialogAction::Confirm => ConfirmDialogAction::Cancel,
-                });
+                self.cloud_sync_confirm_focused_action =
+                    Some(next_confirm_dialog_footer_focus(Some(focused), true));
                 cx.notify();
                 true
             }

@@ -258,22 +258,33 @@ enum KeybindingRecordingFooterAction {
     Cancel,
 }
 
+const CONFIRM_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
+    [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
+const KEYBINDING_RECORDING_FOOTER_ACTIONS: [KeybindingRecordingFooterAction; 2] = [
+    KeybindingRecordingFooterAction::Confirm,
+    KeybindingRecordingFooterAction::Cancel,
+];
+
+fn next_confirm_dialog_footer_focus(
+    current: Option<ConfirmDialogAction>,
+    forward: bool,
+) -> ConfirmDialogAction {
+    // Confirm dialogs share the same DOM-style footer cycle across settings,
+    // Cloud Sync, and other Radix parity modals.
+    browser_behavior::FocusCycle::new(&CONFIRM_DIALOG_FOOTER_ACTIONS)
+        .next(current, forward)
+        .unwrap_or(ConfirmDialogAction::Cancel)
+}
+
 fn next_keybinding_recording_footer_focus(
     current: Option<KeybindingRecordingFooterAction>,
     forward: bool,
 ) -> KeybindingRecordingFooterAction {
     // Recording uses a window-level key capture like Tauri. Once action buttons
     // are visible, native has to model the browser's two-button Tab cycle.
-    match (current, forward) {
-        (Some(KeybindingRecordingFooterAction::Confirm), _) => {
-            KeybindingRecordingFooterAction::Cancel
-        }
-        (Some(KeybindingRecordingFooterAction::Cancel), _) => {
-            KeybindingRecordingFooterAction::Confirm
-        }
-        (None, true) => KeybindingRecordingFooterAction::Confirm,
-        (None, false) => KeybindingRecordingFooterAction::Cancel,
-    }
+    browser_behavior::FocusCycle::new(&KEYBINDING_RECORDING_FOOTER_ACTIONS)
+        .next(current, forward)
+        .unwrap_or(KeybindingRecordingFooterAction::Confirm)
 }
 
 impl KeybindingScopeFilter {
