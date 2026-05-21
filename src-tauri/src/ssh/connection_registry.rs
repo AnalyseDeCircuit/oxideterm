@@ -55,7 +55,7 @@ use crate::sftp::session::SftpSession;
 use chrono::Utc;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::sync::{Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -2064,10 +2064,32 @@ impl SshConnectionRegistry {
                 conn_clone.handle_controller.disconnect().await;
                 conn_clone.set_state(ConnectionState::Disconnected).await;
 
+                let mut disconnected_connection_ids =
+                    Vec::with_capacity(all_descendant_ids.len() + 1);
+                disconnected_connection_ids.push(connection_id.clone());
+                disconnected_connection_ids.extend(all_descendant_ids.iter().cloned());
+
                 // 🔴 关键修复：发送 connection_status_changed 事件通知前端
                 // 之前只发了 node:state 事件，前端 useConnectionEvents 收不到
                 if let Some(ref handle) = app_handle {
                     use tauri::Emitter;
+
+                    if let Some(tree_state) =
+                        handle.try_state::<Arc<crate::commands::session_tree::SessionTreeState>>()
+                    {
+                        let affected_nodes =
+                            crate::commands::session_tree::mark_tree_nodes_disconnected_by_connection_ids(
+                                tree_state.inner(),
+                                &disconnected_connection_ids,
+                            )
+                            .await;
+                        if !affected_nodes.is_empty() {
+                            info!(
+                                "Marked {} session tree node(s) disconnected after idle timeout",
+                                affected_nodes.len()
+                            );
+                        }
+                    }
 
                     #[derive(Clone, serde::Serialize)]
                     struct ConnectionStatusEvent {

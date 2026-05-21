@@ -5,6 +5,7 @@
 //!
 //! Tauri commands for managing the dynamic jump host session tree.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -37,6 +38,39 @@ impl SessionTreeState {
             tree: RwLock::new(SessionTree::new()),
         }
     }
+}
+
+/// Mark tree nodes as disconnected after their backing pooled SSH connections
+/// have been removed outside the explicit tree-disconnect command path.
+pub async fn mark_tree_nodes_disconnected_by_connection_ids(
+    state: &Arc<SessionTreeState>,
+    connection_ids: &[String],
+) -> Vec<String> {
+    if connection_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let connection_id_set: HashSet<&str> = connection_ids.iter().map(String::as_str).collect();
+    let mut tree = state.tree.write().await;
+    let affected_node_ids: Vec<String> = tree
+        .node_ids()
+        .filter(|node_id| {
+            tree.get_node(node_id)
+                .and_then(|node| node.ssh_connection_id.as_deref())
+                .is_some_and(|connection_id| connection_id_set.contains(connection_id))
+        })
+        .collect();
+
+    for node_id in &affected_node_ids {
+        if let Some(node) = tree.get_node_mut(node_id) {
+            node.state = NodeState::Disconnected;
+            node.ssh_connection_id = None;
+            node.terminal_session_id = None;
+            node.sftp_session_id = None;
+        }
+    }
+
+    affected_node_ids
 }
 
 // ============================================================================
@@ -834,6 +868,55 @@ mod tests {
         assert_eq!(error, format!("Node {} is already connected", node_id));
         let node = tree.get_node(&node_id).unwrap();
         assert_eq!(node.ssh_connection_id.as_deref(), Some("active-ssh"));
+    }
+
+    #[tokio::test]
+    async fn test_mark_tree_nodes_disconnected_by_connection_ids_clears_runtime() {
+        let state = Arc::new(SessionTreeState::new());
+        let (root_id, child_id) = {
+            let mut tree = state.tree.write().await;
+            let root_id = tree.add_root_node(
+                NodeConnection::new("jump.example.com", 22, "alice"),
+                NodeOrigin::Direct,
+            );
+            tree.update_state(&root_id, NodeState::Connected).unwrap();
+            tree.set_ssh_connection_id(&root_id, "root-conn".to_string())
+                .unwrap();
+            tree.set_terminal_session_id(&root_id, "root-terminal".to_string())
+                .unwrap();
+
+            let child_id = tree
+                .drill_down(
+                    &root_id,
+                    NodeConnection::new("target.example.com", 22, "alice"),
+                )
+                .unwrap();
+            tree.update_state(&child_id, NodeState::Connected).unwrap();
+            tree.set_ssh_connection_id(&child_id, "child-conn".to_string())
+                .unwrap();
+            tree.set_terminal_session_id(&child_id, "child-terminal".to_string())
+                .unwrap();
+            tree.set_sftp_session_id(&child_id, "child-sftp".to_string())
+                .unwrap();
+
+            (root_id, child_id)
+        };
+
+        let affected = mark_tree_nodes_disconnected_by_connection_ids(
+            &state,
+            &["root-conn".to_string(), "child-conn".to_string()],
+        )
+        .await;
+
+        assert_eq!(affected.len(), 2);
+        let tree = state.tree.read().await;
+        for node_id in [root_id, child_id] {
+            let node = tree.get_node(&node_id).unwrap();
+            assert!(matches!(node.state, NodeState::Disconnected));
+            assert!(node.ssh_connection_id.is_none());
+            assert!(node.terminal_session_id.is_none());
+            assert!(node.sftp_session_id.is_none());
+        }
     }
 }
 
