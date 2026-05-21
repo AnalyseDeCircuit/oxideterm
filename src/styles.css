@@ -1108,14 +1108,11 @@ html {
 
 /* Terminal Pixel-Perfect Rendering */
 .terminal-container {
-  /* GPU acceleration for smooth rendering */
-  transform: translateZ(0);
-  backface-visibility: hidden;
-
-  /* Contain layout recalculations */
-  contain: layout style;
-
-  /* Prevent text selection issues */
+  /*
+   * Do not promote or layout-contain the xterm host. xterm 6 maps pointer
+   * coordinates back to buffer rows for selection and link hit testing; parent
+   * transforms/containment can desync that mapping while scrollback is moving.
+   */
   user-select: none;
 }
 
@@ -1128,11 +1125,6 @@ html {
   /* Ensure monospace grid integrity - CRITICAL */
   letter-spacing: 0 !important;
   word-spacing: 0 !important;
-}
-
-.xterm-viewport {
-  /* Prevent scroll-induced repaints */
-  contain: layout style;
 }
 
 /* xterm.js 6.0 uses a custom SmoothScrollableElement (not native scrollbar).
