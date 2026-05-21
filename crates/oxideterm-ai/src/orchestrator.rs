@@ -103,14 +103,13 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "send_terminal_input",
-            "Send text, Enter, or control input to a visible terminal target. Read the terminal first when interacting with TUI or password prompts.",
+            "Send literal interactive text or Enter to a visible terminal target after observing a prompt. Do not use this to run shell commands; use run_command instead. Control sequences such as Ctrl-C are not supported here.",
             json!({
                 "type": "object",
                 "properties": {
                     "target_id": { "type": "string", "description": "terminal-session:* target ID." },
                     "text": { "type": "string", "description": "Text to send." },
                     "append_enter": { "type": "boolean", "description": "Append Enter after text. Default: false." },
-                    "control": { "type": "string", "enum": ["ctrl-c", "ctrl-d", "ctrl-z"], "description": "Optional control sequence." },
                 },
                 "required": ["target_id"],
             }),

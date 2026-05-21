@@ -10,7 +10,8 @@ use tokio::sync::oneshot;
 use crate::workspace::WorkspaceApp;
 use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_ui::{
-    TextInputView, form_field, modal::dialog_backdrop, text_input, text_input_anchor_probe,
+    TextInputView, form_field, modal::dismissible_dialog_backdrop, text_input,
+    text_input_anchor_probe,
 };
 
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
@@ -233,7 +234,16 @@ impl WorkspaceApp {
             ));
         }
 
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    // Tauri GlobalKbiDialog maps Radix outside-close to
+                    // handleCancel(), which rejects the pending KBI prompt.
+                    this.cancel_keyboard_interactive_challenge(cx);
+                    cx.stop_propagation();
+                }),
+            )
             .child(
                 div()
                     .w(px(self.tokens.metrics.modal_width))
@@ -242,6 +252,9 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(rgb(theme.border))
                     .bg(rgb(theme.bg_elevated))
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .px(px(self.tokens.metrics.modal_header_padding_x))

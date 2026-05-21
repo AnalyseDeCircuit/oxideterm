@@ -311,7 +311,9 @@ impl WorkspaceApp {
                 .w_full()
                 .max_w(px(672.0))
                 .h(px(256.0))
-                .overflow_y_scroll()
+                .selectable_overflow_y_scroll(
+                    &self.selectable_text_scroll_handle("settings-ssh-config-scroll"),
+                )
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
                 .border_color(rgb(self.tokens.ui.border))

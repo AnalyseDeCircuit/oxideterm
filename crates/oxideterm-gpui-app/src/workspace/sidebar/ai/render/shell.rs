@@ -10,7 +10,7 @@ impl WorkspaceApp {
             ai_chat_panel(&self.tokens)
                 .relative()
                 .child(self.render_ai_sidebar_chat_header(cx))
-                .when_some(self.render_ai_compaction_notice(), |panel, notice| {
+                .when_some(self.render_ai_compaction_notice(cx), |panel, notice| {
                     panel.child(notice)
                 })
                 .child(
@@ -32,7 +32,10 @@ impl WorkspaceApp {
                 )
                 .child(self.render_ai_context_warning_banners(cx))
                 .child(self.render_ai_sidebar_model_bar(cx))
-                .child(self.render_ai_sidebar_input(true, cx))
+                .child(self.render_ai_sidebar_input(
+                    self.ai_chat_initialization_error.is_none(),
+                    cx,
+                ))
                 .into_any_element()
         };
 
@@ -55,6 +58,9 @@ impl WorkspaceApp {
     }
 
     fn render_ai_sidebar_chat_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(error) = self.ai_chat_initialization_error.clone() {
+            return self.render_ai_sidebar_initialization_error(error, cx);
+        }
         let Some((conversation_id, items, signatures)) = self.ai_chat.active_conversation().and_then(
             |conversation| {
                 if conversation.messages.is_empty() {
@@ -106,7 +112,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match item {
-            AiChatListItem::TrimNotice { count, .. } => self.render_ai_trim_notice(count),
+            AiChatListItem::TrimNotice { count, .. } => self.render_ai_trim_notice(count, cx),
             AiChatListItem::Message { id } => {
                 let Some(conversation) = self.ai_chat.active_conversation() else {
                     return div().into_any_element();
@@ -231,35 +237,17 @@ impl WorkspaceApp {
 
     fn sync_ai_chat_list_state(&mut self, conversation_id: &str, signatures: &[u64]) {
         let mut cache = self.ai_chat_list_cache.borrow_mut();
-        let conversation_changed = cache.conversation_id.as_deref() != Some(conversation_id);
-        if conversation_changed || self.ai_chat_list_state.item_count() != cache.signatures.len() {
-            self.ai_chat_list_state = ListState::new(
-                signatures.len(),
-                ListAlignment::Top,
-                px(AI_CHAT_LIST_OVERDRAW_PX),
-            );
-            cache.conversation_id = Some(conversation_id.to_string());
-            cache.signatures = signatures.to_vec();
-            return;
-        }
-
-        let old_len = cache.signatures.len();
-        let new_len = signatures.len();
-        let shared_len = old_len.min(new_len);
-        for (index, signature) in signatures.iter().take(shared_len).enumerate() {
-            if cache.signatures.get(index) != Some(signature) {
-                self.ai_chat_list_state.splice(index..index + 1, 1);
-            }
-        }
-        if old_len < new_len {
-            self.ai_chat_list_state.splice(old_len..old_len, new_len - old_len);
-        } else if old_len > new_len {
-            self.ai_chat_list_state.splice(new_len..old_len, 0);
-        }
-        cache.signatures = signatures.to_vec();
+        sync_virtual_list_state_by_signatures(
+            &mut self.ai_chat_list_state,
+            &mut cache,
+            conversation_id,
+            signatures,
+            ListAlignment::Top,
+            px(AI_CHAT_LIST_OVERDRAW_PX),
+        );
     }
 
-    fn render_ai_compaction_notice(&self) -> Option<AnyElement> {
+    fn render_ai_compaction_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let active_id = self.ai_chat.active_conversation_id.as_deref()?;
         let notice = self.ai_compaction_notice.as_ref()?;
         if notice.conversation_id != active_id {
@@ -306,13 +294,20 @@ impl WorkspaceApp {
                         .min_w_0()
                         .text_size(px(11.0))
                         .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(label),
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "ai-compaction-notice",
+                            active_id,
+                            label,
+                            self.tokens.ui.text_muted,
+                            cx,
+                        )),
                 )
                 .into_any_element(),
         )
     }
 
-    fn render_ai_trim_notice(&self, count: usize) -> AnyElement {
+    fn render_ai_trim_notice(&self, count: usize, cx: &mut Context<Self>) -> AnyElement {
         const AI_TRIM_NOTICE_COLOR: u32 = 0xf59e0b;
         div()
             .flex()
@@ -333,12 +328,113 @@ impl WorkspaceApp {
                     .flex_1()
                     .text_size(px(10.0))
                     .text_color(rgb(0xfbbf24))
-                    .child(
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-trim-notice",
+                        count,
                         self.i18n
                             .t("ai.context.messages_trimmed")
                             .replace("{{count}}", &count.to_string()),
+                        0xfbbf24,
+                        cx,
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_ai_sidebar_initialization_error(
+        &self,
+        error: AiChatInitializationError,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let message = self.i18n.t(error.message_key);
+        div()
+            .h_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .p(px(24.0))
+            .text_align(gpui::TextAlign::Center)
+            .gap(px(12.0))
+            .bg(rgb(self.tokens.ui.bg))
+            .child(
+                div()
+                    .size(px(48.0))
+                    .flex()
+                    .rounded(px(self.tokens.radii.md))
+                    .items_center()
+                    .justify_center()
+                    .bg(rgba(0xef44441a))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::AlertTriangle,
+                        20.0,
+                        rgb(0xff6b6b),
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .max_w(px(260.0))
+                    .child(
+                        div()
+                            .text_size(px(13.0))
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "ai-chat-load-failed",
+                                "title",
+                                self.i18n.t("ai.chat.load_failed_title"),
+                                self.tokens.ui.text,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .line_height(px(18.0))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "ai-chat-load-failed",
+                                "message",
+                                message,
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     ),
             )
+            .when(error.can_retry, |container| {
+                container.child(
+                    div()
+                        .px(px(16.0))
+                        .py(px(6.0))
+                        .rounded(px(self.tokens.radii.md))
+                        .bg(rgb(self.tokens.ui.accent))
+                        .text_color(rgb(self.tokens.ui.bg))
+                        .text_size(px(12.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .cursor_pointer()
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::NonSelectable,
+                            "ai-chat-load-failed",
+                            "retry",
+                            self.i18n.t("launcher.retry"),
+                            self.tokens.ui.bg,
+                            cx,
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.retry_ai_chat_initialization(cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                )
+            })
             .into_any_element()
     }
 
@@ -355,7 +451,14 @@ impl WorkspaceApp {
                     .text_size(px(13.0))
                     .font_weight(gpui::FontWeight::BOLD)
                     .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t("ai.chat.get_started")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-chat-empty",
+                        "get-started",
+                        self.i18n.t("ai.chat.get_started"),
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -413,7 +516,17 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text))
             })
             .child(Self::render_lucide_icon(icon, 14.0, rgb(self.tokens.ui.text_muted)))
-            .child(div().truncate().child(label))
+            .child(div().truncate().child(
+                // Quick prompts are clickable commands; label text must not steal the row click.
+                self.render_display_text_with_role(
+                    SelectableTextRole::NonSelectable,
+                    "ai-quick-prompt",
+                    label.clone(),
+                    label,
+                    self.tokens.ui.text_muted,
+                    cx,
+                ),
+            ))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
@@ -481,7 +594,14 @@ impl WorkspaceApp {
                     .min_w_0()
                     .text_size(px(11.0))
                     .text_color(rgb(0xfbbf24))
-                    .child(label),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-context-warning",
+                        label.clone(),
+                        label,
+                        0xfbbf24,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -552,7 +672,16 @@ impl WorkspaceApp {
                 })
             })
             .child(Self::render_lucide_icon(icon, 12.0, rgb(0xfbbf24)))
-            .when(!label.is_empty(), |button| button.child(label))
+            .when(!label.is_empty(), |button| {
+                button.child(self.render_display_text_with_role(
+                    SelectableTextRole::NonSelectable,
+                    "ai-context-warning-action",
+                    label.clone(),
+                    label,
+                    if disabled { 0xb78322 } else { 0xfbbf24 },
+                    cx,
+                ))
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -612,12 +741,35 @@ impl WorkspaceApp {
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Default,
                 title: div()
-                    .child(self.i18n.t("ai.context.summarize_confirm"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-summarize-confirm",
+                        "title",
+                        self.i18n.t("ai.context.summarize_confirm"),
+                        self.tokens.ui.text_heading,
+                        cx,
+                    ))
                     .into_any_element(),
                 description: None,
-                cancel_label: div().child(self.i18n.t("common.cancel")).into_any_element(),
+                cancel_label: div()
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-summarize-confirm",
+                        "cancel",
+                        self.i18n.t("common.cancel"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
+                    .into_any_element(),
                 confirm_label: div()
-                    .child(self.i18n.t("ai.context.summarize"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-summarize-confirm",
+                        "confirm",
+                        self.i18n.t("ai.context.summarize"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
                     .into_any_element(),
             },
             cx.listener(|this, _event, _window, cx| {
@@ -642,12 +794,35 @@ impl WorkspaceApp {
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
-                    .child(self.i18n.t("ai.chat.clear_all_confirm"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-clear-all-confirm",
+                        "title",
+                        self.i18n.t("ai.chat.clear_all_confirm"),
+                        self.tokens.ui.text_heading,
+                        cx,
+                    ))
                     .into_any_element(),
                 description: None,
-                cancel_label: div().child(self.i18n.t("common.actions.cancel")).into_any_element(),
+                cancel_label: div()
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-clear-all-confirm",
+                        "cancel",
+                        self.i18n.t("common.actions.cancel"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
+                    .into_any_element(),
                 confirm_label: div()
-                    .child(self.i18n.t("common.actions.confirm"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-clear-all-confirm",
+                        "confirm",
+                        self.i18n.t("common.actions.confirm"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
                     .into_any_element(),
             },
             cx.listener(|this, _event, _window, cx| {
@@ -672,12 +847,35 @@ impl WorkspaceApp {
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
-                    .child(self.i18n.t("ai.message.delete_confirm"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-delete-message-confirm",
+                        "title",
+                        self.i18n.t("ai.message.delete_confirm"),
+                        self.tokens.ui.text_heading,
+                        cx,
+                    ))
                     .into_any_element(),
                 description: None,
-                cancel_label: div().child(self.i18n.t("common.actions.cancel")).into_any_element(),
+                cancel_label: div()
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-delete-message-confirm",
+                        "cancel",
+                        self.i18n.t("common.actions.cancel"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
+                    .into_any_element(),
                 confirm_label: div()
-                    .child(self.i18n.t("common.actions.confirm"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-delete-message-confirm",
+                        "confirm",
+                        self.i18n.t("common.actions.confirm"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
                     .into_any_element(),
             },
             cx.listener(|this, _event, _window, cx| {

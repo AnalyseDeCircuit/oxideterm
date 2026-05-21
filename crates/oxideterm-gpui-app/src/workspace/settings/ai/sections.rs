@@ -1,5 +1,6 @@
 const AI_TEXTAREA_SYSTEM_PROMPT_MIN_H: f32 = 80.0; // Tauri rows=4 min-h-[80px].
 const AI_TEXTAREA_MEMORY_MIN_H: f32 = 120.0; // Tauri rows=5 min-h-[120px].
+const AI_TOOL_NUMBER_INPUT_W: f32 = 96.0; // Tauri w-24.
 const AI_TOOL_POLICY_CARD_BG_ALPHA: u32 = 0x4d; // Tauri bg-theme-bg-panel/30.
 const AI_TOOL_POLICY_ROW_BG_ALPHA: u32 = 0x40; // Tauri bg-theme-bg/25.
 const AI_TOOL_POLICY_BORDER_ALPHA: u32 = 0x99; // Tauri border-theme-border/60.
@@ -627,32 +628,26 @@ impl WorkspaceApp {
                                 .text_color(rgb(self.tokens.ui.text_muted))
                                 .child(self.i18n.t("settings_view.ai.tool_use_approve_hint")),
                         )
-                        .child(self.number_row(
+                        .child(self.ai_tool_number_input_row(
                             "settings_view.ai.tool_use_max_rounds",
                             "settings_view.ai.tool_use_max_rounds_hint",
+                            SettingsInput::AiToolUseMaxRounds,
                             settings
                                 .ai
                                 .tool_use
                                 .max_rounds
                                 .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS),
-                            1,
-                            oxideterm_settings::MIN_AI_TOOL_MAX_ROUNDS,
-                            oxideterm_settings::MAX_AI_TOOL_MAX_ROUNDS,
-                            set_ai_tool_use_max_rounds,
                             cx,
                         ))
-                        .child(self.number_row(
+                        .child(self.ai_tool_number_input_row(
                             "settings_view.ai.tool_use_max_calls_per_round",
                             "settings_view.ai.tool_use_max_calls_per_round_hint",
+                            SettingsInput::AiToolUseMaxCallsPerRound,
                             settings
                                 .ai
                                 .tool_use
                                 .max_calls_per_round
                                 .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND),
-                            1,
-                            oxideterm_settings::MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
-                            oxideterm_settings::MAX_AI_TOOL_MAX_CALLS_PER_ROUND,
-                            set_ai_tool_use_max_calls_per_round,
                             cx,
                         ))
                         .child(policy_groups)
@@ -663,6 +658,29 @@ impl WorkspaceApp {
             .child(self.ai_separator())
             .child(self.ai_mcp_summary_section(settings, cx))
             .child(self.ai_embedding_config_section(settings, cx))
+            .into_any_element()
+    }
+
+    fn ai_tool_number_input_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        input: SettingsInput,
+        value: i64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | AI_TOOL_POLICY_BORDER_ALPHA))
+            .bg(rgba((self.tokens.ui.bg_panel << 8) | AI_TOOL_POLICY_CARD_BG_ALPHA))
+            .p(px(12.0))
+            .child(self.setting_row(
+                label_key,
+                hint_key,
+                self.number_input(input, value.to_string(), AI_TOOL_NUMBER_INPUT_W, cx),
+                cx,
+            ))
             .into_any_element()
     }
 

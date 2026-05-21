@@ -30,7 +30,7 @@ impl WorkspaceApp {
                 },
             )
             .w(px(width))
-            .justify_center()
+            .justify_end()
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(
                 MouseButton::Left,

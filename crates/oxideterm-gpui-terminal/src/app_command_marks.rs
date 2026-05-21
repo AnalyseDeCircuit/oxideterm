@@ -284,6 +284,14 @@ struct TerminalInputTracker {
 }
 
 impl TerminalInputTracker {
+    fn state(&self) -> TerminalAutosuggestInputState {
+        TerminalAutosuggestInputState {
+            value: self.value.clone(),
+            cursor_index: self.cursor_index,
+            is_cursor_at_end: self.cursor_index == self.value.len(),
+        }
+    }
+
     fn apply_bytes(&mut self, bytes: &[u8]) -> Option<String> {
         let data = String::from_utf8_lossy(bytes);
         if data.contains("\u{1b}[200~") || data.contains("\u{1b}[201~") {
@@ -468,6 +476,20 @@ mod input_tracker_tests {
         assert_eq!(tracker.apply_bytes(b"\x1b[D"), None);
         assert_eq!(tracker.apply_bytes(b"\x7f"), None);
         assert_eq!(tracker.apply_bytes(b"Z\r"), Some("aZc".to_string()));
+    }
+
+    #[test]
+    fn input_tracker_exposes_tauri_autosuggest_state_shape() {
+        let mut tracker = TerminalInputTracker::default();
+
+        assert_eq!(tracker.apply_bytes(b"abc"), None);
+        assert_eq!(tracker.apply_bytes(b"\x1b[D"), None);
+        assert_eq!(tracker.apply_bytes(b"Z"), None);
+
+        let state = tracker.state();
+        assert_eq!(state.value, "abZc");
+        assert_eq!(state.cursor_index, 3);
+        assert!(!state.is_cursor_at_end);
     }
 
     #[test]

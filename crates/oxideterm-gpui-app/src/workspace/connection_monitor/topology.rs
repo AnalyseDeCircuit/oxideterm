@@ -20,13 +20,27 @@ impl WorkspaceApp {
                             .text_size(px(24.0))
                             .font_weight(gpui::FontWeight::BOLD)
                             .text_color(rgb(theme.text_heading))
-                            .child(self.i18n.t("topology.page.title")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "topology-page-header",
+                                "title",
+                                self.i18n.t("topology.page.title"),
+                                theme.text_heading,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
                             .text_size(px(14.0))
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("topology.page.description")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "topology-page-header",
+                                "description",
+                                self.i18n.t("topology.page.description"),
+                                theme.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .child(
@@ -65,22 +79,24 @@ impl WorkspaceApp {
         date.format("%Y-%m-%d").to_string()
     }
 
-    fn render_connection_pool_monitor(&self, _cx: &mut Context<Self>) -> AnyElement {
+    fn render_connection_pool_monitor(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         if let Some(error) = &self.connection_monitor.pool_error {
             return monitor_center_state(
-                &self.tokens,
+                self,
                 LucideIcon::AlertTriangle,
                 MONITOR_RED,
                 error.clone(),
+                cx,
             );
         }
         let Some(stats) = self.connection_monitor.pool_stats.as_ref() else {
             return monitor_center_state(
-                &self.tokens,
+                self,
                 LucideIcon::RefreshCw,
                 theme.text_muted,
                 self.i18n.t("connections.monitor.loading"),
+                cx,
             );
         };
 
@@ -115,7 +131,14 @@ impl WorkspaceApp {
                         div()
                             .text_size(px(14.0))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(self.i18n.t("connections.monitor.title")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "topology-monitor-header",
+                                "title",
+                                self.i18n.t("connections.monitor.title"),
+                                theme.text,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -148,6 +171,7 @@ impl WorkspaceApp {
                         } else {
                             theme.text_muted
                         },
+                        cx,
                     ))
                     .child(self.render_pool_stat_card(
                         self.i18n.t("connections.monitor.idle"),
@@ -158,6 +182,7 @@ impl WorkspaceApp {
                         } else {
                             theme.text_muted
                         },
+                        cx,
                     ))
                     .child(self.render_pool_stat_card(
                         self.i18n.t("connections.monitor.reconnecting"),
@@ -168,6 +193,7 @@ impl WorkspaceApp {
                         } else {
                             theme.text_muted
                         },
+                        cx,
                     ))
                     .child(self.render_pool_stat_card(
                         self.i18n.t("connections.monitor.link_down"),
@@ -178,6 +204,7 @@ impl WorkspaceApp {
                         } else {
                             theme.text_muted
                         },
+                        cx,
                     )),
             )
             .child(
@@ -194,6 +221,7 @@ impl WorkspaceApp {
                         } else {
                             theme.text_muted
                         },
+                        cx,
                     ))
                     .child(self.render_pool_stat_card(
                         self.i18n.t("connections.monitor.sftp"),
@@ -204,6 +232,7 @@ impl WorkspaceApp {
                         } else {
                             theme.text_muted
                         },
+                        cx,
                     ))
                     .child(self.render_pool_stat_card(
                         self.i18n.t("connections.monitor.forwards"),
@@ -214,6 +243,7 @@ impl WorkspaceApp {
                         } else {
                             theme.text_muted
                         },
+                        cx,
                     )),
             )
             .child(
@@ -242,7 +272,14 @@ impl WorkspaceApp {
                                 12.0,
                                 rgb(theme.text_muted),
                             ))
-                            .child(self.i18n.t("connections.monitor.live")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "topology-monitor-header",
+                                "live",
+                                self.i18n.t("connections.monitor.live"),
+                                theme.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .into_any_element()
@@ -254,6 +291,7 @@ impl WorkspaceApp {
         value: usize,
         icon: LucideIcon,
         color: u32,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let background = if color == theme.text_muted {
@@ -278,7 +316,13 @@ impl WorkspaceApp {
                         div()
                             .text_size(px(12.0))
                             .text_color(rgb(theme.text_muted))
-                            .child(label),
+                            .child(self.render_selectable_display_text(
+                                "connection-pool-stat-label",
+                                &label,
+                                label.clone(),
+                                theme.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .child(
@@ -290,7 +334,13 @@ impl WorkspaceApp {
                     .text_size(px(24.0))
                     .font_weight(gpui::FontWeight::BOLD)
                     .text_color(rgb(color))
-                    .child(value.to_string()),
+                    .child(self.render_selectable_display_text(
+                        "connection-pool-stat-value",
+                        &label,
+                        value.to_string(),
+                        color,
+                        cx,
+                    )),
             )
             .into_any_element()
     }
@@ -299,10 +349,11 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let Some(snapshot) = self.connection_monitor.topology_snapshot.as_ref() else {
             return monitor_center_state(
-                &self.tokens,
+                self,
                 LucideIcon::RefreshCw,
                 theme.text_muted,
                 self.i18n.t("connections.monitor.loading"),
+                cx,
             );
         };
         let layout = ConnectionTopologyLayout::from_snapshot(snapshot);
@@ -317,14 +368,28 @@ impl WorkspaceApp {
                 .child(
                     div()
                         .text_size(px(18.0))
-                        .child(self.i18n.t("topology.page.no_connections")),
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "topology-empty",
+                            "title",
+                            self.i18n.t("topology.page.no_connections"),
+                            theme.text_muted,
+                            cx,
+                        )),
                 )
                 .child(
                     div()
                         .mt_2()
                         .text_size(px(14.0))
                         .opacity(0.7)
-                        .child(self.i18n.t("topology.page.connect_hint")),
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "topology-empty",
+                            "hint",
+                            self.i18n.t("topology.page.connect_hint"),
+                            theme.text_muted,
+                            cx,
+                        )),
                 )
                 .into_any_element();
         }
@@ -491,7 +556,14 @@ impl WorkspaceApp {
                     .font_family("monospace")
                     .text_color(rgb(theme.text_muted))
                     .shadow_sm()
-                    .child(format!("{}%", (transform.k * 100.0).round() as i32)),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "topology-zoom-chip",
+                        "scale",
+                        format!("{}%", (transform.k * 100.0).round() as i32),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -503,7 +575,14 @@ impl WorkspaceApp {
                     .text_color(rgba(
                         (theme.text_muted << 8) | TOPOLOGY_INSTRUCTION_ALPHA_60,
                     ))
-                    .child(self.i18n.t("topology.controls.instructions")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "topology-instructions",
+                        "controls",
+                        self.i18n.t("topology.controls.instructions"),
+                        theme.text_muted,
+                        cx,
+                    )),
             );
 
         for node in layout.nodes {
@@ -650,6 +729,12 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let is_connected = menu.view_status.is_connected();
         let node_id = menu.node_id.clone();
+        let menu_key = menu
+            .node_id
+            .as_ref()
+            .map(|node_id| node_id.0.as_str())
+            .unwrap_or("unknown")
+            .to_string();
 
         let mut actions = div().py(px(4.0)).child(self.render_topology_menu_action(
             LucideIcon::ExternalLink,
@@ -667,6 +752,7 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }),
+            cx,
         ));
 
         if is_connected {
@@ -695,6 +781,7 @@ impl WorkspaceApp {
                             cx.notify();
                         }
                     }),
+                    cx,
                 ))
                 .child(self.render_topology_menu_action(
                     LucideIcon::FolderOpen,
@@ -711,6 +798,7 @@ impl WorkspaceApp {
                             cx.notify();
                         }
                     }),
+                    cx,
                 ));
         }
 
@@ -742,14 +830,28 @@ impl WorkspaceApp {
                             .text_size(px(12.0))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(theme.text))
-                            .child(menu.name),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "topology-menu-title",
+                                (menu_key.as_str(), "name"),
+                                menu.name,
+                                theme.text,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
                             .font_family("monospace")
                             .text_size(px(10.0))
                             .text_color(rgb(theme.text_muted))
-                            .child(menu.host),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "topology-menu-host",
+                                (menu_key.as_str(), "host"),
+                                menu.host,
+                                theme.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .child(actions)
@@ -763,7 +865,14 @@ impl WorkspaceApp {
                     .text_align(gpui::TextAlign::Center)
                     .text_size(px(10.0))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("topology.menu.close_hint")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "topology-menu-close-hint",
+                        "label",
+                        self.i18n.t("topology.menu.close_hint"),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .into_any_element()
     }
@@ -774,8 +883,10 @@ impl WorkspaceApp {
         icon_color: u32,
         label: String,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let label_key = label.clone();
         div()
             .w_full()
             .px_3()
@@ -793,7 +904,14 @@ impl WorkspaceApp {
             })
             .on_mouse_down(MouseButton::Left, listener)
             .child(Self::render_lucide_icon(icon, 16.0, rgb(icon_color)))
-            .child(label)
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "topology-menu-action-label",
+                label_key,
+                label,
+                theme.text_muted,
+                cx,
+            ))
             .into_any_element()
     }
 

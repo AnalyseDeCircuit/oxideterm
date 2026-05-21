@@ -205,6 +205,7 @@ fn encrypted_connection_to_saved(
             updated_at: Some(now),
             color: conn.color,
             tags: conn.tags,
+            post_connect_command: None,
         },
         forward_records,
     ))
@@ -349,6 +350,7 @@ fn merge_saved_connection(
     existing.options = merge_options(existing.options, imported.options, imported_has_proxy_chain);
     existing.color = imported.color.or(existing.color);
     existing.tags = merge_tags(existing.tags, imported.tags);
+    existing.post_connect_command = imported.post_connect_command.or(existing.post_connect_command);
     existing
 }
 

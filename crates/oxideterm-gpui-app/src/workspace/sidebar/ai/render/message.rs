@@ -48,7 +48,15 @@ impl WorkspaceApp {
                                         .text_size(px(11.0))
                                         .font_weight(gpui::FontWeight::MEDIUM)
                                         .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
-                                        .child(label),
+                                        .child(self.render_display_text_with_role_and_alpha(
+                                            SelectableTextRole::NonSelectable,
+                                            "ai-condensed-context-label",
+                                            label.clone(),
+                                            label,
+                                            self.tokens.ui.text_muted,
+                                            0x99 as f32 / 255.0,
+                                            cx,
+                                        )),
                                 )
                                 .child(Self::render_lucide_icon(
                                     LucideIcon::ChevronRight,
@@ -277,7 +285,15 @@ impl WorkspaceApp {
                             .text_size(px(10.0))
                             .font_family(settings_ui_font_family(""))
                             .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x80))
-                            .child(format!("{}/{}", branches.active_index + 1, branches.total)),
+                            .child(self.render_display_text_with_role_and_alpha(
+                                SelectableTextRole::PlainDocument,
+                                "ai-message-branches",
+                                message.id.as_str(),
+                                format!("{}/{}", branches.active_index + 1, branches.total),
+                                self.tokens.ui.text_muted,
+                                0x80 as f32 / 255.0,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -796,7 +812,15 @@ impl WorkspaceApp {
                         12.0,
                         rgba((self.tokens.ui.text_muted << 8) | 0x99),
                     ))
-                    .child(self.i18n.t("ai.context.view_original"))
+                    .child(self.render_display_text_with_role_and_alpha(
+                        SelectableTextRole::NonSelectable,
+                        "ai-tool-context-action",
+                        "view-original",
+                        self.i18n.t("ai.context.view_original"),
+                        self.tokens.ui.text_muted,
+                        0x99 as f32 / 255.0,
+                        cx,
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
@@ -1000,7 +1024,17 @@ impl WorkspaceApp {
                         12.0,
                         rgba((self.tokens.ui.text_muted << 8) | 0x80),
                     ))
-                    .child(div().flex_1().min_w_0().child(label))
+                    .child(div().flex_1().min_w_0().child(
+                        self.render_display_text_with_role_and_alpha(
+                            SelectableTextRole::NonSelectable,
+                            "ai-tool-condensed-label",
+                            label.clone(),
+                            label,
+                            self.tokens.ui.text_muted,
+                            0x66 as f32 / 255.0,
+                            cx,
+                        ),
+                    ))
                     .child(Self::render_lucide_icon(
                         if show_condensed {
                             LucideIcon::ChevronDown
@@ -1238,7 +1272,15 @@ impl WorkspaceApp {
                         14.0,
                         rgba((self.tokens.ui.accent << 8) | 0xb3),
                     ))
-                    .child(self.i18n.t("ai.tool_use.awaiting_summary")),
+                    .child(self.render_display_text_with_role_and_alpha(
+                        SelectableTextRole::PlainDocument,
+                        "ai-tool-use",
+                        "awaiting-summary",
+                        self.i18n.t("ai.tool_use.awaiting_summary"),
+                        self.tokens.ui.text_muted,
+                        0x99 as f32 / 255.0,
+                        cx,
+                    )),
             );
         }
         block.into_any_element()
@@ -1386,7 +1428,14 @@ impl WorkspaceApp {
                             .text_size(px(10.0))
                             .font_weight(gpui::FontWeight::BOLD)
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("ai.chat.header").to_uppercase()),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "ai-chat-header",
+                                "label",
+                                self.i18n.t("ai.chat.header").to_uppercase(),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     )
                     .when_some(active_title, |row, title| {
                         let workspace = cx.entity();
@@ -1406,7 +1455,15 @@ impl WorkspaceApp {
                                     .text_size(px(11.0))
                                     .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
                                     .hover(|style| style.text_color(rgb(self.tokens.ui.text)))
-                                    .child(title)
+                                    .child(self.render_display_text_with_role_and_alpha(
+                                        SelectableTextRole::NonSelectable,
+                                        "ai-chat-header-title",
+                                        title.clone(),
+                                        title,
+                                        self.tokens.ui.text_muted,
+                                        0x99 as f32 / 255.0,
+                                        cx,
+                                    ))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {

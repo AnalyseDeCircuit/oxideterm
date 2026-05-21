@@ -15,6 +15,14 @@ impl WorkspaceApp {
         } else {
             self.i18n.t("sessionManager.table.no_search_results")
         };
+        let row_count = rows.len();
+        let virtual_rows = Arc::new(rows.clone());
+        let workspace = cx.entity();
+        let table_scroll = self.session_manager.table_scroll_handle.clone();
+        let virtual_spec = TauriVirtualListSpec::new(
+            px(MANAGER_TABLE_VIRTUAL_ROW_HEIGHT),
+            MANAGER_TABLE_VIRTUAL_OVERSCAN,
+        );
         div()
             .flex_1()
             .min_w(px(0.0))
@@ -32,7 +40,7 @@ impl WorkspaceApp {
                     .id("session-manager-table-scroll")
                     .flex_1()
                     .min_h(px(0.0))
-                    .overflow_y_scroll()
+                    .overflow_hidden()
                     .when(rows.is_empty(), |body| {
                         body.flex().items_center().justify_center().child(
                             div()
@@ -56,16 +64,27 @@ impl WorkspaceApp {
                                             div()
                                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                                 .font_weight(gpui::FontWeight::MEDIUM)
-                                                .child(empty_message),
+                                                .child(self.render_selectable_display_text(
+                                                    "session-manager-table-empty",
+                                                    &self.session_manager.search_query,
+                                                    empty_message,
+                                                    theme.text_muted,
+                                                    cx,
+                                                )),
                                         )
                                         .child(
                                             div()
                                                 .mt_1()
                                                 .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                .child(
+                                                .child(self.render_selectable_display_text(
+                                                    "session-manager-table-empty-hint",
+                                                    "no-connections-hint",
                                                     self.i18n.t(
                                                         "sessionManager.table.no_connections_hint",
                                                     ),
+                                                    theme.text_muted,
+                                                    cx,
+                                                ),
                                                 ),
                                         ),
                                 )
@@ -87,10 +106,31 @@ impl WorkspaceApp {
                                 ),
                         )
                     })
-                    .children(
-                        rows.into_iter()
-                            .map(|conn| self.render_connection_table_row(conn, has_background, cx)),
-                    ),
+                    .when(!rows.is_empty(), |body| {
+                        body.child(tauri_virtual_uniform_list(
+                            "session-manager-table-virtual",
+                            row_count,
+                            table_scroll,
+                            virtual_spec,
+                            move |range, _window, app| {
+                                let mut rendered = Vec::new();
+                                let rows = virtual_rows.clone();
+                                let _ = workspace.update(app, |this, cx| {
+                                    for index in range {
+                                        let Some(conn) = rows.get(index).cloned() else {
+                                            continue;
+                                        };
+                                        rendered.push(this.render_connection_table_row(
+                                            conn,
+                                            has_background,
+                                            cx,
+                                        ));
+                                    }
+                                });
+                                rendered
+                            },
+                        ))
+                    })
             )
             .into_any_element()
     }
@@ -191,12 +231,46 @@ impl WorkspaceApp {
                 rgba((theme.text_muted << 8) | 0x66),
             )
         };
-        tauri_table_sort_header(
-            &self.tokens,
-            &self.manager_table_cell_options(width, flexible),
-            self.i18n.t(label_key),
-            Self::render_lucide_icon(icon, 14.0, icon_color),
-        )
+        let options = self.manager_table_cell_options(width, flexible);
+        let field_key = match field {
+            SessionSortField::Name => "name",
+            SessionSortField::Host => "host",
+            SessionSortField::Port => "port",
+            SessionSortField::Username => "username",
+            SessionSortField::AuthType => "auth-type",
+            SessionSortField::Group => "group",
+            SessionSortField::LastUsed => "last-used",
+        };
+        let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
+            "session-manager-sort-header",
+            field_key,
+        );
+        div()
+            .when(options.flexible, |cell| {
+                cell.flex_1().min_w(px(options.min_width))
+            })
+            .when(!options.flexible, |cell| {
+                cell.w(px(options.width)).flex_none()
+            })
+            .pl(px(options.padding_left))
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .cursor_pointer()
+            .hover(move |cell| cell.text_color(rgb(theme.text)))
+            .child(div().truncate().child(
+                self.render_row_safe_selectable_display_text_in_group(
+                    selection_group_id,
+                    "session-manager-sort-header-cell",
+                    field_key,
+                    0,
+                    self.i18n.t(label_key),
+                    theme.text_muted,
+                    None,
+                    cx,
+                ),
+            ))
+            .child(Self::render_lucide_icon(icon, 14.0, icon_color))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
@@ -223,6 +297,10 @@ impl WorkspaceApp {
         let hovered =
             self.session_manager.hovered_connection_id.as_deref() == Some(conn.id.as_str());
         let id = conn.id.clone();
+        let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
+            "session-manager-table-row",
+            &conn.id,
+        );
         let color = conn.color.as_deref().and_then(parse_hex_color);
         tauri_table_row(
             self.manager_table_colors(has_background),
@@ -251,6 +329,13 @@ impl WorkspaceApp {
                 this.session_manager.row_context_menu_connection_id = None;
                 if event.click_count == 2 {
                     this.open_saved_connection(&id, window, cx);
+                } else {
+                    this.begin_selectable_text_group_from_mouse_down(
+                        selection_group_id,
+                        event,
+                        window,
+                        cx,
+                    );
                 }
                 cx.stop_propagation();
             }),
@@ -297,40 +382,64 @@ impl WorkspaceApp {
         ))
         .child(self.render_table_cell(
             conn.name.clone(),
+            selection_group_id,
+            ("name", conn.id.as_str()),
+            0,
             MANAGER_COL_NAME_BASIS,
             TauriTableCellStyle::Primary,
             true,
+            cx,
         ))
         .child(self.render_table_cell(
             conn.host.clone(),
+            selection_group_id,
+            ("host", conn.id.as_str()),
+            1,
             MANAGER_COL_HOST,
             TauriTableCellStyle::MetaMono,
             false,
+            cx,
         ))
         .child(self.render_table_cell(
             conn.port.to_string(),
+            selection_group_id,
+            ("port", conn.id.as_str()),
+            2,
             MANAGER_COL_PORT,
             TauriTableCellStyle::MetaMono,
             false,
+            cx,
         ))
         .child(self.render_table_cell(
             conn.username.clone(),
+            selection_group_id,
+            ("username", conn.id.as_str()),
+            3,
             MANAGER_COL_USERNAME,
             TauriTableCellStyle::Meta,
             false,
+            cx,
         ))
         .child(self.render_auth_badge_cell(conn.auth_type))
         .child(self.render_table_cell(
             conn.group.clone().unwrap_or_else(|| "—".to_string()),
+            selection_group_id,
+            ("group", conn.id.as_str()),
+            4,
             MANAGER_COL_GROUP,
             TauriTableCellStyle::Meta,
             false,
+            cx,
         ))
         .child(self.render_table_cell(
             format_last_used(conn.last_used_at.as_deref(), &self.i18n),
+            selection_group_id,
+            ("last-used", conn.id.as_str()),
+            5,
             MANAGER_COL_LAST_USED,
             TauriTableCellStyle::Meta,
             false,
+            cx,
         ))
         .child(tauri_table_spacer_cell(MANAGER_COL_ACTIONS))
         .child(self.render_inline_row_actions(conn, hovered, has_background, cx))
@@ -340,16 +449,62 @@ impl WorkspaceApp {
     fn render_table_cell(
         &self,
         text: String,
+        selection_group_id: u64,
+        selection_key: impl std::hash::Hash,
+        selection_order: usize,
         width: f32,
         style: TauriTableCellStyle,
         flexible: bool,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        tauri_table_cell(
-            &self.tokens,
-            &self.manager_table_cell_options(width, flexible),
-            style,
-            text,
-        )
+        let options = self.manager_table_cell_options(width, flexible);
+        let strong = style == TauriTableCellStyle::Primary;
+        let color = if strong {
+            self.tokens.ui.text
+        } else {
+            self.tokens.ui.text_muted
+        };
+        div()
+            .when(options.flexible, |cell| {
+                cell.flex_1().min_w(px(options.min_width))
+            })
+            .when(!options.flexible, |cell| {
+                cell.w(px(options.width)).flex_none()
+            })
+            .pl(px(options.padding_left))
+            .truncate()
+            .text_size(px(match style {
+                TauriTableCellStyle::Primary => options.primary_text_size,
+                TauriTableCellStyle::Meta | TauriTableCellStyle::MetaMono => {
+                    options.meta_text_size
+                }
+            }))
+            .font_weight(if strong {
+                gpui::FontWeight::MEDIUM
+            } else {
+                gpui::FontWeight::NORMAL
+            })
+            .text_color(rgb(color))
+            .when(style == TauriTableCellStyle::MetaMono, |cell| {
+                if let Some(font) = options.mono_font.clone() {
+                    cell.font_family(font)
+                } else {
+                    cell
+                }
+            })
+            .child(self.render_row_safe_selectable_display_text_in_group(
+                selection_group_id,
+                "session-manager-table-cell",
+                selection_key,
+                selection_order,
+                text,
+                color,
+                (style == TauriTableCellStyle::MetaMono)
+                    .then(|| options.mono_font.clone())
+                    .flatten(),
+                cx,
+            ))
+            .into_any_element()
     }
 
     fn manager_table_colors(&self, has_background: bool) -> TauriTableColors {
@@ -542,6 +697,7 @@ impl WorkspaceApp {
                     self.i18n.t("sessionManager.actions.test_connection"),
                     rgb(theme.text),
                     has_background,
+                    cx,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -561,6 +717,7 @@ impl WorkspaceApp {
                     self.i18n.t("sessionManager.actions.duplicate"),
                     rgb(theme.text),
                     has_background,
+                    cx,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -586,6 +743,7 @@ impl WorkspaceApp {
                     self.i18n.t("sessionManager.actions.delete"),
                     rgb(0xf87171),
                     has_background,
+                    cx,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -645,6 +803,7 @@ impl WorkspaceApp {
                     rgb(theme.text),
                     rgb(0x4ade80),
                     has_background,
+                    cx,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -665,6 +824,7 @@ impl WorkspaceApp {
                     rgb(theme.text),
                     rgb(theme.text),
                     has_background,
+                    cx,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -685,6 +845,7 @@ impl WorkspaceApp {
                     rgb(theme.text),
                     rgb(theme.text),
                     has_background,
+                    cx,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -705,6 +866,7 @@ impl WorkspaceApp {
                     rgb(theme.text),
                     rgb(theme.text),
                     has_background,
+                    cx,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -731,6 +893,7 @@ impl WorkspaceApp {
                     rgb(0xf87171),
                     rgb(0xf87171),
                     has_background,
+                    cx,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -753,6 +916,7 @@ impl WorkspaceApp {
         label: String,
         color: Rgba,
         has_background: bool,
+        cx: &mut Context<Self>,
     ) -> gpui::Div {
         div()
             .h(px(30.0))
@@ -766,7 +930,14 @@ impl WorkspaceApp {
             .cursor_pointer()
             .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
             .child(Self::render_lucide_icon(icon, 16.0, color))
-            .child(label)
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "session-manager-row-menu-item",
+                label.clone(),
+                label,
+                color.into(),
+                cx,
+            ))
     }
 
     fn render_row_menu_item_with_icon_color(
@@ -776,6 +947,7 @@ impl WorkspaceApp {
         text_color: Rgba,
         icon_color: Rgba,
         has_background: bool,
+        cx: &mut Context<Self>,
     ) -> gpui::Div {
         div()
             .h(px(30.0))
@@ -789,7 +961,14 @@ impl WorkspaceApp {
             .cursor_pointer()
             .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
             .child(Self::render_lucide_icon(icon, 16.0, icon_color))
-            .child(label)
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "session-manager-row-menu-item",
+                label.clone(),
+                label,
+                text_color.into(),
+                cx,
+            ))
     }
 
     fn render_row_icon_button(

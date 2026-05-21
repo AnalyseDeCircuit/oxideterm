@@ -22,6 +22,8 @@ impl WorkspaceApp {
     pub(super) fn render_settings_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let has_settings_background = self.settings_background_active();
+        let settings_content_scroll =
+            self.selectable_text_scroll_handle("settings-content-scroll");
         div()
             .size_full()
             .relative()
@@ -40,7 +42,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_w(px(0.0))
                     .min_h(px(0.0))
-                    .overflow_y_scroll()
+                    .selectable_overflow_y_scrollbar(&settings_content_scroll)
                     .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
                         // GPUI can advance scroll state without rebuilding the settings view,
                         // so cached trigger bounds must not survive a settings scroll.
@@ -125,7 +127,9 @@ impl WorkspaceApp {
             .id("settings-nav-scroll")
             .flex_1()
             .min_h(px(0.0))
-            .overflow_y_scroll()
+            .selectable_overflow_y_scrollbar(
+                &self.selectable_text_scroll_handle("settings-nav-scroll"),
+            )
             .px_3()
             .flex()
             .flex_col();
@@ -300,6 +304,9 @@ impl WorkspaceApp {
                 .unwrap_or(settings.appearance.render_profile),
             &self.detected_graphics,
         );
+        // Settings changes can flip the render profile while a modal is open;
+        // update the shared backdrop gate before the next top-layer render.
+        set_tauri_backdrop_blur_allowed(self.render_policy.allow_background_blur);
         self.background_image_cache
             .set_byte_limit(self.render_policy.image_cache_bytes);
         self.sftp_transfer_manager

@@ -20,8 +20,8 @@ pub use drives::{directory_stats, local_drives};
 pub use listing::{list_local_files, local_file_default_cmp, sorted_local_files};
 pub use model::{
     LocalArchiveEntry, LocalArchiveInfo, LocalBookmark, LocalChecksumResult, LocalClipboardMode,
-    LocalDrive, LocalFileEntry, LocalFileType, LocalPreview, LocalPreviewMetadata,
-    LocalSortDirection, LocalSortField,
+    LocalDrive, LocalFileEntry, LocalFileType, LocalPreview, LocalPreviewChunk,
+    LocalPreviewMetadata, LocalSortDirection, LocalSortField,
 };
 pub use operations::{
     copy_recursively, copy_recursively_with_progress, local_operation_unit_count,
@@ -32,5 +32,5 @@ pub use paths::{
 };
 pub use preview::{
     MAX_PREVIEW_SIZE, STREAM_PREVIEW_THRESHOLD, local_file_extension, local_preview_metadata,
-    mime_type_for_extension, read_local_preview,
+    mime_type_for_extension, read_local_preview, read_local_preview_range,
 };

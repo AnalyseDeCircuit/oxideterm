@@ -1,9 +1,32 @@
 impl WorkspaceApp {
     fn render_connection_hint(&self, text: String) -> AnyElement {
+        self.render_connection_hint_with_color(text, self.tokens.ui.text_muted)
+    }
+
+    fn render_connection_hint_with_color(&self, text: String, color: u32) -> AnyElement {
         div()
             .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
+            .text_color(rgb(color))
             .child(text)
+            .into_any_element()
+    }
+
+    fn render_agent_status(&self, available: Option<bool>) -> AnyElement {
+        let (color, label) = match available {
+            Some(true) => (self.tokens.ui.success, self.i18n.t("ssh.form.agent_detected")),
+            Some(false) => (
+                self.tokens.ui.error,
+                self.i18n.t("ssh.form.agent_not_detected"),
+            ),
+            None => (self.tokens.ui.text_muted, "...".to_string()),
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .child(div().size(px(8.0)).rounded_full().bg(rgb(color)))
+            .child(div().text_color(rgb(color)).child(label))
             .into_any_element()
     }
 
@@ -453,6 +476,7 @@ impl WorkspaceApp {
         &self,
         active_tab: SshAuthTab,
         edit_properties_mode: bool,
+        kbi_disabled_for_proxy_chain: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let tabs: Vec<(SshAuthTab, &str)> = if edit_properties_mode {
@@ -487,8 +511,13 @@ impl WorkspaceApp {
                 || (edit_properties_mode
                     && tab == SshAuthTab::SshKey
                     && active_tab == SshAuthTab::DefaultKey);
-            row = row.child(
-                segmented_tab(&self.tokens, self.i18n.t(key), selected).on_mouse_down(
+            let disabled = tab == SshAuthTab::TwoFactor && kbi_disabled_for_proxy_chain;
+            let item = segmented_tab(&self.tokens, self.i18n.t(key), selected)
+                .opacity(if disabled { 0.45 } else { 1.0 });
+            row = row.child(if disabled {
+                item
+            } else {
+                item.on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         if let Some(form) = this.new_connection_form.as_mut() {
@@ -498,10 +527,24 @@ impl WorkspaceApp {
                         this.open_new_connection_select = None;
                         cx.notify();
                     }),
-                ),
-            );
+                )
+            });
         }
-        row.into_any_element()
+        let field = form_field(&self.tokens, self.i18n.t("ssh.form.authentication"), row);
+        if kbi_disabled_for_proxy_chain {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.spacing.two))
+                .child(field)
+                .child(self.render_connection_hint_with_color(
+                    self.i18n.t("sessionManager.toast.proxy_hop_kbi_unsupported"),
+                    self.tokens.ui.warning,
+                ))
+                .into_any_element()
+        } else {
+            field
+        }
     }
 
     fn render_drill_auth_tabs(&self, active_tab: SshAuthTab, cx: &mut Context<Self>) -> AnyElement {

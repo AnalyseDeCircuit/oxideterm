@@ -34,7 +34,12 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_oxide_labeled_input(&self, label: String, input: AnyElement) -> AnyElement {
+    fn render_oxide_labeled_input(
+        &self,
+        label: String,
+        input: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .flex_col()
@@ -43,7 +48,13 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text))
-                    .child(label),
+                    .child(self.render_selectable_display_text(
+                        "oxide-labeled-input",
+                        &label,
+                        label.clone(),
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .child(input)
             .into_any_element()
@@ -54,8 +65,9 @@ impl WorkspaceApp {
         &self,
         title: Option<(LucideIcon, String)>,
         children: Vec<AnyElement>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.render_oxide_padded_card(OXIDE_MODAL_CARD_P, title, children)
+        self.render_oxide_padded_card(OXIDE_MODAL_CARD_P, title, children, cx)
     }
 
     fn render_oxide_padded_card(
@@ -63,6 +75,7 @@ impl WorkspaceApp {
         padding: f32,
         title: Option<(LucideIcon, String)>,
         children: Vec<AnyElement>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -84,7 +97,14 @@ impl WorkspaceApp {
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(rgb(theme.text))
                         .child(Self::render_lucide_icon(icon, 16.0, rgb(theme.text)))
-                        .child(label),
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "oxide-card-title",
+                            label.clone(),
+                            label,
+                            theme.text,
+                            cx,
+                        )),
                 )
             })
             .children(children)
@@ -97,6 +117,7 @@ impl WorkspaceApp {
         description: String,
         checked: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .flex()
@@ -112,14 +133,28 @@ impl WorkspaceApp {
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .text_color(rgb(self.tokens.ui.text))
-                            .child(title),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "oxide-option-title",
+                                title.clone(),
+                                title,
+                                self.tokens.ui.text,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .line_height(px(16.0))
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(description),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "oxide-option-description",
+                                description.clone(),
+                                description,
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .into_any_element()
@@ -130,6 +165,7 @@ impl WorkspaceApp {
         &self,
         progress: OxideTransferProgress,
         export_embed_keys: Option<bool>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let percent = progress.percent();
         let label = if let Some(embed_keys) = export_embed_keys {
@@ -161,20 +197,41 @@ impl WorkspaceApp {
                             .flex_col()
                             .gap(px(4.0))
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(label)
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "oxide-progress-label",
+                                (&progress.stage, export_embed_keys),
+                                label,
+                                self.tokens.ui.text,
+                                cx,
+                            ))
                             .when_some(summary, |body, summary| {
                                 body.child(
                                     div()
                                         .text_size(px(self.tokens.metrics.ui_text_xs))
                                         .text_color(rgb(self.tokens.ui.text_muted))
-                                        .child(summary),
+                                        .child(self.render_display_text_with_role(
+                                            SelectableTextRole::PlainDocument,
+                                            "oxide-progress-summary",
+                                            (&progress.stage, export_embed_keys),
+                                            summary,
+                                            self.tokens.ui.text_muted,
+                                            cx,
+                                        )),
                                 )
                             }),
                     )
                     .child(
                         div()
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(format!("{percent}%")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "oxide-progress-percent",
+                                (&progress.stage, export_embed_keys),
+                                format!("{percent}%"),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     )
                     .into_any_element(),
                 div()
@@ -192,11 +249,17 @@ impl WorkspaceApp {
                     )
                     .into_any_element(),
             ],
+            cx,
         )
     }
 
-    fn render_oxide_password_strength(&self, password: &str) -> AnyElement {
+    fn render_oxide_password_strength(&self, password: &str, cx: &mut Context<Self>) -> AnyElement {
         let strength = oxide_password_strength(password);
+        let text_color = match strength {
+            OxidePasswordStrength::Weak => OXIDE_YELLOW_500,
+            OxidePasswordStrength::Fair => self.tokens.ui.text_muted,
+            OxidePasswordStrength::Strong => OXIDE_GREEN_500,
+        };
         div()
             .flex()
             .flex_col()
@@ -225,7 +288,14 @@ impl WorkspaceApp {
                         strength,
                         self.tokens.ui.text_muted,
                     ))
-                    .child(oxide_password_strength_label(strength)),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "oxide-password-strength",
+                        strength as u8,
+                        oxide_password_strength_label(strength),
+                        text_color,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

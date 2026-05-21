@@ -26,6 +26,9 @@ impl Render for WorkspaceApp {
         window.set_window_title(&SharedString::from(title));
         let vibrancy_mode =
             effective_vibrancy_mode(self.settings_store.settings(), &self.render_policy);
+        // Modal/command-palette backdrop blur follows the active render profile
+        // just like Tauri's linuxBackdropBlurClass compatibility gate.
+        set_tauri_backdrop_blur_allowed(self.render_policy.allow_background_blur);
         if self.applied_vibrancy_mode != vibrancy_mode {
             let _ = apply_window_vibrancy(window, vibrancy_mode);
             self.applied_vibrancy_mode = vibrancy_mode;
@@ -344,26 +347,36 @@ impl Render for WorkspaceApp {
                 this.update_settings_slider_drag(event, cx);
                 this.update_terminal_cast_seek_drag(event, cx);
                 this.update_ime_selection_drag(event.position, window, cx);
+                if this.read_only_selection_drag_active() {
+                    this.update_selectable_text_autoscroll(event.position, cx);
+                    cx.stop_propagation();
+                }
                 this.update_tab_drag(event, window, cx);
             }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
                     this.blur_text_inputs(cx);
+                    this.clear_read_only_ime_selection(cx);
                 }),
             )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                    let was_read_only_dragging = this.read_only_selection_drag_active();
                     this.finish_sidebar_resize(cx);
                     this.finish_ai_sidebar_resize(cx);
                     this.finish_split_drag(cx);
                     this.finish_settings_slider_drag(cx);
                     this.finish_terminal_cast_seek_drag(cx);
-                    this.finish_ime_selection_drag();
+                    this.finish_ime_selection_drag(cx);
+                    this.stop_selectable_text_autoscroll();
                     this.finish_tab_drag(event, window, cx);
                     if this.launcher.pressed_app_path.take().is_some() {
                         cx.notify();
+                    }
+                    if was_read_only_dragging {
+                        cx.stop_propagation();
                     }
                 }),
             )
@@ -726,9 +739,7 @@ impl Render for WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.terminal_quick_commands_open = false;
-                                    this.terminal_quick_command_pending = None;
-                                    this.quick_commands.focused_input = None;
+                                    this.close_terminal_quick_commands_popover();
                                     cx.stop_propagation();
                                     cx.notify();
                                 }),
@@ -736,9 +747,7 @@ impl Render for WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Right,
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.terminal_quick_commands_open = false;
-                                    this.terminal_quick_command_pending = None;
-                                    this.quick_commands.focused_input = None;
+                                    this.close_terminal_quick_commands_popover();
                                     cx.stop_propagation();
                                     cx.notify();
                                 }),

@@ -8,12 +8,26 @@ impl WorkspaceApp {
         }
         let can_create = !self.knowledge_new_collection_name.trim().is_empty();
         Some(
-            dialog_backdrop()
+            dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        // Tauri DocumentManager uses Dialog onOpenChange for
+                        // create collection; outside close matches Cancel.
+                        this.knowledge_create_dialog_open = false;
+                        this.knowledge_new_collection_name.clear();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
                 .child(
                     dialog_content(&self.tokens)
                         .w(px(KNOWLEDGE_DIALOG_WIDTH))
                         .max_w(relative(0.92))
                         .shadow_lg()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
                         .child(
                             dialog_header(&self.tokens)
                                 .child(dialog_title(
@@ -130,12 +144,26 @@ impl WorkspaceApp {
         }
         let can_create = !self.knowledge_new_document_title.trim().is_empty();
         Some(
-            dialog_backdrop()
+            dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        // Tauri new-document Dialog closes through
+                        // setNewDocDialogOpen(false) on backdrop click.
+                        this.knowledge_new_document_dialog_open = false;
+                        this.knowledge_new_document_title.clear();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
                 .child(
                     dialog_content(&self.tokens)
                         .w(px(KNOWLEDGE_DIALOG_WIDTH))
                         .max_w(relative(0.92))
                         .shadow_lg()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
                         .child(
                             dialog_header(&self.tokens)
                                 .child(dialog_title(
@@ -257,12 +285,25 @@ impl WorkspaceApp {
             .t(message_key)
             .replace("{{name}}", &confirm.name);
         Some(
-            dialog_backdrop()
+            dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        // Tauri delete confirm uses onOpenChange(false) to
+                        // clear the pending delete target.
+                        this.knowledge_delete_confirm = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
                 .child(
                     dialog_content(&self.tokens)
                         .w(px(KNOWLEDGE_DIALOG_WIDTH))
                         .max_w(relative(0.92))
                         .shadow_lg()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
                         .child(
                             dialog_header(&self.tokens)
                                 .child(dialog_title(

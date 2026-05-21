@@ -261,6 +261,7 @@ pub(super) fn form_from_saved_connection(
         group: group_label_for_form(conn.group.as_deref()),
         color: conn.color.clone().unwrap_or_default(),
         tags: conn.tags.clone(),
+        post_connect_command: conn.post_connect_command.clone().unwrap_or_default(),
         agent_forwarding: conn.options.agent_forwarding,
         save_connection: true,
         error,
@@ -299,6 +300,7 @@ fn connection_draft_from_form(form: &NewConnectionForm) -> ConnectionDraft {
             .map(proxy_hop_draft_from_form)
             .collect(),
         agent_forwarding: form.agent_forwarding,
+        post_connect_command: form.post_connect_command.clone(),
     }
 }
 
@@ -358,6 +360,7 @@ pub(super) fn ssh_config_from_saved_connection(
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
         agent_forwarding: conn.options.agent_forwarding,
         strict_host_key_checking: true,
+        post_connect_command: conn.post_connect_command.clone(),
         ..SshConfig::default()
     })
 }

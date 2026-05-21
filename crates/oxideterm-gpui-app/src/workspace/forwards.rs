@@ -5,8 +5,8 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, Context, IntoElement, MouseButton, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, prelude::*, px, rgb,
+    AnyElement, Context, IntoElement, MouseButton, ParentElement, SharedString, Styled, Window,
+    div, prelude::*, px, rgb,
 };
 use oxideterm_forwarding::{
     DetectedPort, ForwardEvent, ForwardRule, ForwardStats, ForwardStatus, ForwardType,

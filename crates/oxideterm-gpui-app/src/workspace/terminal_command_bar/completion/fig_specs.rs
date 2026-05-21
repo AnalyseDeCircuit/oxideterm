@@ -8,6 +8,20 @@ struct TerminalFigUserSpecCache {
     specs: Vec<TerminalFigSpec>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TerminalLocalShellHistoryFileSnapshot {
+    path: std::path::PathBuf,
+    modified: Option<std::time::SystemTime>,
+    len: u64,
+}
+
+#[derive(Clone, Debug)]
+struct TerminalLocalShellHistoryCache {
+    home: std::path::PathBuf,
+    files: Vec<TerminalLocalShellHistoryFileSnapshot>,
+    commands: Vec<String>,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum TerminalFigSpecConfigRoot {
@@ -1150,40 +1164,79 @@ fn escape_terminal_path_for_shell(value: &str, quoted: bool) -> String {
 }
 
 fn load_local_shell_history_commands() -> Vec<String> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    load_local_shell_history_commands_from_home(std::path::Path::new(&home))
+}
+
+fn load_local_shell_history_commands_from_home(home: &std::path::Path) -> Vec<String> {
     const MAX_HISTORY_BYTES: usize = 512 * 1024;
     const MAX_COMMANDS: usize = 500;
-    static LOCAL_SHELL_HISTORY: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    LOCAL_SHELL_HISTORY
-        .get_or_init(|| {
-            let Some(home) = std::env::var_os("HOME") else {
-                return Vec::new();
-            };
-            let home = std::path::PathBuf::from(home);
-            let files = [
-                ".zsh_history",
-                ".bash_history",
-                ".zhistory",
-                ".local/share/fish/fish_history",
-            ];
-            let mut commands = Vec::new();
-            for file in files {
-                let path = home.join(file);
-                let Ok(mut content) = std::fs::read(&path) else {
-                    continue;
-                };
-                if content.len() > MAX_HISTORY_BYTES {
-                    content = content[content.len() - MAX_HISTORY_BYTES..].to_vec();
-                }
-                let text = String::from_utf8_lossy(&content);
-                commands.extend(parse_terminal_history_file(file, &text));
-            }
-            if commands.len() > MAX_COMMANDS {
-                commands[commands.len() - MAX_COMMANDS..].to_vec()
-            } else {
-                commands
-            }
+    static LOCAL_SHELL_HISTORY: std::sync::OnceLock<
+        std::sync::Mutex<Option<TerminalLocalShellHistoryCache>>,
+    > = std::sync::OnceLock::new();
+
+    let files = [
+        ".zsh_history",
+        ".bash_history",
+        ".zhistory",
+        ".local/share/fish/fish_history",
+    ];
+    let home = home.to_path_buf();
+    let snapshots = terminal_local_shell_history_snapshots(&home, &files);
+    let cache = LOCAL_SHELL_HISTORY.get_or_init(|| std::sync::Mutex::new(None));
+    if let Ok(guard) = cache.lock()
+        && let Some(cache) = guard.as_ref()
+        && cache.home == home
+        && cache.files == snapshots
+    {
+        return cache.commands.clone();
+    }
+
+    let mut commands = Vec::new();
+    for file in files {
+        let path = home.join(file);
+        let Ok(mut content) = std::fs::read(&path) else {
+            continue;
+        };
+        if content.len() > MAX_HISTORY_BYTES {
+            content = content[content.len() - MAX_HISTORY_BYTES..].to_vec();
+        }
+        let text = String::from_utf8_lossy(&content);
+        commands.extend(parse_terminal_history_file(file, &text));
+    }
+    let commands = if commands.len() > MAX_COMMANDS {
+        commands[commands.len() - MAX_COMMANDS..].to_vec()
+    } else {
+        commands
+    };
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some(TerminalLocalShellHistoryCache {
+            home,
+            files: snapshots,
+            commands: commands.clone(),
+        });
+    }
+    commands
+}
+
+fn terminal_local_shell_history_snapshots(
+    home: &std::path::Path,
+    files: &[&str],
+) -> Vec<TerminalLocalShellHistoryFileSnapshot> {
+    files
+        .iter()
+        .filter_map(|file| {
+            let path = home.join(file);
+            let metadata = std::fs::metadata(&path).ok()?;
+            Some(TerminalLocalShellHistoryFileSnapshot {
+                path,
+                modified: metadata.modified().ok(),
+                len: metadata.len(),
+            })
         })
-        .clone()
+        .collect()
 }
 
 fn parse_terminal_history_file(path: &str, content: &str) -> Vec<String> {
@@ -1341,5 +1394,52 @@ mod terminal_fig_registry_tests {
             .unwrap();
         assert_eq!(run.options[0].name, "--profile");
         assert_eq!(run.options[0].args, TerminalFigArgType::Value);
+    }
+
+    #[test]
+    fn local_shell_history_parses_tauri_history_formats() {
+        let commands = parse_terminal_history_file(
+            ".zsh_history",
+            ": 1700000000:0;git status\ncargo test\n",
+        );
+        assert_eq!(commands, vec!["git status", "cargo test"]);
+
+        let fish = parse_terminal_history_file(
+            ".local/share/fish/fish_history",
+            "- cmd: echo hello\\nworld\n- when: 1700000000\n- cmd: ls -la\n",
+        );
+        assert_eq!(fish, vec!["echo hello\nworld", "ls -la"]);
+    }
+
+    #[test]
+    fn local_shell_history_cache_refreshes_when_files_change() {
+        let home = unique_terminal_history_home();
+        std::fs::create_dir_all(&home).unwrap();
+        let history = home.join(".zsh_history");
+
+        std::fs::write(&history, ": 1700000000:0;git status\n").unwrap();
+        assert_eq!(
+            load_local_shell_history_commands_from_home(&home),
+            vec!["git status".to_string()]
+        );
+
+        std::fs::write(&history, ": 1700000000:0;git status\ncargo check\n").unwrap();
+        assert_eq!(
+            load_local_shell_history_commands_from_home(&home),
+            vec!["git status".to_string(), "cargo check".to_string()]
+        );
+
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    fn unique_terminal_history_home() -> std::path::PathBuf {
+        let id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!(
+            "oxideterm-terminal-history-{}-{id}",
+            std::process::id()
+        ))
     }
 }

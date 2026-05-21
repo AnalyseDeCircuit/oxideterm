@@ -210,6 +210,7 @@ mod tests {
             updated_at: Some(now),
             color: None,
             tags: Vec::new(),
+            post_connect_command: None,
         };
 
         let config = ssh_config_from_saved_connection(&store, &conn).unwrap();

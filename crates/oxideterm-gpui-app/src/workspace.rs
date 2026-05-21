@@ -23,6 +23,7 @@ mod sidebar;
 mod tabs;
 mod terminal_cast;
 mod terminal_command_bar;
+mod virtual_list;
 
 use std::{
     cell::RefCell,
@@ -41,9 +42,9 @@ use gpui::{
     AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, CursorStyle,
     FocusHandle, Focusable, IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions,
-    Pixels, Render, RenderImage, Rgba, ScrollStrategy, ScrollWheelEvent, SharedString, Styled,
+    Pixels, Point, Render, RenderImage, Rgba, ScrollHandle, ScrollWheelEvent, SharedString, Styled,
     StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle, Window, anchored,
-    deferred, div, list, prelude::*, px, relative, rgb, rgba, svg, uniform_list,
+    deferred, div, list, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
@@ -68,7 +69,7 @@ use oxideterm_gpui_terminal::{
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView, confirm_dialog,
-    modal::popover_backdrop,
+    modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
     toast::{ToastVariant, ToastView},
     toaster::toaster,
     tooltip::tooltip_content,
@@ -175,6 +176,12 @@ use oxideterm_gpui_ui::typography::{
     css_font_family_head as settings_css_font_family_head, gpui_font_family_name,
     tauri_ui_font_family as settings_ui_font_family,
 };
+pub(super) use selectable_text::{SelectableTextRole, SelectableTextScrollExt};
+pub(super) use virtual_list::{
+    TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
+    tauri_virtual_uniform_list, tracked_uniform_list,
+};
+use virtual_list::{VirtualListSignatureCache, sync_virtual_list_state_by_signatures};
 
 #[derive(Clone, Debug)]
 struct AiMcpServerDraft {
@@ -224,6 +231,12 @@ struct AiCompactionNotice {
     phase: AiCompactionNoticePhase,
     compacted_count: Option<usize>,
     timestamp_ms: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AiChatInitializationError {
+    message_key: &'static str,
+    can_retry: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -293,12 +306,6 @@ struct AiChatListViewportSnapshot {
     item_ix: usize,
     offset_in_item: f32,
     height: f32,
-}
-
-#[derive(Default)]
-struct AiChatListStateCache {
-    conversation_id: Option<String>,
-    signatures: Vec<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -460,10 +467,11 @@ pub(crate) struct WorkspaceApp {
     ai_model_selector_probe_generations: HashMap<String, u64>,
     ai_chat: oxideterm_ai::AiChatState,
     ai_chat_list_state: ListState,
-    ai_chat_list_cache: RefCell<AiChatListStateCache>,
+    ai_chat_list_cache: RefCell<VirtualListSignatureCache>,
     ai_markdown_cache: RefCell<AiMarkdownDocumentCache>,
     ai_context_token_cache: RefCell<AiContextTokenBreakdownCache>,
-    ai_chat_store: oxideterm_ai::AiChatPersistenceStore,
+    ai_chat_store: Option<oxideterm_ai::AiChatPersistenceStore>,
+    ai_chat_initialization_error: Option<AiChatInitializationError>,
     ai_runtime_epoch: String,
     ai_command_record_sequence: u64,
     ai_command_records: VecDeque<AiRuntimeCommandRecord>,
@@ -551,6 +559,9 @@ pub(crate) struct WorkspaceApp {
     selectable_text_layouts: HashMap<u64, TextLayout>,
     selectable_text_fragments: HashMap<u64, SelectableTextFragmentState>,
     selectable_text_generation: u64,
+    selectable_text_autoscroll_position: Option<Point<Pixels>>,
+    selectable_text_autoscroll_scheduled: bool,
+    selectable_text_scroll_handles: RefCell<HashMap<String, ScrollHandle>>,
     ime_marked_text: Option<String>,
     selected_ime_target: Option<WorkspaceImeTarget>,
     selected_ime_range: Option<WorkspaceImeSelection>,

@@ -1,9 +1,9 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
-    AnchoredPositionMode, Corner, Entity, ObjectFit, PathPromptOptions, ScrollStrategy,
-    SharedString, StatefulInteractiveElement, StyledText, Subscription, UniformListScrollHandle,
-    anchored, deferred, prelude::*, uniform_list,
+    AnchoredPositionMode, Corner, Entity, ObjectFit, PathPromptOptions, SharedString,
+    StatefulInteractiveElement, StyledText, Subscription, UniformListScrollHandle, anchored,
+    deferred, prelude::*,
 };
 use oxideterm_code_editor::backend::input::{
     Input as CodeEditorInput, InputEvent as CodeEditorInputEvent,
@@ -13,7 +13,7 @@ use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
 };
 use oxideterm_gpui_ui::{
-    modal::{dialog_backdrop, popover_backdrop},
+    modal::{dismissible_dialog_backdrop, popover_backdrop},
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{text_caret, text_input_anchor_probe},
 };

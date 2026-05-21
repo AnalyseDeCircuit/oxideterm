@@ -34,6 +34,7 @@ pub(crate) struct TerminalElement {
     theme: TerminalUiTheme,
     cursor_visible: bool,
     marked_text: Option<String>,
+    ghost_text: Option<String>,
     search_query: Option<String>,
     search_matches: Vec<TerminalSearchMatch>,
     selected_search_match: Option<usize>,
@@ -64,6 +65,7 @@ pub(crate) struct TerminalElementLayout {
     pub(crate) images: Vec<TerminalImageLayout>,
     pub(crate) text_runs: Vec<BatchedTextRun>,
     pub(crate) marked_text: Option<BatchedTextRun>,
+    pub(crate) ghost_text: Option<BatchedTextRun>,
     pub(crate) ime_cursor_bounds: Option<Bounds<Pixels>>,
     pub(crate) cursor: Option<TerminalCursor>,
     pub(crate) scrollbar: Option<TerminalScrollbar>,
@@ -207,6 +209,7 @@ impl TerminalElement {
             bidi_enabled,
             input,
             transparent_background: false,
+            ghost_text: None,
         }
     }
 
@@ -227,6 +230,11 @@ impl TerminalElement {
 
     pub(crate) fn transparent_background(mut self, transparent_background: bool) -> Self {
         self.transparent_background = transparent_background;
+        self
+    }
+
+    pub(crate) fn ghost_text(mut self, ghost_text: Option<String>) -> Self {
+        self.ghost_text = ghost_text;
         self
     }
 
@@ -491,10 +499,46 @@ impl TerminalElement {
                     style: marked_text_run(text, &self.metrics),
                 })
             }),
+            ghost_text: self.ghost_text_run(cursor_row_visible),
             ime_cursor_bounds,
             cursor,
             scrollbar,
         }
+    }
+
+    fn ghost_text_run(&self, cursor_row_visible: bool) -> Option<BatchedTextRun> {
+        if self.marked_text.is_some()
+            || !cursor_row_visible
+            || self.snapshot.cursor_shape == TerminalCursorShape::Hidden
+        {
+            return None;
+        }
+
+        let text = self.ghost_text.as_deref().filter(|text| !text.is_empty())?;
+        let row = self.snapshot.lines.get(self.snapshot.cursor_row)?;
+        let visual_line = visual_line_for_row_with_bidi(row, self.bidi_enabled);
+        let col = if visual_line.has_bidi {
+            visual_line.visual_col_for_logical_col(self.snapshot.cursor_col)
+        } else {
+            self.snapshot.cursor_col
+        };
+        let remaining_cells = self.snapshot.cols.saturating_sub(col);
+        if remaining_cells == 0 {
+            return None;
+        }
+
+        let visible_text = text.chars().take(remaining_cells).collect::<String>();
+        if visible_text.is_empty() {
+            return None;
+        }
+
+        Some(BatchedTextRun {
+            row: self.snapshot.cursor_row,
+            col,
+            cells: visible_text.chars().count(),
+            style: ghost_text_run(&visible_text, &self.theme, &self.metrics),
+            text: visible_text,
+        })
     }
 }
 
@@ -868,6 +912,9 @@ impl Element for TerminalElement {
             }
             for run in &layout.text_runs {
                 paint_text_run(run, origin, &self.metrics, window, cx);
+            }
+            if let Some(ghost_text) = &layout.ghost_text {
+                paint_text_run(ghost_text, origin, &self.metrics, window, cx);
             }
             if let Some(marked_text) = &layout.marked_text {
                 paint_text_run(marked_text, origin, &self.metrics, window, cx);

@@ -95,6 +95,7 @@ impl WorkspaceApp {
             rows.push(self.knowledge_empty_row(
                 LucideIcon::BookOpen,
                 self.i18n.t("settings_view.knowledge.no_collections"),
+                cx,
             ));
         } else {
             for collection in collections {
@@ -251,13 +252,14 @@ impl WorkspaceApp {
         ];
         rows.push(self.knowledge_embedding_config_section(cx));
         if let Some(stats) = stats {
-            rows.push(self.knowledge_stats_row(stats));
+            rows.push(self.knowledge_stats_row(stats, cx));
         }
         rows.push(self.card_separator());
         if documents.is_empty() {
             rows.push(self.knowledge_empty_row(
                 LucideIcon::FileText,
                 self.i18n.t("settings_view.knowledge.no_documents"),
+                cx,
             ));
         } else {
             for document in documents {
@@ -799,7 +801,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn knowledge_stats_row(&self, stats: oxideterm_ai::RagStatsResponse) -> AnyElement {
+    fn knowledge_stats_row(
+        &self,
+        stats: oxideterm_ai::RagStatsResponse,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let embedded_pct = if stats.chunk_count > 0 {
             ((stats.embedded_chunk_count as f64 / stats.chunk_count as f64) * 100.0).round() as i64
         } else {
@@ -815,25 +821,34 @@ impl WorkspaceApp {
             .child(self.knowledge_stat_item(
                 stats.doc_count.to_string(),
                 self.i18n.t("settings_view.knowledge.stat_docs"),
+                cx,
             ))
             .child(self.knowledge_stat_item(
                 stats.chunk_count.to_string(),
                 self.i18n.t("settings_view.knowledge.stat_chunks"),
+                cx,
             ))
             .child(self.knowledge_stat_item(
                 format!("{embedded_pct}%"),
                 self.i18n.t("settings_view.knowledge.stat_embedded"),
+                cx,
             ));
         if stats.last_updated > 0 {
             row = row.child(self.knowledge_stat_item(
                 self.knowledge_format_date(stats.last_updated),
                 self.i18n.t("settings_view.knowledge.stat_updated"),
+                cx,
             ));
         }
         row.into_any_element()
     }
 
-    fn knowledge_stat_item(&self, value: String, label: String) -> AnyElement {
+    fn knowledge_stat_item(
+        &self,
+        value: String,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .items_center()
@@ -842,9 +857,21 @@ impl WorkspaceApp {
                 div()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(self.tokens.ui.text))
-                    .child(value),
+                    .child(self.render_selectable_display_text(
+                        "knowledge-stat-value",
+                        &label,
+                        value.clone(),
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
-            .child(label)
+            .child(self.render_selectable_display_text(
+                "knowledge-stat-label",
+                &value,
+                label,
+                self.tokens.ui.text_muted,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -859,7 +886,12 @@ impl WorkspaceApp {
         }
     }
 
-    fn knowledge_empty_row(&self, icon: LucideIcon, label: String) -> AnyElement {
+    fn knowledge_empty_row(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .flex_col()
@@ -876,7 +908,13 @@ impl WorkspaceApp {
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .child(label),
+                    .child(self.render_selectable_display_text(
+                        "knowledge-empty-row",
+                        &label,
+                        label.clone(),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

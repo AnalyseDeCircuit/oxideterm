@@ -20,7 +20,7 @@ impl WorkspaceApp {
         sort_active_session_nodes(&mut orphan_node_views);
 
         if tree_nodes.is_empty() && orphan_node_views.is_empty() {
-            return self.render_empty_sessions_sidebar_content();
+            return self.render_empty_sessions_sidebar_content(cx);
         }
 
         div()
@@ -28,7 +28,9 @@ impl WorkspaceApp {
             .flex_1()
             .min_h(px(0.0))
             .w_full()
-            .overflow_y_scroll()
+            .selectable_overflow_y_scroll(
+                &self.selectable_text_scroll_handle("active-sessions-sidebar-scroll"),
+            )
             .px_1()
             .children(tree_nodes.drain(..).filter_map(|flat_node| {
                 let node_id = NodeId::new(flat_node.id.clone());
@@ -84,92 +86,102 @@ impl WorkspaceApp {
 
         if expanded {
             if self.has_active_reconnect_job(&node_id) {
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    move |this, _event, _window, cx| {
+                        this.cancel_reconnect_for_node(&node_id, cx);
+                        cx.stop_propagation();
+                    }
+                });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
                     is_last,
                     LucideIcon::X,
                     self.i18n.t("sessions.tree.actions.cancel_reconnect"),
                     SessionActionVariant::Danger,
-                    cx.listener({
-                        let node_id = node_id.clone();
-                        move |this, _event, _window, cx| {
-                            this.cancel_reconnect_for_node(&node_id, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
+                    listener,
+                    cx,
                 ));
             } else if matches!(
                 node_view.status(),
                 ActiveSessionStatus::Active | ActiveSessionStatus::Connected
             ) {
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    let config = node.config.clone();
+                    let title = node.title.clone();
+                    let saved_connection_id = node.saved_connection_id.clone();
+                    move |this, _event, window, cx| {
+                        let _ = this.queue_ssh_terminal_tab_for_node(
+                            node_id.clone(),
+                            config.clone(),
+                            title.clone(),
+                            saved_connection_id.clone(),
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }
+                });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
                     false,
                     LucideIcon::Plus,
                     self.i18n.t("sessions.tree.actions.new_terminal"),
                     SessionActionVariant::Primary,
-                    cx.listener({
-                        let node_id = node_id.clone();
-                        let config = node.config.clone();
-                        let title = node.title.clone();
-                        let saved_connection_id = node.saved_connection_id.clone();
-                        move |this, _event, window, cx| {
-                            let _ = this.queue_ssh_terminal_tab_for_node(
-                                node_id.clone(),
-                                config.clone(),
-                                title.clone(),
-                                saved_connection_id.clone(),
-                                window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }
-                    }),
+                    listener,
+                    cx,
                 ));
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    move |this, _event, window, cx| {
+                        this.open_sftp_tab(node_id.clone(), window, cx);
+                        cx.stop_propagation();
+                    }
+                });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
                     false,
                     LucideIcon::FolderOpen,
                     self.i18n.t("sessions.tree.actions.sftp"),
                     SessionActionVariant::Primary,
-                    cx.listener({
-                        let node_id = node_id.clone();
-                        move |this, _event, window, cx| {
-                            this.open_sftp_tab(node_id.clone(), window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
+                    listener,
+                    cx,
                 ));
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    move |this, _event, _window, cx| {
+                        // Mirrors Tauri's node-first IDE route: opening IDE creates
+                        // an IDE owner surface and remote folder chooser for the
+                        // node, not a terminal pane or implicit "/" project.
+                        this.open_ide_folder_picker_tab(node_id.clone(), cx);
+                        cx.stop_propagation();
+                    }
+                });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
                     false,
                     LucideIcon::Code2,
                     "IDE".to_string(),
                     SessionActionVariant::Primary,
-                    cx.listener({
-                        let node_id = node_id.clone();
-                        move |this, _event, _window, cx| {
-                            // Mirrors Tauri's node-first IDE route: opening IDE creates
-                            // an IDE owner surface and remote folder chooser for the
-                            // node, not a terminal pane or implicit "/" project.
-                            this.open_ide_folder_picker_tab(node_id.clone(), cx);
-                            cx.stop_propagation();
-                        }
-                    }),
+                    listener,
+                    cx,
                 ));
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    move |this, _event, window, cx| {
+                        this.open_forwards_tab(node_id.clone(), window, cx);
+                        cx.stop_propagation();
+                    }
+                });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
                     false,
                     LucideIcon::ArrowLeftRight,
                     self.i18n.t("sessions.tree.actions.port_forwarding"),
                     SessionActionVariant::Primary,
-                    cx.listener({
-                        let node_id = node_id.clone();
-                        move |this, _event, window, cx| {
-                            this.open_forwards_tab(node_id.clone(), window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
+                    listener,
+                    cx,
                 ));
                 for (index, session_id) in terminal_ids.iter().copied().enumerate() {
                     children.push(self.render_session_terminal_item(
@@ -180,61 +192,67 @@ impl WorkspaceApp {
                         cx,
                     ));
                 }
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    move |this, _event, window, cx| {
+                        this.disconnect_ssh_node(&node_id, window, cx);
+                        cx.stop_propagation();
+                    }
+                });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
                     false,
                     LucideIcon::WifiOff,
                     self.i18n.t("sessions.tree.actions.disconnect"),
                     SessionActionVariant::Danger,
-                    cx.listener({
-                        let node_id = node_id.clone();
-                        move |this, _event, window, cx| {
-                            this.disconnect_ssh_node(&node_id, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
+                    listener,
+                    cx,
                 ));
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    move |this, _event, window, cx| {
+                        this.open_drill_down_form(node_id.clone(), window, cx);
+                        cx.stop_propagation();
+                    }
+                });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
                     is_last,
                     LucideIcon::ArrowDownRight,
                     self.i18n.t("sessions.tree.actions.drill_in"),
                     SessionActionVariant::Primary,
-                    cx.listener({
-                        let node_id = node_id.clone();
-                        move |this, _event, window, cx| {
-                            this.open_drill_down_form(node_id.clone(), window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
+                    listener,
+                    cx,
                 ));
             } else if matches!(
                 node_view.status(),
                 ActiveSessionStatus::Error | ActiveSessionStatus::Idle
             ) {
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    let config = node.config.clone();
+                    let title = node.title.clone();
+                    let saved_connection_id = node.saved_connection_id.clone();
+                    move |this, _event, window, cx| {
+                        let _ = this.queue_ssh_terminal_tab_for_node(
+                            node_id.clone(),
+                            config.clone(),
+                            title.clone(),
+                            saved_connection_id.clone(),
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }
+                });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
                     is_last,
                     LucideIcon::Play,
                     self.i18n.t("sessions.tree.actions.reconnect"),
                     SessionActionVariant::Primary,
-                    cx.listener({
-                        let node_id = node_id.clone();
-                        let config = node.config.clone();
-                        let title = node.title.clone();
-                        let saved_connection_id = node.saved_connection_id.clone();
-                        move |this, _event, window, cx| {
-                            let _ = this.queue_ssh_terminal_tab_for_node(
-                                node_id.clone(),
-                                config.clone(),
-                                title.clone(),
-                                saved_connection_id.clone(),
-                                window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }
-                    }),
+                    listener,
+                    cx,
                 ));
             }
         }
@@ -278,6 +296,8 @@ impl WorkspaceApp {
         let row_text = rgb(status.text_color);
         let port_text = format!(":{}", node.port);
         let terminal_count = node.terminal_ids.len();
+        let selection_group_id =
+            crate::workspace::selectable_text::selectable_text_id("session-sidebar-node", &node_id);
 
         div()
             .relative()
@@ -328,7 +348,16 @@ impl WorkspaceApp {
                         gpui::FontWeight::NORMAL
                     })
                     .text_color(row_text)
-                    .child(node.title),
+                    .child(self.render_row_safe_selectable_display_text_in_group(
+                        selection_group_id,
+                        "session-sidebar-node-cell",
+                        "title",
+                        0,
+                        node.title,
+                        status.text_color,
+                        None,
+                        cx,
+                    )),
             )
             .when(node.port != 22, |row| {
                 row.child(
@@ -336,7 +365,16 @@ impl WorkspaceApp {
                         .ml_2()
                         .text_size(px(SESSION_TREE_META_TEXT_SIZE))
                         .text_color(muted_text)
-                        .child(port_text),
+                        .child(self.render_row_safe_selectable_display_text_in_group(
+                            selection_group_id,
+                            "session-sidebar-node-cell",
+                            "port",
+                            1,
+                            port_text,
+                            theme.text_muted,
+                            None,
+                            cx,
+                        )),
                 )
             })
             .when(terminal_count > 0, |row| {
@@ -354,7 +392,16 @@ impl WorkspaceApp {
                             12.0,
                             muted_text,
                         ))
-                        .child(terminal_count.to_string()),
+                        .child(self.render_row_safe_selectable_display_text_in_group(
+                            selection_group_id,
+                            "session-sidebar-node-cell",
+                            "terminal-count",
+                            2,
+                            terminal_count.to_string(),
+                            theme.text_muted,
+                            None,
+                            cx,
+                        )),
                 )
             })
             .child(self.render_session_status_dot(status))
@@ -461,7 +508,23 @@ impl WorkspaceApp {
                             gpui::FontWeight::NORMAL
                         })
                         .text_color(text_color)
-                        .child(text),
+                        .child(self.render_row_safe_selectable_display_text_in_group(
+                            crate::workspace::selectable_text::selectable_text_id(
+                                "session-sidebar-terminal",
+                                session_id,
+                            ),
+                            "session-sidebar-terminal-cell",
+                            "label",
+                            0,
+                            text,
+                            if active {
+                                theme.accent
+                            } else {
+                                theme.text_muted
+                            },
+                            None,
+                            cx,
+                        )),
                 )
                 .child(
                     div()
@@ -500,12 +563,17 @@ impl WorkspaceApp {
         label: String,
         variant: SessionActionVariant,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (text_color, hover_bg) = match variant {
             SessionActionVariant::Primary => (theme.accent, theme.bg_hover),
             SessionActionVariant::Danger => (0xef4444, mix_rgb(theme.bg_hover, 0xef4444, 0.10)),
         };
+        let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
+            "session-sidebar-action",
+            (depth, line_stops_here, label.as_str()),
+        );
 
         self.render_session_tree_child(
             depth,
@@ -528,7 +596,18 @@ impl WorkspaceApp {
                     SESSION_TREE_CHILD_ICON_SIZE,
                     rgb(text_color),
                 ))
-                .child(div().truncate().child(label))
+                .child(div().truncate().child(
+                    self.render_row_safe_selectable_display_text_in_group(
+                        selection_group_id,
+                        "session-sidebar-action-cell",
+                        "label",
+                        0,
+                        label,
+                        text_color,
+                        None,
+                        cx,
+                    ),
+                ))
                 .on_mouse_down(MouseButton::Left, listener)
                 .into_any_element(),
         )

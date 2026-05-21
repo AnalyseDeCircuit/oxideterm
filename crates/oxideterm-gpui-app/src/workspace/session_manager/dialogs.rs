@@ -1,7 +1,16 @@
 impl WorkspaceApp {
     fn render_new_group_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.show_new_group = false;
+                    this.session_manager.focused_input = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .w(px(380.0))
@@ -13,6 +22,11 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(rgb(theme.border))
                     .bg(rgb(theme.bg_panel))
+                    // Source: Radix DialogContent does not let inside pointer
+                    // activity bubble to the DialogOverlay outside closer.
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .text_size(px(18.0))
@@ -87,7 +101,16 @@ impl WorkspaceApp {
 
     fn render_ssh_config_import_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.show_import = false;
+                    this.session_manager.selected_import_aliases.clear();
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .w(px(620.0))
@@ -98,6 +121,11 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(rgb(theme.border))
                     .bg(rgb(theme.bg_panel))
+                    // Source: SessionManager import uses a Dialog shell; only
+                    // the overlay outside the content dismisses the modal.
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .h(px(48.0))
@@ -108,14 +136,24 @@ impl WorkspaceApp {
                             .border_color(rgb(theme.border))
                             .text_size(px(18.0))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child("SSH Config"),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "ssh-config-import",
+                                "title",
+                                "SSH Config",
+                                theme.text,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
                             .id("session-manager-import-scroll")
                             .flex_1()
                             .min_h(px(0.0))
-                            .overflow_y_scroll()
+                            .selectable_overflow_y_scroll(
+                                &self
+                                    .selectable_text_scroll_handle("session-manager-import-scroll"),
+                            )
                             .children(
                                 self.session_manager
                                     .ssh_config_hosts
@@ -240,7 +278,14 @@ impl WorkspaceApp {
                         .bg(rgba((theme.success << 8) | 0x2a))
                         .text_color(rgb(theme.success))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .child("Imported"),
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "ssh-config-import",
+                            "imported",
+                            "Imported",
+                            theme.success,
+                            cx,
+                        )),
                 )
             })
             .into_any_element()
@@ -256,7 +301,9 @@ impl WorkspaceApp {
             .right(px(104.0))
             .w(px(220.0))
             .max_h(px(260.0))
-            .overflow_y_scroll()
+            .selectable_overflow_y_scroll(
+                &self.selectable_text_scroll_handle("session-manager-batch-move-scroll"),
+            )
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgb(theme.border))
@@ -290,7 +337,14 @@ impl WorkspaceApp {
             .cursor_pointer()
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .hover(move |row| row.bg(rgb(theme.bg_hover)))
-            .child(label)
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "batch-move-item",
+                label.clone(),
+                label,
+                theme.text,
+                cx,
+            ))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {

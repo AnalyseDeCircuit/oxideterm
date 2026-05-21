@@ -511,6 +511,28 @@ impl WorkspaceApp {
         self.ime_drag_selection = None;
     }
 
+    pub(super) fn clear_read_only_ime_selection(&mut self, cx: &mut Context<Self>) {
+        let has_read_only_selection = self
+            .selected_ime_range
+            .as_ref()
+            .is_some_and(|selection| ime_target_is_read_only(selection.target))
+            || self
+                .selected_ime_target
+                .is_some_and(ime_target_is_read_only)
+            || self
+                .ime_drag_selection
+                .is_some_and(|drag| ime_target_is_read_only(drag.target));
+        if has_read_only_selection {
+            self.clear_ime_selection();
+            cx.notify();
+        }
+    }
+
+    pub(super) fn read_only_selection_drag_active(&self) -> bool {
+        self.ime_drag_selection
+            .is_some_and(|drag| ime_target_is_read_only(drag.target))
+    }
+
     pub(super) fn begin_ime_selection(
         &mut self,
         target: WorkspaceImeTarget,
@@ -605,6 +627,35 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(super) fn update_read_only_selection_drag_at_position(
+        &mut self,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(drag) = self.ime_drag_selection else {
+            return;
+        };
+        let WorkspaceImeTarget::ReadOnlyText(id) = drag.target else {
+            return;
+        };
+        let Some(text) = self.text_for_ime_target(drag.target) else {
+            return;
+        };
+        let text_len = text.encode_utf16().count();
+        let index = if let Some(layout) = self.selectable_text_layouts.get(&id) {
+            let byte_index = match layout.index_for_position(position) {
+                Ok(index) | Err(index) => index.min(text.len()),
+            };
+            utf16_offset_for_byte_index(&text, byte_index)
+        } else {
+            self.selectable_text_group_index_for_position(id, position)
+                .unwrap_or(text_len)
+                .min(text_len)
+        };
+        self.set_ime_selection_from_anchor(drag.target, drag.anchor, index);
+        cx.notify();
+    }
+
     pub(super) fn update_ime_selection_drag_from_mouse_move(
         &mut self,
         event: &gpui::MouseMoveEvent,
@@ -618,8 +669,21 @@ impl WorkspaceApp {
         cx.stop_propagation();
     }
 
-    pub(super) fn finish_ime_selection_drag(&mut self) {
-        self.ime_drag_selection = None;
+    pub(super) fn finish_ime_selection_drag(&mut self, cx: &mut Context<Self>) {
+        let drag = self.ime_drag_selection.take();
+        if let Some(drag) = drag
+            && ime_target_is_read_only(drag.target)
+            && self.selected_ime_range.as_ref().is_some_and(|selection| {
+                selection.target == drag.target && selection.range.start == selection.range.end
+            })
+        {
+            // Browser text clicks do not leave a page-level caret. Native read-only
+            // selection begins on mouse-down, so clear collapsed ranges on mouse-up
+            // to keep Cmd-C falling through to terminal/app copy just like Tauri.
+            self.selected_ime_range = None;
+            self.selected_ime_target = None;
+            cx.notify();
+        }
     }
 
     fn set_ime_selection_from_anchor(
@@ -1719,6 +1783,7 @@ fn new_connection_field_value(
         NewConnectionField::CertPath => &form.cert_path,
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::Group => &form.group,
+        NewConnectionField::PostConnectCommand => &form.post_connect_command,
         NewConnectionField::Color => &form.color,
         NewConnectionField::JumpHost => &form.jump_server_form.as_ref()?.host,
         NewConnectionField::JumpPort => &form.jump_server_form.as_ref()?.port,
@@ -1744,6 +1809,7 @@ fn connection_field_value_mut(
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
+        NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
         NewConnectionField::Color => &mut form.color,
         NewConnectionField::JumpHost => {
             &mut form

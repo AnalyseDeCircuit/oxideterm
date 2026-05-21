@@ -38,7 +38,13 @@ impl WorkspaceApp {
                             20.0,
                             rgb(theme.text_muted),
                         ))
-                        .child(self.i18n.t("sftp.file_list.loading")),
+                        .child(self.render_selectable_display_text(
+                            "sftp-file-list-loading",
+                            pane as u64,
+                            self.i18n.t("sftp.file_list.loading"),
+                            theme.text_muted,
+                            cx,
+                        )),
                 )
                 .into_any_element();
         }
@@ -65,7 +71,13 @@ impl WorkspaceApp {
                                     rgb(theme.text_muted),
                                 )),
                         )
-                        .child(self.i18n.t("sftp.file_list.empty")),
+                        .child(self.render_selectable_display_text(
+                            "sftp-file-list-empty",
+                            pane as u64,
+                            self.i18n.t("sftp.file_list.empty"),
+                            theme.text_muted,
+                            cx,
+                        )),
                 )
                 .into_any_element();
         }
@@ -81,12 +93,15 @@ impl WorkspaceApp {
         let list_items = files.clone();
         let row_selected = selected.clone();
         let row_workspace = workspace.clone();
+        let row_selectable_state = self.selectable_text_render_state(cx);
 
         list.child(
-            uniform_list(
+            tracked_uniform_list(
                 ("sftp-file-list-virtual", pane as u64),
                 row_count,
+                scroll_handle,
                 move |range, _window, _cx| {
+                    let selectable_state = row_selectable_state.clone();
                     range
                         .map(|index| {
                             let file = list_items[index].clone();
@@ -101,6 +116,22 @@ impl WorkspaceApp {
                             let _metadata_fields_consumed =
                                 (&file.permissions, &file.owner, &file.group);
                             let is_selected = row_selected.contains(&name);
+                            let selection_group_id =
+                                crate::workspace::selectable_text::selectable_text_id(
+                                    "sftp-file-list-row",
+                                    (pane as u64, file.name.as_str()),
+                                );
+                            let row_text_color = if is_selected {
+                                theme.accent
+                            } else {
+                                theme.text
+                            };
+                            let size_text = if file.file_type == SftpFileType::Directory {
+                                "-".to_string()
+                            } else {
+                                format_file_size(file.size)
+                            };
+                            let modified_text = format_modified(file.modified);
                             div()
                                 .w_full()
                                 .h(px(SFTP_ROW_HEIGHT))
@@ -151,7 +182,17 @@ impl WorkspaceApp {
                                                 rgb(theme.text_muted)
                                             },
                                         ))
-                                        .child(div().truncate().child(display_name)),
+                                        .child(div().truncate().child(
+                                            selectable_state.render_row_safe_display_text_in_group(
+                                                selection_group_id,
+                                                "sftp-file-list-cell",
+                                                ("name", pane as u64, file.name.as_str()),
+                                                0,
+                                                display_name,
+                                                row_text_color,
+                                                _cx,
+                                            ),
+                                        )),
                                 )
                                 .child(
                                     div()
@@ -159,11 +200,15 @@ impl WorkspaceApp {
                                         .flex_none()
                                         .text_align(gpui::TextAlign::Right)
                                         .text_color(rgb(theme.text_muted))
-                                        .child(if file.file_type == SftpFileType::Directory {
-                                            "-".to_string()
-                                        } else {
-                                            format_file_size(file.size)
-                                        }),
+                                        .child(selectable_state.render_row_safe_display_text_in_group(
+                                            selection_group_id,
+                                            "sftp-file-list-cell",
+                                            ("size", pane as u64, file.name.as_str()),
+                                            1,
+                                            size_text,
+                                            theme.text_muted,
+                                            _cx,
+                                        )),
                                 )
                                 .child(
                                     div()
@@ -171,7 +216,15 @@ impl WorkspaceApp {
                                         .flex_none()
                                         .text_align(gpui::TextAlign::Right)
                                         .text_color(rgb(theme.text_muted))
-                                        .child(format_modified(file.modified)),
+                                        .child(selectable_state.render_row_safe_display_text_in_group(
+                                            selection_group_id,
+                                            "sftp-file-list-cell",
+                                            ("modified", pane as u64, file.name.as_str()),
+                                            2,
+                                            modified_text,
+                                            theme.text_muted,
+                                            _cx,
+                                        )),
                                 )
                                 .on_mouse_down(MouseButton::Left, {
                                     let workspace = row_workspace.clone();
@@ -187,11 +240,13 @@ impl WorkspaceApp {
                                                     name.clone(),
                                                     event.modifiers,
                                                 );
-                                                this.start_sftp_drag_candidate(
-                                                    pane,
-                                                    f32::from(event.position.x),
-                                                    f32::from(event.position.y),
-                                                );
+                                                if !this.read_only_selection_drag_active() {
+                                                    this.start_sftp_drag_candidate(
+                                                        pane,
+                                                        f32::from(event.position.x),
+                                                        f32::from(event.position.y),
+                                                    );
+                                                }
                                             }
                                             cx.stop_propagation();
                                             cx.notify();
@@ -219,8 +274,6 @@ impl WorkspaceApp {
                         .collect::<Vec<_>>()
                 },
             )
-            .track_scroll(scroll_handle)
-            .size_full()
             .bg(sftp_bg(theme.bg, has_background))
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
                 this.update_sftp_drag(

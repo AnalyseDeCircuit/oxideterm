@@ -587,6 +587,7 @@ impl WorkspaceApp {
         self.file_manager.preview_markdown_source = false;
         self.file_manager.preview_code_scroll = UniformListScrollHandle::new();
         self.file_manager.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+        self.file_manager.preview_stream = FileManagerPreviewStreamState::default();
         self.file_manager.preview_font_family = None;
         self.file_manager.preview_font_error = None;
         self.file_manager.focused_input = None;
@@ -628,6 +629,19 @@ impl WorkspaceApp {
                 }
                 Err(error) => self.file_manager.preview_font_error = Some(error.to_string()),
             },
+            LocalPreview::TextStream {
+                path,
+                size,
+                language,
+            } => {
+                self.file_manager.preview_stream = FileManagerPreviewStreamState {
+                    path: path.clone(),
+                    size: *size,
+                    language: language.clone(),
+                    ..Default::default()
+                };
+                self.load_more_file_manager_stream_preview(cx);
+            }
             _ => {}
         }
         self.file_manager.preview = Some(preview);
@@ -636,6 +650,47 @@ impl WorkspaceApp {
         self.file_manager.preview_image_rotation = 0;
         self.file_manager.dialog = Some(FileManagerDialog::Preview { entry });
         self.file_manager.context_menu = None;
+    }
+
+    pub(super) fn load_more_file_manager_stream_preview(&mut self, cx: &mut Context<Self>) {
+        if self.file_manager.preview_stream.path.is_empty() {
+            return;
+        }
+        if self.file_manager.preview_stream.loading
+            || self.file_manager.preview_stream.eof
+            || self.file_manager.preview_stream.error.is_some()
+        {
+            return;
+        }
+
+        self.file_manager.preview_stream.loading = true;
+        let path = self.file_manager.preview_stream.path.clone();
+        let offset = self.file_manager.preview_stream.loaded_bytes;
+        let result =
+            read_local_preview_range(&path, offset, FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE);
+        self.file_manager.preview_stream.loading = false;
+
+        match result {
+            Ok(chunk) => {
+                self.file_manager.preview_stream.loaded_bytes += chunk.data.len() as u64;
+                append_file_manager_stream_preview_chunk(
+                    &mut self.file_manager.preview_stream,
+                    chunk.data,
+                    chunk.eof,
+                );
+                if chunk.eof
+                    || self.file_manager.preview_stream.loaded_bytes
+                        >= self.file_manager.preview_stream.size
+                {
+                    self.file_manager.preview_stream.eof = true;
+                }
+            }
+            Err(error) => {
+                self.file_manager.preview_stream.error = Some(error);
+                self.file_manager.preview_stream.eof = true;
+            }
+        }
+        cx.notify();
     }
 
     pub(super) fn navigate_file_manager_preview(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -1320,6 +1375,7 @@ impl WorkspaceApp {
         self.file_manager.preview_markdown_source = false;
         self.file_manager.preview_code_scroll = UniformListScrollHandle::new();
         self.file_manager.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+        self.file_manager.preview_stream = FileManagerPreviewStreamState::default();
         self.file_manager.properties_checksum = None;
         self.file_manager.properties_checksum_loading = false;
         self.file_manager.properties_checksum_rx = None;
@@ -1340,5 +1396,64 @@ impl WorkspaceApp {
             progress: None,
             variant,
         });
+    }
+}
+
+fn append_file_manager_stream_preview_chunk(
+    state: &mut FileManagerPreviewStreamState,
+    data: Vec<u8>,
+    eof: bool,
+) {
+    if data.is_empty() && !eof {
+        return;
+    }
+
+    let mut bytes = std::mem::take(&mut state.carry_bytes);
+    bytes.extend_from_slice(&data);
+    let mut text = String::new();
+
+    match std::str::from_utf8(&bytes) {
+        Ok(valid) => text.push_str(valid),
+        Err(error) => {
+            let valid_up_to = error.valid_up_to();
+            if valid_up_to > 0 {
+                if let Ok(valid) = std::str::from_utf8(&bytes[..valid_up_to]) {
+                    text.push_str(valid);
+                }
+            }
+            let tail = &bytes[valid_up_to..];
+            if eof {
+                text.push_str(&String::from_utf8_lossy(tail));
+            } else {
+                state.carry_bytes.extend_from_slice(tail);
+            }
+        }
+    }
+
+    if eof && !state.carry_bytes.is_empty() {
+        text.push_str(&String::from_utf8_lossy(&state.carry_bytes));
+        state.carry_bytes.clear();
+    }
+
+    append_file_manager_stream_preview_text(state, &text, eof);
+}
+
+fn append_file_manager_stream_preview_text(
+    state: &mut FileManagerPreviewStreamState,
+    text: &str,
+    eof: bool,
+) {
+    if text.is_empty() && !eof {
+        return;
+    }
+    let combined = format!("{}{}", state.carry_text, text);
+    let mut parts = combined.split('\n').map(str::to_string).collect::<Vec<_>>();
+
+    if eof {
+        state.carry_text.clear();
+        state.lines.extend(parts);
+    } else {
+        state.carry_text = parts.pop().unwrap_or_default();
+        state.lines.extend(parts);
     }
 }

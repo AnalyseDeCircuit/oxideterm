@@ -120,7 +120,9 @@ impl AiOrchestratorRuntimeSnapshot {
             "read_mcp_resource" => self.read_mcp_resource(&args).await,
             "recall_preferences" => self.ok("Read saved preferences.", self.memory.clone(), serde_json::json!({ "memory": self.memory }), "read"),
             "remember_preference" => self.remember_preference(&args),
-            "connect_target" | "send_terminal_input" | "open_app_surface" => self.unsupported_live_action(&tool_name, &args),
+            "connect_target" | "send_terminal_input" | "open_app_surface" => {
+                self.ui_thread_required_action(&tool_name, &args)
+            }
             _ => self.fail("Unknown tool.", "unknown_tool", format!("Tool {tool_name} is not available."), "read"),
             }
         };
@@ -360,9 +362,9 @@ impl AiOrchestratorRuntimeSnapshot {
                 }
             }
             "terminal-session" => self.fail(
-                "Visible terminal execution is not wired yet.",
-                "terminal_execution_unavailable",
-                "Native can observe terminal-session targets in this build, but command injection is still pending the UI-thread terminal executor.",
+                "Terminal command requires the native UI executor.",
+                "ui_thread_required",
+                "The chat tool loop must dispatch terminal-session run_command through the native UI executor.",
                 "interactive",
             ).with_target(target.clone()),
             "saved-connection" => self.fail(
@@ -853,11 +855,15 @@ impl AiOrchestratorRuntimeSnapshot {
         )
     }
 
-    fn unsupported_live_action(&self, tool_name: &str, args: &serde_json::Value) -> AiActionResultLite {
+    fn ui_thread_required_action(
+        &self,
+        tool_name: &str,
+        args: &serde_json::Value,
+    ) -> AiActionResultLite {
         self.fail(
             "Tool requires a native UI executor.",
-            "native_executor_pending",
-            format!("{tool_name} is defined and policy-gated, but its native executor is not connected in this pass."),
+            "ui_thread_required",
+            format!("{tool_name} must be executed on the GPUI thread; the chat tool loop should dispatch it through ToolExecutionRequested."),
             if matches!(tool_name, "send_terminal_input") { "interactive" } else { "write" },
         )
         .with_data(serde_json::json!({ "requestedArgs": args }))

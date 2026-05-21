@@ -240,9 +240,9 @@ impl WorkspaceApp {
             );
 
         if let Some(line) = command.filter(|line| !line.is_empty()) {
-            card = card.child(self.ai_mcp_code_line(line));
+            card = card.child(self.ai_mcp_code_line(line, cx));
         } else if !endpoint.is_empty() {
-            card = card.child(self.ai_mcp_code_line(endpoint));
+            card = card.child(self.ai_mcp_code_line(endpoint, cx));
         }
         if let Some(error) = snapshot.and_then(|snapshot| snapshot.error.as_ref()) {
             card = card.child(
@@ -445,7 +445,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn ai_mcp_code_line(&self, value: String) -> AnyElement {
+    fn ai_mcp_code_line(&self, value: String, cx: &mut Context<Self>) -> AnyElement {
         div()
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(self.tokens.ui.text_muted))
@@ -455,7 +455,13 @@ impl WorkspaceApp {
                     .py(px(2.0))
                     .rounded(px(self.tokens.radii.sm))
                     .bg(rgba((self.tokens.ui.bg_panel << 8) | AI_MCP_CODE_BG_ALPHA))
-                    .child(value),
+                    .child(self.render_selectable_display_text(
+                        "ai-mcp-code-line",
+                        &value,
+                        value.clone(),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .into_any_element()
     }
@@ -477,7 +483,17 @@ impl WorkspaceApp {
         };
 
         Some(
-            dialog_backdrop()
+            dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        // Tauri McpServersPanel binds Add Server Dialog
+                        // onOpenChange to setShowAddDialog(false).
+                        this.close_ai_mcp_add_dialog();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
                 .child(
                     dialog_content(&self.tokens)
                         .w(px(AI_MCP_DIALOG_WIDTH))
@@ -486,6 +502,9 @@ impl WorkspaceApp {
                         .shadow_lg()
                         .flex()
                         .flex_col()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
                         .child(
                             dialog_header(&self.tokens)
                                 .child(dialog_title(
@@ -499,9 +518,12 @@ impl WorkspaceApp {
                         )
                         .child(
                             div()
+                                .id("ai-mcp-add-server-scroll")
                                 .flex_1()
                                 .min_h(px(0.0))
-                                .overflow_y_scrollbar()
+                                .selectable_overflow_y_scrollbar(
+                                    &self.selectable_text_scroll_handle("ai-mcp-add-server-scroll"),
+                                )
                                 .px(px(AI_MCP_DIALOG_CONTENT_PX))
                                 .py(px(AI_MCP_DIALOG_CONTENT_PY))
                                 .flex()
@@ -697,7 +719,13 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(label_key)),
+                    .child(self.render_selectable_display_text(
+                        "ai-mcp-field-label",
+                        label_key,
+                        self.i18n.t(label_key),
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .child(self.ai_mcp_text_input_control(
                 input,
@@ -725,7 +753,13 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(label_key)),
+                    .child(self.render_selectable_display_text(
+                        "ai-mcp-select-label",
+                        label_key,
+                        self.i18n.t(label_key),
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .child(select_anchor_probe(
                 select_id.anchor_id(),

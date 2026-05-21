@@ -53,7 +53,13 @@ impl WorkspaceApp {
                             .text_size(px(SFTP_TEXT_XS))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(theme.text_muted))
-                            .child(self.queue_title(active_count))
+                            .child(self.render_selectable_display_text(
+                                "sftp-queue-title",
+                                &active_count,
+                                self.queue_title(active_count),
+                                theme.text_muted,
+                                cx,
+                            ))
                             .when(has_incomplete, |row| {
                                 row.child(
                                     div()
@@ -96,7 +102,15 @@ impl WorkspaceApp {
                                 .text_color(rgb(theme.text))
                                 .hover(move |button| button.bg(rgb(theme.bg_hover)))
                                 .cursor_pointer()
-                                .child(self.i18n.t("sftp.queue.clear_done"))
+                                // Queue toolbar labels are controls, so they stay out of read-only selection ownership.
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::NonSelectable,
+                                    "sftp-queue-clear-done",
+                                    "label",
+                                    self.i18n.t("sftp.queue.clear_done"),
+                                    theme.text,
+                                    cx,
+                                ))
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
@@ -118,7 +132,9 @@ impl WorkspaceApp {
                     .id("sftp-transfer-queue-scroll")
                     .flex_1()
                     .min_h(px(0.0))
-                    .overflow_y_scroll()
+                    .selectable_overflow_y_scroll(
+                        &self.selectable_text_scroll_handle("sftp-transfer-queue-scroll"),
+                    )
                     .p(px(8.0))
                     .flex()
                     .flex_col()
@@ -132,7 +148,13 @@ impl WorkspaceApp {
                                 .justify_center()
                                 .text_size(px(SFTP_TEXT_SM))
                                 .text_color(rgb(theme.text_muted))
-                                .child(self.i18n.t("sftp.queue.empty")),
+                                .child(self.render_selectable_display_text(
+                                    "sftp-queue-empty",
+                                    "empty",
+                                    self.i18n.t("sftp.queue.empty"),
+                                    theme.text_muted,
+                                    cx,
+                                )),
                         )
                     })
                     .children(self.sftp_view.transfers.iter().cloned().map(|transfer| {
@@ -158,13 +180,21 @@ impl WorkspaceApp {
                     .py(px(4.0))
                     .text_size(px(SFTP_TEXT_10))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("sftp.queue.incomplete_title").to_uppercase()),
+                    .child(self.render_selectable_display_text(
+                        "sftp-incomplete-title",
+                        "title",
+                        self.i18n.t("sftp.queue.incomplete_title").to_uppercase(),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()
                     .id("sftp-incomplete-transfer-scroll")
                     .max_h(px(128.0))
-                    .overflow_y_scroll()
+                    .selectable_overflow_y_scroll(
+                        &self.selectable_text_scroll_handle("sftp-incomplete-transfer-scroll"),
+                    )
                     .p(px(8.0))
                     .flex()
                     .flex_col()
@@ -193,7 +223,13 @@ impl WorkspaceApp {
                                     SFTP_ICON_SM,
                                     rgb(theme.text_muted),
                                 ))
-                                .child(self.i18n.t("sftp.queue.loading")),
+                                .child(self.render_selectable_display_text(
+                                    "sftp-incomplete-loading",
+                                    "loading",
+                                    self.i18n.t("sftp.queue.loading"),
+                                    theme.text_muted,
+                                    cx,
+                                )),
                         )
                     }),
             )
@@ -275,21 +311,47 @@ impl WorkspaceApp {
                 div()
                     .flex_1()
                     .min_w(px(0.0))
-                    .child(div().truncate().text_color(rgb(theme.text)).child(name))
+                    .child(div().truncate().text_color(rgb(theme.text)).child(
+                        self.render_selectable_display_text(
+                            "sftp-transfer-name",
+                            &transfer.transfer_id,
+                            name,
+                            theme.text,
+                            cx,
+                        ),
+                    ))
                     .child(
                         div()
                             .flex()
                             .gap(px(8.0))
                             .text_size(px(SFTP_TEXT_10))
                             .text_color(rgb(theme.text_muted))
-                            .child(transfer_type)
+                            .child(self.render_selectable_display_text(
+                                "sftp-transfer-type",
+                                &transfer.transfer_id,
+                                transfer_type,
+                                theme.text_muted,
+                                cx,
+                            ))
                             .child("•")
-                            .child(format!("{:.0}%", transfer.progress_percent()))
+                            .child(self.render_selectable_display_text(
+                                "sftp-transfer-progress",
+                                &transfer.transfer_id,
+                                format!("{:.0}%", transfer.progress_percent()),
+                                theme.text_muted,
+                                cx,
+                            ))
                             .child("•")
-                            .child(format!(
-                                "{} / {}",
-                                format_file_size(transfer.transferred_bytes),
-                                format_file_size(transfer.total_bytes)
+                            .child(self.render_selectable_display_text(
+                                "sftp-transfer-size",
+                                &transfer.transfer_id,
+                                format!(
+                                    "{} / {}",
+                                    format_file_size(transfer.transferred_bytes),
+                                    format_file_size(transfer.total_bytes)
+                                ),
+                                theme.text_muted,
+                                cx,
                             )),
                     )
                     .when_some(transfer.error.clone(), |row, error| {
@@ -298,7 +360,13 @@ impl WorkspaceApp {
                                 .text_size(px(SFTP_TEXT_10))
                                 .text_color(rgb(SFTP_RED))
                                 .truncate()
-                                .child(error),
+                                .child(self.render_selectable_display_text(
+                                    "sftp-transfer-error",
+                                    &transfer.transfer_id,
+                                    error,
+                                    SFTP_RED,
+                                    cx,
+                                )),
                         )
                     }),
             )
@@ -306,7 +374,13 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(SFTP_TEXT_10))
                     .text_color(rgb(theme.text_muted))
-                    .child(status),
+                    .child(self.render_selectable_display_text(
+                        "sftp-transfer-status",
+                        &transfer.transfer_id,
+                        status,
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .when(transfer.is_incomplete(), |row| {
                 row.child(
@@ -435,17 +509,31 @@ impl WorkspaceApp {
                             .justify_between()
                             .text_size(px(SFTP_TEXT_10))
                             .text_color(rgb(theme.text_muted))
-                            .child(if indeterminate {
-                                format_file_size(transfer.transferred)
-                            } else {
-                                format!(
-                                    "{} / {}",
-                                    format_file_size(transfer.transferred),
-                                    format_file_size(transfer.size)
-                                )
-                            })
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "sftp-transfer-progress",
+                                (&transfer.id, "bytes"),
+                                if indeterminate {
+                                    format_file_size(transfer.transferred)
+                                } else {
+                                    format!(
+                                        "{} / {}",
+                                        format_file_size(transfer.transferred),
+                                        format_file_size(transfer.size)
+                                    )
+                                },
+                                theme.text_muted,
+                                cx,
+                            ))
                             .when(!indeterminate, |row| {
-                                row.child(format!("{}%", (progress * 100.0).round() as u32))
+                                row.child(self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "sftp-transfer-progress",
+                                    (&transfer.id, "percent"),
+                                    format!("{}%", (progress * 100.0).round() as u32),
+                                    theme.text_muted,
+                                    cx,
+                                ))
                             }),
                     ),
             )

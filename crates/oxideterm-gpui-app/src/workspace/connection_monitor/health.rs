@@ -19,7 +19,14 @@ impl WorkspaceApp {
                 .child(
                     div()
                         .text_size(px(14.0))
-                        .child(self.i18n.t("profiler.panel.no_connection")),
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "system-health-empty",
+                            "no-connection",
+                            self.i18n.t("profiler.panel.no_connection"),
+                            self.tokens.ui.text_muted,
+                            cx,
+                        )),
                 )
                 .into_any_element();
         }
@@ -89,7 +96,14 @@ impl WorkspaceApp {
                             div()
                                 .mb_3()
                                 .text_size(px(14.0))
-                                .child(self.i18n.t("profiler.panel.disabled")),
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "system-health-profiler",
+                                    "disabled",
+                                    self.i18n.t("profiler.panel.disabled"),
+                                    self.tokens.ui.text_muted,
+                                    cx,
+                                )),
                         )
                         .child(
                             div()
@@ -103,7 +117,15 @@ impl WorkspaceApp {
                                 .text_size(px(12.0))
                                 .cursor_pointer()
                                 .hover(|button| button.bg(rgb(self.tokens.ui.bg_hover)))
-                                .child(self.i18n.t("profiler.panel.enable"))
+                                // Profiler enable is a button label; keep it outside selection ownership.
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::NonSelectable,
+                                    "system-health-profiler",
+                                    "enable",
+                                    self.i18n.t("profiler.panel.enable"),
+                                    self.tokens.ui.text_muted,
+                                    cx,
+                                ))
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener({
@@ -139,7 +161,14 @@ impl WorkspaceApp {
                         .child(
                             div()
                                 .text_size(px(12.0))
-                                .child(self.i18n.t("profiler.panel.sampling")),
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "system-health-profiler",
+                                    "sampling",
+                                    self.i18n.t("profiler.panel.sampling"),
+                                    self.tokens.ui.text_muted,
+                                    cx,
+                                )),
                         ),
                 )
                 .into_any_element();
@@ -158,7 +187,14 @@ impl WorkspaceApp {
                             div()
                                 .opacity(0.6)
                                 .text_size(px(12.0))
-                                .child(self.i18n.t("profiler.panel.no_data")),
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "system-health-profiler",
+                                    "no-data",
+                                    self.i18n.t("profiler.panel.no_data"),
+                                    self.tokens.ui.text_muted,
+                                    cx,
+                                )),
                         ),
                 )
                 .into_any_element();
@@ -259,7 +295,13 @@ impl WorkspaceApp {
                     .text_color(rgba(
                         (self.tokens.ui.text_muted << 8) | MONITOR_SOURCE_ALPHA,
                     ))
-                    .child(self.i18n.t("profiler.panel.source"))
+                    .child(self.render_selectable_display_text(
+                        "monitor-metric-source-label",
+                        "profiler.panel.source",
+                        self.i18n.t("profiler.panel.source"),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    ))
                     .child(
                         div()
                             .font_family("monospace")
@@ -374,14 +416,28 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(14.0))
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(format!("{}@{}", connection.username, connection.host)),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "system-health-connection-endpoint",
+                                connection.connection_id.as_str(),
+                                format!("{}@{}", connection.username, connection.host),
+                                theme.text,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
                             .font_family("monospace")
                             .text_size(px(12.0))
                             .text_color(rgb(theme.text_muted))
-                            .child(format!(":{}", connection.port)),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "system-health-connection-port",
+                                connection.connection_id.as_str(),
+                                format!(":{}", connection.port),
+                                theme.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .child(
@@ -492,7 +548,13 @@ impl WorkspaceApp {
                             .text_size(px(12.0))
                             .text_color(rgb(theme.text_muted))
                             .child(Self::render_lucide_icon(icon, 14.0, rgb(theme.text_muted)))
-                            .child(label.clone()),
+                            .child(self.render_selectable_display_text(
+                                "monitor-metric-label",
+                                &label,
+                                label.clone(),
+                                theme.text_muted,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -543,7 +605,14 @@ impl WorkspaceApp {
                         14.0,
                         rgb(theme.text_muted),
                     ))
-                    .child(self.i18n.t("profiler.panel.network")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "system-health-section-label",
+                        "network",
+                        self.i18n.t("profiler.panel.network"),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -616,7 +685,13 @@ impl WorkspaceApp {
                     .text_size(px(12.0))
                     .text_color(rgb(theme.text_muted))
                     .child(Self::render_lucide_icon(icon, 14.0, rgb(theme.text_muted)))
-                    .child(label.clone()),
+                    .child(self.render_selectable_display_text(
+                        "monitor-compact-metric-label",
+                        &label,
+                        label.clone(),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()

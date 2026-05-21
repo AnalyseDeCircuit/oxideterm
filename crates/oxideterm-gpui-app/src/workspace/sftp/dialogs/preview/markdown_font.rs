@@ -99,7 +99,9 @@ impl WorkspaceApp {
                 div()
                     .id("sftp-font-preview-scroll")
                     .flex_1()
-                    .overflow_y_scroll()
+                    .selectable_overflow_y_scroll(
+                        &self.selectable_text_scroll_handle("sftp-font-preview-scroll"),
+                    )
                     .p(px(24.0))
                     .bg(rgb(theme.bg_sunken))
                     .font_family(sample_font.clone())
@@ -253,15 +255,18 @@ impl WorkspaceApp {
             .size_full()
             .bg(rgb(theme.bg_sunken))
             .child(
-                uniform_list("sftp-preview-code-virtual", row_count, move |range, _window, _cx| {
-                    let opts = opts.clone();
-                    let language = language.clone();
-                    let font_family = font_family.clone();
-                    range
-                        .map(|index| {
-                            let line = &list_lines[index];
-                            let content: AnyElement =
-                                if language != "text"
+                tracked_uniform_list(
+                    "sftp-preview-code-virtual",
+                    row_count,
+                    scroll,
+                    move |range, _window, _cx| {
+                        let opts = opts.clone();
+                        let language = language.clone();
+                        let font_family = font_family.clone();
+                        range
+                            .map(|index| {
+                                let line = &list_lines[index];
+                                let content: AnyElement = if language != "text"
                                     && let Some(runs) =
                                         highlight::highlight_code(&language, &line.content, &opts)
                                 {
@@ -273,44 +278,38 @@ impl WorkspaceApp {
                                 } else {
                                     SharedString::from(line.content.clone()).into_any_element()
                                 };
-                            div()
-                                .h(px(SFTP_PREVIEW_CODE_LINE_HEIGHT))
-                                .w_full()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .font_family(font_family.clone())
-                                .text_size(px(SFTP_TEXT_XS))
-                                .line_height(px(SFTP_PREVIEW_CODE_LINE_HEIGHT))
-                                .text_color(rgb(theme.text))
-                                .child(
-                                    div()
-                                        .w(px(SFTP_DIFF_LINE_NUMBER_COL))
-                                        .flex_none()
-                                        .pr(px(12.0))
-                                        .text_align(gpui::TextAlign::Right)
-                                        .text_color(rgba(
-                                            (theme.text_muted << 8)
-                                                | SFTP_PREVIEW_CODE_GUTTER_ALPHA,
-                                        ))
-                                        .child(
-                                            line.line_number
-                                                .map(|line_number| line_number.to_string())
-                                                .unwrap_or_default(),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w(px(0.0))
-                                        .child(content),
-                                )
-                                .into_any_element()
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .track_scroll(scroll)
-                .size_full()
+                                div()
+                                    .h(px(SFTP_PREVIEW_CODE_LINE_HEIGHT))
+                                    .w_full()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .font_family(font_family.clone())
+                                    .text_size(px(SFTP_TEXT_XS))
+                                    .line_height(px(SFTP_PREVIEW_CODE_LINE_HEIGHT))
+                                    .text_color(rgb(theme.text))
+                                    .child(
+                                        div()
+                                            .w(px(SFTP_DIFF_LINE_NUMBER_COL))
+                                            .flex_none()
+                                            .pr(px(12.0))
+                                            .text_align(gpui::TextAlign::Right)
+                                            .text_color(rgba(
+                                                (theme.text_muted << 8)
+                                                    | SFTP_PREVIEW_CODE_GUTTER_ALPHA,
+                                            ))
+                                            .child(
+                                                line.line_number
+                                                    .map(|line_number| line_number.to_string())
+                                                    .unwrap_or_default(),
+                                            ),
+                                    )
+                                    .child(div().flex_1().min_w(px(0.0)).child(content))
+                                    .into_any_element()
+                            })
+                            .collect::<Vec<_>>()
+                    },
+                )
                 .on_scroll_wheel(|_, _, cx| cx.stop_propagation()),
             )
             .into_any_element()

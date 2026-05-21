@@ -155,6 +155,8 @@ pub struct SavedConnection {
     pub color: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_connect_command: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -212,7 +214,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             color: conn.color.clone(),
             tags: conn.tags.clone(),
             agent_forwarding: conn.options.agent_forwarding,
-            post_connect_command: None,
+            post_connect_command: conn.post_connect_command.clone(),
         }
     }
 }
@@ -230,6 +232,7 @@ pub struct SaveConnectionRequest {
     pub color: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
+    pub post_connect_command: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

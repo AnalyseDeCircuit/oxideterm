@@ -92,18 +92,34 @@ impl WorkspaceApp {
                     .gap(px(8.0))
                     .text_size(px(SFTP_TEXT_XS))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("sftp.preview.hex_view"))
+                    .child(self.render_selectable_display_text(
+                        "sftp-preview-hex-header",
+                        "hex-view",
+                        self.i18n.t("sftp.preview.hex_view"),
+                        theme.text_muted,
+                        cx,
+                    ))
                     .child("•")
-                    .child(
+                    .child(self.render_selectable_display_text(
+                        "sftp-preview-hex-header",
+                        "showing",
                         self.i18n
                             .t("sftp.preview.showing_first")
                             .replace("{{size}}", &format_file_size(showing)),
-                    )
+                        theme.text_muted,
+                        cx,
+                    ))
                     .when(total_size > 0, |header| {
                         header.child("•").child(
-                            self.i18n
-                                .t("sftp.preview.total_size")
-                                .replace("{{size}}", &format_file_size(total_size)),
+                            self.render_selectable_display_text(
+                                "sftp-preview-hex-header",
+                                "total-size",
+                                self.i18n
+                                    .t("sftp.preview.total_size")
+                                    .replace("{{size}}", &format_file_size(total_size)),
+                                theme.text_muted,
+                                cx,
+                            ),
                         )
                     }),
             )
@@ -113,7 +129,13 @@ impl WorkspaceApp {
                     .text_size(px(SFTP_TEXT_XS))
                     .line_height(px(20.0))
                     .text_color(rgb(theme.text))
-                    .child(data.to_string()),
+                    .child(self.render_selectable_display_text(
+                        "sftp-preview-hex-data",
+                        &offset,
+                        data.to_string(),
+                        theme.text,
+                        cx,
+                    )),
             )
             .when(has_more, |body| {
                 let label = if loading_more {

@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{MouseButton, PathBuilder, canvas, fill, point, rgba};
-use gpui_component::scroll::ScrollableElement;
 use oxideterm_connection_monitor::{ProfilerState, ResourceSampler};
 use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::select::{select_option, select_trigger};
@@ -147,4 +146,3 @@ impl ConnectionMonitorState {
         }
     }
 }
-

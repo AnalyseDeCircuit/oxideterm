@@ -400,6 +400,44 @@ mod tests {
     }
 
     #[test]
+    fn shell_integration_osc7_emits_cwd_and_host() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]7;file://build-host/home/dev/Oxide%20Term\x07$ ",
+            |event| events.push(event),
+        );
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CwdChanged {
+                cwd,
+                host: Some(host),
+            } if cwd == "/home/dev/Oxide Term" && host == "build-host"
+        )));
+        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let visible_text = snapshot
+            .lines
+            .iter()
+            .map(|row| row.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!visible_text.contains("file://build-host"));
+        assert!(visible_text.contains("$"));
+    }
+
+    #[test]
     fn shell_integration_scanner_waits_for_split_osc_terminator() {
         let size = TerminalSize {
             cols: 80,

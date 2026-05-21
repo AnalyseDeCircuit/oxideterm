@@ -6,7 +6,7 @@ use std::{
 use crate::workspace::ime::WorkspaceImeTarget;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use chrono::{DateTime, Local, Utc};
-use gpui_component::scroll::ScrollableElement;
+use gpui::prelude::*;
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,
     MAX_ROLLBACK_BACKUP_BYTES, PREVIEW_RECORD_LIMIT, STRUCTURED_MANIFEST_FORMAT,
@@ -215,6 +215,7 @@ pub(super) enum CloudSyncApplyOutcome {
 #[derive(Clone, Debug)]
 pub(super) struct CloudSyncPreviewSelection {
     import_connections: bool,
+    selected_connection_names: BTreeSet<String>,
     import_app_settings: bool,
     selected_app_settings_sections: BTreeSet<String>,
     import_plugin_settings: bool,
@@ -238,6 +239,7 @@ impl CloudSyncPreviewSelection {
         };
         Self {
             import_connections: summary.connections > 0,
+            selected_connection_names: summary.connection_record_names(),
             import_app_settings: summary.has_app_settings,
             selected_app_settings_sections: summary
                 .app_settings_sections
@@ -251,6 +253,36 @@ impl CloudSyncPreviewSelection {
         }
     }
 
+    fn effective_import_connections(&self, summary: &CloudSyncPreviewSummary) -> bool {
+        if !self.import_connections {
+            return false;
+        }
+        let record_names = summary.connection_record_names();
+        record_names.is_empty()
+            || record_names
+                .iter()
+                .any(|name| self.selected_connection_names.contains(name))
+    }
+
+    fn selected_connection_names_for_import(
+        &self,
+        summary: &CloudSyncPreviewSummary,
+    ) -> Option<Vec<String>> {
+        if !self.import_connections {
+            return Some(Vec::new());
+        }
+        let record_names = summary.connection_record_names();
+        if record_names.is_empty() {
+            return None;
+        }
+        Some(
+            record_names
+                .into_iter()
+                .filter(|name| self.selected_connection_names.contains(name))
+                .collect(),
+        )
+    }
+
     fn effective_import_app_settings(&self, summary: &CloudSyncPreviewSummary) -> bool {
         self.import_app_settings
             && (!self.selected_app_settings_sections.is_empty()
@@ -262,7 +294,7 @@ impl CloudSyncPreviewSelection {
     }
 
     fn can_apply(&self, summary: &CloudSyncPreviewSummary) -> bool {
-        self.import_connections
+        self.effective_import_connections(summary)
             || self.import_forwards
             || self.effective_import_app_settings(summary)
             || self.effective_import_plugin_settings()
@@ -345,7 +377,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn render_cloud_sync_sidebar_content(&self) -> AnyElement {
+    pub(super) fn render_cloud_sync_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .flex_1()
@@ -367,7 +399,14 @@ impl WorkspaceApp {
                     .text_center()
                     .text_size(px(self.tokens.metrics.empty_sidebar_title_font_size))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("plugin.cloud_sync.panel_title")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-sidebar-empty",
+                        "title",
+                        self.i18n.t("plugin.cloud_sync.panel_title"),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -376,7 +415,14 @@ impl WorkspaceApp {
                     .text_center()
                     .text_size(px(self.tokens.metrics.empty_sidebar_subtitle_font_size))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("plugin.cloud_sync.native_description")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-sidebar-empty",
+                        "description",
+                        self.i18n.t("plugin.cloud_sync.native_description"),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .into_any_element()
     }
@@ -397,10 +443,12 @@ impl WorkspaceApp {
         let backend_label = self.cloud_sync_backend_label(&settings);
         let busy = self.cloud_sync_rx.is_some();
         let has_rollback_backup = !state.rollback_backups.is_empty();
+        let cloud_sync_scroll = self.selectable_text_scroll_handle("cloud-sync-scroll");
 
         div()
+            .id("cloud-sync-scroll")
             .size_full()
-            .overflow_y_scrollbar()
+            .selectable_overflow_y_scrollbar(&cloud_sync_scroll)
             .bg(rgb(theme.bg))
             .text_color(rgb(theme.text))
             .text_size(px(self.tokens.metrics.ui_text_sm))
@@ -413,8 +461,8 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap(px(CLOUD_SYNC_CARD_GAP))
-                    .child(self.render_cloud_sync_header(&state))
-                    .child(self.render_cloud_sync_guide(&self.cloud_sync_form.backend_type))
+                    .child(self.render_cloud_sync_header(&state, cx))
+                    .child(self.render_cloud_sync_guide(&self.cloud_sync_form.backend_type, cx))
                     .child(
                         div()
                             .w_full()
@@ -428,7 +476,7 @@ impl WorkspaceApp {
                             .flex_col()
                             .gap(px(10.0))
                             .when_some(self.cloud_sync_progress.as_ref(), |card, progress| {
-                                card.child(self.render_cloud_sync_progress(progress))
+                                card.child(self.render_cloud_sync_progress(progress, cx))
                             })
                             .when_some(state.last_error.as_ref(), |card, error| {
                                 card.child(self.render_cloud_sync_error(error))
@@ -555,12 +603,16 @@ impl WorkspaceApp {
                     })
                     .child(self.render_cloud_sync_history(&state, cx))
                     .child(self.render_cloud_sync_config(cx))
-                    .child(self.render_cloud_sync_notes(local_snapshot.as_ref().ok())),
+                    .child(self.render_cloud_sync_notes(local_snapshot.as_ref().ok(), cx)),
             )
             .into_any_element()
     }
 
-    fn render_cloud_sync_header(&self, state: &CloudSyncPersistedState) -> AnyElement {
+    fn render_cloud_sync_header(
+        &self,
+        state: &CloudSyncPersistedState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .flex()
@@ -571,7 +623,14 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text))
-                    .child(self.i18n.t("plugin.cloud_sync.panel_title").to_uppercase()),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-panel",
+                        "title",
+                        self.i18n.t("plugin.cloud_sync.panel_title").to_uppercase(),
+                        theme.text,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -582,26 +641,45 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_cloud_sync_guide(&self, backend_type: &BackendType) -> AnyElement {
+    fn render_cloud_sync_guide(
+        &self,
+        backend_type: &BackendType,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let backend_key = format!("{backend_type:?}");
         let mut card = self
             .cloud_sync_card()
-            .child(self.render_cloud_sync_section_title("plugin.cloud_sync.sections.quick_start"))
+            .child(
+                self.render_cloud_sync_section_title("plugin.cloud_sync.sections.quick_start", cx),
+            )
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text_heading))
-                    .child(self.cloud_sync_usage_guide_title(backend_type)),
+                    .child(self.render_selectable_text_scoped(
+                        "cloud-sync-guide-title",
+                        &backend_key,
+                        self.cloud_sync_usage_guide_title(backend_type),
+                        theme.text_heading,
+                        cx,
+                    )),
             )
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .line_height(px(20.0))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.cloud_sync_usage_guide_description(backend_type)),
+                    .child(self.render_selectable_text_scoped(
+                        "cloud-sync-guide-description",
+                        &backend_key,
+                        self.cloud_sync_usage_guide_description(backend_type),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
-            .child(self.render_cloud_sync_guide_steps());
+            .child(self.render_cloud_sync_guide_steps(cx));
         let examples = self.cloud_sync_usage_guide_examples(backend_type);
         if !examples.is_empty() {
             let mut example_card = div()
@@ -618,7 +696,14 @@ impl WorkspaceApp {
                         .text_size(px(self.tokens.metrics.ui_text_sm))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(rgb(theme.text_heading))
-                        .child(self.i18n.t("plugin.cloud_sync.guide.example_title")),
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "cloud-sync-guide",
+                            "example-title",
+                            self.i18n.t("plugin.cloud_sync.guide.example_title"),
+                            theme.text_heading,
+                            cx,
+                        )),
                 );
             for (label, value) in examples {
                 example_card = example_card.child(
@@ -629,14 +714,26 @@ impl WorkspaceApp {
                         .text_size(px(self.tokens.metrics.ui_text_sm))
                         .line_height(px(20.0))
                         .text_color(rgb(theme.text_muted))
-                        .child(format!("{label}:"))
+                        .child(self.render_selectable_text_scoped(
+                            "cloud-sync-guide-example-label",
+                            (&label, &value),
+                            format!("{label}:"),
+                            theme.text_muted,
+                            cx,
+                        ))
                         .child(
                             div()
                                 .font_family(settings_mono_font_family(
                                     self.settings_store.settings(),
                                 ))
                                 .text_color(rgb(theme.accent))
-                                .child(value),
+                                .child(self.render_selectable_text_scoped(
+                                    "cloud-sync-guide-example-value",
+                                    (&label, &value),
+                                    value.clone(),
+                                    theme.accent,
+                                    cx,
+                                )),
                         ),
                 );
             }
@@ -649,15 +746,21 @@ impl WorkspaceApp {
                     .line_height(px(20.0))
                     .text_color(rgb(theme.accent))
                     .child(
-                        self.i18n
-                            .t("plugin.cloud_sync.guide.webdav_duplicate_warning"),
+                        self.render_selectable_text_scoped(
+                            "cloud-sync-guide-warning",
+                            &backend_key,
+                            self.i18n
+                                .t("plugin.cloud_sync.guide.webdav_duplicate_warning"),
+                            theme.accent,
+                            cx,
+                        ),
                     ),
             );
         }
         card.into_any_element()
     }
 
-    fn render_cloud_sync_guide_steps(&self) -> AnyElement {
+    fn render_cloud_sync_guide_steps(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let steps = [
             "plugin.cloud_sync.guide.step_choose_backend",
@@ -681,19 +784,38 @@ impl WorkspaceApp {
                     .flex()
                     .items_start()
                     .gap(px(8.0))
-                    .child(format!("{}.", index + 1))
-                    .child(self.i18n.t(key)),
+                    .child(self.render_selectable_text_scoped(
+                        "cloud-sync-guide-step-index",
+                        key,
+                        format!("{}.", index + 1),
+                        theme.text_muted,
+                        cx,
+                    ))
+                    .child(self.render_selectable_text_scoped(
+                        "cloud-sync-guide-step",
+                        key,
+                        self.i18n.t(key),
+                        theme.text_muted,
+                        cx,
+                    )),
             );
         }
         list.into_any_element()
     }
 
-    fn render_cloud_sync_section_title(&self, key: &str) -> AnyElement {
+    fn render_cloud_sync_section_title(&self, key: &str, cx: &mut Context<Self>) -> AnyElement {
         div()
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(self.tokens.ui.text_heading))
-            .child(self.i18n.t(key).to_uppercase())
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-section-title",
+                key,
+                self.i18n.t(key).to_uppercase(),
+                self.tokens.ui.text_heading,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -737,7 +859,11 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn render_cloud_sync_progress(&self, progress: &CloudSyncProgress) -> AnyElement {
+    fn render_cloud_sync_progress(
+        &self,
+        progress: &CloudSyncProgress,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let ratio = if progress.total <= 0.0 {
             0.0
@@ -759,11 +885,25 @@ impl WorkspaceApp {
                     .justify_between()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(theme.text))
-                    .child(self.cloud_sync_progress_stage_label(progress.stage))
-                    .child(format!(
-                        "{}/{}",
-                        cloud_sync_progress_unit(progress.current),
-                        cloud_sync_progress_unit(progress.total)
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-progress",
+                        "stage",
+                        self.cloud_sync_progress_stage_label(progress.stage),
+                        theme.text,
+                        cx,
+                    ))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-progress",
+                        "count",
+                        format!(
+                            "{}/{}",
+                            cloud_sync_progress_unit(progress.current),
+                            cloud_sync_progress_unit(progress.total)
+                        ),
+                        theme.text,
+                        cx,
                     )),
             )
             .child(
@@ -982,11 +1122,22 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text_heading))
-                    .child(self.i18n.t(if source_is_backup {
-                        "plugin.cloud_sync.sections.rollback_preview"
-                    } else {
-                        "plugin.cloud_sync.sections.import_preview"
-                    })),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-preview-title",
+                        if source_is_backup {
+                            "rollback"
+                        } else {
+                            "import"
+                        },
+                        self.i18n.t(if source_is_backup {
+                            "plugin.cloud_sync.sections.rollback_preview"
+                        } else {
+                            "plugin.cloud_sync.sections.import_preview"
+                        }),
+                        theme.text_heading,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -1042,7 +1193,8 @@ impl WorkspaceApp {
         }
         for (action, records) in summary.grouped_records() {
             if !records.is_empty() {
-                card = card.child(self.render_cloud_sync_record_group(action, &records, cx));
+                card = card
+                    .child(self.render_cloud_sync_record_group(action, &records, &selection, cx));
             }
         }
         card.child(
@@ -1110,13 +1262,25 @@ impl WorkspaceApp {
                 false,
                 cx.listener(
                     |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
+                        let all_connection_names = this
+                            .cloud_sync_pending_preview
+                            .as_ref()
+                            .map(cloud_sync_preview_summary)
+                            .map(|summary| summary.connection_record_names())
+                            .unwrap_or_default();
                         if let Some(selection) = this.cloud_sync_preview_selection.as_mut() {
                             selection.import_connections = !selection.import_connections;
+                            if selection.import_connections
+                                && selection.selected_connection_names.is_empty()
+                            {
+                                selection.selected_connection_names = all_connection_names;
+                            }
                         }
                         cx.stop_propagation();
                         cx.notify();
                     },
                 ),
+                cx,
             ));
         }
         if summary.has_app_settings {
@@ -1134,6 +1298,7 @@ impl WorkspaceApp {
                         cx.notify();
                     },
                 ),
+                cx,
             ));
             for section in &summary.app_settings_sections {
                 let section_id = section.id.clone();
@@ -1167,6 +1332,7 @@ impl WorkspaceApp {
                                 cx.notify();
                             },
                         ),
+                        cx,
                     ),
                 );
             }
@@ -1189,6 +1355,7 @@ impl WorkspaceApp {
                         cx.notify();
                     },
                 ),
+                cx,
             ));
             for (plugin_id, count) in &summary.plugin_settings_by_plugin {
                 let plugin_id_for_toggle = plugin_id.clone();
@@ -1217,6 +1384,7 @@ impl WorkspaceApp {
                             cx.notify();
                         },
                     ),
+                    cx,
                 ));
             }
         }
@@ -1238,6 +1406,7 @@ impl WorkspaceApp {
                         cx.notify();
                     },
                 ),
+                cx,
             ));
         }
         block.into_any_element()
@@ -1250,8 +1419,10 @@ impl WorkspaceApp {
         checked: bool,
         disabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let label_key = label.clone();
         div()
             .w_full()
             .min_w(px(0.0))
@@ -1296,10 +1467,32 @@ impl WorkspaceApp {
                             } else {
                                 rgb(theme.text)
                             })
-                            .child(label),
+                            // Preview rows toggle on the row, matching Tauri checkbox row select-none labels.
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "cloud-sync-preview-check-label",
+                                label_key,
+                                label,
+                                if disabled {
+                                    theme.text_muted
+                                } else {
+                                    theme.text
+                                },
+                                cx,
+                            )),
                     )
                     .when_some(meta, |row, meta| {
-                        row.child(div().text_color(rgb(theme.text_muted)).child(meta))
+                        let meta_key = meta.clone();
+                        row.child(div().text_color(rgb(theme.text_muted)).child(
+                            self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "cloud-sync-preview-check-meta",
+                                meta_key,
+                                meta,
+                                theme.text_muted,
+                                cx,
+                            ),
+                        ))
                     }),
             )
             .into_any_element()
@@ -1336,6 +1529,7 @@ impl WorkspaceApp {
         &self,
         action: &'static str,
         records: &[CloudSyncPreviewRecord],
+        selection: &CloudSyncPreviewSelection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut block = self.render_cloud_sync_preview_block(
@@ -1350,11 +1544,35 @@ impl WorkspaceApp {
             cx,
         );
         for record in records.iter().take(PREVIEW_RECORD_LIMIT) {
-            block = block.child(self.render_cloud_sync_list_item(
-                record.name.clone(),
-                Some(self.format_cloud_sync_preview_record(record)),
-                cx,
-            ));
+            let meta = Some(self.format_cloud_sync_preview_record(record));
+            if record.resource == "connection" {
+                let name = record.name.clone();
+                block = block.child(self.render_cloud_sync_check_row(
+                    record.name.clone(),
+                    meta,
+                    selection.import_connections
+                        && selection.selected_connection_names.contains(&record.name),
+                    !selection.import_connections,
+                    cx.listener(
+                        move |this: &mut WorkspaceApp,
+                              _event,
+                              _window,
+                              cx: &mut Context<WorkspaceApp>| {
+                            if let Some(selection) = this.cloud_sync_preview_selection.as_mut() {
+                                if !selection.selected_connection_names.remove(&name) {
+                                    selection.selected_connection_names.insert(name.clone());
+                                }
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ),
+                    cx,
+                ));
+            } else {
+                block =
+                    block.child(self.render_cloud_sync_list_item(record.name.clone(), meta, cx));
+            }
         }
         if records.len() > PREVIEW_RECORD_LIMIT {
             block =
@@ -1481,9 +1699,12 @@ impl WorkspaceApp {
         busy: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut card = self.cloud_sync_card().child(
-            self.render_cloud_sync_section_title("plugin.cloud_sync.sections.rollback_backups"),
-        );
+        let mut card =
+            self.cloud_sync_card()
+                .child(self.render_cloud_sync_section_title(
+                    "plugin.cloud_sync.sections.rollback_backups",
+                    cx,
+                ));
         for backup in &state.rollback_backups {
             let id = backup.id.clone();
             let created_at = backup.created_at.clone();
@@ -1530,13 +1751,27 @@ impl WorkspaceApp {
                                     .text_size(px(self.tokens.metrics.ui_text_sm))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(self.tokens.ui.text))
-                                    .child(created_at.clone()),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "cloud-sync-rollback-backup",
+                                        (id.as_str(), "created-at"),
+                                        created_at.clone(),
+                                        self.tokens.ui.text,
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(summary),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "cloud-sync-rollback-backup",
+                                        (id.as_str(), "summary"),
+                                        summary,
+                                        self.tokens.ui.text_muted,
+                                        cx,
+                                    )),
                             ),
                     )
                     .child(self.render_cloud_sync_inline_button(
@@ -1556,6 +1791,7 @@ impl WorkspaceApp {
                                 cx.notify();
                             },
                         ),
+                        cx,
                     )),
             );
         }
@@ -1582,14 +1818,28 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text_heading))
-                    .child(self.i18n.t("plugin.cloud_sync.sections.sync_history")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-history",
+                        "title",
+                        self.i18n.t("plugin.cloud_sync.sections.sync_history"),
+                        theme.text_heading,
+                        cx,
+                    )),
             );
         if state.sync_history.is_empty() {
             card = card.child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("plugin.cloud_sync.history_empty")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-history",
+                        "empty",
+                        self.i18n.t("plugin.cloud_sync.history_empty"),
+                        theme.text_muted,
+                        cx,
+                    )),
             );
         } else {
             for entry in state.sync_history.iter().take(10) {
@@ -1691,6 +1941,7 @@ impl WorkspaceApp {
     fn render_cloud_sync_notes(
         &self,
         local_snapshot: Option<&CloudSyncLocalSnapshot>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -1707,7 +1958,14 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text_heading))
-                    .child(self.i18n.t("plugin.cloud_sync.sections.notes")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-notes",
+                        "title",
+                        self.i18n.t("plugin.cloud_sync.sections.notes"),
+                        theme.text_heading,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -1760,12 +2018,13 @@ impl WorkspaceApp {
             "plugin.cloud_sync.settings.token"
         };
 
-        let mut card =
-            self.cloud_sync_card()
-                .child(self.render_cloud_sync_section_title(
-                    "plugin.cloud_sync.sections.connection_settings",
-                ))
-                .child(self.render_cloud_sync_backend_select(cx));
+        let mut card = self
+            .cloud_sync_card()
+            .child(self.render_cloud_sync_section_title(
+                "plugin.cloud_sync.sections.connection_settings",
+                cx,
+            ))
+            .child(self.render_cloud_sync_backend_select(cx));
         if show_auth_mode {
             card = card.child(self.render_cloud_sync_auth_mode_select(cx));
         }
@@ -1897,6 +2156,7 @@ impl WorkspaceApp {
                     cx.notify();
                 },
             ),
+            cx,
         ))
         .child(self.render_cloud_sync_text_field(
             "plugin.cloud_sync.settings.auto_upload_interval",
@@ -1937,7 +2197,14 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t(label_key)),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-text-field-label",
+                        label_key,
+                        self.i18n.t(label_key),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(text_input_anchor_probe(
                 target.anchor_id(),
@@ -2039,6 +2306,7 @@ impl WorkspaceApp {
                         cx.notify();
                     },
                 ),
+                cx,
             ));
         }
         row.into_any_element()
@@ -2298,6 +2566,7 @@ impl WorkspaceApp {
         options: Vec<(String, bool, CloudSyncOptionListener)>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let label = self.i18n.t(label_key);
         let mut group = div()
             .w_full()
             .min_w(px(0.0))
@@ -2309,7 +2578,13 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t(label_key)),
+                    .child(self.render_selectable_text_scoped(
+                        "cloud-sync-select-label",
+                        label_key,
+                        label,
+                        theme.text_muted,
+                        cx,
+                    )),
             );
         let open = self.cloud_sync_open_select == Some(select);
         group = group.child(
@@ -2349,7 +2624,15 @@ impl WorkspaceApp {
                         },
                     ),
                 )
-                .child(value)
+                // Select trigger/options are controls; labels stay outside read-only selection ownership.
+                .child(self.render_display_text_with_role(
+                    SelectableTextRole::NonSelectable,
+                    "cloud-sync-select-value",
+                    format!("{select:?}"),
+                    value,
+                    theme.text,
+                    cx,
+                ))
                 .child(
                     div()
                         .text_size(px(self.tokens.metrics.ui_text_sm))
@@ -2366,6 +2649,7 @@ impl WorkspaceApp {
                 .bg(rgb(theme.bg_panel))
                 .overflow_hidden();
             for (label, selected, listener) in options {
+                let option_key = label.clone();
                 menu = menu.child(
                     div()
                         .w_full()
@@ -2388,7 +2672,14 @@ impl WorkspaceApp {
                         .cursor_pointer()
                         .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
                         .on_mouse_down(MouseButton::Left, listener)
-                        .child(label)
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::NonSelectable,
+                            "cloud-sync-select-option",
+                            option_key,
+                            label,
+                            if selected { theme.accent } else { theme.text },
+                            cx,
+                        ))
                         .when(selected, |row| row.child("✓")),
                 );
             }
@@ -2402,6 +2693,7 @@ impl WorkspaceApp {
         label_key: &str,
         checked: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -2415,7 +2707,15 @@ impl WorkspaceApp {
             .text_color(rgb(theme.text_muted))
             .cursor_pointer()
             .on_mouse_down(MouseButton::Left, listener)
-            .child(self.i18n.t(label_key))
+            // Toggle labels are control text, so they match Tauri select-none behavior.
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "cloud-sync-toggle-label",
+                label_key,
+                self.i18n.t(label_key),
+                theme.text_muted,
+                cx,
+            ))
             .child(
                 div()
                     .w(px(16.0))
@@ -2451,6 +2751,7 @@ impl WorkspaceApp {
         &self,
         label_key: &str,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -2472,7 +2773,14 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text))
             })
             .on_mouse_down(MouseButton::Left, listener)
-            .child(self.i18n.t(label_key))
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "cloud-sync-inline-button",
+                label_key,
+                self.i18n.t(label_key),
+                theme.text_muted,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -2754,7 +3062,14 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
-                    .child(label.clone()),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-fact-label",
+                        label_key,
+                        label.clone(),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -2841,10 +3156,48 @@ impl WorkspaceApp {
             &self.tokens,
             ConfirmDialogView {
                 variant,
-                title: div().child(title).into_any_element(),
-                description: description.map(|text| div().child(text).into_any_element()),
-                cancel_label: div().child(self.i18n.t("common.cancel")).into_any_element(),
-                confirm_label: div().child(confirm_label).into_any_element(),
+                title: div()
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-confirm",
+                        "title",
+                        title,
+                        self.tokens.ui.text_heading,
+                        cx,
+                    ))
+                    .into_any_element(),
+                description: description.map(|text| {
+                    div()
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "cloud-sync-confirm",
+                            "description",
+                            text,
+                            self.tokens.ui.text_muted,
+                            cx,
+                        ))
+                        .into_any_element()
+                }),
+                cancel_label: div()
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "cloud-sync-confirm",
+                        "cancel",
+                        self.i18n.t("common.cancel"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
+                    .into_any_element(),
+                confirm_label: div()
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "cloud-sync-confirm",
+                        "confirm",
+                        confirm_label,
+                        self.tokens.ui.text,
+                        cx,
+                    ))
+                    .into_any_element(),
             },
             cx.listener(
                 |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
@@ -3444,23 +3797,30 @@ impl WorkspaceApp {
                             outcome.expect("cloud sync structured apply unexpectedly skipped"),
                         )
                     }),
-                CloudSyncPendingPreview::Legacy { preview, source } => service
-                    .apply_legacy_preview(
-                        &mut connection_store,
-                        &settings,
-                        &preview,
-                        sync_password.as_deref(),
-                        selection.import_connections,
-                        selection.import_forwards,
-                        selection.conflict_strategy.clone(),
-                        Some(&mut apply_progress),
-                    )
-                    .map(|outcome| CloudSyncApplyOutcome::Legacy {
-                        preview,
-                        source,
-                        selection: selection.clone(),
-                        outcome: outcome.expect("cloud sync legacy apply unexpectedly skipped"),
-                    }),
+                CloudSyncPendingPreview::Legacy { preview, source } => {
+                    let summary = cloud_sync_preview_summary(&CloudSyncPendingPreview::Legacy {
+                        preview: preview.clone(),
+                        source: source.clone(),
+                    });
+                    service
+                        .apply_legacy_preview(
+                            &mut connection_store,
+                            &settings,
+                            &preview,
+                            sync_password.as_deref(),
+                            selection.effective_import_connections(&summary),
+                            selection.selected_connection_names_for_import(&summary),
+                            selection.import_forwards,
+                            selection.conflict_strategy.clone(),
+                            Some(&mut apply_progress),
+                        )
+                        .map(|outcome| CloudSyncApplyOutcome::Legacy {
+                            preview,
+                            source,
+                            selection: selection.clone(),
+                            outcome: outcome.expect("cloud sync legacy apply unexpectedly skipped"),
+                        })
+                }
             }
             .map(|outcome| CloudSyncApplyUiOutcome {
                 connection_store,
@@ -3972,13 +4332,15 @@ impl WorkspaceApp {
             preview: preview.clone(),
             source: source.clone(),
         });
+        let effective_import_connections = selection.effective_import_connections(&summary);
         let options = OxideClientStateImportOptions {
             oxide_options: oxideterm_connections::oxide_file::OxideImportOptions {
+                selected_names: selection.selected_connection_names_for_import(&summary),
                 conflict_strategy: import_strategy_from_cloud_settings(
                     selection.conflict_strategy.clone(),
                 ),
                 import_forwards: selection.import_forwards,
-                import_portable_secrets: selection.import_connections,
+                import_portable_secrets: effective_import_connections,
                 ..oxideterm_connections::oxide_file::OxideImportOptions::default()
             },
             import_quick_commands: true,
@@ -4320,6 +4682,7 @@ fn legacy_apply_covers_full_remote(
     summary: &CloudSyncPreviewSummary,
     selection: &CloudSyncPreviewSelection,
 ) -> bool {
+    let remote_connection_names = summary.connection_record_names();
     let remote_app_section_ids = summary
         .app_settings_sections
         .iter()
@@ -4331,7 +4694,12 @@ fn legacy_apply_covers_full_remote(
         .map(String::as_str)
         .collect::<Vec<_>>();
 
-    (summary.connections == 0 || selection.import_connections)
+    (summary.connections == 0
+        || (selection.import_connections
+            && (remote_connection_names.is_empty()
+                || remote_connection_names
+                    .iter()
+                    .all(|name| selection.selected_connection_names.contains(name)))))
         && (summary.forwards == 0 || selection.import_forwards)
         && (!summary.has_app_settings
             || (selection.effective_import_app_settings(summary)
@@ -4436,6 +4804,7 @@ struct CloudSyncForwardDetail {
 
 #[derive(Clone, Debug)]
 struct CloudSyncPreviewRecord {
+    resource: String,
     name: String,
     action: String,
     reason_code: String,
@@ -4456,6 +4825,14 @@ impl CloudSyncPreviewSummary {
                         .collect(),
                 )
             })
+            .collect()
+    }
+
+    fn connection_record_names(&self) -> BTreeSet<String> {
+        self.records
+            .iter()
+            .filter(|record| record.resource == "connection")
+            .map(|record| record.name.clone())
             .collect()
     }
 }
@@ -4546,6 +4923,7 @@ fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyncPre
                 .records
                 .iter()
                 .map(|record| CloudSyncPreviewRecord {
+                    resource: record.resource.clone(),
                     name: record.name.clone(),
                     action: record.action.clone(),
                     reason_code: record.reason_code.clone(),
@@ -4866,5 +5244,77 @@ fn cloud_sync_platform_label() -> &'static str {
         "linux"
     } else {
         "native"
+    }
+}
+
+#[cfg(test)]
+mod cloud_sync_preview_selection_tests {
+    use super::*;
+
+    fn connection_record(name: &str) -> CloudSyncPreviewRecord {
+        CloudSyncPreviewRecord {
+            resource: "connection".to_string(),
+            name: name.to_string(),
+            action: "import".to_string(),
+            reason_code: "new".to_string(),
+            target_name: None,
+        }
+    }
+
+    fn summary_with_connections(names: &[&str]) -> CloudSyncPreviewSummary {
+        CloudSyncPreviewSummary {
+            connections: names.len(),
+            records: names.iter().map(|name| connection_record(name)).collect(),
+            ..CloudSyncPreviewSummary::default()
+        }
+    }
+
+    #[test]
+    fn legacy_preview_selection_exports_selected_connection_names() {
+        let summary = summary_with_connections(&["Prod", "Staging"]);
+        let mut selection = CloudSyncPreviewSelection {
+            import_connections: true,
+            selected_connection_names: BTreeSet::from(["Prod".to_string()]),
+            import_app_settings: false,
+            selected_app_settings_sections: BTreeSet::new(),
+            import_plugin_settings: false,
+            selected_plugin_ids: BTreeSet::new(),
+            import_forwards: false,
+            conflict_strategy: ConflictStrategy::Rename,
+        };
+
+        assert_eq!(
+            selection.selected_connection_names_for_import(&summary),
+            Some(vec!["Prod".to_string()])
+        );
+        assert!(selection.can_apply(&summary));
+        assert!(!legacy_apply_covers_full_remote(&summary, &selection));
+
+        selection
+            .selected_connection_names
+            .insert("Staging".to_string());
+        assert!(legacy_apply_covers_full_remote(&summary, &selection));
+    }
+
+    #[test]
+    fn legacy_preview_selection_disables_connection_import_when_none_checked() {
+        let summary = summary_with_connections(&["Prod"]);
+        let selection = CloudSyncPreviewSelection {
+            import_connections: true,
+            selected_connection_names: BTreeSet::new(),
+            import_app_settings: false,
+            selected_app_settings_sections: BTreeSet::new(),
+            import_plugin_settings: false,
+            selected_plugin_ids: BTreeSet::new(),
+            import_forwards: false,
+            conflict_strategy: ConflictStrategy::Rename,
+        };
+
+        assert_eq!(
+            selection.selected_connection_names_for_import(&summary),
+            Some(Vec::new())
+        );
+        assert!(!selection.can_apply(&summary));
+        assert!(!legacy_apply_covers_full_remote(&summary, &selection));
     }
 }

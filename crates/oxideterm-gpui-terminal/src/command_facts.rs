@@ -52,6 +52,13 @@ pub struct TerminalAutosuggestCommandRecord {
     pub finished_at: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalAutosuggestInputState {
+    pub value: String,
+    pub cursor_index: usize,
+    pub is_cursor_at_end: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct CommandFactLedger {
     facts: Vec<TerminalCommandFact>,
@@ -70,6 +77,24 @@ impl CommandFactLedger {
 
     pub(crate) fn autosuggest_records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
         self.autosuggest_records.clone()
+    }
+
+    pub(crate) fn autosuggest_ghost_text(
+        &self,
+        state: &TerminalAutosuggestInputState,
+    ) -> Option<String> {
+        let query = state.value.trim_start();
+        if query.is_empty() || !state.is_cursor_at_end {
+            return None;
+        }
+        self.autosuggest_records
+            .iter()
+            .rev()
+            .find_map(|record| {
+                (record.command.starts_with(query) && record.command != query)
+                    .then(|| record.command[query.len()..].to_string())
+            })
+            .filter(|suffix| !suffix.is_empty())
     }
 
     pub(crate) fn record_runtime_autosuggest_command(&mut self, command: &str) {
@@ -300,5 +325,37 @@ mod tests {
         let records = ledger.autosuggest_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].command, "git status");
+    }
+
+    #[test]
+    fn command_fact_ledger_exposes_prefix_autosuggest_ghost_text() {
+        let mut ledger = CommandFactLedger::default();
+        ledger.record_runtime_autosuggest_command("git status");
+        ledger.record_runtime_autosuggest_command("git stash list");
+
+        assert_eq!(
+            ledger.autosuggest_ghost_text(&TerminalAutosuggestInputState {
+                value: "git sta".to_string(),
+                cursor_index: 7,
+                is_cursor_at_end: true,
+            }),
+            Some("sh list".to_string())
+        );
+        assert_eq!(
+            ledger.autosuggest_ghost_text(&TerminalAutosuggestInputState {
+                value: "git status".to_string(),
+                cursor_index: 10,
+                is_cursor_at_end: true,
+            }),
+            None
+        );
+        assert_eq!(
+            ledger.autosuggest_ghost_text(&TerminalAutosuggestInputState {
+                value: "git sta".to_string(),
+                cursor_index: 3,
+                is_cursor_at_end: false,
+            }),
+            None
+        );
     }
 }

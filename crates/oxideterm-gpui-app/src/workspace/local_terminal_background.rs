@@ -1,5 +1,4 @@
 use super::*;
-use gpui_component::scroll::ScrollableElement;
 
 const DETACHED_TERMINAL_POPOVER_WIDTH: f32 = 256.0; // Tauri w-64.
 const DETACHED_TERMINAL_POPOVER_MAX_HEIGHT: f32 = 192.0; // Tauri max-h-48.
@@ -234,7 +233,12 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         sessions.sort_by(|left, right| left.detached_at.cmp(&right.detached_at));
 
-        let mut list = div().max_h(px(DETACHED_TERMINAL_POPOVER_MAX_HEIGHT));
+        let mut list = div()
+            .id("detached-local-terminals-scroll")
+            .max_h(px(DETACHED_TERMINAL_POPOVER_MAX_HEIGHT))
+            .selectable_overflow_y_scrollbar(
+                &self.selectable_text_scroll_handle("detached-local-terminals-scroll"),
+            );
         for session in sessions {
             let session_id = session.session_id;
             let buffer_lines = session
@@ -409,7 +413,7 @@ impl WorkspaceApp {
                                 ),
                         ),
                 )
-                .child(list.overflow_y_scrollbar())
+                .child(list)
                 .into_any_element(),
         )
     }

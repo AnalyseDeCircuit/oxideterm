@@ -5,7 +5,18 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        dialog_backdrop()
+        let backdrop_name = name.clone();
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    // Tauri IDE/SFTP save-confirm dialogs close through
+                    // onOpenChange(false) -> cancel, never discard.
+                    this.cancel_sftp_editor_close_confirm(backdrop_name.clone());
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .w(px(SFTP_DIALOG_WIDTH_SM))
@@ -21,6 +32,9 @@ impl WorkspaceApp {
                         blur_radius: px(32.0),
                         spread_radius: px(0.0),
                     }])
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .flex()

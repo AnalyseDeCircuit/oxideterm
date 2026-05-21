@@ -1,3 +1,37 @@
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalCommandSuggestionRowTextRole {
+    Muted,
+    Active,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalCommandSuggestionRowBackgroundRole {
+    Transparent,
+    Active,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TerminalCommandSuggestionRowUiState {
+    text: TerminalCommandSuggestionRowTextRole,
+    background: TerminalCommandSuggestionRowBackgroundRole,
+}
+
+fn terminal_command_suggestion_row_ui_state(
+    highlighted: bool,
+) -> TerminalCommandSuggestionRowUiState {
+    if highlighted {
+        TerminalCommandSuggestionRowUiState {
+            text: TerminalCommandSuggestionRowTextRole::Active,
+            background: TerminalCommandSuggestionRowBackgroundRole::Active,
+        }
+    } else {
+        TerminalCommandSuggestionRowUiState {
+            text: TerminalCommandSuggestionRowTextRole::Muted,
+            background: TerminalCommandSuggestionRowBackgroundRole::Transparent,
+        }
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_terminal_command_suggestions(
         &self,
@@ -45,6 +79,7 @@ impl WorkspaceApp {
             }
             let suggestion_for_click = suggestion.clone();
             let active = highlighted == Some(index);
+            let row_state = terminal_command_suggestion_row_ui_state(active);
             let row_index = index;
             index += 1;
             menu = menu.child(
@@ -57,15 +92,13 @@ impl WorkspaceApp {
                     .py(px(8.0))
                     .cursor_pointer()
                     .text_size(px(13.0))
-                    .text_color(if active {
-                        rgb(theme.text)
-                    } else {
-                        rgb(theme.text_muted)
+                    .text_color(match row_state.text {
+                        TerminalCommandSuggestionRowTextRole::Active => rgb(theme.text),
+                        TerminalCommandSuggestionRowTextRole::Muted => rgb(theme.text_muted),
                     })
-                    .bg(if active {
-                        rgb(theme.bg_hover)
-                    } else {
-                        rgba(0x00000000)
+                    .bg(match row_state.background {
+                        TerminalCommandSuggestionRowBackgroundRole::Active => rgb(theme.bg_hover),
+                        TerminalCommandSuggestionRowBackgroundRole::Transparent => rgba(0x00000000),
                     })
                     .hover(move |style| {
                         style
@@ -131,5 +164,32 @@ impl WorkspaceApp {
             );
         }
         menu.into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlighted_suggestion_row_uses_active_visual_state() {
+        assert_eq!(
+            terminal_command_suggestion_row_ui_state(true),
+            TerminalCommandSuggestionRowUiState {
+                text: TerminalCommandSuggestionRowTextRole::Active,
+                background: TerminalCommandSuggestionRowBackgroundRole::Active,
+            }
+        );
+    }
+
+    #[test]
+    fn unhighlighted_suggestion_row_stays_muted_and_transparent() {
+        assert_eq!(
+            terminal_command_suggestion_row_ui_state(false),
+            TerminalCommandSuggestionRowUiState {
+                text: TerminalCommandSuggestionRowTextRole::Muted,
+                background: TerminalCommandSuggestionRowBackgroundRole::Transparent,
+            }
+        );
     }
 }

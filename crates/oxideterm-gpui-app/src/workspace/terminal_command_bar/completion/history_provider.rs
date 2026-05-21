@@ -3,6 +3,7 @@ impl WorkspaceApp {
         &self,
         input: &str,
         allow_empty_history: bool,
+        context: &TerminalCommandContext,
         cx: &mut Context<Self>,
     ) -> Vec<TerminalCommandSuggestion> {
         let query = input.trim_start();
@@ -39,9 +40,7 @@ impl WorkspaceApp {
             .terminal
             .autosuggest
             .local_shell_history
-            && self
-                .active_tab()
-                .is_some_and(|tab| tab.kind == TabKind::LocalTerminal)
+            && context.is_local_terminal()
         {
             for (index, command) in load_local_shell_history_commands().into_iter().enumerate() {
                 put_terminal_history_entry(

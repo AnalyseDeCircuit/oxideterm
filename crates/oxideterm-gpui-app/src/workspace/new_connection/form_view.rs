@@ -1,7 +1,7 @@
 use gpui::{
     AnchoredPositionMode, AnyElement, ClipboardItem, Context, Corner, KeyDownEvent, MouseButton,
-    ParentElement, PathPromptOptions, SharedString, Styled, Window, anchored, deferred, div, point,
-    prelude::*, px, rgb, rgba,
+    MouseMoveEvent, ParentElement, PathPromptOptions, SharedString, Styled, Window, anchored,
+    deferred, div, point, prelude::*, px, rgb, rgba,
 };
 
 use super::{
@@ -15,14 +15,15 @@ use super::{
     ssh_flow::SshConnectionIntent,
 };
 use crate::assets::LucideIcon;
+use crate::workspace::SelectableTextScrollExt;
 use crate::workspace::WorkspaceApp;
 use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_ui::{
     ButtonTone, TextInputView, button,
     button::{ButtonOptions, ButtonSize, ButtonVariant, button_with},
     checkbox, form_field,
-    modal::popover_backdrop,
-    modal_body, modal_container, modal_footer, modal_header, modal_overlay,
+    modal::{dismissible_dialog_backdrop, popover_backdrop},
+    modal_body, modal_container, modal_footer, modal_header,
     radio_group::{radio_group, radio_group_item},
     segmented_tab, segmented_tabs,
     select::{

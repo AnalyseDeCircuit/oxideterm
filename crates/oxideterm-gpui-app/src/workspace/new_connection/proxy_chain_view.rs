@@ -134,10 +134,28 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let add_disabled = !jump_form.complete();
-        modal_overlay(
-            &self.tokens,
-            modal_container(&self.tokens)
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    // Tauri jump-server form is a Dialog child of the new
+                    // connection flow; overlay clicks cancel just this subform.
+                    if let Some(form) = this.new_connection_form.as_mut() {
+                        form.jump_server_form = None;
+                        form.field_focused = false;
+                        form.selected_field = None;
+                    }
+                    this.ime_marked_text = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(
+                modal_container(&self.tokens)
                 .w(px(TAURI_JUMP_MODAL_WIDTH))
+                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
                 .child(modal_header(
                     &self.tokens,
                     self.i18n.t("ssh.form.proxy_jump_title"),
@@ -267,6 +285,7 @@ impl WorkspaceApp {
                         .child(self.render_jump_add_button(add_disabled, cx)),
                 ),
         )
+        .into_any_element()
     }
 
     fn render_proxy_chain_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -281,7 +300,9 @@ impl WorkspaceApp {
             .flex_col()
             .gap_2()
             .max_h(px(TAURI_PROXY_CHAIN_MAX_HEIGHT))
-            .overflow_y_scroll();
+            .selectable_overflow_y_scroll(
+                &self.selectable_text_scroll_handle("new-connection-proxy-chain-scroll"),
+            );
         if hops.is_empty() {
             list = list.child(
                 div()
@@ -563,25 +584,34 @@ impl WorkspaceApp {
                         .child(self.render_proxy_hop_line(
                             self.i18n.t("ssh.form.proxy_chain_host"),
                             hop.host,
+                            cx,
                         ))
                         .child(self.render_proxy_hop_line(
                             self.i18n.t("ssh.form.proxy_chain_port"),
                             hop.port,
+                            cx,
                         ))
                         .child(self.render_proxy_hop_line(
                             self.i18n.t("ssh.form.proxy_chain_username"),
                             hop.username,
+                            cx,
                         ))
                         .child(self.render_proxy_hop_line(
                             self.i18n.t("ssh.form.proxy_chain_auth"),
                             auth_label,
+                            cx,
                         )),
                 ),
             )
             .into_any_element()
     }
 
-    fn render_proxy_hop_line(&self, label: String, value: String) -> AnyElement {
+    fn render_proxy_hop_line(
+        &self,
+        label: String,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .items_center()
@@ -590,9 +620,25 @@ impl WorkspaceApp {
             .child(
                 div()
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(format!("{label}:")),
+                    .child(self.render_selectable_text_scoped(
+                        "proxy-hop-label",
+                        (&label, &value),
+                        format!("{label}:"),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
-            .child(div().font_weight(gpui::FontWeight::MEDIUM).child(value))
+            .child(
+                div()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .child(self.render_selectable_text_scoped(
+                        "proxy-hop-value",
+                        (&label, &value),
+                        value.clone(),
+                        self.tokens.ui.text,
+                        cx,
+                    )),
+            )
             .into_any_element()
     }
 
@@ -673,6 +719,10 @@ impl WorkspaceApp {
             return;
         }
         form.proxy_hops.push(jump_form);
+        if form.auth_tab == SshAuthTab::TwoFactor {
+            form.auth_tab = SshAuthTab::Password;
+            form.focused_field = NewConnectionField::Password;
+        }
         form.proxy_chain_expanded = true;
         form.field_focused = false;
         form.selected_field = None;

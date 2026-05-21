@@ -152,6 +152,8 @@ pub enum SettingsInput {
     AiProfileModel(usize),
     AiSystemPrompt,
     AiMemoryContent,
+    AiToolUseMaxRounds,
+    AiToolUseMaxCallsPerRound,
     AiModelContextWindow(usize, usize),
     AiActiveModelMaxResponseTokens,
     AiEmbeddingModel,
@@ -220,6 +222,8 @@ impl SettingsInput {
             Self::AiProfileModel(index) => 21_001 + index as u64 * 2,
             Self::AiSystemPrompt => 22_000,
             Self::AiMemoryContent => 22_001,
+            Self::AiToolUseMaxRounds => 22_002,
+            Self::AiToolUseMaxCallsPerRound => 22_003,
             Self::AiModelContextWindow(provider_index, model_index) => {
                 23_000 + provider_index as u64 * 1_000 + model_index as u64
             }

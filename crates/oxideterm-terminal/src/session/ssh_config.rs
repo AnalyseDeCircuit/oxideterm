@@ -5,6 +5,7 @@ pub struct SshSessionConfig {
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
     trzsz_policy: Option<TrzszTransferPolicy>,
     defer_pty_until_resize: bool,
+    post_connect_command: Option<String>,
 }
 
 impl SshSessionConfig {
@@ -16,6 +17,7 @@ impl SshSessionConfig {
             prompt_handler: None,
             trzsz_policy: None,
             defer_pty_until_resize: false,
+            post_connect_command: None,
         }
     }
 
@@ -56,6 +58,14 @@ impl SshSessionConfig {
         self
     }
 
+    pub fn with_post_connect_command(mut self, command: Option<String>) -> Self {
+        self.post_connect_command = command.and_then(|command| {
+            let command = command.trim().to_string();
+            (!command.is_empty()).then_some(command)
+        });
+        self
+    }
+
     pub fn defer_pty_until_resize(&self) -> bool {
         self.defer_pty_until_resize
     }
@@ -63,11 +73,16 @@ impl SshSessionConfig {
     pub fn trzsz_policy(&self) -> Option<TrzszTransferPolicy> {
         self.trzsz_policy.clone()
     }
+
+    pub fn post_connect_command(&self) -> Option<&str> {
+        self.post_connect_command.as_deref()
+    }
 }
 
 impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
     fn from(config: oxideterm_ssh::SshConfig) -> Self {
         Self {
+            post_connect_command: config.post_connect_command.clone(),
             config,
             registry: None,
             consumer: None,
@@ -87,6 +102,7 @@ impl std::fmt::Debug for SshSessionConfig {
             .field("prompt_handler", &self.prompt_handler.is_some())
             .field("trzsz_policy", &self.trzsz_policy)
             .field("defer_pty_until_resize", &self.defer_pty_until_resize)
+            .field("post_connect_command", &self.post_connect_command.is_some())
             .finish()
     }
 }

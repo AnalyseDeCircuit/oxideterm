@@ -61,26 +61,7 @@ impl WorkspaceApp {
         } else {
             Vec::new()
         };
-        let ghost_text = command_suggestions
-            .iter()
-            .find(|candidate| candidate.inline_safe)
-            .and_then(|candidate| {
-                let start = candidate
-                    .replacement
-                    .start
-                    .min(self.terminal_command_bar_draft.len());
-                let end = candidate
-                    .replacement
-                    .end
-                    .min(self.terminal_command_bar_draft.len())
-                    .max(start);
-                let current = &self.terminal_command_bar_draft[start..end];
-                candidate
-                    .insert_text
-                    .strip_prefix(current)
-                    .filter(|suffix| !suffix.is_empty())
-                    .map(ToString::to_string)
-            });
+        let ghost_text = self.terminal_command_ghost_text(&command_suggestions);
         let showing_placeholder = command_is_empty && marked_text.is_none();
         let command_text = if showing_placeholder {
             self.i18n.t("terminal.command_bar.command_placeholder")
@@ -550,7 +531,7 @@ impl WorkspaceApp {
                                             !this.terminal_quick_commands_open;
                                         this.terminal_broadcast_menu_open = false;
                                         if !this.terminal_quick_commands_open {
-                                            this.terminal_quick_command_pending = None;
+                                            this.close_terminal_quick_commands_popover();
                                         }
                                         cx.stop_propagation();
                                         cx.notify();

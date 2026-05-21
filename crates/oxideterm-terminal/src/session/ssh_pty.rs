@@ -127,6 +127,11 @@ impl SshPtySession {
                     cols: self.resize.cols as u16,
                     rows: self.resize.rows as u16,
                 });
+                if let Some(command) = self.config.post_connect_command() {
+                    let mut payload = command.as_bytes().to_vec();
+                    payload.push(b'\r');
+                    let _ = self.send_command(SshTransportCommand::Data(payload));
+                }
                 self.title = Some(self.title_text());
                 self.pending_events
                     .push(TerminalEvent::TitleChanged(self.title_text()));

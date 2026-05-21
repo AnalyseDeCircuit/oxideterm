@@ -86,6 +86,7 @@ pub struct ConnectionDraft {
     pub tags: Vec<String>,
     pub proxy_hops: Vec<ProxyHopDraft>,
     pub agent_forwarding: bool,
+    pub post_connect_command: String,
 }
 
 pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnection> {
@@ -122,6 +123,7 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
         updated_at: Some(now),
         color: None,
         tags: vec![SSH_CONFIG_TAG.to_string()],
+        post_connect_command: None,
     })
 }
 
@@ -147,6 +149,8 @@ pub fn save_request_from_draft(
         color: (!draft.color.trim().is_empty()).then(|| draft.color.trim().to_string()),
         tags: draft.tags,
         agent_forwarding: draft.agent_forwarding,
+        post_connect_command: (!draft.post_connect_command.trim().is_empty())
+            .then(|| draft.post_connect_command.trim().to_string()),
     })
 }
 
@@ -433,6 +437,7 @@ mod tests {
                 agent_forwarding: false,
             }],
             agent_forwarding: false,
+            post_connect_command: String::new(),
         };
 
         let error = save_request_from_draft(draft, None, None).unwrap_err();

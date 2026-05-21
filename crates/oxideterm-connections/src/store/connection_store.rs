@@ -100,6 +100,12 @@ impl ConnectionStore {
             updated_at: Some(now),
             color: request.color,
             tags: request.tags,
+            post_connect_command: request
+                .post_connect_command
+                .and_then(|command| {
+                    let command = command.trim().to_string();
+                    (!command.is_empty()).then_some(command)
+                }),
         };
         if let Some(index) = self.data.connections.iter().position(|conn| conn.id == id) {
             self.data.connections[index] = connection;

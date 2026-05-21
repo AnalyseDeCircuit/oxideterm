@@ -1,6 +1,9 @@
-use std::path::Path;
+use std::{
+    io::{Read, Seek, SeekFrom},
+    path::Path,
+};
 
-use crate::{LocalPreview, LocalPreviewMetadata, list_local_archive_contents};
+use crate::{LocalPreview, LocalPreviewChunk, LocalPreviewMetadata, list_local_archive_contents};
 
 pub const MAX_PREVIEW_SIZE: u64 = 10 * 1024 * 1024;
 pub const STREAM_PREVIEW_THRESHOLD: u64 = 256 * 1024;
@@ -65,6 +68,33 @@ pub fn read_local_preview(path: &str) -> LocalPreview {
     if office_extensions().contains(&ext.as_str()) {
         return LocalPreview::Unsupported("fileManager.openExternal".to_string());
     }
+    let language = language_for_extension(&ext, &file_name);
+    if file_size >= STREAM_PREVIEW_THRESHOLD
+        && !markdown_extensions().contains(&ext.as_str())
+        && (language.is_some() || text_extensions().contains(&ext.as_str()))
+    {
+        return match std::fs::File::open(path_ref) {
+            Ok(mut file) => {
+                let mut sample = vec![0u8; 4096usize.min(file_size as usize)];
+                match file.read(&mut sample) {
+                    Ok(bytes_read) => {
+                        sample.truncate(bytes_read);
+                        if looks_binary(&sample) {
+                            LocalPreview::Unsupported("fileManager.binaryFile".to_string())
+                        } else {
+                            LocalPreview::TextStream {
+                                path: path.to_string(),
+                                size: file_size,
+                                language,
+                            }
+                        }
+                    }
+                    Err(error) => LocalPreview::Error(error.to_string()),
+                }
+            }
+            Err(error) => LocalPreview::Error(error.to_string()),
+        };
+    }
     if file_size > MAX_PREVIEW_SIZE {
         return LocalPreview::TooLarge { size: file_size };
     }
@@ -102,6 +132,38 @@ pub fn read_local_preview(path: &str) -> LocalPreview {
         },
         Err(error) => LocalPreview::Error(error.to_string()),
     }
+}
+
+pub fn read_local_preview_range(
+    path: &str,
+    offset: u64,
+    length: u64,
+) -> Result<LocalPreviewChunk, String> {
+    let mut file =
+        std::fs::File::open(path).map_err(|error| format!("Failed to open file: {error}"))?;
+    let file_len = file
+        .metadata()
+        .map_err(|error| format!("Failed to get metadata: {error}"))?
+        .len();
+    if offset >= file_len {
+        return Ok(LocalPreviewChunk {
+            data: Vec::new(),
+            eof: true,
+        });
+    }
+
+    let safe_len = length.min(1024 * 1024).min(file_len - offset);
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|error| format!("Failed to seek file: {error}"))?;
+    let mut data = vec![0u8; safe_len as usize];
+    let bytes_read = file
+        .read(&mut data)
+        .map_err(|error| format!("Failed to read file: {error}"))?;
+    data.truncate(bytes_read);
+    Ok(LocalPreviewChunk {
+        eof: offset + bytes_read as u64 >= file_len,
+        data,
+    })
 }
 
 pub fn local_preview_metadata(path: &str) -> Option<LocalPreviewMetadata> {
@@ -190,6 +252,10 @@ fn archive_extensions() -> &'static [&'static str] {
 
 fn markdown_extensions() -> &'static [&'static str] {
     &["md", "markdown", "mdx"]
+}
+
+fn text_extensions() -> &'static [&'static str] {
+    &["txt", "log", "ini", "conf", "cfg", "env"]
 }
 
 fn shell_config_file(file_name: &str) -> bool {

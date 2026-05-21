@@ -15,6 +15,19 @@ pub(super) struct SearchBarState {
     pub(super) active_match: Option<usize>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalCommandEnterAction {
+    SubmitDraft,
+    SubmitSuggestion(usize),
+    AcceptSuggestion(usize),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalCommandSuggestionDirection {
+    Up,
+    Down,
+}
+
 impl WorkspaceApp {
     pub(super) fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.visible = true;
@@ -232,9 +245,7 @@ impl WorkspaceApp {
         }
 
         if self.terminal_quick_commands_open {
-            self.terminal_quick_commands_open = false;
-            self.terminal_quick_command_pending = None;
-            self.quick_commands.focused_input = None;
+            self.close_terminal_quick_commands_popover();
             cx.notify();
             return true;
         }
@@ -683,8 +694,7 @@ impl WorkspaceApp {
                     return;
                 }
                 self.terminal_command_bar_focused = false;
-                self.terminal_quick_commands_open = false;
-                self.terminal_quick_command_pending = None;
+                self.close_terminal_quick_commands_popover();
                 self.ime_marked_text = None;
                 self.focus_active_pane(window, cx);
                 cx.notify();
@@ -700,9 +710,10 @@ impl WorkspaceApp {
             }
             "right" => {
                 let suggestions = self.terminal_command_bar_visible_suggestions(cx);
-                if let Some(suggestion) = suggestions.iter().find(|candidate| candidate.inline_safe)
+                if let Some(suggestion) =
+                    self.terminal_command_inline_suggestion_for_accept(&suggestions)
                 {
-                    self.accept_terminal_command_suggestion(suggestion, cx);
+                    self.accept_terminal_command_suggestion(&suggestion, cx);
                 }
             }
             "down" => {
@@ -711,16 +722,14 @@ impl WorkspaceApp {
                     suggestions = self.terminal_command_bar_suggestions(true, cx);
                 }
                 if !suggestions.is_empty() {
-                    let next = if self.terminal_command_suggestions_open {
-                        self.terminal_command_suggestion_highlighted
-                            .unwrap_or(0)
-                            .saturating_add(1)
-                            .min(suggestions.len().saturating_sub(1))
-                    } else {
-                        0
-                    };
                     self.terminal_command_suggestions_open = true;
-                    self.terminal_command_suggestion_highlighted = Some(next);
+                    self.terminal_command_suggestion_highlighted =
+                        terminal_command_next_suggestion_index(
+                            suggestions.len(),
+                            true,
+                            self.terminal_command_suggestion_highlighted,
+                            TerminalCommandSuggestionDirection::Down,
+                        );
                     cx.notify();
                 }
             }
@@ -730,34 +739,45 @@ impl WorkspaceApp {
                     suggestions = self.terminal_command_bar_suggestions(true, cx);
                 }
                 if !suggestions.is_empty() {
-                    let next = if self.terminal_command_suggestions_open {
-                        self.terminal_command_suggestion_highlighted
-                            .unwrap_or_else(|| suggestions.len().saturating_sub(1))
-                            .saturating_sub(1)
-                    } else {
-                        suggestions.len().saturating_sub(1)
-                    };
                     self.terminal_command_suggestions_open = true;
-                    self.terminal_command_suggestion_highlighted = Some(next);
+                    self.terminal_command_suggestion_highlighted =
+                        terminal_command_next_suggestion_index(
+                            suggestions.len(),
+                            true,
+                            self.terminal_command_suggestion_highlighted,
+                            TerminalCommandSuggestionDirection::Up,
+                        );
                     cx.notify();
                 }
             }
             "enter" if modifiers.shift || modifiers.alt => {
+                self.terminal_command_bar_draft.push('\n');
                 self.terminal_command_suggestions_open = false;
                 self.terminal_command_suggestion_highlighted = None;
+                self.ime_marked_text = None;
                 cx.notify();
             }
             "enter" => {
-                if self.terminal_command_suggestions_open {
-                    let suggestions = self.terminal_command_bar_visible_suggestions(cx);
-                    if let Some(index) = self.terminal_command_suggestion_highlighted
-                        && let Some(suggestion) = suggestions.get(index)
-                    {
-                        if !suggestion.executable {
+                let suggestions = self.terminal_command_bar_visible_suggestions(cx);
+                match terminal_command_enter_action(
+                    self.terminal_command_suggestions_open,
+                    self.terminal_command_suggestion_highlighted,
+                    &suggestions,
+                ) {
+                    TerminalCommandEnterAction::AcceptSuggestion(index) => {
+                        if let Some(suggestion) = suggestions.get(index) {
                             self.accept_terminal_command_suggestion(suggestion, cx);
                             return;
                         }
-                        self.accept_terminal_command_suggestion(suggestion, cx);
+                    }
+                    TerminalCommandEnterAction::SubmitSuggestion(index) => {
+                        if let Some(suggestion) = suggestions.get(index) {
+                            self.accept_terminal_command_suggestion(suggestion, cx);
+                        }
+                    }
+                    TerminalCommandEnterAction::SubmitDraft => {
+                        self.terminal_command_suggestions_open = false;
+                        self.terminal_command_suggestion_highlighted = None;
                     }
                 }
                 self.terminal_command_suggestions_open = false;
@@ -883,8 +903,7 @@ impl WorkspaceApp {
                 variant: TerminalNoticeVariant::Success,
             });
         }
-        self.terminal_quick_command_pending = None;
-        self.terminal_quick_commands_open = false;
+        self.close_terminal_quick_commands_popover();
         self.terminal_command_bar_draft.clear();
         self.ime_marked_text = None;
         cx.notify();
@@ -1286,6 +1305,47 @@ fn terminal_command_executable(command: &str) -> Option<String> {
     None
 }
 
+fn terminal_command_enter_action(
+    suggestions_open: bool,
+    highlighted: Option<usize>,
+    suggestions: &[TerminalCommandSuggestion],
+) -> TerminalCommandEnterAction {
+    let Some(index) = highlighted else {
+        return TerminalCommandEnterAction::SubmitDraft;
+    };
+    if !suggestions_open {
+        return TerminalCommandEnterAction::SubmitDraft;
+    }
+    let Some(suggestion) = suggestions.get(index) else {
+        return TerminalCommandEnterAction::SubmitDraft;
+    };
+    if suggestion.executable {
+        TerminalCommandEnterAction::SubmitSuggestion(index)
+    } else {
+        TerminalCommandEnterAction::AcceptSuggestion(index)
+    }
+}
+
+fn terminal_command_next_suggestion_index(
+    suggestions_len: usize,
+    suggestions_open: bool,
+    highlighted: Option<usize>,
+    direction: TerminalCommandSuggestionDirection,
+) -> Option<usize> {
+    if suggestions_len == 0 {
+        return None;
+    }
+    let last = suggestions_len.saturating_sub(1);
+    Some(match (direction, suggestions_open, highlighted) {
+        (TerminalCommandSuggestionDirection::Down, true, Some(index)) => {
+            index.saturating_add(1).min(last)
+        }
+        (TerminalCommandSuggestionDirection::Down, _, _) => 0,
+        (TerminalCommandSuggestionDirection::Up, true, Some(index)) => index.saturating_sub(1),
+        (TerminalCommandSuggestionDirection::Up, _, _) => last,
+    })
+}
+
 fn shell_words(segment: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
@@ -1332,6 +1392,106 @@ fn is_shell_assignment_name(name: &str) -> bool {
     };
     (first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod terminal_command_bar_behavior_tests {
+    use super::*;
+
+    fn suggestion(executable: bool) -> TerminalCommandSuggestion {
+        TerminalCommandSuggestion {
+            kind: TerminalCommandSuggestionKind::History,
+            label: "ls -la".to_string(),
+            insert_text: "ls -la".to_string(),
+            description: None,
+            executable,
+            replacement: 0..2,
+            group_label_key: "terminal.command_bar.group_history",
+            source_label_key: "terminal.command_bar.source_history",
+            score: 1.0,
+            risk: None,
+            inline_safe: true,
+        }
+    }
+
+    #[test]
+    fn command_bar_enter_matches_tauri_unselected_popup_semantics() {
+        let suggestions = vec![suggestion(true)];
+
+        assert_eq!(
+            terminal_command_enter_action(true, None, &suggestions),
+            TerminalCommandEnterAction::SubmitDraft
+        );
+        assert_eq!(
+            terminal_command_enter_action(false, Some(0), &suggestions),
+            TerminalCommandEnterAction::SubmitDraft
+        );
+    }
+
+    #[test]
+    fn command_bar_enter_submits_only_highlighted_executable_suggestion() {
+        assert_eq!(
+            terminal_command_enter_action(true, Some(0), &[suggestion(true)]),
+            TerminalCommandEnterAction::SubmitSuggestion(0)
+        );
+        assert_eq!(
+            terminal_command_enter_action(true, Some(0), &[suggestion(false)]),
+            TerminalCommandEnterAction::AcceptSuggestion(0)
+        );
+    }
+
+    #[test]
+    fn command_bar_arrow_navigation_matches_tauri_highlight_rules() {
+        assert_eq!(
+            terminal_command_next_suggestion_index(
+                2,
+                false,
+                None,
+                TerminalCommandSuggestionDirection::Down
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            terminal_command_next_suggestion_index(
+                2,
+                true,
+                Some(0),
+                TerminalCommandSuggestionDirection::Down
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            terminal_command_next_suggestion_index(
+                2,
+                false,
+                None,
+                TerminalCommandSuggestionDirection::Up
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            terminal_command_next_suggestion_index(
+                2,
+                true,
+                Some(1),
+                TerminalCommandSuggestionDirection::Up
+            ),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn command_executable_supports_focus_handoff_detection() {
+        assert_eq!(
+            terminal_command_executable("vim src/main.rs").as_deref(),
+            Some("vim")
+        );
+        assert_eq!(
+            terminal_command_executable("FOO=1 sudo /usr/bin/nvim").as_deref(),
+            Some("nvim")
+        );
+        assert_eq!(terminal_command_executable("A=1 B=2").as_deref(), None);
+    }
 }
 
 pub(super) fn classify_command_risk(command: &str) -> Option<&'static str> {

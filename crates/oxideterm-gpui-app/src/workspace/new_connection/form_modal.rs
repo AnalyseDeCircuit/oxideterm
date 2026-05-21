@@ -51,9 +51,19 @@ impl WorkspaceApp {
             && !form.username.trim().is_empty()
             && form.port.trim().parse::<u16>().is_ok();
         let primary_disabled = form.pending || !has_required_fields;
-        modal_overlay(
-            &self.tokens,
-            modal_container(&self.tokens)
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, window, cx| {
+                    // Tauri NewConnectionModal is a Radix Dialog; overlay
+                    // pointer-down calls onOpenChange(false), which closes and
+                    // restores focus to the active pane in native.
+                    this.close_new_connection_form(window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(
+                modal_container(&self.tokens)
                 .w(px(if drill_down_mode {
                     TAURI_DRILL_DOWN_MODAL_WIDTH
                 } else if prompt_mode || edit_properties_mode {
@@ -64,13 +74,20 @@ impl WorkspaceApp {
                 .max_h(px(modal_max_height))
                 .flex()
                 .flex_col()
+                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
                 .child(modal_header(&self.tokens, title, description))
                 .child(
                     modal_body(&self.tokens)
                         .id("new-connection-modal-body-scroll")
                         .flex_1()
                         .min_h(px(0.0))
-                        .overflow_y_scroll()
+                        .selectable_overflow_y_scroll(
+                            &self.selectable_text_scroll_handle(
+                                "new-connection-modal-body-scroll",
+                            ),
+                        )
                         .child(
                             div()
                                 .flex()
@@ -178,7 +195,12 @@ impl WorkspaceApp {
                                 } else if drill_down_mode {
                                     self.render_drill_auth_tabs(form.auth_tab, cx)
                                 } else {
-                                    self.render_auth_tabs(form.auth_tab, edit_properties_mode, cx)
+                                    self.render_auth_tabs(
+                                        form.auth_tab,
+                                        edit_properties_mode,
+                                        !form.proxy_hops.is_empty(),
+                                        cx,
+                                    )
                                 })
                                 .when(form.auth_tab == SshAuthTab::Password, |content| {
                                     if edit_properties_mode {
@@ -378,13 +400,21 @@ impl WorkspaceApp {
                                         })
                                 })
                                 .when(form.auth_tab == SshAuthTab::Agent, |content| {
-                                    let content = content.child(self.render_connection_hint(
-                                        if drill_down_mode {
+                                    let content = content
+                                        .child(self.render_connection_hint(if drill_down_mode {
                                             self.i18n.t("ssh.drill_down.agent_desc")
                                         } else {
                                             self.i18n.t("ssh.form.agent_desc")
-                                        },
-                                    ));
+                                        }))
+                                        .when(!drill_down_mode && !prompt_mode, |content| {
+                                            content
+                                                .child(self.render_agent_status(
+                                                    form.agent_available,
+                                                ))
+                                                .child(self.render_connection_hint(
+                                                    self.i18n.t("ssh.form.agent_hint"),
+                                                ))
+                                        });
                                     if drill_down_mode {
                                         content.child(self.render_connection_hint(
                                             self.i18n.t("ssh.drill_down.agent_hint"),
@@ -398,9 +428,17 @@ impl WorkspaceApp {
                                         && !prompt_mode
                                         && !edit_properties_mode,
                                     |content| {
-                                        content.child(self.render_connection_hint(
-                                            self.i18n.t("ssh.form.two_factor_desc"),
-                                        ))
+                                        content
+                                            .child(self.render_connection_hint(
+                                                self.i18n.t("ssh.form.two_factor_desc"),
+                                            ))
+                                            .child(self.render_connection_hint(
+                                                self.i18n.t("ssh.form.two_factor_hint"),
+                                            ))
+                                            .child(self.render_connection_hint_with_color(
+                                                self.i18n.t("ssh.form.two_factor_warning"),
+                                                self.tokens.ui.warning,
+                                            ))
                                     },
                                 )
                                 .when(!drill_down_mode, |content| {
@@ -419,22 +457,112 @@ impl WorkspaceApp {
                                 })
                                 .when(!prompt_mode && !edit_properties_mode, |content| {
                                     content
-                                        .child(self.render_connection_checkbox(
-                                            self.i18n.t("ssh.form.agent_forwarding"),
-                                            form.agent_forwarding,
-                                            |form| form.agent_forwarding = !form.agent_forwarding,
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(self.tokens.spacing.two))
+                                                .child(self.render_connection_checkbox(
+                                                    self.i18n.t("ssh.form.agent_forwarding"),
+                                                    form.agent_forwarding,
+                                                    |form| {
+                                                        form.agent_forwarding =
+                                                            !form.agent_forwarding
+                                                    },
+                                                    cx,
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .size(px(18.0))
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .cursor_pointer()
+                                                        .child(Self::render_lucide_icon(
+                                                            LucideIcon::Info,
+                                                            14.0,
+                                                            rgb(self.tokens.ui.warning),
+                                                        ))
+                                                        .on_mouse_move(cx.listener(
+                                                            |this,
+                                                             event: &MouseMoveEvent,
+                                                             _window,
+                                                             cx| {
+                                                                this.queue_workspace_tooltip(
+                                                                    "new-connection-agent-forwarding",
+                                                                    this.i18n.t("ssh.form.agent_forwarding_hint"),
+                                                                    f32::from(event.position.x) + 12.0,
+                                                                    f32::from(event.position.y) + 16.0,
+                                                                    cx,
+                                                                );
+                                                            },
+                                                        ))
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            cx.listener(
+                                                                |this, _event, _window, cx| {
+                                                                    this.clear_workspace_tooltip(
+                                                                        "new-connection-agent-forwarding",
+                                                                        cx,
+                                                                    );
+                                                                    cx.stop_propagation();
+                                                                },
+                                                            ),
+                                                        ),
+                                                ),
+                                        )
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.post_connect_command"),
+                                            &form.post_connect_command,
+                                            self.i18n
+                                                .t("ssh.form.post_connect_command_placeholder"),
+                                            NewConnectionField::PostConnectCommand,
+                                            false,
                                             cx,
+                                        ))
+                                        .child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.post_connect_command_hint"),
                                         ))
                                         .when(!drill_down_mode, |content| {
                                             content
-                                                .child(self.render_connection_checkbox(
-                                                    self.i18n.t("ssh.form.save_connection"),
-                                                    form.save_connection,
-                                                    |form| {
-                                                        form.save_connection =
-                                                            !form.save_connection
-                                                    },
-                                                    cx,
+                                                .child(
+                                                    checkbox(
+                                                        &self.tokens,
+                                                        self.i18n.t("ssh.form.save_connection"),
+                                                        form.save_connection,
+                                                    )
+                                                    .on_mouse_down(
+                                                        MouseButton::Left,
+                                                        cx.listener(|this, _event, _window, cx| {
+                                                            let save_connection = if let Some(
+                                                                form,
+                                                            ) = this
+                                                                .new_connection_form
+                                                                .as_mut()
+                                                            {
+                                                                form.save_connection =
+                                                                    !form.save_connection;
+                                                                Some(form.save_connection)
+                                                            } else {
+                                                                None
+                                                            };
+                                                            if let Some(save_connection) =
+                                                                save_connection
+                                                            {
+                                                                this.settings_store
+                                                                    .settings_mut()
+                                                                    .new_connection
+                                                                    .save_connection =
+                                                                    save_connection;
+                                                                let _ = this.settings_store.save();
+                                                            }
+                                                            this.open_new_connection_select = None;
+                                                            cx.notify();
+                                                        }),
+                                                    ),
+                                                )
+                                                .child(self.render_connection_hint(
+                                                    self.i18n.t("ssh.form.save_connection_hint"),
                                                 ))
                                                 .child(self.render_proxy_chain_section(cx))
                                         })
@@ -513,6 +641,7 @@ impl WorkspaceApp {
                         )),
                 ),
         )
+        .into_any_element()
     }
 
 }

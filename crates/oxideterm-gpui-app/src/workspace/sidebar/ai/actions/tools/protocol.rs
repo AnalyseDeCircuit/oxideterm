@@ -386,15 +386,6 @@ fn annotate_executed_ai_tool_result_policy(
 }
 
 fn ai_terminal_input_payload(args: &serde_json::Value) -> String {
-    if let Some(control) = args.get("control").and_then(serde_json::Value::as_str) {
-        return match control {
-            "ctrl-c" => "\u{3}",
-            "ctrl-d" => "\u{4}",
-            "ctrl-z" => "\u{1a}",
-            _ => "",
-        }
-        .to_string();
-    }
     let mut payload = args
         .get("text")
         .and_then(serde_json::Value::as_str)

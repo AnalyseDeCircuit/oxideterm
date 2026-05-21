@@ -67,6 +67,11 @@ pub enum LocalPreview {
         content: String,
         language: Option<String>,
     },
+    TextStream {
+        path: String,
+        size: u64,
+        language: Option<String>,
+    },
     Markdown {
         content: String,
     },
@@ -94,6 +99,12 @@ pub enum LocalPreview {
     },
     Unsupported(String),
     Error(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct LocalPreviewChunk {
+    pub data: Vec<u8>,
+    pub eof: bool,
 }
 
 #[derive(Clone, Debug)]

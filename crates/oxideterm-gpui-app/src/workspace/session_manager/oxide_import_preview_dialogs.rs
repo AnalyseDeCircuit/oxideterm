@@ -110,7 +110,7 @@ impl WorkspaceApp {
             ));
         }
 
-        self.render_oxide_padded_card(16.0, None, children)
+        self.render_oxide_padded_card(16.0, None, children, cx)
     }
 
     fn render_oxide_import_connection_groups(
@@ -195,12 +195,15 @@ impl WorkspaceApp {
         items: Vec<(String, String)>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let scroll_handle =
+            self.selectable_text_scroll_handle(format!("oxide-import-preview-section-{title}"));
         let mut list = div()
+            .id(("oxide-import-preview-section", color as u64))
             .flex()
             .flex_col()
             .gap(px(4.0))
             .max_h(px(96.0))
-            .overflow_y_scrollbar();
+            .selectable_overflow_y_scrollbar(&scroll_handle);
         for (name, label) in items {
             let checked = self
                 .session_manager
@@ -227,7 +230,14 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(color))
-                            .child(title),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "oxide-import-preview-section-title",
+                                title.clone(),
+                                title,
+                                color,
+                                cx,
+                            )),
                     ),
             )
             .child(list)
@@ -262,7 +272,15 @@ impl WorkspaceApp {
                     rgb(self.tokens.ui.text_muted)
                 },
             ))
-            .child(label)
+            // Import preview check rows toggle on row click; labels must not own mouse-down.
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "oxide-import-check-line",
+                name.as_str(),
+                label,
+                self.tokens.ui.text_muted,
+                cx,
+            ))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -312,6 +330,7 @@ impl WorkspaceApp {
                 cx.notify();
                 cx.stop_propagation();
             }),
+            cx,
         )];
 
         if !preview.app_settings_sections.is_empty() {
@@ -328,7 +347,14 @@ impl WorkspaceApp {
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(rgb(self.tokens.ui.text))
-                        .child(format!("设置分组（{}）", preview.app_settings_sections.len())),
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "oxide-import-app-settings",
+                            "group-count",
+                            format!("设置分组（{}）", preview.app_settings_sections.len()),
+                            self.tokens.ui.text,
+                            cx,
+                        )),
                 );
             for section in &preview.app_settings_sections {
                 sections = sections.child(self.render_oxide_import_app_settings_section(section, cx));
@@ -425,7 +451,14 @@ impl WorkspaceApp {
                                             div()
                                                 .text_size(px(self.tokens.metrics.ui_text_xs))
                                                 .text_color(rgb(OXIDE_YELLOW_500))
-                                                .child("包含本地终端环境变量名"),
+                                                .child(self.render_display_text_with_role(
+                                                    SelectableTextRole::PlainDocument,
+                                                    "oxide-import-env-warning",
+                                                    section.id.as_str(),
+                                                    "包含本地终端环境变量名",
+                                                    OXIDE_YELLOW_500,
+                                                    cx,
+                                                )),
                                         )
                                     }),
                             ),
@@ -434,7 +467,14 @@ impl WorkspaceApp {
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(format!("{} 项", section.field_keys.len())),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "oxide-import-section-count",
+                                section.id.as_str(),
+                                format!("{} 项", section.field_keys.len()),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     )
                     .on_mouse_down(
                         MouseButton::Left,
@@ -548,9 +588,9 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|dialog| dialog.import_quick_commands);
         self.render_oxide_import_preview_subcard(vec![self.render_oxide_option_row(
-                format!("快捷命令（{} 条命令）", preview.quick_commands_count),
-                format!(
-                    "导入 {} 个快捷命令组。已有冲突会按当前冲突策略处理；替换只替换冲突项。",
+            format!("快捷命令（{} 条命令）", preview.quick_commands_count),
+            format!(
+                "导入 {} 个快捷命令组。已有冲突会按当前冲突策略处理；替换只替换冲突项。",
                     preview.quick_command_categories_count
                 ),
                 checked,
@@ -558,10 +598,11 @@ impl WorkspaceApp {
                     if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
                         dialog.import_quick_commands = !dialog.import_quick_commands;
                     }
-                    cx.notify();
-                    cx.stop_propagation();
-                }),
-            )])
+                cx.notify();
+                cx.stop_propagation();
+            }),
+            cx,
+        )])
     }
 
     fn render_oxide_import_plugins(
@@ -585,6 +626,7 @@ impl WorkspaceApp {
                 cx.notify();
                 cx.stop_propagation();
             }),
+            cx,
         )];
         let mut entries = preview
             .plugin_settings_by_plugin
@@ -663,7 +705,14 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(format!("{count} 项设置")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "oxide-import-plugin-settings-count",
+                        plugin_id.as_str(),
+                        format!("{count} 项设置"),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .on_mouse_down(
                 MouseButton::Left,
@@ -706,6 +755,7 @@ impl WorkspaceApp {
                         cx.notify();
                         cx.stop_propagation();
                     }),
+                    cx,
                 ),
                 self.render_oxide_tone_notice(
                     OXIDE_BLUE_500,
@@ -738,11 +788,15 @@ impl WorkspaceApp {
                 cx.notify();
                 cx.stop_propagation();
             }),
+            cx,
         )];
         if !preview.forward_details.is_empty() {
             let mut list = div()
+                .id("oxide-import-preview-forwards")
                 .max_h(px(112.0))
-                .overflow_y_scrollbar()
+                .selectable_overflow_y_scrollbar(
+                    &self.selectable_text_scroll_handle("oxide-import-preview-forwards"),
+                )
                 .flex()
                 .flex_col()
                 .gap(px(4.0));

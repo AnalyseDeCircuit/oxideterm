@@ -48,7 +48,13 @@ impl WorkspaceApp {
                     .truncate()
                     .text_size(px(SFTP_TEXT_SM))
                     .text_color(rgb(theme.text_muted))
-                    .child(name),
+                    .child(self.render_selectable_display_text(
+                        "sftp-preview-audio-name",
+                        path,
+                        name,
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -109,10 +115,16 @@ impl WorkspaceApp {
                             .min_w(px(92.0))
                             .text_size(px(SFTP_TEXT_XS))
                             .text_color(rgb(theme.text_muted))
-                            .child(format!(
-                                "{} / {}",
-                                format_sftp_media_time(position),
-                                format_sftp_media_time(duration)
+                            .child(self.render_selectable_display_text(
+                                "sftp-preview-audio-time",
+                                path,
+                                format!(
+                                    "{} / {}",
+                                    format_sftp_media_time(position),
+                                    format_sftp_media_time(duration)
+                                ),
+                                theme.text_muted,
+                                cx,
                             )),
                     )
                     .when(can_seek, |row| {
@@ -167,7 +179,13 @@ impl WorkspaceApp {
                             div()
                                 .text_size(px(SFTP_TEXT_XS))
                                 .text_color(rgb(SFTP_RED))
-                                .child(error),
+                                .child(self.render_selectable_display_text(
+                                    "sftp-preview-audio-error",
+                                    path,
+                                    error,
+                                    SFTP_RED,
+                                    cx,
+                                )),
                         )
                     }),
             )
@@ -175,7 +193,13 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(SFTP_TEXT_XS))
                     .text_color(rgb(theme.text_muted))
-                    .child(mime_type.to_string()),
+                    .child(self.render_selectable_display_text(
+                        "sftp-preview-audio-mime",
+                        path,
+                        mime_type.to_string(),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

@@ -23,6 +23,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             agent_forwarding: false,
+            post_connect_command: None,
         }
     }
 
@@ -607,6 +608,7 @@ mod tests {
             updated_at: None,
             color: None,
             tags: Vec::new(),
+            post_connect_command: None,
         };
         let mut bad = good.clone();
         bad.id = "bad".to_string();

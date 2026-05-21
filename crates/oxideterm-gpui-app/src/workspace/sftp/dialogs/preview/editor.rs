@@ -22,7 +22,11 @@ impl WorkspaceApp {
                     .id("sftp-preview-scroll")
                     .flex_1()
                     .when(!uses_virtual_text, |scroll| {
-                        scroll.overflow_y_scroll().p(px(16.0))
+                        scroll
+                            .selectable_overflow_y_scroll(
+                                &self.selectable_text_scroll_handle("sftp-preview-scroll"),
+                            )
+                            .p(px(16.0))
                     })
                     .text_color(rgb(theme.text))
                     .child(body),

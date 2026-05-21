@@ -63,6 +63,21 @@ pub(crate) fn marked_text_run(text: &str, metrics: &TerminalMetrics) -> TextRun 
     }
 }
 
+pub(crate) fn ghost_text_run(
+    text: &str,
+    theme: &TerminalUiTheme,
+    metrics: &TerminalMetrics,
+) -> TextRun {
+    TextRun {
+        len: text.len(),
+        font: metrics.font.clone(),
+        color: rgba((theme.foreground << 8) | 0x66).into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }
+}
+
 pub(crate) fn text_run_style_matches(left: &TextRun, right: &TextRun) -> bool {
     fn comparable_style(run: &TextRun) -> (&Font, Hsla, Option<Hsla>, bool, bool) {
         (

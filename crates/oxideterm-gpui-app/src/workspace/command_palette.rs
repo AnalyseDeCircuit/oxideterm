@@ -4,23 +4,22 @@ use oxideterm_connections::{
 };
 use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_oxide_theme};
 use oxideterm_gpui_ui::{
-    modal::{dialog_backdrop, dialog_content},
+    modal::{dialog_content, dismissible_command_palette_backdrop, dismissible_dialog_backdrop},
     text_input::{text_input_anchor_probe, text_input_value_segments},
 };
 use oxideterm_theme::BUILT_IN_THEMES;
 use std::borrow::Cow;
 
-const COMMAND_PALETTE_WIDTH: f32 = 560.0;
+const COMMAND_PALETTE_WIDTH: f32 = 560.0; // Tauri DialogContent max-w-[560px].
 const COMMAND_PALETTE_FALLBACK_TOP: f32 = 96.0;
-const COMMAND_PALETTE_TOP_RATIO: f32 = 0.15;
-const COMMAND_PALETTE_LIST_MAX_HEIGHT: f32 = 400.0;
-const COMMAND_PALETTE_INPUT_HEIGHT: f32 = 40.0;
-const COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT: f32 = 32.0;
+const COMMAND_PALETTE_TOP_RATIO: f32 = 0.15; // Tauri DialogContent top-[15%] translate-y-0.
+const COMMAND_PALETTE_LIST_MAX_HEIGHT: f32 = 400.0; // Tauri CommandList max-h-[min(50vh,400px)] cap.
+const COMMAND_PALETTE_INPUT_HEIGHT: f32 = 40.0; // Tauri CommandInput h-10.
+const COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT: f32 = 32.0; // Tauri CommandItem py-1.5 + text-sm line height.
 const SHORTCUTS_MODAL_LIST_MAX_HEIGHT: f32 = 420.0;
 const SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT: f32 = 32.0;
-const COMMAND_PALETTE_ICON_SLOT: f32 = 16.0;
+const COMMAND_PALETTE_ICON_SLOT: f32 = 16.0; // Tauri CommandInput/CommandItem h-4 w-4 icons.
 const COMMAND_PALETTE_ITEM_GAP: f32 = 10.0; // Tauri CommandItem gap-2.5.
-const COMMAND_PALETTE_BACKDROP_ALPHA: u32 = 0x66; // Tauri bg-black/40.
 const COMMAND_PALETTE_SELECTED_ALPHA: u32 = 0x26; // Tauri accent/15.
 const COMMAND_PALETTE_MODE_BADGE_ALPHA: u32 = 0x33; // Tauri accent/20.
 const QUICK_CONNECT_REQUIRES_AT: char = '@';
@@ -274,9 +273,11 @@ impl WorkspaceApp {
             // Tauri cmdk reveals the selected item automatically; GPUI scroll
             // children include section headings, so we map the selected item
             // index to the actual scroll child index before requesting reveal.
-            self.command_palette
-                .scroll_handle
-                .scroll_to_item(child_index, ScrollStrategy::Center);
+            scroll_tauri_virtual_list_to_index(
+                &self.command_palette.scroll_handle,
+                child_index,
+                TauriVirtualScrollAlign::Center,
+            );
         }
     }
 
@@ -999,6 +1000,11 @@ impl WorkspaceApp {
             .w(px(COMMAND_PALETTE_WIDTH))
             .rounded(px(self.tokens.radii.lg))
             .shadow_xl()
+            // Tauri uses Radix DialogContent, so pointer activity inside the
+            // panel must not bubble to the overlay outside-dismiss handler.
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
             .child(
                 div()
                     .flex()
@@ -1036,26 +1042,24 @@ impl WorkspaceApp {
                         div()
                             .relative()
                             .id("command-palette-scroll")
+                            .w_full()
                             .h(px(rows_height))
                             .max_h(px(COMMAND_PALETTE_LIST_MAX_HEIGHT))
-                            .child(
-                                uniform_list(
-                                    "command-palette-virtual-list",
-                                    row_count,
-                                    move |range, _window, cx| {
-                                        range
-                                            .map(|row_index| {
-                                                let row = virtual_rows[row_index].clone();
-                                                entity.update(cx, |this, cx| {
-                                                    this.render_command_palette_virtual_row(row, cx)
-                                                })
+                            .child(tracked_uniform_list(
+                                "command-palette-virtual-list",
+                                row_count,
+                                self.command_palette.scroll_handle.clone(),
+                                move |range, _window, cx| {
+                                    range
+                                        .map(|row_index| {
+                                            let row = virtual_rows[row_index].clone();
+                                            entity.update(cx, |this, cx| {
+                                                this.render_command_palette_virtual_row(row, cx)
                                             })
-                                            .collect::<Vec<_>>()
-                                    },
-                                )
-                                .track_scroll(self.command_palette.scroll_handle.clone())
-                                .size_full(),
-                            ),
+                                        })
+                                        .collect::<Vec<_>>()
+                                },
+                            )),
                     )
                     .when_some(self.command_palette.error.as_ref(), |root, error| {
                         root.child(
@@ -1081,7 +1085,14 @@ impl WorkspaceApp {
                             .text_size(px(11.0))
                             .line_height(px(16.0))
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("command_palette.footer_hint")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "command-palette-footer",
+                                "hint",
+                                self.i18n.t("command_palette.footer_hint"),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     ),
             );
         let palette_top = self
@@ -1089,19 +1100,16 @@ impl WorkspaceApp {
             .map(|(_, height)| height * COMMAND_PALETTE_TOP_RATIO)
             .unwrap_or(COMMAND_PALETTE_FALLBACK_TOP);
 
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
+        dismissible_command_palette_backdrop()
             .items_start()
             .justify_center()
-            .bg(rgba((0x000000 << 8) | COMMAND_PALETTE_BACKDROP_ALPHA))
-            .occlude()
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_command_palette(cx);
+                    cx.stop_propagation();
+                }),
+            )
             .child(div().mt(px(palette_top)).child(panel))
             .into_any_element()
     }
@@ -1129,8 +1137,14 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_command_palette_section_heading(&self, section: PaletteSection) -> AnyElement {
+    fn render_command_palette_section_heading(
+        &self,
+        section: PaletteSection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = self.i18n.t(section_label_key(section));
         div()
+            .w_full()
             .h(px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT))
             .px(px(12.0))
             .flex()
@@ -1139,7 +1153,14 @@ impl WorkspaceApp {
             .line_height(px(16.0))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(self.i18n.t(section_label_key(section)))
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "command-palette-section-heading",
+                section_label_key(section),
+                label,
+                self.tokens.ui.text_muted,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1168,6 +1189,9 @@ impl WorkspaceApp {
         }
         div()
             .id(("command-palette-row", index))
+            // Tauri CommandItem is a full-width flex row; this keeps its
+            // CommandShortcut ml-auto at the panel edge instead of after text.
+            .w_full()
             .h(px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT))
             .px(px(12.0))
             .flex()
@@ -1225,9 +1249,9 @@ impl WorkspaceApp {
                 row.child(
                     div()
                         .ml_auto()
+                        .flex_none()
                         .text_size(px(12.0))
                         .line_height(px(16.0))
-                        .font_family("monospace")
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(shortcut.clone()),
                 )
@@ -1242,19 +1266,26 @@ impl WorkspaceApp {
     ) -> AnyElement {
         match row {
             CommandPaletteVirtualRow::Heading(section) => {
-                self.render_command_palette_section_heading(section)
+                self.render_command_palette_section_heading(section, cx)
             }
             CommandPaletteVirtualRow::Item { ranked, item_index } => {
                 self.render_command_palette_row(&ranked, item_index, cx)
             }
             CommandPaletteVirtualRow::Empty => div()
+                .w_full()
                 .h(px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT))
                 .px(px(16.0))
                 .flex()
                 .items_center()
                 .text_size(px(14.0))
                 .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("command_palette.no_results"))
+                .child(self.render_selectable_display_text(
+                    "command-palette-empty",
+                    &self.command_palette.raw_query,
+                    self.i18n.t("command_palette.no_results"),
+                    self.tokens.ui.text_muted,
+                    cx,
+                ))
                 .into_any_element(),
         }
     }
@@ -1324,10 +1355,22 @@ impl WorkspaceApp {
             .min(SHORTCUTS_MODAL_LIST_MAX_HEIGHT);
         let virtual_rows = rows.clone();
         let entity = cx.entity();
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_shortcuts_modal(cx);
+                    cx.stop_propagation();
+                }),
+            )
             .child(
                 dialog_content(&self.tokens)
                     .w(px(600.0))
+                    // Mirrors Radix DialogContent: clicking or dragging inside
+                    // the shortcuts panel is not an outside click.
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .h(px(44.0))
@@ -1377,24 +1420,21 @@ impl WorkspaceApp {
                             .max_h(px(SHORTCUTS_MODAL_LIST_MAX_HEIGHT))
                             .px(px(16.0))
                             .py(px(4.0))
-                            .child(
-                                uniform_list(
-                                    "shortcuts-modal-virtual-list",
-                                    row_count,
-                                    move |range, _window, cx| {
-                                        range
-                                            .map(|row_index| {
-                                                let row = virtual_rows[row_index].clone();
-                                                entity.update(cx, |this, _cx| {
-                                                    this.render_shortcuts_modal_virtual_row(row)
-                                                })
+                            .child(tracked_uniform_list(
+                                "shortcuts-modal-virtual-list",
+                                row_count,
+                                self.shortcuts_modal.scroll_handle.clone(),
+                                move |range, _window, cx| {
+                                    range
+                                        .map(|row_index| {
+                                            let row = virtual_rows[row_index].clone();
+                                            entity.update(cx, |this, cx| {
+                                                this.render_shortcuts_modal_virtual_row(row, cx)
                                             })
-                                            .collect::<Vec<_>>()
-                                    },
-                                )
-                                .track_scroll(self.shortcuts_modal.scroll_handle.clone())
-                                .size_full(),
-                            ),
+                                        })
+                                        .collect::<Vec<_>>()
+                                },
+                            )),
                     )
                     .child(
                         div()
@@ -1589,7 +1629,12 @@ impl WorkspaceApp {
         categories
     }
 
-    fn render_shortcut_modal_row(&self, row: ShortcutModalRow, show_separator: bool) -> AnyElement {
+    fn render_shortcut_modal_row(
+        &self,
+        row: ShortcutModalRow,
+        show_separator: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .h(px(SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT))
             .flex()
@@ -1606,7 +1651,13 @@ impl WorkspaceApp {
                     .truncate()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text))
-                    .child(row.label),
+                    .child(self.render_selectable_display_text(
+                        "shortcuts-modal-label",
+                        &row.shortcut,
+                        row.label.clone(),
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -1620,12 +1671,22 @@ impl WorkspaceApp {
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(row.shortcut),
+                    .child(self.render_selectable_display_text(
+                        "shortcuts-modal-shortcut",
+                        &row.label,
+                        row.shortcut.clone(),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .into_any_element()
     }
 
-    fn render_shortcuts_modal_virtual_row(&self, row: ShortcutsModalVirtualRow) -> AnyElement {
+    fn render_shortcuts_modal_virtual_row(
+        &self,
+        row: ShortcutsModalVirtualRow,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         match row {
             ShortcutsModalVirtualRow::Heading(title) => div()
                 .h(px(SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT))
@@ -1640,12 +1701,18 @@ impl WorkspaceApp {
                     12.0,
                     rgb(self.tokens.ui.text_muted),
                 ))
-                .child(title.to_uppercase())
+                .child(self.render_selectable_display_text(
+                    "shortcuts-modal-heading",
+                    &title,
+                    title.to_uppercase(),
+                    self.tokens.ui.text_muted,
+                    cx,
+                ))
                 .into_any_element(),
             ShortcutsModalVirtualRow::Row {
                 row,
                 show_separator,
-            } => self.render_shortcut_modal_row(row, show_separator),
+            } => self.render_shortcut_modal_row(row, show_separator, cx),
             ShortcutsModalVirtualRow::Empty => div()
                 .h(px(SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT))
                 .flex()
@@ -1653,7 +1720,13 @@ impl WorkspaceApp {
                 .justify_center()
                 .text_size(px(self.tokens.metrics.ui_text_sm))
                 .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("shortcuts_modal.no_results"))
+                .child(self.render_selectable_display_text(
+                    "shortcuts-modal-empty",
+                    "shortcuts_modal.no_results",
+                    self.i18n.t("shortcuts_modal.no_results"),
+                    self.tokens.ui.text_muted,
+                    cx,
+                ))
                 .into_any_element(),
         }
     }

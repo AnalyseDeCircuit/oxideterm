@@ -1,10 +1,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{
-    AnchoredPositionMode, Corner, Div, ObjectFit, PathPromptOptions, Rgba,
-    StatefulInteractiveElement, StyledImage, anchored, deferred, point,
+    AnchoredPositionMode, Corner, Div, ObjectFit, PathPromptOptions, Rgba, StyledImage, anchored,
+    deferred, point,
 };
-use gpui_component::scroll::ScrollableElement;
 use oxideterm_settings::{
     FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
     PersistedSettings, create_default_highlight_rule, reindex_highlight_rules,
@@ -40,8 +39,8 @@ use oxideterm_gpui_ui::{
     checkbox::checkbox,
     confirm_dialog,
     modal::{
-        dialog_backdrop, dialog_content, dialog_description, dialog_footer, dialog_header,
-        dialog_title, popover_backdrop,
+        dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
+        dismissible_dialog_backdrop, popover_backdrop,
     },
     select::{
         OverlayAnchor, SelectAnchorId, select_anchor_probe, select_label, select_option,

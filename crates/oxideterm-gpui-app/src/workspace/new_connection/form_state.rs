@@ -62,6 +62,7 @@ pub(in crate::workspace) enum NewConnectionField {
     CertPath,
     Passphrase,
     Group,
+    PostConnectCommand,
     Color,
     JumpHost,
     JumpPort,
@@ -140,12 +141,14 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) passphrase: String,
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) group: String,
+    pub(in crate::workspace) post_connect_command: String,
     pub(in crate::workspace) color: String,
     pub(in crate::workspace) tags: Vec<String>,
     pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
     pub(in crate::workspace) proxy_chain_expanded: bool,
     pub(in crate::workspace) jump_server_form: Option<NewConnectionProxyHop>,
     pub(in crate::workspace) agent_forwarding: bool,
+    pub(in crate::workspace) agent_available: Option<bool>,
     pub(in crate::workspace) save_connection: bool,
     pub(in crate::workspace) field_focused: bool,
     pub(in crate::workspace) focused_field: NewConnectionField,
@@ -177,12 +180,14 @@ impl fmt::Debug for NewConnectionForm {
             .field("passphrase", &"[redacted secret]")
             .field("save_password", &self.save_password)
             .field("group", &self.group)
+            .field("post_connect_command", &self.post_connect_command)
             .field("color", &self.color)
             .field("tags", &self.tags)
             .field("proxy_hops", &self.proxy_hops)
             .field("proxy_chain_expanded", &self.proxy_chain_expanded)
             .field("jump_server_form", &self.jump_server_form)
             .field("agent_forwarding", &self.agent_forwarding)
+            .field("agent_available", &self.agent_available)
             .field("save_connection", &self.save_connection)
             .field("field_focused", &self.field_focused)
             .field("focused_field", &self.focused_field)
@@ -212,13 +217,15 @@ impl Default for NewConnectionForm {
             passphrase: String::new(),
             save_password: false,
             group: String::new(),
+            post_connect_command: String::new(),
             color: String::new(),
             tags: Vec::new(),
             proxy_hops: Vec::new(),
             proxy_chain_expanded: false,
             jump_server_form: None,
             agent_forwarding: false,
-            save_connection: true,
+            agent_available: None,
+            save_connection: false,
             field_focused: true,
             focused_field: NewConnectionField::Name,
             selected_field: None,
@@ -241,6 +248,7 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Username,
             NewConnectionField::Password,
             NewConnectionField::Group,
+            NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::DefaultKey => vec![
             NewConnectionField::Name,
@@ -249,6 +257,7 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Username,
             NewConnectionField::Passphrase,
             NewConnectionField::Group,
+            NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::SshKey => vec![
             NewConnectionField::Name,
@@ -258,6 +267,7 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::KeyPath,
             NewConnectionField::Passphrase,
             NewConnectionField::Group,
+            NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::Certificate => vec![
             NewConnectionField::Name,
@@ -268,6 +278,7 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::CertPath,
             NewConnectionField::Passphrase,
             NewConnectionField::Group,
+            NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::Agent | SshAuthTab::TwoFactor => vec![
             NewConnectionField::Name,
@@ -275,6 +286,7 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Port,
             NewConnectionField::Username,
             NewConnectionField::Group,
+            NewConnectionField::PostConnectCommand,
         ],
     };
     let index = fields
@@ -356,6 +368,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
+        NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
         NewConnectionField::Color => &mut form.color,
         NewConnectionField::JumpHost => {
             &mut form
@@ -420,6 +433,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::CertPath => &form.cert_path,
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::Group => &form.group,
+        NewConnectionField::PostConnectCommand => &form.post_connect_command,
         NewConnectionField::Color => &form.color,
         NewConnectionField::JumpHost => {
             &form

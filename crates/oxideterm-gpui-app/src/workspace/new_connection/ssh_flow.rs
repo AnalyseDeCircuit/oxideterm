@@ -98,6 +98,12 @@ impl WorkspaceApp {
         self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(NewConnectionForm {
             group: self.i18n.t("ssh.form.ungrouped"),
+            agent_available: detect_ssh_agent_available(),
+            save_connection: self
+                .settings_store
+                .settings()
+                .new_connection
+                .save_connection,
             ..NewConnectionForm::default()
         });
         self.drill_down_parent_node_id = None;
@@ -136,6 +142,7 @@ impl WorkspaceApp {
             focused_field: super::form_state::NewConnectionField::Host,
             save_connection: false,
             group: self.i18n.t("ssh.form.ungrouped"),
+            agent_available: detect_ssh_agent_available(),
             ..NewConnectionForm::default()
         };
         form.username = String::new();
@@ -546,6 +553,8 @@ impl WorkspaceApp {
             agent_forwarding: form.agent_forwarding,
             proxy_chain,
             strict_host_key_checking: true,
+            post_connect_command: (!form.post_connect_command.trim().is_empty())
+                .then(|| form.post_connect_command.trim().to_string()),
             ..SshConfig::default()
         };
         let title = if form.name.trim().is_empty() {
@@ -938,6 +947,11 @@ impl WorkspaceApp {
         });
         cx.notify();
     }
+}
+
+fn detect_ssh_agent_available() -> Option<bool> {
+    let sock = std::env::var_os("SSH_AUTH_SOCK")?;
+    Some(!sock.is_empty() && std::path::Path::new(&sock).exists())
 }
 
 fn proxy_chain_from_form(

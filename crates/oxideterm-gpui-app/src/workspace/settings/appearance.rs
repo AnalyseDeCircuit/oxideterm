@@ -1146,9 +1146,12 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .id("theme-editor-scroll")
                     .flex_1()
                     .min_h(px(0.0))
-                    .overflow_y_scrollbar()
+                    .selectable_overflow_y_scrollbar(
+                        &self.selectable_text_scroll_handle("theme-editor-scroll"),
+                    )
                     .px(px(THEME_EDITOR_BODY_PADDING_X))
                     .py(px(THEME_EDITOR_BODY_PADDING_Y))
                     .flex()
@@ -1237,7 +1240,20 @@ impl WorkspaceApp {
                     ),
             );
 
-        Some(dialog_backdrop().child(dialog).into_any_element())
+        Some(
+            dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        // Tauri ThemeEditorModal passes Dialog onOpenChange
+                        // directly through, so overlay close cancels editing.
+                        this.close_theme_editor(cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(dialog)
+                .into_any_element(),
+        )
     }
 
     fn theme_editor_name_duplicate_row(

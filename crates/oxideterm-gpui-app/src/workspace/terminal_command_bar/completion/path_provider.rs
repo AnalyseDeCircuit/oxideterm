@@ -1,13 +1,20 @@
 impl WorkspaceApp {
-    fn terminal_command_context_cwd(&self, cx: &mut Context<Self>) -> Option<String> {
-        let inferred = self
-            .active_pane_id()
+    fn terminal_command_context_cwd(
+        &self,
+        pane_id: Option<PaneId>,
+        tab_kind: Option<&TabKind>,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let registry_cwd = pane_id
+            .and_then(|pane_id| self.panes.get(&pane_id))
+            .and_then(|pane| pane.read(cx).current_working_directory());
+        let inferred = pane_id
             .and_then(|pane_id| self.panes.get(&pane_id))
             .map(|pane| pane.read(cx).visible_text_snapshot())
             .and_then(|text| infer_ai_cwd(&text));
-        inferred.or_else(|| {
-            self.active_tab()
-                .is_some_and(|tab| tab.kind == TabKind::LocalTerminal)
+        registry_cwd.or(inferred).or_else(|| {
+            tab_kind
+                .is_some_and(|kind| *kind == TabKind::LocalTerminal)
                 .then(|| {
                     std::env::current_dir()
                         .ok()
@@ -21,6 +28,7 @@ impl WorkspaceApp {
         &self,
         parsed: &TerminalShellParseResult,
         active_arg_type: TerminalFigArgType,
+        context: &TerminalCommandContext,
         cx: &mut Context<Self>,
     ) -> Vec<TerminalCommandSuggestion> {
         if !parsed.reliable
@@ -28,22 +36,19 @@ impl WorkspaceApp {
         {
             return Vec::new();
         }
-        let cwd = self.terminal_command_context_cwd(cx);
-        let Some(parts) = normalize_terminal_path_token(&parsed.current_token, cwd.as_deref())
+        let Some(parts) = normalize_terminal_path_token(&parsed.current_token, context.cwd.as_deref())
         else {
             return Vec::new();
         };
-        let is_remote = self
-            .active_tab()
-            .is_some_and(|tab| tab.kind == TabKind::SshTerminal);
-        if is_remote {
-            let Some(node_id) = self.terminal_command_active_node_id() else {
+        let provider_scope_id = context.provider_scope_id();
+        if context.is_remote_terminal() {
+            let Some(node_id) = context.node_id.clone() else {
                 return Vec::new();
             };
             let cache_key = terminal_path_cache_key(
                 "remote",
-                Some(node_id.0.as_str()),
-                cwd.as_deref(),
+                Some(provider_scope_id.as_str()),
+                context.cwd.as_deref(),
                 &parts.directory,
             );
             if let Some(entries) = get_cached_terminal_path_entries(&cache_key) {
@@ -58,7 +63,12 @@ impl WorkspaceApp {
             return Vec::new();
         }
 
-        let cache_key = terminal_path_cache_key("local", None, cwd.as_deref(), &parts.directory);
+        let cache_key = terminal_path_cache_key(
+            "local",
+            Some(provider_scope_id.as_str()),
+            context.cwd.as_deref(),
+            &parts.directory,
+        );
         let entries = if let Some(entries) = get_cached_terminal_path_entries(&cache_key) {
             entries
         } else {
@@ -80,13 +90,6 @@ impl WorkspaceApp {
             entries
         };
         terminal_path_entries_to_suggestions(entries, &parts, parsed, active_arg_type)
-    }
-
-    fn terminal_command_active_node_id(&self) -> Option<NodeId> {
-        let tab = self.active_tab()?;
-        let pane_id = tab.active_pane_id?;
-        let session_id = tab.root_pane.as_ref()?.session_id_for_pane(pane_id)?;
-        self.terminal_ssh_nodes.get(&session_id).cloned()
     }
 
     fn spawn_terminal_remote_path_completion(
@@ -224,14 +227,14 @@ fn terminal_path_completion_cache() -> &'static std::sync::Mutex<TerminalPathCom
 
 fn terminal_path_cache_key(
     scope: &str,
-    node_id: Option<&str>,
+    target_id: Option<&str>,
     cwd: Option<&str>,
     directory: &str,
 ) -> String {
     format!(
         "{}::{}::{}::{}",
         scope,
-        node_id.unwrap_or_default(),
+        target_id.unwrap_or_default(),
         cwd.unwrap_or_default(),
         directory
     )

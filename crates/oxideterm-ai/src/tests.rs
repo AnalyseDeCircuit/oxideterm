@@ -85,6 +85,30 @@ fn provider_templates_match_tauri_order() {
 }
 
 #[test]
+fn orchestrator_send_terminal_input_blocks_control_schema() {
+    let tools = orchestrator_tool_definitions();
+    let terminal_input = tools
+        .iter()
+        .find(|tool| tool.name == "send_terminal_input")
+        .expect("send_terminal_input tool");
+    let properties = terminal_input
+        .parameters
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .expect("tool properties");
+
+    assert!(
+        terminal_input
+            .description
+            .contains("use run_command instead")
+    );
+    assert!(terminal_input.description.contains("Control sequences"));
+    assert!(properties.contains_key("text"));
+    assert!(properties.contains_key("append_enter"));
+    assert!(!properties.contains_key("control"));
+}
+
+#[test]
 fn creates_provider_without_secret_material() {
     let template = provider_template_by_type("openai");
     let provider = new_provider_from_template(

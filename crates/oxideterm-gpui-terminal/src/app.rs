@@ -27,7 +27,7 @@ use parking_lot::Mutex;
 use crate::background_cache::BackgroundImageRenderCache;
 use crate::command_facts::{
     CommandFactLedger, TerminalAiCommandRecord, TerminalAutosuggestCommandRecord,
-    TerminalCommandFact,
+    TerminalAutosuggestInputState, TerminalCommandFact,
 };
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
@@ -69,6 +69,8 @@ pub struct TerminalPane {
     selecting: bool,
     last_mouse_report_point: Option<TerminalPoint>,
     title: SharedString,
+    cwd: Option<String>,
+    cwd_host: Option<String>,
     shell_integration_status: ShellIntegrationStatus,
     command_marks: Vec<TerminalCommandMark>,
     selected_command_mark_id: Option<String>,
@@ -269,6 +271,8 @@ impl TerminalPane {
             selecting: false,
             last_mouse_report_point: None,
             title: SharedString::from("OxideTerm"),
+            cwd: None,
+            cwd_host: None,
             shell_integration_status: ShellIntegrationStatus {
                 detected: false,
                 state: ShellIntegrationLifecycleState::Idle,
@@ -335,6 +339,14 @@ impl TerminalPane {
         self.shell_integration_status.clone()
     }
 
+    pub fn current_working_directory(&self) -> Option<String> {
+        self.cwd.clone()
+    }
+
+    pub fn current_working_directory_host(&self) -> Option<String> {
+        self.cwd_host.clone()
+    }
+
     pub fn command_marks(&self) -> Vec<TerminalCommandMark> {
         self.command_marks.clone()
     }
@@ -349,6 +361,15 @@ impl TerminalPane {
 
     pub fn autosuggest_command_records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
         self.command_fact_ledger.autosuggest_records()
+    }
+
+    pub fn autosuggest_input_state(&self) -> TerminalAutosuggestInputState {
+        self.input_tracker.state()
+    }
+
+    pub fn autosuggest_ghost_text(&self) -> Option<String> {
+        self.command_fact_ledger
+            .autosuggest_ghost_text(&self.input_tracker.state())
     }
 
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
@@ -426,6 +447,7 @@ impl TerminalPane {
 
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if self.terminal_accepts_input() && self.terminal.lock().paste_text(text).is_ok() {
+            self.input_tracker.reset();
             self.last_terminal_input = Instant::now();
             self.reset_cursor_blink();
             cx.notify();
@@ -436,8 +458,9 @@ impl TerminalPane {
         if command.trim().is_empty() {
             return;
         }
-        let mut input = command.to_string();
+        let mut input = command.replace("\r\n", "\r").replace('\n', "\r");
         input.push('\r');
+        self.observe_autosuggest_input_bytes(input.as_bytes());
         self.send_text(&input, cx);
     }
 
@@ -699,6 +722,11 @@ impl TerminalPane {
                 }
                 cx.notify();
             }
+            TerminalEvent::CwdChanged { cwd, host } => {
+                self.cwd = Some(cwd);
+                self.cwd_host = host;
+                cx.notify();
+            }
             TerminalEvent::ClipboardStore(text) => {
                 if self.settings.osc52_clipboard {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -769,11 +797,9 @@ impl TerminalPane {
     }
 
     fn observe_user_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        let Some(command) = self.input_tracker.apply_bytes(bytes) else {
+        let Some(command) = self.observe_autosuggest_input_bytes(bytes) else {
             return;
         };
-        self.command_fact_ledger
-            .record_runtime_autosuggest_command(&command);
         if self.shell_integration_status.detected
             || !self.settings.command_marks_user_input_observed
         {
@@ -784,6 +810,13 @@ impl TerminalPane {
             TerminalCommandMarkDetectionSource::UserInputObserved,
             cx,
         );
+    }
+
+    fn observe_autosuggest_input_bytes(&mut self, bytes: &[u8]) -> Option<String> {
+        let command = self.input_tracker.apply_bytes(bytes)?;
+        self.command_fact_ledger
+            .record_runtime_autosuggest_command(&command);
+        Some(command)
     }
 
     fn terminal_accepts_input(&self) -> bool {

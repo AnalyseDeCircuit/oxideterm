@@ -74,7 +74,8 @@ impl WorkspaceApp {
             .iter()
             .find(|conversation| conversation.id == id)
             && !conversation.messages_loaded
-            && let Ok(Some(loaded)) = self.ai_chat_store.load_conversation(&id)
+            && let Some(store) = self.ai_chat_store.as_ref()
+            && let Ok(Some(loaded)) = store.load_conversation(&id)
             && let Some(slot) = self
                 .ai_chat
                 .conversations
@@ -139,7 +140,9 @@ impl WorkspaceApp {
     }
 
     fn persist_ai_chat_state(&self) {
-        let store = self.ai_chat_store.clone();
+        let Some(store) = self.ai_chat_store.clone() else {
+            return;
+        };
         let state = self.ai_chat.clone();
         let projection_updated_at =
             oxideterm_ai::AiChatPersistenceStore::next_projection_persist_at();
@@ -172,6 +175,27 @@ impl WorkspaceApp {
                 );
             }
         }
+    }
+
+    fn retry_ai_chat_initialization(&mut self, cx: &mut Context<Self>) {
+        match oxideterm_ai::AiChatPersistenceStore::load(default_ai_conversations_path()) {
+            Ok((store, state)) => {
+                self.ai_chat_store = Some(store);
+                self.ai_chat = state;
+                self.ai_chat_initialization_error = None;
+                self.ai_chat_list_state =
+                    ListState::new(0, ListAlignment::Top, px(AI_CHAT_LIST_OVERDRAW_PX));
+                self.ai_chat_list_cache
+                    .replace(VirtualListSignatureCache::default());
+            }
+            Err(error) => {
+                eprintln!("failed to retry AI chat store load: {error}");
+                self.ai_chat = oxideterm_ai::AiChatState::default();
+                self.ai_chat_store = None;
+                self.ai_chat_initialization_error = Some(ai_chat_initialization_error(&error));
+            }
+        }
+        cx.notify();
     }
 
     fn ai_messages_count_label(&self, count: usize) -> String {

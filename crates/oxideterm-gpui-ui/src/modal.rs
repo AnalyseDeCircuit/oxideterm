@@ -3,17 +3,86 @@ use gpui::{
     rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const TW_BLACK: u32 = 0x000000;
 const DIALOG_BACKDROP_ALPHA: u32 = 0x99; // Tauri DialogOverlay bg-black/60.
+const COMMAND_PALETTE_BACKDROP_ALPHA: u32 = 0x66; // Tauri CommandPalette overlayClassName bg-black/40.
 const QUICKLOOK_BACKDROP_ALPHA: u32 = 0xcc; // Tauri QuickLook bg-black/80.
+const TRANSPARENT_BACKDROP_ALPHA: u32 = 0x00; // Radix popover outside-hit-test layer.
+const TAILWIND_BACKDROP_BLUR_SM_PX: f32 = 4.0; // Tailwind backdrop-blur-sm.
+static TAURI_BACKDROP_BLUR_ALLOWED: AtomicBool = AtomicBool::new(true);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TauriBackdropRole {
+    Dialog,
+    CommandPalette,
+    QuickLook,
+    Popover,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TauriBackdropEffect {
+    pub color: Rgba,
+    pub blur_px: Option<f32>,
+}
+
+pub fn set_tauri_backdrop_blur_allowed(allowed: bool) {
+    // Native render-profile changes are global app appearance state, the same
+    // way Tauri writes data-frosted/data-animation attributes on the root.
+    TAURI_BACKDROP_BLUR_ALLOWED.store(allowed, Ordering::Relaxed);
+}
+
+pub fn backdrop_source_effect(role: TauriBackdropRole) -> TauriBackdropEffect {
+    let blur_px = match role {
+        // Tauri DialogOverlay always includes linuxBackdropBlurClass("backdrop-blur-sm");
+        // CommandPalette only overrides the overlay color, and QuickLook has its own
+        // fixed overlay that also keeps the same blur class.
+        TauriBackdropRole::Dialog
+        | TauriBackdropRole::CommandPalette
+        | TauriBackdropRole::QuickLook => Some(TAILWIND_BACKDROP_BLUR_SM_PX),
+        TauriBackdropRole::Popover => None,
+    };
+    TauriBackdropEffect {
+        color: backdrop_color(role),
+        blur_px,
+    }
+}
+
+pub fn backdrop_effect_with_blur_allowed(
+    role: TauriBackdropRole,
+    blur_allowed: bool,
+) -> TauriBackdropEffect {
+    let mut effect = backdrop_source_effect(role);
+    if !blur_allowed {
+        // Tauri disables these backdrop-blur classes on unsafe Linux webview
+        // profiles. Native uses render-policy's blur allowance as the same
+        // compatibility gate for GPUI top-layer effects.
+        effect.blur_px = None;
+    }
+    effect
+}
+
+pub fn backdrop_effect(role: TauriBackdropRole) -> TauriBackdropEffect {
+    backdrop_effect_with_blur_allowed(role, TAURI_BACKDROP_BLUR_ALLOWED.load(Ordering::Relaxed))
+}
+
+pub fn backdrop_color(role: TauriBackdropRole) -> Rgba {
+    let alpha = match role {
+        TauriBackdropRole::Dialog => DIALOG_BACKDROP_ALPHA,
+        TauriBackdropRole::CommandPalette => COMMAND_PALETTE_BACKDROP_ALPHA,
+        TauriBackdropRole::QuickLook => QUICKLOOK_BACKDROP_ALPHA,
+        TauriBackdropRole::Popover => TRANSPARENT_BACKDROP_ALPHA,
+    };
+    rgba((TW_BLACK << 8) | alpha)
+}
 
 pub fn dialog_backdrop_color() -> Rgba {
-    rgba((TW_BLACK << 8) | DIALOG_BACKDROP_ALPHA)
+    backdrop_color(TauriBackdropRole::Dialog)
 }
 
 pub fn quicklook_backdrop_color() -> Rgba {
-    rgba((TW_BLACK << 8) | QUICKLOOK_BACKDROP_ALPHA)
+    backdrop_color(TauriBackdropRole::QuickLook)
 }
 
 pub fn modal_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
@@ -39,14 +108,52 @@ pub fn modal_backdrop(backdrop: Rgba) -> Div {
 pub fn dialog_backdrop() -> Div {
     // Radix DialogOverlay is modal: pointer and wheel events cannot fall through
     // to the background surface while the dialog is open.
-    modal_backdrop(dialog_backdrop_color())
+    modal_backdrop_for_role(TauriBackdropRole::Dialog)
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
+fn modal_backdrop_for_role(role: TauriBackdropRole) -> Div {
+    let effect = backdrop_effect(role);
+    // Tauri paints these top-layer overlays with CSS backdrop-filter, which
+    // samples the already-rendered app behind the element. GPUI 0.2.2 only has
+    // window-background blur and shadow blur, so this currently paints the
+    // source overlay color while keeping the requested blur radius classified
+    // in `TauriBackdropEffect`. A real parity fix must wire `effect.blur_px`
+    // through an order-aware renderer primitive that can sample the scene behind
+    // this element; NSVisualEffectView/window blur and screen capture are not
+    // equivalent because they blur outside-window content instead of the GPUI
+    // scene behind the modal.
+    modal_backdrop(effect.color)
+}
+
+fn dismissible_modal_backdrop(role: TauriBackdropRole) -> Div {
+    // Tauri shadcn/Radix Dialog keeps the overlay modal, but pointer-down on
+    // the overlay itself drives onOpenChange(false). Callers attach their close
+    // callback here and stop propagation on the dialog content.
+    modal_backdrop_for_role(role)
+}
+
+pub fn dismissible_dialog_backdrop() -> Div {
+    dismissible_modal_backdrop(TauriBackdropRole::Dialog)
+}
+
+pub fn command_palette_backdrop() -> Div {
+    // Tauri CommandPalette overrides DialogOverlay with overlayClassName
+    // "bg-black/40"; keep that as a named top-layer role instead of letting
+    // feature code hand-pick a translucent black.
+    modal_backdrop_for_role(TauriBackdropRole::CommandPalette)
+}
+
+pub fn dismissible_command_palette_backdrop() -> Div {
+    // Same outside-dismiss contract as Radix Dialog, but with CommandPalette's
+    // lighter overlayClassName rather than the default DialogOverlay color.
+    dismissible_modal_backdrop(TauriBackdropRole::CommandPalette)
+}
+
 pub fn quicklook_backdrop() -> Div {
-    // Tauri QuickLook uses the same portal-style top layer as dialogs, but
-    // left-clicking the backdrop itself closes the preview.
-    modal_backdrop(quicklook_backdrop_color())
+    // Tauri QuickLook uses bg-black/80 with the same backdrop-blur-sm class as
+    // DialogOverlay; left-clicking the backdrop itself closes the preview.
+    modal_backdrop_for_role(TauriBackdropRole::QuickLook)
 }
 
 pub fn popover_backdrop() -> Div {
@@ -58,7 +165,7 @@ pub fn popover_backdrop() -> Div {
         .left_0()
         .right_0()
         .bottom_0()
-        .bg(rgba(0x00000000))
+        .bg(backdrop_color(TauriBackdropRole::Popover))
         .occlude()
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
 }
@@ -145,4 +252,76 @@ pub fn dialog_footer(tokens: &ThemeTokens) -> Div {
         .border_t_1()
         .border_color(rgb(theme.border))
         .bg(rgb(theme.bg_panel))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rgba_hex(color: Rgba) -> u32 {
+        color.into()
+    }
+
+    #[test]
+    fn backdrop_colors_match_tauri_overlay_classes() {
+        // These values mirror Tauri bg-black/{60,40,80} and the transparent
+        // outside-hit-test layer used for popovers.
+        assert_eq!(
+            rgba_hex(backdrop_color(TauriBackdropRole::Dialog)),
+            0x00000099
+        );
+        assert_eq!(
+            rgba_hex(backdrop_color(TauriBackdropRole::CommandPalette)),
+            0x00000066
+        );
+        assert_eq!(
+            rgba_hex(backdrop_color(TauriBackdropRole::QuickLook)),
+            0x000000cc
+        );
+        assert_eq!(
+            rgba_hex(backdrop_color(TauriBackdropRole::Popover)),
+            0x00000000
+        );
+    }
+
+    #[test]
+    fn backdrop_blur_sources_match_tauri_classes() {
+        // Dialog, CommandPalette, and QuickLook all keep
+        // linuxBackdropBlurClass("backdrop-blur-sm") in the Tauri source.
+        assert_eq!(
+            backdrop_source_effect(TauriBackdropRole::Dialog).blur_px,
+            Some(TAILWIND_BACKDROP_BLUR_SM_PX)
+        );
+        assert_eq!(
+            backdrop_source_effect(TauriBackdropRole::CommandPalette).blur_px,
+            Some(TAILWIND_BACKDROP_BLUR_SM_PX)
+        );
+        assert_eq!(
+            backdrop_source_effect(TauriBackdropRole::QuickLook).blur_px,
+            Some(TAILWIND_BACKDROP_BLUR_SM_PX)
+        );
+        assert_eq!(
+            backdrop_source_effect(TauriBackdropRole::Popover).blur_px,
+            None
+        );
+    }
+
+    #[test]
+    fn backdrop_blur_can_be_disabled_by_render_policy() {
+        // This mirrors Tauri's Linux safe-profile helper and native
+        // render-profile compatibility mode: colors stay identical while the
+        // blur request is stripped before painting.
+        assert_eq!(
+            backdrop_effect_with_blur_allowed(TauriBackdropRole::Dialog, false).color,
+            backdrop_source_effect(TauriBackdropRole::Dialog).color
+        );
+        assert_eq!(
+            backdrop_effect_with_blur_allowed(TauriBackdropRole::Dialog, false).blur_px,
+            None
+        );
+        assert_eq!(
+            backdrop_effect_with_blur_allowed(TauriBackdropRole::CommandPalette, true).blur_px,
+            Some(TAILWIND_BACKDROP_BLUR_SM_PX)
+        );
+    }
 }

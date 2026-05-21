@@ -67,7 +67,9 @@ impl WorkspaceApp {
         let mut surface = div()
             .id("forwards-view-scroll")
             .size_full()
-            .overflow_y_scroll()
+            .selectable_overflow_y_scroll(
+                &self.selectable_text_scroll_handle("forwards-view-scroll"),
+            )
             .p(px(FORWARDS_PAGE_PADDING))
             .font_family(settings_ui_font_family(
                 &self.settings_store.settings().appearance.ui_font_family,

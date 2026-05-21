@@ -659,6 +659,18 @@ impl WorkspaceApp {
                 .to_string(),
             SettingsInput::AiSystemPrompt => settings.ai.custom_system_prompt.clone(),
             SettingsInput::AiMemoryContent => settings.ai.memory.content.clone(),
+            SettingsInput::AiToolUseMaxRounds => settings
+                .ai
+                .tool_use
+                .max_rounds
+                .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS)
+                .to_string(),
+            SettingsInput::AiToolUseMaxCallsPerRound => settings
+                .ai
+                .tool_use
+                .max_calls_per_round
+                .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND)
+                .to_string(),
             SettingsInput::AiModelContextWindow(provider_index, model_index) => settings
                 .ai
                 .providers
@@ -1074,6 +1086,42 @@ impl WorkspaceApp {
             SettingsInput::AiMemoryContent => {
                 let value = self.settings_input_draft.clone();
                 self.edit_settings(|settings| settings.ai.memory.content = value.clone(), cx);
+            }
+            SettingsInput::AiToolUseMaxRounds => {
+                if let Ok(value) = self.settings_input_draft.trim().parse::<i64>() {
+                    self.edit_settings(
+                        |settings| {
+                            set_ai_tool_use_max_rounds(
+                                settings,
+                                value.clamp(
+                                    oxideterm_settings::MIN_AI_TOOL_MAX_ROUNDS,
+                                    oxideterm_settings::MAX_AI_TOOL_MAX_ROUNDS,
+                                ),
+                            );
+                        },
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::AiToolUseMaxCallsPerRound => {
+                if let Ok(value) = self.settings_input_draft.trim().parse::<i64>() {
+                    self.edit_settings(
+                        |settings| {
+                            set_ai_tool_use_max_calls_per_round(
+                                settings,
+                                value.clamp(
+                                    oxideterm_settings::MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
+                                    oxideterm_settings::MAX_AI_TOOL_MAX_CALLS_PER_ROUND,
+                                ),
+                            );
+                        },
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
             }
             SettingsInput::AiModelContextWindow(provider_index, model_index) => {
                 let value = self.settings_input_draft.trim().to_string();

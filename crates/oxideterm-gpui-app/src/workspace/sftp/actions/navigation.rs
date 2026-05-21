@@ -513,14 +513,16 @@ impl WorkspaceApp {
         // movement. GPUI's uniform list exposes the same deferred "reveal if
         // needed" behavior through a non-strict scroll request.
         match pane {
-            SftpPane::Local => self
-                .sftp_view
-                .local_file_scroll
-                .scroll_to_item(next, ScrollStrategy::Center),
-            SftpPane::Remote => self
-                .sftp_view
-                .remote_file_scroll
-                .scroll_to_item(next, ScrollStrategy::Center),
+            SftpPane::Local => scroll_tauri_virtual_list_to_index(
+                &self.sftp_view.local_file_scroll,
+                next,
+                TauriVirtualScrollAlign::Nearest,
+            ),
+            SftpPane::Remote => scroll_tauri_virtual_list_to_index(
+                &self.sftp_view.remote_file_scroll,
+                next,
+                TauriVirtualScrollAlign::Nearest,
+            ),
         }
     }
 

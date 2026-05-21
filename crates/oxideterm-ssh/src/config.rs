@@ -29,6 +29,8 @@ pub struct SshConfig {
     pub expected_host_key_fingerprint: Option<String>,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_connect_command: Option<String>,
 }
 
 impl SshConfig {
@@ -200,6 +202,7 @@ impl Default for SshConfig {
             trust_host_key: None,
             expected_host_key_fingerprint: None,
             agent_forwarding: false,
+            post_connect_command: None,
         }
     }
 }

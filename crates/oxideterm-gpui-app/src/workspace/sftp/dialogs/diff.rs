@@ -139,7 +139,9 @@ impl WorkspaceApp {
                     .id("sftp-diff-scroll")
                     .w_full()
                     .flex_1()
-                    .overflow_y_scroll()
+                    .selectable_overflow_y_scroll(
+                        &self.selectable_text_scroll_handle("sftp-diff-scroll"),
+                    )
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
                     .text_size(px(SFTP_TEXT_XS))
                     .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
@@ -157,9 +159,10 @@ impl WorkspaceApp {
                     .when(line_count > 0, |body| {
                         let diff_lines = diff_lines.clone();
                         body.child(
-                            uniform_list(
+                            tracked_uniform_list(
                                 "sftp-diff-virtual-list",
                                 line_count,
+                                diff_scroll,
                                 move |range, _window, _cx| {
                                     range
                                         .map(|index| {
@@ -192,8 +195,6 @@ impl WorkspaceApp {
                                         .collect::<Vec<_>>()
                                 },
                             )
-                            .track_scroll(diff_scroll)
-                            .size_full()
                             .on_scroll_wheel(|_, _, cx| cx.stop_propagation()),
                         )
                     }),

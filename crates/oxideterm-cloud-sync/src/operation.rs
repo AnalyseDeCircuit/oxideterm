@@ -794,6 +794,7 @@ impl CloudSyncOperationService {
         preview: &LegacyPreview,
         sync_password: Option<&str>,
         import_connections: bool,
+        selected_connection_names: Option<Vec<String>>,
         import_forwards: bool,
         conflict_strategy: ConflictStrategy,
         progress: Option<&mut dyn CloudSyncProgressSink>,
@@ -822,11 +823,10 @@ impl CloudSyncOperationService {
             &preview.bytes,
             password,
             OxideImportOptions {
-                selected_names: if import_connections {
-                    None
-                } else {
-                    Some(Vec::new())
-                },
+                selected_names: legacy_preview_selected_names(
+                    import_connections,
+                    selected_connection_names,
+                ),
                 conflict_strategy: import_strategy_from_cloud(conflict_strategy),
                 import_forwards,
                 import_portable_secrets: import_connections,
@@ -1257,6 +1257,17 @@ fn import_strategy_from_cloud(strategy: ConflictStrategy) -> ImportConflictStrat
     }
 }
 
+fn legacy_preview_selected_names(
+    import_connections: bool,
+    selected_connection_names: Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    if import_connections {
+        selected_connection_names
+    } else {
+        Some(Vec::new())
+    }
+}
+
 #[derive(Clone, Debug)]
 struct StructuredUploadPlan {
     manifest: crate::StructuredManifest,
@@ -1471,5 +1482,29 @@ mod tests {
 
         ensure_no_remote_conflict(&dirty_snapshot(), &metadata, Some("remote-current"), None)
             .unwrap();
+    }
+
+    #[test]
+    fn legacy_preview_uses_selected_connection_names_when_importing() {
+        let selected_names = legacy_preview_selected_names(
+            true,
+            Some(vec!["Prod".to_string(), "Staging".to_string()]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            selected_names,
+            vec!["Prod".to_string(), "Staging".to_string()]
+        );
+    }
+
+    #[test]
+    fn legacy_preview_clears_connection_names_when_connections_are_disabled() {
+        let selected_names = legacy_preview_selected_names(true, None);
+        assert!(selected_names.is_none());
+
+        let selected_names =
+            legacy_preview_selected_names(false, Some(vec!["Prod".to_string()])).unwrap();
+        assert!(selected_names.is_empty());
     }
 }

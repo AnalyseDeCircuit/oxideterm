@@ -23,6 +23,96 @@ fn terminal_element_batches_adjacent_cells_with_same_style() {
 }
 
 #[test]
+fn terminal_element_lays_out_autosuggest_ghost_text_at_cursor() {
+    let mut snapshot = selection_snapshot("git");
+    snapshot.cursor_row = 0;
+    snapshot.cursor_col = 3;
+    snapshot.lines[0].cells[3].cursor = true;
+
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .ghost_text(Some(" status".to_string()))
+    .layout();
+
+    let ghost_text = layout.ghost_text.expect("ghost text");
+    assert_eq!(ghost_text.text, " status");
+    assert_eq!(ghost_text.row, 0);
+    assert_eq!(ghost_text.col, 3);
+    assert_eq!(ghost_text.cells, 7);
+    assert!(
+        !layout
+            .text_runs
+            .iter()
+            .any(|run| run.text.contains(" status"))
+    );
+}
+
+#[test]
+fn terminal_element_truncates_autosuggest_ghost_text_to_visible_columns() {
+    let mut snapshot = selection_snapshot("git");
+    snapshot.cols = 5;
+    snapshot.lines[0].cells.truncate(5);
+    snapshot.cursor_row = 0;
+    snapshot.cursor_col = 3;
+    snapshot.lines[0].cells[3].cursor = true;
+
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .ghost_text(Some(" status".to_string()))
+    .layout();
+
+    let ghost_text = layout.ghost_text.expect("ghost text");
+    assert_eq!(ghost_text.text, " s");
+    assert_eq!(ghost_text.cells, 2);
+}
+
+#[test]
+fn terminal_element_hides_autosuggest_ghost_text_during_ime_composition() {
+    let mut snapshot = selection_snapshot("git");
+    snapshot.cursor_row = 0;
+    snapshot.cursor_col = 3;
+    snapshot.lines[0].cells[3].cursor = true;
+
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        Some("あ".to_string()),
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .ghost_text(Some(" status".to_string()))
+    .layout();
+
+    assert!(layout.marked_text.is_some());
+    assert!(layout.ghost_text.is_none());
+}
+
+#[test]
 fn terminal_element_shapes_zero_width_marks_with_base_cell() {
     let mut snapshot = selection_snapshot("e");
     snapshot.lines[0].cells[0].zerowidth = "\u{301}".to_string();
@@ -268,6 +358,7 @@ fn terminal_element_prepaint_clips_layout_to_visible_rows() {
     assert!(layout.search_matches.iter().all(|rect| rect.row < 2));
     assert!(layout.cursor.is_none());
     assert!(layout.marked_text.is_none());
+    assert!(layout.ghost_text.is_none());
     assert!(layout.ime_cursor_bounds.is_none());
     assert!(
         layout

@@ -13,6 +13,9 @@ impl WorkspaceApp {
             render_profile_override.unwrap_or(settings.appearance.render_profile),
             &detected_graphics,
         );
+        // Tauri drops backdrop-blur classes under safe render profiles; keep
+        // the GPUI shared backdrop layer tied to the same render-policy switch.
+        set_tauri_backdrop_blur_allowed(render_policy.allow_background_blur);
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig {
             idle_timeout: Some(Duration::from_secs(
                 settings.connection_pool.idle_timeout_secs as u64,
@@ -30,19 +33,34 @@ impl WorkspaceApp {
             }
         };
         let ai_chat_path = default_ai_conversations_path();
-        let (ai_chat_store, ai_chat) = match oxideterm_ai::AiChatPersistenceStore::load(&ai_chat_path)
-        {
-            Ok((store, state)) => (store, state),
-            Err(error) => {
-                eprintln!("failed to load AI chat store: {error}");
-                return Err(error);
-            }
-        };
+        let (ai_chat_store, ai_chat, ai_chat_initialization_error) =
+            match oxideterm_ai::AiChatPersistenceStore::load(&ai_chat_path) {
+                Ok((store, state)) => (Some(store), state, None),
+                Err(error) => {
+                    eprintln!("failed to load AI chat store: {error}");
+                    (
+                        None,
+                        oxideterm_ai::AiChatState::default(),
+                        Some(ai_chat_initialization_error(&error)),
+                    )
+                }
+            };
         let ai_rag_data_dir = default_rag_data_dir();
         if let Err(error) = fs::create_dir_all(&ai_rag_data_dir) {
             eprintln!("failed to create AI RAG data directory: {error}");
         }
-        let ai_rag_store = Arc::new(oxideterm_ai::RagStore::new(&ai_rag_data_dir)?);
+        let ai_rag_store = match oxideterm_ai::RagStore::new(&ai_rag_data_dir) {
+            Ok(store) => Arc::new(store),
+            Err(error) => {
+                eprintln!("failed to load AI RAG store: {error}");
+                let fallback_dir = std::env::temp_dir().join(format!(
+                    "oxideterm-rag-unavailable-{}",
+                    uuid::Uuid::new_v4()
+                ));
+                fs::create_dir_all(&fallback_dir)?;
+                Arc::new(oxideterm_ai::RagStore::new(&fallback_dir)?)
+            }
+        };
         // Mirror Tauri's split between SessionTree runtime state and NodeRouter:
         // the router resolves capabilities from this shared node runtime store
         // instead of owning the node lifecycle itself.
@@ -177,10 +195,11 @@ impl WorkspaceApp {
             ai_model_selector_probe_generations: HashMap::new(),
             ai_chat,
             ai_chat_list_state: ListState::new(0, ListAlignment::Top, px(AI_CHAT_LIST_OVERDRAW_PX)),
-            ai_chat_list_cache: RefCell::new(AiChatListStateCache::default()),
+            ai_chat_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             ai_markdown_cache: RefCell::new(AiMarkdownDocumentCache::default()),
             ai_context_token_cache: RefCell::new(AiContextTokenBreakdownCache::default()),
             ai_chat_store,
+            ai_chat_initialization_error,
             ai_runtime_epoch: uuid::Uuid::new_v4().to_string(),
             ai_command_record_sequence: 0,
             ai_command_records: VecDeque::new(),
@@ -268,6 +287,9 @@ impl WorkspaceApp {
             selectable_text_layouts: HashMap::new(),
             selectable_text_fragments: HashMap::new(),
             selectable_text_generation: 0,
+            selectable_text_autoscroll_position: None,
+            selectable_text_autoscroll_scheduled: false,
+            selectable_text_scroll_handles: RefCell::new(HashMap::new()),
             ime_marked_text: None,
             selected_ime_target: None,
             selected_ime_range: None,
@@ -701,5 +723,28 @@ impl WorkspaceApp {
             blur: terminal.background_blur.clamp(0, 20) as f32,
             fit: terminal_background_fit(terminal.background_fit),
         })
+    }
+}
+
+fn ai_chat_initialization_error(error: &anyhow::Error) -> AiChatInitializationError {
+    let message = error.to_string();
+    if message.contains("Database already open") || message.contains("Cannot acquire lock") {
+        return AiChatInitializationError {
+            message_key: "ai.chat.database_locked",
+            can_retry: true,
+        };
+    }
+    if message.contains("requires format upgrade")
+        || message.contains("upgrade required")
+        || message.contains("manual upgrade required")
+    {
+        return AiChatInitializationError {
+            message_key: "ai.chat.database_upgrade_required",
+            can_retry: false,
+        };
+    }
+    AiChatInitializationError {
+        message_key: "ai.chat.load_failed_generic",
+        can_retry: true,
     }
 }

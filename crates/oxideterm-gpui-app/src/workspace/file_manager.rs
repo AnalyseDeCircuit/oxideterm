@@ -2,16 +2,13 @@ use std::borrow::Cow;
 
 use super::ime::WorkspaceImeTarget;
 use super::*;
-use gpui::{
-    AnchoredPositionMode, Corner, UniformListScrollHandle, anchored, deferred, prelude::*,
-    uniform_list,
-};
+use gpui::{AnchoredPositionMode, Corner, UniformListScrollHandle, anchored, deferred, prelude::*};
 use gpui_component::scroll::ScrollableElement;
 use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
 };
 use oxideterm_gpui_ui::{
-    modal::{dialog_backdrop, popover_backdrop, quicklook_backdrop},
+    modal::{dismissible_dialog_backdrop, popover_backdrop, quicklook_backdrop},
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{TextInputView, text_caret, text_input, text_input_anchor_probe},
 };
@@ -39,6 +36,7 @@ const FILE_MANAGER_GAP: f32 = 8.0; // Tauri gap-2.
 const FILE_MANAGER_HEADER_HEIGHT: f32 = 40.0; // Tauri h-10.
 const FILE_MANAGER_ROW_HEIGHT: f32 = 25.0; // Tauri FileList row px-2 py-1 text-xs.
 const FILE_MANAGER_PREVIEW_CODE_WRAP_COLUMNS: usize = 96; // Virtual rows pre-wrap long `whitespace-pre` lines.
+const FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE: u64 = 128 * 1024; // Tauri VirtualTextPreview CHUNK_SIZE.
 const FILE_MANAGER_PREVIEW_CODE_GUTTER_ALPHA: u32 = 0x4d; // Tauri CodeHighlight line-number opacity 30%.
 const FILE_MANAGER_SIDEBAR_WIDTH: f32 = 220.0; // Tauri favorites sidebar column.
 const FILE_MANAGER_TEXT_XS: f32 = 12.0;
@@ -152,6 +150,20 @@ pub(super) struct FileManagerOperationProgress {
     pub(super) active: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct FileManagerPreviewStreamState {
+    pub(super) path: String,
+    pub(super) size: u64,
+    pub(super) language: Option<String>,
+    pub(super) lines: Vec<String>,
+    pub(super) loaded_bytes: u64,
+    pub(super) eof: bool,
+    pub(super) loading: bool,
+    pub(super) error: Option<String>,
+    pub(super) carry_text: String,
+    pub(super) carry_bytes: Vec<u8>,
+}
+
 #[derive(Debug)]
 pub(super) enum FileManagerOperationEvent {
     Progress(FileManagerOperationProgress),
@@ -187,6 +199,7 @@ pub(super) struct FileManagerState {
     pub(super) preview_image_rotation: i32,
     pub(super) preview_code_scroll: UniformListScrollHandle,
     pub(super) preview_markdown_scroll: MarkdownVirtualListScrollHandle,
+    pub(super) preview_stream: FileManagerPreviewStreamState,
     pub(super) preview_audio: RodioAudioPreviewBackend,
     pub(super) preview_video_surface: SharedSftpNativeVideoSurface,
     pub(super) preview_font_family: Option<String>,
@@ -234,6 +247,7 @@ impl Default for FileManagerState {
             preview_image_rotation: 0,
             preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
+            preview_stream: FileManagerPreviewStreamState::default(),
             preview_audio: RodioAudioPreviewBackend::default(),
             preview_video_surface: SharedSftpNativeVideoSurface::default(),
             preview_font_family: None,

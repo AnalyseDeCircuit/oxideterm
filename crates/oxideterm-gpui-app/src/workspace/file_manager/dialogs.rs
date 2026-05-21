@@ -55,6 +55,7 @@ impl WorkspaceApp {
                                 cx.notify();
                             }
                         }),
+                        cx,
                     ))
                 } else {
                     menu_el
@@ -78,6 +79,7 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }
                             }),
+                            cx,
                         ))
                         .child(self.render_file_manager_context_menu_item(
                             LucideIcon::Eye,
@@ -92,6 +94,7 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }
                             }),
+                            cx,
                         ))
                 }
             })
@@ -118,6 +121,7 @@ impl WorkspaceApp {
                             cx.notify();
                         }
                     }),
+                    cx,
                 ))
             })
             .when(selected_count > 0, |menu_el| {
@@ -132,6 +136,7 @@ impl WorkspaceApp {
                             this.copy_file_manager_selection(false, cx);
                             cx.stop_propagation();
                         }),
+                        cx,
                     ))
                     .child(self.render_file_manager_context_menu_item(
                         LucideIcon::Pencil,
@@ -142,6 +147,7 @@ impl WorkspaceApp {
                             this.copy_file_manager_selection(true, cx);
                             cx.stop_propagation();
                         }),
+                        cx,
                     ))
                     .child(self.render_file_manager_context_menu_item(
                         LucideIcon::Copy,
@@ -152,6 +158,7 @@ impl WorkspaceApp {
                             this.duplicate_file_manager_selection(cx);
                             cx.stop_propagation();
                         }),
+                        cx,
                     ))
                     .child(self.render_file_manager_context_menu_item(
                         LucideIcon::FileArchive,
@@ -162,6 +169,7 @@ impl WorkspaceApp {
                             this.compress_file_manager_selection(cx);
                             cx.stop_propagation();
                         }),
+                        cx,
                     ))
             })
             .when(
@@ -180,6 +188,7 @@ impl WorkspaceApp {
                             this.extract_selected_file_manager_archive(cx);
                             cx.stop_propagation();
                         }),
+                        cx,
                     ))
                 },
             )
@@ -193,6 +202,7 @@ impl WorkspaceApp {
                         this.paste_file_manager_clipboard(cx);
                         cx.stop_propagation();
                     }),
+                    cx,
                 ))
             })
             .when(selected_count == 1, |menu_el| {
@@ -213,6 +223,7 @@ impl WorkspaceApp {
                                 cx.notify();
                             }
                         }),
+                        cx,
                     ))
                     .child(self.render_file_manager_context_menu_item(
                         LucideIcon::Copy,
@@ -223,6 +234,7 @@ impl WorkspaceApp {
                             this.copy_file_manager_path_to_clipboard(false, cx);
                             cx.stop_propagation();
                         }),
+                        cx,
                     ))
                     .child(self.render_file_manager_context_menu_item(
                         LucideIcon::FileText,
@@ -233,6 +245,7 @@ impl WorkspaceApp {
                             this.copy_file_manager_path_to_clipboard(true, cx);
                             cx.stop_propagation();
                         }),
+                        cx,
                     ))
             })
             .when(selected_count > 0, |menu_el| {
@@ -255,6 +268,7 @@ impl WorkspaceApp {
                                 cx.notify();
                             }
                         }),
+                        cx,
                     ))
                     .child(self.render_file_manager_context_menu_item(
                         LucideIcon::Trash2,
@@ -266,6 +280,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                             cx.notify();
                         }),
+                        cx,
                     ))
             })
             .child(self.render_file_manager_separator(has_background))
@@ -280,6 +295,7 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     cx.notify();
                 }),
+                cx,
             ))
             .child(self.render_file_manager_context_menu_item(
                 LucideIcon::FilePlus,
@@ -292,6 +308,7 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     cx.notify();
                 }),
+                cx,
             ))
             .child(self.render_file_manager_context_menu_item(
                 LucideIcon::Check,
@@ -304,6 +321,7 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     cx.notify();
                 }),
+                cx,
             ))
             .child(self.render_file_manager_context_menu_item(
                 LucideIcon::RefreshCw,
@@ -316,6 +334,7 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     cx.notify();
                 }),
+                cx,
             ))
             .on_mouse_down(
                 MouseButton::Left,
@@ -362,6 +381,7 @@ impl WorkspaceApp {
         danger: bool,
         has_background: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let color = if danger { FILE_MANAGER_RED } else { theme.text };
@@ -383,7 +403,14 @@ impl WorkspaceApp {
                 FILE_MANAGER_ICON_SM,
                 rgb(color),
             ))
-            .child(div().truncate().child(label))
+            .child(div().truncate().child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "file-manager-context-menu",
+                label.clone(),
+                label,
+                color,
+                cx,
+            )))
             .on_mouse_down(MouseButton::Left, listener)
             .into_any_element()
     }
@@ -455,7 +482,15 @@ impl WorkspaceApp {
             }
         };
         let width = FILE_MANAGER_DIALOG_WIDTH_SM;
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_file_manager_dialog();
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .w(px(width.min(f32::from(window.viewport_size().width) - 32.0)))
@@ -469,6 +504,11 @@ impl WorkspaceApp {
                     .border_color(rgba(
                         (self.tokens.ui.border << 8) | FILE_MANAGER_DIALOG_BORDER_ALPHA,
                     ))
+                    // Tauri DialogContent keeps inside clicks from becoming
+                    // backdrop outside-click dismissals.
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .bg(file_manager_panel_bg(
                         self.tokens.ui.bg_elevated,
                         has_background,
@@ -492,7 +532,14 @@ impl WorkspaceApp {
                                     .truncate()
                                     .text_size(px(FILE_MANAGER_TEXT_SM))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(title),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "file-manager-dialog-title",
+                                        title.clone(),
+                                        title,
+                                        self.tokens.ui.text,
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
@@ -603,7 +650,15 @@ impl WorkspaceApp {
         } else {
             icon_color
         };
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_file_manager_dialog();
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .w(px(width.max(280.0)))
@@ -615,6 +670,11 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(rgba((theme.border << 8) | FILE_MANAGER_DIALOG_BORDER_ALPHA))
+                    // Mirrors browser DialogContent bubbling: property fields
+                    // stay interactive while the backdrop remains dismissible.
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .bg(file_manager_panel_bg(
                         theme.bg_elevated,
                         has_background,
@@ -643,7 +703,13 @@ impl WorkspaceApp {
                                     .text_size(px(FILE_MANAGER_TEXT_SM))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text))
-                                    .child(entry.name.clone()),
+                                    .child(self.render_selectable_display_text(
+                                        "file-manager-dialog-title",
+                                        entry.path.as_str(),
+                                        entry.name.clone(),
+                                        theme.text,
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
@@ -694,7 +760,14 @@ impl WorkspaceApp {
                                     .text_color(rgb(theme.text))
                                     .cursor_pointer()
                                     .hover(move |button| button.bg(rgb(theme.text_muted)))
-                                    .child("OK")
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::NonSelectable,
+                                        "file-manager-dialog-action",
+                                        "ok",
+                                        "OK",
+                                        theme.text,
+                                        cx,
+                                    ))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
@@ -787,7 +860,14 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(FILE_MANAGER_TEXT_XS))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("fileManager.editBookmarkDesc")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "file-manager-bookmark-dialog",
+                        "description",
+                        self.i18n.t("fileManager.editBookmarkDesc"),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .child(text_input_anchor_probe(
                 target.anchor_id(),
@@ -834,11 +914,16 @@ impl WorkspaceApp {
                     .flex_col()
                     .gap(px(4.0))
                     .text_size(px(FILE_MANAGER_TEXT_XS))
-                    .child(
-                        div()
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("fileManager.bookmarkPath")),
-                    )
+                    .child(div().text_color(rgb(self.tokens.ui.text_muted)).child(
+                        self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "file-manager-bookmark-dialog",
+                            "path-label",
+                            self.i18n.t("fileManager.bookmarkPath"),
+                            self.tokens.ui.text_muted,
+                            cx,
+                        ),
+                    ))
                     .child(
                         div()
                             .px(px(8.0))
@@ -847,7 +932,13 @@ impl WorkspaceApp {
                             .bg(file_manager_bg(self.tokens.ui.bg_sunken, has_background))
                             .font_family(settings_mono_font_family(self.settings_store.settings()))
                             .truncate()
-                            .child(path),
+                            .child(self.render_selectable_display_text(
+                                "file-manager-bookmark-path",
+                                "edit-bookmark",
+                                path,
+                                self.tokens.ui.text,
+                                cx,
+                            )),
                     ),
             )
             .child(self.render_file_manager_dialog_buttons(false, cx))
@@ -895,7 +986,14 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(rgb(theme.border))
                     .cursor_pointer()
-                    .child(self.i18n.t("common.actions.cancel"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "file-manager-dialog-action",
+                        "cancel",
+                        self.i18n.t("common.actions.cancel"),
+                        theme.text,
+                        cx,
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
@@ -983,12 +1081,19 @@ impl WorkspaceApp {
                             .mt(px(4.0))
                             .text_size(px(FILE_MANAGER_TEXT_XS))
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(format!(
-                                "{} · {} {} / {}",
-                                drive.path,
-                                self.i18n.t("fileManager.available"),
-                                format_file_size(drive.available_space),
-                                format_file_size(drive.total_space),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "file-manager-drive-meta",
+                                drive.path.as_str(),
+                                format!(
+                                    "{} · {} {} / {}",
+                                    drive.path,
+                                    self.i18n.t("fileManager.available"),
+                                    format_file_size(drive.available_space),
+                                    format_file_size(drive.total_space),
+                                ),
+                                self.tokens.ui.text_muted,
+                                cx,
                             )),
                     )
                     .when(drive.read_only, |row| {
@@ -997,7 +1102,14 @@ impl WorkspaceApp {
                                 .mt(px(4.0))
                                 .text_size(px(FILE_MANAGER_TEXT_XS))
                                 .text_color(rgb(FILE_MANAGER_ORANGE))
-                                .child(self.i18n.t("fileManager.readOnly")),
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "file-manager-drive-meta",
+                                    (drive.path.as_str(), "read-only"),
+                                    self.i18n.t("fileManager.readOnly"),
+                                    FILE_MANAGER_ORANGE,
+                                    cx,
+                                )),
                         )
                     })
                     .on_mouse_down(
@@ -1088,7 +1200,7 @@ impl WorkspaceApp {
             .child(if let Some(mode) = details.mode {
                 self.render_file_manager_property_row_value(
                     self.i18n.t("fileManager.permissions"),
-                    self.render_file_manager_property_permissions(mode),
+                    self.render_file_manager_property_permissions(mode, cx),
                     cx,
                 )
             } else {
@@ -1180,10 +1292,10 @@ impl WorkspaceApp {
             .flex_1()
             .min_w(px(0.0))
             .text_color(rgb(self.tokens.ui.text))
-            .child(self.render_selectable_text_scoped(
+            .child(self.render_selectable_display_text(
                 "file-manager-property-value",
                 (&label, mono),
-                value,
+                value.clone(),
                 self.tokens.ui.text,
                 cx,
             ));
@@ -1214,10 +1326,10 @@ impl WorkspaceApp {
                     .flex_none()
                     .text_align(gpui::TextAlign::Right)
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_text_scoped(
+                    .child(self.render_selectable_display_text(
                         "file-manager-property-label",
+                        &label,
                         label.clone(),
-                        label,
                         self.tokens.ui.text_muted,
                         cx,
                     )),
@@ -1267,7 +1379,11 @@ impl WorkspaceApp {
         value.into_any_element()
     }
 
-    fn render_file_manager_property_permissions(&self, mode: u32) -> AnyElement {
+    fn render_file_manager_property_permissions(
+        &self,
+        mode: u32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let perms = format_permission_bits(mode);
         let mut row = div()
             .flex()
@@ -1275,20 +1391,36 @@ impl WorkspaceApp {
             .gap(px(1.0))
             .font_family(settings_mono_font_family(self.settings_store.settings()))
             .text_color(rgb(self.tokens.ui.text));
-        for ch in perms.chars() {
+        for (index, ch) in perms.chars().enumerate() {
             let color = match ch {
                 'r' => 0x34d399,
                 'w' => 0xfbbf24,
                 'x' => 0x38bdf8,
                 _ => self.tokens.ui.text_muted,
             };
-            row = row.child(div().text_color(rgb(color)).child(ch.to_string()));
+            row = row.child(div().text_color(rgb(color)).child(
+                self.render_display_text_with_role(
+                    SelectableTextRole::PlainDocument,
+                    "file-manager-permission-char",
+                    index,
+                    ch.to_string(),
+                    color,
+                    cx,
+                ),
+            ));
         }
         row.child(
             div()
                 .ml(px(6.0))
                 .text_color(rgb(self.tokens.ui.text_muted))
-                .child(format!("({:04o})", mode & 0o777)),
+                .child(self.render_display_text_with_role(
+                    SelectableTextRole::PlainDocument,
+                    "file-manager-permission-mode",
+                    mode,
+                    format!("({:04o})", mode & 0o777),
+                    self.tokens.ui.text_muted,
+                    cx,
+                )),
         )
         .into_any_element()
     }

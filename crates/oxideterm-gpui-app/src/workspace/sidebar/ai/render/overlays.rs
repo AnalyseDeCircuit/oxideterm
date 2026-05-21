@@ -210,11 +210,14 @@ impl WorkspaceApp {
                 .min(AI_CONVERSATION_MAX_HEIGHT)
         };
         let mut list = div()
+            .id("ai-conversation-dropdown-scroll")
             .w(px(dropdown_width))
             .flex()
             .flex_col()
             .h(px(dropdown_height))
-            .overflow_y_scrollbar()
+            .selectable_overflow_y_scrollbar(
+                &self.selectable_text_scroll_handle("ai-conversation-dropdown-scroll"),
+            )
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
@@ -228,7 +231,14 @@ impl WorkspaceApp {
                     .text_center()
                     .text_size(px(13.0))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("ai.chat.no_conversations")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-conversation-list",
+                        "empty",
+                        self.i18n.t("ai.chat.no_conversations"),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             );
         } else {
             for conversation in &self.ai_chat.conversations {
@@ -432,7 +442,21 @@ impl WorkspaceApp {
                     rgb(self.tokens.ui.text_muted)
                 },
             ))
-            .child(div().truncate().child(label))
+            .child(div().truncate().child(
+                // Conversation menu rows are commands; text should not intercept row click.
+                self.render_display_text_with_role(
+                    SelectableTextRole::NonSelectable,
+                    "ai-conversation-menu-action",
+                    label.clone(),
+                    label,
+                    if destructive {
+                        0xef4444
+                    } else {
+                        self.tokens.ui.text_muted
+                    },
+                    cx,
+                ),
+            ))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {

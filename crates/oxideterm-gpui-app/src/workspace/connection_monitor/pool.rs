@@ -2,8 +2,11 @@ impl WorkspaceApp {
     pub(super) fn render_connection_monitor_surface(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         div()
+            .id("connection-monitor-scroll")
             .size_full()
-            .overflow_y_scrollbar()
+            .selectable_overflow_y_scrollbar(
+                &self.selectable_text_scroll_handle("connection-monitor-scroll"),
+            )
             .p(px(MONITOR_PAGE_PADDING))
             .bg(rgb(theme.bg))
             .text_color(rgb(theme.text))
@@ -24,7 +27,14 @@ impl WorkspaceApp {
                                     .text_size(px(24.0))
                                     .font_weight(gpui::FontWeight::BOLD)
                                     .text_color(rgb(theme.text))
-                                    .child(self.i18n.t("layout.connection_monitor.title")),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "connection-monitor-page-title",
+                                        "pool",
+                                        self.i18n.t("layout.connection_monitor.title"),
+                                        theme.text,
+                                        cx,
+                                    )),
                             )
                             .child(self.render_connection_pool_monitor(cx)),
                     )
@@ -38,7 +48,14 @@ impl WorkspaceApp {
                                     .text_size(px(20.0))
                                     .font_weight(gpui::FontWeight::BOLD)
                                     .text_color(rgb(theme.text))
-                                    .child(self.i18n.t("sidebar.panels.system_health")),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "connection-monitor-page-title",
+                                        "health",
+                                        self.i18n.t("sidebar.panels.system_health"),
+                                        theme.text,
+                                        cx,
+                                    )),
                             )
                             .child(self.render_system_health_panel(cx)),
                     ),
@@ -81,39 +98,58 @@ impl WorkspaceApp {
                                     .text_size(px(20.0))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text_heading))
-                                    .child(self.i18n.t("connections.panel.title")),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "connection-pool-header",
+                                        "title",
+                                        self.i18n.t("connections.panel.title"),
+                                        theme.text_heading,
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
                                     .mt_1()
                                     .text_size(px(14.0))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(self.i18n.t("connections.panel.description")),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "connection-pool-header",
+                                        "description",
+                                        self.i18n.t("connections.panel.description"),
+                                        theme.text_muted,
+                                        cx,
+                                    )),
                             ),
                     )
                     .child(self.render_connection_pool_refresh_button(cx)),
             )
             .child(
                 div()
+                    .id("connection-pool-scroll")
                     .flex_1()
-                    .overflow_y_scrollbar()
+                    .selectable_overflow_y_scrollbar(
+                        &self.selectable_text_scroll_handle("connection-pool-scroll"),
+                    )
                     .p(px(CONNECTION_POOL_BODY_PADDING))
                     .child(if let Some(error) = &self.connection_monitor.pool_error {
                         monitor_center_state(
-                            &self.tokens,
+                            self,
                             LucideIcon::AlertTriangle,
                             MONITOR_RED,
                             error.clone(),
+                            cx,
                         )
                     } else if self.connection_monitor.pool_stats.is_none() {
                         monitor_center_state(
-                            &self.tokens,
+                            self,
                             LucideIcon::RefreshCw,
                             theme.text_muted,
                             self.i18n.t("connections.monitor.loading"),
+                            cx,
                         )
                     } else if connection_list.is_empty() {
-                        self.render_connection_pool_empty_state()
+                        self.render_connection_pool_empty_state(cx)
                     } else {
                         let mut list = div()
                             .grid()
@@ -129,7 +165,7 @@ impl WorkspaceApp {
                         list.into_any_element()
                     }),
             )
-            .child(self.render_connection_pool_keep_alive_legend(idle_timeout_secs))
+            .child(self.render_connection_pool_keep_alive_legend(idle_timeout_secs, cx))
             .into_any_element()
     }
 
@@ -167,11 +203,19 @@ impl WorkspaceApp {
                 CONNECTION_POOL_ICON_SIZE_MD,
                 rgb(theme.text),
             ))
-            .child(self.i18n.t("connections.panel.refresh"))
+            // Toolbar button labels stay NonSelectable so mouse-down always reaches the button.
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "connection-pool-refresh-button",
+                "label",
+                self.i18n.t("connections.panel.refresh"),
+                theme.text,
+                cx,
+            ))
             .into_any_element()
     }
 
-    fn render_connection_pool_empty_state(&self) -> AnyElement {
+    fn render_connection_pool_empty_state(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .w_full()
@@ -190,14 +234,28 @@ impl WorkspaceApp {
                 div()
                     .mt_4()
                     .text_size(px(18.0))
-                    .child(self.i18n.t("connections.panel.no_connections")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "connection-pool-empty",
+                        "title",
+                        self.i18n.t("connections.panel.no_connections"),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()
                     .mt_2()
                     .text_size(px(14.0))
                     .opacity(CONNECTION_POOL_EMPTY_HINT_OPACITY)
-                    .child(self.i18n.t("connections.panel.no_connections_hint")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "connection-pool-empty",
+                        "hint",
+                        self.i18n.t("connections.panel.no_connections_hint"),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .into_any_element()
     }
@@ -265,11 +323,18 @@ impl WorkspaceApp {
                                             .text_size(px(14.0))
                                             .font_weight(gpui::FontWeight::MEDIUM)
                                             .text_color(rgb(theme.text))
-                                            .child(format!(
-                                                "{}@{}:{}",
-                                                connection.username,
-                                                connection.host,
-                                                connection.port
+                                            .child(self.render_display_text_with_role(
+                                                SelectableTextRole::PlainDocument,
+                                                "connection-pool-card-endpoint",
+                                                connection.id.as_str(),
+                                                format!(
+                                                    "{}@{}:{}",
+                                                    connection.username,
+                                                    connection.host,
+                                                    connection.port
+                                                ),
+                                                theme.text,
+                                                cx,
                                             )),
                                     )
                                     .child(
@@ -354,6 +419,7 @@ impl WorkspaceApp {
                             self.i18n
                                 .t("connections.panel.terminals")
                                 .replace("{{count}}", &connection.terminal_count.to_string()),
+                            cx,
                         ),
                     )
                     .child(self.render_connection_pool_metric(
@@ -366,6 +432,7 @@ impl WorkspaceApp {
                                 "0"
                             },
                         ),
+                        cx,
                     ))
                     .child(
                         self.render_connection_pool_metric(
@@ -373,6 +440,7 @@ impl WorkspaceApp {
                             self.i18n
                                 .t("connections.panel.forwards")
                                 .replace("{{count}}", &connection.forward_count.to_string()),
+                            cx,
                         ),
                     ),
             )
@@ -389,6 +457,7 @@ impl WorkspaceApp {
                             "{{time}}",
                             &self.format_connection_pool_time(connection.created_at),
                         ),
+                        cx,
                     ))
                     .when(is_idle, |row| {
                         let keep_alive_label = if global_never_timeout || connection.keep_alive {
@@ -400,9 +469,16 @@ impl WorkspaceApp {
                         };
                         row.child(
                             div().text_color(rgb(CONNECTION_POOL_AMBER_400)).child(
-                                self.i18n
-                                    .t("connections.panel.idle_hint")
-                                    .replace("{{keepAlive}}", &keep_alive_label),
+                                self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "connection-pool-idle-hint",
+                                    connection.id.as_str(),
+                                    self.i18n
+                                        .t("connections.panel.idle_hint")
+                                        .replace("{{keepAlive}}", &keep_alive_label),
+                                    CONNECTION_POOL_AMBER_400,
+                                    cx,
+                                ),
                             ),
                         )
                     }),
@@ -410,8 +486,14 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_connection_pool_metric(&self, icon: LucideIcon, label: String) -> AnyElement {
+    fn render_connection_pool_metric(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let label_key = label.clone();
         div()
             .flex()
             .items_center()
@@ -421,11 +503,22 @@ impl WorkspaceApp {
                 CONNECTION_POOL_ICON_SIZE_SM,
                 rgb(theme.text_muted),
             ))
-            .child(label)
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "connection-pool-metric",
+                (label_key, icon as u8),
+                label,
+                theme.text_muted,
+                cx,
+            ))
             .into_any_element()
     }
 
-    fn render_connection_pool_keep_alive_legend(&self, idle_timeout_secs: u64) -> AnyElement {
+    fn render_connection_pool_keep_alive_legend(
+        &self,
+        idle_timeout_secs: u64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let disabled_label = if idle_timeout_secs == 0 {
             self.i18n.t("connections.keep_alive.global_never_tooltip")
@@ -458,7 +551,14 @@ impl WorkspaceApp {
                         CONNECTION_POOL_ICON_SIZE_MD,
                         rgb(CONNECTION_POOL_GREEN_400),
                     ))
-                    .child(self.i18n.t("connections.keep_alive.legend_enabled")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "connection-pool-keep-alive-legend",
+                        "enabled",
+                        self.i18n.t("connections.keep_alive.legend_enabled"),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()

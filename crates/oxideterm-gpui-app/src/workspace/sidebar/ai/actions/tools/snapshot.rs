@@ -49,10 +49,16 @@ impl WorkspaceApp {
 
         for (node_id, node) in &self.ssh_nodes {
             let terminal_id = node.terminal_ids.first().copied();
-            let ssh_handle = terminal_id
-                .and_then(|session_id| self.terminal_endpoint_sessions.get(&session_id))
-                .map(|endpoint| endpoint.session.lock().ssh_connection_handle())
-                .flatten();
+            let ssh_handle = self
+                .node_router
+                .resolve_connection_now(node_id)
+                .ok()
+                .map(|resolved| resolved.handle)
+                .or_else(|| {
+                    terminal_id
+                        .and_then(|session_id| self.terminal_endpoint_sessions.get(&session_id))
+                        .and_then(|endpoint| endpoint.session.lock().ssh_connection_handle())
+                });
             let mut refs = BTreeMap::new();
             refs.insert("nodeId".to_string(), node_id.0.clone());
             if let Some(saved_connection_id) = node.saved_connection_id.as_ref() {
@@ -116,6 +122,16 @@ impl WorkspaceApp {
                 let mut refs = BTreeMap::new();
                 refs.insert("sessionId".to_string(), session_id.0.to_string());
                 refs.insert("tabId".to_string(), tab.id.0.to_string());
+                if let Some(node_id) = self.terminal_ssh_nodes.get(&session_id) {
+                    refs.insert("nodeId".to_string(), node_id.0.clone());
+                    if let Some(connection_id) = self
+                        .ssh_nodes
+                        .get(node_id)
+                        .and_then(|node| node.saved_connection_id.clone())
+                    {
+                        refs.insert("connectionId".to_string(), connection_id);
+                    }
+                }
                 let terminal_buffer = pane.read(cx).visible_text_snapshot();
                 targets.push(AiOrchestratorTarget {
                     id: format!("terminal-session:{}", session_id.0),
@@ -254,7 +270,12 @@ impl WorkspaceApp {
             "write_resource" => self.execute_ai_write_settings_resource(&args, cx),
             "open_app_surface" => self.execute_ai_open_app_surface(&args, window, cx),
             "remember_preference" => self.execute_ai_remember_preference(&args, cx),
-            _ => self.ai_orchestrator_snapshot(cx).unsupported_live_action(&tool_name, &args),
+            _ => self.ai_orchestrator_snapshot(cx).fail(
+                "Unknown tool.",
+                "unknown_tool",
+                format!("Tool {tool_name} is not available."),
+                "read",
+            ),
         };
         self.ai_orchestrator_snapshot(cx).to_executed_tool_result(
             tool_call_id,
@@ -300,6 +321,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let started = std::time::Instant::now();
         let base = self.execute_ai_ui_orchestrator_tool(
             tool_call_id.clone(),
             tool_name.clone(),
@@ -311,7 +333,13 @@ impl WorkspaceApp {
             let _ = sender.send(base);
             return;
         }
-        if let Some(ready) = self.ai_connect_target_ready_result(&tool_call_id, &tool_name, &args, cx) {
+        if let Some(ready) = self.ai_connect_target_ready_result(
+            &tool_call_id,
+            &tool_name,
+            &args,
+            started.elapsed().as_millis(),
+            cx,
+        ) {
             let _ = sender.send(ready);
             return;
         }
@@ -320,7 +348,13 @@ impl WorkspaceApp {
             for _ in 0..50 {
                 Timer::after(Duration::from_millis(100)).await;
                 let ready = weak.update(cx, |this, cx| {
-                    this.ai_connect_target_ready_result(&tool_call_id, &tool_name, &args, cx)
+                    this.ai_connect_target_ready_result(
+                        &tool_call_id,
+                        &tool_name,
+                        &args,
+                        started.elapsed().as_millis(),
+                        cx,
+                    )
                 });
                 match ready {
                     Ok(Some(result)) => {
@@ -334,7 +368,17 @@ impl WorkspaceApp {
                 }
             }
             if let Some(sender) = sender.take() {
-                let _ = sender.send(base);
+                let result = weak.update(cx, |this, cx| {
+                    this.ai_connect_target_timeout_result(
+                        &tool_call_id,
+                        &tool_name,
+                        &args,
+                        &base,
+                        started.elapsed().as_millis(),
+                        cx,
+                    )
+                });
+                let _ = sender.send(result.unwrap_or(base));
             }
         })
         .detach();
@@ -347,6 +391,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
+        if args.get("control").and_then(serde_json::Value::as_str).is_some() {
+            return snapshot.fail(
+                "Terminal control input is not available through this tool.",
+                "terminal_control_disabled",
+                "Use run_command to execute shell commands. send_terminal_input only sends literal interactive text or Enter after observing a prompt.",
+                "interactive",
+            );
+        }
         let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
             return snapshot.fail(
                 "Target is required.",
@@ -405,12 +457,17 @@ impl WorkspaceApp {
                     .and_then(|node| node.terminal_ids.first().copied())
                     && self.focus_terminal_session(session_id, window, cx)
                 {
+                    let data = serde_json::json!({
+                        "nodeId": node_id.0,
+                        "sessionId": session_id.0.to_string(),
+                        "connectionId": target.refs.get("connectionId").cloned().unwrap_or_default(),
+                    });
                     return self
                         .ai_orchestrator_snapshot(cx)
                         .ok(
-                            format!("Connected target: {}", target.label),
-                            format!("Connected target {}; visible terminal terminal-session:{}.", target.id, session_id.0),
-                            target_json(&target),
+                            "Target is already live.",
+                            "",
+                            data,
                             "write",
                         )
                         .with_target(target);
@@ -1072,12 +1129,16 @@ impl WorkspaceApp {
         match surface {
             "local_terminal" | "terminal" => match self.create_local_terminal_tab(window, cx) {
                 Ok(()) => {
+                    let active_tab_id = self.active_tab_id.map(|tab_id| tab_id.0.to_string());
                     let refreshed = self.ai_orchestrator_snapshot(cx);
                     let target = refreshed
                         .targets
                         .iter()
                         .find(|target| {
                             target.kind == "terminal-session"
+                                && active_tab_id
+                                    .as_ref()
+                                    .is_some_and(|tab_id| target.refs.get("tabId") == Some(tab_id))
                                 && target
                                     .metadata
                                     .get("terminalType")
@@ -1212,6 +1273,7 @@ impl WorkspaceApp {
         tool_call_id: &str,
         tool_name: &str,
         args: &serde_json::Value,
+        duration_ms: u128,
         cx: &mut Context<Self>,
     ) -> Option<AiExecutedToolResult> {
         let target_id = args.get("target_id").and_then(serde_json::Value::as_str)?;
@@ -1223,7 +1285,9 @@ impl WorkspaceApp {
             .targets
             .iter()
             .filter(|target| {
-                if target.kind == "terminal-session" {
+                if (target.kind == "ssh-node" || target.kind == "terminal-session")
+                    && target.state == "connected"
+                {
                     let connection_matches = connection_id
                         .as_ref()
                         .is_some_and(|id| target.refs.get("connectionId") == Some(id));
@@ -1254,8 +1318,34 @@ impl WorkspaceApp {
             })
             .cloned()
             .or_else(|| ready_targets.first().cloned())?;
-        let output = std::iter::once(primary.clone())
-            .chain(ready_targets.clone())
+        let session_id = ready_targets
+            .iter()
+            .find(|target| target.kind == "terminal-session")
+            .and_then(|target| target.refs.get("sessionId"))
+            .cloned()
+            .or_else(|| primary.refs.get("sessionId").cloned())
+            .unwrap_or_default();
+        let node_id = primary
+            .refs
+            .get("nodeId")
+            .cloned()
+            .or_else(|| node_id.clone())
+            .unwrap_or_default();
+        let connection_id = primary
+            .refs
+            .get("connectionId")
+            .cloned()
+            .or_else(|| connection_id.clone())
+            .unwrap_or_default();
+        let returned_targets = std::iter::once(primary.clone())
+            .chain(
+                ready_targets
+                    .into_iter()
+                    .filter(|target| target.id != primary.id),
+            )
+            .collect::<Vec<_>>();
+        let output = returned_targets
+            .iter()
             .map(|target| format!("{} — {}", target.id, target.label))
             .collect::<Vec<_>>()
             .join("\n");
@@ -1266,12 +1356,63 @@ impl WorkspaceApp {
                 .ok(
                     format!("Connected {}.", primary.label),
                     output,
-                    target_json(&primary),
+                    serde_json::json!({
+                        "nodeId": node_id,
+                        "sessionId": session_id,
+                        "connectionId": connection_id,
+                    }),
                     "write",
                 )
                 .with_target(primary)
-                .with_targets(ready_targets),
-            0,
+                .with_targets(returned_targets),
+            duration_ms,
         ))
+    }
+
+    fn ai_connect_target_timeout_result(
+        &mut self,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &serde_json::Value,
+        base: &AiExecutedToolResult,
+        duration_ms: u128,
+        cx: &mut Context<Self>,
+    ) -> AiExecutedToolResult {
+        let snapshot = self.ai_orchestrator_snapshot(cx);
+        let target = args
+            .get("target_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|target_id| {
+                snapshot
+                    .targets
+                    .iter()
+                    .find(|target| target.id == target_id)
+                    .cloned()
+            });
+        let detail = match target.as_ref().map(|target| target.kind.as_str()) {
+            Some("saved-connection") => {
+                "The saved connection flow did not return a live terminal."
+            }
+            Some("ssh-node") => {
+                "The SSH target did not return a live terminal before the executor timeout."
+            }
+            Some("terminal-session") => {
+                "The terminal target did not become available before the executor timeout."
+            }
+            _ => "The connection request did not return a live OxideTerm target.",
+        };
+        let data = serde_json::json!({
+            "requestedArgs": args,
+            "initialResult": base.envelope,
+        });
+        snapshot.to_executed_tool_result(
+            tool_call_id.to_string(),
+            tool_name.to_string(),
+            snapshot
+                .fail("Connection did not complete.", "connect_failed", detail, "write")
+                .with_data(data)
+                .with_optional_target(target),
+            duration_ms,
+        )
     }
 }

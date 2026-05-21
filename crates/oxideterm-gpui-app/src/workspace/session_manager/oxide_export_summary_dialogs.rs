@@ -123,7 +123,7 @@ impl WorkspaceApp {
             );
         }
 
-        section = section.child(self.render_oxide_card(None, card_children));
+        section = section.child(self.render_oxide_card(None, card_children, cx));
         section.into_any_element()
     }
 
@@ -203,7 +203,7 @@ impl WorkspaceApp {
                 })
                 .collect()
         };
-        self.render_oxide_card(Some((LucideIcon::Shield, "所选内容".to_string())), content)
+        self.render_oxide_card(Some((LucideIcon::Shield, "所选内容".to_string())), content, cx)
     }
 
     fn render_oxide_security_notice(
@@ -255,7 +255,14 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text))
-                    .child("加密密码 *"),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "oxide-export-password",
+                        "label",
+                        "加密密码 *",
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .child(self.render_session_password_input(
                 SessionManagerInput::OxideExportPassword,
@@ -267,7 +274,7 @@ impl WorkspaceApp {
                 input.child(
                     div()
                         .mt(px(4.0))
-                        .child(self.render_oxide_password_strength(&dialog.password)),
+                        .child(self.render_oxide_password_strength(&dialog.password, cx)),
                 )
             })
             .into_any_element()
@@ -314,8 +321,11 @@ impl WorkspaceApp {
             .when(!lines.is_empty(), |notice| {
                 notice.child(
                     div()
+                        .id("oxide-export-summary-lines")
                         .max_h(px(64.0))
-                        .overflow_y_scrollbar()
+                        .selectable_overflow_y_scrollbar(
+                            &self.selectable_text_scroll_handle("oxide-export-summary-lines"),
+                        )
                         .flex()
                         .flex_col()
                         .gap(px(2.0))

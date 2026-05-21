@@ -6,7 +6,18 @@ impl WorkspaceApp {
         };
         let connection_count = dialog.selected_ids.len();
         let connections = self.connection_store.connections();
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    // Tauri OxideExportModal uses Dialog onOpenChange(onClose);
+                    // native backdrop clicks follow the same close path.
+                    this.session_manager.oxide_export_dialog = None;
+                    this.session_manager.focused_input = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .w(px(OXIDE_MODAL_WIDTH))
@@ -18,6 +29,9 @@ impl WorkspaceApp {
                     .border_color(rgb(theme.border))
                     .bg(rgb(theme.bg_panel))
                     .overflow_hidden()
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .px(px(OXIDE_MODAL_HEADER_PX))
@@ -32,7 +46,14 @@ impl WorkspaceApp {
                                     .text_size(px(20.0))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text_heading))
-                                    .child("导出配置到 .oxide 文件"),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "oxide-export-dialog",
+                                        "title",
+                                        "导出配置到 .oxide 文件",
+                                        theme.text_heading,
+                                        cx,
+                                    )),
                             )
                             .child(self.render_oxide_close_button(false, cx)),
                     )
@@ -41,7 +62,9 @@ impl WorkspaceApp {
                             .id("oxide-export-dialog-scroll")
                             .flex_1()
                             .min_h(px(0.0))
-                            .overflow_y_scroll()
+                            .selectable_overflow_y_scroll(
+                                &self.selectable_text_scroll_handle("oxide-export-dialog-scroll"),
+                            )
                             .p(px(OXIDE_MODAL_BODY_P))
                             .flex()
                             .flex_col()
@@ -67,6 +90,7 @@ impl WorkspaceApp {
                                     "例如：生产服务器".to_string(),
                                     cx,
                                 ),
+                                cx,
                             ))
                             .child(self.render_oxide_option_row(
                                 "嵌入私钥".to_string(),
@@ -82,6 +106,7 @@ impl WorkspaceApp {
                                     cx.notify();
                                     cx.stop_propagation();
                                 }),
+                                cx,
                             ))
                             .child(self.render_oxide_export_content_summary(dialog, cx))
                             .child(self.render_oxide_export_password_input(dialog, cx))
@@ -93,10 +118,11 @@ impl WorkspaceApp {
                                     "重新输入密码".to_string(),
                                     cx,
                                 ),
+                                cx,
                             ))
                             .child(self.render_oxide_security_notice(dialog, cx))
                             .when_some(dialog.progress_stage.clone(), |body, progress| {
-                                body.child(self.render_oxide_progress(progress, Some(dialog.embed_keys)))
+                                body.child(self.render_oxide_progress(progress, Some(dialog.embed_keys), cx))
                             })
                             .when_some(dialog.result_summary.clone(), |body, result| {
                                 body.child(self.render_oxide_status_line(result, false, cx))

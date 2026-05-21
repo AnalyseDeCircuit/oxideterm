@@ -288,6 +288,13 @@ impl TerminalShellIntegration {
         let Some((code, data)) = text.split_once(';') else {
             return false;
         };
+        if code == "7" {
+            if let Some((cwd, host)) = parse_osc7_cwd(data) {
+                emit(crate::TerminalEvent::CwdChanged { cwd, host });
+                return true;
+            }
+            return false;
+        }
         let source = match code {
             "133" => ShellIntegrationSource::Osc133,
             "633" => ShellIntegrationSource::Osc633,
@@ -532,6 +539,22 @@ fn parse_shell_integration_event(
         command,
         exit_code,
     })
+}
+
+fn parse_osc7_cwd(data: &str) -> Option<(String, Option<String>)> {
+    if let Some(rest) = data.strip_prefix("file://") {
+        let (host, path) = if rest.starts_with('/') {
+            (None, rest)
+        } else {
+            let slash = rest.find('/')?;
+            let host = &rest[..slash];
+            ((!host.is_empty()).then(|| host.to_string()), &rest[slash..])
+        };
+        let cwd = percent_decode(path)?;
+        return (!cwd.is_empty()).then_some((cwd, host));
+    }
+
+    (!data.is_empty()).then(|| (data.to_string(), None))
 }
 
 fn split_sequence(data: &str) -> (String, Vec<String>) {

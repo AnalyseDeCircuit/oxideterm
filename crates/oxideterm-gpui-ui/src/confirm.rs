@@ -3,8 +3,9 @@ use gpui::{
     div, point, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_theme::ThemeTokens;
+use std::rc::Rc;
 
-use crate::modal::dialog_backdrop;
+use crate::modal::dismissible_dialog_backdrop;
 
 const CONFIRM_DIALOG_WIDTH: f32 = 384.0; // Tauri useConfirm max-w-sm
 const CONFIRM_BORDER_ALPHA: u32 = 0x99; // Tauri border-theme-border/60
@@ -56,8 +57,16 @@ pub fn confirm_dialog(
     let icon_color = if is_danger { TW_RED_400 } else { theme.accent };
     let confirm_color = if is_danger { TW_RED_400 } else { theme.accent };
     let confirm_hover_color = if is_danger { TW_RED_300 } else { theme.accent };
+    let on_cancel = Rc::new(on_cancel);
+    let on_backdrop_cancel = on_cancel.clone();
 
-    dialog_backdrop()
+    dismissible_dialog_backdrop()
+        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+            // Tauri useConfirm wraps Radix Dialog and maps onOpenChange(false)
+            // to cancel, so an outside pointer-down must follow the same path.
+            on_backdrop_cancel(event, window, cx);
+            cx.stop_propagation();
+        })
         .child(
             div()
                 .w(px(CONFIRM_DIALOG_WIDTH))
@@ -143,7 +152,9 @@ pub fn confirm_dialog(
                                 })
                                 .cursor_pointer()
                                 .child(view.cancel_label)
-                                .on_mouse_down(MouseButton::Left, on_cancel),
+                                .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                                    on_cancel(event, window, cx);
+                                }),
                         )
                         .child(
                             div()

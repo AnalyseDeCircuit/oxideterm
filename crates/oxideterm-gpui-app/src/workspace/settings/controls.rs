@@ -238,7 +238,14 @@ impl WorkspaceApp {
             }
             (SettingsTab::Appearance, SettingsSelect::AppearanceFrostedGlass) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
-                for mode in [FrostedGlassMode::Off, FrostedGlassMode::Native] {
+                // Tauri exposes off/css/native. GPUI maps native to window
+                // vibrancy today; css is retained as the future element-level
+                // backdrop-filter mode instead of collapsing it into off.
+                for mode in [
+                    FrostedGlassMode::Off,
+                    FrostedGlassMode::Css,
+                    FrostedGlassMode::Native,
+                ] {
                     popup = popup.child(
                         select_option(
                             &self.tokens,

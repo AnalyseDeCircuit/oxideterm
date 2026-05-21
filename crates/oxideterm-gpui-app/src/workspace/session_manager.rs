@@ -26,11 +26,10 @@ use oxideterm_gpui_ui::{
     TauriTableMetrics,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
     checkbox, icon_badge,
-    modal::{dialog_backdrop, popover_backdrop},
+    modal::{dismissible_dialog_backdrop, popover_backdrop},
     modal_body, modal_container, modal_footer, modal_overlay,
     surface::{color_for_background, color_for_background_or_alpha},
-    tauri_table_cell, tauri_table_checkbox_cell, tauri_table_header, tauri_table_row,
-    tauri_table_sort_header, tauri_table_spacer_cell,
+    tauri_table_checkbox_cell, tauri_table_header, tauri_table_row, tauri_table_spacer_cell,
     text_input::{text_caret, text_input_anchor_probe},
 };
 use oxideterm_settings::{
@@ -75,6 +74,10 @@ const MANAGER_ROW_MORE_BUTTON: f32 = 28.0; // Tauri h-7 w-7
 const MANAGER_ROW_MENU_WIDTH: f32 = 184.0;
 const MANAGER_ROW_MENU_HEIGHT: f32 = 112.0;
 const MANAGER_ROW_CONTEXT_MENU_HEIGHT: f32 = 180.0;
+pub(super) const MANAGER_TABLE_VIRTUAL_ROW_HEIGHT: f32 = 37.0; // Tauri ConnectionTable CONNECTION_ROW_HEIGHT
+pub(super) const MANAGER_TABLE_VIRTUAL_OVERSCAN: usize = 16; // Tauri useVirtualizer overscan
+pub(super) const SAVED_CONNECTION_VIRTUAL_ROW_HEIGHT: f32 = 43.0; // Tauri Sidebar SAVED_CONNECTION_ROW_HEIGHT
+pub(super) const SAVED_CONNECTION_VIRTUAL_OVERSCAN: usize = 12; // Tauri savedListVirtualizer overscan
 const MANAGER_RESPONSIVE_SM: f32 = 640.0;
 const MANAGER_RESPONSIVE_MD: f32 = 768.0;
 const OXIDE_APP_SETTINGS_SECTIONS: &[&str] = ALL_OXIDE_SETTINGS_SECTIONS;
@@ -229,6 +232,8 @@ pub(super) struct SessionManagerState {
     pub(super) oxide_import_dialog: Option<OxideImportDialogState>,
     pub(super) oxide_export_dialog: Option<OxideExportDialogState>,
     pub(super) status: Option<String>,
+    pub(super) table_scroll_handle: UniformListScrollHandle,
+    pub(super) saved_sidebar_scroll_handle: UniformListScrollHandle,
 }
 
 impl Default for SessionManagerState {
@@ -257,6 +262,8 @@ impl Default for SessionManagerState {
             oxide_import_dialog: None,
             oxide_export_dialog: None,
             status: None,
+            table_scroll_handle: UniformListScrollHandle::new(),
+            saved_sidebar_scroll_handle: UniformListScrollHandle::new(),
         }
     }
 }

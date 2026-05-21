@@ -99,7 +99,23 @@ impl WorkspaceApp {
         };
         let show_description = !description.is_empty() && !matches!(dialog, SftpDialog::Preview { .. });
 
-        dialog_backdrop()
+        let outside_dialog = dialog.clone();
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    // Tauri SFTP dialogs are Radix Dialogs. Backdrop clicks map
+                    // to their onOpenChange(false) close/cancel path; editor
+                    // shells run the same dirty-check path as the close button.
+                    match outside_dialog {
+                        SftpDialog::Editor { .. } => this.request_close_sftp_editor(),
+                        SftpDialog::Conflict => this.cancel_sftp_transfer_conflicts(),
+                        _ => this.close_sftp_dialog(),
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .w(px(width))
@@ -115,6 +131,9 @@ impl WorkspaceApp {
                     // Tauri DialogContent stays opaque; only the overlay is translucent.
                     .bg(rgb(theme.bg_elevated))
                     .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .shadow(vec![gpui::BoxShadow {
                         color: gpui::Hsla::from(rgba(SFTP_DIALOG_SHADOW_ALPHA)),
                         offset: gpui::point(px(0.0), px(16.0)),

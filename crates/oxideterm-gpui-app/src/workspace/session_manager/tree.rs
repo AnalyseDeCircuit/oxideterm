@@ -160,7 +160,9 @@ impl WorkspaceApp {
             .flex_1()
             .min_h(px(0.0))
             .min_w(px(0.0))
-            .overflow_y_scroll()
+            .selectable_overflow_y_scroll(
+                &self.selectable_text_scroll_handle("session-manager-folder-tree-scroll"),
+            )
             .px_1()
             .py_1();
 
@@ -250,6 +252,11 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let active = self.session_manager.selected_group == group;
+        let selection_group_id =
+            crate::workspace::selectable_text::selectable_text_id("session-manager-tree-row", (
+                group.as_deref(),
+                label.as_str(),
+            ));
         div()
             .min_h(px(32.0))
             .pl(px(12.0 + depth as f32 * 16.0))
@@ -296,14 +303,32 @@ impl WorkspaceApp {
                     } else {
                         gpui::FontWeight::NORMAL
                     })
-                    .child(label),
+                    .child(self.render_row_safe_selectable_display_text_in_group(
+                        selection_group_id,
+                        "session-manager-tree-cell",
+                        "label",
+                        0,
+                        label,
+                        theme.text,
+                        None,
+                        cx,
+                    )),
             )
             .when_some(count, |item, count| {
                 item.child(
                     div()
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(theme.text_muted))
-                        .child(count.to_string()),
+                        .child(self.render_row_safe_selectable_display_text_in_group(
+                            selection_group_id,
+                            "session-manager-tree-cell",
+                            "count",
+                            1,
+                            count.to_string(),
+                            theme.text_muted,
+                            None,
+                            cx,
+                        )),
                 )
             })
             .on_mouse_down(
@@ -338,6 +363,11 @@ impl WorkspaceApp {
             .unwrap_or(group.as_str())
             .to_string();
         let selected_group = group.clone();
+        let selection_group_id =
+            crate::workspace::selectable_text::selectable_text_id("session-manager-tree-node", (
+                group.as_str(),
+                label.as_str(),
+            ));
         let mut node = div().child(
             div()
                 .min_h(px(28.0))
@@ -411,16 +441,34 @@ impl WorkspaceApp {
                         .font_weight(if active {
                             gpui::FontWeight::MEDIUM
                         } else {
-                            gpui::FontWeight::NORMAL
-                        })
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.connection_count_for_group(&group).to_string()),
-                )
+                        gpui::FontWeight::NORMAL
+                    })
+                    .child(self.render_row_safe_selectable_display_text_in_group(
+                        selection_group_id,
+                        "session-manager-tree-cell",
+                        "label",
+                        0,
+                        label,
+                        theme.text,
+                        None,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.render_row_safe_selectable_display_text_in_group(
+                        selection_group_id,
+                        "session-manager-tree-cell",
+                        "count",
+                        1,
+                        self.connection_count_for_group(&group).to_string(),
+                        theme.text_muted,
+                        None,
+                        cx,
+                    )),
+            )
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
@@ -480,7 +528,14 @@ impl WorkspaceApp {
                     .flex_1()
                     .truncate()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .child(self.i18n.t("sessionManager.folder_tree.new_group")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "session-manager-tree-action",
+                        "new-group",
+                        self.i18n.t("sessionManager.folder_tree.new_group"),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .on_mouse_down(
                 MouseButton::Left,

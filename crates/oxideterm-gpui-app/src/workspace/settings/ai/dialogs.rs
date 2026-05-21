@@ -3,7 +3,17 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    // Tauri SettingsView AI confirm is a Radix Dialog bound to
+                    // setShowAiConfirm, so outside click is the Cancel path.
+                    this.show_ai_enable_confirm = false;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 dialog_content(&self.tokens)
                     .w(px(AI_CONFIRM_DIALOG_WIDTH))
@@ -11,6 +21,9 @@ impl WorkspaceApp {
                     .shadow_lg()
                     .flex()
                     .flex_col()
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         dialog_header(&self.tokens)
                             .child(dialog_title(
@@ -134,7 +147,17 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    // Tauri provider-key removal uses the shared confirm
+                    // dialog; outside close cancels the pending removal.
+                    this.ai_provider_key_remove_confirm = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 dialog_content(&self.tokens)
                     .w(px(AI_KEY_REMOVE_DIALOG_WIDTH))
@@ -142,6 +165,9 @@ impl WorkspaceApp {
                     .shadow_lg()
                     .rounded(px(self.tokens.radii.lg))
                     .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .flex()
@@ -257,7 +283,17 @@ impl WorkspaceApp {
             .i18n
             .t("settings_view.ai.remove_provider_confirm")
             .replace("{{name}}", provider_name);
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    // Tauri remove-provider confirm is cancellable via
+                    // Dialog onOpenChange(false).
+                    this.ai_provider_remove_confirm = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 dialog_content(&self.tokens)
                     .w(px(AI_KEY_REMOVE_DIALOG_WIDTH))
@@ -265,6 +301,9 @@ impl WorkspaceApp {
                     .shadow_lg()
                     .rounded(px(self.tokens.radii.lg))
                     .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .flex()

@@ -7,7 +7,6 @@ use std::{
 };
 
 use gpui::StatefulInteractiveElement;
-use gpui_component::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
     ButtonTone, TextInputView, button,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
@@ -371,9 +370,12 @@ impl WorkspaceApp {
         }
 
         div()
+            .id("launcher-wsl-scroll")
             .flex_1()
             .min_h(px(0.0))
-            .overflow_y_scrollbar()
+            .selectable_overflow_y_scrollbar(
+                &self.selectable_text_scroll_handle("launcher-wsl-scroll"),
+            )
             .p(px(LAUNCHER_WSL_CONTENT_PADDING))
             .flex()
             .flex_col()
@@ -973,9 +975,12 @@ impl WorkspaceApp {
         }
 
         div()
+            .id("launcher-apps-scroll")
             .flex_1()
             .min_h(px(0.0))
-            .overflow_y_scrollbar()
+            .selectable_overflow_y_scrollbar(
+                &self.selectable_text_scroll_handle("launcher-apps-scroll"),
+            )
             .child(
                 div()
                     .px(px(LAUNCHER_HEADER_PADDING_X))

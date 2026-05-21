@@ -1,5 +1,4 @@
 use super::*;
-use gpui_component::scroll::ScrollableElement;
 
 impl WorkspaceApp {
     pub(super) fn open_plugin_manager_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -34,8 +33,11 @@ impl WorkspaceApp {
     pub(super) fn render_plugin_manager_surface(&self) -> AnyElement {
         let theme = self.tokens.ui;
         div()
+            .id("plugin-manager-scroll")
             .size_full()
-            .overflow_y_scrollbar()
+            .selectable_overflow_y_scrollbar(
+                &self.selectable_text_scroll_handle("plugin-manager-scroll"),
+            )
             .bg(rgb(theme.bg))
             .text_color(rgb(theme.text))
             .child(

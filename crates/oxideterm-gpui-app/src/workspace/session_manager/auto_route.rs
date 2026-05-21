@@ -3,8 +3,6 @@ use std::{
     collections::BinaryHeap,
 };
 
-use gpui_component::scroll::ScrollableElement;
-
 const AUTO_ROUTE_MODAL_WIDTH: f32 = 512.0; // Tauri max-w-lg
 const AUTO_ROUTE_MODAL_MAX_HEIGHT_RATIO: f32 = 0.80; // Tauri max-h-[80vh]
 const AUTO_ROUTE_NODE_LIST_MAX_HEIGHT: f32 = 240.0; // Tauri max-h-60
@@ -400,7 +398,9 @@ impl WorkspaceApp {
                         .id("auto-route-modal-body-scroll")
                         .flex_1()
                         .min_h(px(0.0))
-                        .overflow_y_scroll()
+                        .selectable_overflow_y_scroll(
+                            &self.selectable_text_scroll_handle("auto-route-modal-body-scroll"),
+                        )
                         .child(self.render_auto_route_body(cx)),
                 )
                 .child(self.render_auto_route_footer(cx)),
@@ -567,8 +567,11 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .id("auto-route-node-picker-scroll")
                     .max_h(px(AUTO_ROUTE_NODE_LIST_MAX_HEIGHT))
-                    .overflow_y_scrollbar()
+                    .selectable_overflow_y_scrollbar(
+                        &self.selectable_text_scroll_handle("auto-route-node-picker-scroll"),
+                    )
                     .rounded(px(self.tokens.radii.md))
                     .border_1()
                     .border_color(rgb(theme.border))
@@ -592,6 +595,8 @@ impl WorkspaceApp {
         let has_background = self
             .terminal_background_preferences("session_manager")
             .is_some();
+        let selection_group_id =
+            crate::workspace::selectable_text::selectable_text_id("auto-route-target-row", &node.id);
         div()
             .flex()
             .items_center()
@@ -626,14 +631,32 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text_heading))
-                            .child(node.display_title()),
+                            .child(self.render_row_safe_selectable_display_text_in_group(
+                                selection_group_id,
+                                "auto-route-target-cell",
+                                ("title", node.id.as_str()),
+                                0,
+                                node.display_title(),
+                                theme.text_heading,
+                                None,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
                             .truncate()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
-                            .child(format!("{}@{}:{}", node.username, node.host, node.port)),
+                            .child(self.render_row_safe_selectable_display_text_in_group(
+                                selection_group_id,
+                                "auto-route-target-cell",
+                                ("detail", node.id.as_str()),
+                                1,
+                                format!("{}@{}:{}", node.username, node.host, node.port),
+                                theme.text_muted,
+                                None,
+                                cx,
+                            )),
                     ),
             )
             .on_mouse_down(
@@ -1143,6 +1166,7 @@ mod auto_route_tests {
             updated_at: None,
             color: None,
             tags: Vec::new(),
+            post_connect_command: None,
         }
     }
 }

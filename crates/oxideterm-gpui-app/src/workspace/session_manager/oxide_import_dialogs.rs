@@ -6,7 +6,18 @@ impl WorkspaceApp {
         };
         let preview = dialog.preview.clone();
         let has_result = dialog.result.is_some();
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    // Tauri OxideImportModal wires Dialog onOpenChange through
+                    // handleClose, which clears the dialog state on backdrop click.
+                    this.session_manager.oxide_import_dialog = None;
+                    this.session_manager.focused_input = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .w(px(OXIDE_MODAL_WIDTH))
@@ -18,6 +29,9 @@ impl WorkspaceApp {
                     .border_color(rgb(theme.border))
                     .bg(rgb(theme.bg_panel))
                     .overflow_hidden()
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .px(px(OXIDE_MODAL_HEADER_PX))
@@ -32,7 +46,14 @@ impl WorkspaceApp {
                                     .text_size(px(20.0))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text_heading))
-                                    .child("从 .oxide 文件导入配置"),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "oxide-import-dialog",
+                                        "title",
+                                        "从 .oxide 文件导入配置",
+                                        theme.text_heading,
+                                        cx,
+                                    )),
                             )
                             .child(self.render_oxide_close_button(true, cx)),
                     )
@@ -41,7 +62,9 @@ impl WorkspaceApp {
                             .id("oxide-import-dialog-scroll")
                             .flex_1()
                             .min_h(px(0.0))
-                            .overflow_y_scroll()
+                            .selectable_overflow_y_scroll(
+                                &self.selectable_text_scroll_handle("oxide-import-dialog-scroll"),
+                            )
                             .p(px(OXIDE_MODAL_BODY_P))
                             .flex()
                             .flex_col()
@@ -87,7 +110,7 @@ impl WorkspaceApp {
                                 )
                             })
                             .when_some(dialog.progress_stage.clone().filter(|_| !has_result), |body, progress| {
-                                body.child(self.render_oxide_progress(progress, None))
+                                body.child(self.render_oxide_progress(progress, None, cx))
                             })
                             .when_some(dialog.metadata.clone().filter(|_| !has_result), |body, metadata| {
                                 body.child(self.render_oxide_import_file_info(metadata, cx))
@@ -101,11 +124,12 @@ impl WorkspaceApp {
                                         "输入导出时设置的密码".to_string(),
                                         cx,
                                     ),
+                                    cx,
                                 ))
                                 .child(self.render_oxide_conflict_strategy(cx))
                             })
                             .when(dialog.file_data.is_some() && dialog.preview.is_none() && !has_result, |body| {
-                                body.child(self.render_oxide_import_warning())
+                                body.child(self.render_oxide_import_warning(cx))
                             })
                             .when_some(preview.clone().filter(|_| !has_result), |body, preview| {
                                 body.child(self.render_oxide_import_preview(preview, cx))
@@ -237,9 +261,12 @@ impl WorkspaceApp {
         );
         if !metadata.connection_names.is_empty() {
             let mut list = div()
+                .id("oxide-import-connections-preview")
                 .mt(px(4.0))
                 .max_h(px(128.0))
-                .overflow_y_scrollbar()
+                .selectable_overflow_y_scrollbar(
+                    &self.selectable_text_scroll_handle("oxide-import-connections-preview"),
+                )
                 .flex()
                 .flex_col()
                 .gap(px(4.0));
@@ -275,7 +302,7 @@ impl WorkspaceApp {
             children.push(list.into_any_element());
         }
 
-        self.render_oxide_padded_card(16.0, None, children)
+        self.render_oxide_padded_card(16.0, None, children, cx)
     }
 
     fn render_oxide_conflict_strategy(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -294,6 +321,12 @@ impl WorkspaceApp {
         let mut row = div().grid().grid_cols(2).gap(px(8.0));
         for (strategy, label) in strategies {
             let selected = current == strategy;
+            let strategy_key = match strategy {
+                ImportConflictStrategy::Rename => "rename",
+                ImportConflictStrategy::Skip => "skip",
+                ImportConflictStrategy::Replace => "replace",
+                ImportConflictStrategy::Merge => "merge",
+            };
             row = row.child(
                 div()
                     .rounded(px(self.tokens.radii.md))
@@ -319,7 +352,19 @@ impl WorkspaceApp {
                             } else {
                                 self.tokens.ui.text_muted
                             }))
-                            .child(label),
+                            // Source tabs are selectable rows, so the visible label follows Tauri select-none behavior.
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "oxide-import-source-tab",
+                                strategy_key,
+                                label,
+                                if selected {
+                                    self.tokens.ui.text
+                                } else {
+                                    self.tokens.ui.text_muted
+                                },
+                                cx,
+                            )),
                     )
                     .hover(|button| button.bg(rgb(self.tokens.ui.bg_hover)))
                     .on_mouse_down(
@@ -346,14 +391,21 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text))
-                    .child("冲突处理策略"),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "oxide-import-conflict",
+                        "title",
+                        "冲突处理策略",
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .child(row)
             .into_any_element()
     }
 
 
-    fn render_oxide_import_warning(&self) -> AnyElement {
+    fn render_oxide_import_warning(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .px_3()
             .py_2()
@@ -369,21 +421,44 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child("⚠️ 注意"),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "oxide-import-warning",
+                        "title",
+                        "⚠️ 注意",
+                        OXIDE_YELLOW_500,
+                        cx,
+                    )),
             )
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .line_height(px(16.0))
                     .opacity(0.9)
-                    .child("导入会一次处理所有已选连接。名称冲突的处理方式取决于你在下方选择的冲突策略。"),
+                    .child(self.render_display_text_with_role_and_alpha(
+                        SelectableTextRole::PlainDocument,
+                        "oxide-import-warning",
+                        "conflict",
+                        "导入会一次处理所有已选连接。名称冲突的处理方式取决于你在下方选择的冲突策略。",
+                        OXIDE_YELLOW_500,
+                        0.9,
+                        cx,
+                    )),
             )
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .line_height(px(16.0))
                     .opacity(0.9)
-                    .child(".oxide 文件从不包含已保存的服务器密码。使用密码认证的连接导入后，后续可能需要你重新输入密码。"),
+                    .child(self.render_display_text_with_role_and_alpha(
+                        SelectableTextRole::PlainDocument,
+                        "oxide-import-warning",
+                        "passwords",
+                        ".oxide 文件从不包含已保存的服务器密码。使用密码认证的连接导入后，后续可能需要你重新输入密码。",
+                        OXIDE_YELLOW_500,
+                        0.9,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

@@ -26,6 +26,10 @@ pub enum TerminalEvent {
     },
     ShellIntegration(ShellIntegrationEvent),
     CommandMark(TerminalCommandMarkEvent),
+    CwdChanged {
+        cwd: String,
+        host: Option<String>,
+    },
     EncodingHint(EncodingHint),
     ClipboardStore(String),
     ClipboardLoad(Arc<dyn Fn(&str) -> String + Sync + Send + 'static>),

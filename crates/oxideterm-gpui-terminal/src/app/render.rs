@@ -75,7 +75,8 @@ impl Render for TerminalPane {
             self.selected_command_mark_id.clone(),
         )
         .highlight_rules(self.preferences.highlight_rules.clone())
-        .transparent_background(background.is_some());
+        .transparent_background(background.is_some())
+        .ghost_text(self.autosuggest_ghost_text());
 
         div()
             .id("terminal-pane")

@@ -35,7 +35,7 @@ impl WorkspaceApp {
         }
 
         if visible_scope_count == 0 {
-            rows.push(self.keybinding_no_results());
+            rows.push(self.keybinding_no_results(cx));
         }
 
         rows
@@ -239,7 +239,7 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn keybinding_no_results(&self) -> AnyElement {
+    fn keybinding_no_results(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .w_full()
             .py(px(44.0))
@@ -248,7 +248,14 @@ impl WorkspaceApp {
             .justify_center()
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(self.i18n.t("settings_view.keybindings.no_results"))
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "settings-keybindings",
+                "no-results",
+                self.i18n.t("settings_view.keybindings.no_results"),
+                self.tokens.ui.text_muted,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -282,13 +289,27 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t(scope.label_key()).to_uppercase()),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "settings-keybindings-scope",
+                                scope.label_key(),
+                                self.i18n.t(scope.label_key()).to_uppercase(),
+                                theme.text_muted,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("settings_view.keybindings.column_shortcut")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "settings-keybindings-column",
+                                "shortcut",
+                                self.i18n.t("settings_view.keybindings.column_shortcut"),
+                                theme.text_muted,
+                                cx,
+                            )),
                     ),
             );
 
@@ -349,9 +370,16 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text))
-                            .child(self.i18n.t(&definition.label_key())),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "settings-keybinding-action",
+                                definition.id,
+                                self.i18n.t(&definition.label_key()),
+                                theme.text,
+                                cx,
+                            )),
                     )
-                    .when(modified, |label| label.child(self.keybinding_modified_badge())),
+                    .when(modified, |label| label.child(self.keybinding_modified_badge(cx))),
             )
             .child(
                 div()
@@ -377,6 +405,7 @@ impl WorkspaceApp {
                                     .child(self.keybinding_kbd_badge(
                                         &crate::keybindings::format_combo(&current),
                                         false,
+                                        cx,
                                     ))
                                     .on_mouse_down(
                                         MouseButton::Left,
@@ -427,13 +456,20 @@ impl WorkspaceApp {
                     .gap(px(4.0))
                     .child(match combo {
                         Some(combo) => {
-                            self.keybinding_kbd_badge(&crate::keybindings::format_combo(combo), true)
+                            self.keybinding_kbd_badge(&crate::keybindings::format_combo(combo), true, cx)
                         }
                         None => div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .italic()
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("settings_view.keybindings.record_prompt"))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "settings-keybindings-record",
+                                "prompt",
+                                self.i18n.t("settings_view.keybindings.record_prompt"),
+                                theme.text_muted,
+                                cx,
+                            ))
                             .into_any_element(),
                     })
                     .when(combo.is_some() && !conflicts.is_empty(), |cell| {
@@ -443,7 +479,14 @@ impl WorkspaceApp {
                                 .truncate()
                                 .text_size(px(11.0))
                                 .text_color(rgb(theme.warning))
-                                .child(self.keybinding_conflict_text(conflicts, side)),
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "settings-keybindings-conflict",
+                                    conflicts.join("|"),
+                                    self.keybinding_conflict_text(conflicts, side),
+                                    theme.warning,
+                                    cx,
+                                )),
                         )
                     }),
             )
@@ -489,7 +532,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn keybinding_modified_badge(&self) -> AnyElement {
+    fn keybinding_modified_badge(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .flex_none()
             .rounded(px(self.tokens.radii.sm))
@@ -499,11 +542,23 @@ impl WorkspaceApp {
             .text_size(px(10.0))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(self.tokens.ui.accent))
-            .child(self.i18n.t("settings_view.keybindings.modified"))
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "settings-keybindings",
+                "modified",
+                self.i18n.t("settings_view.keybindings.modified"),
+                self.tokens.ui.accent,
+                cx,
+            ))
             .into_any_element()
     }
 
-    fn keybinding_kbd_badge(&self, value: &str, accent: bool) -> AnyElement {
+    fn keybinding_kbd_badge(
+        &self,
+        value: &str,
+        accent: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .rounded(px(self.tokens.radii.sm))
             .border_1()
@@ -526,7 +581,18 @@ impl WorkspaceApp {
             } else {
                 self.tokens.ui.text
             }))
-            .child(value.to_string())
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "settings-keybinding-chip",
+                (value, accent),
+                value.to_string(),
+                if accent {
+                    self.tokens.ui.accent
+                } else {
+                    self.tokens.ui.text
+                },
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -575,14 +641,36 @@ impl WorkspaceApp {
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
-                    .child(self.i18n.t("settings_view.keybindings.reset_all_confirm"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "settings-keybindings-reset-dialog",
+                        "title",
+                        self.i18n.t("settings_view.keybindings.reset_all_confirm"),
+                        self.tokens.ui.text_heading,
+                        cx,
+                    ))
                     .into_any_element(),
                 description: None,
                 cancel_label: div()
-                    .child(self.i18n.t("common.actions.cancel"))
+                    // Dialog action labels mirror browser select-none buttons.
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "settings-keybindings-reset-dialog",
+                        "cancel",
+                        self.i18n.t("common.actions.cancel"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
                     .into_any_element(),
                 confirm_label: div()
-                    .child(self.i18n.t("settings_view.keybindings.reset_all"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "settings-keybindings-reset-dialog",
+                        "confirm",
+                        self.i18n.t("settings_view.keybindings.reset_all"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
                     .into_any_element(),
             },
             cx.listener(|this, _event, _window, cx| {

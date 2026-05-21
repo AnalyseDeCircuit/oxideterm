@@ -184,7 +184,14 @@ impl WorkspaceApp {
                     12.0,
                     rgb(self.tokens.ui.accent),
                 ))
-                .child(div().truncate().child(self.i18n.t("ai.input.thinking")))
+                .child(div().truncate().child(self.render_display_text_with_role(
+                    SelectableTextRole::PlainDocument,
+                    "ai-input-footer",
+                    "thinking",
+                    self.i18n.t("ai.input.thinking"),
+                    self.tokens.ui.accent,
+                    cx,
+                )))
                 .into_any_element()
         } else {
             self.render_ai_context_usage_indicator(cx).into_any_element()
@@ -437,7 +444,14 @@ impl WorkspaceApp {
                                 .flex_none()
                                 .text_size(px(10.0))
                                 .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(self.i18n.t("ai.profile.default_badge")),
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "ai-profile-badge",
+                                    "default",
+                                    self.i18n.t("ai.profile.default_badge"),
+                                    self.tokens.ui.text_muted,
+                                    cx,
+                                )),
                         )
                     })
                     .on_mouse_down(
@@ -475,7 +489,14 @@ impl WorkspaceApp {
                     .text_size(px(12.0))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("ai.safety_mode.menu_title")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-safety-menu",
+                        "title",
+                        self.i18n.t("ai.safety_mode.menu_title"),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .child(self.render_ai_safety_menu_item(
                 AiSafetyMode::Default,
@@ -511,7 +532,14 @@ impl WorkspaceApp {
                         14.0,
                         rgb(self.tokens.ui.text_muted),
                     ))
-                    .child(self.i18n.t("ai.safety_mode.open_settings"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-safety-menu",
+                        "open-settings",
+                        self.i18n.t("ai.safety_mode.open_settings"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, window, cx| {
@@ -537,6 +565,8 @@ impl WorkspaceApp {
         } else {
             LucideIcon::ShieldCheck
         };
+        let title_color = if bypass { 0xfcd34d } else { self.tokens.ui.text };
+        let mode_key = if bypass { "bypass" } else { "default" };
         div()
             .flex()
             .items_start()
@@ -564,19 +594,30 @@ impl WorkspaceApp {
                         div()
                             .text_size(px(12.0))
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(if bypass {
-                                0xfcd34d
-                            } else {
-                                self.tokens.ui.text
-                            }))
-                            .child(title),
+                            .text_color(rgb(title_color))
+                            // Safety mode rows are menu items; text must bubble mouse-down like Tauri select-none labels.
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "ai-safety-menu-item-title",
+                                mode_key,
+                                title,
+                                title_color,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
                             .text_size(px(10.0))
                             .line_height(px(15.0))
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(description),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "ai-safety-menu-item-description",
+                                mode_key,
+                                description,
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .on_mouse_down(
@@ -607,18 +648,46 @@ impl WorkspaceApp {
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
-                    .child(self.i18n.t("ai.safety_mode.confirm_title"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-safety-confirm",
+                        "title",
+                        self.i18n.t("ai.safety_mode.confirm_title"),
+                        self.tokens.ui.text_heading,
+                        cx,
+                    ))
                     .into_any_element(),
                 description: Some(
                     div()
-                        .child(self.i18n.t("ai.safety_mode.confirm_description"))
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "ai-safety-confirm",
+                            "description",
+                            self.i18n.t("ai.safety_mode.confirm_description"),
+                            self.tokens.ui.text_muted,
+                            cx,
+                        ))
                         .into_any_element(),
                 ),
                 cancel_label: div()
-                    .child(self.i18n.t("ai.safety_mode.confirm_cancel"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-safety-confirm",
+                        "cancel",
+                        self.i18n.t("ai.safety_mode.confirm_cancel"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
                     .into_any_element(),
                 confirm_label: div()
-                    .child(self.i18n.t("ai.safety_mode.confirm_enable"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-safety-confirm",
+                        "confirm",
+                        self.i18n.t("ai.safety_mode.confirm_enable"),
+                        self.tokens.ui.text,
+                        cx,
+                    ))
                     .into_any_element(),
             },
             cx.listener(|this, _event, _window, cx| {
@@ -770,19 +839,29 @@ impl WorkspaceApp {
                             .text_size(px(10.0))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("ai.context.system")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "ai-context-popover-section",
+                                "system",
+                                self.i18n.t("ai.context.system"),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     )
                     .child(self.render_ai_context_breakdown_row(
                         self.i18n.t("ai.context.system_instructions"),
                         ai_context_percent(breakdown.system_instructions, max_tokens),
+                        cx,
                     ))
                     .child(self.render_ai_context_breakdown_row(
                         self.i18n.t("ai.context.tool_definitions"),
                         ai_context_percent(breakdown.tool_definitions, max_tokens),
+                        cx,
                     ))
                     .child(self.render_ai_context_breakdown_row(
                         self.i18n.t("ai.context.reserved_output"),
                         ai_context_percent(breakdown.reserved_output, max_tokens),
+                        cx,
                     )),
             )
             .child(
@@ -800,15 +879,24 @@ impl WorkspaceApp {
                             .text_size(px(10.0))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("ai.context.user_context")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "ai-context-popover-section",
+                                "user",
+                                self.i18n.t("ai.context.user_context"),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
                     )
                     .child(self.render_ai_context_breakdown_row(
                         self.i18n.t("ai.context.messages_label"),
                         ai_context_percent(breakdown.messages, max_tokens),
+                        cx,
                     ))
                     .child(self.render_ai_context_breakdown_row(
                         self.i18n.t("ai.context.tool_results"),
                         ai_context_percent(breakdown.tool_results, max_tokens),
+                        cx,
                     )),
             )
             .when(
@@ -846,7 +934,15 @@ impl WorkspaceApp {
                                         12.0,
                                         rgb(self.tokens.ui.text),
                                     ))
-                                    .child(self.i18n.t("ai.context.compress_dialog"))
+                                    // Popover command label mirrors Tauri select-none button text.
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::NonSelectable,
+                                        "ai-context-popover-action",
+                                        "compress",
+                                        self.i18n.t("ai.context.compress_dialog"),
+                                        self.tokens.ui.text,
+                                        cx,
+                                    ))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
@@ -863,7 +959,12 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_ai_context_breakdown_row(&self, label: String, value: String) -> AnyElement {
+    fn render_ai_context_breakdown_row(
+        &self,
+        label: String,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .items_center()
@@ -873,14 +974,26 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(11.0))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(label),
+                    .child(self.render_selectable_text_scoped(
+                        "ai-context-breakdown-label",
+                        (&label, &value),
+                        label.clone(),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()
                     .text_size(px(11.0))
                     .font_family(settings_ui_font_family(""))
                     .text_color(rgb(self.tokens.ui.text))
-                    .child(value),
+                    .child(self.render_selectable_text_scoped(
+                        "ai-context-breakdown-value",
+                        (&label, &value),
+                        value.clone(),
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

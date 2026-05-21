@@ -2,7 +2,7 @@ use gpui::{
     AnyElement, Context, MouseButton, ParentElement, SharedString, Styled, Window, div, prelude::*,
     px, rgb, rgba,
 };
-use oxideterm_gpui_ui::modal::dialog_backdrop;
+use oxideterm_gpui_ui::modal::dismissible_dialog_backdrop;
 use oxideterm_ssh::{HostKeyStatus, SshConfig, remove_host_key};
 
 use super::ssh_flow::SshConnectionIntent;
@@ -196,7 +196,17 @@ impl WorkspaceApp {
             ),
         };
 
-        dialog_backdrop()
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    // Tauri HostKeyConfirmDialog closes via Radix onOpenChange
+                    // when not loading; native host-key actions are synchronous,
+                    // so backdrop dismiss follows the same cancel path as Esc.
+                    this.cancel_host_key_challenge(cx);
+                    cx.stop_propagation();
+                }),
+            )
             .child(
                 div()
                     .w(px(480.0))
@@ -206,6 +216,9 @@ impl WorkspaceApp {
                     .bg(rgb(theme.bg_elevated))
                     .shadow_lg()
                     .overflow_hidden()
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
                         div()
                             .px(px(self.tokens.metrics.modal_header_padding_x))
@@ -324,7 +337,13 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.form_label_font_size))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(label.clone()),
+                    .child(self.render_selectable_text_scoped(
+                        "host-key-label",
+                        (&label, &value),
+                        label.clone(),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()

@@ -235,7 +235,14 @@ impl WorkspaceApp {
                     .text_size(px(SFTP_TEXT_XS))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(theme.text_muted))
-                    .child(title.to_uppercase()),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::RowSafe,
+                        "sftp-pane-title",
+                        pane as u64,
+                        title.to_uppercase(),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(self.render_sftp_path_bar(
                 pane,
@@ -448,6 +455,15 @@ impl WorkspaceApp {
             }
             let is_last = index + 1 == segments.len();
             let full_path = segment.full_path.clone();
+            let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
+                "sftp-breadcrumb-segment",
+                (pane as u64, segment.full_path.as_str()),
+            );
+            let segment_text_color = if is_last {
+                theme.text_heading
+            } else {
+                theme.text
+            };
             inner = inner.child(
                 div()
                     .max_w(px(120.0))
@@ -482,7 +498,18 @@ impl WorkspaceApp {
                             rgb(theme.text_muted),
                         ))
                     })
-                    .child(div().truncate().child(segment.name))
+                    .child(div().truncate().child(
+                        self.render_row_safe_selectable_display_text_in_group(
+                            selection_group_id,
+                            "sftp-breadcrumb-cell",
+                            ("name", pane as u64, segment.full_path.as_str()),
+                            0,
+                            segment.name,
+                            segment_text_color,
+                            None,
+                            cx,
+                        ),
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
@@ -576,6 +603,20 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let field_key = match field {
+            SftpSortField::Name => "name",
+            SftpSortField::Size => "size",
+            SftpSortField::Modified => "modified",
+        };
+        let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
+            "sftp-sort-header",
+            (pane as u64, field_key),
+        );
+        let header_text_color = if active_field == field {
+            theme.accent
+        } else {
+            theme.text_muted
+        };
         div()
             .when_some(width, |header, width| {
                 header.w(px(width)).flex_none().justify_end()
@@ -593,7 +634,18 @@ impl WorkspaceApp {
             })
             .hover(move |header| header.text_color(rgb(theme.text)))
             .cursor_pointer()
-            .child(div().truncate().child(label))
+            .child(div().truncate().child(
+                self.render_row_safe_selectable_display_text_in_group(
+                    selection_group_id,
+                    "sftp-sort-header-cell",
+                    field_key,
+                    0,
+                    label,
+                    header_text_color,
+                    None,
+                    cx,
+                ),
+            ))
             .when(active_field == field, |header| {
                 let icon = match (field, direction) {
                     (SftpSortField::Name, SftpSortDirection::Asc) => LucideIcon::ArrowUpAZ,

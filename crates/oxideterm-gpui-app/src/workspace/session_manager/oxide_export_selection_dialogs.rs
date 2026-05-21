@@ -21,8 +21,11 @@ impl WorkspaceApp {
             })
             .unwrap_or(0);
         let mut list = div()
+            .id("oxide-export-connections-selection")
             .max_h(px(OXIDE_MODAL_LIST_MAX_H))
-            .overflow_y_scrollbar()
+            .selectable_overflow_y_scrollbar(
+                &self.selectable_text_scroll_handle("oxide-export-connections-selection"),
+            )
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgb(theme.border))
@@ -38,11 +41,19 @@ impl WorkspaceApp {
                     .text_align(gpui::TextAlign::Center)
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(theme.text_muted))
-                    .child("无保存的连接"),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "oxide-export-connections",
+                        "empty",
+                        "无保存的连接",
+                        theme.text_muted,
+                        cx,
+                    )),
             );
         } else {
             for connection in connections {
                 let id = connection.id.clone();
+                let row_key = id.clone();
                 let checked = self.session_manager.oxide_export_dialog.as_ref().is_some_and(
                     |dialog| dialog.selected_ids.contains(&connection.id),
                 );
@@ -106,7 +117,14 @@ impl WorkspaceApp {
                                         .text_size(px(self.tokens.metrics.ui_text_sm))
                                         .font_weight(gpui::FontWeight::MEDIUM)
                                         .text_color(rgb(theme.text))
-                                        .child(connection.name.clone())
+                                        .child(self.render_display_text_with_role(
+                                            SelectableTextRole::NonSelectable,
+                                            "oxide-export-connection-name",
+                                            row_key.as_str(),
+                                            connection.name.clone(),
+                                            theme.text,
+                                            cx,
+                                        ))
                                         .when(is_new_since_last_export, |row| {
                                             row.child(
                                                 div()
@@ -128,7 +146,14 @@ impl WorkspaceApp {
                                                         10.0,
                                                         rgb(OXIDE_GREEN_500),
                                                     ))
-                                                    .child("新"),
+                                                    .child(self.render_display_text_with_role(
+                                                        SelectableTextRole::PlainDocument,
+                                                        "oxide-export-new-badge",
+                                                        row_key.as_str(),
+                                                        "新",
+                                                        OXIDE_GREEN_500,
+                                                        cx,
+                                                    )),
                                             )
                                         }),
                                 )
@@ -137,7 +162,14 @@ impl WorkspaceApp {
                                         .truncate()
                                         .text_size(px(self.tokens.metrics.ui_text_xs))
                                         .text_color(rgb(theme.text_muted))
-                                        .child(meta),
+                                        .child(self.render_display_text_with_role(
+                                            SelectableTextRole::NonSelectable,
+                                            "oxide-export-connection-meta",
+                                            row_key.as_str(),
+                                            meta,
+                                            theme.text_muted,
+                                            cx,
+                                        )),
                                 ),
                         ),
                 );
@@ -157,7 +189,14 @@ impl WorkspaceApp {
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .text_color(rgb(theme.text))
-                            .child(format!("选择要导出的连接 ({selected_count}/{total})")),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "oxide-export-selection",
+                                "connection-count",
+                                format!("选择要导出的连接 ({selected_count}/{total})"),
+                                theme.text,
+                                cx,
+                            )),
                     )
                     .child(
                         button_with(
@@ -214,7 +253,14 @@ impl WorkspaceApp {
                             12.0,
                             rgb(OXIDE_GREEN_500),
                         ))
-                        .child(format!("上次导出后新增 {new_connection_count} 个连接")),
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "oxide-export-selection",
+                            "new-connections",
+                            format!("上次导出后新增 {new_connection_count} 个连接"),
+                            OXIDE_GREEN_500,
+                            cx,
+                        )),
                 )
             })
             .child(list)
@@ -243,6 +289,7 @@ impl WorkspaceApp {
                     cx.notify();
                     cx.stop_propagation();
                 }),
+                cx,
             ))
             .when(dialog.include_app_settings, |options| {
                 let mut children = vec![
@@ -255,13 +302,27 @@ impl WorkspaceApp {
                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(rgb(self.tokens.ui.text))
-                                .child("应用设置分组"),
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "oxide-export-app-settings",
+                                    "title",
+                                    "应用设置分组",
+                                    self.tokens.ui.text,
+                                    cx,
+                                )),
                         )
                         .child(
                             div()
                                 .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .text_color(rgb(self.tokens.ui.text_muted))
-                                .child("选择要包含到 .oxide 文件中的应用设置分组。"),
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::PlainDocument,
+                                    "oxide-export-app-settings",
+                                    "description",
+                                    "选择要包含到 .oxide 文件中的应用设置分组。",
+                                    self.tokens.ui.text_muted,
+                                    cx,
+                                )),
                         )
                         .into_any_element(),
                     self.render_oxide_settings_section_grid(
@@ -276,7 +337,7 @@ impl WorkspaceApp {
                         cx,
                     ));
                 }
-                options.child(self.render_oxide_card(None, children))
+                options.child(self.render_oxide_card(None, children, cx))
             })
             .when(
                 dialog.include_app_settings
@@ -300,7 +361,9 @@ impl WorkspaceApp {
                                 cx.notify();
                                 cx.stop_propagation();
                             }),
+                            cx,
                         )],
+                        cx,
                     ))
                 },
             )
@@ -316,6 +379,7 @@ impl WorkspaceApp {
                     cx.notify();
                     cx.stop_propagation();
                 }),
+                cx,
             ))
             .child(self.render_oxide_option_row(
                 "包含插件偏好设置".to_string(),
@@ -329,6 +393,7 @@ impl WorkspaceApp {
                     cx.notify();
                     cx.stop_propagation();
                 }),
+                cx,
             ))
             .child(self.render_oxide_export_plugin_settings(dialog, cx))
             .child(self.render_oxide_option_row(
@@ -343,6 +408,7 @@ impl WorkspaceApp {
                     cx.notify();
                     cx.stop_propagation();
                 }),
+                cx,
             ))
             .into_any_element()
     }
@@ -357,14 +423,28 @@ impl WorkspaceApp {
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .line_height(px(16.0))
             .text_color(rgb(self.tokens.ui.text_muted))
-                    .child("所选的已保存端口转发会连同其所属的连接配置一起导出。")
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "oxide-export-forwards",
+                "description",
+                "所选的已保存端口转发会连同其所属的连接配置一起导出。",
+                self.tokens.ui.text_muted,
+                cx,
+            ))
             .into_any_element()];
         if dialog.available_forwards.is_empty() {
             children.push(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child("没有已保存的端口转发")
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "oxide-export-forwards",
+                        "empty",
+                        "没有已保存的端口转发",
+                        self.tokens.ui.text_muted,
+                        cx,
+                    ))
                     .into_any_element(),
             );
         } else {
@@ -376,6 +456,7 @@ impl WorkspaceApp {
                 format!("已保存的端口转发（{}）", dialog.available_forwards.len()),
             )),
             children,
+            cx,
         )
     }
 
@@ -403,8 +484,11 @@ impl WorkspaceApp {
         entries.sort_by(|left, right| left.0.cmp(&right.0));
 
         let mut list = div()
+            .id("oxide-export-forwards-selection")
             .max_h(px(OXIDE_MODAL_FORWARDS_MAX_H))
-            .overflow_y_scrollbar()
+            .selectable_overflow_y_scrollbar(
+                &self.selectable_text_scroll_handle("oxide-export-forwards-selection"),
+            )
             .flex()
             .flex_col()
             .gap(px(12.0));
@@ -488,8 +572,16 @@ impl WorkspaceApp {
                 vec![div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child("没有可导出的插件偏好设置")
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "oxide-export-plugin-settings",
+                        "empty",
+                        "没有可导出的插件偏好设置",
+                        self.tokens.ui.text_muted,
+                        cx,
+                    ))
                     .into_any_element()],
+                cx,
             );
         }
 
@@ -526,12 +618,19 @@ impl WorkspaceApp {
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .text_color(rgb(self.tokens.ui.text))
-                            .child(format!("{}（{} 项设置）", plugin_id, count)),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "oxide-export-plugin-settings",
+                                plugin_id.as_str(),
+                                format!("{}（{} 项设置）", plugin_id, count),
+                                self.tokens.ui.text,
+                                cx,
+                            )),
                     )
                     .into_any_element(),
             );
         }
-        self.render_oxide_card(None, children)
+        self.render_oxide_card(None, children, cx)
     }
 
 }

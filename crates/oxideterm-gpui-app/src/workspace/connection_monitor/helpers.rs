@@ -1,9 +1,11 @@
 fn monitor_center_state(
-    _tokens: &ThemeTokens,
+    app: &WorkspaceApp,
     icon: LucideIcon,
     color: u32,
     label: String,
+    cx: &mut Context<WorkspaceApp>,
 ) -> AnyElement {
+    let label_key = label.clone();
     div()
         .p_4()
         .flex()
@@ -17,7 +19,16 @@ fn monitor_center_state(
                 .mb_2()
                 .child(WorkspaceApp::render_lucide_icon(icon, 20.0, rgb(color))),
         )
-        .child(div().text_size(px(14.0)).child(label))
+        .child(div().text_size(px(14.0)).child(
+            app.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "monitor-center-state",
+                label_key,
+                label,
+                color,
+                cx,
+            ),
+        ))
         .into_any_element()
 }
 

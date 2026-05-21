@@ -66,7 +66,7 @@ impl WorkspaceApp {
         if let Some(progress) = self.file_manager.operation_progress.as_ref()
             && progress.active
         {
-            root = root.child(self.render_file_manager_operation_progress(progress));
+            root = root.child(self.render_file_manager_operation_progress(progress, cx));
         }
         root.into_any_element()
     }
@@ -116,7 +116,13 @@ impl WorkspaceApp {
                     .text_size(px(FILE_MANAGER_TEXT_SM))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text))
-                    .child(self.i18n.t("fileManager.title")),
+                    .child(self.render_selectable_display_text(
+                        "file-manager-title",
+                        (),
+                        self.i18n.t("fileManager.title"),
+                        theme.text,
+                        cx,
+                    )),
             )
             .child(div().flex_1())
             .child(self.render_file_manager_icon_button(
@@ -267,7 +273,13 @@ impl WorkspaceApp {
                     .text_size(px(FILE_MANAGER_TEXT_XS))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("fileManager.favorites").to_uppercase()),
+                    .child(self.render_selectable_display_text(
+                        "file-manager-bookmarks-title",
+                        (),
+                        self.i18n.t("fileManager.favorites").to_uppercase(),
+                        theme.text_muted,
+                        cx,
+                    )),
             );
         if self.file_manager.bookmarks.is_empty() {
             panel = panel.child(
@@ -276,11 +288,21 @@ impl WorkspaceApp {
                     .py(px(16.0))
                     .text_size(px(FILE_MANAGER_TEXT_XS))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("fileManager.noBookmarks")),
+                    .child(self.render_selectable_display_text(
+                        "file-manager-no-bookmarks",
+                        (),
+                        self.i18n.t("fileManager.noBookmarks"),
+                        theme.text_muted,
+                        cx,
+                    )),
             );
         }
         for bookmark in self.file_manager.bookmarks.clone() {
             let active = bookmark.path == self.file_manager.path;
+            let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
+                "file-manager-bookmark-row",
+                &bookmark.id,
+            );
             panel = panel.child(
                 div()
                     .h(px(32.0))
@@ -314,7 +336,16 @@ impl WorkspaceApp {
                             } else {
                                 rgb(theme.text)
                             })
-                            .child(bookmark.name.clone()),
+                            .child(self.render_row_safe_selectable_display_text_in_group(
+                                selection_group_id,
+                                "file-manager-bookmark-cell",
+                                ("name", bookmark.id.as_str()),
+                                0,
+                                bookmark.name.clone(),
+                                if active { theme.accent } else { theme.text },
+                                None,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -418,7 +449,14 @@ impl WorkspaceApp {
                                 .text_size(px(FILE_MANAGER_TEXT_XS))
                                 .font_weight(gpui::FontWeight::MEDIUM)
                                 .text_color(rgb(theme.text))
-                                .child(self.i18n.t("fileManager.openTerminalHere")),
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::NonSelectable,
+                                    "file-manager-action",
+                                    "open-terminal-here",
+                                    self.i18n.t("fileManager.openTerminalHere"),
+                                    theme.text,
+                                    cx,
+                                )),
                         )
                         .on_mouse_down(
                             MouseButton::Left,
@@ -481,7 +519,13 @@ impl WorkspaceApp {
                     .text_size(px(FILE_MANAGER_TEXT_XS))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("fileManager.local").to_uppercase()),
+                    .child(self.render_selectable_display_text(
+                        "file-manager-local-title",
+                        (),
+                        self.i18n.t("fileManager.local").to_uppercase(),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .child(self.render_file_manager_path_bar(has_background, cx))
             .child(self.render_file_manager_icon_button(
@@ -624,6 +668,15 @@ impl WorkspaceApp {
             }
             let is_last = index + 1 == segments.len();
             let full_path = segment.full_path.clone();
+            let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
+                "file-manager-breadcrumb-segment",
+                &segment.full_path,
+            );
+            let segment_text_color = if is_last {
+                theme.text_heading
+            } else {
+                theme.text
+            };
             inner = inner.child(
                 div()
                     .max_w(px(120.0))
@@ -661,7 +714,18 @@ impl WorkspaceApp {
                             rgb(theme.text_muted),
                         ))
                     })
-                    .child(div().truncate().child(segment.name))
+                    .child(div().truncate().child(
+                        self.render_row_safe_selectable_display_text_in_group(
+                            selection_group_id,
+                            "file-manager-breadcrumb-cell",
+                            ("name", segment.full_path.as_str()),
+                            0,
+                            segment.name,
+                            segment_text_color,
+                            None,
+                            cx,
+                        ),
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
@@ -780,6 +844,20 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let active = self.file_manager.sort_field == field;
+        let field_key = match field {
+            LocalSortField::Name => "name",
+            LocalSortField::Size => "size",
+            LocalSortField::Modified => "modified",
+        };
+        let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
+            "file-manager-sort-header",
+            field_key,
+        );
+        let text_color = if active {
+            self.tokens.ui.accent
+        } else {
+            self.tokens.ui.text_muted
+        };
         div()
             .when(flexible, |col| col.flex_1().min_w(px(0.0)))
             .when(!flexible && field == LocalSortField::Size, |col| {
@@ -799,7 +877,23 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.text_muted)
             })
             .cursor_pointer()
-            .child(label)
+            .child(
+                div()
+                    .when(flexible, |label| label.flex_1().min_w(px(0.0)))
+                    .when(!flexible, |label| label.flex_none())
+                    .truncate()
+                    .whitespace_nowrap()
+                    .child(self.render_row_safe_selectable_display_text_in_group(
+                        selection_group_id,
+                        "file-manager-sort-header-cell",
+                        field_key,
+                        0,
+                        label,
+                        text_color,
+                        None,
+                        cx,
+                    )),
+            )
             .when(active, |col| {
                 col.child(Self::render_lucide_icon(
                     match self.file_manager.sort_direction {
@@ -910,7 +1004,13 @@ impl WorkspaceApp {
                             20.0,
                             rgb(theme.text_muted),
                         ))
-                        .child(self.i18n.t("sftp.file_list.loading")),
+                        .child(self.render_selectable_display_text(
+                            "file-manager-list-loading",
+                            (),
+                            self.i18n.t("sftp.file_list.loading"),
+                            theme.text_muted,
+                            cx,
+                        )),
                 )
                 .into_any_element();
         }
@@ -958,7 +1058,13 @@ impl WorkspaceApp {
                                     rgb(theme.text_muted),
                                 )),
                         )
-                        .child(self.i18n.t("fileManager.empty")),
+                        .child(self.render_selectable_display_text(
+                            "file-manager-list-empty",
+                            (),
+                            self.i18n.t("fileManager.empty"),
+                            theme.text_muted,
+                            cx,
+                        )),
                 )
                 .into_any_element();
         }
@@ -970,11 +1076,14 @@ impl WorkspaceApp {
         let list_items = files.clone();
         let row_selected = selected.clone();
         let row_workspace = workspace.clone();
+        let row_selectable_state = self.selectable_text_render_state(cx);
         list.child(
-            uniform_list(
+            tracked_uniform_list(
                 "file-manager-list-virtual",
                 row_count,
+                self.file_manager.list_scroll.clone(),
                 move |range, _window, _cx| {
+                    let selectable_state = row_selectable_state.clone();
                     range
                         .map(|index| {
                             let file = list_items[index].clone();
@@ -988,6 +1097,23 @@ impl WorkspaceApp {
                             } else {
                                 icon_color
                             };
+                            let selection_group_id =
+                                crate::workspace::selectable_text::selectable_text_id(
+                                    "file-manager-list-row",
+                                    &file.name,
+                                );
+                            let display_name = if let Some(target) = file.symlink_target.as_ref() {
+                                format!("{} -> {target}", file.name)
+                            } else {
+                                file.name.clone()
+                            };
+                            let row_text_color = if selected { theme.accent } else { theme.text };
+                            let size_text = if file.file_type == LocalFileType::Directory {
+                                "-".to_string()
+                            } else {
+                                format_file_size(file.size)
+                            };
+                            let modified_text = format_modified(file.modified);
                             div()
                                 .w_full()
                                 .h(px(FILE_MANAGER_ROW_HEIGHT))
@@ -1026,11 +1152,15 @@ impl WorkspaceApp {
                                             rgb(icon_color),
                                         ))
                                         .child(div().truncate().child(
-                                            if let Some(target) = file.symlink_target.as_ref() {
-                                                format!("{} -> {target}", file.name)
-                                            } else {
-                                                file.name.clone()
-                                            },
+                                            selectable_state.render_row_safe_display_text_in_group(
+                                                selection_group_id,
+                                                "file-manager-list-cell",
+                                                ("name", file.name.as_str()),
+                                                0,
+                                                display_name,
+                                                row_text_color,
+                                                _cx,
+                                            ),
                                         )),
                                 )
                                 .child(
@@ -1039,11 +1169,17 @@ impl WorkspaceApp {
                                         .flex_none()
                                         .text_align(gpui::TextAlign::Right)
                                         .text_color(rgb(theme.text_muted))
-                                        .child(if file.file_type == LocalFileType::Directory {
-                                            "-".to_string()
-                                        } else {
-                                            format_file_size(file.size)
-                                        }),
+                                        .child(
+                                            selectable_state.render_row_safe_display_text_in_group(
+                                                selection_group_id,
+                                                "file-manager-list-cell",
+                                                ("size", file.name.as_str()),
+                                                1,
+                                                size_text,
+                                                theme.text_muted,
+                                                _cx,
+                                            ),
+                                        ),
                                 )
                                 .child(
                                     div()
@@ -1051,7 +1187,17 @@ impl WorkspaceApp {
                                         .flex_none()
                                         .text_align(gpui::TextAlign::Right)
                                         .text_color(rgb(theme.text_muted))
-                                        .child(format_modified(file.modified)),
+                                        .child(
+                                            selectable_state.render_row_safe_display_text_in_group(
+                                                selection_group_id,
+                                                "file-manager-list-cell",
+                                                ("modified", file.name.as_str()),
+                                                2,
+                                                modified_text,
+                                                theme.text_muted,
+                                                _cx,
+                                            ),
+                                        ),
                                 )
                                 .on_mouse_down(MouseButton::Left, {
                                     let workspace = row_workspace.clone();
@@ -1098,8 +1244,6 @@ impl WorkspaceApp {
                         .collect::<Vec<_>>()
                 },
             )
-            .track_scroll(self.file_manager.list_scroll.clone())
-            .size_full()
             .drag_over::<gpui::ExternalPaths>({
                 let theme = self.tokens.ui;
                 move |style, _paths, _window, _cx| {
@@ -1146,6 +1290,7 @@ impl WorkspaceApp {
     fn render_file_manager_operation_progress(
         &self,
         progress: &FileManagerOperationProgress,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let percent = if progress.total > 0 {
@@ -1181,12 +1326,26 @@ impl WorkspaceApp {
                     .gap(px(8.0))
                     .text_size(px(FILE_MANAGER_TEXT_XS))
                     .text_color(rgb(theme.text_muted))
-                    .child(div().max_w(relative(0.7)).truncate().child(label))
-                    .child(format!(
-                        "{}/{} ({}%)",
-                        progress.current,
-                        progress.total,
-                        percent.round() as u32
+                    .child(div().max_w(relative(0.7)).truncate().child(
+                        self.render_selectable_display_text(
+                            "file-manager-operation-label",
+                            (&progress.file_name, progress.total),
+                            label,
+                            theme.text_muted,
+                            cx,
+                        ),
+                    ))
+                    .child(self.render_selectable_display_text(
+                        "file-manager-operation-count",
+                        (&progress.file_name, progress.current, progress.total),
+                        format!(
+                            "{}/{} ({}%)",
+                            progress.current,
+                            progress.total,
+                            percent.round() as u32
+                        ),
+                        theme.text_muted,
+                        cx,
                     )),
             )
             .child(

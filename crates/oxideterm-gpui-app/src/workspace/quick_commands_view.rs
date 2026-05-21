@@ -12,7 +12,57 @@ pub(super) fn quick_command_icon_label_key(icon: QuickCommandIcon) -> String {
     format!("terminal.quick_commands.icon_{}", icon.as_source_id())
 }
 
+fn close_terminal_quick_commands_popover_state(
+    open: &mut bool,
+    pending_command: &mut Option<String>,
+    focused_input: &mut Option<QuickCommandInput>,
+) {
+    *open = false;
+    *pending_command = None;
+    *focused_input = None;
+}
+
+fn insert_quick_command_into_command_bar_state(
+    draft: &mut String,
+    command: &str,
+    command_bar_focused: &mut bool,
+    open: &mut bool,
+    pending_command: &mut Option<String>,
+    focused_input: &mut Option<QuickCommandInput>,
+) {
+    *draft = command.to_string();
+    *command_bar_focused = true;
+    close_terminal_quick_commands_popover_state(open, pending_command, focused_input);
+}
+
+fn quick_command_draft_can_save(draft: &QuickCommandDraft) -> bool {
+    !draft.name.trim().is_empty() && !draft.command.trim().is_empty()
+}
+
+fn quick_command_category_draft_can_save(draft: &QuickCommandCategoryDraft) -> bool {
+    !draft.name.trim().is_empty()
+}
+
 impl WorkspaceApp {
+    pub(super) fn close_terminal_quick_commands_popover(&mut self) {
+        close_terminal_quick_commands_popover_state(
+            &mut self.terminal_quick_commands_open,
+            &mut self.terminal_quick_command_pending,
+            &mut self.quick_commands.focused_input,
+        );
+    }
+
+    fn insert_quick_command_into_command_bar(&mut self, command: &str) {
+        insert_quick_command_into_command_bar_state(
+            &mut self.terminal_command_bar_draft,
+            command,
+            &mut self.terminal_command_bar_focused,
+            &mut self.terminal_quick_commands_open,
+            &mut self.terminal_quick_command_pending,
+            &mut self.quick_commands.focused_input,
+        );
+    }
+
     pub(super) fn handle_quick_commands_key(
         &mut self,
         event: &KeyDownEvent,
@@ -194,7 +244,14 @@ impl WorkspaceApp {
                             .text_size(px(11.0))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("terminal.quick_commands.title").to_uppercase()),
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "quick-commands",
+                                "title",
+                                self.i18n.t("terminal.quick_commands.title").to_uppercase(),
+                                theme.text_muted,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -216,9 +273,7 @@ impl WorkspaceApp {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
-                                            this.terminal_quick_commands_open = false;
-                                            this.terminal_quick_command_pending = None;
-                                            this.quick_commands.focused_input = None;
+                                            this.close_terminal_quick_commands_popover();
                                             cx.stop_propagation();
                                             cx.notify();
                                         }),
@@ -291,7 +346,21 @@ impl WorkspaceApp {
                                     rgb(theme.text_muted)
                                 },
                             ))
-                            .child(div().flex_1().truncate().child(category.name.clone()))
+                            .child(div().flex_1().truncate().child(
+                                self.render_row_safe_selectable_display_text_in_group(
+                                    crate::workspace::selectable_text::selectable_text_id(
+                                        "quick-command-category-row",
+                                        &category.id,
+                                    ),
+                                    "quick-command-category-cell",
+                                    ("name", category.id.as_str()),
+                                    0,
+                                    category.name.clone(),
+                                    if active { theme.accent } else { theme.text_muted },
+                                    None,
+                                    cx,
+                                ),
+                            ))
                             .child(
                                 div()
                                     .rounded(px(self.tokens.radii.md))
@@ -300,7 +369,14 @@ impl WorkspaceApp {
                                     .py(px(1.0))
                                     .text_size(px(10.0))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(count.to_string()),
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::NonSelectable,
+                                        "quick-command-category-count",
+                                        category.id.as_str(),
+                                        count.to_string(),
+                                        theme.text_muted,
+                                        cx,
+                                    )),
                             ),
                     )
                     .child(
@@ -411,7 +487,15 @@ impl WorkspaceApp {
                                 14.0,
                                 rgb(theme.text_muted),
                             ))
-                            .child(self.i18n.t("terminal.quick_commands.add")),
+                            // Tauri treats this as a select-none control label; selection must not steal the button click.
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "quick-command-add-button",
+                                "label",
+                                self.i18n.t("terminal.quick_commands.add"),
+                                theme.text_muted,
+                                cx,
+                            )),
                     ),
             )
             .when_some(self.quick_commands.category_editor.as_ref(), |body, _| {
@@ -444,11 +528,18 @@ impl WorkspaceApp {
                     20.0,
                     rgb(theme.text_muted),
                 ))
-                .child(if self.quick_commands.query.trim().is_empty() {
-                    self.i18n.t("terminal.quick_commands.empty_category")
-                } else {
-                    self.i18n.t("terminal.quick_commands.empty_search")
-                })
+                .child(self.render_display_text_with_role(
+                    SelectableTextRole::PlainDocument,
+                    "quick-commands-empty",
+                    self.quick_commands.query.as_str(),
+                    if self.quick_commands.query.trim().is_empty() {
+                        self.i18n.t("terminal.quick_commands.empty_category")
+                    } else {
+                        self.i18n.t("terminal.quick_commands.empty_search")
+                    },
+                    theme.text_muted,
+                    cx,
+                ))
                 .into_any_element();
         }
 
@@ -477,6 +568,10 @@ impl WorkspaceApp {
         let command_for_run = command.command.clone();
         let command_for_edit = command.clone();
         let command_id = command.id.clone();
+        let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
+            "quick-command-row",
+            command.id.as_str(),
+        );
         div()
             .rounded(px(self.tokens.radii.md))
             .px(px(8.0))
@@ -501,10 +596,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, window, cx| {
-                            this.terminal_command_bar_draft = command_for_insert.clone();
-                            this.terminal_command_bar_focused = true;
-                            this.terminal_quick_commands_open = false;
-                            this.quick_commands.focused_input = None;
+                            this.insert_quick_command_into_command_bar(&command_for_insert);
                             window.focus(&this.focus_handle);
                             cx.stop_propagation();
                             cx.notify();
@@ -520,7 +612,16 @@ impl WorkspaceApp {
                                     .truncate()
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(theme.text))
-                                    .child(command.name.clone()),
+                                    .child(self.render_row_safe_selectable_display_text_in_group(
+                                        selection_group_id,
+                                        "quick-command-row-cell",
+                                        ("name", command.id.as_str()),
+                                        0,
+                                        command.name.clone(),
+                                        theme.text,
+                                        None,
+                                        cx,
+                                    )),
                             )
                             .when_some(risk, |row, risk: &'static str| {
                                 row.child(
@@ -539,7 +640,18 @@ impl WorkspaceApp {
                                         } else {
                                             rgba(0xf59e0b26)
                                         })
-                                        .child(risk.to_uppercase()),
+                                        .child(self.render_display_text_with_role(
+                                            SelectableTextRole::NonSelectable,
+                                            "quick-command-risk",
+                                            command.id.as_str(),
+                                            risk.to_uppercase(),
+                                            if risk == "high" {
+                                                0xfca5a5
+                                            } else {
+                                                0xfcd34d
+                                            },
+                                            cx,
+                                        )),
                                 )
                             })
                             .when_some(command.host_pattern.as_ref(), |row, pattern| {
@@ -551,7 +663,14 @@ impl WorkspaceApp {
                                         .text_size(px(10.0))
                                         .text_color(rgb(theme.text_muted))
                                         .bg(rgb(theme.bg_panel))
-                                        .child(pattern.clone()),
+                                        .child(self.render_display_text_with_role(
+                                            SelectableTextRole::NonSelectable,
+                                            "quick-command-host-pattern",
+                                            command.id.as_str(),
+                                            pattern.clone(),
+                                            theme.text_muted,
+                                            cx,
+                                        )),
                                 )
                             }),
                     )
@@ -560,7 +679,17 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(12.0))
                             .text_color(rgba((theme.accent << 8) | 0xd9))
-                            .child(command.command.clone()),
+                            .child(self.render_row_safe_selectable_display_text_in_group_with_alpha(
+                                selection_group_id,
+                                "quick-command-row-cell",
+                                ("command", command.id.as_str()),
+                                1,
+                                command.command.clone(),
+                                theme.accent,
+                                0xd9 as f32 / 255.0,
+                                None,
+                                cx,
+                            )),
                     )
                     .when_some(command.description.as_ref(), |row, description| {
                         row.child(
@@ -568,7 +697,17 @@ impl WorkspaceApp {
                                 .truncate()
                                 .text_size(px(11.0))
                                 .text_color(rgba((theme.text_muted << 8) | 0xb3))
-                                .child(description.clone()),
+                                .child(self.render_row_safe_selectable_display_text_in_group_with_alpha(
+                                    selection_group_id,
+                                    "quick-command-row-cell",
+                                    ("description", command.id.as_str()),
+                                    2,
+                                    description.clone(),
+                                    theme.text_muted,
+                                    0xb3 as f32 / 255.0,
+                                    None,
+                                    cx,
+                                )),
                         )
                     }),
             )
@@ -608,7 +747,7 @@ impl WorkspaceApp {
         let Some(draft) = self.quick_commands.category_editor.as_ref() else {
             return div().into_any_element();
         };
-        let can_save = !draft.name.trim().is_empty();
+        let can_save = quick_command_category_draft_can_save(draft);
         let mut icon_options = div().flex().items_center().gap(px(4.0));
         for icon in [
             QuickCommandIcon::Terminal,
@@ -662,7 +801,14 @@ impl WorkspaceApp {
                             rgb(theme.text_muted)
                         },
                     ))
-                    .child(self.i18n.t(&quick_command_icon_label_key(icon))),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "quick-command-icon-option",
+                        icon.as_source_id(),
+                        self.i18n.t(&quick_command_icon_label_key(icon)),
+                        if active { theme.accent } else { theme.text_muted },
+                        cx,
+                    )),
             );
         }
 
@@ -703,7 +849,7 @@ impl WorkspaceApp {
         let Some(draft) = self.quick_commands.command_editor.as_ref() else {
             return div().into_any_element();
         };
-        let can_save = !draft.name.trim().is_empty() && !draft.command.trim().is_empty();
+        let can_save = quick_command_draft_can_save(draft);
         let mut categories = div().flex().items_center().gap(px(4.0)).flex_wrap();
         for category in &self.quick_commands.categories {
             let category_id = category.id.clone();
@@ -742,7 +888,14 @@ impl WorkspaceApp {
                             cx.notify();
                         }),
                     )
-                    .child(category.name.clone()),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "quick-command-editor-category",
+                        category.id.as_str(),
+                        category.name.clone(),
+                        if active { theme.accent } else { theme.text_muted },
+                        cx,
+                    )),
             );
         }
 
@@ -955,6 +1108,12 @@ impl WorkspaceApp {
     }
 
     fn save_quick_command_editor(&mut self, cx: &mut Context<Self>) {
+        let Some(draft) = self.quick_commands.command_editor.as_ref() else {
+            return;
+        };
+        if !quick_command_draft_can_save(draft) {
+            return;
+        }
         let Some(draft) = self.quick_commands.command_editor.take() else {
             return;
         };
@@ -964,11 +1123,111 @@ impl WorkspaceApp {
     }
 
     fn save_quick_command_category_editor(&mut self, cx: &mut Context<Self>) {
+        let Some(draft) = self.quick_commands.category_editor.as_ref() else {
+            return;
+        };
+        if !quick_command_category_draft_can_save(draft) {
+            return;
+        }
         let Some(draft) = self.quick_commands.category_editor.take() else {
             return;
         };
         self.quick_commands.upsert_category(draft);
         self.quick_commands.focused_input = None;
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod terminal_command_bar_quick_command_tests {
+    use super::*;
+
+    #[test]
+    fn quick_command_popover_outside_click_closes_without_blurring_command_bar() {
+        let mut open = true;
+        let mut pending_command = Some("rm -rf /tmp/example".to_string());
+        let mut focused_input = Some(QuickCommandInput::Search);
+        let command_bar_focused = true;
+
+        close_terminal_quick_commands_popover_state(
+            &mut open,
+            &mut pending_command,
+            &mut focused_input,
+        );
+
+        assert!(!open);
+        assert_eq!(pending_command, None);
+        assert_eq!(focused_input, None);
+        assert!(command_bar_focused);
+    }
+
+    #[test]
+    fn quick_command_row_click_inserts_command_and_keeps_submit_closed() {
+        let mut draft = String::new();
+        let mut command_bar_focused = false;
+        let mut open = true;
+        let mut pending_command = Some("docker system prune".to_string());
+        let mut focused_input = Some(QuickCommandInput::Search);
+
+        insert_quick_command_into_command_bar_state(
+            &mut draft,
+            "git status",
+            &mut command_bar_focused,
+            &mut open,
+            &mut pending_command,
+            &mut focused_input,
+        );
+
+        assert_eq!(draft, "git status");
+        assert!(command_bar_focused);
+        assert!(!open);
+        assert_eq!(pending_command, None);
+        assert_eq!(focused_input, None);
+    }
+
+    #[test]
+    fn quick_command_editor_save_gate_matches_tauri_disabled_button() {
+        assert!(!quick_command_draft_can_save(&QuickCommandDraft {
+            id: None,
+            name: String::new(),
+            command: "git status".to_string(),
+            category: "system".to_string(),
+            description: String::new(),
+            host_pattern: String::new(),
+        }));
+        assert!(!quick_command_draft_can_save(&QuickCommandDraft {
+            id: None,
+            name: "Status".to_string(),
+            command: "   ".to_string(),
+            category: "system".to_string(),
+            description: String::new(),
+            host_pattern: String::new(),
+        }));
+        assert!(quick_command_draft_can_save(&QuickCommandDraft {
+            id: None,
+            name: "Status".to_string(),
+            command: "git status".to_string(),
+            category: "system".to_string(),
+            description: String::new(),
+            host_pattern: String::new(),
+        }));
+    }
+
+    #[test]
+    fn quick_command_category_editor_save_gate_matches_tauri_disabled_button() {
+        assert!(!quick_command_category_draft_can_save(
+            &QuickCommandCategoryDraft {
+                id: None,
+                name: "   ".to_string(),
+                icon: QuickCommandIcon::Zap,
+            }
+        ));
+        assert!(quick_command_category_draft_can_save(
+            &QuickCommandCategoryDraft {
+                id: None,
+                name: "Ops".to_string(),
+                icon: QuickCommandIcon::Zap,
+            }
+        ));
     }
 }

@@ -27,7 +27,14 @@ impl WorkspaceApp {
                     .text_size(px(13.0))
                     .font_weight(gpui::FontWeight::BOLD)
                     .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t("ai.chat.title")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-chat-disabled",
+                        "title",
+                        self.i18n.t("ai.chat.title"),
+                        self.tokens.ui.text,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -35,7 +42,14 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .line_height(px(18.0))
-                    .child(self.i18n.t("ai.chat.disabled_message")),
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "ai-chat-disabled",
+                        "message",
+                        self.i18n.t("ai.chat.disabled_message"),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -48,7 +62,14 @@ impl WorkspaceApp {
                     .text_size(px(11.0))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .cursor_pointer()
-                    .child(self.i18n.t("ai.chat.open_settings"))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "ai-chat-disabled",
+                        "open-settings",
+                        self.i18n.t("ai.chat.open_settings"),
+                        self.tokens.ui.bg,
+                        cx,
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, window, cx| {
