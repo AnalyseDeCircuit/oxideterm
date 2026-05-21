@@ -6,6 +6,18 @@ use oxideterm_theme::ThemeTokens;
 const BUTTON_FOCUS_RING_ALPHA: u32 = 0xb3; // Tauri focus-visible:ring-theme-accent/70
 const BUTTON_FOCUS_RING_WIDTH: f32 = 2.0; // Tauri focus-visible:ring-2
 
+pub fn tauri_focus_visible_ring(tokens: &ThemeTokens) -> Vec<BoxShadow> {
+    // Browser :focus-visible is keyboard-owned and shared across shadcn buttons,
+    // select triggers, and dialog footer actions. GPUI callers pass the owner
+    // state explicitly, but the visual ring must stay centralized.
+    vec![BoxShadow {
+        color: Hsla::from(rgba((tokens.ui.accent << 8) | BUTTON_FOCUS_RING_ALPHA)),
+        offset: point(px(0.0), px(0.0)),
+        blur_radius: px(0.0),
+        spread_radius: px(BUTTON_FOCUS_RING_WIDTH),
+    }]
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ButtonTone {
     Primary,
@@ -154,10 +166,5 @@ pub fn button_focus_visible(tokens: &ThemeTokens, button: Div, focused: bool) ->
     // GPUI buttons are drawn from workspace-owned keyboard focus rather than
     // DOM :focus-visible, so the shared primitive applies the same ring when a
     // caller marks the action as keyboard-focused.
-    button.shadow(vec![BoxShadow {
-        color: Hsla::from(rgba((tokens.ui.accent << 8) | BUTTON_FOCUS_RING_ALPHA)),
-        offset: point(px(0.0), px(0.0)),
-        blur_radius: px(0.0),
-        spread_radius: px(BUTTON_FOCUS_RING_WIDTH),
-    }])
+    button.shadow(tauri_focus_visible_ring(tokens))
 }

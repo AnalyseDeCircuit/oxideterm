@@ -435,10 +435,11 @@ impl WorkspaceApp {
     ) {
         self.blur_file_manager_inline_inputs();
         if let Some(file) = file.as_ref()
-            && !self.file_manager.selected.contains(&file.name)
+            && crate::workspace::browser_behavior::preserve_or_move_context_selection(
+                &mut self.file_manager.selected,
+                file.name.clone(),
+            )
         {
-            self.file_manager.selected.clear();
-            self.file_manager.selected.insert(file.name.clone());
             self.file_manager.last_selected = Some(file.name.clone());
         }
         self.file_manager.context_menu = Some(FileManagerContextMenu { file, x, y });

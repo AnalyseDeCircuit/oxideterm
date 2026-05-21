@@ -1277,21 +1277,15 @@ impl WorkspaceApp {
         let Some(text) = self.text_for_ime_target(target) else {
             return false;
         };
-        let Some(selection) = self
-            .ime_selected_range_for_target(target)
-            .filter(|range| range.start < range.end)
-        else {
-            if !collapsed_copy_shortcut_is_owned_by_target(target) {
-                // Browser page selections only own Cmd-C when a real range is
-                // active. A collapsed/read-only target must fall through to the
-                // terminal or app-level copy owner instead of swallowing it.
-                return false;
+        let selection = self.ime_selected_range_for_target(target);
+        match copy_shortcut_owner_for_target(target, selection.as_ref()) {
+            CopyShortcutOwner::SelectedRange(range) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(utf16_slice(&text, range)));
+                true
             }
-            return true;
-        };
-        let copied = utf16_slice(&text, selection);
-        cx.write_to_clipboard(ClipboardItem::new_string(copied));
-        true
+            CopyShortcutOwner::FocusedEditableInput => true,
+            CopyShortcutOwner::NextOwner => false,
+        }
     }
 
     pub(super) fn cut_active_text_input(&mut self, cx: &mut Context<Self>) -> bool {
@@ -1915,6 +1909,29 @@ fn collapsed_copy_shortcut_is_owned_by_target(target: WorkspaceImeTarget) -> boo
     !ime_target_is_read_only(target)
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CopyShortcutOwner {
+    SelectedRange(Range<usize>),
+    FocusedEditableInput,
+    NextOwner,
+}
+
+fn copy_shortcut_owner_for_target(
+    target: WorkspaceImeTarget,
+    selection: Option<&Range<usize>>,
+) -> CopyShortcutOwner {
+    if let Some(range) = selection.filter(|range| range.start < range.end) {
+        return CopyShortcutOwner::SelectedRange(range.clone());
+    }
+    if collapsed_copy_shortcut_is_owned_by_target(target) {
+        // Browser inputs own Cmd-C even with a collapsed caret. Read-only page
+        // selections do not, so terminal selection/app copy can run next.
+        CopyShortcutOwner::FocusedEditableInput
+    } else {
+        CopyShortcutOwner::NextOwner
+    }
+}
+
 fn utf16_slice(value: &str, range: Range<usize>) -> String {
     let start = byte_index_for_utf16(value, range.start);
     let end = byte_index_for_utf16(value, range.end);
@@ -2278,12 +2295,12 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
 
     use super::{
-        WorkspaceImeTarget, collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
-        keystroke_commits_platform_text, line_end_for_utf16_offset, line_range_for_utf16_offset,
-        line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
-        previous_utf16_boundary, previous_word_boundary, soft_wrapped_line_ranges_utf16,
-        transpose_text_at_utf16_offset, vertical_line_navigation_destination,
-        word_range_for_utf16_offset,
+        CopyShortcutOwner, WorkspaceImeTarget, collapsed_copy_shortcut_is_owned_by_target,
+        control_k_delete_end, copy_shortcut_owner_for_target, keystroke_commits_platform_text,
+        line_end_for_utf16_offset, line_range_for_utf16_offset, line_start_for_utf16_offset,
+        next_utf16_boundary, next_word_boundary, previous_utf16_boundary, previous_word_boundary,
+        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
+        vertical_line_navigation_destination, word_range_for_utf16_offset,
     };
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -2432,5 +2449,21 @@ mod tests {
         assert!(collapsed_copy_shortcut_is_owned_by_target(
             WorkspaceImeTarget::Search
         ));
+    }
+
+    #[test]
+    fn copy_shortcut_owner_prioritizes_selection_then_focused_input_then_terminal() {
+        assert_eq!(
+            copy_shortcut_owner_for_target(WorkspaceImeTarget::ReadOnlyText(1), Some(&(2..5))),
+            CopyShortcutOwner::SelectedRange(2..5)
+        );
+        assert_eq!(
+            copy_shortcut_owner_for_target(WorkspaceImeTarget::Search, Some(&(3..3))),
+            CopyShortcutOwner::FocusedEditableInput
+        );
+        assert_eq!(
+            copy_shortcut_owner_for_target(WorkspaceImeTarget::ReadOnlyText(1), Some(&(4..4))),
+            CopyShortcutOwner::NextOwner
+        );
     }
 }

@@ -116,7 +116,7 @@ impl WorkspaceApp {
                             .position_mode(AnchoredPositionMode::Window)
                             .child(popup),
                     )
-                    .with_priority(200),
+                    .with_priority(oxideterm_gpui_ui::modal::TAURI_SELECT_LAYER_PRIORITY),
                 )
                 .into_any_element(),
         )

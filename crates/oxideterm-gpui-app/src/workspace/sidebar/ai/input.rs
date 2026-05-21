@@ -136,6 +136,7 @@ impl WorkspaceApp {
             MouseButton::Left,
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                 this.ai_chat_input_focused = true;
+                this.ai_chat_footer_focus = None;
                 this.ai_model_selector_search_focused = false;
                 this.ime_marked_text = None;
                 window.focus(&this.focus_handle);
@@ -156,6 +157,8 @@ impl WorkspaceApp {
             });
         });
         let send_disabled = !enabled || self.ai_chat_draft.trim().is_empty();
+        let action_focused = self.ai_chat_footer_focus == Some(AiChatFooterAction::Submit)
+            && (self.ai_chat_loading || !send_disabled);
         let action = if self.ai_chat_loading {
             ai_stop_button(
                 &self.tokens,
@@ -209,9 +212,10 @@ impl WorkspaceApp {
                         .child("SHIFT+ENTER"),
                 )
             })
-            .child(action.on_mouse_down(
+            .child(button_focus_visible(&self.tokens, action, action_focused).on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
+                    this.ai_chat_footer_focus = None;
                     if this.ai_chat_loading {
                         this.cancel_ai_chat_stream(cx);
                     } else if !send_disabled {

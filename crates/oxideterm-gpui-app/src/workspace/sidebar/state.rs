@@ -52,9 +52,10 @@ impl WorkspaceApp {
         if !self.sidebar_resizing {
             return;
         }
-        if event.pressed_button != Some(MouseButton::Left) {
-            return;
-        }
+        // The root view acts as our pointer-capture owner. GPUI may report no
+        // element-local pressed button once the cursor leaves the narrow resize
+        // handle, so the active resize flag is the browser-style capture source
+        // of truth until root mouse-up finishes it.
         self.set_sidebar_width(f32::from(event.position.x), cx);
     }
 
@@ -113,9 +114,8 @@ impl WorkspaceApp {
         if !self.ai_sidebar_resizing {
             return;
         }
-        if event.pressed_button != Some(MouseButton::Left) {
-            return;
-        }
+        // Continue from the root capture even after the pointer leaves the AI
+        // sidebar edge, matching browser resize handles.
         self.set_ai_sidebar_width(self.ai_sidebar_width_from_cursor(event.position.x, window), cx);
     }
 

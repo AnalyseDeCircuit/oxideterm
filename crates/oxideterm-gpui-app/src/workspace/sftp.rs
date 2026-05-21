@@ -625,6 +625,12 @@ impl SftpViewState {
         // action ownership inside the SFTP module.
         self.context_menu.take().is_some()
     }
+
+    pub(super) fn has_drag_capture(&self) -> bool {
+        // SFTP file drags use root-level pointer capture so releasing outside
+        // both panes still clears the candidate and autoscroll state.
+        self.drag_state.is_some() || self.drag_over_pane.is_some()
+    }
 }
 
 include!("sftp/runtime.rs");

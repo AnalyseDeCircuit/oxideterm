@@ -108,6 +108,9 @@ impl Render for TerminalPane {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    // Tauri's terminal surface does not install a custom
+                    // context menu; right-click remains xterm mouse input when
+                    // mouse tracking asks for it.
                     this.handle_mouse_down(event, cx);
                 }),
             )

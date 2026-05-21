@@ -370,7 +370,7 @@ impl WorkspaceApp {
                         .position_mode(AnchoredPositionMode::Window)
                         .child(overlay_content_boundary(popup)),
                 )
-                .with_priority(100),
+                .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
             )
             .into_any_element()
     }

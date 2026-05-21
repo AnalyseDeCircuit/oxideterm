@@ -32,7 +32,7 @@ pub mod tree;
 pub mod typography;
 
 pub use badge::{IconBadgeMetrics, icon_badge, icon_badge_metrics_from_tokens};
-pub use button::{ButtonTone, button, button_focus_visible};
+pub use button::{ButtonTone, button, button_focus_visible, tauri_focus_visible_ring};
 pub use checkbox::{CheckboxOptions, checkbox, checkbox_with};
 pub use confirm::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog,

@@ -414,6 +414,7 @@ impl WorkspaceApp {
                                             this.keybinding_recording_action_id =
                                                 Some(record_action_id.clone());
                                             this.keybinding_recording_combo = None;
+                                            this.keybinding_recording_footer_focus = None;
                                             this.keybinding_conflict_action_ids.clear();
                                             cx.stop_propagation();
                                             cx.notify();
@@ -498,19 +499,24 @@ impl WorkspaceApp {
                     "settings_view.keybindings.override_anyway"
                 };
                 cell.child(
-                    button_with(
+                    button_focus_visible(
                         &self.tokens,
-                        if conflicts.is_empty() {
-                            label_key.to_string()
-                        } else {
-                            self.i18n.t(label_key)
-                        },
-                        ButtonOptions {
-                            variant: ButtonVariant::Ghost,
-                            size: ButtonSize::Sm,
-                            radius: ButtonRadius::Md,
-                            disabled: false,
-                        },
+                        button_with(
+                            &self.tokens,
+                            if conflicts.is_empty() {
+                                label_key.to_string()
+                            } else {
+                                self.i18n.t(label_key)
+                            },
+                            ButtonOptions {
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Sm,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                        ),
+                        self.keybinding_recording_footer_focus
+                            == Some(KeybindingRecordingFooterAction::Confirm),
                     )
                     .on_mouse_down(
                         MouseButton::Left,
@@ -522,7 +528,13 @@ impl WorkspaceApp {
                 )
             })
             .child(
-                self.keybinding_icon_button(LucideIcon::X).on_mouse_down(
+                button_focus_visible(
+                    &self.tokens,
+                    self.keybinding_icon_button(LucideIcon::X),
+                    self.keybinding_recording_footer_focus
+                        == Some(KeybindingRecordingFooterAction::Cancel),
+                )
+                .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
                         this.cancel_keybinding_recording(cx);

@@ -13,6 +13,7 @@ impl WorkspaceApp {
 
     pub(super) fn clear_ai_sidebar_keyboard_focus(&mut self) {
         self.ai_chat_input_focused = false;
+        self.ai_chat_footer_focus = None;
         self.ai_model_selector_search_focused = false;
         self.ai_model_selector_open = false;
         self.ai_model_selector_highlighted_model = None;
@@ -97,6 +98,7 @@ impl WorkspaceApp {
         self.ai_thinking_expansion_state.clear();
         self.ai_tool_call_expansion_state.clear();
         self.ai_chat_input_focused = false;
+        self.ai_chat_footer_focus = None;
     }
 
     fn delete_ai_conversation(&mut self, id: &str) {

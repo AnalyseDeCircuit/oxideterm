@@ -88,6 +88,44 @@ impl WorkspaceApp {
                     cx.notify();
                     true
                 }
+                "tab" => {
+                    // Textareas in the Tauri sidebar release focus on Tab
+                    // unless an autocomplete/menu owner consumes it first.
+                    self.ai_editing_message_focused = false;
+                    self.ime_marked_text = None;
+                    cx.notify();
+                    true
+                }
+                _ => true,
+            }
+        } else if let Some(action) = self.ai_chat_footer_focus {
+            if event.keystroke.modifiers.platform {
+                return false;
+            }
+            match event.keystroke.key.as_str() {
+                "escape" => {
+                    self.ai_chat_footer_focus = None;
+                    self.ime_marked_text = None;
+                    cx.notify();
+                    true
+                }
+                "tab" if event.keystroke.modifiers.shift => {
+                    self.ai_chat_footer_focus = None;
+                    self.ai_chat_input_focused = true;
+                    self.ime_marked_text = None;
+                    cx.notify();
+                    true
+                }
+                "tab" => {
+                    self.ai_chat_footer_focus = None;
+                    self.ime_marked_text = None;
+                    cx.notify();
+                    true
+                }
+                "enter" | "space" | " " => {
+                    self.activate_ai_chat_footer_action(action, cx);
+                    true
+                }
                 _ => true,
             }
         } else if self.ai_chat_input_focused {
@@ -152,10 +190,43 @@ impl WorkspaceApp {
                     cx.notify();
                     true
                 }
+                "tab" => {
+                    // Browser Tab leaves the textarea. If the footer action is
+                    // enabled, native makes that button the explicit
+                    // focus-visible owner; otherwise focus moves out of the AI
+                    // input cluster.
+                    if !event.keystroke.modifiers.shift && self.ai_chat_footer_action_enabled() {
+                        self.ai_chat_input_focused = false;
+                        self.ai_chat_footer_focus = Some(AiChatFooterAction::Submit);
+                    } else {
+                        self.ai_chat_input_focused = false;
+                        self.ai_chat_footer_focus = None;
+                    }
+                    self.ime_marked_text = None;
+                    cx.notify();
+                    true
+                }
                 _ => true,
             }
         } else {
             false
+        }
+    }
+
+    fn ai_chat_footer_action_enabled(&self) -> bool {
+        self.ai_chat_loading || !self.ai_chat_draft.trim().is_empty()
+    }
+
+    fn activate_ai_chat_footer_action(&mut self, action: AiChatFooterAction, cx: &mut Context<Self>) {
+        match action {
+            AiChatFooterAction::Submit if self.ai_chat_loading => self.cancel_ai_chat_stream(cx),
+            AiChatFooterAction::Submit if !self.ai_chat_draft.trim().is_empty() => {
+                self.send_ai_chat_draft(cx)
+            }
+            AiChatFooterAction::Submit => {
+                self.ai_chat_footer_focus = None;
+                cx.notify();
+            }
         }
     }
 

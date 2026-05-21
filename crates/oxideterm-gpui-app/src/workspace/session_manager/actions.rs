@@ -133,10 +133,10 @@ impl WorkspaceApp {
         // Browser file/table UIs keep an existing multi-selection when the
         // context target is already selected, but right-clicking an unselected
         // row first moves selection to that row before opening the menu.
-        if !self.session_manager.selected_ids.contains(id) {
-            self.session_manager.selected_ids.clear();
-            self.session_manager.selected_ids.insert(id.to_string());
-        }
+        crate::workspace::browser_behavior::preserve_or_move_context_selection(
+            &mut self.session_manager.selected_ids,
+            id.to_string(),
+        );
     }
 
     fn toggle_all_visible_connections(&mut self, cx: &mut Context<Self>) {

@@ -1,4 +1,4 @@
-use gpui::{Div, Styled};
+use gpui::{CursorStyle, Div, Styled};
 use oxideterm_theme::ThemeTokens;
 
 use super::text_input::{TextInputView, text_input};
@@ -34,18 +34,43 @@ impl<'a> InputView<'a> {
 }
 
 pub fn input(tokens: &ThemeTokens, view: InputView<'_>) -> Div {
+    let disabled = view.disabled;
     text_input(
         tokens,
         TextInputView {
             value: view.value,
             placeholder: view.placeholder,
-            focused: view.focused,
-            caret_visible: view.caret_visible,
+            // Browser disabled inputs cannot become the text owner. Keep the
+            // shared primitive from drawing a caret/focus ring even if feature
+            // state is stale for one frame after a disabled transition.
+            focused: input_effective_focus(view.focused, disabled),
+            caret_visible: input_effective_focus(view.caret_visible, disabled),
             secret: view.input_type == InputType::Password,
-            selected_all: view.selected_all,
+            selected_all: view.selected_all && !disabled,
             selected_range: None,
             marked_text: None,
         },
     )
-    .opacity(if view.disabled { 0.5 } else { 1.0 })
+    .opacity(if disabled { 0.5 } else { 1.0 })
+    .cursor(if disabled {
+        CursorStyle::OperationNotAllowed
+    } else {
+        CursorStyle::IBeam
+    })
+}
+
+fn input_effective_focus(focused: bool, disabled: bool) -> bool {
+    focused && !disabled
+}
+
+#[cfg(test)]
+mod tests {
+    use super::input_effective_focus;
+
+    #[test]
+    fn disabled_input_does_not_expose_browser_text_focus() {
+        assert!(!input_effective_focus(true, true));
+        assert!(!input_effective_focus(false, true));
+        assert!(input_effective_focus(true, false));
+    }
 }

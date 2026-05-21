@@ -822,12 +822,11 @@ impl WorkspaceApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        if event.pressed_button != Some(MouseButton::Left) {
-            return;
-        }
         let Some(mut drag) = self.tab_drag.clone() else {
             return;
         };
+        // Browser tab drags keep pointer capture after leaving the tab label;
+        // the root mouse-up is responsible for finishing or cancelling.
         drag.current_x = f32::from(event.position.x);
         let delta = (drag.current_x - drag.start_x).abs();
         // Tauri TabBar uses a 10px pointer threshold before a pointer gesture

@@ -19,7 +19,65 @@ impl WorkspaceApp {
                 rgba((theme.accent << 8) | SFTP_DRAG_BG_ALPHA)
             } else {
                 sftp_bg(theme.bg, has_background)
-            });
+            })
+            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                this.update_sftp_drag(
+                    pane,
+                    f32::from(event.position.x),
+                    f32::from(event.position.y),
+                );
+                cx.notify();
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.finish_sftp_drag(pane);
+                    cx.notify();
+                }),
+            )
+            .when(pane == SftpPane::Remote, |list| {
+                list.can_drop(|drag, _window, _cx| drag.is::<gpui::ExternalPaths>())
+                    .on_drop(cx.listener(
+                        |this, paths: &gpui::ExternalPaths, _window, cx| {
+                            this.queue_sftp_external_upload_paths(paths.paths());
+                            this.sftp_view.drag_over_pane = None;
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ))
+            })
+            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                // The menu is positioned in window coordinates, so any pane
+                // scroll invalidates the row that produced the coordinates.
+                if this.sftp_view.context_menu.take().is_some() {
+                    cx.notify();
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    window.focus(&this.focus_handle);
+                    this.sftp_view.context_menu = None;
+                    this.sftp_view.drag_state = None;
+                    this.sftp_view.drag_over_pane = None;
+                    this.clear_sftp_selection(pane);
+                    cx.notify();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle);
+                    this.open_sftp_context_menu(
+                        pane,
+                        None,
+                        f32::from(event.position.x),
+                        f32::from(event.position.y),
+                    );
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            );
 
         if loading {
             return list
@@ -274,65 +332,6 @@ impl WorkspaceApp {
                         .collect::<Vec<_>>()
                 },
             )
-            .bg(sftp_bg(theme.bg, has_background))
-            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                this.update_sftp_drag(
-                    pane,
-                    f32::from(event.position.x),
-                    f32::from(event.position.y),
-                );
-                cx.notify();
-            }))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.finish_sftp_drag(pane);
-                    cx.notify();
-                }),
-            )
-            .when(pane == SftpPane::Remote, |list| {
-                list.can_drop(|drag, _window, _cx| drag.is::<gpui::ExternalPaths>())
-                    .on_drop(cx.listener(
-                        |this, paths: &gpui::ExternalPaths, _window, cx| {
-                            this.queue_sftp_external_upload_paths(paths.paths());
-                            this.sftp_view.drag_over_pane = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    ))
-            })
-            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
-                // The menu is positioned in window coordinates, so any scroll invalidates
-                // the row that produced the coordinates.
-                if this.sftp_view.context_menu.take().is_some() {
-                    cx.notify();
-                }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    window.focus(&this.focus_handle);
-                    this.sftp_view.context_menu = None;
-                    this.sftp_view.drag_state = None;
-                    this.sftp_view.drag_over_pane = None;
-                    this.clear_sftp_selection(pane);
-                    cx.notify();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
-                    this.open_sftp_context_menu(
-                        pane,
-                        None,
-                        f32::from(event.position.x),
-                        f32::from(event.position.y),
-                    );
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            ),
         )
         .into_any_element()
     }

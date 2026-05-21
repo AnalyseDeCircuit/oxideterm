@@ -340,7 +340,9 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.ai_sidebar_visible()
-                    && (this.ai_chat_input_focused || this.ai_model_selector_search_focused)
+                    && (this.ai_chat_input_focused
+                        || this.ai_chat_footer_focus.is_some()
+                        || this.ai_model_selector_search_focused)
                 {
                     if keystroke_commits_platform_text(&event.keystroke) {
                         return;
@@ -377,6 +379,9 @@ impl Render for WorkspaceApp {
                 }
                 this.update_sftp_drag_capture(event.position, cx);
                 this.update_tab_drag(event, window, cx);
+                if this.browser_pointer_capture_owner().is_some() {
+                    cx.stop_propagation();
+                }
             }))
             .on_mouse_down(
                 MouseButton::Left,
@@ -410,6 +415,7 @@ impl Render for WorkspaceApp {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                    let capture_owner = this.browser_pointer_capture_owner();
                     let was_read_only_dragging = this.read_only_selection_drag_active();
                     this.finish_sidebar_resize(cx);
                     this.finish_ai_sidebar_resize(cx);
@@ -426,7 +432,7 @@ impl Render for WorkspaceApp {
                     if cancelled_sftp_drag {
                         cx.notify();
                     }
-                    if was_read_only_dragging || cancelled_sftp_drag {
+                    if capture_owner.is_some() || was_read_only_dragging || cancelled_sftp_drag {
                         cx.stop_propagation();
                     }
                 }),
@@ -967,7 +973,7 @@ impl WorkspaceApp {
                 .position_mode(AnchoredPositionMode::Window)
                 .child(tooltip_content(&self.tokens, tooltip.label, None)),
         )
-        .with_priority(300)
+        .with_priority(oxideterm_gpui_ui::modal::TAURI_TOOLTIP_LAYER_PRIORITY)
         .into_any_element()
     }
 

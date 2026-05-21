@@ -1,4 +1,5 @@
 mod actions;
+mod browser_behavior;
 mod cloud_sync;
 mod command_palette;
 mod connection_monitor;
@@ -244,6 +245,35 @@ struct AiChatInitializationError {
 enum KeybindingScopeFilter {
     All,
     Scope(crate::keybindings::ActionScope),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AiChatFooterAction {
+    Submit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeybindingRecordingFooterAction {
+    Confirm,
+    Cancel,
+}
+
+fn next_keybinding_recording_footer_focus(
+    current: Option<KeybindingRecordingFooterAction>,
+    forward: bool,
+) -> KeybindingRecordingFooterAction {
+    // Recording uses a window-level key capture like Tauri. Once action buttons
+    // are visible, native has to model the browser's two-button Tab cycle.
+    match (current, forward) {
+        (Some(KeybindingRecordingFooterAction::Confirm), _) => {
+            KeybindingRecordingFooterAction::Cancel
+        }
+        (Some(KeybindingRecordingFooterAction::Cancel), _) => {
+            KeybindingRecordingFooterAction::Confirm
+        }
+        (None, true) => KeybindingRecordingFooterAction::Confirm,
+        (None, false) => KeybindingRecordingFooterAction::Cancel,
+    }
 }
 
 impl KeybindingScopeFilter {
@@ -497,6 +527,7 @@ pub(crate) struct WorkspaceApp {
     ai_safety_bypass_conversations: HashSet<String>,
     ai_chat_draft: String,
     ai_chat_input_focused: bool,
+    ai_chat_footer_focus: Option<AiChatFooterAction>,
     ai_editing_message_id: Option<String>,
     ai_editing_message_draft: String,
     ai_editing_message_focused: bool,
@@ -581,6 +612,7 @@ pub(crate) struct WorkspaceApp {
     settings_slider_drag: Option<SettingsSlider>,
     keybinding_recording_action_id: Option<String>,
     keybinding_recording_combo: Option<crate::keybindings::KeyCombo>,
+    keybinding_recording_footer_focus: Option<KeybindingRecordingFooterAction>,
     keybinding_conflict_action_ids: Vec<String>,
     keybinding_search_query: String,
     keybinding_scope_filter: KeybindingScopeFilter,
@@ -663,6 +695,7 @@ pub(crate) struct WorkspaceApp {
     cloud_sync_form: cloud_sync::CloudSyncFormDraft,
     cloud_sync_open_select: Option<cloud_sync::CloudSyncSelect>,
     cloud_sync_focused_select: Option<cloud_sync::CloudSyncSelect>,
+    cloud_sync_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     cloud_sync_select_highlighted: Option<(cloud_sync::CloudSyncSelect, usize)>,
     cloud_sync_confirm: Option<cloud_sync::CloudSyncConfirm>,
     cloud_sync_confirm_focused_action: Option<ConfirmDialogAction>,

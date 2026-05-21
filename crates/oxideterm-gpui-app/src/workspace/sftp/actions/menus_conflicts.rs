@@ -12,9 +12,10 @@ impl WorkspaceApp {
                 SftpPane::Local => &mut self.sftp_view.local_selected,
                 SftpPane::Remote => &mut self.sftp_view.remote_selected,
             };
-            if !selected.contains(&file.name) {
-                selected.clear();
-                selected.insert(file.name.clone());
+            if crate::workspace::browser_behavior::preserve_or_move_context_selection(
+                selected,
+                file.name.clone(),
+            ) {
                 match pane {
                     SftpPane::Local => self.sftp_view.local_last_selected = Some(file.name.clone()),
                     SftpPane::Remote => {

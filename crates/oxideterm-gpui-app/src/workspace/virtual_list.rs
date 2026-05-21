@@ -249,4 +249,45 @@ mod tests {
         let spec = TauriVirtualListSpec::new(px(38.0), 16);
         assert_eq!(spec.overdraw(), px(608.0));
     }
+
+    #[test]
+    fn browser_drag_edge_scroll_step_is_idle_away_from_edges() {
+        assert_eq!(
+            browser_drag_edge_scroll_step(px(100.0), px(300.0), px(150.0)),
+            None
+        );
+        assert_eq!(
+            browser_drag_edge_scroll_step(px(100.0), px(300.0), px(250.0)),
+            None
+        );
+    }
+
+    #[test]
+    fn browser_drag_edge_scroll_step_tracks_edge_direction() {
+        let upward_step = browser_drag_edge_scroll_step(px(100.0), px(300.0), px(120.0)).unwrap();
+        let downward_step = browser_drag_edge_scroll_step(px(100.0), px(300.0), px(280.0)).unwrap();
+
+        assert!(upward_step < 0.0);
+        assert!(downward_step > 0.0);
+        assert!(
+            upward_step.abs() <= BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX,
+            "edge autoscroll must clamp to the shared browser-like max step"
+        );
+        assert!(
+            downward_step.abs() <= BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX,
+            "edge autoscroll must clamp to the shared browser-like max step"
+        );
+    }
+
+    #[test]
+    fn browser_drag_edge_scroll_step_clamps_past_edges() {
+        assert_eq!(
+            browser_drag_edge_scroll_step(px(100.0), px(300.0), px(0.0)),
+            Some(-BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX)
+        );
+        assert_eq!(
+            browser_drag_edge_scroll_step(px(100.0), px(300.0), px(400.0)),
+            Some(BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX)
+        );
+    }
 }

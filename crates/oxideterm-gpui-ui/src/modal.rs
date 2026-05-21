@@ -13,6 +13,14 @@ const TRANSPARENT_BACKDROP_ALPHA: u32 = 0x00; // Radix popover outside-hit-test 
 const TAILWIND_BACKDROP_BLUR_SM_PX: f32 = 4.0; // Tailwind backdrop-blur-sm.
 static TAURI_BACKDROP_BLUR_ALLOWED: AtomicBool = AtomicBool::new(true);
 
+// Tauri/Radix portals use z-50 for dialog/select/popover surfaces; GPUI uses
+// deferred priority instead of CSS stacking, so keep the source z-index value
+// named and centralized for every migrated floating layer.
+pub const TAURI_POPOVER_LAYER_PRIORITY: usize = 50;
+pub const TAURI_SELECT_LAYER_PRIORITY: usize = 50;
+// Tauri TooltipContent uses z-[9999], intentionally above normal portals.
+pub const TAURI_TOOLTIP_LAYER_PRIORITY: usize = 9_999;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TauriBackdropRole {
     Dialog,

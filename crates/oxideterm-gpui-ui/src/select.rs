@@ -6,6 +6,8 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
+use crate::button::tauri_focus_visible_ring;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SelectAnchorId {
     SettingsLanguage,
@@ -201,6 +203,16 @@ pub fn select_trigger(
                 .opacity(0.5)
                 .child("⌄"),
         )
+}
+
+pub fn select_trigger_focus_visible(tokens: &ThemeTokens, trigger: Div, focused: bool) -> Div {
+    if !focused {
+        return trigger;
+    }
+    // Tauri SelectTrigger gets the same focus-visible ring as shadcn Button.
+    // Native select owners pass keyboard focus explicitly so mouse-opened
+    // dropdowns do not show the keyboard ring.
+    trigger.shadow(tauri_focus_visible_ring(tokens))
 }
 
 pub fn select_popup(tokens: &ThemeTokens, width: f32) -> Stateful<Div> {

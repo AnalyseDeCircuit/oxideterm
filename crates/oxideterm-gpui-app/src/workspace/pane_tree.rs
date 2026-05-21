@@ -184,9 +184,8 @@ impl WorkspaceApp {
         let Some(drag) = self.split_drag.clone() else {
             return;
         };
-        if event.pressed_button != Some(MouseButton::Left) {
-            return;
-        }
+        // Splitters use root-level pointer capture. While dragging outside the
+        // splitter element, the stored drag state owns motion until mouse-up.
         let viewport = window.viewport_size();
         let delta_fraction = match drag.direction {
             SplitDirection::Horizontal => {

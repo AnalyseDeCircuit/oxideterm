@@ -609,7 +609,7 @@ impl WorkspaceApp {
     pub(super) fn handle_keybinding_recording_key(
         &mut self,
         event: &KeyDownEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if event.keystroke.key.as_str() == "escape"
@@ -618,11 +618,51 @@ impl WorkspaceApp {
             && !event.keystroke.modifiers.alt
             && !event.keystroke.modifiers.shift
         {
-            self.keybinding_recording_action_id = None;
-            self.keybinding_recording_combo = None;
-            self.keybinding_conflict_action_ids.clear();
-            cx.notify();
+            self.cancel_keybinding_recording(cx);
             return;
+        }
+
+        if self.keybinding_recording_combo.is_some()
+            && !event.keystroke.modifiers.platform
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.alt
+        {
+            match event.keystroke.key.as_str() {
+                "tab" => {
+                    // Tauri renders real footer buttons once a combo exists.
+                    // Native captures keydown globally, so model that browser
+                    // Tab order explicitly instead of recording Tab again.
+                    self.move_keybinding_recording_footer_focus(
+                        !event.keystroke.modifiers.shift,
+                        cx,
+                    );
+                    return;
+                }
+                "home" | "arrowleft" | "left" => {
+                    self.keybinding_recording_footer_focus =
+                        Some(KeybindingRecordingFooterAction::Confirm);
+                    cx.notify();
+                    return;
+                }
+                "end" | "arrowright" | "right" => {
+                    self.keybinding_recording_footer_focus =
+                        Some(KeybindingRecordingFooterAction::Cancel);
+                    cx.notify();
+                    return;
+                }
+                "enter" | "space" | " " => match self.keybinding_recording_footer_focus {
+                    Some(KeybindingRecordingFooterAction::Confirm) => {
+                        self.confirm_keybinding_recording(window, cx);
+                        return;
+                    }
+                    Some(KeybindingRecordingFooterAction::Cancel) => {
+                        self.cancel_keybinding_recording(cx);
+                        return;
+                    }
+                    None => {}
+                },
+                _ => {}
+            }
         }
 
         let Some(action_id) = self.keybinding_recording_action_id.clone() else {
@@ -644,7 +684,16 @@ impl WorkspaceApp {
         .collect::<Vec<_>>();
 
         self.keybinding_recording_combo = Some(combo);
+        self.keybinding_recording_footer_focus = None;
         self.keybinding_conflict_action_ids = conflicts;
+        cx.notify();
+    }
+
+    fn move_keybinding_recording_footer_focus(&mut self, forward: bool, cx: &mut Context<Self>) {
+        self.keybinding_recording_footer_focus = Some(next_keybinding_recording_footer_focus(
+            self.keybinding_recording_footer_focus,
+            forward,
+        ));
         cx.notify();
     }
 
@@ -691,6 +740,7 @@ impl WorkspaceApp {
     pub(super) fn cancel_keybinding_recording(&mut self, cx: &mut Context<Self>) {
         self.keybinding_recording_action_id = None;
         self.keybinding_recording_combo = None;
+        self.keybinding_recording_footer_focus = None;
         self.keybinding_conflict_action_ids.clear();
         cx.notify();
     }
@@ -725,6 +775,7 @@ impl WorkspaceApp {
         );
         self.keybinding_recording_action_id = None;
         self.keybinding_recording_combo = None;
+        self.keybinding_recording_footer_focus = None;
         self.keybinding_conflict_action_ids.clear();
         self.apply_runtime_key_bindings(runtime_bindings, window, cx);
     }
@@ -743,6 +794,7 @@ impl WorkspaceApp {
         self.edit_settings(|settings| settings.keybindings.overrides.clear(), cx);
         self.keybinding_recording_action_id = None;
         self.keybinding_recording_combo = None;
+        self.keybinding_recording_footer_focus = None;
         self.keybinding_conflict_action_ids.clear();
         self.apply_runtime_key_bindings(runtime_bindings, window, cx);
     }
@@ -838,6 +890,7 @@ impl WorkspaceApp {
                         );
                         this.keybinding_recording_action_id = None;
                         this.keybinding_recording_combo = None;
+                        this.keybinding_recording_footer_focus = None;
                         this.keybinding_conflict_action_ids.clear();
                         this.apply_runtime_key_bindings(runtime_bindings, window, cx);
                         this.push_ai_settings_toast(success, TerminalNoticeVariant::Success);
@@ -1667,6 +1720,32 @@ mod terminal_command_bar_behavior_tests {
                 TerminalCommandSuggestionDirection::Up
             ),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn keybinding_recorder_footer_focus_cycles_like_two_browser_buttons() {
+        assert_eq!(
+            next_keybinding_recording_footer_focus(None, true),
+            KeybindingRecordingFooterAction::Confirm
+        );
+        assert_eq!(
+            next_keybinding_recording_footer_focus(
+                Some(KeybindingRecordingFooterAction::Confirm),
+                true
+            ),
+            KeybindingRecordingFooterAction::Cancel
+        );
+        assert_eq!(
+            next_keybinding_recording_footer_focus(
+                Some(KeybindingRecordingFooterAction::Cancel),
+                false
+            ),
+            KeybindingRecordingFooterAction::Confirm
+        );
+        assert_eq!(
+            next_keybinding_recording_footer_focus(None, false),
+            KeybindingRecordingFooterAction::Cancel
         );
     }
 

@@ -37,6 +37,7 @@ use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
 };
+use oxideterm_gpui_ui::select::select_trigger_focus_visible;
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
 
 use super::quick_commands::QuickCommandImportStrategy;
@@ -470,12 +471,7 @@ impl WorkspaceApp {
             .size_full()
             .selectable_overflow_y_scrollbar(&cloud_sync_scroll)
             .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
-                if this.cloud_sync_open_select.is_some() {
-                    // A wheel on the scroll container outside the inline select
-                    // dismisses the popup while preserving the trigger focus,
-                    // matching Radix Select inside a scrollable settings pane.
-                    this.cloud_sync_open_select = None;
-                    this.cloud_sync_select_highlighted = None;
+                if this.close_cloud_sync_select_for_scroll() {
                     cx.notify();
                 }
             }))
@@ -2460,6 +2456,7 @@ impl WorkspaceApp {
 
     fn open_cloud_sync_select_for_keyboard(&mut self, select: CloudSyncSelect) {
         self.cloud_sync_focused_select = Some(select);
+        self.cloud_sync_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Keyboard);
         self.cloud_sync_open_select = Some(select);
         self.cloud_sync_select_highlighted =
             Some((select, self.cloud_sync_selected_option_index(select)));
@@ -2470,7 +2467,16 @@ impl WorkspaceApp {
         // sibling input/button. Keep popup and focus-ring ownership paired.
         self.cloud_sync_open_select = None;
         self.cloud_sync_focused_select = None;
+        self.cloud_sync_select_focus_origin = None;
         self.cloud_sync_select_highlighted = None;
+    }
+
+    fn close_cloud_sync_select_for_scroll(&mut self) -> bool {
+        close_cloud_sync_select_on_container_scroll(
+            &mut self.cloud_sync_open_select,
+            &mut self.cloud_sync_focused_select,
+            &mut self.cloud_sync_select_highlighted,
+        )
     }
 
     fn apply_cloud_sync_select_action(
@@ -2526,6 +2532,7 @@ impl WorkspaceApp {
         match event.keystroke.key.as_str() {
             "escape" => {
                 self.cloud_sync_focused_select = None;
+                self.cloud_sync_select_focus_origin = None;
                 cx.notify();
                 true
             }
@@ -2534,6 +2541,8 @@ impl WorkspaceApp {
                 // onward. Native keeps the owner explicit so the visual ring and
                 // next-select order stay in sync without DOM tab stops.
                 self.move_cloud_sync_select_focus(select, !event.keystroke.modifiers.shift);
+                self.cloud_sync_select_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
                 cx.notify();
                 true
             }
@@ -2567,6 +2576,8 @@ impl WorkspaceApp {
                 self.cloud_sync_open_select = None;
                 self.cloud_sync_select_highlighted = None;
                 self.cloud_sync_focused_select = Some(select);
+                self.cloud_sync_select_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
                 cx.notify();
                 true
             }
@@ -2577,6 +2588,8 @@ impl WorkspaceApp {
                 self.cloud_sync_open_select = None;
                 self.cloud_sync_select_highlighted = None;
                 self.move_cloud_sync_select_focus(select, !event.keystroke.modifiers.shift);
+                self.cloud_sync_select_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
                 cx.notify();
                 true
             }
@@ -2611,6 +2624,8 @@ impl WorkspaceApp {
                     .get(current.min(options.len() - 1))
                     .map(|option| option.action.clone());
                 if let Some(action) = action {
+                    self.cloud_sync_select_focus_origin =
+                        Some(browser_behavior::BrowserFocusOrigin::Keyboard);
                     self.apply_cloud_sync_select_action(action, cx);
                 }
                 true
@@ -2650,7 +2665,12 @@ impl WorkspaceApp {
             );
         let open = self.cloud_sync_open_select == Some(select);
         let focused = self.cloud_sync_focused_select == Some(select);
-        group = group.child(
+        let focus_visible = focused
+            && self
+                .cloud_sync_select_focus_origin
+                .is_some_and(|origin| origin.is_focus_visible());
+        group = group.child(select_trigger_focus_visible(
+            &self.tokens,
             div()
                 .w_full()
                 .h(px(36.0))
@@ -2677,6 +2697,8 @@ impl WorkspaceApp {
                               _window,
                               cx: &mut Context<WorkspaceApp>| {
                             this.cloud_sync_focused_select = Some(select);
+                            this.cloud_sync_select_focus_origin =
+                                Some(browser_behavior::BrowserFocusOrigin::Pointer);
                             this.cloud_sync_open_select = if this.cloud_sync_open_select
                                 == Some(select)
                             {
@@ -2707,7 +2729,8 @@ impl WorkspaceApp {
                         .text_color(rgb(theme.text_muted))
                         .child("⌄"),
                 ),
-        );
+            focus_visible,
+        ));
         if open {
             let highlighted = self
                 .cloud_sync_select_highlighted
@@ -2764,6 +2787,8 @@ impl WorkspaceApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
+                                this.cloud_sync_select_focus_origin =
+                                    Some(browser_behavior::BrowserFocusOrigin::Pointer);
                                 this.apply_cloud_sync_select_action(action.clone(), cx);
                                 cx.stop_propagation();
                             }),
@@ -5425,6 +5450,23 @@ fn next_cloud_sync_select_focus(
     }
 }
 
+fn close_cloud_sync_select_on_container_scroll(
+    open_select: &mut Option<CloudSyncSelect>,
+    focused_select: &mut Option<CloudSyncSelect>,
+    highlighted_option: &mut Option<(CloudSyncSelect, usize)>,
+) -> bool {
+    let Some(select) = open_select.take() else {
+        return false;
+    };
+
+    // Radix Select closes its content when an owning scroll container moves,
+    // but the trigger remains the browser focus anchor for the visible ring and
+    // the next keyboard action. Keep that routing explicit for native GPUI.
+    *focused_select = Some(select);
+    *highlighted_option = None;
+    true
+}
+
 #[cfg(test)]
 mod cloud_sync_preview_selection_tests {
     use super::*;
@@ -5536,5 +5578,28 @@ mod cloud_sync_preview_selection_tests {
             next_cloud_sync_select_focus(&webdav_selects, CloudSyncSelect::AuthMode, false),
             Some(CloudSyncSelect::Backend)
         );
+    }
+
+    #[test]
+    fn cloud_sync_select_scroll_close_preserves_trigger_focus() {
+        let mut open_select = Some(CloudSyncSelect::ConflictStrategy);
+        let mut focused_select = Some(CloudSyncSelect::Backend);
+        let mut highlighted_option = Some((CloudSyncSelect::ConflictStrategy, 1));
+
+        assert!(close_cloud_sync_select_on_container_scroll(
+            &mut open_select,
+            &mut focused_select,
+            &mut highlighted_option,
+        ));
+        assert_eq!(open_select, None);
+        assert_eq!(focused_select, Some(CloudSyncSelect::ConflictStrategy));
+        assert_eq!(highlighted_option, None);
+
+        assert!(!close_cloud_sync_select_on_container_scroll(
+            &mut open_select,
+            &mut focused_select,
+            &mut highlighted_option,
+        ));
+        assert_eq!(focused_select, Some(CloudSyncSelect::ConflictStrategy));
     }
 }

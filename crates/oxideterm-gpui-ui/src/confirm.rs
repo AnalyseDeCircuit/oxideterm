@@ -5,6 +5,7 @@ use gpui::{
 use oxideterm_theme::ThemeTokens;
 use std::rc::Rc;
 
+use crate::button::tauri_focus_visible_ring;
 use crate::modal::dismissible_dialog_backdrop;
 
 const CONFIRM_DIALOG_WIDTH: f32 = 384.0; // Tauri useConfirm max-w-sm
@@ -14,7 +15,6 @@ const CONFIRM_SHADOW_ALPHA: u32 = 0x66; // Tauri shadow-black/40
 const CONFIRM_ICON_BG_ALPHA: u32 = 0x1a; // Tauri bg-*-500/10
 const CONFIRM_ICON_RING_ALPHA: u32 = 0x33; // Tauri ring-*-500/20
 const CONFIRM_ACTION_HOVER_ALPHA: u32 = 0x1a; // Tauri hover:bg-*-500/10
-const CONFIRM_ACTION_FOCUS_RING_ALPHA: u32 = 0xb3; // Tauri focus-visible:ring-theme-accent/70
 const CONFIRM_ICON_SIZE: f32 = 24.0; // Tauri w-6 h-6
 const CONFIRM_ICON_WRAPPER_SIZE: f32 = 48.0; // Tauri w-12 h-12
 const CONFIRM_BODY_PAD_X: f32 = 24.0; // Tauri px-6
@@ -74,12 +74,7 @@ pub fn confirm_dialog_with_focus(
     let icon_color = if is_danger { TW_RED_400 } else { theme.accent };
     let confirm_color = if is_danger { TW_RED_400 } else { theme.accent };
     let confirm_hover_color = if is_danger { TW_RED_300 } else { theme.accent };
-    let focus_ring = vec![BoxShadow {
-        color: Hsla::from(rgba((theme.accent << 8) | CONFIRM_ACTION_FOCUS_RING_ALPHA)),
-        offset: point(px(0.0), px(0.0)),
-        blur_radius: px(0.0),
-        spread_radius: px(2.0),
-    }];
+    let focus_ring = tauri_focus_visible_ring(tokens);
     let on_cancel = Rc::new(on_cancel);
     let on_backdrop_cancel = on_cancel.clone();
 
