@@ -43,6 +43,41 @@ pub(crate) fn browser_select_next_index(
     }
 }
 
+pub(crate) fn close_browser_select_on_container_scroll<T>(
+    open_select: &mut Option<T>,
+    focused_select: &mut Option<T>,
+    highlighted_option: &mut Option<(T, usize)>,
+) -> bool
+where
+    T: Copy,
+{
+    let Some(select) = open_select.take() else {
+        return false;
+    };
+
+    // Radix Select closes its content when an owning scroll container moves,
+    // but the trigger remains the browser focus anchor. Keep this shared so
+    // Cloud Sync, settings inline selects, and future form selects do not clear
+    // focus ownership while only trying to dismiss the popup content.
+    *focused_select = Some(select);
+    *highlighted_option = None;
+    true
+}
+
+pub(crate) fn close_browser_trigger_select_on_container_scroll<T>(
+    open_select: &mut Option<T>,
+    focus_origin: &mut Option<BrowserFocusOrigin>,
+) -> bool {
+    let had_open_select = open_select.take().is_some();
+    if had_open_select {
+        // Settings/new-connection selects are trigger-owned form controls. When
+        // their scroll container moves the anchor, Radix closes the popup and
+        // drops focus-visible ownership rather than leaving a stale ring.
+        *focus_origin = None;
+    }
+    had_open_select
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FocusCycle<'a, T> {
     actions: &'a [T],
@@ -123,6 +158,14 @@ pub(crate) enum ModalFooterKeyAction<T> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ModalFooterInputKeyAction<T> {
     Cancel,
+    FocusInput,
+    FocusFooter(T),
+    Activate(T),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InlineFooterInputKeyAction<T> {
+    ClearFocus,
     FocusInput,
     FocusFooter(T),
     Activate(T),
@@ -229,6 +272,55 @@ where
         "enter" | "space" | " " => current
             .or(activation_fallback)
             .map(ModalFooterInputKeyAction::Activate),
+        _ => None,
+    }
+}
+
+pub(crate) fn inline_footer_input_key_action<T>(
+    key: &str,
+    shift: bool,
+    actions: &[T],
+    input_focused: bool,
+    current: Option<T>,
+    fallback: T,
+) -> Option<InlineFooterInputKeyAction<T>>
+where
+    T: Copy + Eq,
+{
+    // Inline browser controls such as the AI chat composer are not modal focus
+    // traps: Tab moves from the textarea to the footer action, then out of the
+    // control group, while Shift+Tab from the action returns to the textarea.
+    // Keep that DOM-like order shared instead of hand-writing it in each input.
+    let has_actions = !actions.is_empty();
+    match key {
+        "escape" => Some(InlineFooterInputKeyAction::ClearFocus),
+        "tab" if input_focused && !shift && has_actions => {
+            Some(InlineFooterInputKeyAction::FocusFooter(
+                next_required_modal_footer_focus(actions, None, true, fallback),
+            ))
+        }
+        "tab" if input_focused && !shift => Some(InlineFooterInputKeyAction::ClearFocus),
+        "tab" if input_focused => Some(InlineFooterInputKeyAction::ClearFocus),
+        "tab" if shift => Some(InlineFooterInputKeyAction::FocusInput),
+        "tab" => Some(InlineFooterInputKeyAction::ClearFocus),
+        "arrowleft" | "left" | "arrowright" | "right" | "home" | "end"
+            if !input_focused && has_actions =>
+        {
+            modal_footer_key_action(key, shift, actions, current, fallback).map(|action| {
+                match action {
+                    ModalFooterKeyAction::Cancel => InlineFooterInputKeyAction::ClearFocus,
+                    ModalFooterKeyAction::Focus(action) => {
+                        InlineFooterInputKeyAction::FocusFooter(action)
+                    }
+                    ModalFooterKeyAction::Activate(action) => {
+                        InlineFooterInputKeyAction::Activate(action)
+                    }
+                }
+            })
+        }
+        "enter" | "space" | " " if !input_focused && has_actions => Some(
+            InlineFooterInputKeyAction::Activate(current.unwrap_or(fallback)),
+        ),
         _ => None,
     }
 }
@@ -434,7 +526,8 @@ fn resolve_browser_pointer_capture_owner(
 mod tests {
     use super::{
         BrowserFocusOrigin, BrowserPointerCaptureOwner, BrowserPointerCaptureState, FocusCycle,
-        browser_focus_visible, clamp_context_menu_position, modal_footer_input_key_action,
+        browser_focus_visible, clamp_context_menu_position,
+        close_browser_select_on_container_scroll, modal_footer_input_key_action,
         modal_footer_key_action, modal_footer_key_moves_forward, next_required_modal_footer_focus,
         preserve_or_move_context_selection, resolve_browser_pointer_capture_owner,
     };
@@ -558,6 +651,29 @@ mod tests {
             super::browser_select_next_index(0, 0, super::BrowserSelectKeyDirection::Next),
             0
         );
+    }
+
+    #[test]
+    fn close_browser_select_on_scroll_preserves_trigger_focus() {
+        let mut open_select = Some("backend");
+        let mut focused_select = Some("auth");
+        let mut highlighted_option = Some(("backend", 2));
+
+        assert!(close_browser_select_on_container_scroll(
+            &mut open_select,
+            &mut focused_select,
+            &mut highlighted_option,
+        ));
+        assert_eq!(open_select, None);
+        assert_eq!(focused_select, Some("backend"));
+        assert_eq!(highlighted_option, None);
+
+        assert!(!close_browser_select_on_container_scroll(
+            &mut open_select,
+            &mut focused_select,
+            &mut highlighted_option,
+        ));
+        assert_eq!(focused_select, Some("backend"));
     }
 
     #[test]
@@ -698,6 +814,42 @@ mod tests {
                 Some("confirm")
             ),
             Some(super::ModalFooterInputKeyAction::Activate("confirm"))
+        );
+    }
+
+    #[test]
+    fn inline_footer_input_key_action_matches_browser_tab_exit_order() {
+        let actions = ["submit"];
+
+        assert_eq!(
+            super::inline_footer_input_key_action("tab", false, &actions, true, None, "submit"),
+            Some(super::InlineFooterInputKeyAction::FocusFooter("submit"))
+        );
+        assert_eq!(
+            super::inline_footer_input_key_action(
+                "tab",
+                false,
+                &actions,
+                false,
+                Some("submit"),
+                "submit",
+            ),
+            Some(super::InlineFooterInputKeyAction::ClearFocus)
+        );
+        assert_eq!(
+            super::inline_footer_input_key_action(
+                "tab",
+                true,
+                &actions,
+                false,
+                Some("submit"),
+                "submit",
+            ),
+            Some(super::InlineFooterInputKeyAction::FocusInput)
+        );
+        assert_eq!(
+            super::inline_footer_input_key_action("tab", false, &[], true, None, "submit"),
+            Some(super::InlineFooterInputKeyAction::ClearFocus)
         );
     }
 

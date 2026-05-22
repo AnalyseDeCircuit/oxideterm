@@ -1002,7 +1002,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                        this.open_settings_select = None;
+                        this.close_settings_select();
                         this.focused_settings_input = None;
                         this.settings_slider_drag = Some(slider_id);
                         this.apply_settings_slider_from_position(
@@ -1596,7 +1596,7 @@ impl WorkspaceApp {
                     if let Some(editor) = this.theme_editor.as_mut() {
                         editor.active_section = section;
                     }
-                    this.open_settings_select = None;
+                    this.close_settings_select();
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -2016,14 +2016,14 @@ impl WorkspaceApp {
             ui_colors: app_ui_colors_to_colors(ui),
             active_section: ThemeEditorSection::Terminal,
         });
-        self.open_settings_select = None;
+        self.close_settings_select();
         self.focused_settings_input = None;
         cx.notify();
     }
 
     fn close_theme_editor(&mut self, cx: &mut Context<Self>) {
         self.theme_editor = None;
-        self.open_settings_select = None;
+        self.close_settings_select();
         self.focused_settings_input = None;
         cx.notify();
     }

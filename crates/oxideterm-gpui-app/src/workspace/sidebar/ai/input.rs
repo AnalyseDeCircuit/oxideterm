@@ -558,9 +558,7 @@ impl WorkspaceApp {
                 false,
                 Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
                 cx.listener(|this, _event, window, cx| {
-                    this.ai_safety_menu_open = false;
                     this.open_ai_settings(window, cx);
-                    cx.stop_propagation();
                 }),
                 cx,
             ))
@@ -640,22 +638,19 @@ impl WorkspaceApp {
             false,
             false,
             Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-                cx.listener(move |this, _event, _window, cx| {
-                    match mode {
-                        AiSafetyMode::Default => this.set_ai_safety_mode_default(cx),
+            cx.listener(move |this, _event, _window, cx| {
+                match mode {
+                    AiSafetyMode::Default => this.set_ai_safety_mode_default(cx),
                     AiSafetyMode::Bypass => {
                         if this.active_ai_safety_mode() != AiSafetyMode::Bypass {
                             this.ai_safety_confirm_open = true;
                             this.reset_standard_confirm_focus();
                         }
-                        this.ai_safety_menu_open = false;
-                        cx.notify();
                     }
                 }
-                    cx.stop_propagation();
-                }),
-                cx,
-            )
+            }),
+            cx,
+        )
         .into_any_element()
     }
 

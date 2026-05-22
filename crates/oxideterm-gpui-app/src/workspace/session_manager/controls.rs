@@ -63,32 +63,48 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = self.i18n.t(label_key);
-        div()
-            .h(px(32.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(
+        toolbar_button(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(
                 icon,
                 16.0,
                 rgb(self.tokens.ui.text),
-            ))
-            .when(show_label, |button| button.child(label))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    match transfer_action {
-                        SessionTransferAction::ImportOxide => this.open_oxide_import_dialog(cx),
-                        SessionTransferAction::ExportOxide => this.open_oxide_export_dialog(cx),
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Link,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                show_label,
+                icon_gap: Some(6.0),
+                text_color: Some(rgb(self.tokens.ui.text)),
+                hover_background: Some(rgba(0x00000000)),
+                // Tauri renders these import/export affordances as toolbar links,
+                // not selectable labels. Reuse the shared button boundary while
+                // preserving the old no-fill hover behavior.
+                ..ToolbarButtonOptions::compact_text(
+                    ButtonVariant::Link,
+                    ButtonRadius::Md,
+                    32.0,
+                    0.0,
+                    self.tokens.metrics.ui_text_sm,
+                )
+            },
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                match transfer_action {
+                    SessionTransferAction::ImportOxide => this.open_oxide_import_dialog(cx),
+                    SessionTransferAction::ExportOxide => this.open_oxide_export_dialog(cx),
+                }
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     pub(super) fn render_session_text_input(

@@ -295,34 +295,29 @@ impl WorkspaceApp {
         };
 
         // Some Tauri confirm dialogs use a split footer instead of shadcn
-        // DialogFooter spacing. Keep the chrome separate, but reuse the same
-        // standard_confirm focus owner so Tab/Shift+Tab stays globally shared.
-        let button = div()
-            .flex_1()
-            .py(px(10.0))
-            .text_align(gpui::TextAlign::Center)
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(if destructive {
-                gpui::FontWeight::SEMIBOLD
-            } else {
-                gpui::FontWeight::MEDIUM
-            })
-            .text_color(rgb(text_color))
-            .cursor_pointer()
-            .hover(move |style| {
-                style.bg(hover_bg).text_color(rgb(hover_text))
-            })
-            .when(draw_right_separator, |button| {
-                button
-                    .border_r_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
-            })
-            .child(label);
-
-        button_focus_visible(
+        // DialogFooter spacing. Use the shared split footer primitive so AI
+        // and settings confirms share button focus-visible behavior.
+        split_footer_button(
             &self.tokens,
-            button,
-            self.standard_confirm_focus() == Some(action),
+            label,
+            SplitFooterButtonOptions {
+                text_color: rgb(text_color),
+                hover_text_color: rgb(hover_text),
+                hover_background: hover_bg,
+                font_weight: if destructive {
+                    gpui::FontWeight::SEMIBOLD
+                } else {
+                    gpui::FontWeight::MEDIUM
+                },
+                focus_visible: self.standard_confirm_focus() == Some(action),
+                right_separator: draw_right_separator,
+                separator_color: Some(rgba((self.tokens.ui.border << 8) | 0x66)),
+                disabled: false,
+                loading: false,
+                height: None,
+                padding_y: Some(10.0),
+                font_size: Some(self.tokens.metrics.ui_text_sm),
+            },
         )
     }
 
@@ -441,17 +436,28 @@ impl WorkspaceApp {
             "tab" if self.ai_mcp_add_dialog.is_some() && settings_input_is_ai_mcp(input) => {
                 // Tauri MCP add dialog lets Tab leave the active input and enter
                 // the DialogFooter. GPUI settings inputs are manually owned, so
-                // release the input owner and start the shared footer cycle.
-                self.focused_settings_input = None;
-                self.clear_settings_input_draft(input);
-                if event.keystroke.modifiers.shift {
-                    self.set_standard_confirm_focus(ConfirmDialogAction::Confirm);
-                } else {
-                    self.reset_standard_confirm_focus();
+                // delegate the input-to-footer edge to the shared browser model.
+                if let Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) =
+                    browser_behavior::modal_footer_input_key_action(
+                        key,
+                        event.keystroke.modifiers.shift,
+                        &CONFIRM_DIALOG_FOOTER_ACTIONS,
+                        true,
+                        true,
+                        self.standard_confirm_focus_owner(),
+                        ConfirmDialogAction::Cancel,
+                        None,
+                    )
+                {
+                    self.focused_settings_input = None;
+                    self.clear_settings_input_draft(input);
+                    self.set_standard_confirm_focus(action);
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                    return true;
                 }
-                self.new_connection_caret_visible = true;
-                cx.notify();
-                true
+
+                false
             }
             "escape" => {
                 self.focused_settings_input = None;
@@ -497,14 +503,14 @@ impl WorkspaceApp {
             self.clear_ime_selection();
             changed = true;
         }
-        if self.open_settings_select.take().is_some() {
+        if self.open_settings_select.is_some() {
             self.ime_marked_text = None;
-            self.settings_select_focus_origin = None;
+            self.close_settings_select();
             changed = true;
         }
-        if self.open_new_connection_select.take().is_some() {
+        if self.open_new_connection_select.is_some() {
             self.ime_marked_text = None;
-            self.new_connection_select_focus_origin = None;
+            self.close_new_connection_select();
             changed = true;
         }
         if self.terminal_command_bar_focused {
@@ -639,13 +645,20 @@ impl WorkspaceApp {
         current_value: String,
         cx: &mut Context<Self>,
     ) {
-        self.open_settings_select = None;
-        self.settings_select_focus_origin = None;
+        self.close_settings_select();
         self.focused_settings_input = Some(input);
         self.clear_ime_selection();
         self.settings_input_draft = current_value;
         self.new_connection_caret_visible = true;
         cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_settings_select(&mut self) {
+        // Settings selects use an explicit focus-origin owner. Closing the
+        // popup must clear both pieces together so pointer-opened selects do
+        // not leak stale keyboard/pointer focus state into the next trigger.
+        self.open_settings_select = None;
+        self.settings_select_focus_origin = None;
     }
 
     fn clear_settings_input_draft(&mut self, input: SettingsInput) {

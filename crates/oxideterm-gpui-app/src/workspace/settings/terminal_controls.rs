@@ -80,7 +80,7 @@ impl WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                                    this.open_settings_select = None;
+                                    this.close_settings_select();
                                     this.focused_settings_input = None;
                                     this.settings_slider_drag =
                                         Some(SettingsSlider::TerminalFontSize);

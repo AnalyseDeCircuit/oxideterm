@@ -326,7 +326,7 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                this.session_manager.row_context_menu_connection_id = None;
+                this.close_session_row_menus();
                 if event.click_count == 2 {
                     this.open_saved_connection(&id, window, cx);
                 } else {
@@ -345,11 +345,11 @@ impl WorkspaceApp {
             cx.listener({
                 let id = conn.id.clone();
                 move |this, event: &MouseDownEvent, _window, cx| {
-                    this.select_connection_for_context_menu(&id);
-                    this.session_manager.row_context_menu_connection_id = Some(id.clone());
-                    this.session_manager.row_context_menu_x = f32::from(event.position.x);
-                    this.session_manager.row_context_menu_y = f32::from(event.position.y);
-                    this.session_manager.row_menu_connection_id = None;
+                    this.open_session_row_context_menu(
+                        &id,
+                        f32::from(event.position.x),
+                        f32::from(event.position.y),
+                    );
                     cx.notify();
                     cx.stop_propagation();
                 }
@@ -603,7 +603,7 @@ impl WorkspaceApp {
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, window, cx| {
-                            this.session_manager.row_menu_connection_id = None;
+                            this.close_session_row_menus();
                             this.open_saved_connection(&id, window, cx);
                             cx.stop_propagation();
                         }
@@ -623,7 +623,7 @@ impl WorkspaceApp {
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, window, cx| {
-                            this.session_manager.row_menu_connection_id = None;
+                            this.close_session_row_menus();
                             this.open_saved_connection_editor(&id, None, window, cx);
                             cx.stop_propagation();
                         }
@@ -642,56 +642,55 @@ impl WorkspaceApp {
                     MouseButton::Left,
                     cx.listener({
                         let id = conn.id.clone();
-                        move |this, event: &MouseDownEvent, window, cx| {
-                            this.session_manager.row_menu_connection_id =
-                                if this.session_manager.row_menu_connection_id.as_deref()
-                                    == Some(id.as_str())
-                                {
-                                    None
-                                } else {
-                                    Some(id.clone())
-                                };
-                            let viewport_height = f32::from(window.viewport_size().height);
-                            this.session_manager.row_menu_opens_above = f32::from(event.position.y)
-                                + MANAGER_ROW_MENU_HEIGHT
-                                > viewport_height;
+                        move |this, event: &MouseDownEvent, _window, cx| {
+                            let trigger_x = f32::from(event.position.x);
+                            let trigger_y = f32::from(event.position.y);
+                            this.toggle_session_row_more_menu(
+                                &id,
+                                trigger_x - MANAGER_ROW_MENU_WIDTH + MANAGER_ROW_MORE_BUTTON,
+                                trigger_y,
+                            );
                             cx.notify();
                             cx.stop_propagation();
                         }
                     }),
                 ),
             )
-            .when(menu_open, |actions| {
-                actions.child(self.render_row_more_menu(
-                    conn,
-                    has_background,
-                    self.session_manager.row_menu_opens_above,
-                    cx,
-                ))
-            })
             .into_any_element()
     }
 
     fn render_row_more_menu(
         &self,
         conn: ConnectionInfo,
+        window: &Window,
         has_background: bool,
-        opens_above: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let viewport = window.viewport_size();
+        let placement = browser_behavior::clamp_context_menu_position(
+            self.session_manager.row_menu_x,
+            self.session_manager.row_menu_y,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            MANAGER_ROW_MENU_WIDTH,
+            MANAGER_ROW_MENU_HEIGHT,
+            8.0,
+        );
         let theme = self.tokens.ui;
-        div()
+        // Row "more" menus used to be row-local absolute children. Rendering
+        // them as a context-menu surface gives them the same outside-click,
+        // wheel island, and Esc dismissal path as right-click row menus.
+        context_menu_event_boundary(div()
             .absolute()
-            .when(!opens_above, |menu| menu.top(px(30.0)))
-            .when(opens_above, |menu| menu.bottom(px(30.0)))
-            .right(px(0.0))
+            .left(px(placement.x))
+            .top(px(placement.y))
             .w(px(MANAGER_ROW_MENU_WIDTH))
             .p(px(4.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(theme_border(theme.border, has_background))
             .bg(theme_panel_bg(theme.bg_panel, has_background))
-            .shadow_lg()
+            .shadow_lg())
             .child(
                 self.render_session_manager_menu_action(
                     self.render_row_menu_item(
@@ -709,12 +708,10 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
-                            this.session_manager.row_menu_connection_id = None;
-                            this.test_connection(&id, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                    cx,
+                        this.test_connection(&id, window, cx);
+                    }
+                }),
+                cx,
                 ),
             )
             .child(
@@ -734,12 +731,10 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, _window, cx| {
-                            this.session_manager.row_menu_connection_id = None;
-                            this.duplicate_connection(&id, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                    cx,
+                        this.duplicate_connection(&id, cx);
+                    }
+                }),
+                cx,
                 ),
             )
             .child(
@@ -765,12 +760,10 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, _window, cx| {
-                            this.session_manager.row_menu_connection_id = None;
-                            this.delete_connection(&id, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                    cx,
+                        this.delete_connection(&id, cx);
+                    }
+                }),
+                cx,
                 ),
             )
             .into_any_element()
@@ -823,12 +816,10 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
-                            this.close_session_row_menus();
-                            this.open_saved_connection(&id, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                    cx,
+                        this.open_saved_connection(&id, window, cx);
+                    }
+                }),
+                cx,
                 ),
             )
             .child(
@@ -849,12 +840,10 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
-                            this.close_session_row_menus();
-                            this.test_connection(&id, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                    cx,
+                        this.test_connection(&id, window, cx);
+                    }
+                }),
+                cx,
                 ),
             )
             .child(
@@ -875,12 +864,10 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
-                            this.close_session_row_menus();
-                            this.open_saved_connection_editor(&id, None, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                    cx,
+                        this.open_saved_connection_editor(&id, None, window, cx);
+                    }
+                }),
+                cx,
                 ),
             )
             .child(
@@ -901,12 +888,10 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, _window, cx| {
-                            this.close_session_row_menus();
-                            this.duplicate_connection(&id, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                    cx,
+                        this.duplicate_connection(&id, cx);
+                    }
+                }),
+                cx,
                 ),
             )
             .child(
@@ -933,12 +918,10 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, _window, cx| {
-                            this.close_session_row_menus();
-                            this.delete_connection(&id, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                    cx,
+                        this.delete_connection(&id, cx);
+                    }
+                }),
+                cx,
                 ),
             )
             .into_any_element()
@@ -1027,7 +1010,9 @@ impl WorkspaceApp {
                 hover_background: Some(theme_hover_bg(self.tokens.ui.bg_hover, has_background)),
                 hover_text_color: None,
             },
-            |this| this.close_session_row_menus(),
+            |this| {
+                this.close_session_row_menus();
+            },
             move |_this, event, window, cx| listener(event, window, cx),
             cx,
         )

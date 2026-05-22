@@ -206,6 +206,22 @@ pub struct IconButtonOptions {
     pub disabled_opacity: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SplitFooterButtonOptions {
+    pub text_color: Rgba,
+    pub hover_text_color: Rgba,
+    pub hover_background: Rgba,
+    pub font_weight: gpui::FontWeight,
+    pub focus_visible: bool,
+    pub right_separator: bool,
+    pub separator_color: Option<Rgba>,
+    pub disabled: bool,
+    pub loading: bool,
+    pub height: Option<f32>,
+    pub padding_y: Option<f32>,
+    pub font_size: Option<f32>,
+}
+
 impl IconButtonOptions {
     pub fn compact(size: f32) -> Self {
         Self {
@@ -375,6 +391,57 @@ pub fn icon_button(tokens: &ThemeTokens, icon: AnyElement, options: IconButtonOp
     button_focus_visible(tokens, button, options.focus_visible)
 }
 
+pub fn split_footer_button(
+    tokens: &ThemeTokens,
+    label: impl IntoElement,
+    options: SplitFooterButtonOptions,
+) -> Div {
+    // Tauri confirm-style dialogs sometimes use two equal-width footer cells
+    // rather than normal DialogFooter spacing. Keep that split geometry shared
+    // while reusing the same focus-visible helper as ordinary buttons.
+    let disabled = options.disabled || options.loading;
+    let button = div()
+        .flex_1()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_align(gpui::TextAlign::Center)
+        .font_weight(options.font_weight)
+        .text_color(options.text_color)
+        .opacity(if disabled { 0.5 } else { 1.0 })
+        .cursor(if disabled {
+            CursorStyle::OperationNotAllowed
+        } else {
+            CursorStyle::PointingHand
+        })
+        .when_some(options.height, |button, height| button.h(px(height)))
+        .when_some(options.padding_y, |button, padding_y| {
+            button.py(px(padding_y))
+        })
+        .when_some(options.font_size, |button, font_size| {
+            button.text_size(px(font_size))
+        })
+        .hover(move |button| {
+            if disabled {
+                button
+            } else {
+                button
+                    .bg(options.hover_background)
+                    .text_color(options.hover_text_color)
+            }
+        })
+        .when(options.right_separator, |button| {
+            button.border_r_1().border_color(
+                options
+                    .separator_color
+                    .unwrap_or_else(|| rgb(tokens.ui.border)),
+            )
+        })
+        .child(label);
+
+    button_focus_visible(tokens, button, options.focus_visible)
+}
+
 fn button_base(tokens: &ThemeTokens, options: ButtonOptions, has_background: bool) -> Div {
     let theme = tokens.ui;
     let metrics = tokens.metrics;
@@ -534,6 +601,31 @@ mod tests {
         assert_eq!(options.border, None);
         assert_eq!(options.hover_background, None);
         assert_eq!(options.hover_opacity, None);
+        assert!(!options.disabled);
+        assert!(!options.loading);
+    }
+
+    #[test]
+    fn split_footer_button_options_expose_confirm_footer_shape() {
+        let options = SplitFooterButtonOptions {
+            text_color: rgb(0xffffff),
+            hover_text_color: rgb(0xeeeeee),
+            hover_background: rgba(0x0000001a),
+            font_weight: gpui::FontWeight::SEMIBOLD,
+            focus_visible: true,
+            right_separator: true,
+            separator_color: Some(rgba(0xffffff66)),
+            disabled: false,
+            loading: false,
+            height: Some(40.0),
+            padding_y: None,
+            font_size: Some(14.0),
+        };
+
+        assert_eq!(options.height, Some(40.0));
+        assert_eq!(options.padding_y, None);
+        assert!(options.focus_visible);
+        assert!(options.right_separator);
         assert!(!options.disabled);
         assert!(!options.loading);
     }

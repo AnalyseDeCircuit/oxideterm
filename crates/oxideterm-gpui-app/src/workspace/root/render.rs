@@ -110,11 +110,13 @@ impl Render for WorkspaceApp {
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                let active_ime_commits_printable_key = active_ime_should_defer_printable_key(
-                    this.active_ime_target().is_some(),
-                    &event.keystroke,
-                );
+                let active_ime_commits_printable_key =
+                    this.defer_active_ime_printable_key(&event.keystroke, window, cx);
                 if active_ime_commits_printable_key {
+                    // Active text inputs are owned by GPUI InputHandler for
+                    // printable text. Stop page handlers here so command
+                    // palette/search-style inputs do not append the same key.
+                    cx.stop_propagation();
                     return;
                 }
                 if this.keyboard_interactive_challenge.is_some() {

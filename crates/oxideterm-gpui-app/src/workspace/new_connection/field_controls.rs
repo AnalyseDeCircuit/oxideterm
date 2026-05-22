@@ -23,13 +23,13 @@ impl WorkspaceApp {
         // New-connection selects share browser focus-origin semantics with
         // settings selects: pointer-opened menus should not render a keyboard
         // focus-visible ring on the trigger.
+        if self.open_new_connection_select == Some(select_id) {
+            self.close_new_connection_select();
+            return;
+        }
         self.new_connection_select_focus_origin =
             Some(browser_behavior::BrowserFocusOrigin::Pointer);
-        self.open_new_connection_select = if self.open_new_connection_select == Some(select_id) {
-            None
-        } else {
-            Some(select_id)
-        };
+        self.open_new_connection_select = Some(select_id);
     }
 
     pub(in crate::workspace) fn close_new_connection_select(&mut self) {

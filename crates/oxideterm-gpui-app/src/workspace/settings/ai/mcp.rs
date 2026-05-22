@@ -94,7 +94,7 @@ impl WorkspaceApp {
                             cx.listener(|this, _event, _window, cx| {
                                 this.ai_mcp_add_dialog = Some(AiMcpServerDraft::default());
                                 this.focused_settings_input = None;
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.clear_standard_confirm_focus();
                                 cx.stop_propagation();
                                 cx.notify();
@@ -1123,7 +1123,7 @@ impl WorkspaceApp {
                             zeroize::Zeroize::zeroize(&mut restore_draft.auth_token);
                             this.focused_settings_input = None;
                             this.settings_input_draft.clear();
-                            this.open_settings_select = None;
+                            this.close_settings_select();
                             this.edit_settings(
                                 move |settings| {
                                     settings.ai.mcp_servers.push(config.clone());
@@ -1147,7 +1147,7 @@ impl WorkspaceApp {
         zeroize::Zeroize::zeroize(&mut draft.auth_token);
         self.focused_settings_input = None;
         self.settings_input_draft.clear();
-        self.open_settings_select = None;
+        self.close_settings_select();
         self.clear_standard_confirm_focus();
         self.edit_settings(
             move |settings| {
@@ -1163,7 +1163,7 @@ impl WorkspaceApp {
         }
         self.focused_settings_input = None;
         self.settings_input_draft.clear();
-        self.open_settings_select = None;
+        self.close_settings_select();
         self.clear_standard_confirm_focus();
     }
 }

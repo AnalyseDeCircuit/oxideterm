@@ -92,35 +92,34 @@ impl WorkspaceApp {
                     )
                     .when(has_completed, |header| {
                         header.child(
-                            div()
-                                .h(px(24.0))
-                                .px(px(8.0))
-                                .flex()
-                                .items_center()
-                                .rounded(px(self.tokens.radii.sm))
-                                .text_size(px(SFTP_TEXT_XS))
-                                .text_color(rgb(theme.text))
-                                .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                                .cursor_pointer()
-                                // Queue toolbar labels are controls, so they stay out of read-only selection ownership.
-                                .child(self.render_display_text_with_role(
-                                    SelectableTextRole::NonSelectable,
-                                    "sftp-queue-clear-done",
-                                    "label",
-                                    self.i18n.t("sftp.queue.clear_done"),
-                                    theme.text,
-                                    cx,
-                                ))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.sftp_view
-                                            .transfers
-                                            .retain(|item| item.state != SftpTransferState::Completed);
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }),
-                                ),
+                            toolbar_button(
+                                &self.tokens,
+                                self.i18n.t("sftp.queue.clear_done"),
+                                None,
+                                ToolbarButtonOptions {
+                                    text_color: Some(rgb(theme.text)),
+                                    hover_background: Some(rgb(theme.bg_hover)),
+                                    // Queue toolbar labels are controls, so they stay out of
+                                    // read-only selection ownership and share button action guards.
+                                    ..ToolbarButtonOptions::compact_text(
+                                        ButtonVariant::Ghost,
+                                        ButtonRadius::Sm,
+                                        24.0,
+                                        8.0,
+                                        SFTP_TEXT_XS,
+                                    )
+                                },
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.sftp_view
+                                        .transfers
+                                        .retain(|item| item.state != SftpTransferState::Completed);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ),
                         )
                     }),
             )

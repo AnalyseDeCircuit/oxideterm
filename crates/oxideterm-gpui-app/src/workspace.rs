@@ -45,7 +45,7 @@ use gpui::{
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions,
     Pixels, Point, Render, RenderImage, Rgba, ScrollHandle, ScrollWheelEvent, SharedString, Styled,
     StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle, Window, anchored,
-    deferred, div, list, prelude::*, px, relative, rgb, rgba, svg,
+    deferred, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
@@ -183,7 +183,7 @@ pub(super) use virtual_list::{
     tauri_virtual_list, tauri_virtual_list_is_near_bottom, tauri_virtual_uniform_list,
     uniform_list_edge_autoscroll,
 };
-use virtual_list::{VirtualListSignatureCache, sync_virtual_list_state_by_signatures};
+use virtual_list::{VirtualListSignatureCache, sync_tauri_virtual_list_state_by_signatures};
 
 #[derive(Clone, Debug)]
 struct AiMcpServerDraft {
@@ -252,6 +252,10 @@ enum AiChatFooterAction {
     Submit,
 }
 
+// AI composer footer uses the same explicit action list as dialog footers so
+// keyboard focus order stays centralized even though it is not a modal trap.
+const AI_CHAT_FOOTER_ACTIONS: [AiChatFooterAction; 1] = [AiChatFooterAction::Submit];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum KeybindingRecordingFooterAction {
     Confirm,
@@ -304,7 +308,20 @@ struct AiCachedMarkdownDocument {
 }
 
 const AI_MARKDOWN_DOCUMENT_CACHE_MAX_ENTRIES: usize = 128;
-const AI_CHAT_LIST_OVERDRAW_PX: f32 = 640.0;
+const AI_CHAT_LIST_ROW_HEIGHT_ESTIMATE: f32 = 80.0;
+const AI_CHAT_LIST_VIRTUAL_OVERSCAN: usize = 8;
+
+fn ai_chat_virtual_list_spec() -> TauriVirtualListSpec {
+    // Tauri AI chat is a browser scroll container, while native uses GPUI List
+    // for message virtualization. Keep the estimate/overscan explicit so this
+    // variable-height list follows the same shared virtual-list contract as
+    // tables, file panes, notifications, and event logs.
+    TauriVirtualListSpec::new(
+        px(AI_CHAT_LIST_ROW_HEIGHT_ESTIMATE),
+        AI_CHAT_LIST_VIRTUAL_OVERSCAN,
+    )
+}
+
 // Tauri NotificationsPanel uses variable-height grouped rows. Keep the native
 // estimate/overscan as a virtual-list spec instead of a raw overdraw number so
 // notification/event-log surfaces share the same browser virtualizer contract.
@@ -600,6 +617,8 @@ pub(crate) struct WorkspaceApp {
     selectable_text_autoscroll_scheduled: bool,
     selectable_text_scroll_handles: RefCell<HashMap<String, ScrollHandle>>,
     ime_marked_text: Option<String>,
+    pending_platform_text_commit: Option<ime::PendingPlatformTextCommit>,
+    next_platform_text_commit_generation: u64,
     selected_ime_target: Option<WorkspaceImeTarget>,
     selected_ime_range: Option<WorkspaceImeSelection>,
     ime_drag_selection: Option<WorkspaceImeDragSelection>,

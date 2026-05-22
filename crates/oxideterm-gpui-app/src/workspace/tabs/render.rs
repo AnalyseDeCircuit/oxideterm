@@ -476,9 +476,7 @@ impl WorkspaceApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _event, _window, cx| {
-                                this.terminal_broadcast_menu_open =
-                                    !this.terminal_broadcast_menu_open;
-                                this.close_terminal_quick_commands_popover();
+                                this.toggle_terminal_broadcast_menu();
                                 cx.stop_propagation();
                                 cx.notify();
                             }),

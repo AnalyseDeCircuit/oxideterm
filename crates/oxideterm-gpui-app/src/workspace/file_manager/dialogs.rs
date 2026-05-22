@@ -57,11 +57,8 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener({
                         let file = file.clone();
-                        move |this, _event, _window, cx| {
+                        move |this, _event, _window, _cx| {
                             this.set_file_manager_path(file.path.clone());
-                            this.file_manager.context_menu = None;
-                            cx.stop_propagation();
-                            cx.notify();
                         }
                     }),
                     cx,
@@ -75,7 +72,7 @@ impl WorkspaceApp {
                         has_background,
                         cx.listener({
                             let file = file.clone();
-                            move |this, _event, _window, cx| {
+                            move |this, _event, _window, _cx| {
                                 if let Err(error) = open_path_external(&file.path) {
                                     this.push_file_manager_toast(
                                         this.i18n.t("fileManager.error"),
@@ -83,9 +80,6 @@ impl WorkspaceApp {
                                         TerminalNoticeVariant::Error,
                                     );
                                 }
-                                this.file_manager.context_menu = None;
-                                cx.stop_propagation();
-                                cx.notify();
                             }
                         }),
                         cx,
@@ -99,8 +93,6 @@ impl WorkspaceApp {
                             let file = file.clone();
                             move |this, _event, _window, cx| {
                                 this.open_file_manager_preview(file.clone(), cx);
-                                cx.stop_propagation();
-                                cx.notify();
                             }
                         }),
                         cx,
@@ -115,7 +107,7 @@ impl WorkspaceApp {
                 has_background,
                 cx.listener({
                     let file = menu.file.clone();
-                    move |this, _event, _window, cx| {
+                    move |this, _event, _window, _cx| {
                         if let Some(file) = file.as_ref()
                             && let Err(error) = reveal_path_external(&file.path)
                         {
@@ -125,9 +117,6 @@ impl WorkspaceApp {
                                 TerminalNoticeVariant::Error,
                             );
                         }
-                        this.file_manager.context_menu = None;
-                        cx.stop_propagation();
-                        cx.notify();
                     }
                 }),
                 cx,
@@ -145,7 +134,6 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener(|this, _event, _window, cx| {
                         this.copy_file_manager_selection(false, cx);
-                        cx.stop_propagation();
                     }),
                     cx,
                 ))
@@ -158,7 +146,6 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener(|this, _event, _window, cx| {
                         this.copy_file_manager_selection(true, cx);
-                        cx.stop_propagation();
                     }),
                     cx,
                 ))
@@ -171,7 +158,6 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener(|this, _event, _window, cx| {
                         this.duplicate_file_manager_selection(cx);
-                        cx.stop_propagation();
                     }),
                     cx,
                 ))
@@ -184,7 +170,6 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener(|this, _event, _window, cx| {
                         this.compress_file_manager_selection(cx);
-                        cx.stop_propagation();
                     }),
                     cx,
                 ))
@@ -205,7 +190,6 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener(|this, _event, _window, cx| {
                         this.extract_selected_file_manager_archive(cx);
-                        cx.stop_propagation();
                     }),
                     cx,
                 ))
@@ -221,7 +205,6 @@ impl WorkspaceApp {
                 has_background,
                 cx.listener(|this, _event, _window, cx| {
                     this.paste_file_manager_clipboard(cx);
-                    cx.stop_propagation();
                 }),
                 cx,
             ))
@@ -237,13 +220,10 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener({
                         let file = menu.file.clone();
-                        move |this, _event, _window, cx| {
+                        move |this, _event, _window, _cx| {
                             if let Some(file) = file.as_ref() {
                                 this.open_file_manager_rename_dialog(file.name.clone());
                             }
-                            this.file_manager.context_menu = None;
-                            cx.stop_propagation();
-                            cx.notify();
                         }
                     }),
                     cx,
@@ -255,7 +235,6 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener(|this, _event, _window, cx| {
                         this.copy_file_manager_path_to_clipboard(false, cx);
-                        cx.stop_propagation();
                     }),
                     cx,
                 ))
@@ -266,7 +245,6 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener(|this, _event, _window, cx| {
                         this.copy_file_manager_path_to_clipboard(true, cx);
-                        cx.stop_propagation();
                     }),
                     cx,
                 ))
@@ -280,15 +258,13 @@ impl WorkspaceApp {
                     has_background,
                     cx.listener({
                         let file = menu.file.clone();
-                        move |this, _event, _window, cx| {
+                        move |this, _event, _window, _cx| {
                             if let Some(file) = file
                                 .clone()
                                 .or_else(|| this.single_selected_file_manager_file())
                             {
                                 this.open_file_manager_properties(file);
                             }
-                            cx.stop_propagation();
-                            cx.notify();
                         }
                     }),
                     cx,
@@ -300,10 +276,8 @@ impl WorkspaceApp {
                     false,
                     menu_loading,
                     has_background,
-                    cx.listener(|this, _event, _window, cx| {
+                    cx.listener(|this, _event, _window, _cx| {
                         this.open_file_manager_delete_dialog();
-                        cx.stop_propagation();
-                        cx.notify();
                     }),
                     cx,
                 ))
@@ -316,11 +290,8 @@ impl WorkspaceApp {
             false,
             menu_loading,
             has_background,
-            cx.listener(|this, _event, _window, cx| {
+            cx.listener(|this, _event, _window, _cx| {
                 this.open_file_manager_new_folder_dialog();
-                this.file_manager.context_menu = None;
-                cx.stop_propagation();
-                cx.notify();
             }),
             cx,
         ))
@@ -331,11 +302,8 @@ impl WorkspaceApp {
             false,
             menu_loading,
             has_background,
-            cx.listener(|this, _event, _window, cx| {
+            cx.listener(|this, _event, _window, _cx| {
                 this.open_file_manager_new_file_dialog();
-                this.file_manager.context_menu = None;
-                cx.stop_propagation();
-                cx.notify();
             }),
             cx,
         ))
@@ -344,11 +312,8 @@ impl WorkspaceApp {
             self.i18n.t("fileManager.selectAll"),
             false,
             has_background,
-            cx.listener(|this, _event, _window, cx| {
+            cx.listener(|this, _event, _window, _cx| {
                 this.select_all_file_manager_files();
-                this.file_manager.context_menu = None;
-                cx.stop_propagation();
-                cx.notify();
             }),
             cx,
         ))
@@ -357,11 +322,8 @@ impl WorkspaceApp {
             self.i18n.t("fileManager.refresh"),
             false,
             has_background,
-            cx.listener(|this, _event, _window, cx| {
+            cx.listener(|this, _event, _window, _cx| {
                 this.refresh_file_manager();
-                this.file_manager.context_menu = None;
-                cx.stop_propagation();
-                cx.notify();
             }),
             cx,
         ));
@@ -450,7 +412,7 @@ impl WorkspaceApp {
                 hover_text_color: None,
             },
             |this| {
-                this.file_manager.context_menu = None;
+                this.dismiss_file_manager_context_menu();
             },
             move |_this, event, window, cx| listener(event, window, cx),
             cx,
@@ -755,27 +717,29 @@ impl WorkspaceApp {
                                     )),
                             )
                             .child(
-                                div()
-                                    .size(px(28.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .cursor_pointer()
-                                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                                    .child(Self::render_lucide_icon(
+                                icon_button(
+                                    &self.tokens,
+                                    Self::render_lucide_icon(
                                         LucideIcon::X,
                                         FILE_MANAGER_ICON_MD,
                                         rgb(theme.text_muted),
-                                    ))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.close_file_manager_dialog();
-                                            cx.stop_propagation();
-                                            cx.notify();
-                                        }),
                                     ),
+                                    IconButtonOptions {
+                                        hover_background: Some(rgb(theme.bg_hover)),
+                                        // Properties dialog close is an icon-only shadcn button in Tauri.
+                                        // Route it through the shared primitive so disabled/focus behavior
+                                        // stays consistent with other modal actions.
+                                        ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+                                    },
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.close_file_manager_dialog();
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    }),
+                                ),
                             ),
                     )
                     .child(self.render_file_manager_properties_dialog(
@@ -794,31 +758,35 @@ impl WorkspaceApp {
                             .flex()
                             .justify_end()
                             .child(
-                                div()
-                                    .px(px(12.0))
-                                    .py(px(5.0))
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .bg(file_manager_hover_bg(theme.bg_hover, has_background))
-                                    .text_size(px(FILE_MANAGER_TEXT_XS))
-                                    .text_color(rgb(theme.text))
-                                    .cursor_pointer()
-                                    .hover(move |button| button.bg(rgb(theme.text_muted)))
-                                    .child(self.render_display_text_with_role(
-                                        SelectableTextRole::NonSelectable,
-                                        "file-manager-dialog-action",
-                                        "ok",
-                                        "OK",
-                                        theme.text,
-                                        cx,
-                                    ))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.close_file_manager_dialog();
-                                            cx.stop_propagation();
-                                            cx.notify();
-                                        }),
-                                    ),
+                                toolbar_button(
+                                    &self.tokens,
+                                    "OK".to_string(),
+                                    None,
+                                    ToolbarButtonOptions {
+                                        background: Some(file_manager_hover_bg(
+                                            theme.bg_hover,
+                                            has_background,
+                                        )),
+                                        text_color: Some(rgb(theme.text)),
+                                        hover_background: Some(rgb(theme.text_muted)),
+                                        // The OK footer action is a button boundary, not selectable text.
+                                        ..ToolbarButtonOptions::compact_text(
+                                            ButtonVariant::Secondary,
+                                            ButtonRadius::Sm,
+                                            28.0,
+                                            12.0,
+                                            FILE_MANAGER_TEXT_XS,
+                                        )
+                                    },
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.close_file_manager_dialog();
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    }),
+                                ),
                             ),
                     ),
             )

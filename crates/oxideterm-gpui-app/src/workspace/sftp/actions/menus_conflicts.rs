@@ -96,7 +96,7 @@ impl WorkspaceApp {
                 apply_to_all: false,
             });
             self.sftp_view.dialog = Some(SftpDialog::Conflict);
-            self.sftp_view.context_menu = None;
+            self.sftp_view.dismiss_context_menu();
             self.clear_sftp_selection(pane);
             return;
         }
@@ -176,7 +176,7 @@ impl WorkspaceApp {
                 apply_to_all: false,
             });
             self.sftp_view.dialog = Some(SftpDialog::Conflict);
-            self.sftp_view.context_menu = None;
+            self.sftp_view.dismiss_context_menu();
             return;
         }
 

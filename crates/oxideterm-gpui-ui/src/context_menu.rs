@@ -33,6 +33,16 @@ pub fn context_menu_item_is_actionable(disabled: bool, loading: bool) -> bool {
     !(disabled || loading)
 }
 
+fn context_menu_action_cursor(disabled: bool, loading: bool) -> CursorStyle {
+    // Loading rows are not Radix `disabled` attributes, but they have the same
+    // pointer contract: no hand cursor and no activation while work is pending.
+    if context_menu_item_is_actionable(disabled, loading) {
+        CursorStyle::PointingHand
+    } else {
+        CursorStyle::OperationNotAllowed
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ContextMenuActionableStyle {
     pub hover_background: Option<Rgba>,
@@ -61,7 +71,11 @@ pub fn context_menu_actionable_row(
             }
         })
     } else {
+        // Loading rows are semantically inert like disabled Radix menu items.
+        // Force the cursor here because many callers build the visual row with
+        // `disabled = false` and rely on this shared action guard for loading.
         item.opacity(CONTEXT_MENU_DISABLED_OPACITY)
+            .cursor(context_menu_action_cursor(disabled, loading))
     }
 }
 
@@ -272,11 +286,7 @@ pub fn context_menu_item_row(
         // Tauri Radix context-menu disabled rows are visibly and semantically
         // non-interactive. Keep the native shared row from showing a hand
         // cursor while retaining caller-specific event ownership.
-        .cursor(if disabled {
-            CursorStyle::OperationNotAllowed
-        } else {
-            CursorStyle::PointingHand
-        });
+        .cursor(context_menu_action_cursor(disabled, false));
 
     if disabled {
         item
@@ -326,7 +336,9 @@ fn context_menu_chevron(tokens: &ThemeTokens, chevron: impl Into<String>) -> Div
 
 #[cfg(test)]
 mod tests {
-    use super::context_menu_item_is_actionable;
+    use gpui::CursorStyle;
+
+    use super::{context_menu_action_cursor, context_menu_item_is_actionable};
 
     #[test]
     fn context_menu_action_guard_blocks_disabled_or_loading_items() {
@@ -334,5 +346,21 @@ mod tests {
         assert!(!context_menu_item_is_actionable(true, false));
         assert!(!context_menu_item_is_actionable(false, true));
         assert!(!context_menu_item_is_actionable(true, true));
+    }
+
+    #[test]
+    fn context_menu_action_cursor_matches_guard_state() {
+        assert_eq!(
+            context_menu_action_cursor(false, false),
+            CursorStyle::PointingHand
+        );
+        assert_eq!(
+            context_menu_action_cursor(false, true),
+            CursorStyle::OperationNotAllowed
+        );
+        assert_eq!(
+            context_menu_action_cursor(true, false),
+            CursorStyle::OperationNotAllowed
+        );
     }
 }

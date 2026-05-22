@@ -571,6 +571,7 @@ impl WorkspaceApp {
             self.schedule_event_log_virtual_scroll_to_bottom_if_sticky(
                 event_log_scroll.clone(),
                 row_count - 1,
+                event_log_spec,
                 cx,
             );
         }
@@ -657,6 +658,7 @@ impl WorkspaceApp {
         &self,
         handle: UniformListScrollHandle,
         last_index: usize,
+        spec: TauriVirtualListSpec,
         cx: &mut Context<Self>,
     ) {
         if !tauri_virtual_list_is_near_bottom(
@@ -674,6 +676,7 @@ impl WorkspaceApp {
                 scroll_tauri_virtual_list_to_index(
                     &handle,
                     last_index,
+                    spec,
                     TauriVirtualScrollAlign::End,
                 );
                 cx.notify();

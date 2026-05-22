@@ -772,7 +772,7 @@ impl WorkspaceApp {
     pub(super) fn prepare_modal_interaction_boundary(&mut self) {
         // Tauri dialogs are Radix modal roots: opening one dismisses background
         // popovers and input focus before the overlay starts trapping events.
-        self.open_settings_select = None;
+        self.close_settings_select();
         self.close_new_connection_select();
         // Cloud Sync provider/config selects are Radix-like transient popovers;
         // a modal boundary must release both the open menu and the trigger
@@ -794,10 +794,12 @@ impl WorkspaceApp {
         // Auth prompts, confirm dialogs, QuickLook, and SFTP editor shells keep
         // their dedicated dialog_backdrop() close policy and are intentionally
         // excluded from this shared background dismiss path.
-        if self.open_settings_select.take().is_some() {
+        if self.open_settings_select.is_some() {
+            self.close_settings_select();
             changed = true;
         }
-        if self.open_new_connection_select.take().is_some() {
+        if self.open_new_connection_select.is_some() {
+            self.close_new_connection_select();
             changed = true;
         }
         if self.cloud_sync_open_select.take().is_some() {
@@ -861,38 +863,16 @@ impl WorkspaceApp {
         if self.connection_monitor.dismiss_topology_menu() {
             changed = true;
         }
-        if self
-            .session_manager
-            .row_context_menu_connection_id
-            .take()
-            .is_some()
-        {
+        if self.close_session_row_menus() {
             changed = true;
         }
-        if self
-            .session_manager
-            .folder_tree_context_menu_x
-            .take()
-            .is_some()
-            || self
-                .session_manager
-                .folder_tree_context_menu_y
-                .take()
-                .is_some()
-        {
-            changed = true;
-        }
-        if self.session_manager.row_menu_connection_id.take().is_some() {
-            changed = true;
-        }
-        if self.file_manager.context_menu.take().is_some() {
+        if self.dismiss_file_manager_context_menu() {
             changed = true;
         }
         if self.sftp_view.dismiss_context_menu() {
             changed = true;
         }
-        if self.terminal_broadcast_menu_open {
-            self.terminal_broadcast_menu_open = false;
+        if self.dismiss_terminal_broadcast_menu() {
             changed = true;
         }
 

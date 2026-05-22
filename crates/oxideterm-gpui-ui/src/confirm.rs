@@ -5,7 +5,7 @@ use gpui::{
 use oxideterm_theme::ThemeTokens;
 use std::rc::Rc;
 
-use crate::button::tauri_focus_visible_ring;
+use crate::button::{SplitFooterButtonOptions, split_footer_button};
 use crate::modal::dismissible_dialog_backdrop;
 
 const CONFIRM_DIALOG_WIDTH: f32 = 384.0; // Tauri useConfirm max-w-sm
@@ -74,7 +74,6 @@ pub fn confirm_dialog_with_focus(
     let icon_color = if is_danger { TW_RED_400 } else { theme.accent };
     let confirm_color = if is_danger { TW_RED_400 } else { theme.accent };
     let confirm_hover_color = if is_danger { TW_RED_300 } else { theme.accent };
-    let focus_ring = tauri_focus_visible_ring(tokens);
     let on_cancel = Rc::new(on_cancel);
     let on_backdrop_cancel = on_cancel.clone();
 
@@ -154,55 +153,57 @@ pub fn confirm_dialog_with_focus(
                         .border_t_1()
                         .border_color(rgba((theme.border << 8) | CONFIRM_DIVIDER_ALPHA))
                         .child(
-                            div()
-                                .flex_1()
-                                .h(px(CONFIRM_ACTION_HEIGHT))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .border_r_1()
-                                .border_color(rgba((theme.border << 8) | CONFIRM_DIVIDER_ALPHA))
-                                .text_size(px(tokens.metrics.ui_text_sm))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(theme.text_muted))
-                                .hover(move |button| {
-                                    button.text_color(rgb(theme.text)).bg(rgb(theme.bg_hover))
-                                })
-                                .cursor_pointer()
-                                // Browser focus-visible on the footer buttons is
-                                // keyboard-owned. GPUI has no DOM tab stop here,
-                                // so callers pass the active action explicitly.
-                                .when(
-                                    focused_action == Some(ConfirmDialogAction::Cancel),
-                                    |button| button.shadow(focus_ring.clone()),
-                                )
-                                .child(view.cancel_label)
-                                .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                            split_footer_button(
+                                tokens,
+                                view.cancel_label,
+                                SplitFooterButtonOptions {
+                                    text_color: rgb(theme.text_muted),
+                                    hover_text_color: rgb(theme.text),
+                                    hover_background: rgb(theme.bg_hover),
+                                    font_weight: gpui::FontWeight::MEDIUM,
+                                    focus_visible: focused_action
+                                        == Some(ConfirmDialogAction::Cancel),
+                                    right_separator: true,
+                                    separator_color: Some(rgba(
+                                        (theme.border << 8) | CONFIRM_DIVIDER_ALPHA,
+                                    )),
+                                    disabled: false,
+                                    loading: false,
+                                    height: Some(CONFIRM_ACTION_HEIGHT),
+                                    padding_y: None,
+                                    font_size: Some(tokens.metrics.ui_text_sm),
+                                },
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                move |event, window, cx| {
                                     on_cancel(event, window, cx);
-                                }),
+                                },
+                            ),
                         )
                         .child(
-                            div()
-                                .flex_1()
-                                .h(px(CONFIRM_ACTION_HEIGHT))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_size(px(tokens.metrics.ui_text_sm))
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(rgb(confirm_color))
-                                .hover(move |button| {
-                                    button
-                                        .text_color(rgb(confirm_hover_color))
-                                        .bg(rgba((accent << 8) | CONFIRM_ACTION_HOVER_ALPHA))
-                                })
-                                .cursor_pointer()
-                                .when(
-                                    focused_action == Some(ConfirmDialogAction::Confirm),
-                                    |button| button.shadow(focus_ring),
-                                )
-                                .child(view.confirm_label)
-                                .on_mouse_down(MouseButton::Left, on_confirm),
+                            split_footer_button(
+                                tokens,
+                                view.confirm_label,
+                                SplitFooterButtonOptions {
+                                    text_color: rgb(confirm_color),
+                                    hover_text_color: rgb(confirm_hover_color),
+                                    hover_background: rgba(
+                                        (accent << 8) | CONFIRM_ACTION_HOVER_ALPHA,
+                                    ),
+                                    font_weight: gpui::FontWeight::SEMIBOLD,
+                                    focus_visible: focused_action
+                                        == Some(ConfirmDialogAction::Confirm),
+                                    right_separator: false,
+                                    separator_color: None,
+                                    disabled: false,
+                                    loading: false,
+                                    height: Some(CONFIRM_ACTION_HEIGHT),
+                                    padding_y: None,
+                                    font_size: Some(tokens.metrics.ui_text_sm),
+                                },
+                            )
+                            .on_mouse_down(MouseButton::Left, on_confirm),
                         ),
                 ),
         )
