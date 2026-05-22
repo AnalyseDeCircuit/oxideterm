@@ -194,7 +194,14 @@ impl WorkspaceApp {
             .text_size(px(SFTP_TEXT_XS))
             .text_color(rgb(color))
             .child(Self::render_lucide_icon(icon, SFTP_ICON_SM, rgb(color)))
-            .child(div().truncate().child(label));
+            .child(div().truncate().child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "sftp-context-menu",
+                label.clone(),
+                label,
+                color,
+                cx,
+            )));
         // SFTP remote refresh/transfer can leave a context menu visible while
         // the backing pane is loading. Route those rows through the shared menu
         // guard so the UI cannot dispatch stale actions.
@@ -207,7 +214,7 @@ impl WorkspaceApp {
                 hover_text_color: None,
             },
             |this| {
-                this.sftp_view.context_menu = None;
+                this.sftp_view.dismiss_context_menu();
             },
             move |_this, event, window, cx| listener(event, window, cx),
             cx,

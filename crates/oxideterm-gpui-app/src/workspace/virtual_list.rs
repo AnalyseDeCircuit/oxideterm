@@ -98,11 +98,25 @@ where
 pub(crate) fn scroll_tauri_virtual_list_to_index(
     handle: &UniformListScrollHandle,
     index: usize,
+    spec: TauriVirtualListSpec,
     align: TauriVirtualScrollAlign,
 ) {
     match align {
         TauriVirtualScrollAlign::Nearest => {
-            handle.scroll_to_item(index, ScrollStrategy::Center);
+            let base_handle = handle.0.borrow().base_handle.clone();
+            let bounds = base_handle.bounds();
+            let offset = base_handle.offset();
+            if let Some(strategy) = nearest_virtual_scroll_strategy(
+                -offset.y,
+                bounds.size.height,
+                spec.row_height,
+                index,
+            ) {
+                // Browser `block: nearest` moves the minimum edge needed to reveal
+                // the row. GPUI only exposes Top/Bottom strategies, so choose the
+                // edge from current geometry instead of centering every reveal.
+                handle.scroll_to_item_strict(index, strategy);
+            }
         }
         TauriVirtualScrollAlign::Start => {
             handle.scroll_to_item_strict(index, ScrollStrategy::Top);
@@ -113,6 +127,28 @@ pub(crate) fn scroll_tauri_virtual_list_to_index(
         TauriVirtualScrollAlign::End => {
             handle.scroll_to_item_strict(index, ScrollStrategy::Bottom);
         }
+    }
+}
+
+fn nearest_virtual_scroll_strategy(
+    scroll_top: Pixels,
+    viewport_height: Pixels,
+    row_height: Pixels,
+    index: usize,
+) -> Option<ScrollStrategy> {
+    if row_height <= px(0.0) || viewport_height <= px(0.0) {
+        return Some(ScrollStrategy::Center);
+    }
+
+    let item_top = row_height * index as f32;
+    let item_bottom = item_top + row_height;
+    let viewport_bottom = scroll_top + viewport_height;
+    if item_top < scroll_top {
+        Some(ScrollStrategy::Top)
+    } else if item_bottom > viewport_bottom {
+        Some(ScrollStrategy::Bottom)
+    } else {
+        None
     }
 }
 
@@ -321,6 +357,22 @@ mod tests {
     fn tauri_virtual_spec_maps_overscan_to_gpui_overdraw() {
         let spec = TauriVirtualListSpec::new(px(38.0), 16);
         assert_eq!(spec.overdraw(), px(608.0));
+    }
+
+    #[test]
+    fn nearest_virtual_scroll_strategy_matches_browser_edges() {
+        assert_eq!(
+            nearest_virtual_scroll_strategy(px(100.0), px(200.0), px(32.0), 2),
+            Some(ScrollStrategy::Top)
+        );
+        assert_eq!(
+            nearest_virtual_scroll_strategy(px(100.0), px(200.0), px(32.0), 9),
+            Some(ScrollStrategy::Bottom)
+        );
+        assert_eq!(
+            nearest_virtual_scroll_strategy(px(100.0), px(200.0), px(32.0), 4),
+            None
+        );
     }
 
     #[test]

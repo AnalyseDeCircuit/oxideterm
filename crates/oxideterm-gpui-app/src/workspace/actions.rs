@@ -238,8 +238,7 @@ impl WorkspaceApp {
     }
 
     fn close_terminal_command_overlays(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.terminal_broadcast_menu_open {
-            self.terminal_broadcast_menu_open = false;
+        if self.dismiss_terminal_broadcast_menu() {
             cx.notify();
             return true;
         }
@@ -274,11 +273,41 @@ impl WorkspaceApp {
 
     pub(super) fn toggle_terminal_broadcast(&mut self, cx: &mut Context<Self>) {
         self.terminal_broadcast_enabled = !self.terminal_broadcast_enabled;
-        self.terminal_broadcast_menu_open = false;
+        self.dismiss_terminal_broadcast_menu();
         if !self.terminal_broadcast_enabled {
             self.terminal_broadcast_targets.clear();
         }
         cx.notify();
+    }
+
+    pub(in crate::workspace) fn dismiss_terminal_broadcast_menu(&mut self) -> bool {
+        // Broadcast target selection is rendered as a Radix-style context menu.
+        // Keep Esc, outside click, command overlay close, and toolbar toggles
+        // on the same owner path instead of mutating the open flag ad hoc.
+        let was_open = self.terminal_broadcast_menu_open;
+        self.terminal_broadcast_menu_open = false;
+        was_open
+    }
+
+    pub(in crate::workspace) fn toggle_terminal_broadcast_menu(&mut self) {
+        // Opening the broadcast target menu replaces sibling terminal command
+        // popovers, matching browser overlay ownership where only one floating
+        // command surface receives pointer/wheel events at a time.
+        let should_open = !self.terminal_broadcast_menu_open;
+        self.dismiss_terminal_broadcast_menu();
+        if should_open {
+            self.close_terminal_quick_commands_popover();
+            self.terminal_command_suggestions_open = false;
+            self.terminal_command_suggestion_highlighted = None;
+            self.terminal_broadcast_menu_open = true;
+        }
+    }
+
+    pub(in crate::workspace) fn keep_terminal_broadcast_menu_open(&mut self) {
+        // Broadcast target rows are persistent checkbox-style menu items; their
+        // shared action guard runs without closing the menu, so keep ownership
+        // explicit after selection changes.
+        self.terminal_broadcast_menu_open = true;
     }
 
     pub(super) fn handle_workspace_key(
@@ -343,8 +372,7 @@ impl WorkspaceApp {
 
         if self.active_surface == ActiveSurface::Settings && self.open_settings_select.is_some() {
             if key == "escape" && !modifiers.platform {
-                self.open_settings_select = None;
-                self.settings_select_focus_origin = None;
+                self.close_settings_select();
                 cx.notify();
             }
             return;

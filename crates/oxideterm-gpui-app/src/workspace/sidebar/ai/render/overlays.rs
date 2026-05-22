@@ -458,13 +458,8 @@ impl WorkspaceApp {
                     AiHeaderAction::NewChat => {
                         this.ai_clear_all_confirm_open = true;
                         this.reset_standard_confirm_focus();
-                        cx.notify();
                     }
                 }
-                this.ai_chat_menu_open = false;
-                this.ai_conversation_list_open = false;
-                cx.stop_propagation();
-                cx.notify();
             }),
             cx,
         )

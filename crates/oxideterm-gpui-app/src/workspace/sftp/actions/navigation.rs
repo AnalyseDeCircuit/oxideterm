@@ -18,13 +18,13 @@ impl WorkspaceApp {
             match key {
                 "a" => {
                     self.select_all_sftp_files(self.sftp_view.active_pane);
-                    self.sftp_view.context_menu = None;
+                    self.sftp_view.dismiss_context_menu();
                     cx.notify();
                     return true;
                 }
                 "l" => {
                     self.start_sftp_path_edit(self.sftp_view.active_pane);
-                    self.sftp_view.context_menu = None;
+                    self.sftp_view.dismiss_context_menu();
                     cx.notify();
                     return true;
                 }
@@ -120,7 +120,7 @@ impl WorkspaceApp {
         }
         match key {
             "escape" => {
-                self.sftp_view.context_menu = None;
+                self.sftp_view.dismiss_context_menu();
                 self.sftp_view.focused_input = None;
                 cx.notify();
                 true
@@ -258,7 +258,7 @@ impl WorkspaceApp {
             }
         }
         self.sftp_view.focused_input = None;
-        self.sftp_view.context_menu = None;
+        self.sftp_view.dismiss_context_menu();
     }
 
     fn cancel_sftp_path_edit(&mut self, pane: SftpPane) {
@@ -406,7 +406,7 @@ impl WorkspaceApp {
 
     fn select_sftp_file(&mut self, pane: SftpPane, name: String, modifiers: gpui::Modifiers) {
         self.sftp_view.active_pane = pane;
-        self.sftp_view.context_menu = None;
+        self.sftp_view.dismiss_context_menu();
         let range_names = self.sftp_ordered_file_names(pane);
         let (selected, last_selected) = match pane {
             SftpPane::Local => (
@@ -644,11 +644,13 @@ impl WorkspaceApp {
             SftpPane::Local => scroll_tauri_virtual_list_to_index(
                 &self.sftp_view.local_file_scroll,
                 next,
+                TauriVirtualListSpec::new(px(SFTP_ROW_HEIGHT), SFTP_VIRTUAL_OVERSCAN),
                 TauriVirtualScrollAlign::Nearest,
             ),
             SftpPane::Remote => scroll_tauri_virtual_list_to_index(
                 &self.sftp_view.remote_file_scroll,
                 next,
+                TauriVirtualListSpec::new(px(SFTP_ROW_HEIGHT), SFTP_VIRTUAL_OVERSCAN),
                 TauriVirtualScrollAlign::Nearest,
             ),
         }

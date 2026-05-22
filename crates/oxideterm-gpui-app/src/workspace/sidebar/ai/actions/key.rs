@@ -104,32 +104,17 @@ impl WorkspaceApp {
             if event.keystroke.modifiers.platform {
                 return false;
             }
-            match event.keystroke.key.as_str() {
-                "escape" => {
-                    self.ai_chat_footer_focus = None;
-                    self.ime_marked_text = None;
-                    cx.notify();
-                    true
-                }
-                "tab" if event.keystroke.modifiers.shift => {
-                    self.ai_chat_footer_focus = None;
-                    self.ai_chat_input_focused = true;
-                    self.ime_marked_text = None;
-                    cx.notify();
-                    true
-                }
-                "tab" => {
-                    self.ai_chat_footer_focus = None;
-                    self.ime_marked_text = None;
-                    cx.notify();
-                    true
-                }
-                "enter" | "space" | " " => {
-                    self.activate_ai_chat_footer_action(action, cx);
-                    true
-                }
-                _ => true,
+            if let Some(action) = browser_behavior::inline_footer_input_key_action(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                &AI_CHAT_FOOTER_ACTIONS,
+                false,
+                Some(action),
+                AiChatFooterAction::Submit,
+            ) {
+                self.apply_ai_chat_inline_footer_key_action(action, cx);
             }
+            true
         } else if self.ai_chat_input_focused {
             if event.keystroke.modifiers.platform {
                 return false;
@@ -167,13 +152,23 @@ impl WorkspaceApp {
                     _ => {}
                 }
             }
+            let footer_actions = if self.ai_chat_footer_action_enabled() {
+                &AI_CHAT_FOOTER_ACTIONS[..]
+            } else {
+                &[]
+            };
+            if let Some(action) = browser_behavior::inline_footer_input_key_action(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                footer_actions,
+                true,
+                None,
+                AiChatFooterAction::Submit,
+            ) {
+                self.apply_ai_chat_inline_footer_key_action(action, cx);
+                return true;
+            }
             match event.keystroke.key.as_str() {
-                "escape" => {
-                    self.ai_chat_input_focused = false;
-                    self.ime_marked_text = None;
-                    cx.notify();
-                    true
-                }
                 "backspace" => {
                     self.ai_chat_draft.pop();
                     self.ai_chat_autocomplete_suppressed = false;
@@ -188,22 +183,6 @@ impl WorkspaceApp {
                 }
                 "enter" => {
                     self.ai_chat_draft.push('\n');
-                    self.ime_marked_text = None;
-                    cx.notify();
-                    true
-                }
-                "tab" => {
-                    // Browser Tab leaves the textarea. If the footer action is
-                    // enabled, native makes that button the explicit
-                    // focus-visible owner; otherwise focus moves out of the AI
-                    // input cluster.
-                    if !event.keystroke.modifiers.shift && self.ai_chat_footer_action_enabled() {
-                        self.ai_chat_input_focused = false;
-                        self.ai_chat_footer_focus = Some(AiChatFooterAction::Submit);
-                    } else {
-                        self.ai_chat_input_focused = false;
-                        self.ai_chat_footer_focus = None;
-                    }
                     self.ime_marked_text = None;
                     cx.notify();
                     true
@@ -228,6 +207,39 @@ impl WorkspaceApp {
             AiChatFooterAction::Submit => {
                 self.ai_chat_footer_focus = None;
                 cx.notify();
+            }
+        }
+    }
+
+    fn apply_ai_chat_inline_footer_key_action(
+        &mut self,
+        action: browser_behavior::InlineFooterInputKeyAction<AiChatFooterAction>,
+        cx: &mut Context<Self>,
+    ) {
+        // The AI composer is an inline browser control rather than a modal
+        // dialog. Keep its focus exit/return behavior in the shared browser
+        // helper while this method performs the Workspace-specific state writes.
+        match action {
+            browser_behavior::InlineFooterInputKeyAction::ClearFocus => {
+                self.ai_chat_input_focused = false;
+                self.ai_chat_footer_focus = None;
+                self.ime_marked_text = None;
+                cx.notify();
+            }
+            browser_behavior::InlineFooterInputKeyAction::FocusInput => {
+                self.ai_chat_input_focused = true;
+                self.ai_chat_footer_focus = None;
+                self.ime_marked_text = None;
+                cx.notify();
+            }
+            browser_behavior::InlineFooterInputKeyAction::FocusFooter(action) => {
+                self.ai_chat_input_focused = false;
+                self.ai_chat_footer_focus = Some(action);
+                self.ime_marked_text = None;
+                cx.notify();
+            }
+            browser_behavior::InlineFooterInputKeyAction::Activate(action) => {
+                self.activate_ai_chat_footer_action(action, cx);
             }
         }
     }

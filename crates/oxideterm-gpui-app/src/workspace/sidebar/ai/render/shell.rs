@@ -86,12 +86,13 @@ impl WorkspaceApp {
             return self.render_ai_sidebar_empty_chat(cx);
         };
 
-        self.sync_ai_chat_list_state(&conversation_id, &signatures);
+        let virtual_spec = ai_chat_virtual_list_spec();
+        self.sync_ai_chat_list_state(&conversation_id, &signatures, virtual_spec);
 
         let entity = cx.entity();
         let state = self.ai_chat_list_state.clone();
         let viewport = self.ai_chat_list_viewport_snapshot();
-        list(state, move |index, _window, cx| {
+        tauri_virtual_list(state, virtual_spec, move |index, _window, cx| {
             let Some(item) = items.get(index).cloned() else {
                 return div().into_any_element();
             };
@@ -235,15 +236,20 @@ impl WorkspaceApp {
         std::hash::Hasher::finish(&hasher)
     }
 
-    fn sync_ai_chat_list_state(&mut self, conversation_id: &str, signatures: &[u64]) {
+    fn sync_ai_chat_list_state(
+        &mut self,
+        conversation_id: &str,
+        signatures: &[u64],
+        spec: TauriVirtualListSpec,
+    ) {
         let mut cache = self.ai_chat_list_cache.borrow_mut();
-        sync_virtual_list_state_by_signatures(
+        sync_tauri_virtual_list_state_by_signatures(
             &mut self.ai_chat_list_state,
             &mut cache,
             conversation_id,
             signatures,
             ListAlignment::Top,
-            px(AI_CHAT_LIST_OVERDRAW_PX),
+            spec,
         );
     }
 

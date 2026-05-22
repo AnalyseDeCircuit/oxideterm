@@ -281,6 +281,10 @@ impl WorkspaceApp {
             scroll_tauri_virtual_list_to_index(
                 &self.command_palette.scroll_handle,
                 child_index,
+                TauriVirtualListSpec::new(
+                    px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT),
+                    COMMAND_PALETTE_VIRTUAL_OVERSCAN,
+                ),
                 TauriVirtualScrollAlign::Center,
             );
         }

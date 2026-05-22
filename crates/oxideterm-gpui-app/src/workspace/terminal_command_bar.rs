@@ -263,8 +263,7 @@ impl WorkspaceApp {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
-                                            this.terminal_broadcast_menu_open =
-                                                !this.terminal_broadcast_menu_open;
+                                            this.toggle_terminal_broadcast_menu();
                                             cx.stop_propagation();
                                             cx.notify();
                                         }),
@@ -530,7 +529,7 @@ impl WorkspaceApp {
                                     cx.listener(|this, _event, _window, cx| {
                                         this.terminal_quick_commands_open =
                                             !this.terminal_quick_commands_open;
-                                        this.terminal_broadcast_menu_open = false;
+                                        this.dismiss_terminal_broadcast_menu();
                                         if !this.terminal_quick_commands_open {
                                             this.close_terminal_quick_commands_popover();
                                         }
@@ -689,7 +688,7 @@ impl WorkspaceApp {
                             this.terminal_broadcast_targets.insert(pane_id);
                             this.terminal_broadcast_enabled = true;
                         }
-                        this.terminal_broadcast_menu_open = true;
+                        this.keep_terminal_broadcast_menu_open();
                     }),
                     cx,
                 );
@@ -733,7 +732,7 @@ impl WorkspaceApp {
                                 this.terminal_broadcast_enabled =
                                     !this.terminal_broadcast_targets.is_empty();
                             }
-                            this.terminal_broadcast_menu_open = true;
+                            this.keep_terminal_broadcast_menu_open();
                         },
                         cx,
                     ))

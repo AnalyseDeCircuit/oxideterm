@@ -209,13 +209,10 @@ impl WorkspaceApp {
                     // Tauri FolderTree wraps the full sidebar in a Radix
                     // ContextMenuTrigger, so right-clicking any blank or row
                     // area opens the shared New Group menu.
-                    this.session_manager.folder_tree_context_menu_x =
-                        Some(f32::from(event.position.x));
-                    this.session_manager.folder_tree_context_menu_y =
-                        Some(f32::from(event.position.y));
-                    this.session_manager.row_menu_connection_id = None;
-                    this.session_manager.row_context_menu_connection_id = None;
-                    this.session_manager.show_batch_move = false;
+                    this.open_session_folder_tree_context_menu(
+                        f32::from(event.position.x),
+                        f32::from(event.position.y),
+                    );
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -292,15 +289,12 @@ impl WorkspaceApp {
                 false,
                 false,
                 false,
-                cx.listener(|this, _event, _window, cx| {
-                    this.close_session_row_menus();
+                cx.listener(|this, _event, _window, _cx| {
                     this.session_manager.show_new_group = true;
                     this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
                     this.session_manager.focused_basic_dialog_footer_action = None;
                     this.session_manager.new_group_name.clear();
                     this.needs_active_pane_focus = false;
-                    cx.stop_propagation();
-                    cx.notify();
                 }),
                 cx,
             ));

@@ -31,7 +31,7 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
                     window.focus(&this.focus_handle);
-                    this.sftp_view.context_menu = None;
+                    this.sftp_view.dismiss_context_menu();
                     cx.notify();
                 }),
             )

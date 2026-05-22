@@ -31,7 +31,7 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
                     window.focus(&this.focus_handle);
-                    this.file_manager.context_menu = None;
+                    this.dismiss_file_manager_context_menu();
                     if this.file_manager.dialog.is_none() {
                         this.blur_file_manager_inline_inputs();
                     }
@@ -954,7 +954,7 @@ impl WorkspaceApp {
                     cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                         window.focus(&this.focus_handle);
                         this.file_manager.focused_input = Some(FileManagerInput::Filter);
-                        this.file_manager.context_menu = None;
+                        this.dismiss_file_manager_context_menu();
                         this.ime_marked_text = None;
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
@@ -1209,7 +1209,7 @@ impl WorkspaceApp {
                                     move |event: &MouseDownEvent, window, cx| {
                                         let _ = workspace.update(cx, |this, cx| {
                                             window.focus(&this.focus_handle);
-                                            this.file_manager.context_menu = None;
+                                            this.dismiss_file_manager_context_menu();
                                             this.blur_file_manager_inline_inputs();
                                             if event.click_count >= 2 {
                                                 this.open_file_manager_entry(
@@ -1268,7 +1268,7 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
                     window.focus(&this.focus_handle);
-                    this.file_manager.context_menu = None;
+                    this.dismiss_file_manager_context_menu();
                     this.blur_file_manager_inline_inputs();
                     this.clear_file_manager_selection();
                     cx.notify();

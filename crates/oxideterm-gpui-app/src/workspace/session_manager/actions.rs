@@ -116,11 +116,53 @@ impl WorkspaceApp {
             .find(|conn| conn.id == id)
     }
 
-    fn close_session_row_menus(&mut self) {
+    pub(in crate::workspace) fn close_session_row_menus(&mut self) -> bool {
+        // SessionManager owns inline row menus and tree context menus. Radix
+        // closes them through one ContextMenu root, so native exposes one
+        // dismissal owner for outside click, Esc, and guarded item activation.
+        let changed = self.session_manager.row_menu_connection_id.is_some()
+            || self.session_manager.row_context_menu_connection_id.is_some()
+            || self.session_manager.folder_tree_context_menu_x.is_some()
+            || self.session_manager.folder_tree_context_menu_y.is_some();
         self.session_manager.row_menu_connection_id = None;
         self.session_manager.row_context_menu_connection_id = None;
         self.session_manager.folder_tree_context_menu_x = None;
         self.session_manager.folder_tree_context_menu_y = None;
+        changed
+    }
+
+    fn open_session_row_context_menu(&mut self, id: &str, x: f32, y: f32) {
+        // Opening a Radix ContextMenu replaces any sibling menu owner. Native
+        // row context menus share the same close helper so right-click cannot
+        // leave an inline "more" menu or folder menu alive behind it.
+        self.close_session_row_menus();
+        self.select_connection_for_context_menu(id);
+        self.session_manager.row_context_menu_connection_id = Some(id.to_string());
+        self.session_manager.row_context_menu_x = x;
+        self.session_manager.row_context_menu_y = y;
+    }
+
+    fn toggle_session_row_more_menu(&mut self, id: &str, x: f32, y: f32) {
+        let same_row_open = self.session_manager.row_menu_connection_id.as_deref() == Some(id);
+        self.close_session_row_menus();
+        if !same_row_open {
+            // The inline "more" trigger is rendered inside the table row, but
+            // the menu itself is portaled to the surface with a shared backdrop
+            // so outside click and Esc follow the same Radix close owner.
+            self.session_manager.row_menu_connection_id = Some(id.to_string());
+            self.session_manager.row_menu_x = x;
+            self.session_manager.row_menu_y = y;
+        }
+    }
+
+    fn open_session_folder_tree_context_menu(&mut self, x: f32, y: f32) {
+        // FolderTree's blank-area context menu is a sibling of row menus in
+        // Tauri. Keep the replacement rule explicit before assigning the new
+        // tree menu coordinates.
+        self.close_session_row_menus();
+        self.session_manager.folder_tree_context_menu_x = Some(x);
+        self.session_manager.folder_tree_context_menu_y = Some(y);
+        self.session_manager.show_batch_move = false;
     }
 
     fn toggle_connection_selection(&mut self, id: &str) {

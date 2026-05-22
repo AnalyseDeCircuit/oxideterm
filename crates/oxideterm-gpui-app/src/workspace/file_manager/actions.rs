@@ -208,7 +208,7 @@ impl WorkspaceApp {
         }
         match key {
             "escape" => {
-                self.file_manager.context_menu = None;
+                self.dismiss_file_manager_context_menu();
                 self.file_manager.dialog = None;
                 self.file_manager.focused_input = None;
                 self.file_manager.focused_dialog_footer_action = None;
@@ -311,7 +311,7 @@ impl WorkspaceApp {
         self.file_manager.focused_input = None;
         self.file_manager.selected.clear();
         self.file_manager.last_selected = None;
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
         self.file_manager.list_scroll = UniformListScrollHandle::new();
         self.refresh_file_manager();
     }
@@ -530,6 +530,14 @@ impl WorkspaceApp {
         self.file_manager.context_menu = Some(FileManagerContextMenu { file, x, y });
     }
 
+    pub(in crate::workspace) fn dismiss_file_manager_context_menu(&mut self) -> bool {
+        // Radix ContextMenu has one dismissal owner regardless of whether the
+        // close came from outside click, Esc, or an item activation. Keep the
+        // FileManager menu payload behind this helper so global browser
+        // dismissal does not mutate feature state ad hoc.
+        self.file_manager.context_menu.take().is_some()
+    }
+
     pub(super) fn clear_file_manager_selection(&mut self) {
         self.file_manager.selected.clear();
         self.file_manager.last_selected = None;
@@ -636,7 +644,7 @@ impl WorkspaceApp {
         // The delete confirm has no text input, so keyboard focus starts at
         // the same first footer action that a browser/Radix dialog exposes.
         self.file_manager.focused_dialog_footer_action = Some(ConfirmDialogAction::Cancel);
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
     }
 
     pub(super) fn open_file_manager_properties(&mut self, entry: LocalFileEntry) {
@@ -647,7 +655,7 @@ impl WorkspaceApp {
         self.file_manager.properties_checksum_poll_active = false;
         self.file_manager.dialog = Some(FileManagerDialog::Properties { entry, details });
         self.file_manager.focused_dialog_footer_action = None;
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
     }
 
     pub(super) fn calculate_file_manager_properties_checksum(&mut self, cx: &mut Context<Self>) {
@@ -792,7 +800,7 @@ impl WorkspaceApp {
         self.file_manager.preview_image_rotation = 0;
         self.file_manager.dialog = Some(FileManagerDialog::Preview { entry });
         self.file_manager.focused_dialog_footer_action = None;
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
     }
 
     pub(super) fn load_more_file_manager_stream_preview(&mut self, cx: &mut Context<Self>) {
@@ -1149,7 +1157,7 @@ impl WorkspaceApp {
             None,
             TerminalNoticeVariant::Default,
         );
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
         cx.notify();
     }
 
@@ -1247,7 +1255,7 @@ impl WorkspaceApp {
         if clipboard.mode == LocalClipboardMode::Cut
             && clipboard.source_dir == self.file_manager.path
         {
-            self.file_manager.context_menu = None;
+            self.dismiss_file_manager_context_menu();
             return;
         }
         let destination = self.file_manager.path.clone();
@@ -1316,7 +1324,7 @@ impl WorkspaceApp {
         if clipboard.mode == LocalClipboardMode::Cut {
             self.file_manager.clipboard = None;
         }
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
         cx.notify();
     }
 
@@ -1362,7 +1370,7 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
         cx.notify();
     }
 
@@ -1416,7 +1424,7 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
         cx.notify();
     }
 
@@ -1451,7 +1459,7 @@ impl WorkspaceApp {
                 TerminalNoticeVariant::Error,
             ),
         }
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
         cx.notify();
     }
 
@@ -1477,7 +1485,7 @@ impl WorkspaceApp {
                 TerminalNoticeVariant::Error,
             ),
         }
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
         cx.notify();
     }
 
@@ -1491,7 +1499,7 @@ impl WorkspaceApp {
         };
         let value = if name_only { file.name } else { file.path };
         cx.write_to_clipboard(ClipboardItem::new_string(value));
-        self.file_manager.context_menu = None;
+        self.dismiss_file_manager_context_menu();
         cx.notify();
     }
 

@@ -409,14 +409,14 @@ impl WorkspaceApp {
             })
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
                 this.zoom_topology_graph(event);
-                this.connection_monitor.topology_menu = None;
+                this.connection_monitor.dismiss_topology_menu();
                 cx.stop_propagation();
                 cx.notify();
             }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                    this.connection_monitor.topology_menu = None;
+                    this.connection_monitor.dismiss_topology_menu();
                     this.connection_monitor.topology_drag = Some(TopologyDragState {
                         last_x: f32::from(event.position.x),
                         last_y: f32::from(event.position.y),
@@ -744,14 +744,11 @@ impl WorkspaceApp {
             false,
             cx.listener({
                 let node_id = node_id.clone();
-                move |this, _event, _window, cx| {
+                move |this, _event, _window, _cx| {
                     if let Some(node_id) = node_id.clone() {
                         this.active_ssh_node_id = Some(node_id);
                         this.active_sidebar_section = SidebarSection::Sessions;
                     }
-                    this.connection_monitor.topology_menu = None;
-                    cx.stop_propagation();
-                    cx.notify();
                 }
             }),
             cx,
@@ -780,9 +777,6 @@ impl WorkspaceApp {
                                     cx,
                                 );
                             }
-                            this.connection_monitor.topology_menu = None;
-                            cx.stop_propagation();
-                            cx.notify();
                         }
                     }),
                     cx,
@@ -795,13 +789,10 @@ impl WorkspaceApp {
                     false,
                     cx.listener({
                         let node_id = node_id.clone();
-                        move |this, _event, window, cx| {
+                        move |this, _event, window, _cx| {
                             if let Some(node_id) = node_id.clone() {
-                                this.open_sftp_tab(node_id, window, cx);
+                                this.open_sftp_tab(node_id, window, _cx);
                             }
-                            this.connection_monitor.topology_menu = None;
-                            cx.stop_propagation();
-                            cx.notify();
                         }
                     }),
                     cx,
@@ -921,7 +912,7 @@ impl WorkspaceApp {
                 hover_text_color: Some(rgb(theme.text)),
             },
             |this| {
-                this.connection_monitor.topology_menu = None;
+                this.connection_monitor.dismiss_topology_menu();
             },
             move |_this, event, window, cx| listener(event, window, cx),
             cx,

@@ -5419,16 +5419,13 @@ fn close_cloud_sync_select_on_container_scroll(
     focused_select: &mut Option<CloudSyncSelect>,
     highlighted_option: &mut Option<(CloudSyncSelect, usize)>,
 ) -> bool {
-    let Some(select) = open_select.take() else {
-        return false;
-    };
-
-    // Radix Select closes its content when an owning scroll container moves,
-    // but the trigger remains the browser focus anchor for the visible ring and
-    // the next keyboard action. Keep that routing explicit for native GPUI.
-    *focused_select = Some(select);
-    *highlighted_option = None;
-    true
+    // Cloud Sync inline selects use the shared browser select scroll contract:
+    // container wheel closes content, while trigger focus ownership survives.
+    browser_behavior::close_browser_select_on_container_scroll(
+        open_select,
+        focused_select,
+        highlighted_option,
+    )
 }
 
 #[cfg(test)]

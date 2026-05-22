@@ -17,7 +17,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.general.language = language,
                                     cx,
@@ -53,7 +53,7 @@ impl WorkspaceApp {
                                 false,
                                 false,
                                 cx.listener(move |this, _event, _window, cx| {
-                                    this.open_settings_select = None;
+                                    this.close_settings_select();
                                     this.edit_settings(
                                         |settings| settings.terminal.theme = theme_id.clone(),
                                         cx,
@@ -85,7 +85,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.terminal.theme = next_theme.clone(),
                                     cx,
@@ -119,7 +119,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.terminal.theme = theme_id.clone(),
                                     cx,
@@ -151,7 +151,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 if let Some(editor) = this.theme_editor.as_mut() {
                                     let theme = theme_by_id(&theme_id);
                                     editor.duplicate_theme = theme_id.clone();
@@ -183,7 +183,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.appearance.ui_density = density,
                                     cx,
@@ -208,7 +208,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.appearance.animation_speed = speed,
                                     cx,
@@ -233,7 +233,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.appearance.render_profile = profile,
                                     cx,
@@ -265,7 +265,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.appearance.frosted_glass = mode,
                                     cx,
@@ -290,7 +290,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.terminal.background_fit = fit,
                                     cx,
@@ -315,7 +315,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.terminal.font_family = family,
                                     cx,
@@ -340,7 +340,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.terminal.terminal_encoding = encoding,
                                     cx,
@@ -365,7 +365,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.terminal.cursor_style = style,
                                     cx,
@@ -394,7 +394,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(|settings| settings.ide.agent_mode = mode, cx);
                                 cx.stop_propagation();
                             }),
@@ -419,7 +419,7 @@ impl WorkspaceApp {
                                 false,
                                 false,
                                 cx.listener(move |this, _event, _window, cx| {
-                                    this.open_settings_select = None;
+                                    this.close_settings_select();
                                     this.add_highlight_preset(preset.rules.clone(), cx);
                                     cx.stop_propagation();
                                 }),
@@ -448,7 +448,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_highlight_rule(index, |rule| rule.render_mode = mode, cx);
                                 cx.stop_propagation();
                             }),
@@ -472,7 +472,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| {
                                         settings.local_terminal.default_shell_id =
@@ -500,7 +500,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| {
                                         settings.connection_pool.idle_timeout_secs = seconds
@@ -527,7 +527,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| set_reconnect_max_attempts(settings, attempts),
                                     cx,
@@ -552,7 +552,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| set_reconnect_base_delay(settings, delay_ms),
                                     cx,
@@ -577,7 +577,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| set_reconnect_max_delay(settings, delay_ms),
                                     cx,
@@ -603,7 +603,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.ai_new_provider_type = provider_type.clone();
                                 cx.stop_propagation();
                                 cx.notify();
@@ -626,7 +626,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     move |settings| set_ai_context_max_chars(settings, value),
                                     cx,
@@ -651,7 +651,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     move |settings| set_ai_context_lines(settings, value),
                                     cx,
@@ -677,7 +677,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     move |settings| {
                                         settings.ai.reasoning_effort =
@@ -717,7 +717,7 @@ impl WorkspaceApp {
                         false,
                         false,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.open_settings_select = None;
+                            this.close_settings_select();
                             this.edit_settings(
                                 move |settings| {
                                     ai_patch_execution_profile(settings, profile_index, |profile| {
@@ -750,7 +750,7 @@ impl WorkspaceApp {
                             cx.listener(move |this, _event, _window, cx| {
                                 let provider_id = provider_id.clone();
                                 let default_model = default_model.clone();
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     move |settings| {
                                         ai_patch_execution_profile(settings, profile_index, |profile| {
@@ -804,7 +804,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     move |settings| {
                                         ai_patch_execution_profile(settings, profile_index, |profile| {
@@ -854,7 +854,7 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             let provider_id = inherit_provider_id.clone();
-                            this.open_settings_select = None;
+                            this.close_settings_select();
                             this.edit_settings(
                                 move |settings| {
                                     set_ai_provider_reasoning_override(settings, &provider_id, None);
@@ -875,7 +875,7 @@ impl WorkspaceApp {
                             false,
                             cx.listener(move |this, _event, _window, cx| {
                                 let provider_id = option_provider_id.clone();
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     move |settings| {
                                         set_ai_provider_reasoning_override(
@@ -931,7 +931,7 @@ impl WorkspaceApp {
                         cx.listener(move |this, _event, _window, cx| {
                             let provider_id = inherit_provider_id.clone();
                             let model = inherit_model.clone();
-                            this.open_settings_select = None;
+                            this.close_settings_select();
                             this.edit_settings(
                                 move |settings| {
                                     set_ai_model_reasoning_override(
@@ -959,7 +959,7 @@ impl WorkspaceApp {
                             cx.listener(move |this, _event, _window, cx| {
                                 let provider_id = option_provider_id.clone();
                                 let model = option_model.clone();
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     move |settings| {
                                         set_ai_model_reasoning_override(
@@ -1001,7 +1001,7 @@ impl WorkspaceApp {
                         false,
                         false,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.open_settings_select = None;
+                            this.close_settings_select();
                             this.edit_settings(
                                 |settings| {
                                     let model = settings
@@ -1033,7 +1033,7 @@ impl WorkspaceApp {
                             false,
                             cx.listener(move |this, _event, _window, cx| {
                                 let provider_id = provider_id.clone();
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     move |settings| {
                                         let model = settings
@@ -1069,7 +1069,7 @@ impl WorkspaceApp {
                         false,
                         false,
                         cx.listener(|this, _event, _window, cx| {
-                            this.open_settings_select = None;
+                            this.close_settings_select();
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -1087,7 +1087,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.knowledge_new_document_format = format.to_string();
                                 cx.stop_propagation();
                                 cx.notify();
@@ -1118,7 +1118,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 if let Some(draft) = this.ai_mcp_add_dialog.as_mut() {
                                     draft.transport = transport;
                                 }
@@ -1157,7 +1157,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 if let Some(draft) = this.ai_mcp_add_dialog.as_mut() {
                                     draft.auth_header_mode = mode;
                                 }
@@ -1182,7 +1182,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.sftp.max_concurrent_transfers = count,
                                     cx,
@@ -1207,7 +1207,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.sftp.directory_parallelism = count,
                                     cx,
@@ -1237,7 +1237,7 @@ impl WorkspaceApp {
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select = None;
+                                this.close_settings_select();
                                 this.edit_settings(
                                     |settings| settings.sftp.conflict_action = action,
                                     cx,
@@ -1291,12 +1291,12 @@ impl WorkspaceApp {
         // ring. Keep the origin and open/toggle rule in one place so settings,
         // AI provider, and knowledge selects do not drift apart.
         self.focused_settings_input = None;
+        if self.open_settings_select == Some(select_id) {
+            self.close_settings_select();
+            return;
+        }
         self.settings_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Pointer);
-        self.open_settings_select = if self.open_settings_select == Some(select_id) {
-            None
-        } else {
-            Some(select_id)
-        };
+        self.open_settings_select = Some(select_id);
     }
 
     fn language_select_row(&self, selected: Language, cx: &mut Context<Self>) -> AnyElement {

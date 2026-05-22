@@ -377,6 +377,7 @@ impl WorkspaceApp {
         } else {
             LucideIcon::Play
         };
+        let playback_disabled = snapshot.state == AudioPreviewState::Error;
         let can_seek = snapshot.duration.is_some() && snapshot.state != AudioPreviewState::Error;
         div()
             .w_full()
@@ -421,27 +422,28 @@ impl WorkspaceApp {
                     .px_3()
                     .py_2()
                     .child(
-                        div()
-                            .w(px(32.0))
-                            .h(px(32.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(self.tokens.radii.md))
-                            .border_1()
-                            .border_color(rgb(theme.border))
-                            .bg(rgb(theme.bg))
-                            .text_color(rgb(theme.text))
-                            .cursor_pointer()
-                            .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                            .on_mouse_down(
+                        icon_button(
+                            &self.tokens,
+                            Self::render_lucide_icon(play_icon, 14.0, rgb(theme.text)),
+                            IconButtonOptions {
+                                disabled: playback_disabled,
+                                background: Some(rgb(theme.bg)),
+                                border: Some(rgb(theme.border)),
+                                hover_background: Some(rgb(theme.bg_hover)),
+                                // Local preview audio shares the browser button boundary with
+                                // SFTP preview audio; decode errors must not leave a live click target.
+                                ..IconButtonOptions::opaque_toolbar(32.0, ButtonRadius::Md)
+                            },
+                        )
+                        .when(!playback_disabled, |button| {
+                            button.on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
                                     this.toggle_file_manager_preview_audio(cx);
                                     cx.stop_propagation();
                                 }),
                             )
-                            .child(Self::render_lucide_icon(play_icon, 14.0, rgb(theme.text))),
+                        }),
                     )
                     .child(
                         div()
@@ -879,48 +881,46 @@ impl WorkspaceApp {
                     )),
             )
             .child(
-                div()
-                    .mt_2()
-                    .h(px(32.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg))
-                    .px_3()
-                    .text_size(px(FILE_MANAGER_TEXT_XS))
-                    .text_color(rgb(theme.text))
-                    .cursor_pointer()
-                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            if let Err(error) = open_path_external(&path_for_open) {
-                                this.push_file_manager_toast(
-                                    this.i18n.t("fileManager.error"),
-                                    Some(error),
-                                    TerminalNoticeVariant::Error,
-                                );
-                            }
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    )
-                    .child(Self::render_lucide_icon(
+                toolbar_button(
+                    &self.tokens,
+                    self.i18n.t("fileManager.open"),
+                    Some(Self::render_lucide_icon(
                         LucideIcon::ExternalLink,
                         FILE_MANAGER_ICON_MD,
                         rgb(theme.text),
-                    ))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::NonSelectable,
-                        "file-preview-native-status",
-                        "open",
-                        self.i18n.t("fileManager.open"),
-                        theme.text,
-                        cx,
                     )),
+                    ToolbarButtonOptions {
+                        icon_gap: Some(8.0),
+                        background: Some(rgb(theme.bg)),
+                        border: Some(rgb(theme.border)),
+                        text_color: Some(rgb(theme.text)),
+                        hover_background: Some(rgb(theme.bg_hover)),
+                        // Native asset preview's external-open affordance is a real
+                        // button; keep the label outside read-only selection ownership.
+                        ..ToolbarButtonOptions::compact_text(
+                            ButtonVariant::Secondary,
+                            ButtonRadius::Md,
+                            32.0,
+                            12.0,
+                            FILE_MANAGER_TEXT_XS,
+                        )
+                    },
+                )
+                .mt_2()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        if let Err(error) = open_path_external(&path_for_open) {
+                            this.push_file_manager_toast(
+                                this.i18n.t("fileManager.error"),
+                                Some(error),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ),
             )
     }
 

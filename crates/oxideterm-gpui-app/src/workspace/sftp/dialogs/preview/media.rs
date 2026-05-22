@@ -24,6 +24,7 @@ impl WorkspaceApp {
         } else {
             LucideIcon::Play
         };
+        let playback_disabled = snapshot.state == AudioPreviewState::Error;
         let can_seek = snapshot.duration.is_some() && snapshot.state != AudioPreviewState::Error;
 
         div()
@@ -70,30 +71,29 @@ impl WorkspaceApp {
                     .px_3()
                     .py_2()
                     .child(
-                        div()
-                            .w(px(32.0))
-                            .h(px(32.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(self.tokens.radii.md))
-                            .border_1()
-                            .border_color(rgb(theme.border))
-                            .bg(rgb(theme.bg))
-                            .text_color(rgb(theme.text))
-                            .when(snapshot.state != AudioPreviewState::Error, |button| {
-                                button.cursor_pointer().hover(move |button| {
-                                    button.bg(rgb(theme.bg_hover))
-                                })
-                            })
-                            .on_mouse_down(
+                        icon_button(
+                            &self.tokens,
+                            Self::render_lucide_icon(play_icon, 14.0, rgb(theme.text)),
+                            IconButtonOptions {
+                                disabled: playback_disabled,
+                                background: Some(rgb(theme.bg)),
+                                border: Some(rgb(theme.border)),
+                                hover_background: Some(rgb(theme.bg_hover)),
+                                // Tauri disables media playback when preview decode fails.
+                                // Keep that action guard in the shared icon button instead of
+                                // leaving a local div with a live click listener.
+                                ..IconButtonOptions::opaque_toolbar(32.0, ButtonRadius::Md)
+                            },
+                        )
+                        .when(!playback_disabled, |button| {
+                            button.on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
                                     this.toggle_sftp_preview_audio(cx);
                                     cx.notify();
                                 }),
                             )
-                            .child(Self::render_lucide_icon(play_icon, 14.0, rgb(theme.text))),
+                        }),
                     )
                     .child(
                         div()
@@ -129,49 +129,68 @@ impl WorkspaceApp {
                     )
                     .when(can_seek, |row| {
                         row.child(
-                            div()
-                                .px_2()
-                                .py_1()
-                                .rounded(px(self.tokens.radii.sm))
-                                .text_size(px(SFTP_TEXT_XS))
-                                .text_color(rgb(theme.text_muted))
-                                .cursor_pointer()
-                                .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        let now = this.sftp_view.preview_audio.snapshot().position;
-                                        let next = now.saturating_sub(std::time::Duration::from_secs(15));
-                                        this.seek_sftp_preview_audio(next, cx);
-                                        cx.notify();
-                                    }),
-                                )
-                                .child("-15s"),
+                            toolbar_button(
+                                &self.tokens,
+                                "-15s".to_string(),
+                                None,
+                                ToolbarButtonOptions {
+                                    text_color: Some(rgb(theme.text_muted)),
+                                    hover_background: Some(rgb(theme.bg_hover)),
+                                    hover_text_color: Some(rgb(theme.text)),
+                                    // Seek labels are buttons, not selectable document text.
+                                    ..ToolbarButtonOptions::compact_text(
+                                        ButtonVariant::Ghost,
+                                        ButtonRadius::Sm,
+                                        24.0,
+                                        8.0,
+                                        SFTP_TEXT_XS,
+                                    )
+                                },
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    let now = this.sftp_view.preview_audio.snapshot().position;
+                                    let next = now
+                                        .saturating_sub(std::time::Duration::from_secs(15));
+                                    this.seek_sftp_preview_audio(next, cx);
+                                    cx.notify();
+                                }),
+                            ),
                         )
                         .child(
-                            div()
-                                .px_2()
-                                .py_1()
-                                .rounded(px(self.tokens.radii.sm))
-                                .text_size(px(SFTP_TEXT_XS))
-                                .text_color(rgb(theme.text_muted))
-                                .cursor_pointer()
-                                .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        let snapshot = this.sftp_view.preview_audio.snapshot();
-                                        let Some(duration) = snapshot.duration else {
-                                            return;
-                                        };
-                                        let next = (snapshot.position
-                                            + std::time::Duration::from_secs(15))
-                                        .min(duration);
-                                        this.seek_sftp_preview_audio(next, cx);
-                                        cx.notify();
-                                    }),
-                                )
-                                .child("+15s"),
+                            toolbar_button(
+                                &self.tokens,
+                                "+15s".to_string(),
+                                None,
+                                ToolbarButtonOptions {
+                                    text_color: Some(rgb(theme.text_muted)),
+                                    hover_background: Some(rgb(theme.bg_hover)),
+                                    hover_text_color: Some(rgb(theme.text)),
+                                    // Seek labels are buttons, not selectable document text.
+                                    ..ToolbarButtonOptions::compact_text(
+                                        ButtonVariant::Ghost,
+                                        ButtonRadius::Sm,
+                                        24.0,
+                                        8.0,
+                                        SFTP_TEXT_XS,
+                                    )
+                                },
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    let snapshot = this.sftp_view.preview_audio.snapshot();
+                                    let Some(duration) = snapshot.duration else {
+                                        return;
+                                    };
+                                    let next = (snapshot.position
+                                        + std::time::Duration::from_secs(15))
+                                    .min(duration);
+                                    this.seek_sftp_preview_audio(next, cx);
+                                    cx.notify();
+                                }),
+                            ),
                         )
                     })
                     .when_some(snapshot.error, |row, error| {

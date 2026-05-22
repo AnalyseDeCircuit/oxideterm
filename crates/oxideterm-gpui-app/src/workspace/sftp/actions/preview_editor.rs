@@ -1,7 +1,7 @@
 impl WorkspaceApp {
     fn open_or_preview_sftp_file(&mut self, pane: SftpPane, file: &SftpFileEntry) {
         self.sftp_view.active_pane = pane;
-        self.sftp_view.context_menu = None;
+        self.sftp_view.dismiss_context_menu();
         if file.file_type == SftpFileType::Directory {
             let base = match pane {
                 SftpPane::Local => self.sftp_view.local_path.clone(),

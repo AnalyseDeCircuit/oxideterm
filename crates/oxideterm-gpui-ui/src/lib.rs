@@ -33,8 +33,9 @@ pub mod typography;
 
 pub use badge::{IconBadgeMetrics, icon_badge, icon_badge_metrics_from_tokens};
 pub use button::{
-    ButtonTone, IconButtonOptions, ToolbarButtonIconPosition, ToolbarButtonOptions, button,
-    button_focus_visible, icon_button, tauri_focus_visible_ring, toolbar_button,
+    ButtonTone, IconButtonOptions, SplitFooterButtonOptions, ToolbarButtonIconPosition,
+    ToolbarButtonOptions, button, button_focus_visible, icon_button, split_footer_button,
+    tauri_focus_visible_ring, toolbar_button,
 };
 pub use checkbox::{CheckboxOptions, checkbox, checkbox_with};
 pub use confirm::{

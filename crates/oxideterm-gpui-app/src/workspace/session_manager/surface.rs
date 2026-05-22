@@ -144,6 +144,18 @@ impl WorkspaceApp {
             })
             .when_some(
                 self.session_manager
+                    .row_menu_connection_id
+                    .as_deref()
+                    .and_then(|id| self.connection_info_by_id(id)),
+                |surface, conn| {
+                    surface.child(self.workspace_context_menu_backdrop(
+                        self.render_row_more_menu(conn, window, has_background, cx),
+                        cx,
+                    ))
+                },
+            )
+            .when_some(
+                self.session_manager
                 .row_context_menu_connection_id
                 .as_deref()
                 .and_then(|id| self.connection_info_by_id(id)),
