@@ -215,8 +215,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             String::new(),
             Some(
                 div()
@@ -243,53 +242,48 @@ impl WorkspaceApp {
                 font_size: Some(self.tokens.metrics.ui_text_sm),
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(move |this, _event, _window, cx| {
+                let persist = this.forward_persist_context_for_node(&node_id);
+                let registry = this.forwarding_registry.clone();
+                this.start_forward_operation(
+                    tab_id,
+                    node_id.clone(),
+                    "forwards.messages.created",
+                    move |manager| {
+                        Box::pin(async move {
+                            let created = match label_key {
+                                "forwards.quick.jupyter" => {
+                                    manager.forward_jupyter(port, port).await?
+                                }
+                                "forwards.quick.tensorboard" => {
+                                    manager.forward_tensorboard(port, port).await?
+                                }
+                                "forwards.quick.vscode" => {
+                                    manager.forward_vscode(port, port).await?
+                                }
+                                _ => unreachable!("unknown forward quick action"),
+                            };
+                            if let Some((session_id, owner_connection_id)) = persist {
+                                let forward_id = created.id.clone();
+                                let _ = registry.sync_persisted_forward_rule(
+                                    &forward_id,
+                                    &session_id,
+                                    owner_connection_id,
+                                    created,
+                                );
+                            }
+                            Ok(())
+                        })
+                    },
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
         )
-            // The visible label keeps the Forwards CJK font fallback instead of
-            // using toolbar_button's plain String label path.
-            .child(self.render_forward_ui_text(self.i18n.t(label_key)))
-            .when(enabled, |button| {
-                button.on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        let persist = this.forward_persist_context_for_node(&node_id);
-                        let registry = this.forwarding_registry.clone();
-                        this.start_forward_operation(
-                            tab_id,
-                            node_id.clone(),
-                            "forwards.messages.created",
-                            move |manager| {
-                                Box::pin(async move {
-                                    let created = match label_key {
-                                        "forwards.quick.jupyter" => {
-                                            manager.forward_jupyter(port, port).await?
-                                        }
-                                        "forwards.quick.tensorboard" => {
-                                            manager.forward_tensorboard(port, port).await?
-                                        }
-                                        "forwards.quick.vscode" => {
-                                            manager.forward_vscode(port, port).await?
-                                        }
-                                        _ => unreachable!("unknown forward quick action"),
-                                    };
-                                    if let Some((session_id, owner_connection_id)) = persist {
-                                        let forward_id = created.id.clone();
-                                        let _ = registry.sync_persisted_forward_rule(
-                                            &forward_id,
-                                            &session_id,
-                                            owner_connection_id,
-                                            created,
-                                        );
-                                    }
-                                    Ok(())
-                                })
-                            },
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
-                )
-            })
-            .into_any_element()
+        // The visible label keeps the Forwards CJK font fallback instead of
+        // using toolbar_button's plain String label path.
+        .child(self.render_forward_ui_text(self.i18n.t(label_key)))
+        .into_any_element()
     }
 
     fn render_forwards_table(
@@ -321,10 +315,11 @@ impl WorkspaceApp {
                                 LucideIcon::RefreshCcw,
                                 theme.text_muted,
                                 has_background,
-                                cx.listener(|_this, _event, _window, cx| {
+                                |_this, _event, _window, cx| {
                                     cx.notify();
                                     cx.stop_propagation();
-                                }),
+                                },
+                                cx,
                             ))
                             .child(
                                 self.render_forward_button(
@@ -481,7 +476,7 @@ impl WorkspaceApp {
                         LucideIcon::Square,
                         theme.text_muted,
                         has_background,
-                        cx.listener({
+                        {
                             let node_id = node_id.clone();
                             move |this, _event, _window, cx| {
                                 let forward_id = rule_for_stop.id.clone();
@@ -498,7 +493,8 @@ impl WorkspaceApp {
                                 );
                                 cx.stop_propagation();
                             }
-                        }),
+                        },
+                        cx,
                     ))
                 })
                 .when(stopped, |actions| {
@@ -507,7 +503,7 @@ impl WorkspaceApp {
                             LucideIcon::Play,
                             theme.text_muted,
                             has_background,
-                            cx.listener({
+                            {
                                 let node_id = node_id.clone();
                                 move |this, _event, _window, cx| {
                                     let forward_id = rule_for_restart.id.clone();
@@ -539,16 +535,18 @@ impl WorkspaceApp {
                                     );
                                     cx.stop_propagation();
                                 }
-                            }),
+                            },
+                            cx,
                         ))
                         .child(self.render_forward_icon_button(
                             LucideIcon::Pencil,
                             theme.text_muted,
                             has_background,
-                            cx.listener(move |this, _event, _window, cx| {
+                            move |this, _event, _window, cx| {
                                 this.open_forward_edit_form(rule_for_edit.clone(), cx);
                                 cx.stop_propagation();
-                            }),
+                            },
+                            cx,
                         ))
                 })
                 .when(matches!(rule.status, ForwardStatus::Suspended), |actions| {
@@ -566,12 +564,13 @@ impl WorkspaceApp {
                     LucideIcon::Trash2,
                     theme.text_muted,
                     has_background,
-                    cx.listener(move |this, _event, _window, cx| {
+                    move |this, _event, _window, cx| {
                         this.forwarding_view.pending_delete_forward = Some(rule_for_delete.clone());
                         this.forwarding_view.error = None;
                         cx.notify();
                         cx.stop_propagation();
-                    }),
+                    },
+                    cx,
                 )),
         )
         .into_any_element()

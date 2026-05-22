@@ -30,10 +30,10 @@ impl WorkspaceApp {
             )
             .child(
                 // Tauri uses an outline small Button with literal "+ label"
-                // text here, not a lucide icon. Route it through toolbar_button
-                // so all compact settings actions share one Button primitive.
-                toolbar_button(
-                    &self.tokens,
+                // text here, not a lucide icon. Use the workspace action
+                // wrapper so provider creation follows the same guarded Button
+                // path as refresh/remove/save actions.
+                self.workspace_toolbar_action_button(
                     format!("+ {}", self.i18n.t("settings_view.ai.add_provider")),
                     None,
                     ToolbarButtonOptions {
@@ -45,13 +45,10 @@ impl WorkspaceApp {
                         },
                         ..ToolbarButtonOptions::default()
                     },
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
                         this.add_ai_provider_from_selected_template(cx);
                     }),
-                ),
+                )
             )
             .into_any_element()
     }

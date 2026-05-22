@@ -10,12 +10,7 @@ impl WorkspaceApp {
             }
             match event.keystroke.key.as_str() {
                 "escape" => {
-                    self.ai_model_selector_open = false;
-                    self.ai_model_selector_focus_origin = None;
-                    self.ai_model_selector_search_focused = false;
-                    self.ai_model_selector_search_query.clear();
-                    self.ai_model_selector_highlighted_model = None;
-                    self.ime_marked_text = None;
+                    self.close_ai_model_selector();
                     cx.notify();
                     true
                 }
@@ -23,12 +18,7 @@ impl WorkspaceApp {
                     // Browser focus leaves the model selector on Tab. Native
                     // does not yet expose all footer/button targets, so close
                     // the Radix-style dropdown rather than trapping focus.
-                    self.ai_model_selector_open = false;
-                    self.ai_model_selector_focus_origin = None;
-                    self.ai_model_selector_search_focused = false;
-                    self.ai_model_selector_search_query.clear();
-                    self.ai_model_selector_highlighted_model = None;
-                    self.ime_marked_text = None;
+                    self.close_ai_model_selector();
                     cx.notify();
                     true
                 }

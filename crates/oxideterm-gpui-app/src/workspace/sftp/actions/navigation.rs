@@ -644,13 +644,13 @@ impl WorkspaceApp {
             SftpPane::Local => scroll_tauri_virtual_list_to_index(
                 &self.sftp_view.local_file_scroll,
                 next,
-                TauriVirtualListSpec::new(px(SFTP_ROW_HEIGHT), SFTP_VIRTUAL_OVERSCAN),
+                sftp_file_list_virtual_spec(),
                 TauriVirtualScrollAlign::Nearest,
             ),
             SftpPane::Remote => scroll_tauri_virtual_list_to_index(
                 &self.sftp_view.remote_file_scroll,
                 next,
-                TauriVirtualListSpec::new(px(SFTP_ROW_HEIGHT), SFTP_VIRTUAL_OVERSCAN),
+                sftp_file_list_virtual_spec(),
                 TauriVirtualScrollAlign::Nearest,
             ),
         }

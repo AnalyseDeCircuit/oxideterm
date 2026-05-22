@@ -158,7 +158,7 @@ impl WorkspaceApp {
                 ("sftp-file-list-virtual", pane as u64),
                 row_count,
                 scroll_handle,
-                TauriVirtualListSpec::new(px(SFTP_ROW_HEIGHT), SFTP_VIRTUAL_OVERSCAN),
+                sftp_file_list_virtual_spec(),
                 move |range, _window, _cx| {
                     let selectable_state = row_selectable_state.clone();
                     range

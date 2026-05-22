@@ -165,10 +165,10 @@ impl WorkspaceApp {
     fn connection_add_group_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let disabled = self.connection_new_group_text().trim().is_empty();
         // Tauri ConnectionsTab renders Add Group as the default shadcn Button
-        // with a leading Plus icon. Keep the disabled action guard local, but
-        // route the chrome through the shared toolbar primitive.
-        toolbar_button(
-            &self.tokens,
+        // with a leading Plus icon. Route activation through the workspace
+        // wrapper so disabled state follows the same browser Button guard as
+        // other settings actions.
+        self.workspace_toolbar_action_button(
             self.i18n.t("settings_view.connections.groups.add"),
             Some(Self::render_lucide_icon(
                 LucideIcon::Plus,
@@ -188,16 +188,11 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(|this, _event, _window, cx| {
+                this.create_settings_connection_group(cx);
+                cx.stop_propagation();
+            }),
         )
-        .when(!disabled, |button| {
-            button.on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.create_settings_connection_group(cx);
-                    cx.stop_propagation();
-                }),
-            )
-        })
         .into_any_element()
     }
 
@@ -232,29 +227,23 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text))
                     .child(group.clone()),
             )
-            .child(
-                div()
-                    .size(px(30.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(self.tokens.radii.md))
-                    .text_color(rgb(theme.error))
-                    .cursor_pointer()
-                    .hover(|style| style.bg(rgba((self.tokens.ui.error << 8) | 0x14)))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Trash2,
-                        15.0,
-                        rgb(theme.error),
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.delete_settings_connection_group(group.clone(), cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-            )
+            .child(self.workspace_icon_action_button(
+                LucideIcon::Trash2,
+                15.0,
+                rgb(theme.error),
+                IconButtonOptions {
+                    hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x14)),
+                    // ConnectionsTab uses an icon-only ghost Button for group
+                    // delete. Keep the size/radius on the shared icon primitive
+                    // so settings action affordances do not hand-roll div buttons.
+                    ..IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md)
+                },
+                move |this, _event, _window, cx| {
+                    this.delete_settings_connection_group(group.clone(), cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -398,10 +387,9 @@ impl WorkspaceApp {
             .t("settings_view.connections.ssh_config.import_selected")
             .replace("{{count}}", &selected_count.to_string());
         // This is the same compact outline action chrome as other migrated
-        // settings toolbars; keep it on the shared button primitive so hover,
-        // disabled, and future focus-visible behavior stay centralized.
-        toolbar_button(
-            &self.tokens,
+        // settings toolbars; keep it on the workspace action wrapper so click
+        // dispatch shares the disabled/loading guard with other Buttons.
+        self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(
                 LucideIcon::FolderInput,
@@ -424,15 +412,12 @@ impl WorkspaceApp {
                 font_size: Some(self.tokens.metrics.ui_text_xs),
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(|this, _event, _window, cx| {
+                this.import_selected_settings_ssh_hosts(cx);
+                cx.stop_propagation();
+            }),
         )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.import_selected_settings_ssh_hosts(cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
+        .into_any_element()
     }
 
     fn ssh_config_host_row(&self, host: SshConfigHost, cx: &mut Context<Self>) -> AnyElement {
@@ -534,8 +519,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         // Host-row import uses the shared outline action path but preserves
         // Tauri's pill shape with a post-primitive radius override.
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             self.i18n.t("settings_view.connections.ssh_config.import"),
             Some(Self::render_lucide_icon(
                 LucideIcon::FolderInput,
@@ -558,18 +542,13 @@ impl WorkspaceApp {
                 font_size: Some(self.tokens.metrics.ui_text_sm),
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(move |this, _event, _window, cx| {
+                this.import_settings_ssh_host(alias.clone(), cx);
+                cx.stop_propagation();
+            }),
         )
-            .rounded_full()
-            .when(!disabled, |button| {
-                button.on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.import_settings_ssh_host(alias.clone(), cx);
-                        cx.stop_propagation();
-                    }),
-                )
-            })
-            .into_any_element()
+        .rounded_full()
+        .into_any_element()
     }
 
     fn ssh_config_checkbox(&self, checked: bool) -> AnyElement {

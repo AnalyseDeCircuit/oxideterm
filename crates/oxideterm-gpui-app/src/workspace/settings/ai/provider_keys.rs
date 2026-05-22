@@ -57,11 +57,10 @@ impl WorkspaceApp {
                     ))
                     .child(
                         // ProviderKeyInput.tsx uses a secondary small Button
-                        // with h-8 text-xs for save. Keep this on the shared
-                        // toolbar primitive so disabled chrome and later
-                        // focus-visible behavior match other AI actions.
-                        toolbar_button(
-                            &self.tokens,
+                        // with h-8 text-xs for save. Route activation through
+                        // the workspace action wrapper so disabled state cannot
+                        // dispatch, matching the browser Button attribute.
+                        self.workspace_toolbar_action_button(
                             self.i18n.t("settings_view.ai.save"),
                             None,
                             ToolbarButtonOptions {
@@ -75,16 +74,11 @@ impl WorkspaceApp {
                                 font_size: Some(self.tokens.metrics.ui_text_xs),
                                 ..ToolbarButtonOptions::default()
                             },
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.save_ai_provider_api_key(index, cx);
+                                cx.stop_propagation();
+                            }),
                         )
-                        .when(!save_disabled, |button| {
-                            button.on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.save_ai_provider_api_key(index, cx);
-                                    cx.stop_propagation();
-                                }),
-                            )
-                        })
                         .into_any_element(),
                     ),
             )
@@ -133,11 +127,10 @@ impl WorkspaceApp {
                     )
                     .child(
                         // Stored API key removal mirrors Tauri's ghost small
-                        // danger Button. Keep the red hover/action guard in
-                        // the shared toolbar primitive instead of custom div
-                        // styling.
-                        toolbar_button(
-                            &self.tokens,
+                        // danger Button. Shared activation keeps this confirm
+                        // trigger on the same disabled/loading path as the
+                        // rest of AI provider actions.
+                        self.workspace_toolbar_action_button(
                             self.i18n.t("settings_view.ai.remove"),
                             None,
                             ToolbarButtonOptions {
@@ -154,9 +147,6 @@ impl WorkspaceApp {
                                 hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1a)),
                                 ..ToolbarButtonOptions::default()
                             },
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.ai_provider_key_remove_confirm =
                                     Some((index, provider_id.clone()));

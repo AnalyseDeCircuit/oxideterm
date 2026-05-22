@@ -8,10 +8,7 @@ use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
 };
 use oxideterm_gpui_ui::{
-    button::{
-        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonOptions,
-    },
+    button::{ButtonRadius, ButtonVariant, IconButtonOptions, ToolbarButtonOptions},
     context_menu::{ContextMenuActionableStyle, context_menu_event_boundary},
     modal::{dismissible_dialog_backdrop, overlay_content_boundary, quicklook_backdrop},
     surface::{color_for_background, color_with_background_scaled_alpha},
@@ -76,6 +73,13 @@ const FILE_MANAGER_BLUE: u32 = 0x60a5fa; // Tauri text-blue-400.
 const FILE_MANAGER_GREEN: u32 = 0x22c55e; // Tauri text-green-500.
 const FILE_MANAGER_ORANGE: u32 = 0xfb923c; // Tauri text-orange-400.
 const FILE_MANAGER_PURPLE: u32 = 0xc084fc; // Tauri preview/file accent family.
+
+fn file_manager_list_virtual_spec() -> TauriVirtualListSpec {
+    // Tauri FileList owns FILE_ROW_HEIGHT and useVirtualizer overscan as one
+    // contract. Keep native render/scroll call sites on the same named spec so
+    // row height and overdraw cannot drift independently.
+    TauriVirtualListSpec::new(px(FILE_MANAGER_ROW_HEIGHT), FILE_MANAGER_VIRTUAL_OVERSCAN)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum FileManagerInput {

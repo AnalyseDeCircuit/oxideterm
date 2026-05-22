@@ -980,53 +980,39 @@ impl WorkspaceApp {
                 // for create/rename/delete prompts. Keep native prompt
                 // buttons on the same shared button primitive as other modal
                 // footers instead of hand-drawing div chrome here.
-                self.workspace_toolbar_action_button(
+                self.workspace_confirm_footer_action_button(
                     self.i18n.t("common.actions.cancel"),
-                    None,
-                    ToolbarButtonOptions {
-                        button: ButtonOptions {
-                            variant: ButtonVariant::Ghost,
-                            size: ButtonSize::Sm,
-                            radius: ButtonRadius::Md,
-                            disabled: false,
-                        },
-                        focus_visible: self.file_manager.focused_dialog_footer_action
-                            == Some(ConfirmDialogAction::Cancel),
-                        ..ToolbarButtonOptions::default()
-                    },
-                    cx.listener(|this, _event, _window, cx| {
+                    ButtonVariant::Ghost,
+                    ConfirmDialogAction::Cancel,
+                    false,
+                    self.file_manager.focused_dialog_footer_action,
+                    |this, _event, _window, cx| {
                         this.close_file_manager_dialog();
                         cx.stop_propagation();
                         cx.notify();
-                    }),
+                    },
+                    cx,
                 ),
             )
-            .child(self.workspace_toolbar_action_button(
+            .child(self.workspace_confirm_footer_action_button(
                 if danger {
                     self.i18n.t("fileManager.delete")
                 } else {
                     self.i18n.t("fileManager.go")
                 },
-                None,
-                ToolbarButtonOptions {
-                    button: ButtonOptions {
-                        variant: if danger {
-                            ButtonVariant::Destructive
-                        } else {
-                            ButtonVariant::Default
-                        },
-                        size: ButtonSize::Sm,
-                        radius: ButtonRadius::Md,
-                        disabled: primary_disabled,
-                    },
-                    focus_visible: self.file_manager.focused_dialog_footer_action
-                        == Some(ConfirmDialogAction::Confirm),
-                    ..ToolbarButtonOptions::default()
+                if danger {
+                    ButtonVariant::Destructive
+                } else {
+                    ButtonVariant::Default
                 },
-                cx.listener(|this, _event, _window, cx| {
+                ConfirmDialogAction::Confirm,
+                primary_disabled,
+                self.file_manager.focused_dialog_footer_action,
+                |this, _event, _window, cx| {
                     this.accept_file_manager_dialog(cx);
                     cx.stop_propagation();
-                }),
+                },
+                cx,
             ))
             .into_any_element()
     }

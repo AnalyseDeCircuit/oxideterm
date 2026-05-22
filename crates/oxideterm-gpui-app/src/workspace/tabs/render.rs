@@ -414,40 +414,26 @@ impl WorkspaceApp {
                 .when(is_local_terminal, |actions| {
                     actions
                         .child(
-                            terminal_legacy_icon_button(
-                                &self.tokens,
+                            self.terminal_legacy_icon_button(
                                 LucideIcon::ArrowLeftRight,
                                 can_split,
-                            )
-                            .when(can_split, |button| {
-                                button.on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, window, cx| {
-                                        this.split_active_pane(
-                                            SplitDirection::Horizontal,
-                                            window,
-                                            cx,
-                                        );
-                                        cx.stop_propagation();
-                                    }),
-                                )
-                            }),
+                                |this, _event, window, cx| {
+                                    this.split_active_pane(SplitDirection::Horizontal, window, cx);
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            ),
                         )
                         .child(
-                            terminal_legacy_icon_button(
-                                &self.tokens,
+                            self.terminal_legacy_icon_button(
                                 LucideIcon::PanelLeft,
                                 can_split,
-                            )
-                            .when(can_split, |button| {
-                                button.on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, window, cx| {
-                                        this.split_active_pane(SplitDirection::Vertical, window, cx);
-                                        cx.stop_propagation();
-                                    }),
-                                )
-                            }),
+                                |this, _event, window, cx| {
+                                    this.split_active_pane(SplitDirection::Vertical, window, cx);
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            ),
                         )
                         .when(pane_count > 1, |actions| {
                             actions.child(
@@ -467,30 +453,33 @@ impl WorkspaceApp {
                         })
                 })
                 .child(
-                    terminal_legacy_icon_button(&self.tokens, LucideIcon::Radio, true)
+                    self.terminal_legacy_icon_button(
+                        LucideIcon::Radio,
+                        true,
+                        |this, _event, _window, cx| {
+                            this.toggle_terminal_broadcast_menu();
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                        cx,
+                    )
                         .bg(if self.terminal_broadcast_enabled {
                             rgba(0xf9731626)
                         } else {
                             rgba(0x00000000)
-                        })
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.toggle_terminal_broadcast_menu();
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
-                        ),
+                        }),
                 )
-                .child(terminal_legacy_icon_button(
-                    &self.tokens,
+                .child(self.terminal_legacy_icon_button(
                     LucideIcon::Square,
                     false,
+                    |_this, _event, _window, _cx| {},
+                    cx,
                 ))
-                .child(terminal_legacy_icon_button(
-                    &self.tokens,
+                .child(self.terminal_legacy_icon_button(
                     LucideIcon::Play,
                     false,
+                    |_this, _event, _window, _cx| {},
+                    cx,
                 ))
                 .into_any_element(),
         )
@@ -670,27 +659,31 @@ impl WorkspaceApp {
             .child(self.i18n.t(label_key))
             .into_any_element()
     }
-}
 
-fn terminal_legacy_icon_button(
-    tokens: &ThemeTokens,
-    icon: LucideIcon,
-    enabled: bool,
-) -> gpui::Div {
-    let theme = tokens.ui;
-    // The tab-bar legacy actions are icon-only toolbar buttons. Keep the
-    // historical helper name for call-site clarity, but route chrome through
-    // the shared primitive so disabled opacity and hover behavior stay aligned.
-    oxideterm_gpui_ui::button::icon_button(
-        tokens,
-        WorkspaceApp::render_lucide_icon(icon, 14.0, rgb(theme.text_muted)),
-        oxideterm_gpui_ui::button::IconButtonOptions {
-            disabled: !enabled,
-            hover_background: Some(rgb(theme.bg_hover)),
-            ..oxideterm_gpui_ui::button::IconButtonOptions::opaque_toolbar(
-                24.0,
-                oxideterm_gpui_ui::button::ButtonRadius::Md,
-            )
-        },
-    )
+    fn terminal_legacy_icon_button(
+        &self,
+        icon: LucideIcon,
+        enabled: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        // The tab-bar legacy actions are icon-only toolbar buttons. Disabled
+        // placeholders still go through the shared wrapper so they render
+        // browser-like disabled opacity without retaining local pointer actions.
+        self.workspace_icon_action_button(
+            icon,
+            14.0,
+            rgb(self.tokens.ui.text_muted),
+            oxideterm_gpui_ui::button::IconButtonOptions {
+                disabled: !enabled,
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..oxideterm_gpui_ui::button::IconButtonOptions::opaque_toolbar(
+                    24.0,
+                    oxideterm_gpui_ui::button::ButtonRadius::Md,
+                )
+            },
+            listener,
+            cx,
+        )
+    }
 }

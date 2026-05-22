@@ -285,52 +285,20 @@ impl WorkspaceApp {
     }
 
     fn outline_button(&self, label: String, size: ButtonSize) -> AnyElement {
-        // Tauri settings utility actions are shadcn outline Buttons. Keep the
-        // reusable settings entry point on the shared toolbar primitive so
-        // focus-visible/loading behavior can be widened in one place.
-        toolbar_button(
+        // These settings rows currently render Tauri outline button chrome
+        // without a wired native action. Keep them on the plain Button primitive
+        // so real action buttons can be audited through workspace_toolbar_action_button.
+        button::button_with(
             &self.tokens,
             label,
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Outline,
-                    size,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                ..ToolbarButtonOptions::default()
+            ButtonOptions {
+                variant: ButtonVariant::Outline,
+                size,
+                radius: ButtonRadius::Md,
+                disabled: false,
             },
         )
         .into_any_element()
-    }
-
-    fn standard_footer_button(
-        &self,
-        label: String,
-        variant: ButtonVariant,
-        action: ConfirmDialogAction,
-        disabled: bool,
-    ) -> Div {
-        // Tauri DialogFooter buttons are normal shadcn Buttons, but their
-        // focus-visible ring is owned by keyboard navigation rather than mouse
-        // hover. Keep that mapping in one helper so dialogs do not each
-        // reimplement Cancel/Confirm focus state.
-        toolbar_button(
-            &self.tokens,
-            label,
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled,
-                },
-                focus_visible: self.standard_confirm_focus() == Some(action),
-                ..ToolbarButtonOptions::default()
-            },
-        )
     }
 
     fn standard_footer_action_button(
@@ -342,21 +310,22 @@ impl WorkspaceApp {
         listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> Div {
-        let button = self.standard_footer_button(label, variant, action, disabled);
-        if disabled {
-            return button;
-        }
-
-        // Tauri DialogFooter buttons participate in the same Radix focus cycle
-        // as keyboard activation. Centralize pointer activation too so settings
-        // dialogs clear footer focus and stop backdrop bubbling consistently.
-        button.on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, event, window, cx| {
+        // Tauri DialogFooter buttons are normal shadcn Buttons, but their
+        // focus-visible ring is owned by keyboard navigation rather than mouse
+        // hover. Route activation through the workspace Button guard so
+        // disabled/loading footers cannot dispatch while preserving that ring.
+        self.workspace_confirm_footer_action_button(
+            label,
+            variant,
+            action,
+            disabled,
+            self.standard_confirm_focus(),
+            move |this, event, window, cx| {
                 this.clear_standard_confirm_focus();
                 listener(this, event, window, cx);
                 cx.stop_propagation();
-            }),
+            },
+            cx,
         )
     }
 

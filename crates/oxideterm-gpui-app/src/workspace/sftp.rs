@@ -116,6 +116,13 @@ const SFTP_PREVIEW_DIALOG_HEIGHT_RATIO: f32 = 0.85; // Tauri SFTP preview/editor
 const SFTP_DIFF_DIALOG_HEIGHT_RATIO: f32 = 0.80; // Tauri FileDiffDialog h-[80vh]
 const SFTP_HEX_PREVIEW_CHUNK_SIZE: u64 = 16 * 1024; // Tauri nodeSftpPreviewHex load-more step
 
+fn sftp_file_list_virtual_spec() -> TauriVirtualListSpec {
+    // Tauri SFTP FileList uses the same row estimate and overscan for rendering
+    // and keyboard reveal. Keep them as one named native spec so scrollIntoView
+    // parity does not split from virtualized row rendering.
+    TauriVirtualListSpec::new(px(SFTP_ROW_HEIGHT), SFTP_VIRTUAL_OVERSCAN)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum SftpInput {
     LocalPath,

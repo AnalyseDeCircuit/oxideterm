@@ -725,11 +725,10 @@ impl WorkspaceApp {
         action: TerminalCommandSpecsAction,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Command-spec editor actions are inline settings toolbar buttons.
-        // Keep them on the shared primitive so disabled/loading/focus-visible
-        // behavior can be widened without another local button shape.
-        toolbar_button(
-            &self.tokens,
+        // Command-spec editor actions behave like Tauri Button onClick handlers:
+        // disabled/loading guards live at the shared workspace boundary, not in
+        // each feature listener.
+        self.workspace_toolbar_action_button(
             self.i18n.t(label_key),
             None,
             ToolbarButtonOptions {
@@ -745,9 +744,6 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(move |this, _event, window, cx| {
                 this.handle_terminal_command_specs_action(action, window, cx);
                 cx.stop_propagation();

@@ -480,9 +480,6 @@ impl WorkspaceApp {
                     .child(self.appearance_action_button(
                         LucideIcon::Upload,
                         self.i18n.t("settings_view.appearance.theme_import"),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
                             this.import_theme_from_file(cx);
                             cx.stop_propagation();
@@ -493,9 +490,6 @@ impl WorkspaceApp {
                             self.appearance_action_button(
                                 LucideIcon::Pencil,
                                 self.i18n.t("settings_view.custom_theme.edit"),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
                                     let theme_id =
                                         this.settings_store.settings().terminal.theme.clone();
@@ -508,9 +502,6 @@ impl WorkspaceApp {
                     .child(self.appearance_action_button(
                         LucideIcon::Plus,
                         self.i18n.t("settings_view.custom_theme.create"),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
                             this.open_theme_editor(None, cx);
                             cx.stop_propagation();
@@ -730,12 +721,16 @@ impl WorkspaceApp {
         title_el.child(title.to_uppercase()).into_any_element()
     }
 
-    fn appearance_action_button(&self, icon: LucideIcon, label: String) -> Div {
+    fn appearance_action_button(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Div {
         // Appearance header actions are Tauri small outline toolbar buttons.
-        // Route their chrome through the shared primitive so hover, disabled,
-        // and later focus-visible behavior do not diverge from settings.
-        toolbar_button(
-            &self.tokens,
+        // Route activation through the workspace Button boundary so browser
+        // disabled/loading/focus-visible behavior can stay centralized.
+        self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(
                 icon,
@@ -758,6 +753,7 @@ impl WorkspaceApp {
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
                 ..ToolbarButtonOptions::default()
             },
+            listener,
         )
     }
 
@@ -1161,9 +1157,6 @@ impl WorkspaceApp {
                             LucideIcon::Trash2,
                             self.i18n.t("settings_view.custom_theme.delete"),
                             self.tokens.ui.error,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
                             cx.listener(|this, _event, _window, cx| {
                                 this.delete_theme_editor_theme(cx);
                                 cx.stop_propagation();
@@ -1180,10 +1173,11 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(8.0))
                             .child(
-                                // ThemeEditorModal uses a normal outline Button in Tauri, so this
-                                // footer action should share the native Button primitive too.
-                                toolbar_button(
-                                    &self.tokens,
+                                // ThemeEditorModal uses normal shadcn Button
+                                // footer actions in Tauri; route clicks through
+                                // the shared workspace guard rather than a raw
+                                // primitive-level mouse handler.
+                                self.workspace_toolbar_action_button(
                                     self.i18n.t("settings_view.custom_theme.cancel"),
                                     None,
                                     ToolbarButtonOptions {
@@ -1195,9 +1189,6 @@ impl WorkspaceApp {
                                         },
                                         ..ToolbarButtonOptions::default()
                                     },
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
                                         this.close_theme_editor(cx);
                                         cx.stop_propagation();
@@ -1205,8 +1196,7 @@ impl WorkspaceApp {
                                 ),
                             )
                             .child(
-                                toolbar_button(
-                                    &self.tokens,
+                                self.workspace_toolbar_action_button(
                                     self.i18n.t("settings_view.custom_theme.save"),
                                     Some(Self::render_lucide_icon(
                                         LucideIcon::Save,
@@ -1222,13 +1212,8 @@ impl WorkspaceApp {
                                         },
                                         ..ToolbarButtonOptions::default()
                                     },
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        if !save_disabled {
-                                            this.save_theme_editor(cx);
-                                        }
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.save_theme_editor(cx);
                                         cx.stop_propagation();
                                     }),
                                 ),
@@ -1610,9 +1595,10 @@ impl WorkspaceApp {
                             .child(self.i18n.t("settings_view.custom_theme.ui_colors_hint")),
                     )
                     .child(
-                        // Mirrors Tauri ThemeEditorModal's outline Button with Copy icon.
-                        toolbar_button(
-                            &self.tokens,
+                        // Mirrors Tauri ThemeEditorModal's outline Button with
+                        // Copy icon, with activation guarded by the shared
+                        // workspace Button wrapper.
+                        self.workspace_toolbar_action_button(
                             self.i18n.t("settings_view.custom_theme.auto_derive"),
                             Some(Self::render_lucide_icon(
                                 LucideIcon::Copy,
@@ -1628,9 +1614,6 @@ impl WorkspaceApp {
                                 },
                                 ..ToolbarButtonOptions::default()
                             },
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
                             cx.listener(|this, _event, _window, cx| {
                                 if let Some(editor) = this.theme_editor.as_mut() {
                                     let ui = derive_ui_colors_from_terminal(editor_terminal_theme(
@@ -1915,12 +1898,17 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn theme_editor_footer_button(&self, icon: LucideIcon, label: String, color: u32) -> Div {
+    fn theme_editor_footer_button(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        color: u32,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Div {
         // Theme editor delete uses a color-tinted outline button in Tauri.
-        // Keep only the tint local; button geometry and action affordance come
-        // from the shared toolbar primitive.
-        toolbar_button(
-            &self.tokens,
+        // Keep only the tint local; activation still goes through the shared
+        // Button guard used by the rest of the modal footer.
+        self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(icon, 12.0, rgb(color))),
             ToolbarButtonOptions {
@@ -1936,6 +1924,7 @@ impl WorkspaceApp {
                 hover_background: Some(rgba((color << 8) | 0x1a)),
                 ..ToolbarButtonOptions::default()
             },
+            listener,
         )
     }
 
@@ -2159,9 +2148,6 @@ impl WorkspaceApp {
                                 self.appearance_action_button(
                                     LucideIcon::Plus,
                                     self.i18n.t("settings_view.terminal.bg_add"),
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
                                         this.pick_background_image(cx);
                                         cx.stop_propagation();

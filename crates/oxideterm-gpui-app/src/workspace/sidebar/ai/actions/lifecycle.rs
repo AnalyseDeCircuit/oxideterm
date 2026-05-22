@@ -14,10 +14,7 @@ impl WorkspaceApp {
     pub(super) fn clear_ai_sidebar_keyboard_focus(&mut self) {
         self.ai_chat_input_focused = false;
         self.ai_chat_footer_focus = None;
-        self.ai_model_selector_search_focused = false;
-        self.ai_model_selector_open = false;
-        self.ai_model_selector_focus_origin = None;
-        self.ai_model_selector_highlighted_model = None;
+        self.close_ai_model_selector();
         self.ime_marked_text = None;
     }
 
@@ -27,11 +24,20 @@ impl WorkspaceApp {
         self.ai_profile_selector_open = false;
         self.ai_safety_menu_open = false;
         self.ai_context_popover_open = false;
+        self.close_ai_model_selector();
+    }
+
+    pub(in crate::workspace) fn close_ai_model_selector(&mut self) {
+        // The compact model selector behaves like a browser/Radix Select with a
+        // searchable input owner. Closing it must clear popup state, keyboard
+        // focus origin, highlighted option, and any marked text together so Esc,
+        // outside click, Tab, footer navigation, and row activation do not drift.
         self.ai_model_selector_open = false;
         self.ai_model_selector_focus_origin = None;
         self.ai_model_selector_search_focused = false;
         self.ai_model_selector_search_query.clear();
         self.ai_model_selector_highlighted_model = None;
+        self.ime_marked_text = None;
     }
 
     fn cancel_ai_chat_stream(&mut self, cx: &mut Context<Self>) {

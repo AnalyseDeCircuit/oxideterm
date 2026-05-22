@@ -426,27 +426,23 @@ impl WorkspaceApp {
                             .flex()
                             .items_center()
                             .gap(px(4.0))
-                            .child(
-                                quick_command_icon_button(&self.tokens, LucideIcon::Plus)
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.start_quick_command_category_create(cx);
-                                            cx.stop_propagation();
-                                        }),
-                                    ),
-                            )
-                            .child(
-                                quick_command_icon_button(&self.tokens, LucideIcon::X)
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.close_terminal_quick_commands_popover();
-                                            cx.stop_propagation();
-                                            cx.notify();
-                                        }),
-                                    ),
-                            ),
+                            .child(self.quick_command_icon_button(
+                                LucideIcon::Plus,
+                                |this, _event, _window, cx| {
+                                    this.start_quick_command_category_create(cx);
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            ))
+                            .child(self.quick_command_icon_button(
+                                LucideIcon::X,
+                                |this, _event, _window, cx| {
+                                    this.close_terminal_quick_commands_popover();
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                },
+                                cx,
+                            )),
                     ),
             );
 
@@ -548,34 +544,31 @@ impl WorkspaceApp {
                                     )),
                             ),
                     )
-                    .child(
-                        quick_command_mini_button(&self.tokens, LucideIcon::Pencil).on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener({
-                                let category = category.clone();
-                                move |this, _event, _window, cx| {
-                                    this.start_quick_command_category_edit(category.clone(), cx);
-                                    cx.stop_propagation();
-                                }
-                            }),
-                        ),
-                    )
+                    .child(self.quick_command_mini_button(
+                        LucideIcon::Pencil,
+                        {
+                            let category = category.clone();
+                            move |this, _event, _window, cx| {
+                                this.start_quick_command_category_edit(category.clone(), cx);
+                                cx.stop_propagation();
+                            }
+                        },
+                        cx,
+                    ))
                     .when(can_delete, |row| {
-                        row.child(
-                            quick_command_mini_button(&self.tokens, LucideIcon::Trash2)
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener({
-                                        let category_id = category_id.clone();
-                                        move |this, _event, _window, cx| {
-                                            this.quick_commands.delete_category(&category_id);
-                                            this.quick_commands.highlighted_command = None;
-                                            cx.stop_propagation();
-                                            cx.notify();
-                                        }
-                                    }),
-                                ),
-                        )
+                        row.child(self.quick_command_mini_button(
+                            LucideIcon::Trash2,
+                            {
+                                let category_id = category_id.clone();
+                                move |this, _event, _window, cx| {
+                                    this.quick_commands.delete_category(&category_id);
+                                    this.quick_commands.highlighted_command = None;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }
+                            },
+                            cx,
+                        ))
                     }),
             );
         }
@@ -903,35 +896,32 @@ impl WorkspaceApp {
                         )
                     }),
             )
-            .child(
-                quick_command_action_button(&self.tokens, LucideIcon::Play).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, window, cx| {
-                        this.run_quick_command(&command_for_run, window, cx);
-                        cx.stop_propagation();
-                    }),
-                ),
-            )
-            .child(
-                quick_command_action_button(&self.tokens, LucideIcon::Pencil).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.start_quick_command_edit(command_for_edit.clone(), cx);
-                        cx.stop_propagation();
-                    }),
-                ),
-            )
-            .child(
-                quick_command_action_button(&self.tokens, LucideIcon::Trash2).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.quick_commands.delete_command(&command_id);
-                        this.quick_commands.highlighted_command = None;
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                ),
-            )
+            .child(self.quick_command_action_button(
+                LucideIcon::Play,
+                move |this, _event, window, cx| {
+                    this.run_quick_command(&command_for_run, window, cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
+            .child(self.quick_command_action_button(
+                LucideIcon::Pencil,
+                move |this, _event, _window, cx| {
+                    this.start_quick_command_edit(command_for_edit.clone(), cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
+            .child(self.quick_command_action_button(
+                LucideIcon::Trash2,
+                move |this, _event, _window, cx| {
+                    this.quick_commands.delete_command(&command_id);
+                    this.quick_commands.highlighted_command = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                },
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1157,40 +1147,32 @@ impl WorkspaceApp {
             .flex()
             .justify_end()
             .gap(px(8.0))
+            .child(self.quick_command_text_button(
+                self.i18n.t("terminal.quick_commands.cancel"),
+                true,
+                cx.listener(|this, _event, _window, cx| {
+                    this.quick_commands.command_editor = None;
+                    this.quick_commands.category_editor = None;
+                    this.quick_commands.focused_input = None;
+                    this.quick_commands.highlighted_command = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ))
             .child(
-                quick_command_text_button(
-                    &self.tokens,
-                    self.i18n.t("terminal.quick_commands.cancel"),
-                    false,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.quick_commands.command_editor = None;
-                        this.quick_commands.category_editor = None;
-                        this.quick_commands.focused_input = None;
-                        this.quick_commands.highlighted_command = None;
+                self.quick_command_text_button(
+                    self.i18n.t(save_key),
+                    can_save,
+                    cx.listener(move |this, _event, _window, cx| {
+                        save(this, cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
-                ),
-            )
-            .child(
-                quick_command_text_button(&self.tokens, self.i18n.t(save_key), can_save)
+                )
                     .bg(if can_save {
                         rgba((theme.accent << 8) | 0x26)
                     } else {
                         rgba(0x00000000)
-                    })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            if can_save {
-                                save(this, cx);
-                            }
-                            cx.stop_propagation();
-                        }),
-                    ),
+                    }),
             )
             .into_any_element()
     }

@@ -263,29 +263,39 @@ impl WorkspaceApp {
             40.0,
             8.0,
         );
-        let menu = context_menu_event_boundary(context_menu_content(&self.tokens)
-            .w(px(MANAGER_ROW_MENU_WIDTH))
-        )
-            .child(self.render_session_manager_menu_action(
-                context_menu_item(
-                    &self.tokens,
-                    self.i18n.t("sessionManager.folder_tree.new_group"),
-                    ContextMenuItemKind::Plain,
-                    false,
-                    false,
-                ),
-                false,
-                false,
-                false,
-                cx.listener(|this, _event, _window, _cx| {
-                    this.session_manager.show_new_group = true;
-                    this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
-                    this.session_manager.focused_basic_dialog_footer_action = None;
-                    this.session_manager.new_group_name.clear();
-                    this.needs_active_pane_focus = false;
-                }),
-                cx,
-            ));
+        let menu =
+            context_menu_event_boundary(context_menu_content(&self.tokens).w(px(MANAGER_ROW_MENU_WIDTH)))
+                .child({
+                    let label = self.i18n.t("sessionManager.folder_tree.new_group");
+                    // Tauri FolderTree uses a plain Radix ContextMenuItem.
+                    // Keep the row chrome from the shared menu primitive, but
+                    // render the label through native NonSelectable text and
+                    // keep activation in the shared workspace menu guard.
+                    let item =
+                        context_menu_item_row(&self.tokens, ContextMenuItemKind::Plain, false, false)
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "session-manager-folder-tree-menu-item",
+                                "new-group",
+                                label,
+                                self.tokens.ui.text,
+                                cx,
+                            ));
+                    self.render_session_manager_menu_action(
+                        item,
+                        false,
+                        false,
+                        false,
+                        cx.listener(|this, _event, _window, _cx| {
+                            this.session_manager.show_new_group = true;
+                            this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
+                            this.session_manager.focused_basic_dialog_footer_action = None;
+                            this.session_manager.new_group_name.clear();
+                            this.needs_active_pane_focus = false;
+                        }),
+                        cx,
+                    )
+                });
 
         div()
             .absolute()

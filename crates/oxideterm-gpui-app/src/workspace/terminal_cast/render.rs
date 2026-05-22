@@ -1,93 +1,108 @@
 use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_ui::button::{
-    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-    ToolbarButtonOptions, icon_button, toolbar_button,
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, ToolbarButtonOptions,
 };
 use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
 use oxideterm_terminal_recording::{format_cast_time, format_recording_elapsed};
 
-fn terminal_cast_player_button(tokens: &ThemeTokens, icon: LucideIcon) -> gpui::Div {
-    icon_button(
-        tokens,
-        WorkspaceApp::render_lucide_icon(icon, 15.0, rgb(tokens.ui.text)),
-        IconButtonOptions {
-            background: Some(rgba((tokens.ui.bg_panel << 8) | 0xcc)),
-            border: Some(rgb(tokens.ui.border)),
-            hover_background: Some(rgb(tokens.ui.bg_hover)),
-            ..IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md)
-        },
-    )
-}
-
-fn terminal_cast_speed_button(
-    tokens: &ThemeTokens,
-    label: &'static str,
-    active: bool,
-) -> gpui::Div {
-    let background = if active {
-        rgba((tokens.ui.accent << 8) | 0x1f)
-    } else {
-        rgba((tokens.ui.bg_panel << 8) | 0xcc)
-    };
-    // Playback speed chips borrow outline-button geometry but use cast-player
-    // active colors from Tauri, so keep only the feature color contract local.
-    toolbar_button(
-        tokens,
-        label.to_string(),
-        None,
-        ToolbarButtonOptions {
-            button: ButtonOptions {
-                variant: ButtonVariant::Outline,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled: false,
-            },
-            height: Some(30.0),
-            padding_x: Some(10.0),
-            font_size: Some(12.0),
-            background: Some(background),
-            border: Some(if active {
-                rgb(tokens.ui.accent)
-            } else {
-                rgb(tokens.ui.border)
-            }),
-            text_color: Some(if active {
-                rgb(tokens.ui.accent)
-            } else {
-                rgb(tokens.ui.text_muted)
-            }),
-            hover_background: Some(background),
-            ..ToolbarButtonOptions::default()
-        },
-    )
-}
-
-fn terminal_cast_text_button(tokens: &ThemeTokens, label: &'static str) -> gpui::Div {
-    toolbar_button(
-        tokens,
-        label.to_string(),
-        None,
-        ToolbarButtonOptions {
-            button: ButtonOptions {
-                variant: ButtonVariant::Outline,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled: false,
-            },
-            height: Some(30.0),
-            padding_x: Some(10.0),
-            font_size: Some(12.0),
-            background: Some(rgba((tokens.ui.bg_panel << 8) | 0xcc)),
-            border: Some(rgb(tokens.ui.border)),
-            text_color: Some(rgb(tokens.ui.text_muted)),
-            hover_background: Some(rgb(tokens.ui.bg_hover)),
-            ..ToolbarButtonOptions::default()
-        },
-    )
-}
-
 impl WorkspaceApp {
+    fn terminal_cast_player_button(
+        &self,
+        icon: LucideIcon,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        // Cast playback controls are Tauri icon Buttons. Keep their translucent
+        // player chrome local, while routing activation through the shared
+        // browser-style action guard.
+        self.workspace_icon_action_button(
+            icon,
+            15.0,
+            rgb(self.tokens.ui.text),
+            IconButtonOptions {
+                background: Some(rgba((self.tokens.ui.bg_panel << 8) | 0xcc)),
+                border: Some(rgb(self.tokens.ui.border)),
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md)
+            },
+            listener,
+            cx,
+        )
+    }
+
+    fn terminal_cast_speed_button(
+        &self,
+        label: &'static str,
+        active: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> gpui::Div {
+        let background = if active {
+            rgba((self.tokens.ui.accent << 8) | 0x1f)
+        } else {
+            rgba((self.tokens.ui.bg_panel << 8) | 0xcc)
+        };
+        // Playback speed chips borrow outline-button geometry but use cast-player
+        // active colors from Tauri, so only the color contract stays feature-local.
+        self.workspace_toolbar_action_button(
+            label.to_string(),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                height: Some(30.0),
+                padding_x: Some(10.0),
+                font_size: Some(12.0),
+                background: Some(background),
+                border: Some(if active {
+                    rgb(self.tokens.ui.accent)
+                } else {
+                    rgb(self.tokens.ui.border)
+                }),
+                text_color: Some(if active {
+                    rgb(self.tokens.ui.accent)
+                } else {
+                    rgb(self.tokens.ui.text_muted)
+                }),
+                hover_background: Some(background),
+                ..ToolbarButtonOptions::default()
+            },
+            listener,
+        )
+    }
+
+    fn terminal_cast_text_button(
+        &self,
+        label: &'static str,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> gpui::Div {
+        self.workspace_toolbar_action_button(
+            label.to_string(),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                height: Some(30.0),
+                padding_x: Some(10.0),
+                font_size: Some(12.0),
+                background: Some(rgba((self.tokens.ui.bg_panel << 8) | 0xcc)),
+                border: Some(rgb(self.tokens.ui.border)),
+                text_color: Some(rgb(self.tokens.ui.text_muted)),
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..ToolbarButtonOptions::default()
+            },
+            listener,
+        )
+    }
+
     pub(in crate::workspace) fn render_terminal_recording_controls(
         &self,
         status: TerminalRecordingStatus,
@@ -133,45 +148,38 @@ impl WorkspaceApp {
                     })
                     .child(format_recording_elapsed(status.elapsed)),
             )
-            .child(
-                terminal_cast_player_button(
-                    &self.tokens,
+            .child(self.terminal_cast_player_button(
+                if is_paused {
+                    LucideIcon::Play
+                } else {
+                    LucideIcon::Pause
+                },
+                move |this, _event, _window, cx| {
                     if is_paused {
-                        LucideIcon::Play
+                        this.resume_active_terminal_recording(cx);
                     } else {
-                        LucideIcon::Pause
-                    },
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if is_paused {
-                            this.resume_active_terminal_recording(cx);
-                        } else {
-                            this.pause_active_terminal_recording(cx);
-                        }
-                        cx.stop_propagation();
-                    }),
-                ),
-            )
-            .child(
-                terminal_cast_player_button(&self.tokens, LucideIcon::Square).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.stop_active_terminal_recording(cx);
-                        cx.stop_propagation();
-                    }),
-                ),
-            )
-            .child(
-                terminal_cast_player_button(&self.tokens, LucideIcon::Trash2).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.discard_active_terminal_recording(cx);
-                        cx.stop_propagation();
-                    }),
-                ),
-            )
+                        this.pause_active_terminal_recording(cx);
+                    }
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
+            .child(self.terminal_cast_player_button(
+                LucideIcon::Square,
+                |this, _event, _window, cx| {
+                    this.stop_active_terminal_recording(cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
+            .child(self.terminal_cast_player_button(
+                LucideIcon::Trash2,
+                |this, _event, _window, cx| {
+                    this.discard_active_terminal_recording(cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -630,125 +638,88 @@ impl WorkspaceApp {
                                                 .flex()
                                                 .items_center()
                                                 .gap(px(8.0))
-                                                .child(
-                                                    terminal_cast_player_button(
-                                                        &self.tokens,
-                                                        if player.playback.playing() {
-                                                            LucideIcon::Pause
-                                                        } else {
-                                                            LucideIcon::Play
-                                                        },
-                                                    )
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        cx.listener(|this, _event, _window, cx| {
-                                                            this.toggle_terminal_cast_playback(cx);
-                                                            cx.stop_propagation();
-                                                        }),
-                                                    ),
-                                                )
-                                                .child(
-                                                    terminal_cast_speed_button(
-                                                        &self.tokens,
-                                                        "0.5x",
-                                                        player.playback.speed() == 0.5,
-                                                    )
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        cx.listener(|this, _event, _window, cx| {
-                                                            this.set_terminal_cast_speed(0.5, cx);
-                                                            cx.stop_propagation();
-                                                        }),
-                                                    ),
-                                                )
-                                                .child(
-                                                    terminal_cast_speed_button(
-                                                        &self.tokens,
-                                                        "1x",
-                                                        player.playback.speed() == 1.0,
-                                                    )
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        cx.listener(|this, _event, _window, cx| {
-                                                            this.set_terminal_cast_speed(1.0, cx);
-                                                            cx.stop_propagation();
-                                                        }),
-                                                    ),
-                                                )
-                                                .child(
-                                                    terminal_cast_speed_button(
-                                                        &self.tokens,
-                                                        "2x",
-                                                        player.playback.speed() == 2.0,
-                                                    )
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        cx.listener(|this, _event, _window, cx| {
-                                                            this.set_terminal_cast_speed(2.0, cx);
-                                                            cx.stop_propagation();
-                                                        }),
-                                                    ),
-                                                ),
+                                                .child(self.terminal_cast_player_button(
+                                                    if player.playback.playing() {
+                                                        LucideIcon::Pause
+                                                    } else {
+                                                        LucideIcon::Play
+                                                    },
+                                                    |this, _event, _window, cx| {
+                                                        this.toggle_terminal_cast_playback(cx);
+                                                        cx.stop_propagation();
+                                                    },
+                                                    cx,
+                                                ))
+                                                .child(self.terminal_cast_speed_button(
+                                                    "0.5x",
+                                                    player.playback.speed() == 0.5,
+                                                    cx.listener(|this, _event, _window, cx| {
+                                                        this.set_terminal_cast_speed(0.5, cx);
+                                                        cx.stop_propagation();
+                                                    }),
+                                                ))
+                                                .child(self.terminal_cast_speed_button(
+                                                    "1x",
+                                                    player.playback.speed() == 1.0,
+                                                    cx.listener(|this, _event, _window, cx| {
+                                                        this.set_terminal_cast_speed(1.0, cx);
+                                                        cx.stop_propagation();
+                                                    }),
+                                                ))
+                                                .child(self.terminal_cast_speed_button(
+                                                    "2x",
+                                                    player.playback.speed() == 2.0,
+                                                    cx.listener(|this, _event, _window, cx| {
+                                                        this.set_terminal_cast_speed(2.0, cx);
+                                                        cx.stop_propagation();
+                                                    }),
+                                                )),
                                         )
                                         .child(
                                             div()
                                                 .flex()
                                                 .items_center()
                                                 .gap(px(8.0))
-                                                .child(
-                                                    terminal_cast_text_button(&self.tokens, "-10s")
-                                                        .on_mouse_down(
-                                                            MouseButton::Left,
-                                                            cx.listener(
-                                                                |this, _event, _window, cx| {
-                                                                    if let Some(player) =
-                                                                        &this.terminal_cast_player
-                                                                    {
-                                                                        let target = (player
-                                                                            .playback
-                                                                            .position()
-                                                                            - 10.0)
-                                                                            / player
-                                                                                .playback
-                                                                                .recording()
-                                                                                .duration
-                                                                                .max(1.0);
-                                                                        this.seek_terminal_cast(
-                                                                            target, cx,
-                                                                        );
-                                                                    }
-                                                                    cx.stop_propagation();
-                                                                },
-                                                            ),
-                                                        ),
-                                                )
-                                                .child(
-                                                    terminal_cast_text_button(&self.tokens, "+10s")
-                                                        .on_mouse_down(
-                                                            MouseButton::Left,
-                                                            cx.listener(
-                                                                |this, _event, _window, cx| {
-                                                                    if let Some(player) =
-                                                                        &this.terminal_cast_player
-                                                                    {
-                                                                        let target = (player
-                                                                            .playback
-                                                                            .position()
-                                                                            + 10.0)
-                                                                            / player
-                                                                                .playback
-                                                                                .recording()
-                                                                                .duration
-                                                                                .max(1.0);
-                                                                        this.seek_terminal_cast(
-                                                                            target, cx,
-                                                                        );
-                                                                    }
-                                                                    cx.stop_propagation();
-                                                                },
-                                                            ),
-                                                        ),
-                                                ),
+                                                .child(self.terminal_cast_text_button(
+                                                    "-10s",
+                                                    cx.listener(|this, _event, _window, cx| {
+                                                        if let Some(player) =
+                                                            &this.terminal_cast_player
+                                                        {
+                                                            let target = (player
+                                                                .playback
+                                                                .position()
+                                                                - 10.0)
+                                                                / player
+                                                                    .playback
+                                                                    .recording()
+                                                                    .duration
+                                                                    .max(1.0);
+                                                            this.seek_terminal_cast(target, cx);
+                                                        }
+                                                        cx.stop_propagation();
+                                                    }),
+                                                ))
+                                                .child(self.terminal_cast_text_button(
+                                                    "+10s",
+                                                    cx.listener(|this, _event, _window, cx| {
+                                                        if let Some(player) =
+                                                            &this.terminal_cast_player
+                                                        {
+                                                            let target = (player
+                                                                .playback
+                                                                .position()
+                                                                + 10.0)
+                                                                / player
+                                                                    .playback
+                                                                    .recording()
+                                                                    .duration
+                                                                    .max(1.0);
+                                                            this.seek_terminal_cast(target, cx);
+                                                        }
+                                                        cx.stop_propagation();
+                                                    }),
+                                                )),
                                         ),
                                 ),
                         ),

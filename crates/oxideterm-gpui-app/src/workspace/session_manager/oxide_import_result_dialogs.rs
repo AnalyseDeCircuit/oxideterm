@@ -281,12 +281,13 @@ impl WorkspaceApp {
                     focused_action,
                     false,
                     None,
-                    cx.listener(|this, _event, _window, cx| {
+                    |this, _event, _window, cx| {
                         this.session_manager.oxide_import_dialog = None;
                         this.session_manager.focused_input = None;
                         cx.notify();
                         cx.stop_propagation();
-                    }),
+                    },
+                    cx,
                 ),
             )
             .into_any_element()
@@ -313,7 +314,7 @@ impl WorkspaceApp {
                         dialog.focused_footer_action,
                         dialog.busy,
                         None,
-                        cx.listener(|this, _event, _window, cx| {
+                        |this, _event, _window, cx| {
                             if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut()
                             {
                                 dialog.preview = None;
@@ -321,7 +322,8 @@ impl WorkspaceApp {
                             }
                             cx.notify();
                             cx.stop_propagation();
-                        }),
+                        },
+                        cx,
                     ),
                 )
                 .child(
@@ -336,10 +338,11 @@ impl WorkspaceApp {
                         dialog.focused_footer_action,
                         primary_disabled,
                         None,
-                        cx.listener(|this, _event, _window, cx| {
+                        |this, _event, _window, cx| {
                             this.apply_oxide_import_dialog(cx);
                             cx.stop_propagation();
-                        }),
+                        },
+                        cx,
                     ),
                 )
                 .into_any_element()
@@ -359,10 +362,11 @@ impl WorkspaceApp {
                         dialog.focused_footer_action,
                         dialog.busy,
                         None,
-                        cx.listener(|this, _event, _window, cx| {
+                        |this, _event, _window, cx| {
                             this.select_oxide_import_file(cx);
                             cx.stop_propagation();
-                        }),
+                        },
+                        cx,
                     ),
                 )
                 .child(
@@ -373,12 +377,13 @@ impl WorkspaceApp {
                         dialog.focused_footer_action,
                         dialog.busy,
                         None,
-                        cx.listener(|this, _event, _window, cx| {
+                        |this, _event, _window, cx| {
                             this.session_manager.oxide_import_dialog = None;
                             this.session_manager.focused_input = None;
                             cx.notify();
                             cx.stop_propagation();
-                        }),
+                        },
+                        cx,
                     ),
                 )
                 .child(
@@ -393,10 +398,11 @@ impl WorkspaceApp {
                         dialog.focused_footer_action,
                         primary_disabled,
                         None,
-                        cx.listener(|this, _event, _window, cx| {
+                        |this, _event, _window, cx| {
                             this.preview_oxide_import_dialog(cx);
                             cx.stop_propagation();
-                        }),
+                        },
+                        cx,
                     ),
                 )
                 .into_any_element()

@@ -488,9 +488,10 @@ impl WorkspaceApp {
         secondary_label: String,
         primary_label: String,
         focused_action: Option<OxideDialogFooterAction>,
-        secondary_listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        primary_listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        cancel_listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        secondary_listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        primary_listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cancel_listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let primary_label = self.render_oxide_primary_button_label(busy, primary_label);
         let cancel_disabled = busy;
@@ -511,6 +512,7 @@ impl WorkspaceApp {
                     cancel_disabled,
                     None,
                     cancel_listener,
+                    cx,
                 )
             )
             .when(!secondary_label.is_empty(), |footer| {
@@ -523,6 +525,7 @@ impl WorkspaceApp {
                         secondary_disabled,
                         None,
                         secondary_listener,
+                        cx,
                     )
                 )
             })
@@ -535,6 +538,7 @@ impl WorkspaceApp {
                     primary_disabled,
                     Some(140.0),
                     primary_listener,
+                    cx,
                 )
             )
             .into_any_element()
@@ -548,27 +552,22 @@ impl WorkspaceApp {
         focused_action: Option<OxideDialogFooterAction>,
         disabled: bool,
         min_width: Option<f32>,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
     ) -> Div {
         // Tauri DialogFooter buttons share the same disabled guard for mouse
         // activation and keyboard FocusCycle activation. Keep .oxide import
         // and export footers on one action wrapper instead of per-dialog
         // `when(!disabled)` blocks.
-        self.workspace_toolbar_action_button(
+        self.workspace_modal_footer_action_button(
             label,
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled,
-                },
-                min_width,
-                focus_visible: focused_action == Some(action),
-                ..ToolbarButtonOptions::default()
-            },
+            variant,
+            action,
+            disabled,
+            focused_action,
+            min_width,
             listener,
+            cx,
         )
     }
 

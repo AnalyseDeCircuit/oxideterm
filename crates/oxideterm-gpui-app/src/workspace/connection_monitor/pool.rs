@@ -171,10 +171,10 @@ impl WorkspaceApp {
 
     fn render_connection_pool_refresh_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        // Pool header refresh is toolbar-shaped and follows the same browser
-        // button guard/focus path as other migrated action buttons.
-        toolbar_button(
-            &self.tokens,
+        // Pool header refresh is toolbar-shaped and follows Tauri's outline
+        // Button. Use the workspace wrapper so activation guards stay shared
+        // with other migrated action buttons.
+        self.workspace_toolbar_action_button(
             self.i18n.t("connections.panel.refresh"),
             Some(Self::render_lucide_icon(
                 LucideIcon::RefreshCw,
@@ -199,16 +199,13 @@ impl WorkspaceApp {
                 icon_gap: Some(8.0),
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(|this, _event, _window, cx| {
+                this.refresh_connection_monitor_pool_stats();
+                cx.stop_propagation();
+                cx.notify();
+            }),
         )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.refresh_connection_monitor_pool_stats();
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .into_any_element()
+        .into_any_element()
     }
 
     fn render_connection_pool_empty_state(&self, cx: &mut Context<Self>) -> AnyElement {

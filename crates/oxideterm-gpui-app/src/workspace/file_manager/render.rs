@@ -1081,10 +1081,7 @@ impl WorkspaceApp {
                 "file-manager-list-virtual",
                 row_count,
                 self.file_manager.list_scroll.clone(),
-                TauriVirtualListSpec::new(
-                    px(FILE_MANAGER_ROW_HEIGHT),
-                    FILE_MANAGER_VIRTUAL_OVERSCAN,
-                ),
+                file_manager_list_virtual_spec(),
                 move |range, _window, _cx| {
                     let selectable_state = row_selectable_state.clone();
                     range

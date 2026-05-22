@@ -4,7 +4,7 @@ use std::time::{Duration, Instant, SystemTime};
 use gpui::{MouseButton, PathBuilder, canvas, fill, point, rgba};
 use oxideterm_connection_monitor::{ProfilerState, ResourceSampler};
 use oxideterm_gpui_ui::button::{
-    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, toolbar_button,
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
 };
 use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_event_boundary};
 use oxideterm_gpui_ui::progress::progress;

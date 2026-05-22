@@ -135,12 +135,13 @@ impl WorkspaceApp {
                                 LucideIcon::X,
                                 theme.text_muted,
                                 has_background,
-                                cx.listener(|this, _event, _window, cx| {
+                                |this, _event, _window, cx| {
                                     this.forwarding_view.editing_forward = None;
                                     this.forwarding_view.focused_input = None;
                                     cx.notify();
                                     cx.stop_propagation();
-                                }),
+                                },
+                                cx,
                             )),
                     )
                     .child(

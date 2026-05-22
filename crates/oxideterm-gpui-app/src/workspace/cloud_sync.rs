@@ -2447,36 +2447,36 @@ impl WorkspaceApp {
     }
 
     fn open_cloud_sync_select_for_keyboard(&mut self, select: CloudSyncSelect) {
-        self.cloud_sync_focused_select = Some(select);
-        self.cloud_sync_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-        self.cloud_sync_open_select = Some(select);
-        self.cloud_sync_select_highlighted =
-            Some((select, self.cloud_sync_selected_option_index(select)));
+        let selected_index = self.cloud_sync_selected_option_index(select);
+        browser_behavior::open_browser_highlighted_select_from_keyboard(
+            &mut self.cloud_sync_open_select,
+            &mut self.cloud_sync_focused_select,
+            &mut self.cloud_sync_select_focus_origin,
+            &mut self.cloud_sync_select_highlighted,
+            select,
+            selected_index,
+        );
     }
 
     fn toggle_cloud_sync_select_from_pointer(&mut self, select: CloudSyncSelect) {
-        // Browser/Radix Select opened by pointer keeps trigger focus ownership
-        // but does not draw a focus-visible ring. Store the modality with the
-        // open/highlight state so trigger, menu, and option clicks stay paired.
-        self.cloud_sync_focused_select = Some(select);
-        self.cloud_sync_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Pointer);
-        self.cloud_sync_open_select = if self.cloud_sync_open_select == Some(select) {
-            self.cloud_sync_select_highlighted = None;
-            None
-        } else {
-            self.cloud_sync_select_highlighted =
-                Some((select, self.cloud_sync_selected_option_index(select)));
-            Some(select)
-        };
+        let selected_index = self.cloud_sync_selected_option_index(select);
+        browser_behavior::toggle_browser_highlighted_select_from_pointer(
+            &mut self.cloud_sync_open_select,
+            &mut self.cloud_sync_focused_select,
+            &mut self.cloud_sync_select_focus_origin,
+            &mut self.cloud_sync_select_highlighted,
+            select,
+            selected_index,
+        );
     }
 
     fn clear_cloud_sync_select_focus(&mut self) {
-        // Browser focus leaves a Radix Select trigger when the user activates a
-        // sibling input/button. Keep popup and focus-ring ownership paired.
-        self.cloud_sync_open_select = None;
-        self.cloud_sync_focused_select = None;
-        self.cloud_sync_select_focus_origin = None;
-        self.cloud_sync_select_highlighted = None;
+        browser_behavior::clear_browser_highlighted_select_focus(
+            &mut self.cloud_sync_open_select,
+            &mut self.cloud_sync_focused_select,
+            &mut self.cloud_sync_select_focus_origin,
+            &mut self.cloud_sync_select_highlighted,
+        );
     }
 
     fn close_cloud_sync_select_for_scroll(&mut self) -> bool {

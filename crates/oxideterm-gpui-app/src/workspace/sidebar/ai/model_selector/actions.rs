@@ -21,10 +21,7 @@ impl WorkspaceApp {
             self.refresh_ai_model_selector_provider_statuses(cx);
             window.focus(&self.focus_handle);
         } else {
-            self.ai_model_selector_focus_origin = None;
-            self.ai_model_selector_search_focused = false;
-            self.ai_model_selector_search_query.clear();
-            self.ai_model_selector_highlighted_model = None;
+            self.close_ai_model_selector();
         }
         self.ime_marked_text = None;
         cx.notify();
@@ -305,11 +302,7 @@ impl WorkspaceApp {
         if previous_model.as_deref() != Some(model.as_str()) {
             self.update_ai_model_switch_warning(&provider_id, &model);
         }
-        self.ai_model_selector_open = false;
-        self.ai_model_selector_focus_origin = None;
-        self.ai_model_selector_search_focused = false;
-        self.ai_model_selector_search_query.clear();
-        self.ai_model_selector_highlighted_model = None;
+        self.close_ai_model_selector();
         cx.notify();
     }
 

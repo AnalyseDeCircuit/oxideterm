@@ -245,6 +245,14 @@ impl WorkspaceApp {
         .when(actionable, |button| {
             button.on_mouse_down(MouseButton::Left, listener)
         })
+        .when(!actionable, |button| {
+            // Disabled browser buttons do not activate their parent row. Stop the
+            // click at the shared tooltip button so file/SFTP/sidebar toolbars do
+            // not each need a local disabled-event patch.
+            button.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+        })
         .when(flex_none, |button| button.flex_none())
         .into_any_element()
     }
@@ -271,6 +279,13 @@ impl WorkspaceApp {
         .when(actionable, |button| {
             button.on_mouse_down(MouseButton::Left, cx.listener(listener))
         })
+        .when(!actionable, |button| {
+            // Match the DOM disabled button contract for inline row actions:
+            // inert buttons consume the pointer instead of selecting/opening the row.
+            button.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+        })
     }
 
     fn workspace_toolbar_action_button(
@@ -294,6 +309,63 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 })
             })
+    }
+
+    fn workspace_confirm_footer_action_button(
+        &self,
+        label: String,
+        variant: oxideterm_gpui_ui::button::ButtonVariant,
+        action: ConfirmDialogAction,
+        disabled: bool,
+        focused_action: Option<ConfirmDialogAction>,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        self.workspace_modal_footer_action_button(
+            label,
+            variant,
+            action,
+            disabled,
+            focused_action,
+            None,
+            listener,
+            cx,
+        )
+    }
+
+    fn workspace_modal_footer_action_button<T>(
+        &self,
+        label: String,
+        variant: oxideterm_gpui_ui::button::ButtonVariant,
+        action: T,
+        disabled: bool,
+        focused_action: Option<T>,
+        min_width: Option<f32>,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div
+    where
+        T: std::marker::Copy + Eq,
+    {
+        // DialogFooter buttons across settings, AI, FileManager, and import/export
+        // use the same shadcn Button contract: disabled buttons are inert, and the
+        // focus ring only follows explicit keyboard-owned footer focus.
+        self.workspace_toolbar_action_button(
+            label,
+            None,
+            oxideterm_gpui_ui::button::ToolbarButtonOptions {
+                button: oxideterm_gpui_ui::button::ButtonOptions {
+                    variant,
+                    size: oxideterm_gpui_ui::button::ButtonSize::Sm,
+                    radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
+                    disabled,
+                },
+                min_width,
+                focus_visible: focused_action == Some(action),
+                ..oxideterm_gpui_ui::button::ToolbarButtonOptions::default()
+            },
+            cx.listener(listener),
+        )
     }
 
     fn workspace_clickable_row_action(

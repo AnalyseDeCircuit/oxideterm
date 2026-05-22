@@ -31,7 +31,7 @@ use oxideterm_gpui_ui::{
     checkbox,
     context_menu::{
         ContextMenuActionableStyle, ContextMenuItemKind, context_menu_content,
-        context_menu_event_boundary, context_menu_item,
+        context_menu_event_boundary, context_menu_item_row,
     },
     icon_badge,
     modal::{dismissible_dialog_backdrop, overlay_content_boundary},

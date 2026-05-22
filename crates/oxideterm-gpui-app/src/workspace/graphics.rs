@@ -5,7 +5,6 @@ use oxideterm_gpui_ui::{
     TextInputView,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, button_with,
-        toolbar_button,
     },
     text_input_anchor_probe,
 };
@@ -1097,8 +1096,9 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        toolbar_button(
-            &self.tokens,
+        // Graphics toolbar buttons are shadcn-style Tauri actions; route
+        // disabled activation through the same workspace guard as other toolbars.
+        self.workspace_toolbar_action_button(
             self.i18n.t(label_key),
             None,
             ToolbarButtonOptions {
@@ -1110,9 +1110,6 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(move |this, _event, window, cx| {
                 match action {
                     GraphicsToolbarAction::Reconnect => {

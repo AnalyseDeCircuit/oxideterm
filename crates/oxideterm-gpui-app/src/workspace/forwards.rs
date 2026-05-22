@@ -16,7 +16,7 @@ use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant as UiButtonVariant,
-        IconButtonOptions, ToolbarButtonOptions, icon_button, toolbar_button,
+        IconButtonOptions, ToolbarButtonOptions,
     },
     confirm_dialog,
     surface::{color_for_background, color_for_background_or_alpha, color_with_alpha},

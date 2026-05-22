@@ -101,8 +101,7 @@ impl WorkspaceApp {
             ),
         };
         let icon = icon.map(|icon| Self::render_lucide_icon(icon, 14.0, rgb(text)));
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             String::new(),
             icon,
             ToolbarButtonOptions {
@@ -122,11 +121,11 @@ impl WorkspaceApp {
                 font_size: Some(self.tokens.metrics.ui_text_sm),
                 ..ToolbarButtonOptions::default()
             },
+            listener,
         )
         // Forwards labels need the same CJK font fallback as the Tauri UI.
         // Keep that text element outside the shared primitive's plain label.
         .child(self.render_forward_ui_text(label))
-        .when(enabled, |button| button.on_mouse_down(MouseButton::Left, listener))
     }
 
     fn render_forward_icon_button(
@@ -134,18 +133,24 @@ impl WorkspaceApp {
         icon: LucideIcon,
         color: u32,
         has_background: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(icon, 13.0, forwards_palette_color(color)),
+        // Forwards table actions are Tauri icon Buttons. Use the workspace
+        // wrapper so disabled/loading action semantics stay shared with other
+        // toolbar-style controls.
+        self.workspace_icon_action_button(
+            icon,
+            13.0,
+            forwards_palette_color(color),
             IconButtonOptions {
                 has_background,
                 ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Md)
             },
+            listener,
+            cx,
         )
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
+        .into_any_element()
     }
 
     fn render_forward_ui_text(&self, text: String) -> gpui::Div {
@@ -318,11 +323,12 @@ impl WorkspaceApp {
                                 LucideIcon::X,
                                 self.tokens.ui.text_muted,
                                 has_background,
-                                cx.listener(move |this, _event, _window, cx| {
+                                move |this, _event, _window, cx| {
                                     this.dismiss_detected_port(dismiss_port);
                                     cx.notify();
                                     cx.stop_propagation();
-                                }),
+                                },
+                                cx,
                             )),
                     )
             }))

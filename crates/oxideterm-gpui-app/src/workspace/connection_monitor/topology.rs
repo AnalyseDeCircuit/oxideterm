@@ -590,7 +590,15 @@ impl WorkspaceApp {
         }
 
         if let Some(menu) = self.connection_monitor.topology_menu.clone() {
-            graph = graph.child(self.render_topology_node_action_menu(menu, cx));
+            // Topology node actions are a context menu, not a graph child popover:
+            // keep outside pointer and Esc dismissal on the same workspace menu
+            // owner as FileManager/SFTP/session menus.
+            graph = graph.child(
+                self.workspace_context_menu_backdrop(
+                    self.render_topology_node_action_menu(menu, cx),
+                    cx,
+                ),
+            );
         }
 
         div()

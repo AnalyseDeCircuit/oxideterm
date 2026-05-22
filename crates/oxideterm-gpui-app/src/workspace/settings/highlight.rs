@@ -76,10 +76,10 @@ impl WorkspaceApp {
                                 cx,
                             ))
                             .child(
-                                // Tauri uses the shared shadcn Button for this action; keep the
-                                // native focus/disabled semantics on the shared toolbar primitive.
-                                toolbar_button(
-                                    &self.tokens,
+                                // Tauri uses the shared shadcn Button for this action. Route it
+                                // through the workspace wrapper so max-rule disabled state cannot
+                                // dispatch while preserving the existing Button chrome.
+                                self.workspace_toolbar_action_button(
                                     self.i18n
                                         .t("settings_view.terminal.highlight_rules.add_rule"),
                                     Some(Self::render_lucide_icon(
@@ -96,9 +96,6 @@ impl WorkspaceApp {
                                         },
                                         ..ToolbarButtonOptions::default()
                                     },
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
                                     cx.listener(move |this, _event, _window, cx| {
                                         if this
                                             .settings_store
@@ -406,8 +403,9 @@ impl WorkspaceApp {
         action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        toolbar_button(
-            &self.tokens,
+        // Rule-row ghost Buttons mirror TerminalHighlightRulesSection.tsx and
+        // share the same disabled action guard as other settings Buttons.
+        self.workspace_toolbar_action_button(
             label,
             None,
             ToolbarButtonOptions {
@@ -419,13 +417,8 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
-                if enabled {
-                    action(this, cx);
-                }
+                action(this, cx);
                 cx.stop_propagation();
             }),
         )

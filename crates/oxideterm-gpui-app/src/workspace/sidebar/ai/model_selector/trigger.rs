@@ -99,10 +99,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, window, cx| {
-                        this.ai_model_selector_open = false;
-                        this.ai_model_selector_search_focused = false;
-                        this.ai_model_selector_search_query.clear();
-                        this.ai_model_selector_highlighted_model = None;
+                        this.close_ai_model_selector();
                         this.open_ai_settings(window, cx);
                         cx.stop_propagation();
                     }),

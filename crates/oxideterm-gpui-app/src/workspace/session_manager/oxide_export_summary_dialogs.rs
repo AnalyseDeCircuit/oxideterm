@@ -364,19 +364,20 @@ impl WorkspaceApp {
             String::new(),
             primary_label,
             dialog.focused_footer_action,
-            cx.listener(|_this, _event, _window, cx| {
+            |_this, _event, _window, cx| {
                 cx.stop_propagation();
-            }),
-            cx.listener(|this, _event, _window, cx| {
+            },
+            |this, _event, _window, cx| {
                 this.export_oxide_dialog(cx);
                 cx.stop_propagation();
-            }),
-            cx.listener(|this, _event, _window, cx| {
+            },
+            |this, _event, _window, cx| {
                 this.session_manager.oxide_export_dialog = None;
                 this.session_manager.focused_input = None;
                 cx.notify();
                 cx.stop_propagation();
-            }),
+            },
+            cx,
         )
     }
 }

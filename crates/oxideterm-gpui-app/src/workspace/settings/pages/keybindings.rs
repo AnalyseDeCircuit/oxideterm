@@ -191,27 +191,21 @@ impl WorkspaceApp {
         let mut row = div().flex().items_center().gap(px(4.0));
         for filter in filters {
             let active = self.keybinding_scope_filter == filter;
-            row = row.child(
-                self.keybinding_scope_filter_button(filter, active)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.keybinding_scope_filter = filter;
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ),
-            );
+            row = row.child(self.keybinding_scope_filter_button(filter, active, cx));
         }
         row.into_any_element()
     }
 
-    fn keybinding_scope_filter_button(&self, filter: KeybindingScopeFilter, active: bool) -> Div {
+    fn keybinding_scope_filter_button(
+        &self,
+        filter: KeybindingScopeFilter,
+        active: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
         // Tauri renders these as compact shadcn Buttons (`h-8 px-3 text-xs`).
-        // Route through the shared toolbar primitive so disabled/focus/loading
-        // additions do not need another local button implementation.
-        toolbar_button(
-            &self.tokens,
+        // Route activation through the workspace wrapper so scope pills share
+        // the same disabled/loading click guard as every other settings Button.
+        self.workspace_toolbar_action_button(
             self.i18n.t(filter.label_key()),
             None,
             ToolbarButtonOptions {
@@ -229,6 +223,11 @@ impl WorkspaceApp {
                 padding_x: Some(KEYBINDING_SCOPE_FILTER_PADDING_X),
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(move |this, _event, _window, cx| {
+                this.keybinding_scope_filter = filter;
+                cx.stop_propagation();
+                cx.notify();
+            }),
         )
     }
 
@@ -469,16 +468,24 @@ impl WorkspaceApp {
                                     ),
                             )
                             .when(modified, |controls| {
-                                controls.child(
-                                    self.keybinding_icon_button(LucideIcon::RotateCcw, false)
-                                        .on_mouse_down(
-                                            MouseButton::Left,
-                                            cx.listener(move |this, _event, window, cx| {
-                                                this.reset_keybinding(&reset_action_id, window, cx);
-                                                cx.stop_propagation();
-                                            }),
-                                        ),
-                                )
+                                controls.child(self.workspace_icon_action_button(
+                                    LucideIcon::RotateCcw,
+                                    14.0,
+                                    rgb(self.tokens.ui.text_muted),
+                                    IconButtonOptions {
+                                        hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                                        // KeybindingEditorSection renders this
+                                        // as a compact icon Button. Use the
+                                        // shared icon guard instead of a local
+                                        // wrapper so reset actions cannot drift.
+                                        ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+                                    },
+                                    move |this, _event, window, cx| {
+                                        this.reset_keybinding(&reset_action_id, window, cx);
+                                        cx.stop_propagation();
+                                    },
+                                    cx,
+                                ))
                             })
                     }),
             )
@@ -623,24 +630,6 @@ impl WorkspaceApp {
                 cx,
             ))
             .into_any_element()
-    }
-
-    fn keybinding_icon_button(&self, icon: LucideIcon, focus_visible: bool) -> Div {
-        // RecordingCell's icon buttons are still custom-sized, but focus-visible
-        // now enters through the shared icon primitive instead of a local wrapper.
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(
-                icon,
-                14.0,
-                rgb(self.tokens.ui.text_muted),
-            ),
-            IconButtonOptions {
-                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
-                focus_visible,
-                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
-            },
-        )
     }
 
     fn keybinding_recording_confirm_button(
