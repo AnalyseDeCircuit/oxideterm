@@ -178,8 +178,7 @@ impl WorkspaceApp {
         } else {
             rgb(theme.text_muted)
         };
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label.into(),
             None,
             ToolbarButtonOptions {
@@ -200,9 +199,9 @@ impl WorkspaceApp {
                     SFTP_TEXT_XS,
                 )
             },
+            on_click,
         )
-        .on_mouse_down(MouseButton::Left, on_click)
-            .into_any_element()
+        .into_any_element()
     }
 
     fn render_sftp_font_sample_section(

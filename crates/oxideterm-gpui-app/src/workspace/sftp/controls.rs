@@ -52,40 +52,17 @@ impl WorkspaceApp {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         workspace: gpui::Entity<Self>,
     ) -> AnyElement {
-        let title_for_move = title.clone();
-        let title_element_id = title.clone();
-        let title_request_id = title.clone();
-        let tooltip_workspace = workspace.clone();
-        let clear_workspace = workspace;
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(icon, SFTP_ICON_SM, rgb(self.tokens.ui.text)),
-            // Tauri SFTP toolbar buttons render normal opacity; disabled states
-            // are handled by callers that omit the action.
+        self.workspace_tooltip_icon_button(
+            icon,
+            SFTP_ICON_SM,
+            rgb(self.tokens.ui.text),
             IconButtonOptions::opaque_toolbar(SFTP_TOOL_BUTTON, ButtonRadius::Md),
+            title,
+            "sftp-icon-button",
+            true,
+            listener,
+            workspace,
         )
-            .id((gpui::ElementId::from("sftp-icon-button"), title_element_id))
-            .flex_none()
-            .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
-                let _ = tooltip_workspace.update(cx, |this, cx| {
-                    this.queue_workspace_tooltip(
-                        title_request_id.clone(),
-                        title_for_move.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
-                });
-            })
-            .on_hover(move |hovered: &bool, _window, cx| {
-                if !*hovered {
-                    let _ = clear_workspace.update(cx, |this, cx| {
-                        this.clear_workspace_tooltip(&title, cx);
-                    });
-                }
-            })
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
     }
 
     fn render_sftp_nav_button(
@@ -133,8 +110,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(
                 icon,
@@ -153,16 +129,13 @@ impl WorkspaceApp {
                     SFTP_TEXT_XS,
                 )
             },
+            cx.listener(move |this, _event, _window, cx| {
+                this.queue_sftp_transfers(pane, direction);
+                cx.stop_propagation();
+                cx.notify();
+            }),
         )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.queue_sftp_transfers(pane, direction);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .into_any_element()
+        .into_any_element()
     }
 
     fn render_sftp_text_button(
@@ -211,8 +184,7 @@ impl WorkspaceApp {
                 None,
             ),
         };
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label,
             None,
             ToolbarButtonOptions {
@@ -229,9 +201,9 @@ impl WorkspaceApp {
                     SFTP_TEXT_XS,
                 )
             },
+            listener,
         )
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
+        .into_any_element()
     }
 
     fn queue_title(&self, active_count: usize) -> String {

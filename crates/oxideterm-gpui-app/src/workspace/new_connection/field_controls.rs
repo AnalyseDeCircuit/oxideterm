@@ -23,21 +23,25 @@ impl WorkspaceApp {
         // New-connection selects share browser focus-origin semantics with
         // settings selects: pointer-opened menus should not render a keyboard
         // focus-visible ring on the trigger.
-        if self.open_new_connection_select == Some(select_id) {
-            self.close_new_connection_select();
-            return;
-        }
-        self.new_connection_select_focus_origin =
-            Some(browser_behavior::BrowserFocusOrigin::Pointer);
-        self.open_new_connection_select = Some(select_id);
+        browser_behavior::toggle_browser_trigger_select_from_pointer(
+            &mut self.open_new_connection_select,
+            &mut self.new_connection_select_focus_origin,
+            select_id,
+        );
     }
 
     pub(in crate::workspace) fn close_new_connection_select(&mut self) {
-        // Closing a browser select clears both popup ownership and focus-origin
-        // state. Keep new-connection modal selects on the same invariant so a
-        // stale pointer/keyboard origin cannot leak into the next open.
-        self.open_new_connection_select = None;
-        self.new_connection_select_focus_origin = None;
+        browser_behavior::close_browser_trigger_select(
+            &mut self.open_new_connection_select,
+            &mut self.new_connection_select_focus_origin,
+        );
+    }
+
+    fn clear_new_connection_select_anchor(&mut self) {
+        // The group select overlay is anchored inside the new-connection scroll
+        // body. Drop its cached bounds when the body scrolls so a reopened
+        // overlay cannot reuse pre-scroll coordinates.
+        self.select_anchors.remove(&SelectAnchorId::NewConnectionGroup);
     }
 
     fn render_connection_hint(&self, text: String) -> AnyElement {
@@ -136,13 +140,10 @@ impl WorkspaceApp {
                     ),
                 )
                 .child(
-                    icon_button(
-                        &self.tokens,
-                        Self::render_lucide_icon(
-                            icon,
-                            TAURI_PASSWORD_ICON_SIZE,
-                            rgb(self.tokens.ui.text_muted),
-                        ),
+                    self.workspace_icon_action_button(
+                        icon,
+                        TAURI_PASSWORD_ICON_SIZE,
+                        rgb(self.tokens.ui.text_muted),
                         IconButtonOptions {
                             loading: form.password_loading,
                             hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
@@ -156,19 +157,15 @@ impl WorkspaceApp {
                                 ButtonRadius::Sm,
                             )
                         },
+                        |this, _event, _window, cx| {
+                            this.toggle_edit_saved_password_visibility(cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
                     )
                     .absolute()
                     .right(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
-                    .top(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
-                    .when(!form.password_loading, |button| {
-                        button.on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.toggle_edit_saved_password_visibility(cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                    }),
+                    .top(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET)),
                 ),
         )
     }
@@ -198,27 +195,23 @@ impl WorkspaceApp {
                     // path input. Keep this modal-form action on the shared
                     // toolbar primitive so disabled/focus behavior can be
                     // centralized with other form buttons.
-                    toolbar_button(
-                        &self.tokens,
+                    self.workspace_toolbar_action_button(
                         self.i18n.t("sessionManager.edit_properties.browse"),
                         None,
                         ToolbarButtonOptions {
                             button: ButtonOptions {
                                 variant: ButtonVariant::Outline,
                                 size: ButtonSize::Sm,
-                        ..ButtonOptions::default()
-                    },
-                    ..ToolbarButtonOptions::default()
-                },
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.close_new_connection_select();
-                    this.pick_new_connection_path(field, cx);
-                    cx.stop_propagation();
-                }),
-            ),
+                                ..ButtonOptions::default()
+                            },
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select();
+                            this.pick_new_connection_path(field, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
                 ),
         )
     }
@@ -701,8 +694,7 @@ impl WorkspaceApp {
         // NewConnectionModal footer uses shadcn Button variants. Route native
         // footer buttons through the shared toolbar primitive while keeping the
         // existing form action dispatch unchanged.
-        let control = toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label,
             None,
             ToolbarButtonOptions {
@@ -717,28 +709,21 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
-        );
-        if disabled {
-            return control.into_any_element();
-        }
-        control
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| match action {
-                    ConnectionButtonAction::Cancel => {
-                        this.close_new_connection_form(window, cx);
-                    }
-                    ConnectionButtonAction::Test => {
-                        this.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
-                    }
-                    ConnectionButtonAction::Connect => {
-                        this.submit_new_connection_form(window, cx);
-                    }
-                    ConnectionButtonAction::Save => {
-                        this.submit_new_connection_form(window, cx);
-                    }
-                }),
-            )
+            cx.listener(move |this, _event, window, cx| match action {
+                ConnectionButtonAction::Cancel => {
+                    this.close_new_connection_form(window, cx);
+                }
+                ConnectionButtonAction::Test => {
+                    this.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
+                }
+                ConnectionButtonAction::Connect => {
+                    this.submit_new_connection_form(window, cx);
+                }
+                ConnectionButtonAction::Save => {
+                    this.submit_new_connection_form(window, cx);
+                }
+            }),
+        )
             .into_any_element()
     }
 }

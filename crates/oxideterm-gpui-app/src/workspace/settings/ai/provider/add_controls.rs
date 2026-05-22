@@ -1,24 +1,13 @@
 impl WorkspaceApp {
     fn ai_provider_add_controls(&self, cx: &mut Context<Self>) -> AnyElement {
         let selected = ai_provider_template_by_type(&self.ai_new_provider_type);
-        let anchor_id = SettingsSelect::AiProviderTemplate.anchor_id();
-        let workspace = cx.entity();
-        let trigger = self
-            .settings_select_trigger(
-                SettingsSelect::AiProviderTemplate,
-                self.i18n.t(selected.label_key),
-                false,
-                false,
-            )
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(SettingsSelect::AiProviderTemplate);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            );
+        let provider_template_select = self.settings_select_control(
+            SettingsSelect::AiProviderTemplate,
+            self.i18n.t(selected.label_key),
+            false,
+            Some(AI_PROVIDER_SELECT_W),
+            cx,
+        );
 
         div()
             .w_full()
@@ -37,20 +26,7 @@ impl WorkspaceApp {
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.i18n.t("settings_view.ai.provider_template")),
                     )
-                    .child(
-                        div()
-                            .relative()
-                            .w(px(AI_PROVIDER_SELECT_W))
-                            .child(select_anchor_probe(
-                                anchor_id,
-                                trigger,
-                                move |anchor, _window, cx| {
-                                    let _ = workspace.update(cx, |this, cx| {
-                                        this.update_select_anchor(anchor, cx);
-                                    });
-                                },
-                            )),
-                    ),
+                    .child(provider_template_select),
             )
             .child(
                 // Tauri uses an outline small Button with literal "+ label"

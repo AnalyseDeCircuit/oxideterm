@@ -7,13 +7,10 @@ impl WorkspaceApp {
         // Tauri OxideImportModal/OxideExportModal use DialogClose with
         // opacity-70 hover:opacity-100. Keep that chrome in the shared icon
         // button primitive instead of hand-drawing another close control.
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(
-                LucideIcon::X,
-                16.0,
-                rgb(self.tokens.ui.text_muted),
-            ),
+        self.workspace_icon_action_button(
+            LucideIcon::X,
+            16.0,
+            rgb(self.tokens.ui.text_muted),
             IconButtonOptions {
                 size: 24.0,
                 radius: ButtonRadius::Sm,
@@ -28,20 +25,18 @@ impl WorkspaceApp {
                 idle_opacity: 0.7,
                 disabled_opacity: 0.35,
             },
+            move |this, _event, _window, cx| {
+                if import_dialog {
+                    this.session_manager.oxide_import_dialog = None;
+                } else {
+                    this.session_manager.oxide_export_dialog = None;
+                }
+                this.session_manager.focused_input = None;
+                cx.notify();
+                cx.stop_propagation();
+            },
+            cx,
         )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if import_dialog {
-                        this.session_manager.oxide_import_dialog = None;
-                    } else {
-                        this.session_manager.oxide_export_dialog = None;
-                    }
-                    this.session_manager.focused_input = None;
-                    cx.notify();
-                    cx.stop_propagation();
-                }),
-            )
             .into_any_element()
     }
 
@@ -508,50 +503,44 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .pt(px(8.0))
             .child(
-                self.render_oxide_footer_action(
+                self.render_oxide_footer_click_action(
                     self.render_oxide_cancel_button_label(false),
                     ButtonVariant::Outline,
                     OxideDialogFooterAction::Cancel,
                     focused_action,
                     cancel_disabled,
                     None,
+                    cancel_listener,
                 )
-                .when(!cancel_disabled, |button| {
-                    button.on_mouse_down(MouseButton::Left, cancel_listener)
-                }),
             )
             .when(!secondary_label.is_empty(), |footer| {
                 footer.child(
-                    self.render_oxide_footer_action(
+                    self.render_oxide_footer_click_action(
                         secondary_label,
                         ButtonVariant::Outline,
                         OxideDialogFooterAction::Secondary,
                         focused_action,
                         secondary_disabled,
                         None,
+                        secondary_listener,
                     )
-                    .when(!secondary_disabled, |button| {
-                        button.on_mouse_down(MouseButton::Left, secondary_listener)
-                    }),
                 )
             })
             .child(
-                self.render_oxide_footer_action(
+                self.render_oxide_footer_click_action(
                     primary_label,
                     ButtonVariant::Default,
                     OxideDialogFooterAction::Primary,
                     focused_action,
                     primary_disabled,
                     Some(140.0),
+                    primary_listener,
                 )
-                .when(!primary_disabled, |button| {
-                    button.on_mouse_down(MouseButton::Left, primary_listener)
-                }),
             )
             .into_any_element()
     }
 
-    fn render_oxide_footer_action(
+    fn render_oxide_footer_click_action(
         &self,
         label: String,
         variant: ButtonVariant,
@@ -559,12 +548,13 @@ impl WorkspaceApp {
         focused_action: Option<OxideDialogFooterAction>,
         disabled: bool,
         min_width: Option<f32>,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> Div {
-        // Tauri Oxide import/export modals use regular Button elements in a
-        // footer row. Native focus is explicit, so keep Button chrome, disabled
-        // state, and focus-visible ownership centralized for every footer mode.
-        toolbar_button(
-            &self.tokens,
+        // Tauri DialogFooter buttons share the same disabled guard for mouse
+        // activation and keyboard FocusCycle activation. Keep .oxide import
+        // and export footers on one action wrapper instead of per-dialog
+        // `when(!disabled)` blocks.
+        self.workspace_toolbar_action_button(
             label,
             None,
             ToolbarButtonOptions {
@@ -578,6 +568,7 @@ impl WorkspaceApp {
                 focus_visible: focused_action == Some(action),
                 ..ToolbarButtonOptions::default()
             },
+            listener,
         )
     }
 

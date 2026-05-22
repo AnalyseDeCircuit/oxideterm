@@ -1507,39 +1507,48 @@ impl WorkspaceApp {
     fn render_ai_sidebar_header_button(
         &self,
         icon: LucideIcon,
-        _label: String,
+        label: String,
         action: Option<AiHeaderAction>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let button = icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(icon, 14.0, rgb(self.tokens.ui.text_muted)),
+        let disabled = matches!(action, Some(AiHeaderAction::NewChat))
+            && self.ai_chat_initialization_error.is_some();
+        // Tauri AiChatPanel header buttons are title-backed icon buttons. Route
+        // tooltip ownership and disabled New Chat activation through the shared
+        // workspace helper so AI header actions match other toolbar buttons.
+        let button = self.workspace_tooltip_icon_button(
+            icon,
+            14.0,
+            rgb(self.tokens.ui.text_muted),
             IconButtonOptions {
+                disabled,
                 // Tauri AI header buttons use border/10 hover instead of the
                 // default toolbar hover token.
                 hover_background: Some(rgba((self.tokens.ui.border << 8) | 0x1a)),
                 ..IconButtonOptions::opaque_toolbar(22.0, ButtonRadius::Md)
             },
-        )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    match action {
-                        Some(AiHeaderAction::NewChat) => {
-                            this.create_ai_sidebar_conversation(None, cx);
-                        }
-                        Some(AiHeaderAction::Settings) => {
-                            let next_open = !this.ai_chat_menu_open;
-                            this.close_ai_sidebar_popovers();
-                            this.ai_chat_menu_open = next_open;
-                            window.focus(&this.focus_handle);
-                            cx.notify();
-                        }
-                        None => {}
+            label,
+            "ai-sidebar-header-button",
+            false,
+            cx.listener(move |this, _event, window, cx| {
+                match action {
+                    Some(AiHeaderAction::NewChat) => {
+                        this.create_ai_sidebar_conversation(None, cx);
                     }
-                    cx.stop_propagation();
-                }),
-            );
+                    Some(AiHeaderAction::Settings) => {
+                        let next_open = !this.ai_chat_menu_open;
+                        this.close_ai_sidebar_popovers();
+                        this.ai_chat_menu_open = next_open;
+                        window.focus(&this.focus_handle);
+                        cx.notify();
+                    }
+                    None => {}
+                }
+                cx.stop_propagation();
+            }),
+            cx.entity(),
+        )
+        .into_any_element();
 
         if matches!(action, Some(AiHeaderAction::Settings)) {
             let workspace = cx.entity();

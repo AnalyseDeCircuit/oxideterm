@@ -1,6 +1,7 @@
 use super::actions::TerminalBroadcastMenuPlacement;
 use super::ime::WorkspaceImeTarget;
 use super::*;
+use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_event_boundary};
 use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
 use oxideterm_terminal_recording::format_recording_elapsed;
@@ -8,6 +9,34 @@ use oxideterm_terminal_recording::format_recording_elapsed;
 pub(in crate::workspace) mod completion;
 
 impl WorkspaceApp {
+    fn terminal_command_action_button(
+        &self,
+        icon: LucideIcon,
+        icon_color: Rgba,
+        disabled: bool,
+        background: Option<Rgba>,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        // Tauri TerminalCommandBarActions uses a shared h-6/w-6 rounded-md
+        // button for split, broadcast, recording, and cast controls. Keep the
+        // geometry local to the terminal bar while routing activation through
+        // the workspace button guard shared with FileManager/SFTP actions.
+        self.workspace_icon_action_button(
+            icon,
+            14.0,
+            icon_color,
+            IconButtonOptions {
+                disabled,
+                background,
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..IconButtonOptions::opaque_toolbar(24.0, ButtonRadius::Md)
+            },
+            listener,
+            cx,
+        )
+    }
+
     pub(in crate::workspace) fn render_terminal_surface(
         &self,
         root_pane: &PaneNode,
@@ -169,114 +198,59 @@ impl WorkspaceApp {
                             )
                             .when(is_local_terminal, |actions| {
                                 actions
-                                    .child(
-                                        div()
-                                            .size(px(24.0))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded(px(self.tokens.radii.md))
-                                            .text_color(if can_split {
-                                                rgb(theme.text_muted)
-                                            } else {
-                                                rgba((theme.text_muted << 8) | 0x59)
-                                            })
-                                            .when(can_split, |button| {
-                                                button
-                                                    .cursor_pointer()
-                                                    .hover(move |style| {
-                                                        style.bg(rgb(theme.bg_hover))
-                                                    })
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        cx.listener(|this, _event, window, cx| {
-                                                            this.split_active_pane(
-                                                                SplitDirection::Horizontal,
-                                                                window,
-                                                                cx,
-                                                            );
-                                                            cx.stop_propagation();
-                                                        }),
-                                                    )
-                                            })
-                                            .child(Self::render_lucide_icon(
-                                                LucideIcon::SplitSquareHorizontal,
-                                                14.0,
-                                                if can_split {
-                                                    rgb(theme.text_muted)
-                                                } else {
-                                                    rgba((theme.text_muted << 8) | 0x59)
-                                                },
-                                            )),
-                                    )
-                                    .child(
-                                        div()
-                                            .size(px(24.0))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded(px(self.tokens.radii.md))
-                                            .when(can_split, |button| {
-                                                button
-                                                    .cursor_pointer()
-                                                    .hover(move |style| {
-                                                        style.bg(rgb(theme.bg_hover))
-                                                    })
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        cx.listener(|this, _event, window, cx| {
-                                                            this.split_active_pane(
-                                                                SplitDirection::Vertical,
-                                                                window,
-                                                                cx,
-                                                            );
-                                                            cx.stop_propagation();
-                                                        }),
-                                                    )
-                                            })
-                                            .child(Self::render_lucide_icon(
-                                                LucideIcon::SplitSquareVertical,
-                                                14.0,
-                                                if can_split {
-                                                    rgb(theme.text_muted)
-                                                } else {
-                                                    rgba((theme.text_muted << 8) | 0x59)
-                                                },
-                                            )),
-                                    )
+                                    .child(self.terminal_command_action_button(
+                                        LucideIcon::SplitSquareHorizontal,
+                                        rgb(theme.text_muted),
+                                        !can_split,
+                                        None,
+                                        |this, _event, window, cx| {
+                                            this.split_active_pane(
+                                                SplitDirection::Horizontal,
+                                                window,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        },
+                                        cx,
+                                    ))
+                                    .child(self.terminal_command_action_button(
+                                        LucideIcon::SplitSquareVertical,
+                                        rgb(theme.text_muted),
+                                        !can_split,
+                                        None,
+                                        |this, _event, window, cx| {
+                                            this.split_active_pane(
+                                                SplitDirection::Vertical,
+                                                window,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        },
+                                        cx,
+                                    ))
                             })
                             .child(
-                                div()
-                                    .relative()
-                                    .size(px(24.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(self.tokens.radii.md))
-                                    .cursor_pointer()
-                                    .bg(if self.terminal_broadcast_enabled {
+                                self.terminal_command_action_button(
+                                    LucideIcon::Radio,
+                                    if self.terminal_broadcast_enabled {
+                                        rgba(0xfb923cff)
+                                    } else {
+                                        rgb(theme.text_muted)
+                                    },
+                                    false,
+                                    Some(if self.terminal_broadcast_enabled {
                                         rgba(0xf9731626)
                                     } else {
                                         rgba((theme.bg_hover << 8) | 0x00)
-                                    })
-                                    .hover(move |style| style.bg(rgb(theme.bg_hover)))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.toggle_terminal_broadcast_menu();
-                                            cx.stop_propagation();
-                                            cx.notify();
-                                        }),
-                                    )
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::Radio,
-                                        14.0,
-                                        if self.terminal_broadcast_enabled {
-                                            rgba(0xfb923cff)
-                                        } else {
-                                            rgb(theme.text_muted)
-                                        },
-                                    )),
+                                    }),
+                                    |this, _event, _window, cx| {
+                                        this.toggle_terminal_broadcast_menu();
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    },
+                                    cx,
+                                )
+                                .relative(),
                             )
                             .when(recording_active, |actions| {
                                 actions.child(
@@ -300,119 +274,74 @@ impl WorkspaceApp {
                                         .child(format_recording_elapsed(recording_status.elapsed)),
                                 )
                             })
-                            .child(
-                                div()
-                                    .size(px(24.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(self.tokens.radii.md))
-                                    .cursor_pointer()
-                                    .bg(if recording_active {
-                                        rgba(0xef444426)
-                                    } else {
-                                        rgba(0x00000000)
-                                    })
-                                    .hover(move |style| style.bg(rgb(theme.bg_hover)))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, _event, _window, cx| {
-                                            match recording_status.state {
-                                                TerminalRecordingState::Idle => {
-                                                    this.start_active_terminal_recording(cx)
-                                                }
-                                                TerminalRecordingState::Recording => {
-                                                    this.pause_active_terminal_recording(cx)
-                                                }
-                                                TerminalRecordingState::Paused => {
-                                                    this.resume_active_terminal_recording(cx)
-                                                }
-                                            }
-                                            cx.stop_propagation();
-                                        }),
-                                    )
-                                    .child(Self::render_lucide_icon(
-                                        match recording_status.state {
-                                            TerminalRecordingState::Paused => LucideIcon::Play,
-                                            _ => LucideIcon::Circle,
-                                        },
-                                        14.0,
-                                        if recording_active {
-                                            rgba(0xf87171ff)
-                                        } else {
-                                            rgb(theme.text_muted)
-                                        },
-                                    )),
-                            )
+                            .child(self.terminal_command_action_button(
+                                match recording_status.state {
+                                    TerminalRecordingState::Paused => LucideIcon::Play,
+                                    _ => LucideIcon::Circle,
+                                },
+                                if recording_active {
+                                    rgba(0xf87171ff)
+                                } else {
+                                    rgb(theme.text_muted)
+                                },
+                                false,
+                                Some(if recording_active {
+                                    rgba(0xef444426)
+                                } else {
+                                    rgba(0x00000000)
+                                }),
+                                move |this, _event, _window, cx| {
+                                    match recording_status.state {
+                                        TerminalRecordingState::Idle => {
+                                            this.start_active_terminal_recording(cx)
+                                        }
+                                        TerminalRecordingState::Recording => {
+                                            this.pause_active_terminal_recording(cx)
+                                        }
+                                        TerminalRecordingState::Paused => {
+                                            this.resume_active_terminal_recording(cx)
+                                        }
+                                    }
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            ))
                             .when(recording_active, |actions| {
                                 actions
-                                    .child(
-                                        div()
-                                            .size(px(24.0))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded(px(self.tokens.radii.md))
-                                            .cursor_pointer()
-                                            .hover(move |style| style.bg(rgb(theme.bg_hover)))
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(|this, _event, _window, cx| {
-                                                    this.stop_active_terminal_recording(cx);
-                                                    cx.stop_propagation();
-                                                }),
-                                            )
-                                            .child(Self::render_lucide_icon(
-                                                LucideIcon::Square,
-                                                14.0,
-                                                rgba(0xf87171ff),
-                                            )),
-                                    )
-                                    .child(
-                                        div()
-                                            .size(px(24.0))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded(px(self.tokens.radii.md))
-                                            .cursor_pointer()
-                                            .hover(move |style| style.bg(rgb(theme.bg_hover)))
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(|this, _event, _window, cx| {
-                                                    this.discard_active_terminal_recording(cx);
-                                                    cx.stop_propagation();
-                                                }),
-                                            )
-                                            .child(Self::render_lucide_icon(
-                                                LucideIcon::Trash2,
-                                                14.0,
-                                                rgba(0xf87171ff),
-                                            )),
-                                    )
-                            })
-                            .child(
-                                div()
-                                    .size(px(24.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(self.tokens.radii.md))
-                                    .cursor_pointer()
-                                    .hover(move |style| style.bg(rgb(theme.bg_hover)))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, window, cx| {
-                                            this.open_terminal_cast_file(window, cx);
+                                    .child(self.terminal_command_action_button(
+                                        LucideIcon::Square,
+                                        rgba(0xf87171ff),
+                                        false,
+                                        None,
+                                        |this, _event, _window, cx| {
+                                            this.stop_active_terminal_recording(cx);
                                             cx.stop_propagation();
-                                        }),
-                                    )
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::FilePlay,
-                                        14.0,
-                                        rgb(theme.text_muted),
-                                    )),
-                            ),
+                                        },
+                                        cx,
+                                    ))
+                                    .child(self.terminal_command_action_button(
+                                        LucideIcon::Trash2,
+                                        rgba(0xf87171ff),
+                                        false,
+                                        None,
+                                        |this, _event, _window, cx| {
+                                            this.discard_active_terminal_recording(cx);
+                                            cx.stop_propagation();
+                                        },
+                                        cx,
+                                    ))
+                            })
+                            .child(self.terminal_command_action_button(
+                                LucideIcon::FilePlay,
+                                rgb(theme.text_muted),
+                                false,
+                                None,
+                                |this, _event, window, cx| {
+                                    this.open_terminal_cast_file(window, cx);
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            )),
                     ),
             )
             .child(

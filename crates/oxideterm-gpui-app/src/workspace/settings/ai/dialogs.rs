@@ -136,32 +136,25 @@ impl WorkspaceApp {
                     .child(
                         dialog_footer(&self.tokens)
                             .child(
-                                self.standard_footer_button(
+                                self.standard_footer_action_button(
                                     self.i18n.t("settings_view.ai_confirm.cancel"),
                                     ButtonVariant::Ghost,
                                     ConfirmDialogAction::Cancel,
                                     false,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
+                                    |this, _event, _window, cx| {
                                         this.show_ai_enable_confirm = false;
-                                        this.clear_standard_confirm_focus();
-                                        cx.stop_propagation();
                                         cx.notify();
-                                    }),
+                                    },
+                                    cx,
                                 ),
                             )
                             .child(
-                                self.standard_footer_button(
+                                self.standard_footer_action_button(
                                     self.i18n.t("settings_view.ai_confirm.enable"),
                                     ButtonVariant::Default,
                                     ConfirmDialogAction::Confirm,
                                     false,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
+                                    |this, _event, _window, cx| {
                                         this.edit_settings(
                                             |settings| {
                                                 settings.ai.enabled = true;
@@ -170,9 +163,8 @@ impl WorkspaceApp {
                                             cx,
                                         );
                                         this.show_ai_enable_confirm = false;
-                                        this.clear_standard_confirm_focus();
-                                        cx.stop_propagation();
-                                    }),
+                                    },
+                                    cx,
                                 ),
                             ),
                     ),
@@ -269,45 +261,37 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
                             .child(
-                                self.split_confirm_footer_button(
+                                self.split_confirm_footer_action_button(
                                     self.i18n.t("common.actions.cancel"),
                                     ConfirmDialogAction::Cancel,
                                     false,
                                     true,
-                                )
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.ai_provider_key_remove_confirm = None;
-                                            this.clear_standard_confirm_focus();
-                                            cx.stop_propagation();
-                                            cx.notify();
-                                        }),
-                                    ),
+                                    |this, _event, _window, cx| {
+                                        this.ai_provider_key_remove_confirm = None;
+                                        cx.notify();
+                                    },
+                                    cx,
+                                ),
                             )
                             .child(
-                                self.split_confirm_footer_button(
+                                self.split_confirm_footer_action_button(
                                     self.i18n.t("settings_view.ai.remove"),
                                     ConfirmDialogAction::Confirm,
                                     true,
                                     false,
-                                )
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.clear_standard_confirm_focus();
-                                            if let Some((index, provider_id)) =
-                                                this.ai_provider_key_remove_confirm.take()
-                                            {
+                                    |this, _event, _window, cx| {
+                                        if let Some((index, provider_id)) =
+                                            this.ai_provider_key_remove_confirm.take()
+                                        {
                                                 this.remove_ai_provider_api_key(
                                                     index,
                                                     &provider_id,
-                                                    cx,
-                                                );
-                                            }
-                                            cx.stop_propagation();
-                                        }),
-                                    ),
+                                                cx,
+                                            );
+                                        }
+                                    },
+                                    cx,
+                                ),
                             ),
                     ),
             )
@@ -390,41 +374,33 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
                             .child(
-                                self.split_confirm_footer_button(
+                                self.split_confirm_footer_action_button(
                                     self.i18n.t("common.actions.cancel"),
                                     ConfirmDialogAction::Cancel,
                                     false,
                                     true,
-                                )
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.ai_provider_remove_confirm = None;
-                                            this.clear_standard_confirm_focus();
-                                            cx.stop_propagation();
-                                            cx.notify();
-                                        }),
-                                    ),
+                                    |this, _event, _window, cx| {
+                                        this.ai_provider_remove_confirm = None;
+                                        cx.notify();
+                                    },
+                                    cx,
+                                ),
                             )
                             .child(
-                                self.split_confirm_footer_button(
+                                self.split_confirm_footer_action_button(
                                     self.i18n.t("settings_view.ai.remove"),
                                     ConfirmDialogAction::Confirm,
                                     true,
                                     false,
-                                )
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.clear_standard_confirm_focus();
-                                            if let Some((provider_id, _name)) =
-                                                this.ai_provider_remove_confirm.take()
-                                            {
-                                                this.remove_ai_provider(&provider_id, cx);
-                                            }
-                                            cx.stop_propagation();
-                                        }),
-                                    ),
+                                    |this, _event, _window, cx| {
+                                        if let Some((provider_id, _name)) =
+                                            this.ai_provider_remove_confirm.take()
+                                        {
+                                            this.remove_ai_provider(&provider_id, cx);
+                                        }
+                                    },
+                                    cx,
+                                ),
                             ),
                     ),
             )

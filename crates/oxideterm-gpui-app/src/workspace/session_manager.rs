@@ -26,7 +26,7 @@ use oxideterm_gpui_ui::{
     TauriTableMetrics,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonIconPosition, ToolbarButtonOptions, icon_button, toolbar_button,
+        ToolbarButtonIconPosition, ToolbarButtonOptions,
     },
     checkbox,
     context_menu::{

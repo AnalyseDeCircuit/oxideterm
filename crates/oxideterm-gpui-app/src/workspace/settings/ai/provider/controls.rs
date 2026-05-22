@@ -104,10 +104,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Tauri renders this custom-provider action as a ghost small Button
-        // with danger text. Use the toolbar primitive so loading/disabled and
-        // future focus-visible behavior stay shared with other action buttons.
-        toolbar_button(
-            &self.tokens,
+        // with danger text. Route activation through the workspace wrapper so
+        // disabled/loading/focus-visible behavior stays centralized.
+        self.workspace_toolbar_action_button(
             self.i18n.t("settings_view.ai.remove"),
             None,
             ToolbarButtonOptions {
@@ -122,9 +121,6 @@ impl WorkspaceApp {
                     self.tokens.metrics.ui_text_xs,
                 )
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
                 if let Some(provider_id) = this
                     .settings_store
@@ -213,9 +209,8 @@ impl WorkspaceApp {
         options.icon_gap = Some(4.0);
         options.loading = refreshing;
         // Tauri refresh is a compact ghost button with a leading RefreshCw
-        // icon. Keep disabled/loading chrome in the shared toolbar button.
-        toolbar_button(
-            &self.tokens,
+        // icon. Shared action guard keeps the loading state non-submitting.
+        self.workspace_toolbar_action_button(
             self.i18n.t("settings_view.ai.refresh_models"),
             Some(Self::render_lucide_icon(
                 LucideIcon::RefreshCw,
@@ -223,16 +218,11 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.text_muted),
             )),
             options,
+            cx.listener(move |this, _event, _window, cx| {
+                this.refresh_ai_provider_models(index, provider.clone(), cx);
+                cx.stop_propagation();
+            }),
         )
-        .when(!refreshing, |button| {
-            button.on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.refresh_ai_provider_models(index, provider.clone(), cx);
-                    cx.stop_propagation();
-                }),
-            )
-        })
         .into_any_element()
     }
 
@@ -372,28 +362,19 @@ impl WorkspaceApp {
             self.ai_reasoning_display(&current)
         };
         let select_id = SettingsSelect::AiProviderReasoning(index);
-        let workspace = cx.entity();
-        select_anchor_probe(
-            select_id.anchor_id(),
-            self.settings_select_trigger(select_id, label, false, false)
-                .w_full()
-                .h(px(32.0))
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.open_settings_select_from_pointer(select_id);
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                ),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
+        self.settings_select_control_with_trigger_style(
+            select_id,
+            label,
+            false,
+            None,
+            |trigger| {
+                trigger
+                    .w_full()
+                    .h(px(32.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
             },
+            cx,
         )
-        .into_any_element()
     }
 
     fn ai_provider_field(&self, label_key: &str, control: AnyElement) -> AnyElement {

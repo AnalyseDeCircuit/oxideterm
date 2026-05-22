@@ -47,10 +47,7 @@ use oxideterm_gpui_ui::{
         ai_tool_details, ai_tool_heading, ai_tool_item, ai_tool_item_header, ai_tool_output_pre,
         ai_tool_section_label,
     },
-    button::{
-        ButtonRadius, ButtonVariant, IconButtonOptions, ToolbarButtonOptions, icon_button,
-        toolbar_button,
-    },
+    button::{ButtonRadius, ButtonVariant, IconButtonOptions, ToolbarButtonOptions},
     context_menu::ContextMenuActionableStyle,
     modal::overlay_content_boundary,
     tauri_ui_font_family as settings_ui_font_family,

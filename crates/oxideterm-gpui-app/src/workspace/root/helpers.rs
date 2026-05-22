@@ -195,6 +195,122 @@ enum WorkspaceContextMenuDismissal {
 }
 
 impl WorkspaceApp {
+    fn workspace_tooltip_icon_button(
+        &self,
+        icon: LucideIcon,
+        icon_size: f32,
+        icon_color: Rgba,
+        options: oxideterm_gpui_ui::button::IconButtonOptions,
+        tooltip: String,
+        element_id_prefix: &'static str,
+        flex_none: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        workspace: gpui::Entity<Self>,
+    ) -> AnyElement {
+        let actionable = !(options.disabled || options.loading);
+        let tooltip_for_move = tooltip.clone();
+        let tooltip_element_id = tooltip.clone();
+        let tooltip_request_id = tooltip.clone();
+        let tooltip_workspace = workspace.clone();
+        let clear_workspace = workspace;
+
+        // FileManager, SFTP, and launcher toolbar buttons all map to Tauri
+        // icon buttons with hover tooltips. Keep tooltip ownership and the
+        // disabled/loading click guard in one helper so feature surfaces only
+        // supply button metrics and the action body.
+        oxideterm_gpui_ui::button::icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, icon_size, icon_color),
+            options,
+        )
+        .id((gpui::ElementId::from(element_id_prefix), tooltip_element_id))
+        .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
+            let _ = tooltip_workspace.update(cx, |this, cx| {
+                this.queue_workspace_tooltip(
+                    tooltip_request_id.clone(),
+                    tooltip_for_move.clone(),
+                    f32::from(event.position.x) + 12.0,
+                    f32::from(event.position.y) + 16.0,
+                    cx,
+                );
+            });
+        })
+        .on_hover(move |hovered: &bool, _window, cx| {
+            if !*hovered {
+                let _ = clear_workspace.update(cx, |this, cx| {
+                    this.clear_workspace_tooltip(&tooltip, cx);
+                });
+            }
+        })
+        .when(actionable, |button| {
+            button.on_mouse_down(MouseButton::Left, listener)
+        })
+        .when(flex_none, |button| button.flex_none())
+        .into_any_element()
+    }
+
+    fn workspace_icon_action_button(
+        &self,
+        icon: LucideIcon,
+        icon_size: f32,
+        icon_color: Rgba,
+        options: oxideterm_gpui_ui::button::IconButtonOptions,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let actionable = !(options.disabled || options.loading);
+
+        // Row-level icon buttons do not always have tooltips, but they still
+        // share the browser button contract: disabled/loading buttons keep
+        // their visual state and never dispatch pointer activation.
+        oxideterm_gpui_ui::button::icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, icon_size, icon_color),
+            options,
+        )
+        .when(actionable, |button| {
+            button.on_mouse_down(MouseButton::Left, cx.listener(listener))
+        })
+    }
+
+    fn workspace_toolbar_action_button(
+        &self,
+        label: String,
+        icon: Option<AnyElement>,
+        options: oxideterm_gpui_ui::button::ToolbarButtonOptions,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> gpui::Div {
+        let actionable = !(options.button.disabled || options.loading);
+
+        // Tauri Button activation always goes through the native disabled
+        // attribute. GPUI callers still own the action body, but the shared
+        // wrapper keeps disabled/loading activation guards out of feature code.
+        oxideterm_gpui_ui::button::toolbar_button(&self.tokens, label, icon, options)
+            .when(actionable, |button| {
+                button.on_mouse_down(MouseButton::Left, listener)
+            })
+            .when(!actionable, |button| {
+                button.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+            })
+    }
+
+    fn workspace_clickable_row_action(
+        &self,
+        row: gpui::Div,
+        disabled: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> gpui::Div {
+        // Some Tauri controls are clickable rows rather than Button elements
+        // (Cloud Sync record check rows, inline option rows). Keep their
+        // disabled activation guard centralized without forcing Button chrome.
+        row.when(!disabled, |row| {
+            row.cursor_pointer()
+                .on_mouse_down(MouseButton::Left, listener)
+        })
+    }
+
     fn workspace_context_menu_backdrop(
         &self,
         menu: impl gpui::IntoElement,

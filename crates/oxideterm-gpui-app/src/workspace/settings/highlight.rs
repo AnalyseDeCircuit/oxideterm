@@ -12,7 +12,6 @@ impl WorkspaceApp {
             .t("settings_view.terminal.highlight_rules.limit")
             .replace("{{count}}", &MAX_HIGHLIGHT_RULES.to_string());
         let add_disabled = rules.len() >= MAX_HIGHLIGHT_RULES;
-        let workspace = cx.entity();
 
         let mut body = div()
             .w_full()
@@ -68,44 +67,14 @@ impl WorkspaceApp {
                             .flex_row()
                             .flex_wrap()
                             .gap(px(8.0))
-                            .child(
-                                div().relative().w(px(168.0)).child(select_anchor_probe(
-                                    SelectAnchorId::SettingsHighlightPreset,
-                                    self.settings_select_trigger(
-                                        SettingsSelect::HighlightPreset,
-                                        self.i18n
-                                            .t("settings_view.terminal.highlight_rules.add_preset"),
-                                        false,
-                                        add_disabled,
-                                    )
-                                    .cursor_pointer()
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, _event, _window, cx| {
-                                            if this
-                                                .settings_store
-                                                .settings()
-                                                .terminal
-                                                .highlight_rules
-                                                .len()
-                                                < MAX_HIGHLIGHT_RULES
-                                            {
-                                                this.open_settings_select_from_pointer(
-                                                    SettingsSelect::HighlightPreset,
-                                                );
-                                                this.focused_settings_input = None;
-                                            }
-                                            cx.stop_propagation();
-                                            cx.notify();
-                                        }),
-                                    ),
-                                    move |anchor, _window, cx| {
-                                        let _ = workspace.update(cx, |this, cx| {
-                                            this.update_select_anchor(anchor, cx);
-                                        });
-                                    },
-                                )),
-                            )
+                            .child(self.settings_select_control(
+                                SettingsSelect::HighlightPreset,
+                                self.i18n
+                                    .t("settings_view.terminal.highlight_rules.add_preset"),
+                                add_disabled,
+                                Some(168.0),
+                                cx,
+                            ))
                             .child(
                                 // Tauri uses the shared shadcn Button for this action; keep the
                                 // native focus/disabled semantics on the shared toolbar primitive.
@@ -493,8 +462,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let select_id = SettingsSelect::HighlightRenderMode(index);
-        let anchor_id = select_id.anchor_id();
-        let workspace = cx.entity();
         div()
             .flex()
             .flex_col()
@@ -508,27 +475,7 @@ impl WorkspaceApp {
                             .t("settings_view.terminal.highlight_rules.render_mode"),
                     ),
             )
-            .child(
-                div().relative().w(px(148.0)).child(select_anchor_probe(
-                    anchor_id,
-                    self.settings_select_trigger(select_id, value, false, false)
-                        .cursor_pointer()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select_from_pointer(select_id);
-                                this.focused_settings_input = None;
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
-                        ),
-                    move |anchor, _window, cx| {
-                        let _ = workspace.update(cx, |this, cx| {
-                            this.update_select_anchor(anchor, cx);
-                        });
-                    },
-                )),
-            )
+            .child(self.settings_select_control(select_id, value, false, Some(148.0), cx))
             .into_any_element()
     }
 

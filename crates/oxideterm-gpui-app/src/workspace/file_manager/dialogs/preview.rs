@@ -66,11 +66,12 @@ impl WorkspaceApp {
                             .child(self.render_file_manager_preview_button(
                                 LucideIcon::ChevronLeft,
                                 false,
-                                cx.listener(|this, _event, _window, cx| {
+                                |this, _event, _window, cx| {
                                     this.navigate_file_manager_preview(-1, cx);
                                     cx.stop_propagation();
                                     cx.notify();
-                                }),
+                                },
+                                cx,
                             ))
                             .child(
                                 div()
@@ -90,11 +91,12 @@ impl WorkspaceApp {
                             .child(self.render_file_manager_preview_button(
                                 LucideIcon::ChevronRight,
                                 false,
-                                cx.listener(|this, _event, _window, cx| {
+                                |this, _event, _window, cx| {
                                     this.navigate_file_manager_preview(1, cx);
                                     cx.stop_propagation();
                                     cx.notify();
-                                }),
+                                },
+                                cx,
                             ))
                     })
                     .child(Self::render_lucide_icon(
@@ -137,10 +139,11 @@ impl WorkspaceApp {
                         header.child(self.render_file_manager_preview_button(
                             LucideIcon::Copy,
                             false,
-                            cx.listener(|this, _event, _window, cx| {
+                            |this, _event, _window, cx| {
                                 this.copy_file_manager_preview_content(cx);
                                 cx.stop_propagation();
-                            }),
+                            },
+                            cx,
                         ))
                     })
                     .when(show_markdown_toggle, |header| {
@@ -151,28 +154,30 @@ impl WorkspaceApp {
                                 LucideIcon::Code2
                             },
                             self.file_manager.preview_markdown_source,
-                            cx.listener(|this, _event, _window, cx| {
+                            |this, _event, _window, cx| {
                                 this.file_manager.preview_markdown_source =
                                     !this.file_manager.preview_markdown_source;
                                 cx.stop_propagation();
                                 cx.notify();
-                            }),
+                            },
+                            cx,
                         ))
                     })
                     .child(self.render_file_manager_preview_button(
                         LucideIcon::Info,
                         self.file_manager.preview_show_metadata,
-                        cx.listener(|this, _event, _window, cx| {
+                        |this, _event, _window, cx| {
                             this.file_manager.preview_show_metadata =
                                 !this.file_manager.preview_show_metadata;
                             cx.stop_propagation();
                             cx.notify();
-                        }),
+                        },
+                        cx,
                     ))
                     .child(self.render_file_manager_preview_button(
                         LucideIcon::ExternalLink,
                         false,
-                        cx.listener(|this, _event, _window, cx| {
+                        |this, _event, _window, cx| {
                             if let Some(FileManagerDialog::Preview { entry }) =
                                 this.file_manager.dialog.clone()
                             {
@@ -186,16 +191,18 @@ impl WorkspaceApp {
                             }
                             cx.stop_propagation();
                             cx.notify();
-                        }),
+                        },
+                        cx,
                     ))
                     .child(self.render_file_manager_preview_button(
                         LucideIcon::X,
                         false,
-                        cx.listener(|this, _event, _window, cx| {
+                        |this, _event, _window, cx| {
                             this.close_file_manager_dialog();
                             cx.stop_propagation();
                             cx.notify();
-                        }),
+                        },
+                        cx,
                     )),
             )
             .child(
@@ -421,30 +428,25 @@ impl WorkspaceApp {
                     .bg(rgb(theme.bg_panel))
                     .px_3()
                     .py_2()
-                    .child(
-                        icon_button(
-                            &self.tokens,
-                            Self::render_lucide_icon(play_icon, 14.0, rgb(theme.text)),
-                            IconButtonOptions {
-                                disabled: playback_disabled,
-                                background: Some(rgb(theme.bg)),
-                                border: Some(rgb(theme.border)),
-                                hover_background: Some(rgb(theme.bg_hover)),
-                                // Local preview audio shares the browser button boundary with
-                                // SFTP preview audio; decode errors must not leave a live click target.
-                                ..IconButtonOptions::opaque_toolbar(32.0, ButtonRadius::Md)
-                            },
-                        )
-                        .when(!playback_disabled, |button| {
-                            button.on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.toggle_file_manager_preview_audio(cx);
-                                    cx.stop_propagation();
-                                }),
-                            )
-                        }),
-                    )
+                    .child(self.workspace_icon_action_button(
+                        play_icon,
+                        14.0,
+                        rgb(theme.text),
+                        IconButtonOptions {
+                            disabled: playback_disabled,
+                            background: Some(rgb(theme.bg)),
+                            border: Some(rgb(theme.border)),
+                            hover_background: Some(rgb(theme.bg_hover)),
+                            // Local preview audio shares the browser button boundary with
+                            // SFTP preview audio; decode errors must not leave a live click target.
+                            ..IconButtonOptions::opaque_toolbar(32.0, ButtonRadius::Md)
+                        },
+                        |this, _event, _window, cx| {
+                            this.toggle_file_manager_preview_audio(cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -748,8 +750,7 @@ impl WorkspaceApp {
         _cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label.to_string(),
             None,
             ToolbarButtonOptions {
@@ -767,8 +768,8 @@ impl WorkspaceApp {
                     FILE_MANAGER_TEXT_XS,
                 )
             },
+            on_click,
         )
-        .on_mouse_down(MouseButton::Left, on_click)
         .into_any_element()
     }
 
@@ -782,8 +783,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let label = label.into();
         let text_color = if active { theme.text } else { theme.text_muted };
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label,
             None,
             ToolbarButtonOptions {
@@ -804,8 +804,8 @@ impl WorkspaceApp {
                     FILE_MANAGER_TEXT_XS,
                 )
             },
+            on_click,
         )
-        .on_mouse_down(MouseButton::Left, on_click)
         .into_any_element()
     }
 
@@ -881,8 +881,7 @@ impl WorkspaceApp {
                     )),
             )
             .child(
-                toolbar_button(
-                    &self.tokens,
+                self.workspace_toolbar_action_button(
                     self.i18n.t("fileManager.open"),
                     Some(Self::render_lucide_icon(
                         LucideIcon::ExternalLink,
@@ -905,10 +904,6 @@ impl WorkspaceApp {
                             FILE_MANAGER_TEXT_XS,
                         )
                     },
-                )
-                .mt_2()
-                .on_mouse_down(
-                    MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         if let Err(error) = open_path_external(&path_for_open) {
                             this.push_file_manager_toast(
@@ -920,7 +915,8 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                         cx.notify();
                     }),
-                ),
+                )
+                .mt_2(),
             )
     }
 
@@ -1568,12 +1564,14 @@ impl WorkspaceApp {
         &self,
         icon: LucideIcon,
         active: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(icon, FILE_MANAGER_ICON_MD, rgb(theme.text)),
+        self.workspace_icon_action_button(
+            icon,
+            FILE_MANAGER_ICON_MD,
+            rgb(theme.text),
             IconButtonOptions {
                 background: Some(if active {
                     file_manager_hover_bg(theme.bg_hover, true)
@@ -1585,8 +1583,9 @@ impl WorkspaceApp {
                 hover_background: Some(file_manager_hover_bg(theme.bg_hover, true)),
                 ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
             },
+            listener,
+            cx,
         )
-        .on_mouse_down(MouseButton::Left, listener)
         .into_any_element()
     }
 

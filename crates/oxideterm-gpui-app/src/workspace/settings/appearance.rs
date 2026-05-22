@@ -824,32 +824,11 @@ impl WorkspaceApp {
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let anchor_id = select_id.anchor_id();
-        let workspace = cx.entity();
-        let trigger = self
-            .settings_select_trigger(select_id, value, false, false)
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(select_id);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            );
         div()
             .relative()
             .w(px(width))
             .min_w(px(0.0))
-            .child(select_anchor_probe(
-                anchor_id,
-                trigger,
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
-                    });
-                },
-            ))
+            .child(self.settings_select_control(select_id, value, false, Some(width), cx))
             .into_any_element()
     }
 
@@ -1333,30 +1312,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let select_id = SettingsSelect::CustomThemeDuplicate;
-        let workspace = cx.entity();
-        div()
-            .relative()
-            .w(px(THEME_EDITOR_DUPLICATE_WIDTH))
-            .child(select_anchor_probe(
-                select_id.anchor_id(),
-                self.settings_select_trigger(select_id, value, false, false)
-                    .h(px(THEME_EDITOR_INPUT_HEIGHT))
-                    .cursor_pointer()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.open_settings_select_from_pointer(select_id);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ),
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
-                    });
-                },
-            ))
-            .into_any_element()
+        self.settings_select_control_with_trigger_style(
+            select_id,
+            value,
+            false,
+            Some(THEME_EDITOR_DUPLICATE_WIDTH),
+            |trigger| trigger.h(px(THEME_EDITOR_INPUT_HEIGHT)),
+            cx,
+        )
     }
 
     fn theme_editor_preview(

@@ -36,6 +36,17 @@ impl TauriVirtualListSpec {
     }
 }
 
+pub(crate) fn tauri_virtual_list_state(
+    item_count: usize,
+    alignment: ListAlignment,
+    spec: TauriVirtualListSpec,
+) -> ListState {
+    // TanStack useVirtualizer takes row estimate and overscan at construction.
+    // GPUI stores the equivalent overdraw in ListState, so route every native
+    // virtual-list state through the same spec instead of passing raw pixels.
+    ListState::new(item_count, alignment, spec.overdraw())
+}
+
 #[derive(Default)]
 pub(super) struct VirtualListSignatureCache {
     identity: Option<String>,
@@ -357,6 +368,14 @@ mod tests {
     fn tauri_virtual_spec_maps_overscan_to_gpui_overdraw() {
         let spec = TauriVirtualListSpec::new(px(38.0), 16);
         assert_eq!(spec.overdraw(), px(608.0));
+    }
+
+    #[test]
+    fn tauri_virtual_list_state_uses_spec_overdraw() {
+        let spec = TauriVirtualListSpec::new(px(40.0), 3);
+        let state = tauri_virtual_list_state(7, ListAlignment::Top, spec);
+
+        assert_eq!(state.item_count(), 7);
     }
 
     #[test]

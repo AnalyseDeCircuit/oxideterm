@@ -716,31 +716,24 @@ impl WorkspaceApp {
                                         cx,
                                     )),
                             )
-                            .child(
-                                icon_button(
-                                    &self.tokens,
-                                    Self::render_lucide_icon(
-                                        LucideIcon::X,
-                                        FILE_MANAGER_ICON_MD,
-                                        rgb(theme.text_muted),
-                                    ),
-                                    IconButtonOptions {
-                                        hover_background: Some(rgb(theme.bg_hover)),
-                                        // Properties dialog close is an icon-only shadcn button in Tauri.
-                                        // Route it through the shared primitive so disabled/focus behavior
-                                        // stays consistent with other modal actions.
-                                        ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
-                                    },
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.close_file_manager_dialog();
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }),
-                                ),
-                            ),
+                            .child(self.workspace_icon_action_button(
+                                LucideIcon::X,
+                                FILE_MANAGER_ICON_MD,
+                                rgb(theme.text_muted),
+                                IconButtonOptions {
+                                    hover_background: Some(rgb(theme.bg_hover)),
+                                    // Properties dialog close is an icon-only shadcn button in Tauri.
+                                    // Route it through the shared primitive so disabled/focus behavior
+                                    // stays consistent with other modal actions.
+                                    ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+                                },
+                                |this, _event, _window, cx| {
+                                    this.close_file_manager_dialog();
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                },
+                                cx,
+                            )),
                     )
                     .child(self.render_file_manager_properties_dialog(
                         entry,
@@ -757,37 +750,31 @@ impl WorkspaceApp {
                             .bg(file_manager_panel_bg(theme.bg_panel, has_background, 0xff))
                             .flex()
                             .justify_end()
-                            .child(
-                                toolbar_button(
-                                    &self.tokens,
-                                    "OK".to_string(),
-                                    None,
-                                    ToolbarButtonOptions {
-                                        background: Some(file_manager_hover_bg(
-                                            theme.bg_hover,
-                                            has_background,
-                                        )),
-                                        text_color: Some(rgb(theme.text)),
-                                        hover_background: Some(rgb(theme.text_muted)),
-                                        // The OK footer action is a button boundary, not selectable text.
-                                        ..ToolbarButtonOptions::compact_text(
-                                            ButtonVariant::Secondary,
-                                            ButtonRadius::Sm,
-                                            28.0,
-                                            12.0,
-                                            FILE_MANAGER_TEXT_XS,
-                                        )
-                                    },
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.close_file_manager_dialog();
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }),
-                                ),
-                            ),
+                            .child(self.workspace_toolbar_action_button(
+                                "OK".to_string(),
+                                None,
+                                ToolbarButtonOptions {
+                                    background: Some(file_manager_hover_bg(
+                                        theme.bg_hover,
+                                        has_background,
+                                    )),
+                                    text_color: Some(rgb(theme.text)),
+                                    hover_background: Some(rgb(theme.text_muted)),
+                                    // The OK footer action is a button boundary, not selectable text.
+                                    ..ToolbarButtonOptions::compact_text(
+                                        ButtonVariant::Secondary,
+                                        ButtonRadius::Sm,
+                                        28.0,
+                                        12.0,
+                                        FILE_MANAGER_TEXT_XS,
+                                    )
+                                },
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.close_file_manager_dialog();
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )),
                     ),
             )
             .into_any_element()
@@ -993,8 +980,7 @@ impl WorkspaceApp {
                 // for create/rename/delete prompts. Keep native prompt
                 // buttons on the same shared button primitive as other modal
                 // footers instead of hand-drawing div chrome here.
-                toolbar_button(
-                    &self.tokens,
+                self.workspace_toolbar_action_button(
                     self.i18n.t("common.actions.cancel"),
                     None,
                     ToolbarButtonOptions {
@@ -1008,9 +994,6 @@ impl WorkspaceApp {
                             == Some(ConfirmDialogAction::Cancel),
                         ..ToolbarButtonOptions::default()
                     },
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
                         this.close_file_manager_dialog();
                         cx.stop_propagation();
@@ -1018,41 +1001,33 @@ impl WorkspaceApp {
                     }),
                 ),
             )
-            .child(
-                toolbar_button(
-                    &self.tokens,
-                    if danger {
-                        self.i18n.t("fileManager.delete")
-                    } else {
-                        self.i18n.t("fileManager.go")
-                    },
-                    None,
-                    ToolbarButtonOptions {
-                        button: ButtonOptions {
-                            variant: if danger {
-                                ButtonVariant::Destructive
-                            } else {
-                                ButtonVariant::Default
-                            },
-                            size: ButtonSize::Sm,
-                            radius: ButtonRadius::Md,
-                            disabled: primary_disabled,
+            .child(self.workspace_toolbar_action_button(
+                if danger {
+                    self.i18n.t("fileManager.delete")
+                } else {
+                    self.i18n.t("fileManager.go")
+                },
+                None,
+                ToolbarButtonOptions {
+                    button: ButtonOptions {
+                        variant: if danger {
+                            ButtonVariant::Destructive
+                        } else {
+                            ButtonVariant::Default
                         },
-                        focus_visible: self.file_manager.focused_dialog_footer_action
-                            == Some(ConfirmDialogAction::Confirm),
-                        ..ToolbarButtonOptions::default()
+                        size: ButtonSize::Sm,
+                        radius: ButtonRadius::Md,
+                        disabled: primary_disabled,
                     },
-                )
-                .when(!primary_disabled, |button| {
-                    button.on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.accept_file_manager_dialog(cx);
-                            cx.stop_propagation();
-                        }),
-                    )
+                    focus_visible: self.file_manager.focused_dialog_footer_action
+                        == Some(ConfirmDialogAction::Confirm),
+                    ..ToolbarButtonOptions::default()
+                },
+                cx.listener(|this, _event, _window, cx| {
+                    this.accept_file_manager_dialog(cx);
+                    cx.stop_propagation();
                 }),
-            )
+            ))
             .into_any_element()
     }
 

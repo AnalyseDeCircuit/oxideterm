@@ -677,47 +677,39 @@ impl WorkspaceApp {
         options.hover_background = Some(rgba((0xf59e0b << 8) | 0x1a));
         options.hover_text_color = Some(rgb(0xfcd34d));
         // Context warning buttons are compact inline actions rather than full
-        // footer buttons, but they still share disabled and hover semantics
-        // with the button primitive.
-        toolbar_button(
-            &self.tokens,
+        // footer buttons, but they still share disabled activation, hover, and
+        // focus semantics with the workspace toolbar action primitive.
+        self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(icon, 12.0, rgb(0xfbbf24))),
             options,
-        )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if disabled {
-                        cx.stop_propagation();
-                        return;
-                    }
-                    match action {
-                        AiContextWarningAction::Compact(model_switch) => {
-                            if model_switch {
-                                this.ai_model_switch_warning_percentage = None;
-                            }
-                            this.start_ai_compact_conversation(cx);
-                        }
-                        AiContextWarningAction::NewChat(model_switch) => {
-                            if model_switch {
-                                this.ai_model_switch_warning_percentage = None;
-                            }
-                            this.create_ai_sidebar_conversation(None, cx);
-                        }
-                        AiContextWarningAction::Dismiss => {
+            cx.listener(move |this, _event, _window, cx| {
+                match action {
+                    AiContextWarningAction::Compact(model_switch) => {
+                        if model_switch {
                             this.ai_model_switch_warning_percentage = None;
                         }
-                        AiContextWarningAction::Summarize => {
-                            this.ai_summarize_confirm_open = true;
-                            this.reset_standard_confirm_focus();
-                        }
+                        this.start_ai_compact_conversation(cx);
                     }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .into_any_element()
+                    AiContextWarningAction::NewChat(model_switch) => {
+                        if model_switch {
+                            this.ai_model_switch_warning_percentage = None;
+                        }
+                        this.create_ai_sidebar_conversation(None, cx);
+                    }
+                    AiContextWarningAction::Dismiss => {
+                        this.ai_model_switch_warning_percentage = None;
+                    }
+                    AiContextWarningAction::Summarize => {
+                        this.ai_summarize_confirm_open = true;
+                        this.reset_standard_confirm_focus();
+                    }
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+        .into_any_element()
     }
 
     fn ai_context_danger_warning_active(&self) -> bool {

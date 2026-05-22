@@ -10,7 +10,7 @@ use oxideterm_gpui_markdown::{
 use oxideterm_gpui_ui::{
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonOptions, icon_button, toolbar_button,
+        ToolbarButtonOptions,
     },
     context_menu::{ContextMenuActionableStyle, context_menu_event_boundary},
     modal::{dismissible_dialog_backdrop, overlay_content_boundary, quicklook_backdrop},

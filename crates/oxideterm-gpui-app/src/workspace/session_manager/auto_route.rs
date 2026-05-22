@@ -856,42 +856,34 @@ impl WorkspaceApp {
         });
         modal_footer(&self.tokens)
             .child(
-                self.session_manager_dialog_footer_button(
+                self.session_manager_dialog_footer_action(
                     self.i18n.t("sessionManager.auto_route.cancel"),
                     ButtonVariant::Ghost,
                     SessionManagerBasicDialogFooterAction::Cancel,
                     self.auto_route_modal.connecting,
                     ButtonSize::Default,
                     None,
-                )
-                .when(!self.auto_route_modal.connecting, |button| {
-                    button.on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.close_auto_route_modal(cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                }),
+                    |this, _event, _window, cx| {
+                        this.close_auto_route_modal(cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ),
             )
             .child(
-                self.session_manager_dialog_footer_button(
+                self.session_manager_dialog_footer_action(
                     self.i18n.t("sessionManager.auto_route.connect"),
                     ButtonVariant::Default,
                     SessionManagerBasicDialogFooterAction::Primary,
                     connect_disabled,
                     ButtonSize::Default,
                     connect_icon,
-                )
-                .when(!connect_disabled, |button| {
-                    button.on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, window, cx| {
-                            this.connect_auto_route(window, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                }),
+                    |this, _event, window, cx| {
+                        this.connect_auto_route(window, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ),
             )
             .into_any_element()
     }

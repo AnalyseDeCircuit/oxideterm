@@ -27,6 +27,68 @@ impl WorkspaceApp {
             .w(px(self.tokens.metrics.settings_select_width))
     }
 
+    fn settings_select_control(
+        &self,
+        select_id: SettingsSelect,
+        value: String,
+        disabled: bool,
+        width: Option<f32>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.settings_select_control_with_trigger_style(
+            select_id,
+            value,
+            disabled,
+            width,
+            |trigger| trigger,
+            cx,
+        )
+    }
+
+    fn settings_select_control_with_trigger_style(
+        &self,
+        select_id: SettingsSelect,
+        value: String,
+        disabled: bool,
+        width: Option<f32>,
+        trigger_style: impl FnOnce(Div) -> Div,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let anchor_id = select_id.anchor_id();
+        let workspace = cx.entity();
+        let trigger =
+            trigger_style(self.settings_select_trigger(select_id, value, false, disabled)).when(
+                !disabled,
+                |trigger| {
+                trigger.cursor_pointer().on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.open_settings_select_from_pointer(select_id);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                },
+            );
+        // Settings selects all share the same Radix-like trigger contract:
+        // pointer-open sets focus origin, anchor bounds are refreshed in the
+        // same paint pass, and scroll-close is owned by the settings surface.
+        div()
+            .relative()
+            .when_some(width, |control, width| control.w(px(width)))
+            .when(width.is_none(), |control| control.w_full())
+            .child(select_anchor_probe(
+                anchor_id,
+                trigger,
+                move |anchor, _window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.update_select_anchor(anchor, cx);
+                    });
+                },
+            ))
+            .into_any_element()
+    }
+
     fn settings_card(
         &self,
         title_key: &str,
@@ -271,6 +333,33 @@ impl WorkspaceApp {
         )
     }
 
+    fn standard_footer_action_button(
+        &self,
+        label: String,
+        variant: ButtonVariant,
+        action: ConfirmDialogAction,
+        disabled: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let button = self.standard_footer_button(label, variant, action, disabled);
+        if disabled {
+            return button;
+        }
+
+        // Tauri DialogFooter buttons participate in the same Radix focus cycle
+        // as keyboard activation. Centralize pointer activation too so settings
+        // dialogs clear footer focus and stop backdrop bubbling consistently.
+        button.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event, window, cx| {
+                this.clear_standard_confirm_focus();
+                listener(this, event, window, cx);
+                cx.stop_propagation();
+            }),
+        )
+    }
+
     fn split_confirm_footer_button(
         &self,
         label: String,
@@ -319,6 +408,30 @@ impl WorkspaceApp {
                 font_size: Some(self.tokens.metrics.ui_text_sm),
             },
         )
+    }
+
+    fn split_confirm_footer_action_button(
+        &self,
+        label: String,
+        action: ConfirmDialogAction,
+        destructive: bool,
+        draw_right_separator: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        // Split confirm footers are visually different from DialogFooter, but
+        // Tauri still routes pointer activation through the same Radix action
+        // lifecycle. Keep focus cleanup and event isolation shared with
+        // standard_footer_action_button.
+        self.split_confirm_footer_button(label, action, destructive, draw_right_separator)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event, window, cx| {
+                    this.clear_standard_confirm_focus();
+                    listener(this, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
     }
 
     fn terminal_page_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -654,11 +767,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn close_settings_select(&mut self) {
-        // Settings selects use an explicit focus-origin owner. Closing the
-        // popup must clear both pieces together so pointer-opened selects do
-        // not leak stale keyboard/pointer focus state into the next trigger.
-        self.open_settings_select = None;
-        self.settings_select_focus_origin = None;
+        browser_behavior::close_browser_trigger_select(
+            &mut self.open_settings_select,
+            &mut self.settings_select_focus_origin,
+        );
     }
 
     fn clear_settings_input_draft(&mut self, input: SettingsInput) {

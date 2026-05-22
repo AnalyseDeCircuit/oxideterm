@@ -4,10 +4,12 @@ impl WorkspaceApp {
         icon: LucideIcon,
         label: String,
         variant: ButtonVariant,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> gpui::Div {
         let theme = self.tokens.ui;
-        toolbar_button(
-            &self.tokens,
+        // Tauri batch actions are normal shadcn Buttons. Keep the local icon
+        // placement, but route activation through the shared toolbar guard.
+        self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(icon, 14.0, rgb(theme.text))),
             ToolbarButtonOptions {
@@ -20,6 +22,7 @@ impl WorkspaceApp {
                 icon_position: ToolbarButtonIconPosition::Trailing,
                 ..ToolbarButtonOptions::default()
             },
+            listener,
         )
     }
 
@@ -30,14 +33,16 @@ impl WorkspaceApp {
         variant: ButtonVariant,
         has_background: bool,
         show_label: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> gpui::Div {
         let theme = self.tokens.ui;
         let icon_color = match variant {
             ButtonVariant::Default => rgb(theme.bg),
             _ => rgb(theme.text),
         };
-        toolbar_button(
-            &self.tokens,
+        // Toolbar commands match Tauri Button chrome while sharing the native
+        // disabled/loading action guard with other workspace toolbars.
+        self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(icon, 16.0, icon_color)),
             ToolbarButtonOptions {
@@ -51,6 +56,7 @@ impl WorkspaceApp {
                 show_label,
                 ..ToolbarButtonOptions::default()
             },
+            listener,
         )
     }
 
@@ -63,8 +69,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = self.i18n.t(label_key);
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(
                 icon,
@@ -93,9 +98,6 @@ impl WorkspaceApp {
                     self.tokens.metrics.ui_text_sm,
                 )
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
                 match transfer_action {
                     SessionTransferAction::ImportOxide => this.open_oxide_import_dialog(cx),

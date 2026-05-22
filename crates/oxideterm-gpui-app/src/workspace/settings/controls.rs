@@ -1291,51 +1291,27 @@ impl WorkspaceApp {
         // ring. Keep the origin and open/toggle rule in one place so settings,
         // AI provider, and knowledge selects do not drift apart.
         self.focused_settings_input = None;
-        if self.open_settings_select == Some(select_id) {
-            self.close_settings_select();
-            return;
-        }
-        self.settings_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Pointer);
-        self.open_settings_select = Some(select_id);
+        browser_behavior::toggle_browser_trigger_select_from_pointer(
+            &mut self.open_settings_select,
+            &mut self.settings_select_focus_origin,
+            select_id,
+        );
     }
 
     fn language_select_row(&self, selected: Language, cx: &mut Context<Self>) -> AnyElement {
         let control_width = self.tokens.metrics.settings_select_width;
-        let anchor_id = SettingsSelect::Language.anchor_id();
-        let workspace = cx.entity();
-        let trigger = self
-            .settings_select_trigger(
-                SettingsSelect::Language,
-                self.language_label(selected),
-                false,
-                false,
-            )
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(SettingsSelect::Language);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            );
-        let control = div()
-            .relative()
-            .w(px(control_width))
-            .child(select_anchor_probe(
-                anchor_id,
-                trigger,
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
-                    });
-                },
-            ));
+        let control = self.settings_select_control(
+            SettingsSelect::Language,
+            self.language_label(selected),
+            false,
+            Some(control_width),
+            cx,
+        );
 
         self.setting_row(
             "settings_view.general.language",
             "settings_view.general.language_hint",
-            control.into_any_element(),
+            control,
             cx,
         )
     }
@@ -1349,30 +1325,9 @@ impl WorkspaceApp {
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let anchor_id = select_id.anchor_id();
-        let workspace = cx.entity();
-        let trigger = self
-            .settings_select_trigger(select_id, value, false, false)
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(select_id);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            );
-        let control = div().relative().w(px(width)).child(select_anchor_probe(
-            anchor_id,
-            trigger,
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
-            },
-        ));
+        let control = self.settings_select_control(select_id, value, false, Some(width), cx);
 
-        self.setting_row(label_key, hint_key, control.into_any_element(), cx)
+        self.setting_row(label_key, hint_key, control, cx)
     }
 
     fn bool_row(

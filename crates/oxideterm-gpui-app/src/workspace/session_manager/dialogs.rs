@@ -1,22 +1,26 @@
 impl WorkspaceApp {
-    fn session_manager_basic_footer_button(
+    fn session_manager_basic_footer_action(
         &self,
         label: String,
         variant: ButtonVariant,
         action: SessionManagerBasicDialogFooterAction,
         disabled: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
     ) -> Div {
-        self.session_manager_dialog_footer_button(
+        self.session_manager_dialog_footer_action(
             label,
             variant,
             action,
             disabled,
             ButtonSize::Sm,
             None,
+            listener,
+            cx,
         )
     }
 
-    fn session_manager_dialog_footer_button(
+    fn session_manager_dialog_footer_action(
         &self,
         label: String,
         variant: ButtonVariant,
@@ -24,12 +28,13 @@ impl WorkspaceApp {
         disabled: bool,
         size: ButtonSize,
         icon: Option<AnyElement>,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
     ) -> Div {
-        // Tauri session-manager dialogs all use DialogFooter shadcn Buttons.
-        // GPUI has no DOM focus trap, so the button chrome and footer-owned
-        // focus-visible ring need to live in one shared renderer.
-        toolbar_button(
-            &self.tokens,
+        // Mouse activation uses the same disabled/focus-visible ownership as
+        // the keyboard FocusCycle path. Keep it centralized so import, group,
+        // and auto-route dialogs do not each compose DialogFooter buttons.
+        self.workspace_toolbar_action_button(
             label,
             icon,
             ToolbarButtonOptions {
@@ -43,6 +48,7 @@ impl WorkspaceApp {
                     == Some(action),
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(listener),
         )
     }
 
@@ -101,40 +107,34 @@ impl WorkspaceApp {
                             .justify_end()
                             .gap(px(8.0))
                             .child(
-                                self.session_manager_basic_footer_button(
+                                self.session_manager_basic_footer_action(
                                     self.i18n.t("sessionManager.edit_properties.cancel"),
                                     ButtonVariant::Secondary,
                                     SessionManagerBasicDialogFooterAction::Cancel,
                                     false,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
+                                    |this, _event, _window, cx| {
                                         this.session_manager.show_new_group = false;
                                         this.session_manager.focused_input = None;
                                         this.session_manager.focused_basic_dialog_footer_action =
                                             None;
                                         cx.notify();
-                                    }),
+                                    },
+                                    cx,
                                 ),
                             )
                             .child(
-                                self.session_manager_basic_footer_button(
+                                self.session_manager_basic_footer_action(
                                     self.i18n.t("sessionManager.edit_properties.save"),
                                     ButtonVariant::Default,
                                     SessionManagerBasicDialogFooterAction::Primary,
                                     !can_create_group,
-                                )
-                                .when(can_create_group, |button| {
-                                    button.on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.session_manager
-                                                .focused_basic_dialog_footer_action = None;
-                                            this.create_session_group(cx);
-                                        }),
-                                    )
-                                }),
+                                    |this, _event, _window, cx| {
+                                        this.session_manager.focused_basic_dialog_footer_action =
+                                            None;
+                                        this.create_session_group(cx);
+                                    },
+                                    cx,
+                                ),
                             ),
                     ),
             ))
@@ -211,37 +211,33 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgb(theme.border))
                             .child(
-                                self.session_manager_basic_footer_button(
+                                self.session_manager_basic_footer_action(
                                     self.i18n.t("sessionManager.edit_properties.cancel"),
                                     ButtonVariant::Secondary,
                                     SessionManagerBasicDialogFooterAction::Cancel,
                                     false,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
+                                    |this, _event, _window, cx| {
                                         this.session_manager.show_import = false;
                                         this.session_manager.selected_import_aliases.clear();
                                         this.session_manager.focused_basic_dialog_footer_action =
                                             None;
                                         cx.notify();
-                                    }),
+                                    },
+                                    cx,
                                 ),
                             )
                             .child(
-                                self.session_manager_basic_footer_button(
+                                self.session_manager_basic_footer_action(
                                     self.i18n.t("sessionManager.toolbar.import"),
                                     ButtonVariant::Default,
                                     SessionManagerBasicDialogFooterAction::Primary,
                                     false,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
+                                    |this, _event, _window, cx| {
                                         this.session_manager.focused_basic_dialog_footer_action =
                                             None;
                                         this.import_selected_ssh_hosts(cx);
-                                    }),
+                                    },
+                                    cx,
                                 ),
                             ),
                     ),

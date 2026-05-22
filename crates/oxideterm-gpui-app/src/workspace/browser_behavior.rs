@@ -64,18 +64,49 @@ where
     true
 }
 
-pub(crate) fn close_browser_trigger_select_on_container_scroll<T>(
+pub(crate) fn close_browser_trigger_select<T>(
     open_select: &mut Option<T>,
     focus_origin: &mut Option<BrowserFocusOrigin>,
 ) -> bool {
     let had_open_select = open_select.take().is_some();
     if had_open_select {
-        // Settings/new-connection selects are trigger-owned form controls. When
-        // their scroll container moves the anchor, Radix closes the popup and
-        // drops focus-visible ownership rather than leaving a stale ring.
+        // Trigger-owned selects model ordinary DOM/Radix form controls: closing
+        // the popup also releases the transient focus-origin owner, so a stale
+        // pointer/keyboard source cannot leak into the next open.
         *focus_origin = None;
     }
     had_open_select
+}
+
+pub(crate) fn toggle_browser_trigger_select_from_pointer<T>(
+    open_select: &mut Option<T>,
+    focus_origin: &mut Option<BrowserFocusOrigin>,
+    select: T,
+) -> bool
+where
+    T: Copy + Eq,
+{
+    if *open_select == Some(select) {
+        close_browser_trigger_select(open_select, focus_origin);
+        return false;
+    }
+
+    // Radix SelectTrigger opened with the mouse owns focus, but it does not
+    // match :focus-visible. Keep pointer modality and open-state paired here
+    // so every form/settings select uses the same browser rule.
+    *focus_origin = Some(BrowserFocusOrigin::Pointer);
+    *open_select = Some(select);
+    true
+}
+
+pub(crate) fn close_browser_trigger_select_on_container_scroll<T>(
+    open_select: &mut Option<T>,
+    focus_origin: &mut Option<BrowserFocusOrigin>,
+) -> bool {
+    // Settings/new-connection selects are trigger-owned form controls. When
+    // their scroll container moves the anchor, Radix closes the popup and drops
+    // focus-visible ownership rather than leaving a stale ring.
+    close_browser_trigger_select(open_select, focus_origin)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -530,6 +561,7 @@ mod tests {
         close_browser_select_on_container_scroll, modal_footer_input_key_action,
         modal_footer_key_action, modal_footer_key_moves_forward, next_required_modal_footer_focus,
         preserve_or_move_context_selection, resolve_browser_pointer_capture_owner,
+        toggle_browser_trigger_select_from_pointer,
     };
     use std::collections::HashSet;
 
@@ -674,6 +706,37 @@ mod tests {
             &mut highlighted_option,
         ));
         assert_eq!(focused_select, Some("backend"));
+    }
+
+    #[test]
+    fn trigger_select_pointer_toggle_tracks_focus_origin() {
+        let mut open_select = None;
+        let mut focus_origin = None;
+
+        assert!(toggle_browser_trigger_select_from_pointer(
+            &mut open_select,
+            &mut focus_origin,
+            "language",
+        ));
+        assert_eq!(open_select, Some("language"));
+        assert_eq!(focus_origin, Some(BrowserFocusOrigin::Pointer));
+        assert!(!browser_focus_visible(true, focus_origin));
+
+        assert!(!toggle_browser_trigger_select_from_pointer(
+            &mut open_select,
+            &mut focus_origin,
+            "language",
+        ));
+        assert_eq!(open_select, None);
+        assert_eq!(focus_origin, None);
+
+        assert!(toggle_browser_trigger_select_from_pointer(
+            &mut open_select,
+            &mut focus_origin,
+            "theme",
+        ));
+        assert_eq!(open_select, Some("theme"));
+        assert_eq!(focus_origin, Some(BrowserFocusOrigin::Pointer));
     }
 
     #[test]

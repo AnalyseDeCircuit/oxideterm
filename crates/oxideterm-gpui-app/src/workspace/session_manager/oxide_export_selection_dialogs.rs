@@ -203,8 +203,7 @@ impl WorkspaceApp {
                         // outline h-7 text-xs Button. Route through the shared
                         // toolbar primitive so disabled/focus behavior matches
                         // the rest of the dialog actions.
-                        toolbar_button(
-                            &self.tokens,
+                        self.workspace_toolbar_action_button(
                             if all_selected {
                                 "取消全选".to_string()
                             } else {
@@ -222,9 +221,6 @@ impl WorkspaceApp {
                                 font_size: Some(self.tokens.metrics.ui_text_xs),
                                 ..ToolbarButtonOptions::default()
                             },
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
                                 let all_ids = this
                                     .connection_store

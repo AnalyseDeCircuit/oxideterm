@@ -11,10 +11,7 @@ use crate::workspace::WorkspaceApp;
 use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_ui::{
     TextInputView,
-    button::{
-        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
-        toolbar_button,
-    },
+    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
     form_field,
     modal::dismissible_dialog_backdrop,
     text_input, text_input_anchor_probe,
@@ -343,8 +340,7 @@ impl WorkspaceApp {
         // Keyboard-interactive prompts are authentication-protected dialogs, so
         // keep submit/cancel ownership here while sharing the Tauri Button
         // variant chrome.
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label,
             None,
             ToolbarButtonOptions {
@@ -359,9 +355,6 @@ impl WorkspaceApp {
                 font_size: Some(self.tokens.metrics.form_text_font_size),
                 ..ToolbarButtonOptions::default()
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(move |this, _event, window, cx| {
                 if submit {
                     this.submit_keyboard_interactive_challenge(window, cx);

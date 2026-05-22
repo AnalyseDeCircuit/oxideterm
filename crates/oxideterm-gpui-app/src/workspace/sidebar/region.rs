@@ -222,60 +222,39 @@ impl WorkspaceApp {
             SidebarActionKind::AutoRoute => self.i18n.t("sidebar.tooltips.auto_route"),
             SidebarActionKind::None => self.i18n.t("sidebar.panels.sftp"),
         };
-        let tooltip_id = format!("sidebar-action-{:?}", action);
-        let tooltip_id_for_move = tooltip_id.clone();
-        let mut button = div()
-            .id((gpui::ElementId::from("sidebar-action"), tooltip_id.clone()))
-            .size(px(self.tokens.metrics.sidebar_action_size))
+
+        // Tauri sidebar header actions are icon buttons with title tooltips.
+        // Use the shared tooltip icon primitive so hover tooltip ownership and
+        // pointer activation guards do not diverge from FileManager/SFTP tools.
+        div()
             .ml_1()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .cursor_pointer()
-            .hover(move |button| button.bg(rgb(theme.bg_hover)))
-            .child(Self::render_lucide_icon(
+            .child(self.workspace_tooltip_icon_button(
                 icon,
                 self.tokens.metrics.sidebar_action_icon_size,
                 rgb(theme.text),
+                IconButtonOptions {
+                    hover_background: Some(rgb(theme.bg_hover)),
+                    ..IconButtonOptions::opaque_toolbar(
+                        self.tokens.metrics.sidebar_action_size,
+                        ButtonRadius::Md,
+                    )
+                },
+                label,
+                "sidebar-action",
+                false,
+                cx.listener(move |this, _event, window, cx| {
+                    match action {
+                        SidebarActionKind::NewConnection => this.open_new_connection_form(window, cx),
+                        SidebarActionKind::AutoRoute => this.open_auto_route_modal(window, cx),
+                        SidebarActionKind::None => {}
+                    }
+                    if !matches!(action, SidebarActionKind::None) {
+                        cx.stop_propagation();
+                    }
+                }),
+                cx.entity(),
             ))
-            .on_mouse_move(cx.listener({
-                let label = label.clone();
-                move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.queue_workspace_tooltip(
-                        tooltip_id_for_move.clone(),
-                        label.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
-                }
-            }))
-            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-                if !*hovered {
-                    this.clear_workspace_tooltip(&tooltip_id, cx);
-                }
-            }));
-
-        button = match action {
-            SidebarActionKind::NewConnection => button.on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
-                    this.open_new_connection_form(window, cx);
-                    cx.stop_propagation();
-                }),
-            ),
-            SidebarActionKind::AutoRoute => button.on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
-                    this.open_auto_route_modal(window, cx);
-                    cx.stop_propagation();
-                }),
-            ),
-            SidebarActionKind::None => button,
-        };
-
-        button.into_any_element()
+            .into_any_element()
     }
 
     pub(super) fn render_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -305,7 +284,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let active = self.notification_center.active_view == view;
-        div()
+        let tab = div()
             .h(px(28.0))
             .flex_1()
             .min_w(px(0.0))
@@ -371,22 +350,27 @@ impl WorkspaceApp {
                             badge_count.to_string()
                         }),
                 )
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.notification_center.active_view = view;
-                    if view == WorkspaceActivityView::Notifications {
-                        this.notification_center.notifications.unread_count = 0;
-                        this.notification_center.notifications.unread_critical_count = 0;
-                    } else {
-                        this.notification_center.event_log.unread_count = 0;
-                        this.notification_center.event_log.unread_errors = 0;
-                    }
-                    cx.notify();
-                }),
-            )
-            .into_any_element()
+            });
+
+        // Tauri activity tabs are Button-like rows rather than plain labels.
+        // Keep the custom tab chrome, but route pointer activation through the
+        // shared clickable-row guard used by browser-style list controls.
+        self.workspace_clickable_row_action(
+            tab,
+            false,
+            cx.listener(move |this, _event, _window, cx| {
+                this.notification_center.active_view = view;
+                if view == WorkspaceActivityView::Notifications {
+                    this.notification_center.notifications.unread_count = 0;
+                    this.notification_center.notifications.unread_critical_count = 0;
+                } else {
+                    this.notification_center.event_log.unread_count = 0;
+                    this.notification_center.event_log.unread_errors = 0;
+                }
+                cx.notify();
+            }),
+        )
+        .into_any_element()
     }
 
     pub(super) fn render_notifications_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -500,56 +484,62 @@ impl WorkspaceApp {
                 LucideIcon::Bell,
                 self.notification_center.notifications.dnd_enabled,
                 "Toggle notification DND",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.notification_center.notifications.dnd_enabled = !this.notification_center.notifications.dnd_enabled;
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::ListTree,
                 self.notification_center.notifications.filter.status != WorkspaceNotificationStatusFilter::All,
                 "Cycle status filter",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.cycle_notification_status_filter();
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::AlertCircle,
                 self.notification_center.notifications.filter.severity != WorkspaceNotificationSeverityFilter::All,
                 "Cycle severity filter",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.cycle_notification_severity_filter();
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::Hash,
                 self.notification_center.notifications.filter.kind != WorkspaceNotificationKindFilter::All,
                 "Cycle kind filter",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.cycle_notification_kind_filter();
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .child(div().flex_1())
             .child(self.render_activity_icon_button(
                 LucideIcon::Check,
                 false,
                 "Mark all read",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.mark_all_notifications_read();
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::Trash2,
                 false,
                 "Clear notifications",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.clear_notifications();
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .into_any_element()
     }
@@ -716,37 +706,41 @@ impl WorkspaceApp {
                 LucideIcon::Bell,
                 self.notification_center.event_log.dnd_enabled,
                 "Toggle event log DND",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.notification_center.event_log.dnd_enabled = !this.notification_center.event_log.dnd_enabled;
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::ListTree,
                 self.notification_center.event_log.filter.severity != WorkspaceEventSeverityFilter::All,
                 "Cycle severity filter",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.cycle_event_log_severity_filter();
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::Search,
                 self.notification_center.event_log.filter.category != WorkspaceEventCategoryFilter::All,
                 "Cycle category filter",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.cycle_event_log_category_filter();
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .child(self.render_activity_icon_button(
                 LucideIcon::Trash2,
                 false,
                 "Clear event log",
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.clear_event_log();
                     cx.notify();
-                }),
+                },
+                cx,
             ))
             .into_any_element()
     }
@@ -756,7 +750,8 @@ impl WorkspaceApp {
         icon: LucideIcon,
         active: bool,
         _label: &'static str,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let background = if active {
@@ -769,9 +764,10 @@ impl WorkspaceApp {
         } else {
             rgb(theme.text_muted)
         };
-        oxideterm_gpui_ui::button::icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(icon, 12.0, icon_color),
+        self.workspace_icon_action_button(
+            icon,
+            12.0,
+            icon_color,
             oxideterm_gpui_ui::button::IconButtonOptions {
                 background: Some(background),
                 hover_background: Some(rgb(theme.bg_hover)),
@@ -782,9 +778,10 @@ impl WorkspaceApp {
                     oxideterm_gpui_ui::button::ButtonRadius::Sm,
                 )
             },
+            listener,
+            cx,
         )
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
+        .into_any_element()
     }
 
     fn render_count_chip(

@@ -274,16 +274,13 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .pt(px(8.0))
             .child(
-                self.render_oxide_footer_action(
+                self.render_oxide_footer_click_action(
                     "关闭".to_string(),
                     ButtonVariant::Default,
                     OxideDialogFooterAction::Primary,
                     focused_action,
                     false,
                     None,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
                         this.session_manager.oxide_import_dialog = None;
                         this.session_manager.focused_input = None;
@@ -309,32 +306,26 @@ impl WorkspaceApp {
                 .gap(px(8.0))
                 .pt(px(8.0))
                 .child(
-                    self.render_oxide_footer_action(
+                    self.render_oxide_footer_click_action(
                         "返回".to_string(),
                         ButtonVariant::Outline,
                         OxideDialogFooterAction::Secondary,
                         dialog.focused_footer_action,
                         dialog.busy,
                         None,
-                    )
-                    .when(!dialog.busy, |button| {
-                        button.on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Some(dialog) =
-                                    this.session_manager.oxide_import_dialog.as_mut()
-                                {
-                                    dialog.preview = None;
-                                    dialog.result_summary = None;
-                                }
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        )
-                    }),
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut()
+                            {
+                                dialog.preview = None;
+                                dialog.result_summary = None;
+                            }
+                            cx.notify();
+                            cx.stop_propagation();
+                        }),
+                    ),
                 )
                 .child(
-                    self.render_oxide_footer_action(
+                    self.render_oxide_footer_click_action(
                         if dialog.busy {
                             "导入中...".to_string()
                         } else {
@@ -345,16 +336,11 @@ impl WorkspaceApp {
                         dialog.focused_footer_action,
                         primary_disabled,
                         None,
-                    )
-                    .when(!primary_disabled, |button| {
-                        button.on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.apply_oxide_import_dialog(cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                    }),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.apply_oxide_import_dialog(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
                 )
                 .into_any_element()
         } else {
@@ -366,47 +352,37 @@ impl WorkspaceApp {
                 .gap(px(8.0))
                 .pt(px(8.0))
                 .child(
-                    self.render_oxide_footer_action(
+                    self.render_oxide_footer_click_action(
                         "重新选择文件".to_string(),
                         ButtonVariant::Outline,
                         OxideDialogFooterAction::Secondary,
                         dialog.focused_footer_action,
                         dialog.busy,
                         None,
-                    )
-                    .when(!dialog.busy, |button| {
-                        button.on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.select_oxide_import_file(cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                    }),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.select_oxide_import_file(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
                 )
                 .child(
-                    self.render_oxide_footer_action(
+                    self.render_oxide_footer_click_action(
                         "取消".to_string(),
                         ButtonVariant::Outline,
                         OxideDialogFooterAction::Cancel,
                         dialog.focused_footer_action,
                         dialog.busy,
                         None,
-                    )
-                    .when(!dialog.busy, |button| {
-                        button.on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.session_manager.oxide_import_dialog = None;
-                                this.session_manager.focused_input = None;
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        )
-                    }),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.session_manager.oxide_import_dialog = None;
+                            this.session_manager.focused_input = None;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }),
+                    ),
                 )
                 .child(
-                    self.render_oxide_footer_action(
+                    self.render_oxide_footer_click_action(
                         if dialog.busy {
                             "加载中...".to_string()
                         } else {
@@ -417,16 +393,11 @@ impl WorkspaceApp {
                         dialog.focused_footer_action,
                         primary_disabled,
                         None,
-                    )
-                    .when(!primary_disabled, |button| {
-                        button.on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.preview_oxide_import_dialog(cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                    }),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.preview_oxide_import_dialog(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
                 )
                 .into_any_element()
         }

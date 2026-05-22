@@ -71,29 +71,26 @@ impl WorkspaceApp {
                     .px_3()
                     .py_2()
                     .child(
-                        icon_button(
-                            &self.tokens,
-                            Self::render_lucide_icon(play_icon, 14.0, rgb(theme.text)),
+                        self.workspace_icon_action_button(
+                            play_icon,
+                            14.0,
+                            rgb(theme.text),
                             IconButtonOptions {
                                 disabled: playback_disabled,
                                 background: Some(rgb(theme.bg)),
                                 border: Some(rgb(theme.border)),
                                 hover_background: Some(rgb(theme.bg_hover)),
-                                // Tauri disables media playback when preview decode fails.
-                                // Keep that action guard in the shared icon button instead of
-                                // leaving a local div with a live click listener.
+                                // Tauri disables media playback when preview decode fails. The
+                                // shared action wrapper keeps that disabled guard identical to
+                                // FileManager preview controls.
                                 ..IconButtonOptions::opaque_toolbar(32.0, ButtonRadius::Md)
                             },
+                            |this, _event, _window, cx| {
+                                this.toggle_sftp_preview_audio(cx);
+                                cx.notify();
+                            },
+                            cx,
                         )
-                        .when(!playback_disabled, |button| {
-                            button.on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.toggle_sftp_preview_audio(cx);
-                                    cx.notify();
-                                }),
-                            )
-                        }),
                     )
                     .child(
                         div()
@@ -129,8 +126,7 @@ impl WorkspaceApp {
                     )
                     .when(can_seek, |row| {
                         row.child(
-                            toolbar_button(
-                                &self.tokens,
+                            self.workspace_toolbar_action_button(
                                 "-15s".to_string(),
                                 None,
                                 ToolbarButtonOptions {
@@ -146,9 +142,6 @@ impl WorkspaceApp {
                                         SFTP_TEXT_XS,
                                     )
                                 },
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {
                                     let now = this.sftp_view.preview_audio.snapshot().position;
                                     let next = now
@@ -159,8 +152,7 @@ impl WorkspaceApp {
                             ),
                         )
                         .child(
-                            toolbar_button(
-                                &self.tokens,
+                            self.workspace_toolbar_action_button(
                                 "+15s".to_string(),
                                 None,
                                 ToolbarButtonOptions {
@@ -176,9 +168,6 @@ impl WorkspaceApp {
                                         SFTP_TEXT_XS,
                                     )
                                 },
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {
                                     let snapshot = this.sftp_view.preview_audio.snapshot();
                                     let Some(duration) = snapshot.duration else {
@@ -360,8 +349,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             self.i18n.t("sftp.preview.open_external"),
             Some(Self::render_lucide_icon(
                 LucideIcon::ExternalLink,
@@ -385,16 +373,13 @@ impl WorkspaceApp {
                 hover_text_color: None,
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(move |this, _event, _window, cx| {
+                this.open_sftp_preview_external(&path);
+                cx.stop_propagation();
+                cx.notify();
+            }),
         )
             .mt_2()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_sftp_preview_external(&path);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
             .into_any_element()
     }
 

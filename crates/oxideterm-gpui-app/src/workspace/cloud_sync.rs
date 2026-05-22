@@ -35,7 +35,7 @@ use oxideterm_connections::oxide_file::{
 };
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::button::{
-    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, toolbar_button,
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
 };
 use oxideterm_gpui_ui::select::{
     select_inline_menu, select_inline_option_row, select_inline_trigger_chrome,
@@ -863,8 +863,7 @@ impl WorkspaceApp {
         disabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             self.i18n.t(label_key),
             None,
             ToolbarButtonOptions {
@@ -876,12 +875,8 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
+            listener,
         )
-        .when(!disabled, |button| {
-            button
-                .cursor_pointer()
-                .on_mouse_down(MouseButton::Left, listener)
-        })
         .into_any_element()
     }
 
@@ -1449,17 +1444,14 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let label_key = label.clone();
-        div()
+        let row = div()
             .w_full()
             .min_w(px(0.0))
             .flex()
             .items_center()
             .gap(px(8.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .when(!disabled, |row| {
-                row.cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, listener)
-            })
+            .text_size(px(self.tokens.metrics.ui_text_sm));
+        self.workspace_clickable_row_action(row, disabled, listener)
             .child(
                 div()
                     .size(px(16.0))
@@ -2859,8 +2851,7 @@ impl WorkspaceApp {
         // Cloud Sync inline actions are shadcn-style outline buttons in Tauri;
         // keep their chrome on the shared toolbar primitive instead of local
         // div/button styling.
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             self.i18n.t(label_key),
             None,
             ToolbarButtonOptions {
@@ -2880,9 +2871,8 @@ impl WorkspaceApp {
                 font_size: Some(self.tokens.metrics.ui_text_xs),
                 ..ToolbarButtonOptions::default()
             },
+            listener,
         )
-        .cursor_pointer()
-        .on_mouse_down(MouseButton::Left, listener)
         .into_any_element()
     }
 

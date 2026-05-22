@@ -40,9 +40,6 @@ impl WorkspaceApp {
                     ButtonVariant::Default,
                     has_background,
                     show_primary_labels,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
                     cx.listener(|this, _event, window, cx| {
                         this.open_new_connection_form(window, cx);
                         cx.stop_propagation();
@@ -56,9 +53,6 @@ impl WorkspaceApp {
                     ButtonVariant::Outline,
                     has_background,
                     show_primary_labels,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
                     cx.listener(|this, _event, window, cx| {
                         this.open_auto_route_modal(window, cx);
                         cx.stop_propagation();
@@ -87,9 +81,6 @@ impl WorkspaceApp {
                                     LucideIcon::FolderInput,
                                     self.i18n.t("sessionManager.batch.move_to_group"),
                                     ButtonVariant::Outline,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
                                         this.session_manager.show_batch_move =
                                             !this.session_manager.show_batch_move;
@@ -103,9 +94,6 @@ impl WorkspaceApp {
                                     LucideIcon::Trash2,
                                     self.i18n.t("sessionManager.batch.delete"),
                                     ButtonVariant::Outline,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
                                         this.delete_selected_connections(cx);
                                         cx.stop_propagation();

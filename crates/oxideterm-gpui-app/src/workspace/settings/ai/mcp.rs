@@ -70,8 +70,7 @@ impl WorkspaceApp {
                         "settings_view.mcp.description",
                     ))
                     .child(
-                        toolbar_button(
-                            &self.tokens,
+                        self.workspace_toolbar_action_button(
                             self.i18n.t("settings_view.mcp.add_server"),
                             Some(Self::render_lucide_icon(
                                 LucideIcon::Plus,
@@ -88,9 +87,6 @@ impl WorkspaceApp {
                                 icon_gap: Some(6.0),
                                 ..ToolbarButtonOptions::default()
                             },
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
                             cx.listener(|this, _event, _window, cx| {
                                 this.ai_mcp_add_dialog = Some(AiMcpServerDraft::default());
                                 this.focused_settings_input = None;
@@ -317,23 +313,22 @@ impl WorkspaceApp {
         on_click: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let button = icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(icon, AI_MCP_ACTION_ICON, icon_color),
+        self.workspace_icon_action_button(
+            icon,
+            AI_MCP_ACTION_ICON,
+            icon_color,
             IconButtonOptions {
                 disabled,
                 hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x80)),
-                // MCP cards map Tauri disabled icon actions (`opacity-50`) while
-                // reusing the shared icon button action surface.
+                // MCP cards map Tauri disabled icon actions (`opacity-50`);
+                // the workspace wrapper now owns the disabled action guard.
                 disabled_opacity: 0.5,
                 ..IconButtonOptions::opaque_toolbar(AI_MCP_CARD_ICON_BUTTON, ButtonRadius::Md)
             },
-        );
-        button
-            .when(!disabled, |button| {
-                button.on_mouse_down(MouseButton::Left, cx.listener(on_click))
-            })
-            .into_any_element()
+            on_click,
+            cx,
+        )
+        .into_any_element()
     }
 
     fn ai_mcp_toggle_button(
@@ -373,8 +368,7 @@ impl WorkspaceApp {
         // Keep loading/disabled behavior in the shared button primitive so the
         // connecting state cannot still submit.
         options.loading = connecting;
-        let button = toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(
                 icon,
@@ -382,28 +376,22 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.text),
             )),
             options,
-        );
-        button
-            .when(!connecting, |button| {
-                button.on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        let registry = this.ai_mcp_registry.clone();
-                        let config = config.clone();
-                        cx.spawn(async move |weak, cx| {
-                            if connected {
-                                registry.disconnect_server(&config.id).await;
-                            } else {
-                                registry.connect_config(config).await;
-                            }
-                            let _ = weak.update(cx, |_this, cx| cx.notify());
-                        })
-                        .detach();
-                        cx.stop_propagation();
-                    }),
-                )
-            })
-            .into_any_element()
+            cx.listener(move |this, _event, _window, cx| {
+                let registry = this.ai_mcp_registry.clone();
+                let config = config.clone();
+                cx.spawn(async move |weak, cx| {
+                    if connected {
+                        registry.disconnect_server(&config.id).await;
+                    } else {
+                        registry.connect_config(config).await;
+                    }
+                    let _ = weak.update(cx, |_this, cx| cx.notify());
+                })
+                .detach();
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     fn ai_mcp_status_badge(&self, status: &str) -> AnyElement {
@@ -558,37 +546,29 @@ impl WorkspaceApp {
                         .child(
                             dialog_footer(&self.tokens)
                                 .child(
-                                    self.standard_footer_button(
+                                    self.standard_footer_action_button(
                                         self.i18n.t("settings_view.mcp.cancel"),
                                         ButtonVariant::Outline,
                                         ConfirmDialogAction::Cancel,
                                         false,
-                                    )
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
+                                        |this, _event, _window, cx| {
                                             this.close_ai_mcp_add_dialog();
-                                            cx.stop_propagation();
                                             cx.notify();
-                                        }),
+                                        },
+                                        cx,
                                     ),
                                 )
                                 .child(
-                                    self.standard_footer_button(
+                                    self.standard_footer_action_button(
                                         self.i18n.t("settings_view.mcp.add"),
                                         ButtonVariant::Default,
                                         ConfirmDialogAction::Confirm,
                                         !can_add,
-                                    )
-                                    .when(can_add, |button| {
-                                        button.on_mouse_down(
-                                            MouseButton::Left,
-                                            cx.listener(|this, _event, _window, cx| {
-                                                this.add_ai_mcp_server_from_draft(cx);
-                                                cx.stop_propagation();
-                                            }),
-                                        )
-                                    }),
+                                        |this, _event, _window, cx| {
+                                            this.add_ai_mcp_server_from_draft(cx);
+                                        },
+                                        cx,
+                                    ),
                                 ),
                         ),
                 )
@@ -789,7 +769,6 @@ impl WorkspaceApp {
         value: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let workspace = cx.entity();
         div()
             .flex()
             .flex_col()
@@ -806,24 +785,7 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .child(select_anchor_probe(
-                select_id.anchor_id(),
-                self.settings_select_trigger(select_id, value, false, false)
-                    .w_full()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.open_settings_select_from_pointer(select_id);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ),
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, _cx| {
-                        this.select_anchors.insert(select_id.anchor_id(), anchor);
-                    });
-                },
-            ))
+            .child(self.settings_select_control(select_id, value, false, None, cx))
             .into_any_element()
     }
 
@@ -907,8 +869,7 @@ impl WorkspaceApp {
             );
         }
         rows = rows.child(
-            toolbar_button(
-                &self.tokens,
+            self.workspace_toolbar_action_button(
                 add_label,
                 Some(Self::render_lucide_icon(
                     LucideIcon::Plus,
@@ -925,9 +886,6 @@ impl WorkspaceApp {
                     icon_gap: Some(6.0),
                     ..ToolbarButtonOptions::default()
                 },
-            )
-            .on_mouse_down(
-                MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
                     if let Some(draft) = this.ai_mcp_add_dialog.as_mut() {
                         if env {

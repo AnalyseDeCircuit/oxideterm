@@ -297,21 +297,7 @@ impl WorkspaceApp {
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let anchor_id = select_id.anchor_id();
-        let workspace = cx.entity();
-        let trigger = self.settings_select_trigger(select_id, value, false, !enabled);
-        let trigger = if enabled {
-            trigger.cursor_pointer().on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(select_id);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-        } else {
-            trigger
-        };
+        let control = self.settings_select_control(select_id, value, !enabled, None, cx);
 
         div()
             .w_full()
@@ -336,15 +322,7 @@ impl WorkspaceApp {
                             .child(self.i18n.t(hint_key)),
                     ),
             )
-            .child(select_anchor_probe(
-                anchor_id,
-                trigger,
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
-                    });
-                },
-            ))
+            .child(control)
             .when(!enabled, |field| {
                 field.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                     cx.stop_propagation();

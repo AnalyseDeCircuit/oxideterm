@@ -250,10 +250,9 @@ impl WorkspaceApp {
         };
 
         // Tauri renders keybinding toolbar actions as shadcn ghost Buttons
-        // with leading lucide icons. Keep the action identity separate from
-        // i18n labels so later focus-visible/loading wiring stays semantic.
-        toolbar_button(
-            &self.tokens,
+        // with leading lucide icons. Use the workspace action guard so disabled
+        // toolbar buttons cannot dispatch pointer activation in native either.
+        self.workspace_toolbar_action_button(
             self.i18n.t(action.label_key()),
             Some(Self::render_lucide_icon(
                 action.icon(),
@@ -272,14 +271,7 @@ impl WorkspaceApp {
                 hover_text_color: Some(hover_text_color),
                 ..ToolbarButtonOptions::default()
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(move |this, _event, window, cx| {
-                if disabled {
-                    cx.stop_propagation();
-                    return;
-                }
                 match action {
                     KeybindingToolbarAction::Import => this.import_keybindings(window, cx),
                     KeybindingToolbarAction::Export => this.export_keybindings(cx),
@@ -554,59 +546,18 @@ impl WorkspaceApp {
                     "settings_view.keybindings.override_anyway"
                 };
                 cell.child(
-                    toolbar_button(
-                        &self.tokens,
+                    self.keybinding_recording_confirm_button(
                         if conflicts.is_empty() {
                             label_key.to_string()
                         } else {
                             self.i18n.t(label_key)
                         },
-                        None,
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Ghost,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
-                            },
-                            text_color: Some(rgb(if conflicts.is_empty() {
-                                self.tokens.ui.accent
-                            } else {
-                                self.tokens.ui.warning
-                            })),
-                            hover_text_color: Some(rgb(if conflicts.is_empty() {
-                                self.tokens.ui.accent
-                            } else {
-                                self.tokens.ui.warning
-                            })),
-                            focus_visible: self.keybinding_recording_footer_focus
-                                == Some(KeybindingRecordingFooterAction::Confirm),
-                            ..ToolbarButtonOptions::default()
-                        },
+                        conflicts.is_empty(),
+                        cx,
                     )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, window, cx| {
-                            this.confirm_keybinding_recording(window, cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
                 )
             })
-            .child(
-                self.keybinding_icon_button(
-                    LucideIcon::X,
-                    self.keybinding_recording_footer_focus
-                        == Some(KeybindingRecordingFooterAction::Cancel),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.cancel_keybinding_recording(cx);
-                        cx.stop_propagation();
-                    }),
-                ),
-            )
+            .child(self.keybinding_recording_cancel_button(cx))
             .into_any_element()
     }
 
@@ -690,6 +641,73 @@ impl WorkspaceApp {
                 ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
             },
         )
+    }
+
+    fn keybinding_recording_confirm_button(
+        &self,
+        label: String,
+        is_clean_combo: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let text_color = if is_clean_combo {
+            self.tokens.ui.accent
+        } else {
+            self.tokens.ui.warning
+        };
+
+        self.workspace_toolbar_action_button(
+            label,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                text_color: Some(rgb(text_color)),
+                hover_text_color: Some(rgb(text_color)),
+                // Browser focus rings on Tauri's RecordingCell buttons are
+                // keyboard-origin only; mouse activation below clears this
+                // footer focus instead of synthesizing a focus-visible state.
+                focus_visible: self.keybinding_recording_footer_focus
+                    == Some(KeybindingRecordingFooterAction::Confirm),
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(|this, _event, window, cx| {
+                this.activate_keybinding_recording_footer_action(
+                    KeybindingRecordingFooterAction::Confirm,
+                    window,
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn keybinding_recording_cancel_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.workspace_icon_action_button(
+            LucideIcon::X,
+            14.0,
+            rgb(self.tokens.ui.text_muted),
+            IconButtonOptions {
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                focus_visible: self.keybinding_recording_footer_focus
+                    == Some(KeybindingRecordingFooterAction::Cancel),
+                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+            },
+            |this, _event, window, cx| {
+                this.activate_keybinding_recording_footer_action(
+                    KeybindingRecordingFooterAction::Cancel,
+                    window,
+                    cx,
+                );
+                cx.stop_propagation();
+            },
+            cx,
+        )
+        .into_any_element()
     }
 
     fn keybinding_conflict_text(

@@ -88,6 +88,21 @@ impl WorkspaceApp {
                                 "new-connection-modal-body-scroll",
                             ),
                         )
+                        .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                            // Tauri/Radix closes select content when the modal
+                            // scroll body moves its trigger. Native caches the
+                            // trigger anchor explicitly, so clear both popup
+                            // ownership and the stale group-select bounds here.
+                            let had_open_select =
+                                browser_behavior::close_browser_trigger_select_on_container_scroll(
+                                    &mut this.open_new_connection_select,
+                                    &mut this.new_connection_select_focus_origin,
+                                );
+                            this.clear_new_connection_select_anchor();
+                            if had_open_select {
+                                cx.notify();
+                            }
+                        }))
                         .child(
                             div()
                                 .flex()

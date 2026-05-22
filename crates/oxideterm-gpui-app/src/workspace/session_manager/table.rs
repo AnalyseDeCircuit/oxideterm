@@ -95,9 +95,6 @@ impl WorkspaceApp {
                                         ButtonVariant::Default,
                                         has_background,
                                         true,
-                                    )
-                                    .on_mouse_down(
-                                        MouseButton::Left,
                                         cx.listener(|this, _event, window, cx| {
                                             this.open_new_connection_form(window, cx);
                                             cx.stop_propagation();
@@ -590,72 +587,60 @@ impl WorkspaceApp {
             } else {
                 theme_bg(theme.bg, has_background)
             })
-            .child(
-                self.render_row_icon_button(
-                    LucideIcon::Play,
-                    MANAGER_ROW_ACTION_BUTTON,
-                    12.0,
-                    rgb(0x4ade80),
-                    has_background,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, window, cx| {
-                            this.close_session_row_menus();
-                            this.open_saved_connection(&id, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                ),
-            )
-            .child(
-                self.render_row_icon_button(
-                    LucideIcon::Pencil,
-                    MANAGER_ROW_ACTION_BUTTON,
-                    12.0,
-                    rgb(theme.text),
-                    has_background,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, window, cx| {
-                            this.close_session_row_menus();
-                            this.open_saved_connection_editor(&id, None, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                ),
-            )
-            .child(
-                self.render_row_icon_button(
-                    LucideIcon::MoreHorizontal,
-                    MANAGER_ROW_MORE_BUTTON,
-                    14.0,
-                    rgb(theme.text),
-                    has_background,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, event: &MouseDownEvent, _window, cx| {
-                            let trigger_x = f32::from(event.position.x);
-                            let trigger_y = f32::from(event.position.y);
-                            this.toggle_session_row_more_menu(
-                                &id,
-                                trigger_x - MANAGER_ROW_MENU_WIDTH + MANAGER_ROW_MORE_BUTTON,
-                                trigger_y,
-                            );
-                            cx.notify();
-                            cx.stop_propagation();
-                        }
-                    }),
-                ),
-            )
+            .child(self.render_row_icon_button(
+                LucideIcon::Play,
+                MANAGER_ROW_ACTION_BUTTON,
+                12.0,
+                rgb(0x4ade80),
+                has_background,
+                {
+                    let id = conn.id.clone();
+                    move |this, _event, window, cx| {
+                        this.close_session_row_menus();
+                        this.open_saved_connection(&id, window, cx);
+                        cx.stop_propagation();
+                    }
+                },
+                cx,
+            ))
+            .child(self.render_row_icon_button(
+                LucideIcon::Pencil,
+                MANAGER_ROW_ACTION_BUTTON,
+                12.0,
+                rgb(theme.text),
+                has_background,
+                {
+                    let id = conn.id.clone();
+                    move |this, _event, window, cx| {
+                        this.close_session_row_menus();
+                        this.open_saved_connection_editor(&id, None, window, cx);
+                        cx.stop_propagation();
+                    }
+                },
+                cx,
+            ))
+            .child(self.render_row_icon_button(
+                LucideIcon::MoreHorizontal,
+                MANAGER_ROW_MORE_BUTTON,
+                14.0,
+                rgb(theme.text),
+                has_background,
+                {
+                    let id = conn.id.clone();
+                    move |this, event: &MouseDownEvent, _window, cx| {
+                        let trigger_x = f32::from(event.position.x);
+                        let trigger_y = f32::from(event.position.y);
+                        this.toggle_session_row_more_menu(
+                            &id,
+                            trigger_x - MANAGER_ROW_MENU_WIDTH + MANAGER_ROW_MORE_BUTTON,
+                            trigger_y,
+                        );
+                        cx.notify();
+                        cx.stop_propagation();
+                    }
+                },
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1025,14 +1010,19 @@ impl WorkspaceApp {
         icon_size: f32,
         icon_color: Rgba,
         has_background: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
     ) -> gpui::Div {
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(icon, icon_size, icon_color),
+        self.workspace_icon_action_button(
+            icon,
+            icon_size,
+            icon_color,
             IconButtonOptions {
                 has_background,
                 ..IconButtonOptions::opaque_toolbar(size, ButtonRadius::Sm)
             },
+            listener,
+            cx,
         )
     }
 

@@ -72,8 +72,7 @@ impl WorkspaceApp {
                         // Tauri's profile add action is an outline small
                         // Button with a leading Plus icon. Keep it on the
                         // shared toolbar primitive with the same compact gap.
-                        toolbar_button(
-                            &self.tokens,
+                        self.workspace_toolbar_action_button(
                             self.i18n.t("settings_view.ai.profile_add"),
                             Some(Self::render_lucide_icon(
                                 LucideIcon::Plus,
@@ -90,9 +89,6 @@ impl WorkspaceApp {
                                 icon_gap: Some(6.0),
                                 ..ToolbarButtonOptions::default()
                             },
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
                             cx.listener(|this, _event, _window, cx| {
                                 this.edit_settings(ai_add_execution_profile, cx);
                                 cx.stop_propagation();
@@ -356,29 +352,7 @@ impl WorkspaceApp {
         label: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let anchor_id = select_id.anchor_id();
-        let workspace = cx.entity();
-        let trigger = self
-            .settings_select_trigger(select_id, label, false, false)
-            .w_full()
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(select_id);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            );
-        div()
-            .relative()
-            .w_full()
-            .child(select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
-            }))
-            .into_any_element()
+        self.settings_select_control(select_id, label, false, None, cx)
     }
 
     fn ai_context_source_row(
@@ -497,8 +471,7 @@ impl WorkspaceApp {
                 // Tauri renders memory clear as a ghost small Button. Keep it
                 // on the shared toolbar primitive so disabled state does not
                 // need custom per-section button styling.
-                toolbar_button(
-                    &self.tokens,
+                self.workspace_toolbar_action_button(
                     self.i18n.t("settings_view.ai.memory_clear"),
                     None,
                     ToolbarButtonOptions {
@@ -510,16 +483,11 @@ impl WorkspaceApp {
                         },
                         ..ToolbarButtonOptions::default()
                     },
+                    cx.listener(|this, _event, _window, cx| {
+                        this.edit_settings(|settings| settings.ai.memory.content.clear(), cx);
+                        cx.stop_propagation();
+                    }),
                 )
-                .when(!settings.ai.memory.content.trim().is_empty(), |button| {
-                    button.on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.edit_settings(|settings| settings.ai.memory.content.clear(), cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                })
                 .into_any_element(),
             )
             .child(self.ai_separator())
@@ -872,30 +840,27 @@ impl WorkspaceApp {
         on_click: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let button = icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(
-                icon,
-                15.0,
-                if matches!(icon, LucideIcon::Trash2) {
-                    rgb(self.tokens.ui.error)
-                } else {
-                    rgb(self.tokens.ui.text_muted)
-                },
-            ),
+        let icon_color = if matches!(icon, LucideIcon::Trash2) {
+            rgb(self.tokens.ui.error)
+        } else {
+            rgb(self.tokens.ui.text_muted)
+        };
+
+        self.workspace_icon_action_button(
+            icon,
+            15.0,
+            icon_color,
             IconButtonOptions {
                 disabled,
                 hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x80)),
-                // Tauri AI action buttons are fully opaque until disabled;
-                // keep that feature-specific opacity while sharing the button primitive.
+                // Tauri AI action buttons are fully opaque until disabled; the
+                // workspace wrapper owns the disabled activation guard.
                 ..IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md)
             },
-        );
-        button
-            .when(!disabled, |button| {
-                button.on_mouse_down(MouseButton::Left, cx.listener(on_click))
-            })
-            .into_any_element()
+            on_click,
+            cx,
+        )
+        .into_any_element()
     }
 
     fn ai_profile_default_button(
@@ -906,10 +871,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Execution profile default action is a normal small shadcn Button in
-        // Tauri. Use the shared toolbar button rather than another local
-        // ButtonOptions block.
-        toolbar_button(
-            &self.tokens,
+        // Tauri. Route it through the workspace toolbar action wrapper so
+        // default-profile cards share the same action guard as provider cards.
+        self.workspace_toolbar_action_button(
             if is_default {
                 self.i18n.t("settings_view.ai.profile_default")
             } else {
@@ -929,9 +893,6 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
                 this.edit_settings(
                     |settings| ai_set_default_execution_profile(settings, profile_id.clone()),
@@ -950,28 +911,7 @@ impl WorkspaceApp {
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let anchor_id = select_id.anchor_id();
-        let workspace = cx.entity();
-        let trigger = self
-            .settings_select_trigger(select_id, label, false, false)
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(select_id);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            );
-        div()
-            .relative()
-            .w(px(width))
-            .child(select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
-            }))
-            .into_any_element()
+        self.settings_select_control(select_id, label, false, Some(width), cx)
     }
 
     fn ai_reasoning_display(&self, value: &str) -> String {
@@ -1770,8 +1710,7 @@ impl WorkspaceApp {
         // Tool-policy expand/collapse is an outline small Button in Tauri.
         // Route it through the same shared primitive as other settings
         // command buttons.
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             if expanded {
                 self.i18n.t("settings_view.ai.tool_use_collapse")
             } else {
@@ -1787,9 +1726,6 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {
                 this.ai_tool_use_expanded = !this.ai_tool_use_expanded;
                 cx.stop_propagation();
@@ -1911,8 +1847,7 @@ impl WorkspaceApp {
             .child(
                 // Restoring disabled tools is a ghost small Button; share the
                 // same toolbar button path as the rest of AI settings actions.
-                toolbar_button(
-                    &self.tokens,
+                self.workspace_toolbar_action_button(
                     self.i18n.t("settings_view.ai.tool_use_restore_disabled_tools"),
                     None,
                     ToolbarButtonOptions {
@@ -1924,9 +1859,6 @@ impl WorkspaceApp {
                         },
                         ..ToolbarButtonOptions::default()
                     },
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
                         this.edit_settings(|settings| settings.ai.tool_use.disabled_tools.clear(), cx);
                         cx.stop_propagation();

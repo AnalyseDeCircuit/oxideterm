@@ -11,7 +11,6 @@ use oxideterm_gpui_ui::{
     ButtonTone, TextInputView, button,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, button_with,
-        icon_button,
     },
     text_input_anchor_probe,
 };
@@ -832,50 +831,28 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(icon, 12.0, rgb(theme.text)),
+        self.workspace_tooltip_icon_button(
+            icon,
+            12.0,
+            rgb(theme.text),
             IconButtonOptions {
                 size: 20.0,
                 disabled,
                 idle_opacity: 0.5,
                 ..IconButtonOptions::compact(20.0)
             },
-        )
-        .id(("launcher-icon-button", launcher_header_action_id(action)))
-        .on_mouse_move(cx.listener({
-            let title = title.clone();
-            move |this, event: &MouseMoveEvent, _window, cx| {
-                this.queue_workspace_tooltip(
-                    format!("launcher-button-{title}"),
-                    title.clone(),
-                    f32::from(event.position.x) + 12.0,
-                    f32::from(event.position.y) + 16.0,
-                    cx,
-                );
-            }
-        }))
-        .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-            if !*hovered {
-                this.clear_workspace_tooltip(&format!("launcher-button-{title}"), cx);
-            }
-        }))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _event, _window, cx| {
-                if disabled {
-                    return;
-                }
-                match action {
-                    LauncherHeaderAction::Refresh => this.refresh_launcher(cx),
-                    LauncherHeaderAction::Disable => {
-                        this.launcher.core.show_disable_confirm = true;
-                        cx.notify();
-                    }
+            title,
+            "launcher-icon-button",
+            false,
+            cx.listener(move |this, _event, _window, cx| match action {
+                LauncherHeaderAction::Refresh => this.refresh_launcher(cx),
+                LauncherHeaderAction::Disable => {
+                    this.launcher.core.show_disable_confirm = true;
+                    cx.notify();
                 }
             }),
+            cx.entity(),
         )
-        .into_any_element()
     }
 
     fn render_launcher_disable_confirm(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1234,13 +1211,6 @@ impl WorkspaceApp {
 
 fn launcher_requires_opt_in() -> bool {
     cfg!(target_os = "macos")
-}
-
-fn launcher_header_action_id(action: LauncherHeaderAction) -> u64 {
-    match action {
-        LauncherHeaderAction::Refresh => 1,
-        LauncherHeaderAction::Disable => 2,
-    }
 }
 
 fn launcher_element_id_for_path(path: &str) -> u64 {

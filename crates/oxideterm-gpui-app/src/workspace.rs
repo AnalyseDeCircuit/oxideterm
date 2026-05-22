@@ -180,8 +180,8 @@ use oxideterm_gpui_ui::typography::{
 pub(super) use selectable_text::{SelectableTextRole, SelectableTextScrollExt};
 pub(super) use virtual_list::{
     TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
-    tauri_virtual_list, tauri_virtual_list_is_near_bottom, tauri_virtual_uniform_list,
-    uniform_list_edge_autoscroll,
+    tauri_virtual_list, tauri_virtual_list_is_near_bottom, tauri_virtual_list_state,
+    tauri_virtual_uniform_list, uniform_list_edge_autoscroll,
 };
 use virtual_list::{VirtualListSignatureCache, sync_tauri_virtual_list_state_by_signatures};
 

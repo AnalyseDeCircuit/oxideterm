@@ -189,11 +189,8 @@ impl WorkspaceApp {
                 self.ai_chat_store = Some(store);
                 self.ai_chat = state;
                 self.ai_chat_initialization_error = None;
-                self.ai_chat_list_state = ListState::new(
-                    0,
-                    ListAlignment::Top,
-                    ai_chat_virtual_list_spec().overdraw(),
-                );
+                self.ai_chat_list_state =
+                    tauri_virtual_list_state(0, ListAlignment::Top, ai_chat_virtual_list_spec());
                 self.ai_chat_list_cache
                     .replace(VirtualListSignatureCache::default());
             }

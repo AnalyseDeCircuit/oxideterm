@@ -113,10 +113,13 @@ impl Render for WorkspaceApp {
                 let active_ime_commits_printable_key =
                     this.defer_active_ime_printable_key(&event.keystroke, window, cx);
                 if active_ime_commits_printable_key {
-                    // Active text inputs are owned by GPUI InputHandler for
-                    // printable text. Stop page handlers here so command
-                    // palette/search-style inputs do not append the same key.
-                    cx.stop_propagation();
+                    // Tauri DOM inputs let printable keydown bubble while the
+                    // browser performs the actual text mutation through the
+                    // input/composition pipeline. GPUI follows the same shape:
+                    // if we stop propagation here, the platform input handler
+                    // may not receive the character and page-level fallbacks can
+                    // become a second writer. Record the owner for dedupe, then
+                    // leave the key unhandled so Window dispatches text once.
                     return;
                 }
                 if this.keyboard_interactive_challenge.is_some() {

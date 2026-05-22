@@ -368,17 +368,14 @@ impl WorkspaceApp {
         // Proxy-chain expand/collapse is an icon-only toolbar action in the
         // Tauri form. Use the shared primitive so hover and future focus state
         // stay aligned with other new-connection toolbar controls.
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(
-                if expanded {
-                    LucideIcon::ChevronDown
-                } else {
-                    LucideIcon::ChevronRight
-                },
-                16.0,
-                rgb(self.tokens.ui.text),
-            ),
+        self.workspace_icon_action_button(
+            if expanded {
+                LucideIcon::ChevronDown
+            } else {
+                LucideIcon::ChevronRight
+            },
+            16.0,
+            rgb(self.tokens.ui.text),
             IconButtonOptions {
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
                 ..IconButtonOptions::opaque_toolbar(
@@ -386,26 +383,23 @@ impl WorkspaceApp {
                     ButtonRadius::Md,
                 )
             },
+            |this, _event, _window, cx| {
+                if let Some(form) = this.new_connection_form.as_mut() {
+                    form.proxy_chain_expanded = !form.proxy_chain_expanded;
+                    form.field_focused = false;
+                }
+                cx.stop_propagation();
+                cx.notify();
+            },
+            cx,
         )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    if let Some(form) = this.new_connection_form.as_mut() {
-                        form.proxy_chain_expanded = !form.proxy_chain_expanded;
-                        form.field_focused = false;
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
             .into_any_element()
     }
 
     fn render_add_jump_button(&self, cx: &mut Context<Self>) -> AnyElement {
         // The outer "add jump" command is the same small outline action
         // pattern used by settings toolbars, so keep its chrome shared.
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             self.i18n.t("ssh.form.proxy_chain_add_jump"),
             Some(Self::render_lucide_icon(
                 LucideIcon::Plus,
@@ -425,24 +419,20 @@ impl WorkspaceApp {
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(|this, _event, window, cx| {
+                if let Some(form) = this.new_connection_form.as_mut() {
+                    form.jump_server_form = Some(super::form_state::NewConnectionProxyHop::new());
+                    form.field_focused = true;
+                    form.focused_field = NewConnectionField::JumpHost;
+                    form.selected_field = None;
+                }
+                this.close_new_connection_select();
+                this.new_connection_caret_visible = true;
+                window.focus(&this.focus_handle);
+                cx.stop_propagation();
+                cx.notify();
+            }),
         )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
-                    if let Some(form) = this.new_connection_form.as_mut() {
-                        form.jump_server_form =
-                            Some(super::form_state::NewConnectionProxyHop::new());
-                        form.field_focused = true;
-                        form.focused_field = NewConnectionField::JumpHost;
-                        form.selected_field = None;
-                    }
-                    this.close_new_connection_select();
-                    this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
             .into_any_element()
     }
 
@@ -450,8 +440,7 @@ impl WorkspaceApp {
         // Jump-server editor actions mirror Tauri Button chrome. Keep add and
         // cancel on the shared toolbar primitive instead of local button_with
         // calls so disabled/focus handling can converge later.
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             self.i18n.t("ssh.form.proxy_jump_add"),
             None,
             ToolbarButtonOptions {
@@ -463,22 +452,16 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
+            cx.listener(move |this, _event, _window, cx| {
+                this.add_pending_jump_server(cx);
+                cx.stop_propagation();
+            }),
         )
-        .when(!disabled, |button| {
-            button.on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.add_pending_jump_server(cx);
-                    cx.stop_propagation();
-                }),
-            )
-        })
-        .into_any_element()
+            .into_any_element()
     }
 
     fn render_jump_cancel_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             self.i18n.t("ssh.form.cancel"),
             None,
             ToolbarButtonOptions {
@@ -489,9 +472,6 @@ impl WorkspaceApp {
                 },
                 ..ToolbarButtonOptions::default()
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {
                 if let Some(form) = this.new_connection_form.as_mut() {
                     form.jump_server_form = None;
@@ -654,30 +634,25 @@ impl WorkspaceApp {
     }
 
     fn render_remove_jump_button(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(
-                LucideIcon::Trash2,
-                14.0,
-                rgb(self.tokens.ui.text_muted),
-            ),
+        self.workspace_icon_action_button(
+            LucideIcon::Trash2,
+            14.0,
+            rgb(self.tokens.ui.text_muted),
             IconButtonOptions {
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
                 ..IconButtonOptions::opaque_toolbar(24.0, ButtonRadius::Sm)
             },
+            move |this, _event, _window, cx| {
+                if let Some(form) = this.new_connection_form.as_mut()
+                    && index < form.proxy_hops.len()
+                {
+                    form.proxy_hops.remove(index);
+                }
+                cx.stop_propagation();
+                cx.notify();
+            },
+            cx,
         )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if let Some(form) = this.new_connection_form.as_mut()
-                        && index < form.proxy_hops.len()
-                    {
-                        form.proxy_hops.remove(index);
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
             .into_any_element()
     }
 

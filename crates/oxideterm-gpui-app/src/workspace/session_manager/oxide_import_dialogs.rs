@@ -82,8 +82,7 @@ impl WorkspaceApp {
                                             // default accent Button for first
                                             // file selection; keep the shape on
                                             // the shared button primitive.
-                                            toolbar_button(
-                                                &self.tokens,
+                                            self.workspace_toolbar_action_button(
                                                 "选择 .oxide 文件".to_string(),
                                                 None,
                                                 ToolbarButtonOptions {
@@ -95,9 +94,6 @@ impl WorkspaceApp {
                                                     },
                                                     ..ToolbarButtonOptions::default()
                                                 },
-                                            )
-                                            .on_mouse_down(
-                                                MouseButton::Left,
                                                 cx.listener(|this, _event, _window, cx| {
                                                     this.select_oxide_import_file(cx);
                                                     cx.stop_propagation();

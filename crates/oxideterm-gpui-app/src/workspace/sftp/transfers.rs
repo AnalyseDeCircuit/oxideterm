@@ -62,38 +62,35 @@ impl WorkspaceApp {
                             ))
                             .when(has_incomplete, |row| {
                                 row.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(4.0))
-                                        .text_color(rgb(theme.accent))
-                                        .cursor_pointer()
-                                        .child(Self::render_lucide_icon(
-                                            LucideIcon::History,
-                                            SFTP_ICON_SM,
-                                            rgb(theme.accent),
-                                        ))
-                                        .child(
-                                            self.i18n
-                                                .t("sftp.queue.incomplete_count")
-                                                .replace("{{count}}", &incomplete_count.to_string()),
-                                        )
-                                        .on_mouse_down(
-                                            MouseButton::Left,
-                                            cx.listener(|this, _event, _window, cx| {
+                                    self.workspace_clickable_row_action(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(4.0))
+                                            .text_color(rgb(theme.accent))
+                                            .child(Self::render_lucide_icon(
+                                                LucideIcon::History,
+                                                SFTP_ICON_SM,
+                                                rgb(theme.accent),
+                                            ))
+                                            .child(self.i18n.t("sftp.queue.incomplete_count").replace(
+                                                "{{count}}",
+                                                &incomplete_count.to_string(),
+                                            )),
+                                        false,
+                                        cx.listener(|this, _event, _window, cx| {
                                                 this.sftp_view.show_incomplete =
                                                     !this.sftp_view.show_incomplete;
                                                 cx.stop_propagation();
                                                 cx.notify();
-                                            }),
-                                        ),
+                                        }),
+                                    ),
                                 )
                             }),
                     )
                     .when(has_completed, |header| {
                         header.child(
-                            toolbar_button(
-                                &self.tokens,
+                            self.workspace_toolbar_action_button(
                                 self.i18n.t("sftp.queue.clear_done"),
                                 None,
                                 ToolbarButtonOptions {
@@ -109,9 +106,6 @@ impl WorkspaceApp {
                                         SFTP_TEXT_XS,
                                     )
                                 },
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
                                     this.sftp_view
                                         .transfers

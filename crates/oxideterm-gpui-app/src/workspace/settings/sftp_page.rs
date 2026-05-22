@@ -154,33 +154,7 @@ impl WorkspaceApp {
         value: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let anchor_id = select_id.anchor_id();
-        let workspace = cx.entity();
-        let trigger = self
-            .settings_select_trigger(select_id, value, false, false)
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(select_id);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            );
-
-        div()
-            .relative()
-            .w(px(SFTP_SETTINGS_SELECT_WIDTH))
-            .child(select_anchor_probe(
-                anchor_id,
-                trigger,
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
-                    });
-                },
-            ))
-            .into_any_element()
+        self.settings_select_control(select_id, value, false, Some(SFTP_SETTINGS_SELECT_WIDTH), cx)
     }
 
 }

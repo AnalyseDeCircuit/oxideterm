@@ -768,14 +768,7 @@ impl WorkspaceApp {
                     return;
                 }
                 Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
-                    match action {
-                        KeybindingRecordingFooterAction::Confirm => {
-                            self.confirm_keybinding_recording(window, cx);
-                        }
-                        KeybindingRecordingFooterAction::Cancel => {
-                            self.cancel_keybinding_recording(cx);
-                        }
-                    }
+                    self.activate_keybinding_recording_footer_action(action, window, cx);
                     return;
                 }
                 None => {}
@@ -804,6 +797,26 @@ impl WorkspaceApp {
         self.keybinding_recording_footer_focus = None;
         self.keybinding_conflict_action_ids = conflicts;
         cx.notify();
+    }
+
+    pub(super) fn activate_keybinding_recording_footer_action(
+        &mut self,
+        action: KeybindingRecordingFooterAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Tauri RecordingCell buttons stop propagation and then run exactly one
+        // footer action. Native shares this entry for keyboard and pointer
+        // activation so focus cleanup and confirm/cancel branching cannot drift.
+        self.keybinding_recording_footer_focus = None;
+        match action {
+            KeybindingRecordingFooterAction::Confirm => {
+                self.confirm_keybinding_recording(window, cx);
+            }
+            KeybindingRecordingFooterAction::Cancel => {
+                self.cancel_keybinding_recording(cx);
+            }
+        }
     }
 
     pub(super) fn confirm_keybinding_recording(

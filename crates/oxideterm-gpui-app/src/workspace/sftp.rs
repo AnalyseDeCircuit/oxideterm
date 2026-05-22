@@ -2,8 +2,8 @@ use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
     AnchoredPositionMode, Corner, Entity, ObjectFit, PathPromptOptions, Pixels, Point,
-    SharedString, StatefulInteractiveElement, StyledText, Subscription, UniformListScrollHandle,
-    anchored, deferred, prelude::*,
+    SharedString, StyledText, Subscription, UniformListScrollHandle, anchored, deferred,
+    prelude::*,
 };
 use oxideterm_code_editor::backend::input::{
     Input as CodeEditorInput, InputEvent as CodeEditorInputEvent,
@@ -15,7 +15,7 @@ use oxideterm_gpui_markdown::{
 use oxideterm_gpui_ui::{
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonOptions, icon_button, toolbar_button,
+        ToolbarButtonOptions,
     },
     context_menu::{ContextMenuActionableStyle, context_menu_event_boundary},
     modal::{dismissible_dialog_backdrop, overlay_content_boundary},

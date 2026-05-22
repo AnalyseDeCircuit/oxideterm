@@ -1,5 +1,4 @@
 use super::*;
-use gpui::StatefulInteractiveElement;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_file_manager_surface(
@@ -1376,40 +1375,16 @@ impl WorkspaceApp {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         workspace: gpui::Entity<Self>,
     ) -> AnyElement {
-        let tooltip_for_move = tooltip.clone();
-        let tooltip_element_id = tooltip.clone();
-        let tooltip_request_id = tooltip.clone();
-        let tooltip_workspace = workspace.clone();
-        let clear_workspace = workspace;
-        icon_button(
-            &self.tokens,
-            Self::render_lucide_icon(icon, FILE_MANAGER_ICON_MD, rgb(self.tokens.ui.text)),
-            // Tauri file-manager toolbar icons are fully opaque until disabled.
+        self.workspace_tooltip_icon_button(
+            icon,
+            FILE_MANAGER_ICON_MD,
+            rgb(self.tokens.ui.text),
             IconButtonOptions::opaque_toolbar(FILE_MANAGER_TOOL_BUTTON, ButtonRadius::Sm),
+            tooltip,
+            "file-manager-icon-button",
+            false,
+            listener,
+            workspace,
         )
-        .id((
-            gpui::ElementId::from("file-manager-icon-button"),
-            tooltip_element_id,
-        ))
-        .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
-            let _ = tooltip_workspace.update(cx, |this, cx| {
-                this.queue_workspace_tooltip(
-                    tooltip_request_id.clone(),
-                    tooltip_for_move.clone(),
-                    f32::from(event.position.x) + 12.0,
-                    f32::from(event.position.y) + 16.0,
-                    cx,
-                );
-            });
-        })
-        .on_hover(move |hovered: &bool, _window, cx| {
-            if !*hovered {
-                let _ = clear_workspace.update(cx, |this, cx| {
-                    this.clear_workspace_tooltip(&tooltip, cx);
-                });
-            }
-        })
-        .on_mouse_down(MouseButton::Left, listener)
-        .into_any_element()
     }
 }

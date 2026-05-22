@@ -46,13 +46,11 @@ impl WorkspaceApp {
                     .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
                         // GPUI can advance scroll state without rebuilding the settings view,
                         // so cached trigger bounds must not survive a settings scroll.
-                        let had_open_select = this.open_settings_select.is_some();
-                        if had_open_select {
-                            // Browser/Radix closes the popup and releases the
-                            // trigger focus owner when the scroll container
-                            // moves the anchor out from under the overlay.
-                            this.close_settings_select();
-                        }
+                        let had_open_select =
+                            browser_behavior::close_browser_trigger_select_on_container_scroll(
+                                &mut this.open_settings_select,
+                                &mut this.settings_select_focus_origin,
+                            );
                         this.clear_settings_select_anchors();
                         if had_open_select {
                             cx.notify();

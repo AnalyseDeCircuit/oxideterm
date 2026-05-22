@@ -197,10 +197,10 @@ impl WorkspaceApp {
             ai_model_selector_provider_online: HashMap::new(),
             ai_model_selector_probe_generations: HashMap::new(),
             ai_chat,
-            ai_chat_list_state: ListState::new(
+            ai_chat_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
-                ai_chat_virtual_list_spec().overdraw(),
+                ai_chat_virtual_list_spec(),
             ),
             ai_chat_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             ai_markdown_cache: RefCell::new(AiMarkdownDocumentCache::default()),
@@ -366,14 +366,13 @@ impl WorkspaceApp {
             reconnect_forward_restore_totals: HashMap::new(),
             reconnect_forward_restore_tokens: HashMap::new(),
             notification_center: NotificationCenterState::default(),
-            notification_sidebar_list_state: ListState::new(
+            notification_sidebar_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
                 TauriVirtualListSpec::new(
                     px(NOTIFICATION_SIDEBAR_ROW_HEIGHT_ESTIMATE),
                     NOTIFICATION_SIDEBAR_VIRTUAL_OVERSCAN,
-                )
-                .overdraw(),
+                ),
             ),
             notification_sidebar_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             event_log_sidebar_scroll_handle: UniformListScrollHandle::new(),

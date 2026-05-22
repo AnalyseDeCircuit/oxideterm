@@ -3,10 +3,7 @@ use gpui::{
     px, rgb, rgba,
 };
 use oxideterm_gpui_ui::{
-    button::{
-        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
-        toolbar_button,
-    },
+    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
     modal::dismissible_dialog_backdrop,
 };
 use oxideterm_ssh::{HostKeyStatus, SshConfig, remove_host_key};
@@ -389,8 +386,7 @@ impl WorkspaceApp {
         // Host-key prompts are protected dialogs; only the button chrome moves
         // to the shared shadcn-style primitive. The explicit challenge actions
         // and non-dismissible backdrop semantics stay local.
-        toolbar_button(
-            &self.tokens,
+        self.workspace_toolbar_action_button(
             label,
             None,
             ToolbarButtonOptions {
@@ -405,9 +401,6 @@ impl WorkspaceApp {
                 font_size: Some(self.tokens.metrics.form_text_font_size),
                 ..ToolbarButtonOptions::default()
             },
-        )
-        .on_mouse_down(
-            MouseButton::Left,
             cx.listener(move |this, _event, window, cx| match action {
                 HostKeyButtonAction::Cancel => this.cancel_host_key_challenge(cx),
                 HostKeyButtonAction::TrustOnce => this.accept_host_key_challenge(false, window, cx),

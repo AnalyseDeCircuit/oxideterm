@@ -100,21 +100,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let select_id = SettingsSelect::ConnectionIdleTimeout;
-        let anchor_id = select_id.anchor_id();
-        let workspace = cx.entity();
         let value =
             connection_idle_timeout_label(settings.connection_pool.idle_timeout_secs, &self.i18n);
-        let trigger = self
-            .settings_select_trigger(select_id, value, false, false)
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(select_id);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            );
+        let control = self.settings_select_control(select_id, value, false, None, cx);
 
         div()
             .max_w(px(320.0))
@@ -127,16 +115,7 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t("settings_view.connections.idle_timeout.label")),
             )
-            .child(
-                div()
-                    .relative()
-                    .w_full()
-                    .child(select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
-                        let _ = workspace.update(cx, |this, cx| {
-                            this.update_select_anchor(anchor, cx);
-                        });
-                    })),
-            )
+            .child(control)
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
