@@ -1,6 +1,54 @@
 impl WorkspaceApp {
+    fn session_manager_basic_footer_button(
+        &self,
+        label: String,
+        variant: ButtonVariant,
+        action: SessionManagerBasicDialogFooterAction,
+        disabled: bool,
+    ) -> Div {
+        self.session_manager_dialog_footer_button(
+            label,
+            variant,
+            action,
+            disabled,
+            ButtonSize::Sm,
+            None,
+        )
+    }
+
+    fn session_manager_dialog_footer_button(
+        &self,
+        label: String,
+        variant: ButtonVariant,
+        action: SessionManagerBasicDialogFooterAction,
+        disabled: bool,
+        size: ButtonSize,
+        icon: Option<AnyElement>,
+    ) -> Div {
+        // Tauri session-manager dialogs all use DialogFooter shadcn Buttons.
+        // GPUI has no DOM focus trap, so the button chrome and footer-owned
+        // focus-visible ring need to live in one shared renderer.
+        toolbar_button(
+            &self.tokens,
+            label,
+            icon,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant,
+                    size,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+                focus_visible: self.session_manager.focused_basic_dialog_footer_action
+                    == Some(action),
+                ..ToolbarButtonOptions::default()
+            },
+        )
+    }
+
     fn render_new_group_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let can_create_group = !self.session_manager.new_group_name.trim().is_empty();
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
@@ -53,20 +101,11 @@ impl WorkspaceApp {
                             .justify_end()
                             .gap(px(8.0))
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    button_with(
-                                        &self.tokens,
-                                        self.i18n.t("sessionManager.edit_properties.cancel"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Secondary,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
-                                    ),
-                                    self.session_manager.focused_basic_dialog_footer_action
-                                        == Some(SessionManagerBasicDialogFooterAction::Cancel),
+                                self.session_manager_basic_footer_button(
+                                    self.i18n.t("sessionManager.edit_properties.cancel"),
+                                    ButtonVariant::Secondary,
+                                    SessionManagerBasicDialogFooterAction::Cancel,
+                                    false,
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -80,29 +119,22 @@ impl WorkspaceApp {
                                 ),
                             )
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    button_with(
-                                        &self.tokens,
-                                        self.i18n.t("sessionManager.edit_properties.save"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Default,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
-                                    ),
-                                    self.session_manager.focused_basic_dialog_footer_action
-                                        == Some(SessionManagerBasicDialogFooterAction::Primary),
+                                self.session_manager_basic_footer_button(
+                                    self.i18n.t("sessionManager.edit_properties.save"),
+                                    ButtonVariant::Default,
+                                    SessionManagerBasicDialogFooterAction::Primary,
+                                    !can_create_group,
                                 )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.session_manager.focused_basic_dialog_footer_action =
-                                            None;
-                                        this.create_session_group(cx);
-                                    }),
-                                ),
+                                .when(can_create_group, |button| {
+                                    button.on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.session_manager
+                                                .focused_basic_dialog_footer_action = None;
+                                            this.create_session_group(cx);
+                                        }),
+                                    )
+                                }),
                             ),
                     ),
             ))
@@ -179,20 +211,11 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgb(theme.border))
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    button_with(
-                                        &self.tokens,
-                                        self.i18n.t("sessionManager.edit_properties.cancel"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Secondary,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
-                                    ),
-                                    self.session_manager.focused_basic_dialog_footer_action
-                                        == Some(SessionManagerBasicDialogFooterAction::Cancel),
+                                self.session_manager_basic_footer_button(
+                                    self.i18n.t("sessionManager.edit_properties.cancel"),
+                                    ButtonVariant::Secondary,
+                                    SessionManagerBasicDialogFooterAction::Cancel,
+                                    false,
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -206,20 +229,11 @@ impl WorkspaceApp {
                                 ),
                             )
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    button_with(
-                                        &self.tokens,
-                                        self.i18n.t("sessionManager.toolbar.import"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Default,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
-                                    ),
-                                    self.session_manager.focused_basic_dialog_footer_action
-                                        == Some(SessionManagerBasicDialogFooterAction::Primary),
+                                self.session_manager_basic_footer_button(
+                                    self.i18n.t("sessionManager.toolbar.import"),
+                                    ButtonVariant::Default,
+                                    SessionManagerBasicDialogFooterAction::Primary,
+                                    false,
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,

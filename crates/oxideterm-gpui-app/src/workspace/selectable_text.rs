@@ -19,7 +19,6 @@ use super::{SelectableTextFragmentState, WorkspaceApp};
 
 const SELECTABLE_TEXT_AUTOSCROLL_EDGE_PX: f32 = 48.0;
 const SELECTABLE_TEXT_AUTOSCROLL_MAX_STEP_PX: f32 = 26.0;
-const BROWSER_SCROLL_STICKY_BOTTOM_PX: f32 = 30.0;
 
 pub(crate) trait SelectableTextScrollExt:
     StatefulInteractiveElement + gpui_component::scroll::ScrollableElement + Sized
@@ -78,29 +77,6 @@ impl WorkspaceApp {
             .entry(key.into())
             .or_insert_with(ScrollHandle::new)
             .clone()
-    }
-
-    pub(super) fn schedule_browser_scroll_to_bottom_if_sticky(
-        &self,
-        handle: ScrollHandle,
-        cx: &mut Context<Self>,
-    ) {
-        if !browser_scroll_handle_is_near_bottom(&handle) {
-            return;
-        }
-        // Tauri EventLogPanel keeps auto-scroll enabled while the browser
-        // scroll container is within 30px of the bottom, then applies the
-        // bottom scroll after React commits the new row. GPUI needs the same
-        // post-layout turn because max_offset is only fresh after paint.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(16)).await;
-            let _ = weak.update(cx, move |_this, cx| {
-                if scroll_handle_to_bottom(&handle) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
     }
 
     pub(super) fn update_selectable_text_autoscroll(
@@ -781,26 +757,6 @@ impl WorkspaceApp {
         });
         fragments
     }
-}
-
-fn browser_scroll_handle_is_near_bottom(handle: &ScrollHandle) -> bool {
-    let max_offset = handle.max_offset();
-    if max_offset.height <= px(0.0) {
-        return true;
-    }
-    let distance_from_bottom = max_offset.height + handle.offset().y;
-    distance_from_bottom <= px(BROWSER_SCROLL_STICKY_BOTTOM_PX)
-}
-
-fn scroll_handle_to_bottom(handle: &ScrollHandle) -> bool {
-    let offset = handle.offset();
-    let max_offset = handle.max_offset();
-    let next_y = -max_offset.height;
-    if offset.y == next_y {
-        return false;
-    }
-    handle.set_offset(Point::new(offset.x, next_y));
-    true
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

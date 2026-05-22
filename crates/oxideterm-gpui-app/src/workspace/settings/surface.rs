@@ -9,6 +9,7 @@ impl WorkspaceApp {
             .is_some_and(|tab| tab.kind == TabKind::Settings);
         self.active_surface = ActiveSurface::Terminal;
         self.open_settings_select = None;
+        self.settings_select_focus_origin = None;
         self.focused_settings_input = None;
         self.settings_slider_drag = None;
         if close_active_settings_tab {
@@ -47,6 +48,12 @@ impl WorkspaceApp {
                         // GPUI can advance scroll state without rebuilding the settings view,
                         // so cached trigger bounds must not survive a settings scroll.
                         let had_open_select = this.open_settings_select.take().is_some();
+                        if had_open_select {
+                            // Browser/Radix closes the popup and releases the
+                            // trigger focus owner when the scroll container
+                            // moves the anchor out from under the overlay.
+                            this.settings_select_focus_origin = None;
+                        }
                         this.clear_settings_select_anchors();
                         if had_open_select {
                             cx.notify();

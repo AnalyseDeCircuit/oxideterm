@@ -52,28 +52,33 @@ impl WorkspaceApp {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         workspace: gpui::Entity<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let title_for_move = title.clone();
         let title_element_id = title.clone();
         let title_request_id = title.clone();
         let tooltip_workspace = workspace.clone();
         let clear_workspace = workspace;
-        div()
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, SFTP_ICON_SM, rgb(self.tokens.ui.text)),
+            IconButtonOptions {
+                size: SFTP_TOOL_BUTTON,
+                radius: ButtonRadius::Md,
+                disabled: false,
+                loading: false,
+                has_background: false,
+                background: None,
+                border: None,
+                hover_background: None,
+                hover_opacity: None,
+                focus_visible: false,
+                // Tauri SFTP toolbar buttons render normal opacity; disabled
+                // states are handled by callers that omit the action.
+                idle_opacity: 1.0,
+                disabled_opacity: 0.35,
+            },
+        )
             .id((gpui::ElementId::from("sftp-icon-button"), title_element_id))
-            .size(px(SFTP_TOOL_BUTTON))
             .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .text_color(rgb(theme.text))
-            .hover(move |button| button.bg(rgb(theme.bg_hover)))
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(
-                icon,
-                SFTP_ICON_SM,
-                rgb(theme.text),
-            ))
             .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
                 let _ = tooltip_workspace.update(cx, |this, cx| {
                     this.queue_workspace_tooltip(
@@ -141,23 +146,30 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .h(px(24.0))
-            .px(px(8.0))
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .rounded(px(self.tokens.radii.sm))
-            .text_size(px(SFTP_TEXT_XS))
-            .text_color(rgb(theme.text))
-            .hover(move |button| button.bg(rgb(theme.bg_hover)))
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(
+        toolbar_button(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(
                 icon,
                 SFTP_ICON_SM,
                 rgb(theme.text),
-            ))
-            .child(label)
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Sm,
+                    disabled: false,
+                },
+                icon_gap: Some(4.0),
+                height: Some(24.0),
+                padding_x: Some(8.0),
+                font_size: Some(SFTP_TEXT_XS),
+                text_color: Some(rgb(theme.text)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                ..ToolbarButtonOptions::default()
+            },
+        )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -192,44 +204,51 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         // Mirrors the Tauri Button variants used by SFTP dialogs:
         // default = bg-theme-text, secondary = bg-theme-bg-panel, ghost = no border.
-        let (bg, border, text) = match variant {
+        let (bg, border, text, hover_bg, hover_opacity) = match variant {
             SftpButtonVariant::Default => (
                 rgb(theme.text),
                 rgba((theme.text << 8) | SFTP_BUTTON_TRANSPARENT_ALPHA),
                 rgb(theme.bg),
+                rgb(theme.text),
+                Some(0.9),
             ),
-            SftpButtonVariant::Secondary => {
-                (rgb(theme.bg_panel), rgb(theme.border), rgb(theme.text))
-            }
+            SftpButtonVariant::Secondary => (
+                rgb(theme.bg_panel),
+                rgb(theme.border),
+                rgb(theme.text),
+                rgb(theme.bg_hover),
+                None,
+            ),
             SftpButtonVariant::Ghost => (
                 rgba((theme.bg << 8) | SFTP_BUTTON_TRANSPARENT_ALPHA),
                 rgba((theme.border << 8) | SFTP_BUTTON_TRANSPARENT_ALPHA),
                 rgb(theme.text),
+                rgb(theme.bg_hover),
+                None,
             ),
         };
-        div()
-            .h(px(32.0))
-            .px(px(12.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(border)
-            .bg(bg)
-            .text_color(text)
-            .text_size(px(SFTP_TEXT_XS))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .hover(move |button| {
-                match variant {
-                    SftpButtonVariant::Default => button.opacity(0.9),
-                    SftpButtonVariant::Secondary | SftpButtonVariant::Ghost => {
-                        button.bg(rgb(theme.bg_hover))
-                    }
-                }
-            })
-            .cursor_pointer()
-            .child(label)
+        toolbar_button(
+            &self.tokens,
+            label,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                background: Some(bg),
+                border: Some(border),
+                text_color: Some(text),
+                hover_background: Some(hover_bg),
+                hover_opacity,
+                height: Some(32.0),
+                padding_x: Some(12.0),
+                font_size: Some(SFTP_TEXT_XS),
+                ..ToolbarButtonOptions::default()
+            },
+        )
             .on_mouse_down(MouseButton::Left, listener)
             .into_any_element()
     }

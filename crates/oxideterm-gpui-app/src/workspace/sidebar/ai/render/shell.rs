@@ -653,35 +653,32 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = label.into();
-        div()
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .rounded(px(self.tokens.radii.md))
-            .px(px(8.0))
-            .py(px(2.0))
-            .text_size(px(10.0))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(if disabled { 0xb78322 } else { 0xfbbf24 }))
-            .opacity(if disabled { 0.5 } else { 1.0 })
-            .when(!disabled, |button| {
-                button.cursor_pointer().hover(|style| {
-                    style
-                        .bg(rgba((0xf59e0b << 8) | 0x1a))
-                        .text_color(rgb(0xfcd34d))
-                })
-            })
-            .child(Self::render_lucide_icon(icon, 12.0, rgb(0xfbbf24)))
-            .when(!label.is_empty(), |button| {
-                button.child(self.render_display_text_with_role(
-                    SelectableTextRole::NonSelectable,
-                    "ai-context-warning-action",
-                    label.clone(),
-                    label,
-                    if disabled { 0xb78322 } else { 0xfbbf24 },
-                    cx,
-                ))
-            })
+        let text_color = if disabled { 0xb78322 } else { 0xfbbf24 };
+        toolbar_button(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(icon, 12.0, rgb(0xfbbf24))),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+                show_label: true,
+                icon_gap: Some(4.0),
+                height: Some(18.0),
+                padding_x: Some(8.0),
+                font_size: Some(10.0),
+                text_color: Some(rgb(text_color)),
+                hover_background: Some(rgba((0xf59e0b << 8) | 0x1a)),
+                hover_text_color: Some(rgb(0xfcd34d)),
+                // Context warning buttons are compact inline actions rather
+                // than full footer buttons, but they still share disabled and
+                // hover semantics with the button primitive.
+                ..ToolbarButtonOptions::default()
+            },
+        )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {

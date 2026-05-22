@@ -13,7 +13,12 @@ use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
 };
 use oxideterm_gpui_ui::{
-    modal::{dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop},
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
+        ToolbarButtonOptions, icon_button, toolbar_button,
+    },
+    context_menu::{context_menu_action, context_menu_backdrop, context_menu_item_is_actionable},
+    modal::{dismissible_dialog_backdrop, overlay_content_boundary},
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{text_caret, text_input_anchor_probe},
 };
@@ -47,6 +52,7 @@ const SFTP_ICON_SM: f32 = 12.0; // Tauri h-3 w-3
 const SFTP_ICON_MD: f32 = 14.0; // Tauri h-3.5 w-3.5
 const SFTP_TOOL_BUTTON: f32 = 24.0; // Tauri h-6 w-6
 const SFTP_ROW_HEIGHT: f32 = 25.0; // Tauri px-2 py-1 text-xs
+const SFTP_VIRTUAL_OVERSCAN: usize = 15; // Keep SFTP file panes aligned with FileList virtual overdraw.
 const SFTP_DIFF_ROW_HEIGHT: f32 = 21.0; // Tauri FileDiffDialog text-xs py-0.5 border row
 const SFTP_DIFF_LINE_NUMBER_COL: f32 = 48.0; // Tauri w-12
 const SFTP_PREVIEW_CODE_LINE_HEIGHT: f32 = 20.0; // Tauri CodeHighlight text-xs leading-normal

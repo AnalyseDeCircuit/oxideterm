@@ -215,7 +215,7 @@ fn next_oxide_footer_action(
 ) -> Option<OxideDialogFooterAction> {
     // Import/export dialogs can hide footer buttons by stage, so feed only the
     // currently rendered buttons into the shared browser-style focus cycle.
-    browser_behavior::FocusCycle::new(actions).next(current, forward)
+    browser_behavior::next_modal_footer_focus(actions, current, forward)
 }
 
 fn import_preview_selectable_names(preview: &ImportPreview) -> HashSet<String> {

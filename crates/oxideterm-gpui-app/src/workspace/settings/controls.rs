@@ -12,18 +12,19 @@ impl WorkspaceApp {
                 for language in language_options() {
                     let label = self.language_label(language);
                     popup = popup.child(
-                        select_option(&self.tokens, label, language == settings.general.language)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.open_settings_select = None;
-                                    this.edit_settings(
-                                        |settings| settings.general.language = language,
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ),
+                        select_option_action(
+                            select_option(&self.tokens, label, language == settings.general.language),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.general.language = language,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
                     );
                 }
                 Some(popup)
@@ -47,8 +48,10 @@ impl WorkspaceApp {
                         let label = custom_theme_display_name(settings, &theme_id);
                         let selected = theme_id == settings.terminal.theme;
                         popup = popup.child(
-                            select_option(&self.tokens, label, selected).on_mouse_down(
-                                MouseButton::Left,
+                            select_option_action(
+                                select_option(&self.tokens, label, selected),
+                                false,
+                                false,
                                 cx.listener(move |this, _event, _window, cx| {
                                     this.open_settings_select = None;
                                     this.edit_settings(
@@ -73,13 +76,14 @@ impl WorkspaceApp {
                     }
                     let next_theme = theme_id.to_string();
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            theme_display_name(theme_id),
-                            theme_id == settings.terminal.theme.as_str(),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                theme_display_name(theme_id),
+                                theme_id == settings.terminal.theme.as_str(),
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -106,13 +110,14 @@ impl WorkspaceApp {
                 for theme in classic_themes {
                     let theme_id = theme.id.to_string();
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            theme_display_name(theme.id),
-                            theme.id == settings.terminal.theme.as_str(),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                theme_display_name(theme.id),
+                                theme.id == settings.terminal.theme.as_str(),
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -141,25 +146,26 @@ impl WorkspaceApp {
                         .as_ref()
                         .is_some_and(|editor| editor.duplicate_theme == theme_id);
                     popup = popup.child(
-                        select_option(&self.tokens, theme_display_name(theme.id), selected)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.open_settings_select = None;
-                                    if let Some(editor) = this.theme_editor.as_mut() {
-                                        let theme = theme_by_id(&theme_id);
-                                        editor.duplicate_theme = theme_id.clone();
-                                        editor.duplicate_theme_touched = true;
-                                        editor.terminal_colors =
-                                            terminal_theme_to_colors(theme.terminal);
-                                        editor.ui_colors = app_ui_colors_to_colors(
-                                            derive_ui_colors_from_terminal(theme.terminal),
-                                        );
-                                    }
-                                    cx.stop_propagation();
-                                    cx.notify();
-                                }),
-                            ),
+                        select_option_action(
+                            select_option(&self.tokens, theme_display_name(theme.id), selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                if let Some(editor) = this.theme_editor.as_mut() {
+                                    let theme = theme_by_id(&theme_id);
+                                    editor.duplicate_theme = theme_id.clone();
+                                    editor.duplicate_theme_touched = true;
+                                    editor.terminal_colors =
+                                        terminal_theme_to_colors(theme.terminal);
+                                    editor.ui_colors = app_ui_colors_to_colors(
+                                        derive_ui_colors_from_terminal(theme.terminal),
+                                    );
+                                }
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
                     );
                 }
                 Some(popup)
@@ -168,13 +174,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &density in density_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            density_label(density, &self.i18n),
-                            density == settings.appearance.ui_density,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                density_label(density, &self.i18n),
+                                density == settings.appearance.ui_density,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -192,13 +199,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &speed in animation_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            animation_label(speed, &self.i18n),
-                            speed == settings.appearance.animation_speed,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                animation_label(speed, &self.i18n),
+                                speed == settings.appearance.animation_speed,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -216,13 +224,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &profile in render_profile_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            render_profile_label(profile, &self.i18n),
-                            profile == settings.appearance.render_profile,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                render_profile_label(profile, &self.i18n),
+                                profile == settings.appearance.render_profile,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -247,13 +256,14 @@ impl WorkspaceApp {
                     FrostedGlassMode::Native,
                 ] {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            frosted_glass_label(mode, &self.i18n),
-                            settings.appearance.frosted_glass == mode,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                frosted_glass_label(mode, &self.i18n),
+                                settings.appearance.frosted_glass == mode,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -271,13 +281,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &fit in background_fit_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            background_fit_label(fit, &self.i18n),
-                            fit == settings.terminal.background_fit,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                background_fit_label(fit, &self.i18n),
+                                fit == settings.terminal.background_fit,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -295,13 +306,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &family in font_family_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            font_family_label(family),
-                            family == settings.terminal.font_family,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                font_family_label(family),
+                                family == settings.terminal.font_family,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -319,13 +331,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &encoding in terminal_encoding_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            terminal_encoding_label(encoding),
-                            encoding == settings.terminal.terminal_encoding,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                terminal_encoding_label(encoding),
+                                encoding == settings.terminal.terminal_encoding,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -343,13 +356,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &style in cursor_style_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            cursor_style_label(style, &self.i18n),
-                            style == settings.terminal.cursor_style,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                cursor_style_label(style, &self.i18n),
+                                style == settings.terminal.cursor_style,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -371,13 +385,14 @@ impl WorkspaceApp {
                     IdeAgentMode::Disabled,
                 ] {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            ide_agent_label(mode, &self.i18n),
-                            mode == settings.ide.agent_mode,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                ide_agent_label(mode, &self.i18n),
+                                mode == settings.ide.agent_mode,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(|settings| settings.ide.agent_mode = mode, cx);
@@ -399,8 +414,10 @@ impl WorkspaceApp {
                     popup = popup.child(select_label(&self.tokens, group.label));
                     for preset in group.items {
                         popup = popup.child(
-                            select_option(&self.tokens, preset.label.clone(), false).on_mouse_down(
-                                MouseButton::Left,
+                            select_option_action(
+                                select_option(&self.tokens, preset.label.clone(), false),
+                                false,
+                                false,
                                 cx.listener(move |this, _event, _window, cx| {
                                     this.open_settings_select = None;
                                     this.add_highlight_preset(preset.rules.clone(), cx);
@@ -422,13 +439,14 @@ impl WorkspaceApp {
                     .unwrap_or_default();
                 for &mode in highlight_render_mode_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            highlight_render_mode_label(mode, &self.i18n),
-                            mode == selected,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                highlight_render_mode_label(mode, &self.i18n),
+                                mode == selected,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_highlight_rule(index, |rule| rule.render_mode = mode, cx);
@@ -445,13 +463,14 @@ impl WorkspaceApp {
                 for shell in self.effective_local_shells_for_settings(settings) {
                     let shell_id = shell.id.clone();
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            shell.label,
-                            selected == Some(shell_id.as_str()),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                shell.label,
+                                selected == Some(shell_id.as_str()),
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -472,13 +491,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for (seconds, label) in connection_idle_timeout_options(&self.i18n) {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            label,
-                            seconds == settings.connection_pool.idle_timeout_secs,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                label,
+                                seconds == settings.connection_pool.idle_timeout_secs,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -498,13 +518,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for attempts in reconnect_max_attempt_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            attempts.to_string(),
-                            attempts == settings.reconnect.max_attempts,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                attempts.to_string(),
+                                attempts == settings.reconnect.max_attempts,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -522,13 +543,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for (delay_ms, label) in reconnect_base_delay_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            label,
-                            delay_ms == settings.reconnect.base_delay_ms,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                label,
+                                delay_ms == settings.reconnect.base_delay_ms,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -546,13 +568,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for (delay_ms, label) in reconnect_max_delay_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            label,
-                            delay_ms == settings.reconnect.max_delay_ms,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                label,
+                                delay_ms == settings.reconnect.max_delay_ms,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -571,13 +594,14 @@ impl WorkspaceApp {
                 for template in AI_PROVIDER_TEMPLATES {
                     let provider_type = template.provider_type.to_string();
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            self.i18n.t(template.label_key),
-                            self.ai_new_provider_type == template.provider_type,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                self.i18n.t(template.label_key),
+                                self.ai_new_provider_type == template.provider_type,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.ai_new_provider_type = provider_type.clone();
@@ -593,13 +617,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for value in AI_CONTEXT_MAX_CHAR_OPTIONS {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            self.ai_context_max_chars_label(value),
-                            settings.ai.context_max_chars == value,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                self.ai_context_max_chars_label(value),
+                                settings.ai.context_max_chars == value,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -617,13 +642,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for value in AI_CONTEXT_VISIBLE_LINE_OPTIONS {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            self.ai_context_visible_lines_label(value),
-                            settings.ai.context_visible_lines == value,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                self.ai_context_visible_lines_label(value),
+                                settings.ai.context_visible_lines == value,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -642,21 +668,26 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width.max(AI_PROVIDER_SELECT_W));
                 for value in ["auto", "off", "low", "medium", "high", "max"] {
                     popup = popup.child(
-                        select_option(&self.tokens, self.ai_reasoning_display(value), current == value)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.open_settings_select = None;
-                                    this.edit_settings(
-                                        move |settings| {
-                                            settings.ai.reasoning_effort =
-                                                ai_reasoning_effort_from_profile_value(value);
-                                        },
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                self.ai_reasoning_display(value),
+                                current == value,
                             ),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    move |settings| {
+                                        settings.ai.reasoning_effort =
+                                            ai_reasoning_effort_from_profile_value(value);
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
                     );
                 }
                 Some(popup)
@@ -677,13 +708,14 @@ impl WorkspaceApp {
                     .and_then(serde_json::Value::as_str)
                     .map(str::to_string);
                 popup = popup.child(
-                    select_option(
-                        &self.tokens,
-                        self.i18n.t("settings_view.ai.profile_inherit_provider"),
-                        current.is_none(),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
+                    select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.i18n.t("settings_view.ai.profile_inherit_provider"),
+                            current.is_none(),
+                        ),
+                        false,
+                        false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.open_settings_select = None;
                             this.edit_settings(
@@ -711,8 +743,10 @@ impl WorkspaceApp {
                     let default_model = provider.default_model.clone();
                     let selected = current.as_deref() == Some(provider.id.as_str());
                     popup = popup.child(
-                        select_option(&self.tokens, provider.name, selected).on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(&self.tokens, provider.name, selected),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 let provider_id = provider_id.clone();
                                 let default_model = default_model.clone();
@@ -761,29 +795,34 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width.max(160.0));
                 for value in ["auto", "off", "low", "medium", "high", "max"] {
                     popup = popup.child(
-                        select_option(&self.tokens, self.ai_reasoning_display(value), current == value)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.open_settings_select = None;
-                                    this.edit_settings(
-                                        move |settings| {
-                                            ai_patch_execution_profile(settings, profile_index, |profile| {
-                                                profile.insert(
-                                                    "reasoningEffort".to_string(),
-                                                    serde_json::json!(value),
-                                                );
-                                                profile.insert(
-                                                    "updatedAt".to_string(),
-                                                    serde_json::json!(current_time_millis()),
-                                                );
-                                            });
-                                        },
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                self.ai_reasoning_display(value),
+                                current == value,
                             ),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    move |settings| {
+                                        ai_patch_execution_profile(settings, profile_index, |profile| {
+                                            profile.insert(
+                                                "reasoningEffort".to_string(),
+                                                serde_json::json!(value),
+                                            );
+                                            profile.insert(
+                                                "updatedAt".to_string(),
+                                                serde_json::json!(current_time_millis()),
+                                            );
+                                        });
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
                     );
                 }
                 Some(popup)
@@ -803,15 +842,16 @@ impl WorkspaceApp {
                     self.ai_reasoning_display(ai_reasoning_profile_value(settings.ai.reasoning_effort));
                 let inherit_provider_id = provider_id.clone();
                 popup = popup.child(
-                    select_option(
-                        &self.tokens,
-                        self.i18n
-                            .t("settings_view.ai.reasoning_inherit_global")
-                            .replace("{{value}}", &global),
-                        current.is_none(),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
+                    select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.i18n
+                                .t("settings_view.ai.reasoning_inherit_global")
+                                .replace("{{value}}", &global),
+                            current.is_none(),
+                        ),
+                        false,
+                        false,
                         cx.listener(move |this, _event, _window, cx| {
                             let provider_id = inherit_provider_id.clone();
                             this.open_settings_select = None;
@@ -829,25 +869,26 @@ impl WorkspaceApp {
                     let selected = current.as_deref() == Some(value);
                     let option_provider_id = provider_id.clone();
                     popup = popup.child(
-                        select_option(&self.tokens, self.ai_reasoning_display(value), selected)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    let provider_id = option_provider_id.clone();
-                                    this.open_settings_select = None;
-                                    this.edit_settings(
-                                        move |settings| {
-                                            set_ai_provider_reasoning_override(
-                                                settings,
-                                                &provider_id,
-                                                Some(value),
-                                            );
-                                        },
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ),
+                        select_option_action(
+                            select_option(&self.tokens, self.ai_reasoning_display(value), selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                let provider_id = option_provider_id.clone();
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    move |settings| {
+                                        set_ai_provider_reasoning_override(
+                                            settings,
+                                            &provider_id,
+                                            Some(value),
+                                        );
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
                     );
                 }
                 Some(popup)
@@ -879,13 +920,14 @@ impl WorkspaceApp {
                 let inherit_provider_id = provider_id.clone();
                 let inherit_model = model.clone();
                 popup = popup.child(
-                    select_option(
-                        &self.tokens,
-                        self.i18n.t("settings_view.ai.reasoning_inherit_provider"),
-                        current.is_none(),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
+                    select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.i18n.t("settings_view.ai.reasoning_inherit_provider"),
+                            current.is_none(),
+                        ),
+                        false,
+                        false,
                         cx.listener(move |this, _event, _window, cx| {
                             let provider_id = inherit_provider_id.clone();
                             let model = inherit_model.clone();
@@ -910,27 +952,28 @@ impl WorkspaceApp {
                     let option_provider_id = provider_id.clone();
                     let option_model = model.clone();
                     popup = popup.child(
-                        select_option(&self.tokens, self.ai_reasoning_display(value), selected)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    let provider_id = option_provider_id.clone();
-                                    let model = option_model.clone();
-                                    this.open_settings_select = None;
-                                    this.edit_settings(
-                                        move |settings| {
-                                            set_ai_model_reasoning_override(
-                                                settings,
-                                                &provider_id,
-                                                &model,
-                                                Some(value),
-                                            );
-                                        },
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ),
+                        select_option_action(
+                            select_option(&self.tokens, self.ai_reasoning_display(value), selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                let provider_id = option_provider_id.clone();
+                                let model = option_model.clone();
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    move |settings| {
+                                        set_ai_model_reasoning_override(
+                                            settings,
+                                            &provider_id,
+                                            &model,
+                                            Some(value),
+                                        );
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
                     );
                 }
                 Some(popup)
@@ -949,13 +992,14 @@ impl WorkspaceApp {
                     320.0,
                 );
                 popup = popup.child(
-                    select_option(
-                        &self.tokens,
-                        self.i18n.t("settings_view.knowledge.auto_embedding_provider"),
-                        current.is_none(),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
+                    select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.i18n.t("settings_view.knowledge.auto_embedding_provider"),
+                            current.is_none(),
+                        ),
+                        false,
+                        false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.open_settings_select = None;
                             this.edit_settings(
@@ -983,8 +1027,10 @@ impl WorkspaceApp {
                     let provider_id = provider.id.clone();
                     let selected = current.as_deref() == Some(provider.id.as_str());
                     popup = popup.child(
-                        select_option(&self.tokens, provider.name, selected).on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(&self.tokens, provider.name, selected),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 let provider_id = provider_id.clone();
                                 this.open_settings_select = None;
@@ -1014,13 +1060,14 @@ impl WorkspaceApp {
             }
             (SettingsTab::Knowledge, SettingsSelect::KnowledgeCollectionScope) => {
                 let popup = select_overlay_popup(&self.tokens, width.max(220.0)).child(
-                    select_option(
-                        &self.tokens,
-                        self.i18n.t("settings_view.knowledge.scope_global"),
-                        true,
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
+                    select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.i18n.t("settings_view.knowledge.scope_global"),
+                            true,
+                        ),
+                        false,
+                        false,
                         cx.listener(|this, _event, _window, cx| {
                             this.open_settings_select = None;
                             cx.stop_propagation();
@@ -1035,8 +1082,10 @@ impl WorkspaceApp {
                 for (format, label) in [("markdown", "Markdown"), ("plaintext", "Plain Text")] {
                     let selected = self.knowledge_new_document_format == format;
                     popup = popup.child(
-                        select_option(&self.tokens, label, selected).on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(&self.tokens, label, selected),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.knowledge_new_document_format = format.to_string();
@@ -1064,8 +1113,10 @@ impl WorkspaceApp {
                     (oxideterm_ai::McpTransport::LegacySse, "Legacy SSE"),
                 ] {
                     popup = popup.child(
-                        select_option(&self.tokens, label, transport == current).on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(&self.tokens, label, transport == current),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 if let Some(draft) = this.ai_mcp_add_dialog.as_mut() {
@@ -1101,8 +1152,10 @@ impl WorkspaceApp {
                     ),
                 ] {
                     popup = popup.child(
-                        select_option(&self.tokens, label, mode == current).on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(&self.tokens, label, mode == current),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 if let Some(draft) = this.ai_mcp_add_dialog.as_mut() {
@@ -1120,13 +1173,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &count in sftp_concurrent_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            sftp_transfer_count_label(&self.i18n, count),
-                            count == settings.sftp.max_concurrent_transfers,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                sftp_transfer_count_label(&self.i18n, count),
+                                count == settings.sftp.max_concurrent_transfers,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -1144,13 +1198,14 @@ impl WorkspaceApp {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &count in sftp_directory_parallelism_options() {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            sftp_transfer_count_label(&self.i18n, count),
-                            count == settings.sftp.directory_parallelism,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                sftp_transfer_count_label(&self.i18n, count),
+                                count == settings.sftp.directory_parallelism,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -1173,13 +1228,14 @@ impl WorkspaceApp {
                     oxideterm_settings::ConflictAction::Rename,
                 ] {
                     popup = popup.child(
-                        select_option(
-                            &self.tokens,
-                            conflict_label(action, &self.i18n),
-                            action == settings.sftp.conflict_action,
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                conflict_label(action, &self.i18n),
+                                action == settings.sftp.conflict_action,
+                            ),
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
@@ -1230,22 +1286,35 @@ impl WorkspaceApp {
         )
     }
 
+    fn open_settings_select_from_pointer(&mut self, select_id: SettingsSelect) {
+        // Browser select triggers opened by pointer do not show a focus-visible
+        // ring. Keep the origin and open/toggle rule in one place so settings,
+        // AI provider, and knowledge selects do not drift apart.
+        self.focused_settings_input = None;
+        self.settings_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Pointer);
+        self.open_settings_select = if self.open_settings_select == Some(select_id) {
+            None
+        } else {
+            Some(select_id)
+        };
+    }
+
     fn language_select_row(&self, selected: Language, cx: &mut Context<Self>) -> AnyElement {
         let control_width = self.tokens.metrics.settings_select_width;
         let anchor_id = SettingsSelect::Language.anchor_id();
         let workspace = cx.entity();
-        let trigger = select_trigger(&self.tokens, self.language_label(selected), false, false)
+        let trigger = self
+            .settings_select_trigger(
+                SettingsSelect::Language,
+                self.language_label(selected),
+                false,
+                false,
+            )
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.focused_settings_input = None;
-                    this.open_settings_select =
-                        if this.open_settings_select == Some(SettingsSelect::Language) {
-                            None
-                        } else {
-                            Some(SettingsSelect::Language)
-                        };
+                    this.open_settings_select_from_pointer(SettingsSelect::Language);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -1282,17 +1351,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let anchor_id = select_id.anchor_id();
         let workspace = cx.entity();
-        let trigger = select_trigger(&self.tokens, value, false, false)
+        let trigger = self
+            .settings_select_trigger(select_id, value, false, false)
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.focused_settings_input = None;
-                    this.open_settings_select = if this.open_settings_select == Some(select_id) {
-                        None
-                    } else {
-                        Some(select_id)
-                    };
+                    this.open_settings_select_from_pointer(select_id);
                     cx.stop_propagation();
                     cx.notify();
                 }),

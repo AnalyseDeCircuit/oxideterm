@@ -15,15 +15,22 @@ impl WorkspaceApp {
         let max_height = (f32::from(viewport.height) * 0.8)
             .min(FILE_MANAGER_CONTEXT_MENU_MAX_HEIGHT)
             .max(180.0);
-        let x = menu
-            .x
-            .min(f32::from(viewport.width) - FILE_MANAGER_CONTEXT_MENU_WIDTH - 8.0)
-            .max(8.0);
-        let y = menu
-            .y
-            .min(f32::from(viewport.height) - max_height - 8.0)
-            .max(8.0);
+        let placement = browser_behavior::clamp_context_menu_position(
+            menu.x,
+            menu.y,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            FILE_MANAGER_CONTEXT_MENU_WIDTH,
+            max_height,
+            8.0,
+        );
         let selected_count = self.file_manager.selected.len();
+        let menu_loading = self.file_manager.loading
+            || self
+                .file_manager
+                .operation_progress
+                .as_ref()
+                .is_some_and(|progress| progress.active);
 
         let popup = div()
             .w(px(FILE_MANAGER_CONTEXT_MENU_WIDTH))
@@ -132,10 +139,12 @@ impl WorkspaceApp {
             .when(selected_count > 0, |menu_el| {
                 menu_el
                     .child(self.render_file_manager_separator(has_background))
-                    .child(self.render_file_manager_context_menu_item(
+                    .child(self.render_file_manager_context_menu_guarded_item(
                         LucideIcon::Copy,
                         self.i18n.t("fileManager.copy"),
                         false,
+                        false,
+                        menu_loading,
                         has_background,
                         cx.listener(|this, _event, _window, cx| {
                             this.copy_file_manager_selection(false, cx);
@@ -143,10 +152,12 @@ impl WorkspaceApp {
                         }),
                         cx,
                     ))
-                    .child(self.render_file_manager_context_menu_item(
+                    .child(self.render_file_manager_context_menu_guarded_item(
                         LucideIcon::Pencil,
                         self.i18n.t("fileManager.cut"),
                         false,
+                        false,
+                        menu_loading,
                         has_background,
                         cx.listener(|this, _event, _window, cx| {
                             this.copy_file_manager_selection(true, cx);
@@ -154,10 +165,12 @@ impl WorkspaceApp {
                         }),
                         cx,
                     ))
-                    .child(self.render_file_manager_context_menu_item(
+                    .child(self.render_file_manager_context_menu_guarded_item(
                         LucideIcon::Copy,
                         self.i18n.t("fileManager.duplicate"),
                         false,
+                        false,
+                        menu_loading,
                         has_background,
                         cx.listener(|this, _event, _window, cx| {
                             this.duplicate_file_manager_selection(cx);
@@ -165,10 +178,12 @@ impl WorkspaceApp {
                         }),
                         cx,
                     ))
-                    .child(self.render_file_manager_context_menu_item(
+                    .child(self.render_file_manager_context_menu_guarded_item(
                         LucideIcon::FileArchive,
                         self.i18n.t("fileManager.compress"),
                         false,
+                        false,
+                        menu_loading,
                         has_background,
                         cx.listener(|this, _event, _window, cx| {
                             this.compress_file_manager_selection(cx);
@@ -184,10 +199,12 @@ impl WorkspaceApp {
                         .as_ref()
                         .is_some_and(|file| can_extract_archive(&file.name)),
                 |menu_el| {
-                    menu_el.child(self.render_file_manager_context_menu_item(
+                    menu_el.child(self.render_file_manager_context_menu_guarded_item(
                         LucideIcon::FolderArchive,
                         self.i18n.t("fileManager.extract"),
                         false,
+                        false,
+                        menu_loading,
                         has_background,
                         cx.listener(|this, _event, _window, cx| {
                             this.extract_selected_file_manager_archive(cx);
@@ -198,10 +215,12 @@ impl WorkspaceApp {
                 },
             )
             .when(self.file_manager.clipboard.is_some(), |menu_el| {
-                menu_el.child(self.render_file_manager_context_menu_item(
+                menu_el.child(self.render_file_manager_context_menu_guarded_item(
                     LucideIcon::Download,
                     self.i18n.t("fileManager.paste"),
                     false,
+                    false,
+                    menu_loading,
                     has_background,
                     cx.listener(|this, _event, _window, cx| {
                         this.paste_file_manager_clipboard(cx);
@@ -212,10 +231,12 @@ impl WorkspaceApp {
             })
             .when(selected_count == 1, |menu_el| {
                 menu_el
-                    .child(self.render_file_manager_context_menu_item(
+                    .child(self.render_file_manager_context_menu_guarded_item(
                         LucideIcon::Pencil,
                         self.i18n.t("fileManager.rename"),
                         false,
+                        false,
+                        menu_loading,
                         has_background,
                         cx.listener({
                             let file = menu.file.clone();
@@ -275,10 +296,12 @@ impl WorkspaceApp {
                         }),
                         cx,
                     ))
-                    .child(self.render_file_manager_context_menu_item(
+                    .child(self.render_file_manager_context_menu_guarded_item(
                         LucideIcon::Trash2,
                         self.i18n.t("fileManager.delete"),
                         true,
+                        false,
+                        menu_loading,
                         has_background,
                         cx.listener(|this, _event, _window, cx| {
                             this.open_file_manager_delete_dialog();
@@ -289,10 +312,12 @@ impl WorkspaceApp {
                     ))
             })
             .child(self.render_file_manager_separator(has_background))
-            .child(self.render_file_manager_context_menu_item(
+            .child(self.render_file_manager_context_menu_guarded_item(
                 LucideIcon::FolderPlus,
                 self.i18n.t("fileManager.newFolder"),
                 false,
+                false,
+                menu_loading,
                 has_background,
                 cx.listener(|this, _event, _window, cx| {
                     this.open_file_manager_new_folder_dialog();
@@ -302,10 +327,12 @@ impl WorkspaceApp {
                 }),
                 cx,
             ))
-            .child(self.render_file_manager_context_menu_item(
+            .child(self.render_file_manager_context_menu_guarded_item(
                 LucideIcon::FilePlus,
                 self.i18n.t("fileManager.newFile"),
                 false,
+                false,
+                menu_loading,
                 has_background,
                 cx.listener(|this, _event, _window, cx| {
                     this.open_file_manager_new_file_dialog();
@@ -342,7 +369,7 @@ impl WorkspaceApp {
                 cx,
             ));
 
-        popover_backdrop()
+        context_menu_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
@@ -366,7 +393,7 @@ impl WorkspaceApp {
                 deferred(
                     anchored()
                         .anchor(Corner::TopLeft)
-                        .position(gpui::point(px(x), px(y)))
+                        .position(gpui::point(px(placement.x), px(placement.y)))
                         .position_mode(AnchoredPositionMode::Window)
                         .child(overlay_content_boundary(popup)),
                 )
@@ -384,9 +411,33 @@ impl WorkspaceApp {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.render_file_manager_context_menu_guarded_item(
+            icon,
+            label,
+            danger,
+            false,
+            false,
+            has_background,
+            listener,
+            cx,
+        )
+    }
+
+    fn render_file_manager_context_menu_guarded_item(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        danger: bool,
+        disabled: bool,
+        loading: bool,
+        has_background: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let color = if danger { FILE_MANAGER_RED } else { theme.text };
-        div()
+        let actionable = context_menu_item_is_actionable(disabled, loading);
+        let item = div()
             .h(px(FILE_MANAGER_CONTEXT_MENU_ITEM_HEIGHT))
             .w_full()
             .flex()
@@ -397,8 +448,12 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.xs))
             .text_size(px(FILE_MANAGER_TEXT_XS))
             .text_color(rgb(color))
-            .cursor_pointer()
-            .hover(move |item| item.bg(file_manager_hover_bg(theme.bg_hover, has_background)))
+            .opacity(if actionable { 1.0 } else { 0.5 })
+            .when(actionable, |item| {
+                item.cursor_pointer().hover(move |item| {
+                    item.bg(file_manager_hover_bg(theme.bg_hover, has_background))
+                })
+            })
             .child(Self::render_lucide_icon(
                 icon,
                 FILE_MANAGER_ICON_SM,
@@ -411,9 +466,11 @@ impl WorkspaceApp {
                 label,
                 color,
                 cx,
-            )))
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
+            )));
+        // File manager uses conditional rendering for most unavailable items,
+        // but long-running local operations should leave visible menu rows inert
+        // like disabled browser/Radix menu items.
+        context_menu_action(item, disabled, loading, listener).into_any_element()
     }
 
     fn render_file_manager_separator(&self, has_background: bool) -> AnyElement {
@@ -823,6 +880,7 @@ impl WorkspaceApp {
                     cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                         window.focus(&this.focus_handle);
                         this.file_manager.focused_input = Some(FileManagerInput::DialogValue);
+                        this.file_manager.focused_dialog_footer_action = None;
                         this.ime_marked_text = None;
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
@@ -972,64 +1030,73 @@ impl WorkspaceApp {
         danger: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let primary_disabled = self.file_manager_dialog_primary_disabled();
         div()
             .flex()
             .justify_end()
             .gap(px(8.0))
             .child(
-                div()
-                    .h(px(32.0))
-                    .px(px(12.0))
-                    .flex()
-                    .items_center()
-                    .rounded(px(self.tokens.radii.sm))
-                    .border_1()
-                    .border_color(rgb(theme.border))
-                    .cursor_pointer()
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::NonSelectable,
-                        "file-manager-dialog-action",
-                        "cancel",
+                // Tauri LocalFileManager uses DialogFooter + shadcn Button
+                // for create/rename/delete prompts. Keep native prompt
+                // buttons on the same shared button primitive as other modal
+                // footers instead of hand-drawing div chrome here.
+                button_focus_visible(
+                    &self.tokens,
+                    button_with(
+                        &self.tokens,
                         self.i18n.t("common.actions.cancel"),
-                        theme.text,
-                        cx,
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.close_file_manager_dialog();
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
+                        ButtonOptions {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Sm,
+                            radius: ButtonRadius::Md,
+                            disabled: false,
+                        },
                     ),
+                    self.file_manager.focused_dialog_footer_action
+                        == Some(ConfirmDialogAction::Cancel),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_file_manager_dialog();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ),
             )
             .child(
-                div()
-                    .h(px(32.0))
-                    .px(px(12.0))
-                    .flex()
-                    .items_center()
-                    .rounded(px(self.tokens.radii.sm))
-                    .bg(if danger {
-                        rgb(FILE_MANAGER_RED)
-                    } else {
-                        rgb(theme.accent)
-                    })
-                    .text_color(rgb(theme.accent_text))
-                    .cursor_pointer()
-                    .child(if danger {
-                        self.i18n.t("fileManager.delete")
-                    } else {
-                        self.i18n.t("fileManager.go")
-                    })
-                    .on_mouse_down(
+                button_focus_visible(
+                    &self.tokens,
+                    button_with(
+                        &self.tokens,
+                        if danger {
+                            self.i18n.t("fileManager.delete")
+                        } else {
+                            self.i18n.t("fileManager.go")
+                        },
+                        ButtonOptions {
+                            variant: if danger {
+                                ButtonVariant::Destructive
+                            } else {
+                                ButtonVariant::Default
+                            },
+                            size: ButtonSize::Sm,
+                            radius: ButtonRadius::Md,
+                            disabled: primary_disabled,
+                        },
+                    ),
+                    self.file_manager.focused_dialog_footer_action
+                        == Some(ConfirmDialogAction::Confirm),
+                )
+                .when(!primary_disabled, |button| {
+                    button.on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
                             this.accept_file_manager_dialog(cx);
                             cx.stop_propagation();
                         }),
-                    ),
+                    )
+                }),
             )
             .into_any_element()
     }

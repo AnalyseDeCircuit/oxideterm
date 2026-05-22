@@ -136,20 +136,11 @@ impl WorkspaceApp {
                     .child(
                         dialog_footer(&self.tokens)
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    button_with(
-                                        &self.tokens,
-                                        self.i18n.t("settings_view.ai_confirm.cancel"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Ghost,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
-                                    ),
-                                    self.standard_confirm_focus()
-                                        == Some(ConfirmDialogAction::Cancel),
+                                self.standard_footer_button(
+                                    self.i18n.t("settings_view.ai_confirm.cancel"),
+                                    ButtonVariant::Ghost,
+                                    ConfirmDialogAction::Cancel,
+                                    false,
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -162,20 +153,11 @@ impl WorkspaceApp {
                                 ),
                             )
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    button_with(
-                                        &self.tokens,
-                                        self.i18n.t("settings_view.ai_confirm.enable"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Default,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
-                                    ),
-                                    self.standard_confirm_focus()
-                                        == Some(ConfirmDialogAction::Confirm),
+                                self.standard_footer_button(
+                                    self.i18n.t("settings_view.ai_confirm.enable"),
+                                    ButtonVariant::Default,
+                                    ConfirmDialogAction::Confirm,
+                                    false,
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -287,26 +269,11 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    div()
-                                    .flex_1()
-                                    .py(px(10.0))
-                                    .border_r_1()
-                                    .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
-                                    .text_align(gpui::TextAlign::Center)
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .cursor_pointer()
-                                    .hover(|style| {
-                                        style
-                                            .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x80))
-                                            .text_color(rgb(self.tokens.ui.text))
-                                    })
-                                    .child(self.i18n.t("common.actions.cancel")),
-                                    self.standard_confirm_focus()
-                                        == Some(ConfirmDialogAction::Cancel),
+                                self.split_confirm_footer_button(
+                                    self.i18n.t("common.actions.cancel"),
+                                    ConfirmDialogAction::Cancel,
+                                    false,
+                                    true,
                                 )
                                     .on_mouse_down(
                                         MouseButton::Left,
@@ -319,24 +286,11 @@ impl WorkspaceApp {
                                     ),
                             )
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    div()
-                                    .flex_1()
-                                    .py(px(10.0))
-                                    .text_align(gpui::TextAlign::Center)
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(self.tokens.ui.error))
-                                    .cursor_pointer()
-                                    .hover(|style| {
-                                        style
-                                            .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-                                            .text_color(rgb(self.tokens.ui.error))
-                                    })
-                                    .child(self.i18n.t("settings_view.ai.remove")),
-                                    self.standard_confirm_focus()
-                                        == Some(ConfirmDialogAction::Confirm),
+                                self.split_confirm_footer_button(
+                                    self.i18n.t("settings_view.ai.remove"),
+                                    ConfirmDialogAction::Confirm,
+                                    true,
+                                    false,
                                 )
                                     .on_mouse_down(
                                         MouseButton::Left,
@@ -436,26 +390,11 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    div()
-                                    .flex_1()
-                                    .py(px(10.0))
-                                    .border_r_1()
-                                    .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
-                                    .text_align(gpui::TextAlign::Center)
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .cursor_pointer()
-                                    .hover(|style| {
-                                        style
-                                            .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x80))
-                                            .text_color(rgb(self.tokens.ui.text))
-                                    })
-                                    .child(self.i18n.t("common.actions.cancel")),
-                                    self.standard_confirm_focus()
-                                        == Some(ConfirmDialogAction::Cancel),
+                                self.split_confirm_footer_button(
+                                    self.i18n.t("common.actions.cancel"),
+                                    ConfirmDialogAction::Cancel,
+                                    false,
+                                    true,
                                 )
                                     .on_mouse_down(
                                         MouseButton::Left,
@@ -468,24 +407,11 @@ impl WorkspaceApp {
                                     ),
                             )
                             .child(
-                                button_focus_visible(
-                                    &self.tokens,
-                                    div()
-                                    .flex_1()
-                                    .py(px(10.0))
-                                    .text_align(gpui::TextAlign::Center)
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(self.tokens.ui.error))
-                                    .cursor_pointer()
-                                    .hover(|style| {
-                                        style
-                                            .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-                                            .text_color(rgb(self.tokens.ui.error))
-                                    })
-                                    .child(self.i18n.t("settings_view.ai.remove")),
-                                    self.standard_confirm_focus()
-                                        == Some(ConfirmDialogAction::Confirm),
+                                self.split_confirm_footer_button(
+                                    self.i18n.t("settings_view.ai.remove"),
+                                    ConfirmDialogAction::Confirm,
+                                    true,
+                                    false,
                                 )
                                     .on_mouse_down(
                                         MouseButton::Left,

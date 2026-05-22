@@ -307,6 +307,10 @@ impl WorkspaceApp {
             return;
         }
 
+        if self.handle_ai_mcp_add_dialog_key(event, cx) {
+            return;
+        }
+
         if self.handle_oxide_dialog_footer_key(event, cx) {
             return;
         }
@@ -322,6 +326,7 @@ impl WorkspaceApp {
         if self.active_surface == ActiveSurface::Settings && self.open_settings_select.is_some() {
             if key == "escape" && !modifiers.platform {
                 self.open_settings_select = None;
+                self.settings_select_focus_origin = None;
                 cx.notify();
             }
             return;
@@ -447,10 +452,18 @@ impl WorkspaceApp {
         )
     }
 
+    pub(super) fn standard_confirm_focus_owner(&self) -> Option<ConfirmDialogAction> {
+        self.standard_confirm_focused_action
+    }
+
     pub(super) fn reset_standard_confirm_focus(&mut self) {
         // Tauri/Radix dialogs focus the first footer button when keyboard focus
         // enters the action row. Native tracks that owner explicitly.
         self.standard_confirm_focused_action = Some(ConfirmDialogAction::Cancel);
+    }
+
+    pub(super) fn set_standard_confirm_focus(&mut self, action: ConfirmDialogAction) {
+        self.standard_confirm_focused_action = Some(action);
     }
 
     pub(super) fn clear_standard_confirm_focus(&mut self) {
@@ -475,8 +488,12 @@ impl WorkspaceApp {
                 Some(ConfirmKeyboardAction::Cancel)
             }
             "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
+                let forward = browser_behavior::modal_footer_key_moves_forward(
+                    event.keystroke.key.as_str(),
+                    event.keystroke.modifiers.shift,
+                );
                 self.standard_confirm_focused_action =
-                    Some(next_confirm_dialog_footer_focus(Some(focused), true));
+                    Some(next_confirm_dialog_footer_focus(Some(focused), forward));
                 cx.notify();
                 Some(ConfirmKeyboardAction::Handled)
             }
@@ -522,6 +539,67 @@ impl WorkspaceApp {
                 Some(ConfirmKeyboardAction::Confirm) => {
                     self.keybinding_reset_all_confirm_open = false;
                     self.reset_all_keybindings(window, cx);
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else if self.knowledge_create_dialog_open {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.knowledge_create_dialog_open = false;
+                    self.knowledge_new_collection_name.clear();
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    if self.knowledge_new_collection_name.trim().is_empty() {
+                        // Disabled primary buttons keep focus in the dialog;
+                        // restore the shared footer owner after the key guard.
+                        self.reset_standard_confirm_focus();
+                        cx.notify();
+                    } else {
+                        self.knowledge_create_collection(cx);
+                        self.knowledge_create_dialog_open = false;
+                    }
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else if self.knowledge_new_document_dialog_open {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.knowledge_new_document_dialog_open = false;
+                    self.knowledge_new_document_title.clear();
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    if self.knowledge_new_document_title.trim().is_empty() {
+                        // Keep disabled-submit behavior aligned with the
+                        // shared two-action footer instead of adding a local
+                        // key path for this dialog only.
+                        self.reset_standard_confirm_focus();
+                        cx.notify();
+                    } else {
+                        self.knowledge_create_blank_document(cx);
+                        self.knowledge_new_document_dialog_open = false;
+                    }
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
+        } else if self.knowledge_delete_confirm.is_some() {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.knowledge_delete_confirm = None;
+                    cx.notify();
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    self.knowledge_confirm_delete(cx);
                     true
                 }
                 Some(ConfirmKeyboardAction::Handled) => true,

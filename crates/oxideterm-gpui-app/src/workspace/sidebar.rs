@@ -10,6 +10,12 @@ const SESSION_TREE_TEXT_SIZE: f32 = 13.0;
 const SESSION_TREE_META_TEXT_SIZE: f32 = 11.0;
 const SESSION_TREE_ICON_SIZE: f32 = 16.0;
 const SESSION_TREE_CHILD_ICON_SIZE: f32 = 14.0;
+// Tauri EventLogPanel rows use `min-h-[24px]` with `px-3 py-1`; keep the
+// native estimate next to the shared virtual-list call so scroll-to-index and
+// sticky-bottom behavior stay browser-like.
+const EVENT_LOG_SIDEBAR_ROW_HEIGHT: f32 = 24.0;
+const EVENT_LOG_SIDEBAR_VIRTUAL_OVERSCAN: usize = 20;
+const EVENT_LOG_STICKY_BOTTOM_THRESHOLD_PX: f32 = 30.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SidebarSection {

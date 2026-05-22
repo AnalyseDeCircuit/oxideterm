@@ -83,6 +83,7 @@ impl WorkspaceApp {
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
                             this.knowledge_create_dialog_open = true;
+                            this.reset_standard_confirm_focus();
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -168,24 +169,29 @@ impl WorkspaceApp {
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .child(
-                            self.knowledge_text_icon_button(
+                        .child({
+                            let import_disabled = self.knowledge_import_progress.is_some();
+                            let import_button = self.knowledge_text_icon_button(
                                 LucideIcon::FolderOpen,
                                 import_label,
-                                self.knowledge_import_progress.is_some(),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, window, cx| {
-                                    this.knowledge_import_files(
-                                        import_collection_id.clone(),
-                                        window,
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                        )
+                                import_disabled,
+                            );
+                            if import_disabled {
+                                import_button
+                            } else {
+                                import_button.on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, window, cx| {
+                                        this.knowledge_import_files(
+                                            import_collection_id.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                            }
+                        })
                         .child(
                             self.knowledge_text_icon_button(
                                 LucideIcon::FilePlus,
@@ -196,57 +202,65 @@ impl WorkspaceApp {
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
                                     this.knowledge_new_document_dialog_open = true;
+                                    this.reset_standard_confirm_focus();
                                     cx.stop_propagation();
                                     cx.notify();
                                 }),
                             ),
                         )
-                        .child(
-                            self.knowledge_text_icon_button(
+                        .child({
+                            let embedding_disabled = self.knowledge_embedding_progress.is_some();
+                            let embedding_button = self.knowledge_text_icon_button(
                                 LucideIcon::Sparkles,
                                 embedding_label,
-                                self.knowledge_embedding_progress.is_some(),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.knowledge_generate_embeddings(
-                                        embedding_collection_id.clone(),
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                        )
-                        .child(
-                            self.knowledge_text_icon_button(
+                                embedding_disabled,
+                            );
+                            if embedding_disabled {
+                                embedding_button
+                            } else {
+                                embedding_button.on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.knowledge_generate_embeddings(
+                                            embedding_collection_id.clone(),
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                            }
+                        })
+                        .child({
+                            let reindex_disabled =
+                                matches!(self.knowledge_reindex_progress, Some((_current, 0)));
+                            let reindex_button = self.knowledge_text_icon_button(
                                 if self.knowledge_reindex_progress.is_some() {
                                     LucideIcon::X
                                 } else {
                                     LucideIcon::RefreshCw
                                 },
                                 reindex_label,
-                                matches!(self.knowledge_reindex_progress, Some((_current, 0))),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    if matches!(
-                                        this.knowledge_reindex_progress,
-                                        Some((_current, 0))
-                                    ) {
+                                reindex_disabled,
+                            );
+                            if reindex_disabled {
+                                reindex_button
+                            } else {
+                                reindex_button.on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if this.knowledge_reindex_progress.is_some() {
+                                            this.knowledge_cancel_reindex(cx);
+                                        } else {
+                                            this.knowledge_reindex(
+                                                reindex_collection_id.clone(),
+                                                cx,
+                                            );
+                                        }
                                         cx.stop_propagation();
-                                        return;
-                                    }
-                                    if this.knowledge_reindex_progress.is_some() {
-                                        this.knowledge_cancel_reindex(cx);
-                                    } else {
-                                        this.knowledge_reindex(reindex_collection_id.clone(), cx);
-                                    }
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                        ),
+                                    }),
+                                )
+                            }
+                        }),
                 )
                 .into_any_element(),
         ];
@@ -366,6 +380,7 @@ impl WorkspaceApp {
                                 id: delete_id.clone(),
                                 name: delete_name.clone(),
                             });
+                            this.reset_standard_confirm_focus();
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -376,28 +391,34 @@ impl WorkspaceApp {
     }
 
     fn knowledge_text_icon_button(&self, icon: LucideIcon, label: String, disabled: bool) -> Div {
-        div()
-            .h(px(KNOWLEDGE_ACTION_BUTTON_HEIGHT))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg))
-            .px(px(10.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .opacity(if disabled { 0.5 } else { 1.0 })
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-            .child(Self::render_lucide_icon(
+        // Knowledge action chips match Tauri's small outline buttons. Use the
+        // shared primitive so disabled cursor/loading/focus-visible behavior
+        // stays aligned with the rest of settings.
+        toolbar_button(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(
                 icon,
                 KNOWLEDGE_INLINE_ICON_SIZE,
                 rgb(self.tokens.ui.text),
-            ))
-            .child(div().truncate().child(label))
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+                height: Some(KNOWLEDGE_ACTION_BUTTON_HEIGHT),
+                padding_x: Some(10.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                background: Some(rgb(self.tokens.ui.bg)),
+                border: Some(rgb(self.tokens.ui.border)),
+                text_color: Some(rgb(self.tokens.ui.text)),
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..ToolbarButtonOptions::default()
+            },
+        )
     }
 
     fn knowledge_icon_button(
@@ -406,27 +427,27 @@ impl WorkspaceApp {
         color: gpui::Rgba,
         hover_color: Option<gpui::Rgba>,
     ) -> Div {
-        div()
-            .size(px(KNOWLEDGE_ICON_BUTTON_SIZE))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.sm))
-            .text_color(color)
-            .cursor_pointer()
-            .hover(move |style| {
-                let style = style.bg(rgba((0xffffff << 8) | KNOWLEDGE_ICON_BUTTON_HOVER_ALPHA));
-                if let Some(hover_color) = hover_color {
-                    style.text_color(hover_color)
-                } else {
-                    style
-                }
-            })
-            .child(Self::render_lucide_icon(
+        // The original local helper accepted a hover text color, but the icon
+        // SVG is rendered with an explicit color. Keep the parameter until the
+        // shared icon primitive grows a real hover-icon-color slot.
+        let _ = hover_color;
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(
                 icon,
                 KNOWLEDGE_INLINE_ICON_SIZE,
                 color,
-            ))
+            ),
+            IconButtonOptions {
+                size: KNOWLEDGE_ICON_BUTTON_SIZE,
+                radius: ButtonRadius::Sm,
+                hover_background: Some(rgba(
+                    (0xffffff << 8) | KNOWLEDGE_ICON_BUTTON_HOVER_ALPHA,
+                )),
+                idle_opacity: 1.0,
+                ..IconButtonOptions::compact(KNOWLEDGE_ICON_BUTTON_SIZE)
+            },
+        )
     }
 
     fn knowledge_document_row(
@@ -538,6 +559,7 @@ impl WorkspaceApp {
                                     id: delete_id.clone(),
                                     name: delete_name.clone(),
                                 });
+                                this.reset_standard_confirm_focus();
                                 cx.stop_propagation();
                                 cx.notify();
                             }),

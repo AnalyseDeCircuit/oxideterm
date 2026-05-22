@@ -69,8 +69,8 @@ use oxideterm_gpui_terminal::{
     TerminalUiPreferences, TerminalUiTheme,
 };
 use oxideterm_gpui_ui::{
-    ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, button_focus_visible,
-    confirm_dialog_with_focus,
+    ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,
+    context_menu::context_menu_backdrop,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
     toast::{ToastVariant, ToastView},
     toaster::toaster,
@@ -181,7 +181,8 @@ use oxideterm_gpui_ui::typography::{
 pub(super) use selectable_text::{SelectableTextRole, SelectableTextScrollExt};
 pub(super) use virtual_list::{
     TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
-    tauri_virtual_uniform_list, tracked_uniform_list, uniform_list_edge_autoscroll,
+    tauri_virtual_list, tauri_virtual_list_is_near_bottom, tauri_virtual_uniform_list,
+    tracked_uniform_list, uniform_list_edge_autoscroll,
 };
 use virtual_list::{VirtualListSignatureCache, sync_virtual_list_state_by_signatures};
 
@@ -271,9 +272,12 @@ fn next_confirm_dialog_footer_focus(
 ) -> ConfirmDialogAction {
     // Confirm dialogs share the same DOM-style footer cycle across settings,
     // Cloud Sync, and other Radix parity modals.
-    browser_behavior::FocusCycle::new(&CONFIRM_DIALOG_FOOTER_ACTIONS)
-        .next(current, forward)
-        .unwrap_or(ConfirmDialogAction::Cancel)
+    browser_behavior::next_required_modal_footer_focus(
+        &CONFIRM_DIALOG_FOOTER_ACTIONS,
+        current,
+        forward,
+        ConfirmDialogAction::Cancel,
+    )
 }
 
 fn next_keybinding_recording_footer_focus(
@@ -282,9 +286,12 @@ fn next_keybinding_recording_footer_focus(
 ) -> KeybindingRecordingFooterAction {
     // Recording uses a window-level key capture like Tauri. Once action buttons
     // are visible, native has to model the browser's two-button Tab cycle.
-    browser_behavior::FocusCycle::new(&KEYBINDING_RECORDING_FOOTER_ACTIONS)
-        .next(current, forward)
-        .unwrap_or(KeybindingRecordingFooterAction::Confirm)
+    browser_behavior::next_required_modal_footer_focus(
+        &KEYBINDING_RECORDING_FOOTER_ACTIONS,
+        current,
+        forward,
+        KeybindingRecordingFooterAction::Confirm,
+    )
 }
 
 impl KeybindingScopeFilter {
@@ -327,6 +334,10 @@ struct AiCachedMarkdownDocument {
 
 const AI_MARKDOWN_DOCUMENT_CACHE_MAX_ENTRIES: usize = 128;
 const AI_CHAT_LIST_OVERDRAW_PX: f32 = 640.0;
+// Tauri NotificationsPanel uses a browser overflow container with variable
+// height grouped rows. Native keeps that model on GPUI `list`, with enough
+// overdraw to prevent row popping during high-frequency notification bursts.
+const NOTIFICATION_SIDEBAR_LIST_OVERDRAW_PX: f32 = 720.0;
 const AI_MARKDOWN_WINDOW_OVERDRAW_PX: f32 = 720.0;
 const AI_MARKDOWN_CONTENT_OFFSET_PX: f32 = 56.0;
 
@@ -499,6 +510,7 @@ pub(crate) struct WorkspaceApp {
     active_settings_tab: SettingsTab,
     terminal_settings_page: TerminalSettingsPage,
     open_settings_select: Option<SettingsSelect>,
+    settings_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     ai_new_provider_type: String,
     ai_provider_settings_expanded: bool,
     ai_tool_use_expanded: bool,
@@ -509,6 +521,7 @@ pub(crate) struct WorkspaceApp {
     expanded_ai_context_providers: HashSet<String>,
     expanded_ai_model_reasoning_providers: HashSet<String>,
     ai_model_selector_open: bool,
+    ai_model_selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     ai_model_selector_search_focused: bool,
     ai_model_selector_search_query: String,
     ai_model_selector_expanded_providers: HashSet<String>,
@@ -637,6 +650,7 @@ pub(crate) struct WorkspaceApp {
     editing_saved_connection_id: Option<String>,
     saved_connection_prompt_action: Option<SavedConnectionPromptAction>,
     open_new_connection_select: Option<NewConnectionSelect>,
+    new_connection_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,
     keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
@@ -675,6 +689,9 @@ pub(crate) struct WorkspaceApp {
     reconnect_forward_restore_totals: HashMap<NodeId, u32>,
     reconnect_forward_restore_tokens: HashMap<NodeId, Arc<AtomicBool>>,
     notification_center: NotificationCenterState,
+    notification_sidebar_list_state: ListState,
+    notification_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
+    event_log_sidebar_scroll_handle: UniformListScrollHandle,
     terminal_endpoint_sessions: HashMap<TerminalSessionId, WorkspaceTerminalEndpointSession>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,

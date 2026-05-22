@@ -6,7 +6,7 @@ use std::{
 
 use crate::workspace::quick_commands::QuickCommandImportStrategy;
 use chrono::{DateTime, Datelike, Local, Utc};
-use gpui::{StatefulInteractiveElement, prelude::*};
+use gpui::{Div, StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
@@ -29,8 +29,13 @@ use oxideterm_gpui_ui::{
         ToolbarButtonIconPosition, ToolbarButtonOptions, button_focus_visible, button_with,
         icon_button, toolbar_button,
     },
-    checkbox, icon_badge,
-    modal::{dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop},
+    checkbox,
+    context_menu::{
+        ContextMenuItemKind, context_menu_action, context_menu_backdrop, context_menu_content,
+        context_menu_item, context_menu_item_is_actionable,
+    },
+    icon_badge,
+    modal::{dismissible_dialog_backdrop, overlay_content_boundary},
     modal_body, modal_container, modal_footer, modal_overlay,
     surface::{color_for_background, color_for_background_or_alpha},
     tauri_table_checkbox_cell, tauri_table_header, tauri_table_row, tauri_table_spacer_cell,
@@ -190,9 +195,11 @@ fn next_session_manager_basic_dialog_focus(
         }
     }
 
-    let footer_action =
-        browser_behavior::FocusCycle::new(&SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS)
-            .next(current_footer, forward);
+    let footer_action = browser_behavior::next_modal_footer_focus(
+        &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
+        current_footer,
+        forward,
+    );
     (false, footer_action)
 }
 
@@ -272,6 +279,8 @@ pub(super) struct SessionManagerState {
     pub(super) row_context_menu_connection_id: Option<String>,
     pub(super) row_context_menu_x: f32,
     pub(super) row_context_menu_y: f32,
+    pub(super) folder_tree_context_menu_x: Option<f32>,
+    pub(super) folder_tree_context_menu_y: Option<f32>,
     pub(super) expanded_groups: HashSet<String>,
     pub(super) focused_input: Option<SessionManagerInput>,
     pub(super) show_new_group: bool,
@@ -303,6 +312,8 @@ impl Default for SessionManagerState {
             row_context_menu_connection_id: None,
             row_context_menu_x: 0.0,
             row_context_menu_y: 0.0,
+            folder_tree_context_menu_x: None,
+            folder_tree_context_menu_y: None,
             expanded_groups: HashSet::new(),
             focused_input: None,
             show_new_group: false,

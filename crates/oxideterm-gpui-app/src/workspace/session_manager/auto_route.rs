@@ -141,6 +141,7 @@ impl WorkspaceApp {
         if self.session_manager.focused_input == Some(SessionManagerInput::AutoRouteDisplayName) {
             self.session_manager.focused_input = None;
         }
+        self.session_manager.focused_basic_dialog_footer_action = None;
         self.ime_marked_text = None;
         cx.notify();
     }
@@ -156,8 +157,24 @@ impl WorkspaceApp {
                 self.close_auto_route_modal(cx);
                 true
             }
-            "enter" if self.session_manager.focused_input.is_none() => {
-                self.connect_auto_route(window, cx);
+            "tab" => {
+                self.move_auto_route_footer_focus(!event.keystroke.modifiers.shift, true, cx);
+                true
+            }
+            "arrowleft" | "left" => {
+                self.move_auto_route_footer_focus(false, false, cx);
+                true
+            }
+            "arrowright" | "right" => {
+                self.move_auto_route_footer_focus(true, false, cx);
+                true
+            }
+            "enter" | "space" | " " if self.session_manager.focused_input.is_none() => {
+                if let Some(action) = self.session_manager.focused_basic_dialog_footer_action {
+                    self.activate_auto_route_footer(action, window, cx);
+                } else {
+                    self.connect_auto_route(window, cx);
+                }
                 true
             }
             _ if self.session_manager.focused_input == Some(SessionManagerInput::AutoRouteDisplayName) => {
@@ -182,6 +199,7 @@ impl WorkspaceApp {
         self.auto_route_modal.error = None;
         self.auto_route_modal.selected_node_id = None;
         self.auto_route_modal.display_name.clear();
+        self.session_manager.focused_basic_dialog_footer_action = None;
     }
 
     fn select_auto_route_node(&mut self, node_id: String, cx: &mut Context<Self>) {
@@ -195,6 +213,7 @@ impl WorkspaceApp {
         self.auto_route_modal.selected_node_id = Some(node_id);
         self.auto_route_modal.display_name = display_name;
         self.auto_route_modal.error = None;
+        self.session_manager.focused_basic_dialog_footer_action = None;
         cx.notify();
     }
 
@@ -287,6 +306,56 @@ impl WorkspaceApp {
         self.persist_session_tree_snapshot();
         window.focus(&self.focus_handle);
         cx.notify();
+    }
+
+    fn move_auto_route_footer_focus(
+        &mut self,
+        forward: bool,
+        include_display_name: bool,
+        cx: &mut Context<Self>,
+    ) {
+        // Auto Route is a larger Tauri Dialog, but its footer still follows
+        // the same browser focus trap as the small session-manager dialogs:
+        // optional text field, Cancel, primary action, then wrap.
+        let display_name_visible = self.auto_route_modal.selected_node_id.is_some();
+        let (focus_display_name, footer_action) = next_session_manager_basic_dialog_focus(
+            include_display_name && display_name_visible,
+            self.session_manager.focused_input == Some(SessionManagerInput::AutoRouteDisplayName),
+            self.session_manager.focused_basic_dialog_footer_action,
+            forward,
+        );
+        self.session_manager.focused_input =
+            focus_display_name.then_some(SessionManagerInput::AutoRouteDisplayName);
+        self.session_manager.focused_basic_dialog_footer_action = footer_action;
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn activate_auto_route_footer(
+        &mut self,
+        action: SessionManagerBasicDialogFooterAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            SessionManagerBasicDialogFooterAction::Cancel => {
+                if !self.auto_route_modal.connecting {
+                    self.close_auto_route_modal(cx);
+                }
+            }
+            SessionManagerBasicDialogFooterAction::Primary => {
+                let selected_is_password = self
+                    .selected_auto_route_node()
+                    .is_some_and(|node| node.auth_type == TopologyAuthType::Password);
+                let disabled = self.auto_route_modal.selected_node_id.is_none()
+                    || self.auto_route_modal.connecting
+                    || selected_is_password;
+                if !disabled {
+                    self.session_manager.focused_basic_dialog_footer_action = None;
+                    self.connect_auto_route(window, cx);
+                }
+            }
+        }
     }
 
     fn topology_node_to_ssh_config(&self, node: &TopologyNodeConfig) -> Result<SshConfig, String> {
@@ -795,55 +864,48 @@ impl WorkspaceApp {
         let connect_disabled = self.auto_route_modal.selected_node_id.is_none()
             || self.auto_route_modal.connecting
             || selected_is_password;
+        let connect_icon = self.auto_route_modal.connecting.then(|| {
+            Self::render_lucide_icon(LucideIcon::RefreshCw, 16.0, rgb(self.tokens.ui.bg))
+                .into_any_element()
+        });
         modal_footer(&self.tokens)
             .child(
-                button_with(
-                    &self.tokens,
+                self.session_manager_dialog_footer_button(
                     self.i18n.t("sessionManager.auto_route.cancel"),
-                    ButtonOptions {
-                        variant: ButtonVariant::Outline,
-                        size: ButtonSize::Default,
-                        radius: ButtonRadius::Md,
-                        disabled: self.auto_route_modal.connecting,
-                    },
+                    ButtonVariant::Ghost,
+                    SessionManagerBasicDialogFooterAction::Cancel,
+                    self.auto_route_modal.connecting,
+                    ButtonSize::Default,
+                    None,
                 )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        if !this.auto_route_modal.connecting {
+                .when(!self.auto_route_modal.connecting, |button| {
+                    button.on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
                             this.close_auto_route_modal(cx);
-                        }
-                        cx.stop_propagation();
-                    }),
-                ),
+                            cx.stop_propagation();
+                        }),
+                    )
+                }),
             )
             .child(
-                button_with(
-                    &self.tokens,
+                self.session_manager_dialog_footer_button(
                     self.i18n.t("sessionManager.auto_route.connect"),
-                    ButtonOptions {
-                        variant: ButtonVariant::Default,
-                        size: ButtonSize::Default,
-                        radius: ButtonRadius::Md,
-                        disabled: connect_disabled,
-                    },
+                    ButtonVariant::Default,
+                    SessionManagerBasicDialogFooterAction::Primary,
+                    connect_disabled,
+                    ButtonSize::Default,
+                    connect_icon,
                 )
-                .when(self.auto_route_modal.connecting, |button| {
-                    button.child(Self::render_lucide_icon(
-                        LucideIcon::RefreshCw,
-                        16.0,
-                        rgb(self.tokens.ui.bg),
-                    ))
-                })
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, window, cx| {
-                        if !connect_disabled {
+                .when(!connect_disabled, |button| {
+                    button.on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, window, cx| {
                             this.connect_auto_route(window, cx);
-                        }
-                        cx.stop_propagation();
-                    }),
-                ),
+                            cx.stop_propagation();
+                        }),
+                    )
+                }),
             )
             .into_any_element()
     }

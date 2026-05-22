@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use gpui::{
-    App, ElementId, IntoElement, ListAlignment, ListState, Pixels, Point, ScrollStrategy, Styled,
-    UniformList, UniformListScrollHandle, Window, px, uniform_list,
+    App, ElementId, IntoElement, List, ListAlignment, ListState, Pixels, Point, ScrollStrategy,
+    Styled, UniformList, UniformListScrollHandle, Window, list, px, uniform_list,
 };
 
 const BROWSER_DRAG_AUTOSCROLL_EDGE_PX: f32 = 48.0;
@@ -76,6 +76,23 @@ where
     tracked_uniform_list(id, item_count, scroll_handle, render_items)
 }
 
+pub(crate) fn tauri_virtual_list<R>(
+    state: ListState,
+    render_item: impl 'static + FnMut(usize, &mut Window, &mut App) -> R,
+) -> List
+where
+    R: IntoElement,
+{
+    // Variable-height browser lists still share the same virtual-list policy:
+    // feature code owns identity/signature sync, and the shared helper owns the
+    // GPUI list shell so scroll surfaces do not drift per page.
+    let mut render_item = render_item;
+    list(state, move |index, window, cx| {
+        render_item(index, window, cx).into_any_element()
+    })
+    .size_full()
+}
+
 pub(crate) fn scroll_tauri_virtual_list_to_index(
     handle: &UniformListScrollHandle,
     index: usize,
@@ -95,6 +112,23 @@ pub(crate) fn scroll_tauri_virtual_list_to_index(
             handle.scroll_to_item_strict(index, ScrollStrategy::Bottom);
         }
     }
+}
+
+pub(crate) fn tauri_virtual_list_is_near_bottom(
+    handle: &UniformListScrollHandle,
+    threshold: Pixels,
+) -> bool {
+    // Browser scroll containers keep an event log "sticky" while the user is
+    // within a small bottom threshold. GPUI's uniform list owns the same base
+    // scroll handle internally, so expose the threshold test once for migrated
+    // lists instead of reimplementing per sidebar or log view.
+    let base_handle = handle.0.borrow().base_handle.clone();
+    let max_offset = base_handle.max_offset();
+    if max_offset.height <= px(0.0) {
+        return true;
+    }
+    let remaining_to_bottom = max_offset.height + base_handle.offset().y;
+    remaining_to_bottom <= threshold
 }
 
 pub(crate) fn uniform_list_edge_autoscroll(
@@ -196,6 +230,39 @@ pub(super) fn sync_tauri_virtual_list_state_by_signatures(
         alignment,
         spec.overdraw(),
     );
+}
+
+pub(super) fn sync_tauri_variable_list_state_by_signatures(
+    state: &ListState,
+    cache: &mut VirtualListSignatureCache,
+    identity: &str,
+    signatures: &[u64],
+) {
+    // GPUI's variable-height list keeps its state by item index. Mirroring
+    // React keys requires explicit splice/reset calls when filtered rows move
+    // or change; keep that bookkeeping centralized for sidebar/dialog lists.
+    let identity_changed = cache.identity.as_deref() != Some(identity);
+    if identity_changed || state.item_count() != cache.signatures.len() {
+        state.reset(signatures.len());
+        cache.identity = Some(identity.to_string());
+        cache.signatures = signatures.to_vec();
+        return;
+    }
+
+    let old_len = cache.signatures.len();
+    let new_len = signatures.len();
+    let shared_len = old_len.min(new_len);
+    for (index, signature) in signatures.iter().take(shared_len).enumerate() {
+        if cache.signatures.get(index) != Some(signature) {
+            state.splice(index..index + 1, 1);
+        }
+    }
+    if old_len < new_len {
+        state.splice(old_len..old_len, new_len - old_len);
+    } else if old_len > new_len {
+        state.splice(new_len..old_len, 0);
+    }
+    cache.signatures = signatures.to_vec();
 }
 
 #[cfg(test)]

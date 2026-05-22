@@ -1,3 +1,32 @@
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeybindingToolbarAction {
+    Import,
+    Export,
+    ResetAll,
+}
+
+impl KeybindingToolbarAction {
+    fn label_key(self) -> &'static str {
+        match self {
+            Self::Import => "settings_view.keybindings.import",
+            Self::Export => "settings_view.keybindings.export",
+            Self::ResetAll => "settings_view.keybindings.reset_all",
+        }
+    }
+
+    fn icon(self) -> LucideIcon {
+        match self {
+            Self::Import => LucideIcon::Upload,
+            Self::Export => LucideIcon::Download,
+            Self::ResetAll => LucideIcon::RotateCcw,
+        }
+    }
+
+    fn destructive(self) -> bool {
+        matches!(self, Self::ResetAll)
+    }
+}
+
 impl WorkspaceApp {
     fn settings_keybindings(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = self.settings_store.settings();
@@ -61,36 +90,20 @@ impl WorkspaceApp {
                     .child(self.keybinding_scope_filter(cx))
                     .child(div().flex_1().min_w(px(0.0)))
                     .child(self.keybinding_toolbar_button(
-                        LucideIcon::Upload,
-                        "settings_view.keybindings.import",
+                        KeybindingToolbarAction::Import,
                         false,
                         cx,
                     ))
                     .child(self.keybinding_toolbar_button(
-                        LucideIcon::Download,
-                        "settings_view.keybindings.export",
+                        KeybindingToolbarAction::Export,
                         false,
                         cx,
                     ))
                     .when(modified > 0, |toolbar| toolbar.child(
-                        button_with(
-                            &self.tokens,
-                            self.i18n.t("settings_view.keybindings.reset_all"),
-                            ButtonOptions {
-                                variant: ButtonVariant::Ghost,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: modified == 0,
-                            },
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.keybinding_reset_all_confirm_open = true;
-                                this.reset_standard_confirm_focus();
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
+                        self.keybinding_toolbar_button(
+                            KeybindingToolbarAction::ResetAll,
+                            modified == 0,
+                            cx,
                         ),
                     )),
             )
@@ -205,34 +218,60 @@ impl WorkspaceApp {
 
     fn keybinding_toolbar_button(
         &self,
-        icon: LucideIcon,
-        label_key: &'static str,
+        action: KeybindingToolbarAction,
         disabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let action = label_key;
-        button_with(
+        let icon_color = if action.destructive() {
+            self.tokens.ui.error
+        } else {
+            self.tokens.ui.text_muted
+        };
+        let hover_text_color = if action.destructive() {
+            rgb(self.tokens.ui.error)
+        } else {
+            rgb(self.tokens.ui.text)
+        };
+
+        // Tauri renders keybinding toolbar actions as shadcn ghost Buttons
+        // with leading lucide icons. Keep the action identity separate from
+        // i18n labels so later focus-visible/loading wiring stays semantic.
+        toolbar_button(
             &self.tokens,
-            self.i18n.t(label_key),
-            ButtonOptions {
-                variant: ButtonVariant::Ghost,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled,
+            self.i18n.t(action.label_key()),
+            Some(Self::render_lucide_icon(
+                action.icon(),
+                14.0,
+                rgb(icon_color),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+                icon_position: ToolbarButtonIconPosition::Leading,
+                text_color: action.destructive().then(|| rgb(self.tokens.ui.error)),
+                hover_text_color: Some(hover_text_color),
+                ..ToolbarButtonOptions::default()
             },
         )
-        .child(Self::render_lucide_icon(
-            icon,
-            14.0,
-            rgb(self.tokens.ui.text_muted),
-        ))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event, window, cx| {
+                if disabled {
+                    cx.stop_propagation();
+                    return;
+                }
                 match action {
-                    "settings_view.keybindings.import" => this.import_keybindings(window, cx),
-                    "settings_view.keybindings.export" => this.export_keybindings(cx),
-                    _ => {}
+                    KeybindingToolbarAction::Import => this.import_keybindings(window, cx),
+                    KeybindingToolbarAction::Export => this.export_keybindings(cx),
+                    KeybindingToolbarAction::ResetAll => {
+                        this.keybinding_reset_all_confirm_open = true;
+                        this.reset_standard_confirm_focus();
+                        cx.notify();
+                    }
                 }
                 cx.stop_propagation();
             }),
@@ -610,20 +649,21 @@ impl WorkspaceApp {
     }
 
     fn keybinding_icon_button(&self, icon: LucideIcon) -> Div {
-        div()
-            .size(px(28.0))
-            .rounded(px(self.tokens.radii.sm))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-            .child(Self::render_lucide_icon(
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(
                 icon,
                 14.0,
                 rgb(self.tokens.ui.text_muted),
-            ))
+            ),
+            IconButtonOptions {
+                size: 28.0,
+                radius: ButtonRadius::Sm,
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                idle_opacity: 1.0,
+                ..IconButtonOptions::compact(28.0)
+            },
+        )
     }
 
     fn keybinding_conflict_text(

@@ -49,10 +49,20 @@ impl WorkspaceApp {
             ready,
             self.ai_model_selector_open,
             Self::render_lucide_icon(chevron, 12.0, rgb(self.tokens.ui.text_muted)),
+        );
+        let trigger = button_focus_visible(
+            &self.tokens,
+            trigger,
+            browser_behavior::browser_focus_visible(
+                self.ai_model_selector_open,
+                self.ai_model_selector_focus_origin,
+            ),
         )
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, _event, window, cx| {
+                this.ai_model_selector_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Pointer);
                 this.toggle_ai_model_selector(window, cx);
                 cx.stop_propagation();
             }),

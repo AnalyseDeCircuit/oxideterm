@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, BoxShadow, CursorStyle, Div, Hsla, ParentElement, Styled, div, point, prelude::*,
-    px, rgb, rgba,
+    AnyElement, BoxShadow, CursorStyle, Div, Hsla, ParentElement, Rgba, Styled, div, point,
+    prelude::*, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -100,13 +100,25 @@ pub enum ToolbarButtonIconPosition {
     Trailing,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolbarButtonOptions {
     pub button: ButtonOptions,
     pub has_background: bool,
     pub show_label: bool,
     pub loading: bool,
     pub icon_position: ToolbarButtonIconPosition,
+    pub icon_gap: Option<f32>,
+    pub background: Option<Rgba>,
+    pub border: Option<Rgba>,
+    pub text_color: Option<Rgba>,
+    pub hover_background: Option<Rgba>,
+    pub hover_border: Option<Rgba>,
+    pub hover_text_color: Option<Rgba>,
+    pub hover_opacity: Option<f32>,
+    pub height: Option<f32>,
+    pub min_width: Option<f32>,
+    pub padding_x: Option<f32>,
+    pub font_size: Option<f32>,
     pub focus_visible: bool,
 }
 
@@ -121,6 +133,18 @@ impl Default for ToolbarButtonOptions {
             show_label: true,
             loading: false,
             icon_position: ToolbarButtonIconPosition::Leading,
+            icon_gap: None,
+            background: None,
+            border: None,
+            text_color: None,
+            hover_background: None,
+            hover_border: None,
+            hover_text_color: None,
+            hover_opacity: None,
+            height: None,
+            min_width: None,
+            padding_x: None,
+            font_size: None,
             focus_visible: false,
         }
     }
@@ -133,8 +157,13 @@ pub struct IconButtonOptions {
     pub disabled: bool,
     pub loading: bool,
     pub has_background: bool,
+    pub background: Option<Rgba>,
+    pub border: Option<Rgba>,
+    pub hover_background: Option<Rgba>,
+    pub hover_opacity: Option<f32>,
     pub focus_visible: bool,
     pub idle_opacity: f32,
+    pub disabled_opacity: f32,
 }
 
 impl IconButtonOptions {
@@ -145,8 +174,13 @@ impl IconButtonOptions {
             disabled: false,
             loading: false,
             has_background: false,
+            background: None,
+            border: None,
+            hover_background: None,
+            hover_opacity: None,
             focus_visible: false,
             idle_opacity: ICON_BUTTON_IDLE_OPACITY,
+            disabled_opacity: ICON_BUTTON_DISABLED_OPACITY,
         }
     }
 }
@@ -162,22 +196,56 @@ pub fn toolbar_button(
     options: ToolbarButtonOptions,
 ) -> Div {
     let disabled = options.button.disabled || options.loading;
-    let hover_bg = color_for_background(
-        tokens.ui.bg_hover,
-        options.has_background,
-        BUTTON_ACTIVE_HOVER_ALPHA,
-    );
+    let hover_bg = options.hover_background.unwrap_or_else(|| {
+        color_for_background(
+            tokens.ui.bg_hover,
+            options.has_background,
+            BUTTON_ACTIVE_HOVER_ALPHA,
+        )
+    });
     let button_options = ButtonOptions {
         disabled,
         ..options.button
     };
     let button = button_base(tokens, button_options, options.has_background)
-        .gap(px(TOOLBAR_BUTTON_ICON_GAP))
+        .gap(px(options.icon_gap.unwrap_or(TOOLBAR_BUTTON_ICON_GAP)))
+        .when_some(options.height, |button, height| button.h(px(height)))
+        .when_some(options.min_width, |button, min_width| {
+            button.min_w(px(min_width))
+        })
+        .when_some(options.padding_x, |button, padding_x| {
+            button.px(px(padding_x))
+        })
+        .when_some(options.font_size, |button, font_size| {
+            button.text_size(px(font_size))
+        })
+        .when_some(options.background, |button, background| {
+            button.bg(background)
+        })
+        .when_some(options.border, |button, border| button.border_color(border))
+        .when_some(options.text_color, |button, text_color| {
+            button.text_color(text_color)
+        })
         .hover(move |button| {
             if disabled {
                 button
             } else {
-                button.bg(hover_bg)
+                let button = button.bg(hover_bg);
+                let button = if let Some(hover_border) = options.hover_border {
+                    button.border_color(hover_border)
+                } else {
+                    button
+                };
+                let button = if let Some(hover_text_color) = options.hover_text_color {
+                    button.text_color(hover_text_color)
+                } else {
+                    button
+                };
+                if let Some(hover_opacity) = options.hover_opacity {
+                    button.opacity(hover_opacity)
+                } else {
+                    button
+                }
             }
         });
     let button = match (icon, options.icon_position) {
@@ -194,7 +262,9 @@ pub fn toolbar_button(
 
 pub fn icon_button(tokens: &ThemeTokens, icon: AnyElement, options: IconButtonOptions) -> Div {
     let disabled = options.disabled || options.loading;
-    let bg = if options.has_background {
+    let bg = if let Some(background) = options.background {
+        background
+    } else if options.has_background {
         color_for_background(
             tokens.ui.bg_panel,
             options.has_background,
@@ -204,15 +274,17 @@ pub fn icon_button(tokens: &ThemeTokens, icon: AnyElement, options: IconButtonOp
         rgba(0x00000000)
     };
     let opacity = if disabled {
-        ICON_BUTTON_DISABLED_OPACITY
+        options.disabled_opacity
     } else {
         options.idle_opacity
     };
-    let hover_bg = color_for_background(
-        tokens.ui.bg_hover,
-        options.has_background,
-        BUTTON_ACTIVE_HOVER_ALPHA,
-    );
+    let hover_bg = options.hover_background.unwrap_or_else(|| {
+        color_for_background(
+            tokens.ui.bg_hover,
+            options.has_background,
+            BUTTON_ACTIVE_HOVER_ALPHA,
+        )
+    });
     let button = div()
         .size(px(options.size))
         .flex()
@@ -220,6 +292,12 @@ pub fn icon_button(tokens: &ThemeTokens, icon: AnyElement, options: IconButtonOp
         .justify_center()
         .rounded(px(button_radius_px(tokens, options.radius)))
         .bg(bg)
+        .when_some(options.border, |button, border| {
+            // Some migrated toolbar actions are icon-only but still use the
+            // shadcn outline button chrome in Tauri. Keep that border in the
+            // shared primitive so feature helpers do not reimplement it.
+            button.border_1().border_color(border)
+        })
         .opacity(opacity)
         // Icon buttons appear all over toolbars; disabled/loading must be
         // visible at the primitive level even when the caller owns the action.
@@ -232,7 +310,12 @@ pub fn icon_button(tokens: &ThemeTokens, icon: AnyElement, options: IconButtonOp
             if disabled {
                 button
             } else {
-                button.bg(hover_bg)
+                let button = button.bg(hover_bg);
+                if let Some(hover_opacity) = options.hover_opacity {
+                    button.opacity(hover_opacity)
+                } else {
+                    button
+                }
             }
         })
         .child(icon);
@@ -348,6 +431,18 @@ mod tests {
 
         assert_eq!(options.button.size, ButtonSize::Sm);
         assert_eq!(options.icon_position, ToolbarButtonIconPosition::Leading);
+        assert_eq!(options.icon_gap, None);
+        assert_eq!(options.background, None);
+        assert_eq!(options.border, None);
+        assert_eq!(options.text_color, None);
+        assert_eq!(options.hover_background, None);
+        assert_eq!(options.hover_border, None);
+        assert_eq!(options.hover_text_color, None);
+        assert_eq!(options.hover_opacity, None);
+        assert_eq!(options.height, None);
+        assert_eq!(options.min_width, None);
+        assert_eq!(options.padding_x, None);
+        assert_eq!(options.font_size, None);
         assert!(options.show_label);
         assert!(!options.loading);
     }
@@ -359,6 +454,11 @@ mod tests {
         assert_eq!(options.size, 20.0);
         assert_eq!(options.radius, ButtonRadius::Sm);
         assert_eq!(options.idle_opacity, ICON_BUTTON_IDLE_OPACITY);
+        assert_eq!(options.disabled_opacity, ICON_BUTTON_DISABLED_OPACITY);
+        assert_eq!(options.background, None);
+        assert_eq!(options.border, None);
+        assert_eq!(options.hover_background, None);
+        assert_eq!(options.hover_opacity, None);
         assert!(!options.disabled);
         assert!(!options.loading);
     }

@@ -100,30 +100,33 @@ impl WorkspaceApp {
                 forwards_theme_hover_bg(theme.bg_hover, has_background),
             ),
         };
-        div()
-            .h(px(36.0))
-            .px_4()
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(border)
-            .bg(bg)
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(text))
-            .opacity(if enabled { 1.0 } else { 0.5 })
-            .when(enabled, |button| {
-                button
-                    .cursor_pointer()
-                    .hover(move |button| button.bg(hover_bg))
-                    .on_mouse_down(MouseButton::Left, listener)
-            })
-            .when_some(icon, |button, icon| {
-                button.child(Self::render_lucide_icon(icon, 14.0, rgb(text)))
-            })
-            .child(self.render_forward_ui_text(label))
+        let icon = icon.map(|icon| Self::render_lucide_icon(icon, 14.0, rgb(text)));
+        toolbar_button(
+            &self.tokens,
+            String::new(),
+            icon,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: UiButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: !enabled,
+                },
+                show_label: false,
+                background: Some(bg),
+                border: Some(border),
+                text_color: Some(rgb(text)),
+                hover_background: Some(hover_bg),
+                height: Some(36.0),
+                padding_x: Some(16.0),
+                font_size: Some(self.tokens.metrics.ui_text_sm),
+                ..ToolbarButtonOptions::default()
+            },
+        )
+        // Forwards labels need the same CJK font fallback as the Tauri UI.
+        // Keep that text element outside the shared primitive's plain label.
+        .child(self.render_forward_ui_text(label))
+        .when(enabled, |button| button.on_mouse_down(MouseButton::Left, listener))
     }
 
     fn render_forward_icon_button(

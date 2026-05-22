@@ -740,6 +740,8 @@ impl WorkspaceApp {
             LucideIcon::ExternalLink,
             theme.accent,
             self.i18n.t("topology.menu.navigate_session"),
+            false,
+            false,
             cx.listener({
                 let node_id = node_id.clone();
                 move |this, _event, _window, cx| {
@@ -761,6 +763,8 @@ impl WorkspaceApp {
                     LucideIcon::Terminal,
                     MONITOR_EMERALD_DARK,
                     self.i18n.t("topology.menu.new_terminal"),
+                    false,
+                    false,
                     cx.listener({
                         let node_id = node_id.clone();
                         move |this, _event, window, cx| {
@@ -787,6 +791,8 @@ impl WorkspaceApp {
                     LucideIcon::FolderOpen,
                     0xeab308,
                     self.i18n.t("topology.menu.open_sftp"),
+                    false,
+                    false,
                     cx.listener({
                         let node_id = node_id.clone();
                         move |this, _event, window, cx| {
@@ -815,6 +821,14 @@ impl WorkspaceApp {
             .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation()
+            })
+            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation()
+            })
+            .on_scroll_wheel(|_, _, cx| {
+                // Topology menus float over a zoomable canvas; menu wheel
+                // events should stay inside the menu island like Radix.
+                cx.stop_propagation();
             })
             .child(
                 div()
@@ -882,12 +896,15 @@ impl WorkspaceApp {
         icon: LucideIcon,
         icon_color: u32,
         label: String,
+        disabled: bool,
+        loading: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let label_key = label.clone();
-        div()
+        let actionable = context_menu_item_is_actionable(disabled, loading);
+        let item = div()
             .w_full()
             .px_3()
             .py_2()
@@ -896,13 +913,6 @@ impl WorkspaceApp {
             .gap_2()
             .text_size(px(14.0))
             .text_color(rgb(theme.text_muted))
-            .cursor_pointer()
-            .hover(|style| {
-                style
-                    .bg(rgba((theme.accent << 8) | 0x1a))
-                    .text_color(rgb(theme.text))
-            })
-            .on_mouse_down(MouseButton::Left, listener)
             .child(Self::render_lucide_icon(icon, 16.0, rgb(icon_color)))
             .child(self.render_display_text_with_role(
                 SelectableTextRole::NonSelectable,
@@ -911,8 +921,19 @@ impl WorkspaceApp {
                 label,
                 theme.text_muted,
                 cx,
-            ))
-            .into_any_element()
+            ));
+        let item = if actionable {
+            item.cursor_pointer().hover(|style| {
+                style
+                    .bg(rgba((theme.accent << 8) | 0x1a))
+                    .text_color(rgb(theme.text))
+            })
+        } else {
+            item.opacity(0.5)
+        };
+        // Topology node actions are menu items; route invocation through the
+        // shared guard so future disabled/loading states do not bypass it.
+        context_menu_action(item, disabled, loading, listener).into_any_element()
     }
 
     fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent) {

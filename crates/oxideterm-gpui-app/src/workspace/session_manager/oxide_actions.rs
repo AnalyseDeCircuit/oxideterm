@@ -125,8 +125,10 @@ impl WorkspaceApp {
                 true
             }
             "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
-                let forward = !event.keystroke.modifiers.shift
-                    && !matches!(event.keystroke.key.as_str(), "arrowleft" | "left");
+                let forward = browser_behavior::modal_footer_key_moves_forward(
+                    event.keystroke.key.as_str(),
+                    event.keystroke.modifiers.shift,
+                );
                 if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
                     dialog.focused_footer_action =
                         next_oxide_footer_action(&actions, dialog.focused_footer_action, forward);
@@ -208,8 +210,10 @@ impl WorkspaceApp {
                 true
             }
             "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
-                let forward = !event.keystroke.modifiers.shift
-                    && !matches!(event.keystroke.key.as_str(), "arrowleft" | "left");
+                let forward = browser_behavior::modal_footer_key_moves_forward(
+                    event.keystroke.key.as_str(),
+                    event.keystroke.modifiers.shift,
+                );
                 if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
                     dialog.focused_footer_action =
                         next_oxide_footer_action(&actions, dialog.focused_footer_action, forward);

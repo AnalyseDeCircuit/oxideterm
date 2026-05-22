@@ -731,27 +731,34 @@ impl WorkspaceApp {
     }
 
     fn appearance_action_button(&self, icon: LucideIcon, label: String) -> Div {
-        div()
-            .h(px(self.tokens.metrics.settings_appearance_action_height))
-            .px(px(10.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgba(0x00000000))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text))
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-            .child(Self::render_lucide_icon(
+        // Appearance header actions are Tauri small outline toolbar buttons.
+        // Route their chrome through the shared primitive so hover, disabled,
+        // and later focus-visible behavior do not diverge from settings.
+        toolbar_button(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(
                 icon,
                 14.0,
                 rgb(self.tokens.ui.text),
-            ))
-            .child(label)
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                height: Some(self.tokens.metrics.settings_appearance_action_height),
+                padding_x: Some(10.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                background: Some(rgba(0x00000000)),
+                border: Some(rgb(self.tokens.ui.border)),
+                text_color: Some(rgb(self.tokens.ui.text)),
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..ToolbarButtonOptions::default()
+            },
+        )
     }
 
     fn appearance_row(&self, label_key: &str, hint_key: &str, control: AnyElement) -> AnyElement {
@@ -819,17 +826,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let anchor_id = select_id.anchor_id();
         let workspace = cx.entity();
-        let trigger = select_trigger(&self.tokens, value, false, false)
+        let trigger = self
+            .settings_select_trigger(select_id, value, false, false)
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.focused_settings_input = None;
-                    this.open_settings_select = if this.open_settings_select == Some(select_id) {
-                        None
-                    } else {
-                        Some(select_id)
-                    };
+                    this.open_settings_select_from_pointer(select_id);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -1322,19 +1325,13 @@ impl WorkspaceApp {
             .w(px(THEME_EDITOR_DUPLICATE_WIDTH))
             .child(select_anchor_probe(
                 select_id.anchor_id(),
-                select_trigger(&self.tokens, value, false, false)
+                self.settings_select_trigger(select_id, value, false, false)
                     .h(px(THEME_EDITOR_INPUT_HEIGHT))
                     .cursor_pointer()
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.focused_settings_input = None;
-                            this.open_settings_select =
-                                if this.open_settings_select == Some(select_id) {
-                                    None
-                                } else {
-                                    Some(select_id)
-                                };
+                            this.open_settings_select_from_pointer(select_id);
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -1933,21 +1930,27 @@ impl WorkspaceApp {
     }
 
     fn theme_editor_footer_button(&self, icon: LucideIcon, label: String, color: u32) -> Div {
-        div()
-            .h(px(self.tokens.metrics.ui_button_sm_height))
-            .px(px(self.tokens.metrics.ui_button_sm_padding_x))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((color << 8) | 0x4d))
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(color))
-            .cursor_pointer()
-            .hover(|style| style.bg(rgba((color << 8) | 0x1a)))
-            .child(Self::render_lucide_icon(icon, 12.0, rgb(color)))
-            .child(label)
+        // Theme editor delete uses a color-tinted outline button in Tauri.
+        // Keep only the tint local; button geometry and action affordance come
+        // from the shared toolbar primitive.
+        toolbar_button(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(icon, 12.0, rgb(color))),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                icon_gap: Some(4.0),
+                border: Some(rgba((color << 8) | 0x4d)),
+                text_color: Some(rgb(color)),
+                hover_background: Some(rgba((color << 8) | 0x1a)),
+                ..ToolbarButtonOptions::default()
+            },
+        )
     }
 
     fn open_theme_editor(&mut self, edit_theme_id: Option<String>, cx: &mut Context<Self>) {

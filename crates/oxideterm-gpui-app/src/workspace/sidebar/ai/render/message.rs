@@ -1511,17 +1511,26 @@ impl WorkspaceApp {
         action: Option<AiHeaderAction>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let button = div()
-            .p(px(4.0))
-            .rounded(px(self.tokens.radii.md))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .cursor_pointer()
-            .hover(|style| {
-                style
-                    .bg(rgba((self.tokens.ui.border << 8) | 0x1a))
-                    .text_color(rgb(self.tokens.ui.text))
-            })
-            .child(Self::render_lucide_icon(icon, 14.0, rgb(self.tokens.ui.text_muted)))
+        let button = icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, 14.0, rgb(self.tokens.ui.text_muted)),
+            IconButtonOptions {
+                size: 22.0,
+                radius: ButtonRadius::Md,
+                disabled: false,
+                loading: false,
+                has_background: false,
+                background: None,
+                border: None,
+                // Tauri AI header buttons use border/10 hover instead of the
+                // default toolbar hover token.
+                hover_background: Some(rgba((self.tokens.ui.border << 8) | 0x1a)),
+                hover_opacity: None,
+                focus_visible: false,
+                idle_opacity: 1.0,
+                disabled_opacity: 0.35,
+            },
+        )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {

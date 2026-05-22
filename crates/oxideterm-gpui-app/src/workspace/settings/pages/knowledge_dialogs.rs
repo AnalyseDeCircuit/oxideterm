@@ -16,6 +16,7 @@ impl WorkspaceApp {
                         // create collection; outside close matches Cancel.
                         this.knowledge_create_dialog_open = false;
                         this.knowledge_new_collection_name.clear();
+                        this.clear_standard_confirm_focus();
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -90,36 +91,29 @@ impl WorkspaceApp {
                         .child(
                             dialog_footer(&self.tokens)
                                 .child(
-                                    button_with(
-                                        &self.tokens,
+                                    self.standard_footer_button(
                                         self.i18n.t("common.actions.cancel"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Outline,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
+                                        ButtonVariant::Outline,
+                                        ConfirmDialogAction::Cancel,
+                                        false,
                                     )
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
                                             this.knowledge_create_dialog_open = false;
                                             this.knowledge_new_collection_name.clear();
+                                            this.clear_standard_confirm_focus();
                                             cx.stop_propagation();
                                             cx.notify();
                                         }),
                                     ),
                                 )
                                 .child(
-                                    button_with(
-                                        &self.tokens,
+                                    self.standard_footer_button(
                                         self.i18n.t("settings_view.knowledge.create_collection"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Default,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: !can_create,
-                                        },
+                                        ButtonVariant::Default,
+                                        ConfirmDialogAction::Confirm,
+                                        !can_create,
                                     )
                                     .when(can_create, |button| {
                                         button.on_mouse_down(
@@ -127,6 +121,7 @@ impl WorkspaceApp {
                                             cx.listener(|this, _event, _window, cx| {
                                                 this.knowledge_create_collection(cx);
                                                 this.knowledge_create_dialog_open = false;
+                                                this.clear_standard_confirm_focus();
                                                 cx.stop_propagation();
                                             }),
                                         )
@@ -152,6 +147,7 @@ impl WorkspaceApp {
                         // setNewDocDialogOpen(false) on backdrop click.
                         this.knowledge_new_document_dialog_open = false;
                         this.knowledge_new_document_title.clear();
+                        this.clear_standard_confirm_focus();
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -226,36 +222,29 @@ impl WorkspaceApp {
                         .child(
                             dialog_footer(&self.tokens)
                                 .child(
-                                    button_with(
-                                        &self.tokens,
+                                    self.standard_footer_button(
                                         self.i18n.t("common.actions.cancel"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Outline,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
+                                        ButtonVariant::Outline,
+                                        ConfirmDialogAction::Cancel,
+                                        false,
                                     )
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
                                             this.knowledge_new_document_dialog_open = false;
                                             this.knowledge_new_document_title.clear();
+                                            this.clear_standard_confirm_focus();
                                             cx.stop_propagation();
                                             cx.notify();
                                         }),
                                     ),
                                 )
                                 .child(
-                                    button_with(
-                                        &self.tokens,
+                                    self.standard_footer_button(
                                         self.i18n.t("settings_view.knowledge.new_document"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Default,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: !can_create,
-                                        },
+                                        ButtonVariant::Default,
+                                        ConfirmDialogAction::Confirm,
+                                        !can_create,
                                     )
                                     .when(can_create, |button| {
                                         button.on_mouse_down(
@@ -263,6 +252,7 @@ impl WorkspaceApp {
                                             cx.listener(|this, _event, _window, cx| {
                                                 this.knowledge_create_blank_document(cx);
                                                 this.knowledge_new_document_dialog_open = false;
+                                                this.clear_standard_confirm_focus();
                                                 cx.stop_propagation();
                                             }),
                                         )
@@ -292,6 +282,7 @@ impl WorkspaceApp {
                         // Tauri delete confirm uses onOpenChange(false) to
                         // clear the pending delete target.
                         this.knowledge_delete_confirm = None;
+                        this.clear_standard_confirm_focus();
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -315,39 +306,33 @@ impl WorkspaceApp {
                         .child(
                             dialog_footer(&self.tokens)
                                 .child(
-                                    button_with(
-                                        &self.tokens,
+                                    self.standard_footer_button(
                                         self.i18n.t("common.actions.cancel"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Outline,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
+                                        ButtonVariant::Outline,
+                                        ConfirmDialogAction::Cancel,
+                                        false,
                                     )
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
                                             this.knowledge_delete_confirm = None;
+                                            this.clear_standard_confirm_focus();
                                             cx.stop_propagation();
                                             cx.notify();
                                         }),
                                     ),
                                 )
                                 .child(
-                                    button_with(
-                                        &self.tokens,
+                                    self.standard_footer_button(
                                         self.i18n.t("common.delete"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Destructive,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
+                                        ButtonVariant::Destructive,
+                                        ConfirmDialogAction::Confirm,
+                                        false,
                                     )
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
+                                            this.clear_standard_confirm_focus();
                                             this.knowledge_confirm_delete(cx);
                                             cx.stop_propagation();
                                         }),

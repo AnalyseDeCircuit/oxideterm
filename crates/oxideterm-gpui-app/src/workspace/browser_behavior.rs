@@ -14,6 +14,12 @@ impl BrowserFocusOrigin {
     }
 }
 
+pub(crate) fn browser_focus_visible(focused: bool, origin: Option<BrowserFocusOrigin>) -> bool {
+    // Browser :focus-visible depends on both ownership and input modality:
+    // keyboard focus gets the ring, mouse focus does not.
+    focused && origin.is_some_and(BrowserFocusOrigin::is_focus_visible)
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FocusCycle<'a, T> {
     actions: &'a [T],
@@ -57,6 +63,40 @@ where
     }
 }
 
+pub(crate) fn next_modal_footer_focus<T>(
+    actions: &[T],
+    current: Option<T>,
+    forward: bool,
+) -> Option<T>
+where
+    T: Copy + Eq,
+{
+    // Radix/Dialog footer buttons follow DOM tab order even when buttons are
+    // conditionally hidden. Keep modal footers on this explicit entry point so
+    // settings, AI, keybinding, and import/export dialogs do not reimplement
+    // their own wrapping rules.
+    FocusCycle::new(actions).next(current, forward)
+}
+
+pub(crate) fn next_required_modal_footer_focus<T>(
+    actions: &[T],
+    current: Option<T>,
+    forward: bool,
+    fallback: T,
+) -> T
+where
+    T: Copy + Eq,
+{
+    next_modal_footer_focus(actions, current, forward).unwrap_or(fallback)
+}
+
+pub(crate) fn modal_footer_key_moves_forward(key: &str, shift: bool) -> bool {
+    // Browser/Radix dialogs let Shift+Tab and left-arrow walk backward through
+    // footer actions. Keep key-direction mapping shared so standard confirms,
+    // Cloud Sync confirms, and import/export modals do not drift apart.
+    !shift && !matches!(key, "arrowleft" | "left")
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BrowserPointerCaptureOwner {
     SidebarResize,
@@ -67,6 +107,12 @@ pub(crate) enum BrowserPointerCaptureOwner {
     TextSelection,
     SftpFileDrag,
     TabDrag,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BrowserOverlayPlacement {
+    pub x: f32,
+    pub y: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -94,6 +140,28 @@ where
         selected.clear();
         selected.insert(target);
         true
+    }
+}
+
+pub(crate) fn clamp_context_menu_position(
+    pointer_x: f32,
+    pointer_y: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    menu_width: f32,
+    menu_height: f32,
+    viewport_margin: f32,
+) -> BrowserOverlayPlacement {
+    // Browser/Radix context menus collide against the viewport instead of
+    // letting the menu spill off-screen. Native popovers use window coordinates,
+    // so clamp once here and keep every file/tree/table menu on the same rule.
+    BrowserOverlayPlacement {
+        x: pointer_x
+            .min(viewport_width - menu_width - viewport_margin)
+            .max(viewport_margin),
+        y: pointer_y
+            .min(viewport_height - menu_height - viewport_margin)
+            .max(viewport_margin),
     }
 }
 
@@ -143,7 +211,9 @@ fn resolve_browser_pointer_capture_owner(
 mod tests {
     use super::{
         BrowserFocusOrigin, BrowserPointerCaptureOwner, BrowserPointerCaptureState, FocusCycle,
-        preserve_or_move_context_selection, resolve_browser_pointer_capture_owner,
+        browser_focus_visible, clamp_context_menu_position, modal_footer_key_moves_forward,
+        next_required_modal_footer_focus, preserve_or_move_context_selection,
+        resolve_browser_pointer_capture_owner,
     };
     use std::collections::HashSet;
 
@@ -168,6 +238,23 @@ mod tests {
 
         assert!(changed);
         assert_eq!(selected, HashSet::from(["three".to_string()]));
+    }
+
+    #[test]
+    fn context_menu_position_collides_with_viewport_edges() {
+        let placement = clamp_context_menu_position(760.0, 580.0, 800.0, 600.0, 220.0, 180.0, 8.0);
+
+        assert_eq!(
+            placement,
+            super::BrowserOverlayPlacement { x: 572.0, y: 412.0 }
+        );
+    }
+
+    #[test]
+    fn context_menu_position_keeps_viewport_margin() {
+        let placement = clamp_context_menu_position(-20.0, 2.0, 800.0, 600.0, 220.0, 180.0, 8.0);
+
+        assert_eq!(placement, super::BrowserOverlayPlacement { x: 8.0, y: 8.0 });
     }
 
     #[test]
@@ -214,6 +301,23 @@ mod tests {
     }
 
     #[test]
+    fn browser_focus_visible_requires_keyboard_owned_focus() {
+        assert!(browser_focus_visible(
+            true,
+            Some(BrowserFocusOrigin::Keyboard)
+        ));
+        assert!(!browser_focus_visible(
+            true,
+            Some(BrowserFocusOrigin::Pointer)
+        ));
+        assert!(!browser_focus_visible(
+            false,
+            Some(BrowserFocusOrigin::Keyboard)
+        ));
+        assert!(!browser_focus_visible(true, None));
+    }
+
+    #[test]
     fn focus_cycle_uses_browser_footer_order() {
         let actions = ["cancel", "confirm", "extra"];
         let cycle = FocusCycle::new(&actions);
@@ -238,5 +342,24 @@ mod tests {
             Some("confirm")
         );
         assert_eq!(FocusCycle::<&str>::new(&[]).next(None, true), None);
+    }
+
+    #[test]
+    fn modal_footer_focus_uses_required_fallback_when_no_action_is_rendered() {
+        let actions: [&str; 0] = [];
+
+        assert_eq!(
+            next_required_modal_footer_focus(&actions, Some("stale"), true, "cancel"),
+            "cancel"
+        );
+    }
+
+    #[test]
+    fn modal_footer_key_direction_matches_browser_tab_and_arrow_rules() {
+        assert!(modal_footer_key_moves_forward("tab", false));
+        assert!(modal_footer_key_moves_forward("arrowright", false));
+        assert!(!modal_footer_key_moves_forward("tab", true));
+        assert!(!modal_footer_key_moves_forward("arrowleft", false));
+        assert!(!modal_footer_key_moves_forward("left", false));
     }
 }

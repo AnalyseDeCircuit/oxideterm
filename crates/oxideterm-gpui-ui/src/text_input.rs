@@ -213,10 +213,21 @@ pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
 
 pub fn text_caret(tokens: &ThemeTokens, visible: bool) -> Div {
     div()
-        .w(px(tokens.metrics.form_caret_width))
+        .relative()
+        .w(px(0.0))
         .h(px(tokens.metrics.form_caret_height))
-        .bg(rgb(tokens.ui.accent))
-        .opacity(if visible { 1.0 } else { 0.0 })
+        // Browser carets are painted over the text flow. The zero-width anchor
+        // keeps GPUI flex rows from measuring the caret as an extra character.
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .w(px(tokens.metrics.form_caret_width))
+                .h(px(tokens.metrics.form_caret_height))
+                .bg(rgb(tokens.ui.accent))
+                .opacity(if visible { 1.0 } else { 0.0 }),
+        )
 }
 
 pub fn text_input_value_segments(
@@ -278,7 +289,6 @@ pub fn text_input_value_segments_with_color(
         .when(!before.is_empty(), |row| row.child(before))
         .child(
             div()
-                .px(px(tokens.metrics.form_selection_padding_x))
                 .rounded(px(tokens.radii.xs))
                 .bg(rgba((theme.accent << 8) | TEXT_INPUT_SELECTION_BG_ALPHA))
                 .text_color(rgb(theme.text))

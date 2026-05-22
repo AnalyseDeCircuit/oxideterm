@@ -171,25 +171,35 @@ impl WorkspaceApp {
 
     fn render_connection_pool_refresh_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .h(px(CONNECTION_POOL_BUTTON_SIZE))
-            .px_3()
-            .flex()
-            .items_center()
-            .gap_2()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg))
-            .text_size(px(14.0))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(theme.text))
-            .cursor_pointer()
-            .hover(|style| {
-                style
-                    .bg(rgb(theme.bg_hover))
-                    .border_color(rgb(theme.border_strong))
-            })
+        // Pool header refresh is toolbar-shaped and follows the same browser
+        // button guard/focus path as other migrated action buttons.
+        toolbar_button(
+            &self.tokens,
+            self.i18n.t("connections.panel.refresh"),
+            Some(Self::render_lucide_icon(
+                LucideIcon::RefreshCw,
+                CONNECTION_POOL_ICON_SIZE_MD,
+                rgb(theme.text),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                background: Some(rgb(theme.bg)),
+                border: Some(rgb(theme.border)),
+                text_color: Some(rgb(theme.text)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                hover_border: Some(rgb(theme.border_strong)),
+                height: Some(CONNECTION_POOL_BUTTON_SIZE),
+                padding_x: Some(12.0),
+                font_size: Some(14.0),
+                icon_gap: Some(8.0),
+                ..ToolbarButtonOptions::default()
+            },
+        )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -198,20 +208,6 @@ impl WorkspaceApp {
                     cx.notify();
                 }),
             )
-            .child(Self::render_lucide_icon(
-                LucideIcon::RefreshCw,
-                CONNECTION_POOL_ICON_SIZE_MD,
-                rgb(theme.text),
-            ))
-            // Toolbar button labels stay NonSelectable so mouse-down always reaches the button.
-            .child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "connection-pool-refresh-button",
-                "label",
-                self.i18n.t("connections.panel.refresh"),
-                theme.text,
-                cx,
-            ))
             .into_any_element()
     }
 

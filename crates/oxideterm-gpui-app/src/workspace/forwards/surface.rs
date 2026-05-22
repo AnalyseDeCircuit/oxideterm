@@ -215,73 +215,79 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .h(px(36.0))
-            .px_4()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(forwards_theme_border(theme.border, has_background))
-            .bg(forwards_theme_panel_bg(theme.bg_panel, has_background))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(theme.text))
-            .opacity(if enabled { 1.0 } else { 0.5 })
-            .child(
+        toolbar_button(
+            &self.tokens,
+            String::new(),
+            Some(
                 div()
                     .size(px(8.0))
                     .rounded_full()
-                    .bg(forwards_palette_color(dot_color)),
-            )
+                    .bg(forwards_palette_color(dot_color))
+                    .into_any_element(),
+            ),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: UiButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: !enabled,
+                },
+                show_label: false,
+                icon_gap: Some(8.0),
+                background: Some(forwards_theme_panel_bg(theme.bg_panel, has_background)),
+                border: Some(forwards_theme_border(theme.border, has_background)),
+                text_color: Some(rgb(theme.text)),
+                hover_background: Some(forwards_theme_hover_bg(theme.bg_hover, has_background)),
+                height: Some(36.0),
+                padding_x: Some(16.0),
+                font_size: Some(self.tokens.metrics.ui_text_sm),
+                ..ToolbarButtonOptions::default()
+            },
+        )
+            // The visible label keeps the Forwards CJK font fallback instead of
+            // using toolbar_button's plain String label path.
             .child(self.render_forward_ui_text(self.i18n.t(label_key)))
             .when(enabled, |button| {
-                button
-                    .cursor_pointer()
-                    .hover(move |button| {
-                        button.bg(forwards_theme_hover_bg(theme.bg_hover, has_background))
-                    })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            let persist = this.forward_persist_context_for_node(&node_id);
-                            let registry = this.forwarding_registry.clone();
-                            this.start_forward_operation(
-                                tab_id,
-                                node_id.clone(),
-                                "forwards.messages.created",
-                                move |manager| {
-                                    Box::pin(async move {
-                                        let created = match label_key {
-                                            "forwards.quick.jupyter" => {
-                                                manager.forward_jupyter(port, port).await?
-                                            }
-                                            "forwards.quick.tensorboard" => {
-                                                manager.forward_tensorboard(port, port).await?
-                                            }
-                                            "forwards.quick.vscode" => {
-                                                manager.forward_vscode(port, port).await?
-                                            }
-                                            _ => unreachable!("unknown forward quick action"),
-                                        };
-                                        if let Some((session_id, owner_connection_id)) = persist {
-                                            let forward_id = created.id.clone();
-                                            let _ = registry.sync_persisted_forward_rule(
-                                                &forward_id,
-                                                &session_id,
-                                                owner_connection_id,
-                                                created,
-                                            );
+                button.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        let persist = this.forward_persist_context_for_node(&node_id);
+                        let registry = this.forwarding_registry.clone();
+                        this.start_forward_operation(
+                            tab_id,
+                            node_id.clone(),
+                            "forwards.messages.created",
+                            move |manager| {
+                                Box::pin(async move {
+                                    let created = match label_key {
+                                        "forwards.quick.jupyter" => {
+                                            manager.forward_jupyter(port, port).await?
                                         }
-                                        Ok(())
-                                    })
-                                },
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    )
+                                        "forwards.quick.tensorboard" => {
+                                            manager.forward_tensorboard(port, port).await?
+                                        }
+                                        "forwards.quick.vscode" => {
+                                            manager.forward_vscode(port, port).await?
+                                        }
+                                        _ => unreachable!("unknown forward quick action"),
+                                    };
+                                    if let Some((session_id, owner_connection_id)) = persist {
+                                        let forward_id = created.id.clone();
+                                        let _ = registry.sync_persisted_forward_rule(
+                                            &forward_id,
+                                            &session_id,
+                                            owner_connection_id,
+                                            created,
+                                        );
+                                    }
+                                    Ok(())
+                                })
+                            },
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                )
             })
             .into_any_element()
     }

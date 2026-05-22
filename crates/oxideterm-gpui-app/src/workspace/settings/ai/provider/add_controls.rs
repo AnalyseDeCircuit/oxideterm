@@ -3,18 +3,18 @@ impl WorkspaceApp {
         let selected = ai_provider_template_by_type(&self.ai_new_provider_type);
         let anchor_id = SettingsSelect::AiProviderTemplate.anchor_id();
         let workspace = cx.entity();
-        let trigger = select_trigger(&self.tokens, self.i18n.t(selected.label_key), false, false)
+        let trigger = self
+            .settings_select_trigger(
+                SettingsSelect::AiProviderTemplate,
+                self.i18n.t(selected.label_key),
+                false,
+                false,
+            )
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    this.focused_settings_input = None;
-                    this.open_settings_select =
-                        if this.open_settings_select == Some(SettingsSelect::AiProviderTemplate) {
-                            None
-                        } else {
-                            Some(SettingsSelect::AiProviderTemplate)
-                        };
+                    this.open_settings_select_from_pointer(SettingsSelect::AiProviderTemplate);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -53,14 +53,21 @@ impl WorkspaceApp {
                     ),
             )
             .child(
-                button_with(
+                // Tauri uses an outline small Button with literal "+ label"
+                // text here, not a lucide icon. Route it through toolbar_button
+                // so all compact settings actions share one Button primitive.
+                toolbar_button(
                     &self.tokens,
                     format!("+ {}", self.i18n.t("settings_view.ai.add_provider")),
-                    ButtonOptions {
-                        variant: ButtonVariant::Outline,
-                        size: ButtonSize::Sm,
-                        radius: ButtonRadius::Md,
-                        disabled: false,
+                    None,
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
+                            variant: ButtonVariant::Outline,
+                            size: ButtonSize::Sm,
+                            radius: ButtonRadius::Md,
+                            disabled: false,
+                        },
+                        ..ToolbarButtonOptions::default()
                     },
                 )
                 .on_mouse_down(

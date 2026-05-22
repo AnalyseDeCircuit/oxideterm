@@ -1,4 +1,36 @@
 impl WorkspaceApp {
+    fn new_connection_select_trigger(
+        &self,
+        select_id: NewConnectionSelect,
+        value: String,
+        placeholder: bool,
+        disabled: bool,
+    ) -> Div {
+        let focused = self.open_new_connection_select == Some(select_id);
+        let trigger = select_trigger(&self.tokens, value, placeholder, disabled);
+        // New-connection selects live inside modal forms; keep their keyboard
+        // focus ring tied to the same browser focus-origin rule as settings
+        // and Cloud Sync selects.
+        select_trigger_focus_visible(
+            &self.tokens,
+            trigger,
+            browser_behavior::browser_focus_visible(focused, self.new_connection_select_focus_origin),
+        )
+    }
+
+    fn open_new_connection_select_from_pointer(&mut self, select_id: NewConnectionSelect) {
+        // New-connection selects share browser focus-origin semantics with
+        // settings selects: pointer-opened menus should not render a keyboard
+        // focus-visible ring on the trigger.
+        self.new_connection_select_focus_origin =
+            Some(browser_behavior::BrowserFocusOrigin::Pointer);
+        self.open_new_connection_select = if self.open_new_connection_select == Some(select_id) {
+            None
+        } else {
+            Some(select_id)
+        };
+    }
+
     fn render_connection_hint(&self, text: String) -> AnyElement {
         self.render_connection_hint_with_color(text, self.tokens.ui.text_muted)
     }
@@ -181,7 +213,8 @@ impl WorkspaceApp {
         };
         let anchor_id = SelectAnchorId::NewConnectionGroup;
         let workspace = cx.entity();
-        let trigger = select_trigger(&self.tokens, selected_label, false, false)
+        let trigger = self
+            .new_connection_select_trigger(NewConnectionSelect::Group, selected_label, false, false)
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -191,12 +224,7 @@ impl WorkspaceApp {
                         form.selected_field = None;
                     }
                     this.ime_marked_text = None;
-                    this.open_new_connection_select =
-                        if this.open_new_connection_select == Some(NewConnectionSelect::Group) {
-                            None
-                        } else {
-                            Some(NewConnectionSelect::Group)
-                        };
+                    this.open_new_connection_select_from_pointer(NewConnectionSelect::Group);
                     window.focus(&this.focus_handle);
                     cx.stop_propagation();
                     cx.notify();
@@ -222,6 +250,7 @@ impl WorkspaceApp {
             form.error = None;
         }
         self.open_new_connection_select = None;
+        self.new_connection_select_focus_origin = None;
         self.ime_marked_text = None;
         cx.notify();
     }

@@ -1,6 +1,7 @@
 use super::actions::TerminalBroadcastMenuPlacement;
 use super::ime::WorkspaceImeTarget;
 use super::*;
+use oxideterm_gpui_ui::context_menu::{context_menu_action, context_menu_item_is_actionable};
 use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
 use oxideterm_terminal_recording::format_recording_elapsed;
 
@@ -632,74 +633,90 @@ impl WorkspaceApp {
                 } else {
                     rgb(theme.text)
                 };
-                menu = menu.child(
-                    div()
-                        .h(px(30.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .px(px(8.0))
-                        .rounded(px(self.tokens.radii.md))
-                        .text_color(row_color)
-                        .when(!is_current, |row| {
-                            row.cursor_pointer()
-                                .hover(move |style| style.bg(rgb(theme.bg_hover)))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        if this.terminal_broadcast_targets.remove(&pane_id) {
-                                            if this.terminal_broadcast_targets.is_empty() {
-                                                this.terminal_broadcast_enabled = false;
-                                            }
-                                        } else {
-                                            this.terminal_broadcast_targets.insert(pane_id);
-                                            this.terminal_broadcast_enabled = true;
-                                        }
-                                        this.terminal_broadcast_menu_open = true;
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }),
-                                )
-                        })
-                        .child(if checked {
-                            Self::render_lucide_icon(LucideIcon::Check, 12.0, rgba(0xfb923cff))
-                        } else if is_current {
+                let row = div()
+                    .h(px(30.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(8.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .text_color(row_color)
+                    .child(if checked {
+                        Self::render_lucide_icon(LucideIcon::Check, 12.0, rgba(0xfb923cff))
+                    } else if is_current {
+                        div()
+                            .size(px(12.0))
+                            .rounded_full()
+                            .bg(rgba(0xfb923cff))
+                            .into_any_element()
+                    } else {
+                        div().size(px(12.0)).into_any_element()
+                    })
+                    .child(div().flex_1().truncate().child(label))
+                    .when(!badge.is_empty(), |row| {
+                        row.child(
                             div()
-                                .size(px(12.0))
-                                .rounded_full()
-                                .bg(rgba(0xfb923cff))
-                                .into_any_element()
+                                .px(px(5.0))
+                                .py(px(1.0))
+                                .rounded(px(self.tokens.radii.md))
+                                .text_size(px(10.0))
+                                .text_color(rgb(theme.text_muted))
+                                .bg(rgba((theme.bg_panel << 8) | 0x99))
+                                .child(badge),
+                        )
+                    })
+                    .when(is_current, |row| {
+                        row.child(
+                            div()
+                                .px(px(5.0))
+                                .py(px(1.0))
+                                .rounded(px(self.tokens.radii.md))
+                                .text_size(px(10.0))
+                                .text_color(rgba(0xfb923cff))
+                                .bg(rgba(0xf9731626))
+                                .child(self.i18n.t("terminal.broadcast.current")),
+                        )
+                    });
+                // Broadcast rows are checkbox-style menu items. Keep current
+                // pane disabled through the shared menu action guard.
+                let row = self.render_terminal_broadcast_menu_action(
+                    row,
+                    is_current,
+                    false,
+                    Some(rgb(theme.bg_hover)),
+                    cx.listener(move |this, _event, _window, cx| {
+                        if this.terminal_broadcast_targets.remove(&pane_id) {
+                            if this.terminal_broadcast_targets.is_empty() {
+                                this.terminal_broadcast_enabled = false;
+                            }
                         } else {
-                            div().size(px(12.0)).into_any_element()
-                        })
-                        .child(div().flex_1().truncate().child(label))
-                        .when(!badge.is_empty(), |row| {
-                            row.child(
-                                div()
-                                    .px(px(5.0))
-                                    .py(px(1.0))
-                                    .rounded(px(self.tokens.radii.md))
-                                    .text_size(px(10.0))
-                                    .text_color(rgb(theme.text_muted))
-                                    .bg(rgba((theme.bg_panel << 8) | 0x99))
-                                    .child(badge),
-                            )
-                        })
-                        .when(is_current, |row| {
-                            row.child(
-                                div()
-                                    .px(px(5.0))
-                                    .py(px(1.0))
-                                    .rounded(px(self.tokens.radii.md))
-                                    .text_size(px(10.0))
-                                    .text_color(rgba(0xfb923cff))
-                                    .bg(rgba(0xf9731626))
-                                    .child(self.i18n.t("terminal.broadcast.current")),
-                            )
-                        }),
+                            this.terminal_broadcast_targets.insert(pane_id);
+                            this.terminal_broadcast_enabled = true;
+                        }
+                        this.terminal_broadcast_menu_open = true;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
                 );
+                menu = menu.child(row);
             }
 
+            let select_all_disabled = selectable.is_empty();
+            let select_all_actionable = context_menu_item_is_actionable(select_all_disabled, false);
+            let select_all_label = div()
+                .text_size(px(11.0))
+                .text_color(rgb(theme.text_muted))
+                .opacity(if select_all_disabled { 0.5 } else { 1.0 })
+                .when(select_all_actionable, |label| {
+                    label
+                        .cursor_pointer()
+                        .hover(move |style| style.text_color(rgb(theme.accent)))
+                })
+                .child(if all_selected {
+                    self.i18n.t("terminal.broadcast.deselect_all")
+                } else {
+                    self.i18n.t("terminal.broadcast.select_all")
+                });
             menu = menu.child(
                 div()
                     .mt(px(4.0))
@@ -710,35 +727,25 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_between()
                     .px(px(6.0))
-                    .child(
-                        div()
-                            .cursor_pointer()
-                            .text_size(px(11.0))
-                            .text_color(rgb(theme.text_muted))
-                            .hover(move |style| style.text_color(rgb(theme.accent)))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    if all_selected {
-                                        this.terminal_broadcast_enabled = false;
-                                        this.terminal_broadcast_targets.clear();
-                                    } else {
-                                        this.terminal_broadcast_targets =
-                                            selectable.iter().copied().collect();
-                                        this.terminal_broadcast_enabled =
-                                            !this.terminal_broadcast_targets.is_empty();
-                                    }
-                                    this.terminal_broadcast_menu_open = true;
-                                    cx.stop_propagation();
-                                    cx.notify();
-                                }),
-                            )
-                            .child(if all_selected {
-                                self.i18n.t("terminal.broadcast.deselect_all")
+                    .child(context_menu_action(
+                        select_all_label,
+                        select_all_disabled,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            if all_selected {
+                                this.terminal_broadcast_enabled = false;
+                                this.terminal_broadcast_targets.clear();
                             } else {
-                                self.i18n.t("terminal.broadcast.select_all")
-                            }),
-                    )
+                                this.terminal_broadcast_targets =
+                                    selectable.iter().copied().collect();
+                                this.terminal_broadcast_enabled =
+                                    !this.terminal_broadcast_targets.is_empty();
+                            }
+                            this.terminal_broadcast_menu_open = true;
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ))
                     .when(self.terminal_broadcast_enabled, |footer| {
                         footer.child(
                             div()
@@ -751,5 +758,30 @@ impl WorkspaceApp {
         }
 
         menu.into_any_element()
+    }
+
+    fn render_terminal_broadcast_menu_action(
+        &self,
+        item: gpui::Div,
+        disabled: bool,
+        loading: bool,
+        hover_bg: Option<gpui::Rgba>,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+    ) -> gpui::Div {
+        // Tauri broadcast target rows are Radix menu items with a disabled
+        // current-terminal row. Keep native hover/cursor and action blocking
+        // coupled to the shared context-menu guard.
+        let actionable = context_menu_item_is_actionable(disabled, loading);
+        let item = if actionable {
+            let item = item.cursor_pointer();
+            if let Some(hover_bg) = hover_bg {
+                item.hover(move |style| style.bg(hover_bg))
+            } else {
+                item
+            }
+        } else {
+            item.opacity(0.5)
+        };
+        context_menu_action(item, disabled, loading, listener)
     }
 }

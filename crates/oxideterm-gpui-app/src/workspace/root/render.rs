@@ -150,6 +150,9 @@ impl Render for WorkspaceApp {
                 } else if this.handle_settings_confirm_key(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_ai_mcp_add_dialog_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_oxide_dialog_footer_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -762,7 +765,10 @@ impl Render for WorkspaceApp {
                         )
                     };
                     root.child(
-                        popover_backdrop()
+                        // Broadcast target picking is rendered as a terminal
+                        // context menu, so outside pointer dismissal should use
+                        // the same event island primitive as file/SFTP menus.
+                        context_menu_backdrop()
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, window, cx| {

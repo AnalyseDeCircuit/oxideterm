@@ -156,17 +156,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let anchor_id = select_id.anchor_id();
         let workspace = cx.entity();
-        let trigger = select_trigger(&self.tokens, value, false, false)
+        let trigger = self
+            .settings_select_trigger(select_id, value, false, false)
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.focused_settings_input = None;
-                    this.open_settings_select = if this.open_settings_select == Some(select_id) {
-                        None
-                    } else {
-                        Some(select_id)
-                    };
+                    this.open_settings_select_from_pointer(select_id);
                     cx.stop_propagation();
                     cx.notify();
                 }),

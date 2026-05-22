@@ -104,17 +104,13 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let value =
             connection_idle_timeout_label(settings.connection_pool.idle_timeout_secs, &self.i18n);
-        let trigger = select_trigger(&self.tokens, value, false, false)
+        let trigger = self
+            .settings_select_trigger(select_id, value, false, false)
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.focused_settings_input = None;
-                    this.open_settings_select = if this.open_settings_select == Some(select_id) {
-                        None
-                    } else {
-                        Some(select_id)
-                    };
+                    this.open_settings_select_from_pointer(select_id);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -407,27 +403,34 @@ impl WorkspaceApp {
             .i18n
             .t("settings_view.connections.ssh_config.import_selected")
             .replace("{{count}}", &selected_count.to_string());
-        div()
-            .h(px(28.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
-            .px(px(10.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(
+        // This is the same compact outline action chrome as other migrated
+        // settings toolbars; keep it on the shared button primitive so hover,
+        // disabled, and future focus-visible behavior stay centralized.
+        toolbar_button(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(
                 LucideIcon::FolderInput,
                 14.0,
                 rgb(self.tokens.ui.text),
-            ))
-            .child(label)
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                background: Some(self.settings_panel_background(self.tokens.ui.bg_panel)),
+                border: Some(rgb(self.tokens.ui.border)),
+                text_color: Some(rgb(self.tokens.ui.text)),
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                height: Some(28.0),
+                padding_x: Some(10.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                ..ToolbarButtonOptions::default()
+            },
+        )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -535,28 +538,34 @@ impl WorkspaceApp {
         disabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .h(px(34.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .rounded_full()
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgba(0x00000000))
-            .px(px(14.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .opacity(if disabled { 0.5 } else { 1.0 })
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(
+        // Host-row import uses the shared outline action path but preserves
+        // Tauri's pill shape with a post-primitive radius override.
+        toolbar_button(
+            &self.tokens,
+            self.i18n.t("settings_view.connections.ssh_config.import"),
+            Some(Self::render_lucide_icon(
                 LucideIcon::FolderInput,
                 16.0,
                 rgb(self.tokens.ui.text),
-            ))
-            .child(self.i18n.t("settings_view.connections.ssh_config.import"))
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+                background: Some(rgba(0x00000000)),
+                border: Some(rgb(self.tokens.ui.border)),
+                text_color: Some(rgb(self.tokens.ui.text)),
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                height: Some(34.0),
+                padding_x: Some(14.0),
+                font_size: Some(self.tokens.metrics.ui_text_sm),
+                ..ToolbarButtonOptions::default()
+            },
+        )
+            .rounded_full()
             .when(!disabled, |button| {
                 button.on_mouse_down(
                     MouseButton::Left,

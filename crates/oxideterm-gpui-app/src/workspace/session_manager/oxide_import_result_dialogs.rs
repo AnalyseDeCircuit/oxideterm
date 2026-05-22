@@ -262,6 +262,11 @@ impl WorkspaceApp {
     }
 
     fn render_oxide_import_result_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        let focused_action = self
+            .session_manager
+            .oxide_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.focused_footer_action);
         div()
             .flex()
             .items_center()
@@ -269,24 +274,13 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .pt(px(8.0))
             .child(
-                button_focus_visible(
-                    &self.tokens,
-                    button_with(
-                        &self.tokens,
-                        "关闭".to_string(),
-                        ButtonOptions {
-                            variant: ButtonVariant::Default,
-                            size: ButtonSize::Sm,
-                            radius: ButtonRadius::Md,
-                            disabled: false,
-                        },
-                    ),
-                    Some(OxideDialogFooterAction::Primary)
-                        == self
-                            .session_manager
-                            .oxide_import_dialog
-                            .as_ref()
-                            .and_then(|dialog| dialog.focused_footer_action),
+                self.render_oxide_footer_action(
+                    "关闭".to_string(),
+                    ButtonVariant::Default,
+                    OxideDialogFooterAction::Primary,
+                    focused_action,
+                    false,
+                    None,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -307,6 +301,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if dialog.preview.is_some() {
+            let primary_disabled = dialog.busy || !oxide_import_has_selected_content(dialog);
             div()
                 .flex()
                 .items_center()
@@ -314,62 +309,56 @@ impl WorkspaceApp {
                 .gap(px(8.0))
                 .pt(px(8.0))
                 .child(
-                    button_focus_visible(
-                        &self.tokens,
-                        button_with(
-                            &self.tokens,
-                            "返回".to_string(),
-                            ButtonOptions {
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: dialog.busy,
-                            },
-                        ),
-                        dialog.focused_footer_action == Some(OxideDialogFooterAction::Secondary),
+                    self.render_oxide_footer_action(
+                        "返回".to_string(),
+                        ButtonVariant::Outline,
+                        OxideDialogFooterAction::Secondary,
+                        dialog.focused_footer_action,
+                        dialog.busy,
+                        None,
                     )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut()
-                            {
-                                dialog.preview = None;
-                                dialog.result_summary = None;
-                            }
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                    ),
+                    .when(!dialog.busy, |button| {
+                        button.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                if let Some(dialog) =
+                                    this.session_manager.oxide_import_dialog.as_mut()
+                                {
+                                    dialog.preview = None;
+                                    dialog.result_summary = None;
+                                }
+                                cx.notify();
+                                cx.stop_propagation();
+                            }),
+                        )
+                    }),
                 )
                 .child(
-                    button_focus_visible(
-                        &self.tokens,
-                        button_with(
-                            &self.tokens,
-                            if dialog.busy {
-                                "导入中...".to_string()
-                            } else {
-                                "确认导入".to_string()
-                            },
-                            ButtonOptions {
-                                variant: ButtonVariant::Default,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: dialog.busy || !oxide_import_has_selected_content(dialog),
-                            },
-                        ),
-                        dialog.focused_footer_action == Some(OxideDialogFooterAction::Primary),
+                    self.render_oxide_footer_action(
+                        if dialog.busy {
+                            "导入中...".to_string()
+                        } else {
+                            "确认导入".to_string()
+                        },
+                        ButtonVariant::Default,
+                        OxideDialogFooterAction::Primary,
+                        dialog.focused_footer_action,
+                        primary_disabled,
+                        None,
                     )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.apply_oxide_import_dialog(cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
+                    .when(!primary_disabled, |button| {
+                        button.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.apply_oxide_import_dialog(cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                    }),
                 )
                 .into_any_element()
         } else {
+            let primary_disabled = dialog.busy || dialog.password.is_empty();
             div()
                 .flex()
                 .items_center()
@@ -377,79 +366,67 @@ impl WorkspaceApp {
                 .gap(px(8.0))
                 .pt(px(8.0))
                 .child(
-                    button_focus_visible(
-                        &self.tokens,
-                        button_with(
-                            &self.tokens,
-                            "重新选择文件".to_string(),
-                            ButtonOptions {
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: dialog.busy,
-                            },
-                        ),
-                        dialog.focused_footer_action == Some(OxideDialogFooterAction::Secondary),
+                    self.render_oxide_footer_action(
+                        "重新选择文件".to_string(),
+                        ButtonVariant::Outline,
+                        OxideDialogFooterAction::Secondary,
+                        dialog.focused_footer_action,
+                        dialog.busy,
+                        None,
                     )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.select_oxide_import_file(cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
+                    .when(!dialog.busy, |button| {
+                        button.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.select_oxide_import_file(cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                    }),
                 )
                 .child(
-                    button_focus_visible(
-                        &self.tokens,
-                        button_with(
-                            &self.tokens,
-                            "取消".to_string(),
-                            ButtonOptions {
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: dialog.busy,
-                            },
-                        ),
-                        dialog.focused_footer_action == Some(OxideDialogFooterAction::Cancel),
+                    self.render_oxide_footer_action(
+                        "取消".to_string(),
+                        ButtonVariant::Outline,
+                        OxideDialogFooterAction::Cancel,
+                        dialog.focused_footer_action,
+                        dialog.busy,
+                        None,
                     )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.session_manager.oxide_import_dialog = None;
-                            this.session_manager.focused_input = None;
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                    ),
+                    .when(!dialog.busy, |button| {
+                        button.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.session_manager.oxide_import_dialog = None;
+                                this.session_manager.focused_input = None;
+                                cx.notify();
+                                cx.stop_propagation();
+                            }),
+                        )
+                    }),
                 )
                 .child(
-                    button_focus_visible(
-                        &self.tokens,
-                        button_with(
-                            &self.tokens,
-                            if dialog.busy {
-                                "加载中...".to_string()
-                            } else {
-                                "预览".to_string()
-                            },
-                            ButtonOptions {
-                                variant: ButtonVariant::Default,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: dialog.busy || dialog.password.is_empty(),
-                            },
-                        ),
-                        dialog.focused_footer_action == Some(OxideDialogFooterAction::Primary),
+                    self.render_oxide_footer_action(
+                        if dialog.busy {
+                            "加载中...".to_string()
+                        } else {
+                            "预览".to_string()
+                        },
+                        ButtonVariant::Default,
+                        OxideDialogFooterAction::Primary,
+                        dialog.focused_footer_action,
+                        primary_disabled,
+                        None,
                     )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.preview_oxide_import_dialog(cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
+                    .when(!primary_disabled, |button| {
+                        button.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.preview_oxide_import_dialog(cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                    }),
                 )
                 .into_any_element()
         }

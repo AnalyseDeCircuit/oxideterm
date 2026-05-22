@@ -98,18 +98,29 @@ impl WorkspaceApp {
         _name: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        button_with(
+        // Tauri renders this custom-provider action as a ghost small Button
+        // with danger text. Use the toolbar primitive so loading/disabled and
+        // future focus-visible behavior stay shared with other action buttons.
+        toolbar_button(
             &self.tokens,
             self.i18n.t("settings_view.ai.remove"),
-            ButtonOptions {
-                variant: ButtonVariant::Ghost,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled: false,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                height: Some(28.0),
+                padding_x: Some(8.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                text_color: Some(rgb(self.tokens.ui.error)),
+                hover_text_color: Some(rgb(self.tokens.ui.error)),
+                hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1a)),
+                ..ToolbarButtonOptions::default()
             },
         )
-        .text_color(rgb(self.tokens.ui.error))
-        .hover(|style| style.bg(rgba((self.tokens.ui.error << 8) | 0x1a)))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
@@ -189,24 +200,40 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let refreshing = self.ai_model_refreshing.contains(&provider.id);
-        button_with(
+        // Tauri refresh is a compact ghost button with a leading RefreshCw
+        // icon. Keep disabled/loading chrome in the shared toolbar button.
+        toolbar_button(
             &self.tokens,
             self.i18n.t("settings_view.ai.refresh_models"),
-            ButtonOptions {
-                variant: ButtonVariant::Ghost,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled: refreshing,
+            Some(Self::render_lucide_icon(
+                LucideIcon::RefreshCw,
+                12.0,
+                rgb(self.tokens.ui.text_muted),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: refreshing,
+                },
+                height: Some(28.0),
+                padding_x: Some(8.0),
+                font_size: Some(10.0),
+                icon_gap: Some(4.0),
+                loading: refreshing,
+                ..ToolbarButtonOptions::default()
             },
         )
-        .opacity(if refreshing { 0.5 } else { 1.0 })
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _event, _window, cx| {
-                this.refresh_ai_provider_models(index, provider.clone(), cx);
-                cx.stop_propagation();
-            }),
-        )
+        .when(!refreshing, |button| {
+            button.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.refresh_ai_provider_models(index, provider.clone(), cx);
+                    cx.stop_propagation();
+                }),
+            )
+        })
         .into_any_element()
     }
 
@@ -349,20 +376,14 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         select_anchor_probe(
             select_id.anchor_id(),
-            select_trigger(&self.tokens, label, false, false)
+            self.settings_select_trigger(select_id, label, false, false)
                 .w_full()
                 .h(px(32.0))
                 .text_size(px(self.tokens.metrics.ui_text_xs))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.focused_settings_input = None;
-                        this.open_settings_select =
-                            if this.open_settings_select == Some(select_id) {
-                                None
-                            } else {
-                                Some(select_id)
-                            };
+                        this.open_settings_select_from_pointer(select_id);
                         cx.stop_propagation();
                         cx.notify();
                     }),

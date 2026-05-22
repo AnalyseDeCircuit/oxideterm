@@ -1,8 +1,9 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, Bounds, CursorStyle, Div, Element, ElementId, GlobalElementId,
-    InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Stateful,
-    StatefulInteractiveElement, Styled, Window, div, px, rgb, rgba,
+    InspectorElementId, InteractiveElement, IntoElement, LayoutId, MouseButton, MouseDownEvent,
+    ParentElement, Pixels, Stateful, StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -167,6 +168,36 @@ pub fn select_trigger(
     placeholder: bool,
     disabled: bool,
 ) -> Div {
+    select_trigger_chrome(
+        tokens,
+        value.into(),
+        placeholder,
+        if disabled {
+            CursorStyle::OperationNotAllowed
+        } else {
+            CursorStyle::PointingHand
+        },
+        if disabled { 0.5 } else { 1.0 },
+        true,
+    )
+}
+
+pub fn readonly_value_trigger(tokens: &ThemeTokens, value: impl Into<String>) -> Div {
+    // Some settings rows use Select chrome only as a fixed value display. Keep
+    // that styling on a separate primitive so read-only values do not inherit
+    // popup ownership, disabled affordance, or clickable cursor semantics from
+    // true SelectTrigger instances.
+    select_trigger_chrome(tokens, value.into(), false, CursorStyle::Arrow, 1.0, true)
+}
+
+fn select_trigger_chrome(
+    tokens: &ThemeTokens,
+    value: String,
+    placeholder: bool,
+    cursor: CursorStyle,
+    opacity: f32,
+    show_chevron: bool,
+) -> Div {
     div()
         .h(px(tokens.metrics.ui_control_height))
         .w_full()
@@ -186,23 +217,20 @@ pub fn select_trigger(
         } else {
             tokens.ui.text
         }))
-        .opacity(if disabled { 0.5 } else { 1.0 })
-        // Native select triggers are shared by settings/new-connection/Cloud
-        // Sync. Mirror browser disabled affordance at the primitive level so
-        // disabled selects do not still look clickable.
-        .cursor(if disabled {
-            CursorStyle::OperationNotAllowed
-        } else {
-            CursorStyle::PointingHand
+        .opacity(opacity)
+        // Native select-like controls share the same chrome. The caller owns
+        // whether this is an interactive select cursor or a read-only display.
+        .cursor(cursor)
+        .child(div().flex_1().min_w(px(0.0)).truncate().child(value))
+        .when(show_chevron, |trigger| {
+            trigger.child(
+                div()
+                    .ml(px(tokens.spacing.two))
+                    .text_color(rgb(tokens.ui.text_muted))
+                    .opacity(0.5)
+                    .child("⌄"),
+            )
         })
-        .child(div().flex_1().min_w(px(0.0)).truncate().child(value.into()))
-        .child(
-            div()
-                .ml(px(tokens.spacing.two))
-                .text_color(rgb(tokens.ui.text_muted))
-                .opacity(0.5)
-                .child("⌄"),
-        )
 }
 
 pub fn select_trigger_focus_visible(tokens: &ThemeTokens, trigger: Div, focused: bool) -> Div {
@@ -273,6 +301,26 @@ pub fn select_option(tokens: &ThemeTokens, label: impl Into<String>, selected: b
         .hover(|item| item.bg(rgb(tokens.ui.bg_hover)))
 }
 
+pub fn select_option_is_actionable(disabled: bool, loading: bool) -> bool {
+    // Radix SelectItem and browser-backed option rows do not invoke selection
+    // while disabled. Loading rows use the same guard because the label may
+    // remain visible while async state settles.
+    !(disabled || loading)
+}
+
+pub fn select_option_action(
+    option: Div,
+    disabled: bool,
+    loading: bool,
+    listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    if select_option_is_actionable(disabled, loading) {
+        option.on_mouse_down(MouseButton::Left, listener)
+    } else {
+        option.cursor(CursorStyle::OperationNotAllowed)
+    }
+}
+
 pub fn select_content(tokens: &ThemeTokens) -> Div {
     div()
         .relative()
@@ -338,4 +386,17 @@ pub fn select_separator(tokens: &ThemeTokens) -> Div {
 
 fn elevated_background(tokens: &ThemeTokens) -> gpui::Rgba {
     rgba((tokens.ui.bg_elevated << 8) | 0xf2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_option_is_actionable;
+
+    #[test]
+    fn select_option_action_guard_blocks_disabled_or_loading_rows() {
+        assert!(select_option_is_actionable(false, false));
+        assert!(!select_option_is_actionable(true, false));
+        assert!(!select_option_is_actionable(false, true));
+        assert!(!select_option_is_actionable(true, true));
+    }
 }

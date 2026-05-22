@@ -11,6 +11,7 @@ impl WorkspaceApp {
             match event.keystroke.key.as_str() {
                 "escape" => {
                     self.ai_model_selector_open = false;
+                    self.ai_model_selector_focus_origin = None;
                     self.ai_model_selector_search_focused = false;
                     self.ai_model_selector_search_query.clear();
                     self.ai_model_selector_highlighted_model = None;
@@ -23,6 +24,7 @@ impl WorkspaceApp {
                     // does not yet expose all footer/button targets, so close
                     // the Radix-style dropdown rather than trapping focus.
                     self.ai_model_selector_open = false;
+                    self.ai_model_selector_focus_origin = None;
                     self.ai_model_selector_search_focused = false;
                     self.ai_model_selector_search_query.clear();
                     self.ai_model_selector_highlighted_model = None;

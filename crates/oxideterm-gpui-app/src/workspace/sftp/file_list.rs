@@ -154,10 +154,11 @@ impl WorkspaceApp {
         let row_selectable_state = self.selectable_text_render_state(cx);
 
         list.child(
-            tracked_uniform_list(
+            tauri_virtual_uniform_list(
                 ("sftp-file-list-virtual", pane as u64),
                 row_count,
                 scroll_handle,
+                TauriVirtualListSpec::new(px(SFTP_ROW_HEIGHT), SFTP_VIRTUAL_OVERSCAN),
                 move |range, _window, _cx| {
                     let selectable_state = row_selectable_state.clone();
                     range

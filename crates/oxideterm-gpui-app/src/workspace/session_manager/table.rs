@@ -693,15 +693,18 @@ impl WorkspaceApp {
             .bg(theme_panel_bg(theme.bg_panel, has_background))
             .shadow_lg()
             .child(
-                self.render_row_menu_item(
-                    LucideIcon::Zap,
-                    self.i18n.t("sessionManager.actions.test_connection"),
-                    rgb(theme.text),
-                    has_background,
-                    cx,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
+                self.render_session_manager_menu_action(
+                    self.render_row_menu_item(
+                        LucideIcon::Zap,
+                        self.i18n.t("sessionManager.actions.test_connection"),
+                        rgb(theme.text),
+                        false,
+                        false,
+                        has_background,
+                        cx,
+                    ),
+                    false,
+                    false,
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, window, cx| {
@@ -713,15 +716,18 @@ impl WorkspaceApp {
                 ),
             )
             .child(
-                self.render_row_menu_item(
-                    LucideIcon::Copy,
-                    self.i18n.t("sessionManager.actions.duplicate"),
-                    rgb(theme.text),
-                    has_background,
-                    cx,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
+                self.render_session_manager_menu_action(
+                    self.render_row_menu_item(
+                        LucideIcon::Copy,
+                        self.i18n.t("sessionManager.actions.duplicate"),
+                        rgb(theme.text),
+                        false,
+                        false,
+                        has_background,
+                        cx,
+                    ),
+                    false,
+                    false,
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, _window, cx| {
@@ -739,15 +745,18 @@ impl WorkspaceApp {
                     .bg(theme_border_half(theme.border, has_background)),
             )
             .child(
-                self.render_row_menu_item(
-                    LucideIcon::Trash2,
-                    self.i18n.t("sessionManager.actions.delete"),
-                    rgb(0xf87171),
-                    has_background,
-                    cx,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
+                self.render_session_manager_menu_action(
+                    self.render_row_menu_item(
+                        LucideIcon::Trash2,
+                        self.i18n.t("sessionManager.actions.delete"),
+                        rgb(0xf87171),
+                        false,
+                        false,
+                        has_background,
+                        cx,
+                    ),
+                    false,
+                    false,
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, _window, cx| {
@@ -769,21 +778,20 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let viewport = window.viewport_size();
-        let x = self
-            .session_manager
-            .row_context_menu_x
-            .min(f32::from(viewport.width) - MANAGER_ROW_MENU_WIDTH - 8.0)
-            .max(8.0);
-        let y = self
-            .session_manager
-            .row_context_menu_y
-            .min(f32::from(viewport.height) - MANAGER_ROW_CONTEXT_MENU_HEIGHT - 8.0)
-            .max(8.0);
+        let placement = browser_behavior::clamp_context_menu_position(
+            self.session_manager.row_context_menu_x,
+            self.session_manager.row_context_menu_y,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            MANAGER_ROW_MENU_WIDTH,
+            MANAGER_ROW_CONTEXT_MENU_HEIGHT,
+            8.0,
+        );
         let theme = self.tokens.ui;
         div()
             .absolute()
-            .left(px(x))
-            .top(px(y))
+            .left(px(placement.x))
+            .top(px(placement.y))
             .w(px(MANAGER_ROW_MENU_WIDTH))
             .p(px(4.0))
             .rounded(px(self.tokens.radii.md))
@@ -803,16 +811,19 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             })
             .child(
-                self.render_row_menu_item_with_icon_color(
-                    LucideIcon::Play,
-                    self.i18n.t("sessionManager.actions.connect"),
-                    rgb(theme.text),
-                    rgb(0x4ade80),
-                    has_background,
-                    cx,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
+                self.render_session_manager_menu_action(
+                    self.render_row_menu_item_with_icon_color(
+                        LucideIcon::Play,
+                        self.i18n.t("sessionManager.actions.connect"),
+                        rgb(theme.text),
+                        rgb(0x4ade80),
+                        false,
+                        false,
+                        has_background,
+                        cx,
+                    ),
+                    false,
+                    false,
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, window, cx| {
@@ -824,16 +835,19 @@ impl WorkspaceApp {
                 ),
             )
             .child(
-                self.render_row_menu_item_with_icon_color(
-                    LucideIcon::Zap,
-                    self.i18n.t("sessionManager.actions.test_connection"),
-                    rgb(theme.text),
-                    rgb(theme.text),
-                    has_background,
-                    cx,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
+                self.render_session_manager_menu_action(
+                    self.render_row_menu_item_with_icon_color(
+                        LucideIcon::Zap,
+                        self.i18n.t("sessionManager.actions.test_connection"),
+                        rgb(theme.text),
+                        rgb(theme.text),
+                        false,
+                        false,
+                        has_background,
+                        cx,
+                    ),
+                    false,
+                    false,
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, window, cx| {
@@ -845,16 +859,19 @@ impl WorkspaceApp {
                 ),
             )
             .child(
-                self.render_row_menu_item_with_icon_color(
-                    LucideIcon::Pencil,
-                    self.i18n.t("sessionManager.actions.edit"),
-                    rgb(theme.text),
-                    rgb(theme.text),
-                    has_background,
-                    cx,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
+                self.render_session_manager_menu_action(
+                    self.render_row_menu_item_with_icon_color(
+                        LucideIcon::Pencil,
+                        self.i18n.t("sessionManager.actions.edit"),
+                        rgb(theme.text),
+                        rgb(theme.text),
+                        false,
+                        false,
+                        has_background,
+                        cx,
+                    ),
+                    false,
+                    false,
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, window, cx| {
@@ -866,16 +883,19 @@ impl WorkspaceApp {
                 ),
             )
             .child(
-                self.render_row_menu_item_with_icon_color(
-                    LucideIcon::Copy,
-                    self.i18n.t("sessionManager.actions.duplicate"),
-                    rgb(theme.text),
-                    rgb(theme.text),
-                    has_background,
-                    cx,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
+                self.render_session_manager_menu_action(
+                    self.render_row_menu_item_with_icon_color(
+                        LucideIcon::Copy,
+                        self.i18n.t("sessionManager.actions.duplicate"),
+                        rgb(theme.text),
+                        rgb(theme.text),
+                        false,
+                        false,
+                        has_background,
+                        cx,
+                    ),
+                    false,
+                    false,
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, _window, cx| {
@@ -893,16 +913,19 @@ impl WorkspaceApp {
                     .bg(theme_border_half(theme.border, has_background)),
             )
             .child(
-                self.render_row_menu_item_with_icon_color(
-                    LucideIcon::Trash2,
-                    self.i18n.t("sessionManager.actions.delete"),
-                    rgb(0xf87171),
-                    rgb(0xf87171),
-                    has_background,
-                    cx,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
+                self.render_session_manager_menu_action(
+                    self.render_row_menu_item_with_icon_color(
+                        LucideIcon::Trash2,
+                        self.i18n.t("sessionManager.actions.delete"),
+                        rgb(0xf87171),
+                        rgb(0xf87171),
+                        false,
+                        false,
+                        has_background,
+                        cx,
+                    ),
+                    false,
+                    false,
                     cx.listener({
                         let id = conn.id.clone();
                         move |this, _event, _window, cx| {
@@ -921,10 +944,13 @@ impl WorkspaceApp {
         icon: LucideIcon,
         label: String,
         color: Rgba,
+        disabled: bool,
+        loading: bool,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        div()
+        let actionable = context_menu_item_is_actionable(disabled, loading);
+        let item = div()
             .h(px(30.0))
             .flex()
             .items_center()
@@ -933,8 +959,6 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.sm))
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(color)
-            .cursor_pointer()
-            .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
             .child(Self::render_lucide_icon(icon, 16.0, color))
             .child(self.render_display_text_with_role(
                 SelectableTextRole::NonSelectable,
@@ -943,7 +967,13 @@ impl WorkspaceApp {
                 label,
                 color.into(),
                 cx,
-            ))
+            ));
+        if actionable {
+            item.cursor_pointer()
+                .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
+        } else {
+            item.opacity(0.5)
+        }
     }
 
     fn render_row_menu_item_with_icon_color(
@@ -952,10 +982,13 @@ impl WorkspaceApp {
         label: String,
         text_color: Rgba,
         icon_color: Rgba,
+        disabled: bool,
+        loading: bool,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        div()
+        let actionable = context_menu_item_is_actionable(disabled, loading);
+        let item = div()
             .h(px(30.0))
             .flex()
             .items_center()
@@ -964,8 +997,6 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.sm))
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(text_color)
-            .cursor_pointer()
-            .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
             .child(Self::render_lucide_icon(icon, 16.0, icon_color))
             .child(self.render_display_text_with_role(
                 SelectableTextRole::NonSelectable,
@@ -974,7 +1005,26 @@ impl WorkspaceApp {
                 label,
                 text_color.into(),
                 cx,
-            ))
+            ));
+        if actionable {
+            item.cursor_pointer()
+                .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
+        } else {
+            item.opacity(0.5)
+        }
+    }
+
+    fn render_session_manager_menu_action(
+        &self,
+        item: gpui::Div,
+        disabled: bool,
+        loading: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+    ) -> gpui::Div {
+        // SessionManager has both inline "..." menus and row context menus.
+        // Tauri routes both through Radix ContextMenuItem semantics, so native
+        // keeps invocation and disabled/loading guards in one shared path.
+        context_menu_action(item, disabled, loading, listener)
     }
 
     fn render_row_icon_button(
@@ -997,91 +1047,4 @@ impl WorkspaceApp {
         )
     }
 
-    #[allow(dead_code)]
-    fn render_row_actions(&self, conn: ConnectionInfo, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .w(px(210.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .child(
-                self.render_row_action_button(
-                    self.i18n.t("sessionManager.actions.connect"),
-                    ButtonVariant::Default,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, window, cx| {
-                            this.open_saved_connection(&id, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                ),
-            )
-            .child(
-                self.render_row_action_button(
-                    self.i18n.t("sessionManager.actions.edit"),
-                    ButtonVariant::Secondary,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, window, cx| {
-                            this.open_saved_connection_editor(&id, None, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                ),
-            )
-            .child(
-                self.render_row_action_button(
-                    self.i18n.t("sessionManager.actions.duplicate"),
-                    ButtonVariant::Secondary,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, _window, cx| {
-                            this.duplicate_connection(&id, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                ),
-            )
-            .child(
-                self.render_row_action_button(
-                    self.i18n.t("sessionManager.actions.delete"),
-                    ButtonVariant::Destructive,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, _window, cx| {
-                            this.delete_connection(&id, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                ),
-            )
-            .into_any_element()
-    }
-
-    #[allow(dead_code)]
-    fn render_row_action_button(&self, label: String, variant: ButtonVariant) -> gpui::Div {
-        button_with(
-            &self.tokens,
-            label,
-            ButtonOptions {
-                variant,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled: false,
-            },
-        )
-    }
 }

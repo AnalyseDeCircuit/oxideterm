@@ -8,15 +8,18 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let viewport = window.viewport_size();
-        let x = menu
-            .x
-            .min(f32::from(viewport.width) - SFTP_CONTEXT_MENU_WIDTH - 8.0)
-            .max(8.0);
-        let y = menu
-            .y
-            .min(f32::from(viewport.height) - SFTP_CONTEXT_MENU_MAX_HEIGHT - 8.0)
-            .max(8.0);
+        let placement = browser_behavior::clamp_context_menu_position(
+            menu.x,
+            menu.y,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            SFTP_CONTEXT_MENU_WIDTH,
+            SFTP_CONTEXT_MENU_MAX_HEIGHT,
+            8.0,
+        );
         let selected_count = self.sftp_selected_names(menu.pane).len();
+        let pane_loading = menu.pane == SftpPane::Remote && self.sftp_view.remote_loading;
+        let transfer_loading = self.sftp_view.remote_loading;
         let direction = if menu.pane == SftpPane::Local {
             SftpTransferDirection::Upload
         } else {
@@ -42,7 +45,7 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             })
             .when(selected_count > 0, |menu_el| {
-                menu_el.child(self.render_sftp_context_menu_item(
+                menu_el.child(self.render_sftp_context_menu_guarded_item(
                     if menu.pane == SftpPane::Local {
                         LucideIcon::Upload
                     } else {
@@ -50,6 +53,8 @@ impl WorkspaceApp {
                     },
                     transfer_label,
                     false,
+                    false,
+                    transfer_loading,
                     has_background,
                     cx.listener(move |this, _event, _window, cx| {
                         this.queue_sftp_transfers(menu.pane, direction);
@@ -63,10 +68,12 @@ impl WorkspaceApp {
                 if menu.pane != SftpPane::Remote || file.file_type == SftpFileType::Directory {
                     menu_el
                 } else {
-                    menu_el.child(self.render_sftp_context_menu_item(
+                    menu_el.child(self.render_sftp_context_menu_guarded_item(
                         LucideIcon::Eye,
                         self.i18n.t("sftp.context.preview"),
                         false,
+                        false,
+                        pane_loading,
                         has_background,
                         cx.listener({
                             let file = file.clone();
@@ -81,10 +88,12 @@ impl WorkspaceApp {
                 }
             })
             .when(menu.file.is_some() && selected_count == 1, |menu_el| {
-                menu_el.child(self.render_sftp_context_menu_item(
+                menu_el.child(self.render_sftp_context_menu_guarded_item(
                     LucideIcon::Pencil,
                     self.i18n.t("sftp.context.rename"),
                     false,
+                    false,
+                    pane_loading,
                     has_background,
                     cx.listener({
                         let file = menu.file.clone();
@@ -100,10 +109,12 @@ impl WorkspaceApp {
                 ))
             })
             .when_some(menu.file.clone(), |menu_el, file| {
-                menu_el.child(self.render_sftp_context_menu_item(
+                menu_el.child(self.render_sftp_context_menu_guarded_item(
                     LucideIcon::Copy,
                     self.i18n.t("sftp.context.copy_path"),
                     false,
+                    false,
+                    pane_loading,
                     has_background,
                     cx.listener(move |this, _event, _window, cx| {
                         let base = match menu.pane {
@@ -120,10 +131,12 @@ impl WorkspaceApp {
                 ))
             })
             .when(selected_count > 0, |menu_el| {
-                menu_el.child(self.render_sftp_context_menu_item(
+                menu_el.child(self.render_sftp_context_menu_guarded_item(
                     LucideIcon::Trash2,
                     self.i18n.t("sftp.context.delete"),
                     true,
+                    false,
+                    pane_loading,
                     has_background,
                     cx.listener(move |this, _event, _window, cx| {
                         let files = this.sftp_selected_names(menu.pane);
@@ -143,10 +156,12 @@ impl WorkspaceApp {
                     .my(px(SFTP_CONTEXT_MENU_PADDING))
                     .bg(sftp_border(theme.border, has_background)),
             )
-            .child(self.render_sftp_context_menu_item(
+            .child(self.render_sftp_context_menu_guarded_item(
                 LucideIcon::FolderOpen,
                 self.i18n.t("sftp.context.new_folder"),
                 false,
+                false,
+                pane_loading,
                 has_background,
                 cx.listener(move |this, _event, _window, cx| {
                     this.open_sftp_new_folder_dialog(menu.pane);
@@ -156,7 +171,7 @@ impl WorkspaceApp {
                 }),
             ));
 
-        popover_backdrop()
+        context_menu_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
@@ -179,7 +194,7 @@ impl WorkspaceApp {
                 deferred(
                     anchored()
                         .anchor(Corner::TopLeft)
-                        .position(gpui::point(px(x), px(y)))
+                        .position(gpui::point(px(placement.x), px(placement.y)))
                         .position_mode(AnchoredPositionMode::Window)
                         .child(overlay_content_boundary(popup)),
                 )
@@ -188,17 +203,20 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_sftp_context_menu_item(
+    fn render_sftp_context_menu_guarded_item(
         &self,
         icon: LucideIcon,
         label: String,
         danger: bool,
+        disabled: bool,
+        loading: bool,
         has_background: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let color = if danger { SFTP_RED } else { theme.text };
-        div()
+        let actionable = context_menu_item_is_actionable(disabled, loading);
+        let item = div()
             .h(px(SFTP_CONTEXT_MENU_ITEM_HEIGHT))
             .w_full()
             .flex()
@@ -210,11 +228,16 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.xs))
             .text_size(px(SFTP_TEXT_XS))
             .text_color(rgb(color))
-            .cursor_pointer()
-            .hover(move |item| item.bg(sftp_hover_bg(theme.bg_hover, has_background)))
+            .opacity(if actionable { 1.0 } else { 0.5 })
+            .when(actionable, |item| {
+                item.cursor_pointer()
+                    .hover(move |item| item.bg(sftp_hover_bg(theme.bg_hover, has_background)))
+            })
             .child(Self::render_lucide_icon(icon, SFTP_ICON_SM, rgb(color)))
-            .child(div().truncate().child(label))
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
+            .child(div().truncate().child(label));
+        // SFTP remote refresh/transfer can leave a context menu visible while
+        // the backing pane is loading. Route those rows through the shared menu
+        // guard so the UI cannot dispatch stale actions.
+        context_menu_action(item, disabled, loading, listener).into_any_element()
     }
 }

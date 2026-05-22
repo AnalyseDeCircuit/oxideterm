@@ -328,19 +328,26 @@ impl WorkspaceApp {
             .find(|connection| connection.connection_id == selected_id)
             .map(monitor_connection_label)
             .unwrap_or_default();
-        let mut wrapper = div().relative().mb_4().child(
-            select_trigger(&self.tokens, selected_label, false, false)
-                .font_family("monospace")
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.connection_monitor.selector_open =
-                            !this.connection_monitor.selector_open;
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                ),
+        let trigger = select_trigger_focus_visible(
+            &self.tokens,
+            select_trigger(&self.tokens, selected_label, false, false).font_family("monospace"),
+            // The monitor selector is pointer-opened today, but it should use
+            // the same modality gate as other native Select triggers.
+            browser_behavior::browser_focus_visible(
+                self.connection_monitor.selector_open,
+                self.connection_monitor.selector_focus_origin,
+            ),
         );
+        let mut wrapper = div().relative().mb_4().child(trigger.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _event, _window, cx| {
+                this.connection_monitor.selector_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Pointer);
+                this.connection_monitor.selector_open = !this.connection_monitor.selector_open;
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        ));
         if self.connection_monitor.selector_open {
             let mut popup = div()
                 .absolute()
@@ -352,28 +359,42 @@ impl WorkspaceApp {
                 .border_color(rgb(self.tokens.ui.border))
                 .bg(rgb(self.tokens.ui.bg_panel))
                 .p_1()
-                .shadow_lg();
+                .shadow_lg()
+                // Select popups are overlay islands in the browser: pointer
+                // and wheel events inside the list should not leak to the
+                // monitor page or terminal behind it.
+                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .on_scroll_wheel(|_event, _window, cx| {
+                    cx.stop_propagation();
+                });
             for connection in connections {
                 let connection_id = connection.connection_id.clone();
                 let selected = connection.connection_id == selected_id;
                 popup = popup.child(
-                    select_option(&self.tokens, monitor_connection_label(connection), selected)
-                        .font_family("monospace")
-                        .child(div().mr_2().child(Self::render_lucide_icon(
-                            LucideIcon::Server,
-                            14.0,
-                            rgb(self.tokens.ui.text_muted),
-                        )))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.connection_monitor.selected_connection_id =
-                                    Some(connection_id.clone());
-                                this.connection_monitor.selector_open = false;
-                                this.sync_connection_monitor_selection(cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
+                    select_option_action(
+                        select_option(&self.tokens, monitor_connection_label(connection), selected)
+                            .font_family("monospace")
+                            .child(div().mr_2().child(Self::render_lucide_icon(
+                                LucideIcon::Server,
+                                14.0,
+                                rgb(self.tokens.ui.text_muted),
+                            ))),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.connection_monitor.selected_connection_id =
+                                Some(connection_id.clone());
+                            this.connection_monitor.selector_open = false;
+                            this.connection_monitor.selector_focus_origin = None;
+                            this.sync_connection_monitor_selection(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
                 );
             }
             wrapper = wrapper.child(popup);

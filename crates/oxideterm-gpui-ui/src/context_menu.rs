@@ -1,8 +1,10 @@
 use gpui::{
-    CursorStyle, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Styled, div,
-    prelude::*, px, rgb, rgba,
+    App, CursorStyle, Div, FontWeight, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, ParentElement, Styled, Window, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
+
+use crate::modal::popover_backdrop;
 
 // Tauri uses bg-theme-bg-elevated/95 for menu surfaces.
 const CONTEXT_MENU_SURFACE_ALPHA: u32 = 0xf2;
@@ -15,6 +17,33 @@ pub enum ContextMenuItemKind {
     Checkbox(bool),
     Radio(bool),
     Submenu,
+}
+
+pub fn context_menu_backdrop() -> Div {
+    // Radix ContextMenu uses the same transparent outside-hit-test layer as a
+    // popover, but naming the role keeps file/tree/table menus separate from
+    // generic floating panels when we audit dismissal and focus restoration.
+    popover_backdrop()
+}
+
+pub fn context_menu_item_is_actionable(disabled: bool, loading: bool) -> bool {
+    // Radix disabled menu items keep pointer events from invoking item actions.
+    // Loading rows use the same action guard even if a caller keeps them styled
+    // as active to show progress.
+    !(disabled || loading)
+}
+
+pub fn context_menu_action(
+    item: Div,
+    disabled: bool,
+    loading: bool,
+    listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    if context_menu_item_is_actionable(disabled, loading) {
+        item.on_mouse_down(MouseButton::Left, listener)
+    } else {
+        item
+    }
 }
 
 pub fn context_menu_content(tokens: &ThemeTokens) -> Div {
@@ -247,4 +276,17 @@ fn context_menu_chevron(tokens: &ThemeTokens, chevron: impl Into<String>) -> Div
         .text_size(px(tokens.metrics.ui_menu_icon_size))
         .text_color(rgb(tokens.ui.text_muted))
         .child(chevron.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::context_menu_item_is_actionable;
+
+    #[test]
+    fn context_menu_action_guard_blocks_disabled_or_loading_items() {
+        assert!(context_menu_item_is_actionable(false, false));
+        assert!(!context_menu_item_is_actionable(true, false));
+        assert!(!context_menu_item_is_actionable(false, true));
+        assert!(!context_menu_item_is_actionable(true, true));
+    }
 }

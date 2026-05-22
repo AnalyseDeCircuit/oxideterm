@@ -17,18 +17,22 @@ use super::{
 use crate::assets::LucideIcon;
 use crate::workspace::SelectableTextScrollExt;
 use crate::workspace::WorkspaceApp;
-use crate::workspace::ime::WorkspaceImeTarget;
+use crate::workspace::{browser_behavior, ime::WorkspaceImeTarget};
+use gpui::Div;
 use oxideterm_gpui_ui::{
     ButtonTone, TextInputView, button,
-    button::{ButtonOptions, ButtonSize, ButtonVariant, button_with},
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
+        ToolbarButtonOptions, button_with, icon_button, toolbar_button,
+    },
     checkbox, form_field,
     modal::{dismissible_dialog_backdrop, popover_backdrop},
     modal_body, modal_container, modal_footer, modal_header,
     radio_group::{radio_group, radio_group_item},
     segmented_tab, segmented_tabs,
     select::{
-        SelectAnchorId, select_anchor_probe, select_option, select_overlay_popup_with_max_height,
-        select_trigger,
+        SelectAnchorId, select_anchor_probe, select_option, select_option_action,
+        select_overlay_popup_with_max_height, select_trigger, select_trigger_focus_visible,
     },
     text_input, text_input_anchor_probe,
 };
@@ -82,6 +86,7 @@ impl WorkspaceApp {
             && !modifiers.platform
         {
             self.open_new_connection_select = None;
+            self.new_connection_select_focus_origin = None;
             cx.notify();
             return true;
         }

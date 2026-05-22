@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use gpui::Div;
+use gpui::{App, Div, MouseDownEvent, Rgba, Window};
 use oxideterm_ai::{
     AiAutocompleteCandidate, AiAutocompleteKind, AiChatMessage, AiChatMessageMetadata,
     AiChatRole, AiChatStreamConfig, AiConversation, AiMessageBranches, AiProviderView,
@@ -47,6 +47,11 @@ use oxideterm_gpui_ui::{
         ai_tool_details, ai_tool_heading, ai_tool_item, ai_tool_item_header, ai_tool_output_pre,
         ai_tool_section_label,
     },
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
+        ToolbarButtonOptions, button_focus_visible, icon_button, toolbar_button,
+    },
+    context_menu::{context_menu_action, context_menu_item_is_actionable},
     modal::overlay_content_boundary,
     tauri_ui_font_family as settings_ui_font_family,
     text_input::{text_caret, text_input, text_input_anchor_probe},
@@ -65,6 +70,33 @@ pub(super) struct AiPendingChatStream {
     pub(super) request_content: Option<String>,
     pub(super) task_system_prompt: Option<String>,
     pub(super) rag_system_prompt: Option<String>,
+}
+
+impl WorkspaceApp {
+    fn render_ai_menu_action(
+        &self,
+        item: Div,
+        disabled: bool,
+        loading: bool,
+        hover_bg: Option<Rgba>,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Div {
+        // AI safety/chat menus are Radix dropdown-style command rows in Tauri.
+        // Native keeps hover, cursor, and invocation blocking tied to the same
+        // shared menu action guard used by file/session/terminal menus.
+        let actionable = context_menu_item_is_actionable(disabled, loading);
+        let item = if actionable {
+            let item = item.cursor_pointer();
+            if let Some(hover_bg) = hover_bg {
+                item.hover(move |row| row.bg(hover_bg))
+            } else {
+                item
+            }
+        } else {
+            item.opacity(0.5)
+        };
+        context_menu_action(item, disabled, loading, listener)
+    }
 }
 
 include!("ai/render.rs");

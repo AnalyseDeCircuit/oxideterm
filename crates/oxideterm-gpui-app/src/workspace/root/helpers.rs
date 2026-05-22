@@ -634,6 +634,12 @@ impl WorkspaceApp {
         // Tauri dialogs are Radix modal roots: opening one dismisses background
         // popovers and input focus before the overlay starts trapping events.
         self.open_settings_select = None;
+        self.open_new_connection_select = None;
+        self.new_connection_select_focus_origin = None;
+        // Cloud Sync provider/config selects are Radix-like transient popovers;
+        // a modal boundary must release both the open menu and the trigger
+        // focus owner so keyboard rings do not leak behind the dialog.
+        self.cloud_sync_open_select = None;
         self.focused_settings_input = None;
         self.cloud_sync_focused_select = None;
         self.settings_slider_drag = None;
@@ -667,6 +673,12 @@ impl WorkspaceApp {
         }
         if self.connection_monitor.selector_open {
             self.connection_monitor.selector_open = false;
+            self.connection_monitor.selector_focus_origin = None;
+            changed = true;
+        }
+        if self.connection_monitor.dismiss_topology_menu() {
+            // Topology node menus are transient context menus over a canvas,
+            // so Esc/outside dismissal belongs to the shared overlay close path.
             changed = true;
         }
         if self.session_manager.show_batch_move {
@@ -678,6 +690,19 @@ impl WorkspaceApp {
             .row_context_menu_connection_id
             .take()
             .is_some()
+        {
+            changed = true;
+        }
+        if self
+            .session_manager
+            .folder_tree_context_menu_x
+            .take()
+            .is_some()
+            || self
+                .session_manager
+                .folder_tree_context_menu_y
+                .take()
+                .is_some()
         {
             changed = true;
         }

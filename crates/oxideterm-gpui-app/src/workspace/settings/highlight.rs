@@ -71,8 +71,8 @@ impl WorkspaceApp {
                             .child(
                                 div().relative().w(px(168.0)).child(select_anchor_probe(
                                     SelectAnchorId::SettingsHighlightPreset,
-                                    select_trigger(
-                                        &self.tokens,
+                                    self.settings_select_trigger(
+                                        SettingsSelect::HighlightPreset,
                                         self.i18n
                                             .t("settings_view.terminal.highlight_rules.add_preset"),
                                         false,
@@ -90,8 +90,9 @@ impl WorkspaceApp {
                                                 .len()
                                                 < MAX_HIGHLIGHT_RULES
                                             {
-                                                this.open_settings_select =
-                                                    Some(SettingsSelect::HighlightPreset);
+                                                this.open_settings_select_from_pointer(
+                                                    SettingsSelect::HighlightPreset,
+                                                );
                                                 this.focused_settings_input = None;
                                             }
                                             cx.stop_propagation();
@@ -496,17 +497,12 @@ impl WorkspaceApp {
             .child(
                 div().relative().w(px(148.0)).child(select_anchor_probe(
                     anchor_id,
-                    select_trigger(&self.tokens, value, false, false)
+                    self.settings_select_trigger(select_id, value, false, false)
                         .cursor_pointer()
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.open_settings_select =
-                                    if this.open_settings_select == Some(select_id) {
-                                        None
-                                    } else {
-                                        Some(select_id)
-                                    };
+                                this.open_settings_select_from_pointer(select_id);
                                 this.focused_settings_input = None;
                                 cx.stop_propagation();
                                 cx.notify();

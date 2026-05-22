@@ -1,5 +1,5 @@
 impl WorkspaceApp {
-    fn knowledge_create_collection(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn knowledge_create_collection(&mut self, cx: &mut Context<Self>) {
         let name = self.knowledge_new_collection_name.trim().to_string();
         if name.is_empty() {
             cx.notify();
@@ -25,7 +25,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn knowledge_create_blank_document(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn knowledge_create_blank_document(&mut self, cx: &mut Context<Self>) {
         let Some(collection_id) = self.knowledge_selected_collection_id.clone().or_else(|| {
             oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
                 .ok()
@@ -606,7 +606,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn knowledge_confirm_delete(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn knowledge_confirm_delete(&mut self, cx: &mut Context<Self>) {
         let Some(confirm) = self.knowledge_delete_confirm.take() else {
             cx.notify();
             return;

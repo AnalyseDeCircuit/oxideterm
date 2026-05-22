@@ -771,38 +771,40 @@ impl WorkspaceApp {
         label: impl Into<String>,
         active: bool,
         on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let label = label.into();
         let text_color = if active { theme.text } else { theme.text_muted };
-        div()
-            .h(px(28.0))
-            .min_w(px(28.0))
-            .px(px(8.0))
-            .rounded(px(self.tokens.radii.sm))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(px(FILE_MANAGER_TEXT_XS))
-            .text_color(rgb(text_color))
-            .bg(if active {
-                rgb(theme.bg_hover)
-            } else {
-                rgb(theme.bg_panel)
-            })
-            .hover(move |button| button.bg(rgb(theme.bg_hover)).text_color(rgb(theme.text)))
-            .cursor_pointer()
-            .child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "file-preview-font-size-button",
-                label.clone(),
-                label,
-                text_color,
-                cx,
-            ))
-            .on_mouse_down(MouseButton::Left, on_click)
-            .into_any_element()
+        toolbar_button(
+            &self.tokens,
+            label,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Sm,
+                    disabled: false,
+                },
+                show_label: true,
+                height: Some(28.0),
+                min_width: Some(28.0),
+                padding_x: Some(8.0),
+                font_size: Some(FILE_MANAGER_TEXT_XS),
+                background: Some(if active {
+                    rgb(theme.bg_hover)
+                } else {
+                    rgb(theme.bg_panel)
+                }),
+                text_color: Some(rgb(text_color)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                hover_text_color: Some(rgb(theme.text)),
+                ..ToolbarButtonOptions::default()
+            },
+        )
+        .on_mouse_down(MouseButton::Left, on_click)
+        .into_any_element()
     }
 
     fn render_file_manager_native_asset_status_with_external(
@@ -1561,26 +1563,32 @@ impl WorkspaceApp {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .size(px(28.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.sm))
-            .cursor_pointer()
-            .bg(if active {
-                file_manager_hover_bg(theme.bg_hover, true)
-            } else {
-                rgba(0)
-            })
-            .hover(move |button| button.bg(file_manager_hover_bg(theme.bg_hover, true)))
-            .child(Self::render_lucide_icon(
-                icon,
-                FILE_MANAGER_ICON_MD,
-                rgb(theme.text),
-            ))
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, FILE_MANAGER_ICON_MD, rgb(theme.text)),
+            IconButtonOptions {
+                size: 28.0,
+                radius: ButtonRadius::Sm,
+                disabled: false,
+                loading: false,
+                has_background: false,
+                background: Some(if active {
+                    file_manager_hover_bg(theme.bg_hover, true)
+                } else {
+                    rgba(0)
+                }),
+                border: None,
+                // Preview mode buttons keep the active hover tint even without
+                // a terminal background, matching the existing QuickLook chrome.
+                hover_background: Some(file_manager_hover_bg(theme.bg_hover, true)),
+                hover_opacity: None,
+                focus_visible: false,
+                idle_opacity: 1.0,
+                disabled_opacity: 0.35,
+            },
+        )
+        .on_mouse_down(MouseButton::Left, listener)
+        .into_any_element()
     }
 
     fn render_file_manager_preview_status(

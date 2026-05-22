@@ -1078,10 +1078,14 @@ impl WorkspaceApp {
         let row_workspace = workspace.clone();
         let row_selectable_state = self.selectable_text_render_state(cx);
         list.child(
-            tracked_uniform_list(
+            tauri_virtual_uniform_list(
                 "file-manager-list-virtual",
                 row_count,
                 self.file_manager.list_scroll.clone(),
+                TauriVirtualListSpec::new(
+                    px(FILE_MANAGER_ROW_HEIGHT),
+                    FILE_MANAGER_VIRTUAL_OVERSCAN,
+                ),
                 move |range, _window, _cx| {
                     let selectable_state = row_selectable_state.clone();
                     range
@@ -1372,48 +1376,53 @@ impl WorkspaceApp {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         workspace: gpui::Entity<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let tooltip_for_move = tooltip.clone();
         let tooltip_element_id = tooltip.clone();
         let tooltip_request_id = tooltip.clone();
         let tooltip_workspace = workspace.clone();
         let clear_workspace = workspace;
-        div()
-            .id((
-                gpui::ElementId::from("file-manager-icon-button"),
-                tooltip_element_id,
-            ))
-            .size(px(FILE_MANAGER_TOOL_BUTTON))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.sm))
-            .cursor_pointer()
-            .hover(move |button| button.bg(rgb(theme.bg_hover)))
-            .child(Self::render_lucide_icon(
-                icon,
-                FILE_MANAGER_ICON_MD,
-                rgb(theme.text),
-            ))
-            .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
-                let _ = tooltip_workspace.update(cx, |this, cx| {
-                    this.queue_workspace_tooltip(
-                        tooltip_request_id.clone(),
-                        tooltip_for_move.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, FILE_MANAGER_ICON_MD, rgb(self.tokens.ui.text)),
+            IconButtonOptions {
+                size: FILE_MANAGER_TOOL_BUTTON,
+                radius: ButtonRadius::Sm,
+                disabled: false,
+                loading: false,
+                has_background: false,
+                background: None,
+                border: None,
+                hover_background: None,
+                hover_opacity: None,
+                focus_visible: false,
+                // Tauri file-manager toolbar icons are fully opaque until disabled.
+                idle_opacity: 1.0,
+                disabled_opacity: 0.35,
+            },
+        )
+        .id((
+            gpui::ElementId::from("file-manager-icon-button"),
+            tooltip_element_id,
+        ))
+        .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
+            let _ = tooltip_workspace.update(cx, |this, cx| {
+                this.queue_workspace_tooltip(
+                    tooltip_request_id.clone(),
+                    tooltip_for_move.clone(),
+                    f32::from(event.position.x) + 12.0,
+                    f32::from(event.position.y) + 16.0,
+                    cx,
+                );
+            });
+        })
+        .on_hover(move |hovered: &bool, _window, cx| {
+            if !*hovered {
+                let _ = clear_workspace.update(cx, |this, cx| {
+                    this.clear_workspace_tooltip(&tooltip, cx);
                 });
-            })
-            .on_hover(move |hovered: &bool, _window, cx| {
-                if !*hovered {
-                    let _ = clear_workspace.update(cx, |this, cx| {
-                        this.clear_workspace_tooltip(&tooltip, cx);
-                    });
-                }
-            })
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
+            }
+        })
+        .on_mouse_down(MouseButton::Left, listener)
+        .into_any_element()
     }
 }

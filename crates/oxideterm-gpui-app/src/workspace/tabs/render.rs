@@ -680,22 +680,19 @@ fn terminal_legacy_icon_button(
     enabled: bool,
 ) -> gpui::Div {
     let theme = tokens.ui;
-    let color = if enabled {
-        rgb(theme.text_muted)
-    } else {
-        rgba((theme.text_muted << 8) | 0x59)
-    };
-    div()
-        .size(px(24.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_md()
-        .text_color(color)
-        .when(enabled, |button| {
-            button
-                .cursor_pointer()
-                .hover(move |style| style.bg(rgb(theme.bg_hover)))
-        })
-        .child(WorkspaceApp::render_lucide_icon(icon, 14.0, color))
+    // The tab-bar legacy actions are icon-only toolbar buttons. Keep the
+    // historical helper name for call-site clarity, but route chrome through
+    // the shared primitive so disabled opacity and hover behavior stay aligned.
+    oxideterm_gpui_ui::button::icon_button(
+        tokens,
+        WorkspaceApp::render_lucide_icon(icon, 14.0, rgb(theme.text_muted)),
+        oxideterm_gpui_ui::button::IconButtonOptions {
+            size: 24.0,
+            radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
+            disabled: !enabled,
+            hover_background: Some(rgb(theme.bg_hover)),
+            idle_opacity: 1.0,
+            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+        },
+    )
 }

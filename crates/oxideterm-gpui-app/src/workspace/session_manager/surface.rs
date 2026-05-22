@@ -73,6 +73,11 @@ impl WorkspaceApp {
         match action {
             SessionManagerBasicDialogFooterAction::Cancel => self.close_session_manager_basic_dialog(cx),
             SessionManagerBasicDialogFooterAction::Primary if self.session_manager.show_new_group => {
+                if self.session_manager.new_group_name.trim().is_empty() {
+                    // Match Tauri's disabled create button: keyboard activation
+                    // cannot submit while the visible primary action is disabled.
+                    return;
+                }
                 self.session_manager.focused_basic_dialog_footer_action = None;
                 self.create_session_group(cx);
             }
@@ -162,7 +167,7 @@ impl WorkspaceApp {
                 .and_then(|id| self.connection_info_by_id(id)),
                 |surface, conn| {
                     surface.child(
-                        popover_backdrop()
+                        context_menu_backdrop()
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, window, cx| {
@@ -187,6 +192,36 @@ impl WorkspaceApp {
                                 }),
                             )
                             .child(self.render_row_context_menu(conn, window, has_background, cx)),
+                    )
+                },
+            )
+            .when(
+                self.session_manager.folder_tree_context_menu_x.is_some()
+                    && self.session_manager.folder_tree_context_menu_y.is_some(),
+                |surface| {
+                    surface.child(
+                        context_menu_backdrop()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, window, cx| {
+                                    // Folder-tree context menus use the same
+                                    // Radix outside-dismiss path as row menus.
+                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
+                                        window, cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(|this, _event, window, cx| {
+                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
+                                        window, cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .child(self.render_folder_tree_context_menu(window, cx)),
                     )
                 },
             )

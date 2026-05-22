@@ -35,16 +35,21 @@ use oxideterm_connections::{
 use oxideterm_gpui_settings_view::*;
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView, button,
-    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
+        ToolbarButtonIconPosition, ToolbarButtonOptions, button_focus_visible, button_with,
+        icon_button, toolbar_button,
+    },
     checkbox::checkbox,
     modal::{
         dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
         dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop,
     },
     select::{
-        OverlayAnchor, SelectAnchorId, select_anchor_probe, select_label, select_option,
-        select_overlay_popup, select_panel_overlay_popup_with_max_height, select_separator,
-        select_trigger,
+        OverlayAnchor, SelectAnchorId, readonly_value_trigger, select_anchor_probe, select_label,
+        select_option, select_option_action, select_overlay_popup,
+        select_panel_overlay_popup_with_max_height, select_separator, select_trigger,
+        select_trigger_focus_visible,
     },
     separator::{SeparatorOrientation, separator},
     slider::{SliderView, slider},

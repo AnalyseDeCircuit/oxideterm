@@ -5,6 +5,23 @@ mod external;
 
 pub(in crate::workspace::file_manager) use external::{open_path_external, reveal_path_external};
 
+const FILE_MANAGER_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
+    [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
+
+fn next_file_manager_dialog_footer_focus(
+    current: Option<ConfirmDialogAction>,
+    forward: bool,
+) -> ConfirmDialogAction {
+    // File-manager prompts mirror Tauri DialogFooter tab order. Keep their
+    // wrapping behavior on the same tested browser helper as other modals.
+    crate::workspace::browser_behavior::next_required_modal_footer_focus(
+        &FILE_MANAGER_DIALOG_FOOTER_ACTIONS,
+        current,
+        forward,
+        ConfirmDialogAction::Cancel,
+    )
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_file_manager_tab(
         &mut self,
@@ -86,7 +103,7 @@ impl WorkspaceApp {
                     if !event.keystroke.modifiers.platform
                         && !event.keystroke.modifiers.control =>
                 {
-                    self.handle_file_manager_input_tab(input);
+                    self.handle_file_manager_input_tab(input, event.keystroke.modifiers.shift);
                     cx.notify();
                     return true;
                 }
@@ -100,6 +117,7 @@ impl WorkspaceApp {
                         FileManagerInput::DialogValue => {
                             self.file_manager.focused_input = None;
                             self.file_manager.dialog = None;
+                            self.file_manager.focused_dialog_footer_action = None;
                             self.file_manager.dialog_value.clear();
                             self.ime_marked_text = None;
                         }
@@ -123,6 +141,9 @@ impl WorkspaceApp {
                 }
                 _ => {}
             }
+        }
+        if self.handle_file_manager_dialog_footer_key(event, cx) {
+            return true;
         }
         if matches!(
             self.file_manager.dialog,
@@ -208,6 +229,7 @@ impl WorkspaceApp {
                 self.file_manager.context_menu = None;
                 self.file_manager.dialog = None;
                 self.file_manager.focused_input = None;
+                self.file_manager.focused_dialog_footer_action = None;
                 cx.notify();
                 true
             }
@@ -352,6 +374,7 @@ impl WorkspaceApp {
         self.file_manager.path_input = self.file_manager.path.clone();
         self.file_manager.editing_path = true;
         self.file_manager.focused_input = Some(FileManagerInput::Path);
+        self.file_manager.focused_dialog_footer_action = None;
         self.ime_marked_text = None;
     }
 
@@ -364,7 +387,7 @@ impl WorkspaceApp {
         self.ime_marked_text = None;
     }
 
-    fn handle_file_manager_input_tab(&mut self, input: FileManagerInput) {
+    fn handle_file_manager_input_tab(&mut self, input: FileManagerInput, shift: bool) {
         // Tauri FileList inputs are real DOM controls: Tab first blurs the
         // current text field, and the path editor's onBlur cancels unsubmitted
         // edits unless the Go button receives focus. Native has no button focus
@@ -374,6 +397,16 @@ impl WorkspaceApp {
             FileManagerInput::Filter | FileManagerInput::DialogValue => {
                 self.file_manager.focused_input = None;
                 self.ime_marked_text = None;
+                if input == FileManagerInput::DialogValue {
+                    // Radix focus trap wraps dialog tab order. Since the input
+                    // is the first focusable control, Tab enters Cancel and
+                    // Shift+Tab wraps to the primary footer action.
+                    self.file_manager.focused_dialog_footer_action = Some(if shift {
+                        ConfirmDialogAction::Confirm
+                    } else {
+                        ConfirmDialogAction::Cancel
+                    });
+                }
             }
         }
         self.clear_ime_selection();
@@ -523,12 +556,14 @@ impl WorkspaceApp {
         self.file_manager.dialog = Some(FileManagerDialog::NewFolder);
         self.file_manager.dialog_value.clear();
         self.file_manager.focused_input = Some(FileManagerInput::DialogValue);
+        self.file_manager.focused_dialog_footer_action = None;
     }
 
     pub(super) fn open_file_manager_new_file_dialog(&mut self) {
         self.file_manager.dialog = Some(FileManagerDialog::NewFile);
         self.file_manager.dialog_value.clear();
         self.file_manager.focused_input = Some(FileManagerInput::DialogValue);
+        self.file_manager.focused_dialog_footer_action = None;
     }
 
     pub(super) fn open_file_manager_rename_dialog(&mut self, old_name: String) {
@@ -537,6 +572,7 @@ impl WorkspaceApp {
         });
         self.file_manager.dialog_value = old_name;
         self.file_manager.focused_input = Some(FileManagerInput::DialogValue);
+        self.file_manager.focused_dialog_footer_action = None;
     }
 
     pub(super) fn open_file_manager_delete_dialog(&mut self) {
@@ -545,6 +581,9 @@ impl WorkspaceApp {
             return;
         }
         self.file_manager.dialog = Some(FileManagerDialog::Delete { files });
+        // The delete confirm has no text input, so keyboard focus starts at
+        // the same first footer action that a browser/Radix dialog exposes.
+        self.file_manager.focused_dialog_footer_action = Some(ConfirmDialogAction::Cancel);
         self.file_manager.context_menu = None;
     }
 
@@ -555,6 +594,7 @@ impl WorkspaceApp {
         self.file_manager.properties_checksum_rx = None;
         self.file_manager.properties_checksum_poll_active = false;
         self.file_manager.dialog = Some(FileManagerDialog::Properties { entry, details });
+        self.file_manager.focused_dialog_footer_action = None;
         self.file_manager.context_menu = None;
     }
 
@@ -699,6 +739,7 @@ impl WorkspaceApp {
         self.file_manager.preview_image_zoom = 1.0;
         self.file_manager.preview_image_rotation = 0;
         self.file_manager.dialog = Some(FileManagerDialog::Preview { entry });
+        self.file_manager.focused_dialog_footer_action = None;
         self.file_manager.context_menu = None;
     }
 
@@ -835,6 +876,9 @@ impl WorkspaceApp {
     }
 
     pub(super) fn accept_file_manager_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.file_manager_dialog_primary_disabled() {
+            return;
+        }
         match self.file_manager.dialog.clone() {
             Some(FileManagerDialog::NewFolder) => self.create_file_manager_folder(cx),
             Some(FileManagerDialog::NewFile) => self.create_file_manager_file(cx),
@@ -850,7 +894,60 @@ impl WorkspaceApp {
             _ => {
                 self.file_manager.dialog = None;
                 self.file_manager.focused_input = None;
+                self.file_manager.focused_dialog_footer_action = None;
             }
+        }
+    }
+
+    pub(super) fn file_manager_dialog_primary_disabled(&self) -> bool {
+        match self.file_manager.dialog {
+            Some(
+                FileManagerDialog::NewFolder
+                | FileManagerDialog::NewFile
+                | FileManagerDialog::Rename { .. }
+                | FileManagerDialog::EditBookmark { .. },
+            ) => self.file_manager.dialog_value.trim().is_empty(),
+            _ => false,
+        }
+    }
+
+    fn handle_file_manager_dialog_footer_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            return false;
+        }
+        let Some(focused) = self.file_manager.focused_dialog_footer_action else {
+            return false;
+        };
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.close_file_manager_dialog();
+                cx.notify();
+                true
+            }
+            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
+                let forward = crate::workspace::browser_behavior::modal_footer_key_moves_forward(
+                    event.keystroke.key.as_str(),
+                    event.keystroke.modifiers.shift,
+                );
+                self.file_manager.focused_dialog_footer_action = Some(
+                    next_file_manager_dialog_footer_focus(Some(focused), forward),
+                );
+                cx.notify();
+                true
+            }
+            "enter" | "space" | " " => {
+                match focused {
+                    ConfirmDialogAction::Cancel => self.close_file_manager_dialog(),
+                    ConfirmDialogAction::Confirm => self.accept_file_manager_dialog(cx),
+                }
+                cx.notify();
+                true
+            }
+            _ => false,
         }
     }
 
@@ -1419,6 +1516,7 @@ impl WorkspaceApp {
         self.file_manager.preview_video_surface.detach();
         self.file_manager.dialog = None;
         self.file_manager.focused_input = None;
+        self.file_manager.focused_dialog_footer_action = None;
         self.file_manager.dialog_value.clear();
         self.file_manager.preview = None;
         self.file_manager.preview_metadata = None;

@@ -56,24 +56,35 @@ impl WorkspaceApp {
                         ),
                     ))
                     .child(
-                        button_with(
+                        // ProviderKeyInput.tsx uses a secondary small Button
+                        // with h-8 text-xs for save. Keep this on the shared
+                        // toolbar primitive so disabled chrome and later
+                        // focus-visible behavior match other AI actions.
+                        toolbar_button(
                             &self.tokens,
                             self.i18n.t("settings_view.ai.save"),
-                            ButtonOptions {
-                                variant: ButtonVariant::Secondary,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: save_disabled,
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Secondary,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: save_disabled,
+                                },
+                                height: Some(32.0),
+                                font_size: Some(self.tokens.metrics.ui_text_xs),
+                                ..ToolbarButtonOptions::default()
                             },
                         )
-                        .h(px(32.0))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.save_ai_provider_api_key(index, cx);
-                                cx.stop_propagation();
-                            }),
-                        )
+                        .when(!save_disabled, |button| {
+                            button.on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.save_ai_provider_api_key(index, cx);
+                                    cx.stop_propagation();
+                                }),
+                            )
+                        })
                         .into_any_element(),
                     ),
             )
@@ -121,19 +132,29 @@ impl WorkspaceApp {
                             .child("••••••••••••••••"),
                     )
                     .child(
-                        button_with(
+                        // Stored API key removal mirrors Tauri's ghost small
+                        // danger Button. Keep the red hover/action guard in
+                        // the shared toolbar primitive instead of custom div
+                        // styling.
+                        toolbar_button(
                             &self.tokens,
                             self.i18n.t("settings_view.ai.remove"),
-                            ButtonOptions {
-                                variant: ButtonVariant::Ghost,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Ghost,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                                height: Some(32.0),
+                                font_size: Some(self.tokens.metrics.ui_text_xs),
+                                text_color: Some(rgb(self.tokens.ui.error)),
+                                hover_text_color: Some(rgb(self.tokens.ui.error)),
+                                hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1a)),
+                                ..ToolbarButtonOptions::default()
                             },
                         )
-                        .h(px(32.0))
-                        .text_color(rgb(self.tokens.ui.error))
-                        .hover(|style| style.bg(rgba((self.tokens.ui.error << 8) | 0x1a)))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {

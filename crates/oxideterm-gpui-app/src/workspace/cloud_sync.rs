@@ -37,7 +37,7 @@ use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, toolbar_button,
 };
-use oxideterm_gpui_ui::select::select_trigger_focus_visible;
+use oxideterm_gpui_ui::select::{select_option_action, select_trigger_focus_visible};
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
 
 use super::quick_commands::QuickCommandImportStrategy;
@@ -2466,6 +2466,22 @@ impl WorkspaceApp {
             Some((select, self.cloud_sync_selected_option_index(select)));
     }
 
+    fn toggle_cloud_sync_select_from_pointer(&mut self, select: CloudSyncSelect) {
+        // Browser/Radix Select opened by pointer keeps trigger focus ownership
+        // but does not draw a focus-visible ring. Store the modality with the
+        // open/highlight state so trigger, menu, and option clicks stay paired.
+        self.cloud_sync_focused_select = Some(select);
+        self.cloud_sync_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Pointer);
+        self.cloud_sync_open_select = if self.cloud_sync_open_select == Some(select) {
+            self.cloud_sync_select_highlighted = None;
+            None
+        } else {
+            self.cloud_sync_select_highlighted =
+                Some((select, self.cloud_sync_selected_option_index(select)));
+            Some(select)
+        };
+    }
+
     fn clear_cloud_sync_select_focus(&mut self) {
         // Browser focus leaves a Radix Select trigger when the user activates a
         // sibling input/button. Keep popup and focus-ring ownership paired.
@@ -2669,11 +2685,109 @@ impl WorkspaceApp {
             );
         let open = self.cloud_sync_open_select == Some(select);
         let focused = self.cloud_sync_focused_select == Some(select);
-        let focus_visible = focused
-            && self
-                .cloud_sync_select_focus_origin
-                .is_some_and(|origin| origin.is_focus_visible());
-        group = group.child(select_trigger_focus_visible(
+        let focus_visible =
+            browser_behavior::browser_focus_visible(focused, self.cloud_sync_select_focus_origin);
+        group = group.child(self.render_cloud_sync_select_trigger(
+            select,
+            value,
+            open,
+            focused,
+            focus_visible,
+            cx,
+        ));
+        if open {
+            let highlighted = self
+                .cloud_sync_select_highlighted
+                .filter(|(highlighted_select, _)| *highlighted_select == select)
+                .map(|(_, index)| index)
+                .unwrap_or_else(|| self.cloud_sync_selected_option_index(select));
+            let mut menu = div()
+                .w_full()
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgb(theme.bg_panel))
+                .overflow_hidden()
+                // Cloud Sync selects sit inside a settings-like scroll view; a
+                // wheel over the open menu should not scroll the page behind it.
+                .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+            for (index, option) in options.into_iter().enumerate() {
+                let label = option.label.clone();
+                let option_key = option.label.clone();
+                let selected = option.selected;
+                let action = option.action.clone();
+                let option_highlighted = highlighted == index;
+                let option_row = div()
+                    .w_full()
+                    .h(px(36.0))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(if selected {
+                        rgb(theme.accent)
+                    } else {
+                        rgb(theme.text)
+                    })
+                    .bg(if option_highlighted {
+                        rgba((theme.bg_hover << 8) | CLOUD_SYNC_SELECT_HIGHLIGHT_ALPHA)
+                    } else if selected {
+                        rgba((theme.accent << 8) | 0x1f)
+                    } else {
+                        rgba(0x00000000)
+                    })
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
+                    .on_mouse_move(cx.listener(
+                        move |this, _event: &MouseMoveEvent, _window, cx| {
+                            if this.cloud_sync_select_highlighted != Some((select, index)) {
+                                this.cloud_sync_select_highlighted = Some((select, index));
+                                cx.notify();
+                            }
+                        },
+                    ))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "cloud-sync-select-option",
+                        option_key,
+                        label,
+                        if selected { theme.accent } else { theme.text },
+                        cx,
+                    ))
+                    .when(selected, |row| row.child("✓"));
+                menu = menu.child(select_option_action(
+                    option_row,
+                    false,
+                    false,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.cloud_sync_select_focus_origin =
+                            Some(browser_behavior::BrowserFocusOrigin::Pointer);
+                        this.apply_cloud_sync_select_action(action.clone(), cx);
+                        cx.stop_propagation();
+                    }),
+                ));
+            }
+            group = group.child(menu);
+        }
+        group.into_any_element()
+    }
+
+    fn render_cloud_sync_select_trigger(
+        &self,
+        select: CloudSyncSelect,
+        value: String,
+        open: bool,
+        focused: bool,
+        focus_visible: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        // Cloud Sync is built in native rather than coming from a surviving
+        // Tauri React leaf. Keep the current inline SelectTrigger chrome in
+        // one helper so focus-visible, pointer ownership, and future wheel
+        // routing changes do not fork across Backend/Auth/Conflict selects.
+        select_trigger_focus_visible(
             &self.tokens,
             div()
                 .w_full()
@@ -2700,19 +2814,7 @@ impl WorkspaceApp {
                               _event,
                               _window,
                               cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_focused_select = Some(select);
-                            this.cloud_sync_select_focus_origin =
-                                Some(browser_behavior::BrowserFocusOrigin::Pointer);
-                            this.cloud_sync_open_select = if this.cloud_sync_open_select
-                                == Some(select)
-                            {
-                                this.cloud_sync_select_highlighted = None;
-                                None
-                            } else {
-                                this.cloud_sync_select_highlighted =
-                                    Some((select, this.cloud_sync_selected_option_index(select)));
-                                Some(select)
-                            };
+                            this.toggle_cloud_sync_select_from_pointer(select);
                             cx.stop_propagation();
                             cx.notify();
                         },
@@ -2734,83 +2836,8 @@ impl WorkspaceApp {
                         .child("⌄"),
                 ),
             focus_visible,
-        ));
-        if open {
-            let highlighted = self
-                .cloud_sync_select_highlighted
-                .filter(|(highlighted_select, _)| *highlighted_select == select)
-                .map(|(_, index)| index)
-                .unwrap_or_else(|| self.cloud_sync_selected_option_index(select));
-            let mut menu = div()
-                .w_full()
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(rgb(theme.border))
-                .bg(rgb(theme.bg_panel))
-                .overflow_hidden()
-                // Cloud Sync selects sit inside a settings-like scroll view; a
-                // wheel over the open menu should not scroll the page behind it.
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
-            for (index, option) in options.into_iter().enumerate() {
-                let label = option.label.clone();
-                let option_key = option.label.clone();
-                let selected = option.selected;
-                let action = option.action.clone();
-                let option_highlighted = highlighted == index;
-                menu = menu.child(
-                    div()
-                        .w_full()
-                        .h(px(36.0))
-                        .px(px(12.0))
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(if selected {
-                            rgb(theme.accent)
-                        } else {
-                            rgb(theme.text)
-                        })
-                        .bg(if option_highlighted {
-                            rgba((theme.bg_hover << 8) | CLOUD_SYNC_SELECT_HIGHLIGHT_ALPHA)
-                        } else if selected {
-                            rgba((theme.accent << 8) | 0x1f)
-                        } else {
-                            rgba(0x00000000)
-                        })
-                        .cursor_pointer()
-                        .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-                        .on_mouse_move(cx.listener(
-                            move |this, _event: &MouseMoveEvent, _window, cx| {
-                                if this.cloud_sync_select_highlighted != Some((select, index)) {
-                                    this.cloud_sync_select_highlighted = Some((select, index));
-                                    cx.notify();
-                                }
-                            },
-                        ))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.cloud_sync_select_focus_origin =
-                                    Some(browser_behavior::BrowserFocusOrigin::Pointer);
-                                this.apply_cloud_sync_select_action(action.clone(), cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .child(self.render_display_text_with_role(
-                            SelectableTextRole::NonSelectable,
-                            "cloud-sync-select-option",
-                            option_key,
-                            label,
-                            if selected { theme.accent } else { theme.text },
-                            cx,
-                        ))
-                        .when(selected, |row| row.child("✓")),
-                );
-            }
-            group = group.child(menu);
-        }
-        group.into_any_element()
+        )
+        .into_any_element()
     }
 
     fn render_cloud_sync_toggle(
@@ -3281,10 +3308,14 @@ impl WorkspaceApp {
             }
             "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
                 // Tauri footer buttons are ordinary DOM buttons in a modal
-                // focus loop. With two actions, Tab and arrow keys both expose
-                // the same explicit native focus-visible target.
+                // focus loop. Native keeps the same key direction mapping so
+                // Shift+Tab and left-arrow walk backward through the footer.
+                let forward = browser_behavior::modal_footer_key_moves_forward(
+                    event.keystroke.key.as_str(),
+                    event.keystroke.modifiers.shift,
+                );
                 self.cloud_sync_confirm_focused_action =
-                    Some(next_confirm_dialog_footer_focus(Some(focused), true));
+                    Some(next_confirm_dialog_footer_focus(Some(focused), forward));
                 cx.notify();
                 true
             }

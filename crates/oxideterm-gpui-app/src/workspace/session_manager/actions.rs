@@ -119,6 +119,8 @@ impl WorkspaceApp {
     fn close_session_row_menus(&mut self) {
         self.session_manager.row_menu_connection_id = None;
         self.session_manager.row_context_menu_connection_id = None;
+        self.session_manager.folder_tree_context_menu_x = None;
+        self.session_manager.folder_tree_context_menu_y = None;
     }
 
     fn toggle_connection_selection(&mut self, id: &str) {

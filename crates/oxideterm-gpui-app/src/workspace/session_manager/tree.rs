@@ -203,6 +203,23 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.bg)
             })
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    // Tauri FolderTree wraps the full sidebar in a Radix
+                    // ContextMenuTrigger, so right-clicking any blank or row
+                    // area opens the shared New Group menu.
+                    this.session_manager.folder_tree_context_menu_x =
+                        Some(f32::from(event.position.x));
+                    this.session_manager.folder_tree_context_menu_y =
+                        Some(f32::from(event.position.y));
+                    this.session_manager.row_menu_connection_id = None;
+                    this.session_manager.row_context_menu_connection_id = None;
+                    this.session_manager.show_batch_move = false;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
             .child(
                 div()
                     .flex_none()
@@ -237,6 +254,70 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
+            .into_any_element()
+    }
+
+    fn render_folder_tree_context_menu(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(x) = self.session_manager.folder_tree_context_menu_x else {
+            return div().into_any_element();
+        };
+        let Some(y) = self.session_manager.folder_tree_context_menu_y else {
+            return div().into_any_element();
+        };
+        let viewport = window.viewport_size();
+        let placement = browser_behavior::clamp_context_menu_position(
+            x,
+            y,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            MANAGER_ROW_MENU_WIDTH,
+            40.0,
+            8.0,
+        );
+        let menu = context_menu_content(&self.tokens)
+            .w(px(MANAGER_ROW_MENU_WIDTH))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_scroll_wheel(|_, _, cx| {
+                // Browser context menus are wheel islands; the folder tree
+                // behind the menu must not scroll while the menu is open.
+                cx.stop_propagation();
+            })
+            .child(self.render_session_manager_menu_action(
+                context_menu_item(
+                    &self.tokens,
+                    self.i18n.t("sessionManager.folder_tree.new_group"),
+                    ContextMenuItemKind::Plain,
+                    false,
+                    false,
+                ),
+                false,
+                false,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_session_row_menus();
+                    this.session_manager.show_new_group = true;
+                    this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
+                    this.session_manager.focused_basic_dialog_footer_action = None;
+                    this.session_manager.new_group_name.clear();
+                    this.needs_active_pane_focus = false;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ));
+
+        div()
+            .absolute()
+            .left(px(placement.x))
+            .top(px(placement.y))
+            .child(menu)
             .into_any_element()
     }
 

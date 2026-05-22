@@ -8,9 +8,12 @@ use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
 };
 use oxideterm_gpui_ui::{
-    modal::{
-        dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop, quicklook_backdrop,
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
+        ToolbarButtonOptions, button_focus_visible, button_with, icon_button, toolbar_button,
     },
+    context_menu::{context_menu_action, context_menu_backdrop, context_menu_item_is_actionable},
+    modal::{dismissible_dialog_backdrop, overlay_content_boundary, quicklook_backdrop},
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{TextInputView, text_caret, text_input, text_input_anchor_probe},
 };
@@ -36,7 +39,8 @@ use super::sftp::native_video::{SharedSftpNativeVideoSurface, sftp_native_video_
 const FILE_MANAGER_ROOT_PADDING: f32 = 8.0; // Tauri LocalFileManager/FileList p-2.
 const FILE_MANAGER_GAP: f32 = 8.0; // Tauri gap-2.
 const FILE_MANAGER_HEADER_HEIGHT: f32 = 40.0; // Tauri h-10.
-const FILE_MANAGER_ROW_HEIGHT: f32 = 25.0; // Tauri FileList row px-2 py-1 text-xs.
+const FILE_MANAGER_ROW_HEIGHT: f32 = 28.0; // Tauri FileList FILE_ROW_HEIGHT.
+const FILE_MANAGER_VIRTUAL_OVERSCAN: usize = 15; // Tauri useVirtualizer overscan.
 const FILE_MANAGER_PREVIEW_CODE_WRAP_COLUMNS: usize = 96; // Virtual rows pre-wrap long `whitespace-pre` lines.
 const FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE: u64 = 128 * 1024; // Tauri VirtualTextPreview CHUNK_SIZE.
 const FILE_MANAGER_PREVIEW_CODE_GUTTER_ALPHA: u32 = 0x4d; // Tauri CodeHighlight line-number opacity 30%.
@@ -185,6 +189,7 @@ pub(super) struct FileManagerState {
     pub(super) sort_field: LocalSortField,
     pub(super) sort_direction: LocalSortDirection,
     pub(super) focused_input: Option<FileManagerInput>,
+    pub(super) focused_dialog_footer_action: Option<ConfirmDialogAction>,
     pub(super) context_menu: Option<FileManagerContextMenu>,
     pub(super) dialog: Option<FileManagerDialog>,
     pub(super) dialog_value: String,
@@ -233,6 +238,7 @@ impl Default for FileManagerState {
             sort_field: LocalSortField::Name,
             sort_direction: LocalSortDirection::Asc,
             focused_input: None,
+            focused_dialog_footer_action: None,
             context_menu: None,
             dialog: None,
             dialog_value: String::new(),

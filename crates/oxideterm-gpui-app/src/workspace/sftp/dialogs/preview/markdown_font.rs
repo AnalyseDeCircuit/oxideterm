@@ -173,28 +173,38 @@ impl WorkspaceApp {
         on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .h(px(28.0))
-            .min_w(px(28.0))
-            .px(px(8.0))
-            .rounded(px(self.tokens.radii.sm))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(px(SFTP_TEXT_XS))
-            .text_color(if active {
-                rgb(theme.text)
-            } else {
-                rgb(theme.text_muted)
-            })
-            .bg(if active {
-                rgb(theme.bg_hover)
-            } else {
-                rgb(theme.bg_panel)
-            })
-            .hover(move |button| button.bg(rgb(theme.bg_hover)).text_color(rgb(theme.text)))
-            .cursor_pointer()
-            .child(label.into())
+        let text_color = if active {
+            rgb(theme.text)
+        } else {
+            rgb(theme.text_muted)
+        };
+        toolbar_button(
+            &self.tokens,
+            label.into(),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Sm,
+                    disabled: false,
+                },
+                show_label: true,
+                height: Some(28.0),
+                min_width: Some(28.0),
+                padding_x: Some(8.0),
+                font_size: Some(SFTP_TEXT_XS),
+                background: Some(if active {
+                    rgb(theme.bg_hover)
+                } else {
+                    rgb(theme.bg_panel)
+                }),
+                text_color: Some(text_color),
+                hover_background: Some(rgb(theme.bg_hover)),
+                hover_text_color: Some(rgb(theme.text)),
+                ..ToolbarButtonOptions::default()
+            },
+        )
             .on_mouse_down(MouseButton::Left, on_click)
             .into_any_element()
     }

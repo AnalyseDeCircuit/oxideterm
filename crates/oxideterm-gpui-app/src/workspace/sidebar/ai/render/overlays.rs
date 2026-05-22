@@ -403,7 +403,7 @@ impl WorkspaceApp {
         action: AiHeaderAction,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
+        let item = div()
             .mx(px(2.0))
             .flex()
             .items_center()
@@ -416,14 +416,6 @@ impl WorkspaceApp {
                 rgb(0xef4444)
             } else {
                 rgb(self.tokens.ui.text_muted)
-            })
-            .cursor_pointer()
-            .hover(|style| {
-                style.bg(if destructive {
-                    rgba((0xef4444_u32 << 8) | 0x1a)
-                } else {
-                    rgba((self.tokens.ui.border << 8) | 0x1a)
-                })
             })
             .child(Self::render_lucide_icon(
                 icon,
@@ -448,25 +440,34 @@ impl WorkspaceApp {
                     },
                     cx,
                 ),
-            ))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    match action {
-                        AiHeaderAction::Settings => this.open_ai_settings(window, cx),
-                        AiHeaderAction::NewChat => {
-                            this.ai_clear_all_confirm_open = true;
-                            this.reset_standard_confirm_focus();
-                            cx.notify();
-                        }
+            ));
+        // Chat menu actions share the same disabled/loading action guard as
+        // file and session context menus.
+        self.render_ai_menu_action(
+            item,
+            false,
+            false,
+            Some(if destructive {
+                rgba((0xef4444_u32 << 8) | 0x1a)
+            } else {
+                rgba((self.tokens.ui.border << 8) | 0x1a)
+            }),
+            cx.listener(move |this, _event, window, cx| {
+                match action {
+                    AiHeaderAction::Settings => this.open_ai_settings(window, cx),
+                    AiHeaderAction::NewChat => {
+                        this.ai_clear_all_confirm_open = true;
+                        this.reset_standard_confirm_focus();
+                        cx.notify();
                     }
-                    this.ai_chat_menu_open = false;
-                    this.ai_conversation_list_open = false;
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .into_any_element()
+                }
+                this.ai_chat_menu_open = false;
+                this.ai_conversation_list_open = false;
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+        .into_any_element()
     }
 
 

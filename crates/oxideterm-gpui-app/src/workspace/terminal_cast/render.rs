@@ -1,28 +1,26 @@
 use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;
+use oxideterm_gpui_ui::button::{
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
+    ToolbarButtonOptions, icon_button, toolbar_button,
+};
 use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
 use oxideterm_terminal_recording::{format_cast_time, format_recording_elapsed};
 
 fn terminal_cast_player_button(tokens: &ThemeTokens, icon: LucideIcon) -> gpui::Div {
-    div()
-        .size(px(30.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_md()
-        .cursor_pointer()
-        .border_1()
-        .border_color(rgb(tokens.ui.border))
-        .bg(rgba((tokens.ui.bg_panel << 8) | 0xcc))
-        .hover({
-            let hover = tokens.ui.bg_hover;
-            move |style| style.bg(rgb(hover))
-        })
-        .child(WorkspaceApp::render_lucide_icon(
-            icon,
-            15.0,
-            rgb(tokens.ui.text),
-        ))
+    icon_button(
+        tokens,
+        WorkspaceApp::render_lucide_icon(icon, 15.0, rgb(tokens.ui.text)),
+        IconButtonOptions {
+            size: 30.0,
+            radius: ButtonRadius::Md,
+            background: Some(rgba((tokens.ui.bg_panel << 8) | 0xcc)),
+            border: Some(rgb(tokens.ui.border)),
+            hover_background: Some(rgb(tokens.ui.bg_hover)),
+            idle_opacity: 1.0,
+            ..IconButtonOptions::compact(30.0)
+        },
+    )
 }
 
 fn terminal_cast_speed_button(
@@ -30,53 +28,66 @@ fn terminal_cast_speed_button(
     label: &'static str,
     active: bool,
 ) -> gpui::Div {
-    div()
-        .h(px(30.0))
-        .px(px(10.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_md()
-        .cursor_pointer()
-        .border_1()
-        .border_color(if active {
-            rgb(tokens.ui.accent)
-        } else {
-            rgb(tokens.ui.border)
-        })
-        .bg(if active {
-            rgba((tokens.ui.accent << 8) | 0x1f)
-        } else {
-            rgba((tokens.ui.bg_panel << 8) | 0xcc)
-        })
-        .text_size(px(12.0))
-        .text_color(if active {
-            rgb(tokens.ui.accent)
-        } else {
-            rgb(tokens.ui.text_muted)
-        })
-        .child(label)
+    let background = if active {
+        rgba((tokens.ui.accent << 8) | 0x1f)
+    } else {
+        rgba((tokens.ui.bg_panel << 8) | 0xcc)
+    };
+    // Playback speed chips borrow outline-button geometry but use cast-player
+    // active colors from Tauri, so keep only the feature color contract local.
+    toolbar_button(
+        tokens,
+        label.to_string(),
+        None,
+        ToolbarButtonOptions {
+            button: ButtonOptions {
+                variant: ButtonVariant::Outline,
+                size: ButtonSize::Sm,
+                radius: ButtonRadius::Md,
+                disabled: false,
+            },
+            height: Some(30.0),
+            padding_x: Some(10.0),
+            font_size: Some(12.0),
+            background: Some(background),
+            border: Some(if active {
+                rgb(tokens.ui.accent)
+            } else {
+                rgb(tokens.ui.border)
+            }),
+            text_color: Some(if active {
+                rgb(tokens.ui.accent)
+            } else {
+                rgb(tokens.ui.text_muted)
+            }),
+            hover_background: Some(background),
+            ..ToolbarButtonOptions::default()
+        },
+    )
 }
 
 fn terminal_cast_text_button(tokens: &ThemeTokens, label: &'static str) -> gpui::Div {
-    div()
-        .h(px(30.0))
-        .px(px(10.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_md()
-        .cursor_pointer()
-        .border_1()
-        .border_color(rgb(tokens.ui.border))
-        .bg(rgba((tokens.ui.bg_panel << 8) | 0xcc))
-        .text_size(px(12.0))
-        .text_color(rgb(tokens.ui.text_muted))
-        .hover({
-            let hover = tokens.ui.bg_hover;
-            move |style| style.bg(rgb(hover))
-        })
-        .child(label)
+    toolbar_button(
+        tokens,
+        label.to_string(),
+        None,
+        ToolbarButtonOptions {
+            button: ButtonOptions {
+                variant: ButtonVariant::Outline,
+                size: ButtonSize::Sm,
+                radius: ButtonRadius::Md,
+                disabled: false,
+            },
+            height: Some(30.0),
+            padding_x: Some(10.0),
+            font_size: Some(12.0),
+            background: Some(rgba((tokens.ui.bg_panel << 8) | 0xcc)),
+            border: Some(rgb(tokens.ui.border)),
+            text_color: Some(rgb(tokens.ui.text_muted)),
+            hover_background: Some(rgb(tokens.ui.bg_hover)),
+            ..ToolbarButtonOptions::default()
+        },
+    )
 }
 
 impl WorkspaceApp {

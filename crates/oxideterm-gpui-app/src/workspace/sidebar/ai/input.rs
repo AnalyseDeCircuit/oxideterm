@@ -526,17 +526,15 @@ impl WorkspaceApp {
                     .border_t_1()
                     .border_color(rgba((self.tokens.ui.border << 8) | 0x66)),
             )
-            .child(
+            .child(self.render_ai_menu_action(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(self.tokens.spacing.two))
                     .px(px(self.tokens.spacing.three))
                     .py(px(self.tokens.spacing.two))
-                    .cursor_pointer()
                     .text_size(px(12.0))
                     .text_color(rgb(self.tokens.ui.text))
-                    .hover(|row| row.bg(rgba((self.tokens.ui.bg_hover << 8) | 0x99)))
                     .child(Self::render_lucide_icon(
                         LucideIcon::Settings,
                         14.0,
@@ -549,16 +547,16 @@ impl WorkspaceApp {
                         self.i18n.t("ai.safety_mode.open_settings"),
                         self.tokens.ui.text,
                         cx,
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, window, cx| {
-                            this.ai_safety_menu_open = false;
-                            this.open_ai_settings(window, cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-            )
+                    )),
+                false,
+                false,
+                Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
+                cx.listener(|this, _event, window, cx| {
+                    this.ai_safety_menu_open = false;
+                    this.open_ai_settings(window, cx);
+                    cx.stop_propagation();
+                }),
+            ))
             .into_any_element()
     }
 
@@ -577,14 +575,12 @@ impl WorkspaceApp {
         };
         let title_color = if bypass { 0xfcd34d } else { self.tokens.ui.text };
         let mode_key = if bypass { "bypass" } else { "default" };
-        div()
+        let item = div()
             .flex()
             .items_start()
             .gap(px(self.tokens.spacing.two))
             .px(px(self.tokens.spacing.three))
             .py(px(self.tokens.spacing.two))
-            .cursor_pointer()
-            .hover(|row| row.bg(rgba((self.tokens.ui.bg_hover << 8) | 0x99)))
             .child(Self::render_lucide_icon(
                 icon,
                 14.0,
@@ -629,25 +625,30 @@ impl WorkspaceApp {
                                 cx,
                             )),
                     ),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    match mode {
-                        AiSafetyMode::Default => this.set_ai_safety_mode_default(cx),
-                        AiSafetyMode::Bypass => {
-                            if this.active_ai_safety_mode() != AiSafetyMode::Bypass {
-                                this.ai_safety_confirm_open = true;
-                                this.reset_standard_confirm_focus();
-                            }
-                            this.ai_safety_menu_open = false;
-                            cx.notify();
+            );
+        // Safety rows behave as menu actions; disabled/loading semantics stay
+        // centralized even though these two actions are currently always enabled.
+        self.render_ai_menu_action(
+            item,
+            false,
+            false,
+            Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
+            cx.listener(move |this, _event, _window, cx| {
+                match mode {
+                    AiSafetyMode::Default => this.set_ai_safety_mode_default(cx),
+                    AiSafetyMode::Bypass => {
+                        if this.active_ai_safety_mode() != AiSafetyMode::Bypass {
+                            this.ai_safety_confirm_open = true;
+                            this.reset_standard_confirm_focus();
                         }
+                        this.ai_safety_menu_open = false;
+                        cx.notify();
                     }
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
+                }
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     pub(in crate::workspace) fn render_ai_safety_confirm_dialog(
@@ -1256,7 +1257,6 @@ fn ai_input_line_segments(
                 .when(!before.is_empty(), |row| row.child(before))
                 .child(
                     div()
-                        .px(px(tokens.metrics.form_selection_padding_x))
                         .rounded(px(tokens.radii.xs))
                         .bg(rgba((tokens.ui.accent << 8) | AI_INPUT_SELECTION_BG_ALPHA))
                         .text_color(rgb(tokens.ui.text))

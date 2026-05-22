@@ -395,30 +395,22 @@ impl WorkspaceApp {
             .iter()
             .rev()
             .filter(|entry| self.notification_matches_filter(entry))
+            .cloned()
             .collect::<Vec<_>>();
-        let rows = if filtered.is_empty() {
-            vec![
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(12.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "notifications-empty",
-                        (),
-                        "No notifications".to_string(),
-                        theme.text_muted,
-                        cx,
-                    ))
-                    .into_any_element(),
-            ]
-        } else {
-            filtered
-                .into_iter()
-                .map(|entry| self.render_notification_row(entry, cx))
-                .collect::<Vec<_>>()
-        };
+        let row_count = filtered.len();
+        let signatures = notification_sidebar_row_signatures(&filtered);
+        {
+            let mut cache = self.notification_sidebar_list_cache.borrow_mut();
+            super::virtual_list::sync_tauri_variable_list_state_by_signatures(
+                &self.notification_sidebar_list_state,
+                &mut cache,
+                "notifications-sidebar",
+                &signatures,
+            );
+        }
+        let notification_rows = Arc::new(filtered);
+        let notification_list_state = self.notification_sidebar_list_state.clone();
+        let workspace = cx.entity();
 
         div()
             .flex_1()
@@ -451,12 +443,39 @@ impl WorkspaceApp {
                     .id("notifications-sidebar-scroll")
                     .flex_1()
                     .min_h(px(0.0))
-                    .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("notifications-sidebar-scroll"),
-                    )
-                    .px_2()
-                    .py_2()
-                    .children(rows),
+                    .overflow_hidden()
+                    .when(row_count == 0, |content| {
+                        content.child(
+                            div()
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_size(px(12.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(self.render_selectable_display_text(
+                                    "notifications-empty",
+                                    (),
+                                    "No notifications".to_string(),
+                                    theme.text_muted,
+                                    cx,
+                                )),
+                        )
+                    })
+                    .when(row_count > 0, |content| {
+                        content.child(tauri_virtual_list(
+                            notification_list_state,
+                            move |index, _window, app| {
+                                let rows = notification_rows.clone();
+                                let Some(entry) = rows.get(index).cloned() else {
+                                    return div().into_any_element();
+                                };
+                                workspace.update(app, |this, cx| {
+                                    this.render_notification_row(&entry, cx)
+                                })
+                            },
+                        ))
+                    }),
             )
             .into_any_element()
     }
@@ -534,34 +553,23 @@ impl WorkspaceApp {
         let filtered = self.notification_center.event_log.entries
             .iter()
             .filter(|entry| self.event_log_entry_matches_filter(entry))
+            .cloned()
             .collect::<Vec<_>>();
-        let event_log_scroll = self.selectable_text_scroll_handle("event-log-sidebar-scroll");
-        if !filtered.is_empty() {
-            self.schedule_browser_scroll_to_bottom_if_sticky(event_log_scroll.clone(), cx);
+        let row_count = filtered.len();
+        let event_log_scroll = self.event_log_sidebar_scroll_handle.clone();
+        let event_log_spec = TauriVirtualListSpec::new(
+            px(EVENT_LOG_SIDEBAR_ROW_HEIGHT),
+            EVENT_LOG_SIDEBAR_VIRTUAL_OVERSCAN,
+        );
+        if row_count > 0 {
+            self.schedule_event_log_virtual_scroll_to_bottom_if_sticky(
+                event_log_scroll.clone(),
+                row_count - 1,
+                cx,
+            );
         }
-        let rows = if filtered.is_empty() {
-            vec![
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(12.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "event-log-empty",
-                        (),
-                        self.i18n.t("event_log.empty"),
-                        theme.text_muted,
-                        cx,
-                    ))
-                    .into_any_element(),
-            ]
-        } else {
-            filtered
-                .into_iter()
-                .map(|entry| self.render_event_log_row(entry, cx))
-                .collect::<Vec<_>>()
-        };
+        let event_log_rows = Arc::new(filtered);
+        let workspace = cx.entity();
 
         div()
             .flex_1()
@@ -595,12 +603,77 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_h(px(0.0))
                     .w_full()
-                    .selectable_overflow_y_scrollbar(&event_log_scroll)
-                    .px_2()
-                    .py_2()
-                    .children(rows),
+                    .overflow_hidden()
+                    .when(row_count == 0, |content| {
+                        content.child(
+                            div()
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_size(px(12.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(self.render_selectable_display_text(
+                                    "event-log-empty",
+                                    (),
+                                    self.i18n.t("event_log.empty"),
+                                    theme.text_muted,
+                                    cx,
+                                )),
+                        )
+                    })
+                    .when(row_count > 0, |content| {
+                        content.child(tauri_virtual_uniform_list(
+                            "event-log-sidebar-virtual",
+                            row_count,
+                            event_log_scroll,
+                            event_log_spec,
+                            move |range, _window, app| {
+                                let mut rendered = Vec::new();
+                                let rows = event_log_rows.clone();
+                                let _ = workspace.update(app, |this, cx| {
+                                    for index in range {
+                                        let Some(entry) = rows.get(index) else {
+                                            continue;
+                                        };
+                                        rendered.push(this.render_event_log_row(entry, cx));
+                                    }
+                                });
+                                rendered
+                            },
+                        ))
+                    }),
             )
             .into_any_element()
+    }
+
+    fn schedule_event_log_virtual_scroll_to_bottom_if_sticky(
+        &self,
+        handle: UniformListScrollHandle,
+        last_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if !tauri_virtual_list_is_near_bottom(
+            &handle,
+            px(EVENT_LOG_STICKY_BOTTOM_THRESHOLD_PX),
+        ) {
+            return;
+        }
+        // Tauri defers the bottom scroll until after React commits the new row.
+        // GPUI likewise needs a post-layout turn before the uniform-list extent
+        // is current, otherwise the newest event can remain just below view.
+        cx.spawn(async move |weak, cx| {
+            Timer::after(Duration::from_millis(16)).await;
+            let _ = weak.update(cx, move |_this, cx| {
+                scroll_tauri_virtual_list_to_index(
+                    &handle,
+                    last_index,
+                    TauriVirtualScrollAlign::End,
+                );
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn render_event_log_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -677,28 +750,36 @@ impl WorkspaceApp {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .size(px(22.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.sm))
-            .cursor_pointer()
-            .bg(if active {
-                rgb(theme.bg_active)
-            } else {
-                rgb(theme.bg)
-            })
-            .hover(move |button| button.bg(rgb(theme.bg_hover)))
-            .child(Self::render_lucide_icon(
-                icon,
-                12.0,
-                if active {
-                    rgb(theme.text_heading)
-                } else {
-                    rgb(theme.text_muted)
-                },
-            ))
+        let background = if active {
+            rgb(theme.bg_active)
+        } else {
+            rgb(theme.bg)
+        };
+        let icon_color = if active {
+            rgb(theme.text_heading)
+        } else {
+            rgb(theme.text_muted)
+        };
+        oxideterm_gpui_ui::button::icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, 12.0, icon_color),
+            oxideterm_gpui_ui::button::IconButtonOptions {
+                size: 22.0,
+                radius: oxideterm_gpui_ui::button::ButtonRadius::Sm,
+                disabled: false,
+                loading: false,
+                has_background: false,
+                background: Some(background),
+                border: None,
+                hover_background: Some(rgb(theme.bg_hover)),
+                hover_opacity: None,
+                focus_visible: false,
+                // Tauri activity toolbar icons are fully opaque in both normal
+                // and active states; muting is represented by icon color.
+                idle_opacity: 1.0,
+                disabled_opacity: 0.35,
+            },
+        )
             .on_mouse_down(MouseButton::Left, listener)
             .into_any_element()
     }
@@ -940,82 +1021,117 @@ impl WorkspaceApp {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|duration| duration.as_secs().to_string())
             .unwrap_or_else(|_| "0".to_string());
-        let mut meta = format!("#{} | {} | {}", entry.id, category, entry.source);
-        if let Some(node_id) = &entry.node_id {
-            meta.push_str(" | ");
-            meta.push_str(node_id);
-        }
-        if let Some(connection_id) = &entry.connection_id {
-            meta.push_str(" | ");
-            meta.push_str(connection_id);
-        }
+        let node_label = entry
+            .node_id
+            .as_ref()
+            .or(entry.connection_id.as_ref())
+            .cloned();
 
         div()
             .w_full()
-            .mb_2()
-            .p_2()
-            .rounded(px(self.tokens.radii.md))
+            .h(px(EVENT_LOG_SIDEBAR_ROW_HEIGHT))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px_3()
+            .py_1()
+            .overflow_hidden()
+            .text_size(px(12.0))
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
             .bg(rgb(theme.bg))
-            .border_1()
-            .border_color(rgb(theme.border))
+            .hover(move |row| row.bg(rgb(theme.bg_hover)))
             .child(
                 div()
-                    .flex()
-                    .items_start()
-                    .gap(px(8.0))
-                    .child(div().mt(px(1.0)).child(Self::render_lucide_icon(
-                        icon,
-                        14.0,
-                        rgb(accent),
-                    )))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(theme.text_heading))
-                                    .child(self.render_selectable_text_scoped(
-                                        "event-log-title",
-                                        entry.id,
-                                        self.resolve_event_log_title(entry),
-                                        theme.text_heading,
-                                        cx,
-                                    )),
-                            )
-                            .when_some(self.resolve_event_log_detail(entry), |body, detail| {
-                                body.child(
-                                    div()
-                                        .mt_1()
-                                        .text_size(px(11.0))
-                                        .text_color(rgb(theme.text_muted))
-                                        .child(self.render_selectable_text_scoped(
-                                            "event-log-detail",
-                                            entry.id,
-                                            detail,
-                                            theme.text_muted,
-                                            cx,
-                                        )),
-                                )
-                            })
-                            .child(
-                                div()
-                                    .mt_1()
-                                    .truncate()
-                                    .text_size(px(10.0))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(self.render_selectable_text_scoped(
-                                        "event-log-meta",
-                                        entry.id,
-                                        format!("{timestamp} | {meta}"),
-                                        theme.text_muted,
-                                        cx,
-                                    )),
-                            ),
-                    ),
+                    .w(px(60.0))
+                    .flex_none()
+                    .truncate()
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.render_selectable_text_scoped(
+                        "event-log-timestamp",
+                        entry.id,
+                        timestamp,
+                        theme.text_muted,
+                        cx,
+                    )),
             )
+            .child(Self::render_lucide_icon(icon, 14.0, rgb(accent)))
+            .child(self.render_event_log_category_badge(category, cx))
+            .when_some(node_label, |row, node| {
+                row.child(
+                    div()
+                        .max_w(px(120.0))
+                        .flex_none()
+                        .truncate()
+                        .text_color(rgb(theme.accent))
+                        .child(self.render_selectable_text_scoped(
+                            "event-log-node",
+                            entry.id,
+                            node,
+                            theme.accent,
+                            cx,
+                        )),
+                )
+            })
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .truncate()
+                    .text_color(rgb(theme.text))
+                    .child(self.render_selectable_text_scoped(
+                        "event-log-title",
+                        entry.id,
+                        self.resolve_event_log_title(entry),
+                        theme.text,
+                        cx,
+                    )),
+            )
+            .when_some(self.resolve_event_log_detail(entry), |row, detail| {
+                row.child(
+                    div()
+                        .min_w(px(0.0))
+                        .flex_1()
+                        .truncate()
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.render_selectable_text_scoped(
+                            "event-log-detail",
+                            entry.id,
+                            format!("- {detail}"),
+                            theme.text_muted,
+                            cx,
+                        )),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_event_log_category_badge(
+        &self,
+        category: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (bg, text) = match category {
+            "connection" => (0x10b981, 0x34d399),
+            "reconnect" => (0xf59e0b, 0xfbbf24),
+            _ => (0x3b82f6, 0x60a5fa),
+        };
+        div()
+            .flex_none()
+            .px(px(6.0))
+            .py(px(2.0))
+            .rounded(px(self.tokens.radii.md))
+            .bg(rgba((bg << 8) | 0x26))
+            .text_size(px(10.0))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(text))
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "event-log-category",
+                category,
+                self.i18n.t(&format!("event_log.category.{category}")),
+                text,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1104,6 +1220,38 @@ fn resolve_event_log_text(i18n: &I18n, raw: &str) -> Option<String> {
         translated = translated.replace("{{count}}", &count.to_string());
     }
     Some(translated)
+}
+
+fn notification_sidebar_row_signatures(entries: &[WorkspaceNotificationEntry]) -> Vec<u64> {
+    entries
+        .iter()
+        .map(|entry| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            // The variable-height list must be invalidated when visible text or
+            // read state changes, mirroring React keys plus prop updates in
+            // Tauri's NotificationsPanel.
+            std::hash::Hash::hash(&entry.id, &mut hasher);
+            std::hash::Hash::hash(&(entry.status as u8), &mut hasher);
+            std::hash::Hash::hash(&(entry.kind as u8), &mut hasher);
+            std::hash::Hash::hash(&(entry.severity as u8), &mut hasher);
+            std::hash::Hash::hash(&entry.title, &mut hasher);
+            std::hash::Hash::hash(&entry.body, &mut hasher);
+            match &entry.scope {
+                WorkspaceNotificationScope::Global => {
+                    std::hash::Hash::hash(&0u8, &mut hasher);
+                }
+                WorkspaceNotificationScope::Node(node_id) => {
+                    std::hash::Hash::hash(&1u8, &mut hasher);
+                    std::hash::Hash::hash(node_id, &mut hasher);
+                }
+                WorkspaceNotificationScope::Connection(connection_id) => {
+                    std::hash::Hash::hash(&2u8, &mut hasher);
+                    std::hash::Hash::hash(connection_id, &mut hasher);
+                }
+            }
+            std::hash::Hasher::finish(&hasher)
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

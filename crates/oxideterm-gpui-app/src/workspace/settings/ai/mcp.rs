@@ -70,14 +70,23 @@ impl WorkspaceApp {
                         "settings_view.mcp.description",
                     ))
                     .child(
-                        button_with(
+                        toolbar_button(
                             &self.tokens,
-                            format!("+ {}", self.i18n.t("settings_view.mcp.add_server")),
-                            ButtonOptions {
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
+                            self.i18n.t("settings_view.mcp.add_server"),
+                            Some(Self::render_lucide_icon(
+                                LucideIcon::Plus,
+                                14.0,
+                                rgb(self.tokens.ui.text),
+                            )),
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                                icon_gap: Some(6.0),
+                                ..ToolbarButtonOptions::default()
                             },
                         )
                         .on_mouse_down(
@@ -86,6 +95,7 @@ impl WorkspaceApp {
                                 this.ai_mcp_add_dialog = Some(AiMcpServerDraft::default());
                                 this.focused_settings_input = None;
                                 this.open_settings_select = None;
+                                this.clear_standard_confirm_focus();
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
@@ -307,25 +317,24 @@ impl WorkspaceApp {
         on_click: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .w(px(AI_MCP_CARD_ICON_BUTTON))
-            .h(px(AI_MCP_CARD_ICON_BUTTON))
-            .rounded(px(self.tokens.radii.md))
-            .flex()
-            .items_center()
-            .justify_center()
-            .opacity(if disabled { 0.5 } else { 1.0 })
+        let button = icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, AI_MCP_ACTION_ICON, icon_color),
+            IconButtonOptions {
+                radius: ButtonRadius::Md,
+                disabled,
+                hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x80)),
+                idle_opacity: 1.0,
+                // MCP cards map Tauri disabled icon actions (`opacity-50`) while
+                // reusing the shared icon button action surface.
+                disabled_opacity: 0.5,
+                ..IconButtonOptions::compact(AI_MCP_CARD_ICON_BUTTON)
+            },
+        );
+        button
             .when(!disabled, |button| {
-                button
-                    .cursor_pointer()
-                    .hover(|style| style.bg(rgba((self.tokens.ui.bg_hover << 8) | 0x80)))
-                    .on_mouse_down(MouseButton::Left, cx.listener(on_click))
+                button.on_mouse_down(MouseButton::Left, cx.listener(on_click))
             })
-            .child(Self::render_lucide_icon(
-                icon,
-                AI_MCP_ACTION_ICON,
-                icon_color,
-            ))
             .into_any_element()
     }
 
@@ -546,15 +555,11 @@ impl WorkspaceApp {
                         .child(
                             dialog_footer(&self.tokens)
                                 .child(
-                                    button_with(
-                                        &self.tokens,
+                                    self.standard_footer_button(
                                         self.i18n.t("settings_view.mcp.cancel"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Outline,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: false,
-                                        },
+                                        ButtonVariant::Outline,
+                                        ConfirmDialogAction::Cancel,
+                                        false,
                                     )
                                     .on_mouse_down(
                                         MouseButton::Left,
@@ -566,15 +571,11 @@ impl WorkspaceApp {
                                     ),
                                 )
                                 .child(
-                                    button_with(
-                                        &self.tokens,
+                                    self.standard_footer_button(
                                         self.i18n.t("settings_view.mcp.add"),
-                                        ButtonOptions {
-                                            variant: ButtonVariant::Default,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: !can_add,
-                                        },
+                                        ButtonVariant::Default,
+                                        ConfirmDialogAction::Confirm,
+                                        !can_add,
                                     )
                                     .when(can_add, |button| {
                                         button.on_mouse_down(
@@ -590,6 +591,47 @@ impl WorkspaceApp {
                 )
                 .into_any_element(),
         )
+    }
+
+    pub(in crate::workspace) fn handle_ai_mcp_add_dialog_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(draft) = self.ai_mcp_add_dialog.as_ref() else {
+            return false;
+        };
+        let can_add = ai_mcp_draft_valid(draft, self.settings_store.settings());
+        if self.open_settings_select.is_some() || self.focused_settings_input.is_some() {
+            return false;
+        }
+
+        let key = event.keystroke.key.as_str();
+        let footer_focused = self.standard_confirm_focus_owner().is_some();
+        if matches!(key, "enter" | "space" | " ") && !footer_focused {
+            return false;
+        }
+
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.close_ai_mcp_add_dialog();
+                cx.notify();
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                if can_add {
+                    self.add_ai_mcp_server_from_draft(cx);
+                } else {
+                    // Disabled primary buttons remain in the dialog; restore
+                    // focus to the first footer action like a browser footer loop.
+                    self.reset_standard_confirm_focus();
+                    cx.notify();
+                }
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
     }
 
     fn ai_mcp_transport_fields(
@@ -763,20 +805,15 @@ impl WorkspaceApp {
             )
             .child(select_anchor_probe(
                 select_id.anchor_id(),
-                select_trigger(&self.tokens, value, false, false)
+                self.settings_select_trigger(select_id, value, false, false)
                     .w_full()
                     .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.focused_settings_input = None;
-                        this.open_settings_select = if this.open_settings_select == Some(select_id) {
-                            None
-                        } else {
-                            Some(select_id)
-                        };
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.open_settings_select_from_pointer(select_id);
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
                     ),
                 move |anchor, _window, cx| {
                     let _ = workspace.update(cx, |this, _cx| {
@@ -867,14 +904,23 @@ impl WorkspaceApp {
             );
         }
         rows = rows.child(
-            button_with(
+            toolbar_button(
                 &self.tokens,
-                format!("+ {add_label}"),
-                ButtonOptions {
-                    variant: ButtonVariant::Outline,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
+                add_label,
+                Some(Self::render_lucide_icon(
+                    LucideIcon::Plus,
+                    14.0,
+                    rgb(self.tokens.ui.text),
+                )),
+                ToolbarButtonOptions {
+                    button: ButtonOptions {
+                        variant: ButtonVariant::Outline,
+                        size: ButtonSize::Sm,
+                        radius: ButtonRadius::Md,
+                        disabled: false,
+                    },
+                    icon_gap: Some(6.0),
+                    ..ToolbarButtonOptions::default()
                 },
             )
             .on_mouse_down(
@@ -1099,6 +1145,7 @@ impl WorkspaceApp {
         self.focused_settings_input = None;
         self.settings_input_draft.clear();
         self.open_settings_select = None;
+        self.clear_standard_confirm_focus();
         self.edit_settings(
             move |settings| {
                 settings.ai.mcp_servers.push(config.clone());
@@ -1114,7 +1161,24 @@ impl WorkspaceApp {
         self.focused_settings_input = None;
         self.settings_input_draft.clear();
         self.open_settings_select = None;
+        self.clear_standard_confirm_focus();
     }
+}
+
+fn settings_input_is_ai_mcp(input: SettingsInput) -> bool {
+    matches!(
+        input,
+        SettingsInput::AiMcpName
+            | SettingsInput::AiMcpCommand
+            | SettingsInput::AiMcpArgs
+            | SettingsInput::AiMcpUrl
+            | SettingsInput::AiMcpAuthHeaderName
+            | SettingsInput::AiMcpAuthToken
+            | SettingsInput::AiMcpEnvKey(_)
+            | SettingsInput::AiMcpEnvValue(_)
+            | SettingsInput::AiMcpHeaderKey(_)
+            | SettingsInput::AiMcpHeaderValue(_)
+    )
 }
 
 fn ai_mcp_configs(settings: &PersistedSettings) -> Vec<oxideterm_ai::McpServerConfig> {

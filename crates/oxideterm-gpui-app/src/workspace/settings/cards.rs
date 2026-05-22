@@ -1,4 +1,31 @@
 impl WorkspaceApp {
+    fn settings_select_trigger(
+        &self,
+        select_id: SettingsSelect,
+        value: String,
+        placeholder: bool,
+        disabled: bool,
+    ) -> Div {
+        let focused = self.open_settings_select == Some(select_id);
+        let trigger = select_trigger(&self.tokens, value, placeholder, disabled);
+        // Browser focus-visible depends on keyboard vs pointer origin. Keep the
+        // setting select trigger path shared so individual settings pages do
+        // not reimplement the same modality check.
+        select_trigger_focus_visible(
+            &self.tokens,
+            trigger,
+            browser_behavior::browser_focus_visible(focused, self.settings_select_focus_origin),
+        )
+    }
+
+    fn settings_value_display(&self, value: String) -> Div {
+        // Fixed settings values borrow Select chrome in Tauri, but they are not
+        // popup triggers. Keep them on the read-only primitive instead of the
+        // interactive settings_select_trigger path.
+        readonly_value_trigger(&self.tokens, value)
+            .w(px(self.tokens.metrics.settings_select_width))
+    }
+
     fn settings_card(
         &self,
         title_key: &str,
@@ -208,6 +235,88 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    fn standard_footer_button(
+        &self,
+        label: String,
+        variant: ButtonVariant,
+        action: ConfirmDialogAction,
+        disabled: bool,
+    ) -> Div {
+        // Tauri DialogFooter buttons are normal shadcn Buttons, but their
+        // focus-visible ring is owned by keyboard navigation rather than mouse
+        // hover. Keep that mapping in one helper so dialogs do not each
+        // reimplement Cancel/Confirm focus state.
+        button_focus_visible(
+            &self.tokens,
+            button_with(
+                &self.tokens,
+                label,
+                ButtonOptions {
+                    variant,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+            ),
+            self.standard_confirm_focus() == Some(action),
+        )
+    }
+
+    fn split_confirm_footer_button(
+        &self,
+        label: String,
+        action: ConfirmDialogAction,
+        destructive: bool,
+        draw_right_separator: bool,
+    ) -> Div {
+        let text_color = if destructive {
+            self.tokens.ui.error
+        } else {
+            self.tokens.ui.text_muted
+        };
+        let hover_bg = if destructive {
+            rgba((self.tokens.ui.error << 8) | 0x1a)
+        } else {
+            rgba((self.tokens.ui.bg_hover << 8) | 0x80)
+        };
+        let hover_text = if destructive {
+            self.tokens.ui.error
+        } else {
+            self.tokens.ui.text
+        };
+
+        // Some Tauri confirm dialogs use a split footer instead of shadcn
+        // DialogFooter spacing. Keep the chrome separate, but reuse the same
+        // standard_confirm focus owner so Tab/Shift+Tab stays globally shared.
+        let button = div()
+            .flex_1()
+            .py(px(10.0))
+            .text_align(gpui::TextAlign::Center)
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_weight(if destructive {
+                gpui::FontWeight::SEMIBOLD
+            } else {
+                gpui::FontWeight::MEDIUM
+            })
+            .text_color(rgb(text_color))
+            .cursor_pointer()
+            .hover(move |style| {
+                style.bg(hover_bg).text_color(rgb(hover_text))
+            })
+            .when(draw_right_separator, |button| {
+                button
+                    .border_r_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+            })
+            .child(label);
+
+        button_focus_visible(
+            &self.tokens,
+            button,
+            self.standard_confirm_focus() == Some(action),
+        )
+    }
+
     fn terminal_page_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let mut tabs = div()
@@ -272,9 +381,7 @@ impl WorkspaceApp {
         self.setting_row(
             label_key,
             hint_key,
-            select_trigger(&self.tokens, value, false, false)
-                .w(px(self.tokens.metrics.settings_select_width))
-                .into_any_element(),
+            self.settings_value_display(value).into_any_element(),
             cx,
         )
     }
@@ -322,6 +429,21 @@ impl WorkspaceApp {
         let modifiers = event.keystroke.modifiers;
 
         match key {
+            "tab" if self.ai_mcp_add_dialog.is_some() && settings_input_is_ai_mcp(input) => {
+                // Tauri MCP add dialog lets Tab leave the active input and enter
+                // the DialogFooter. GPUI settings inputs are manually owned, so
+                // release the input owner and start the shared footer cycle.
+                self.focused_settings_input = None;
+                self.clear_settings_input_draft(input);
+                if event.keystroke.modifiers.shift {
+                    self.set_standard_confirm_focus(ConfirmDialogAction::Confirm);
+                } else {
+                    self.reset_standard_confirm_focus();
+                }
+                self.new_connection_caret_visible = true;
+                cx.notify();
+                true
+            }
             "escape" => {
                 self.focused_settings_input = None;
                 self.clear_settings_input_draft(input);
@@ -368,10 +490,12 @@ impl WorkspaceApp {
         }
         if self.open_settings_select.take().is_some() {
             self.ime_marked_text = None;
+            self.settings_select_focus_origin = None;
             changed = true;
         }
         if self.open_new_connection_select.take().is_some() {
             self.ime_marked_text = None;
+            self.new_connection_select_focus_origin = None;
             changed = true;
         }
         if self.terminal_command_bar_focused {
@@ -507,6 +631,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.open_settings_select = None;
+        self.settings_select_focus_origin = None;
         self.focused_settings_input = Some(input);
         self.clear_ime_selection();
         self.settings_input_draft = current_value;

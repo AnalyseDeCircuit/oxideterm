@@ -35,13 +35,14 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             })
             .child(
-                select_option(
-                    &self.tokens,
-                    ungrouped_label.clone(),
-                    self.connection_form_group_is_ungrouped(current_group),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
+                select_option_action(
+                    select_option(
+                        &self.tokens,
+                        ungrouped_label.clone(),
+                        self.connection_form_group_is_ungrouped(current_group),
+                    ),
+                    false,
+                    false,
                     cx.listener(move |this, _event, _window, cx| {
                         this.set_new_connection_group(ungrouped_label.clone(), cx);
                         cx.stop_propagation();
@@ -53,8 +54,10 @@ impl WorkspaceApp {
         for group in groups.iter().cloned() {
             let selected = group == current_group;
             popup = popup.child(
-                select_option(&self.tokens, group.clone(), selected).on_mouse_down(
-                    MouseButton::Left,
+                select_option_action(
+                    select_option(&self.tokens, group.clone(), selected),
+                    false,
+                    false,
                     cx.listener(move |this, _event, _window, cx| {
                         this.set_new_connection_group(group.clone(), cx);
                         cx.stop_propagation();
@@ -369,19 +372,12 @@ impl WorkspaceApp {
     }
 
     fn render_proxy_chain_toggle(&self, expanded: bool, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .h(px(self.tokens.metrics.ui_button_sm_height))
-            .w(px(self.tokens.metrics.ui_button_sm_height))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .cursor_pointer()
-            .hover({
-                let bg = rgb(self.tokens.ui.bg_hover);
-                move |button| button.bg(bg)
-            })
-            .child(Self::render_lucide_icon(
+        // Proxy-chain expand/collapse is an icon-only toolbar action in the
+        // Tauri form. Use the shared primitive so hover and future focus state
+        // stay aligned with other new-connection toolbar controls.
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(
                 if expanded {
                     LucideIcon::ChevronDown
                 } else {
@@ -389,7 +385,15 @@ impl WorkspaceApp {
                 },
                 16.0,
                 rgb(self.tokens.ui.text),
-            ))
+            ),
+            IconButtonOptions {
+                size: self.tokens.metrics.ui_button_sm_height,
+                radius: ButtonRadius::Md,
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                idle_opacity: 1.0,
+                ..IconButtonOptions::compact(self.tokens.metrics.ui_button_sm_height)
+            },
+        )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -405,27 +409,30 @@ impl WorkspaceApp {
     }
 
     fn render_add_jump_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .h(px(self.tokens.metrics.ui_button_sm_height))
-            .px(px(self.tokens.metrics.ui_button_sm_padding_x))
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap_2()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgba(0x00000000))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(
+        // The outer "add jump" command is the same small outline action
+        // pattern used by settings toolbars, so keep its chrome shared.
+        toolbar_button(
+            &self.tokens,
+            self.i18n.t("ssh.form.proxy_chain_add_jump"),
+            Some(Self::render_lucide_icon(
                 LucideIcon::Plus,
                 16.0,
                 rgb(self.tokens.ui.text),
-            ))
-            .child(self.i18n.t("ssh.form.proxy_chain_add_jump"))
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                background: Some(rgba(0x00000000)),
+                border: Some(rgb(self.tokens.ui.border)),
+                text_color: Some(rgb(self.tokens.ui.text)),
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..ToolbarButtonOptions::default()
+            },
+        )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
@@ -453,10 +460,10 @@ impl WorkspaceApp {
             ButtonOptions {
                 variant: ButtonVariant::Default,
                 size: ButtonSize::Default,
+                disabled,
                 ..ButtonOptions::default()
             },
         )
-        .opacity(if disabled { 0.5 } else { 1.0 })
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
@@ -643,18 +650,21 @@ impl WorkspaceApp {
     }
 
     fn render_remove_jump_button(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .size(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.sm))
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(
+        icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(
                 LucideIcon::Trash2,
                 14.0,
                 rgb(self.tokens.ui.text_muted),
-            ))
+            ),
+            IconButtonOptions {
+                size: 24.0,
+                radius: ButtonRadius::Sm,
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                idle_opacity: 1.0,
+                ..IconButtonOptions::compact(24.0)
+            },
+        )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {

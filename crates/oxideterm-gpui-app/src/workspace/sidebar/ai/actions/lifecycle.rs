@@ -16,6 +16,7 @@ impl WorkspaceApp {
         self.ai_chat_footer_focus = None;
         self.ai_model_selector_search_focused = false;
         self.ai_model_selector_open = false;
+        self.ai_model_selector_focus_origin = None;
         self.ai_model_selector_highlighted_model = None;
         self.ime_marked_text = None;
     }
@@ -27,6 +28,7 @@ impl WorkspaceApp {
         self.ai_safety_menu_open = false;
         self.ai_context_popover_open = false;
         self.ai_model_selector_open = false;
+        self.ai_model_selector_focus_origin = None;
         self.ai_model_selector_search_focused = false;
         self.ai_model_selector_search_query.clear();
         self.ai_model_selector_highlighted_model = None;

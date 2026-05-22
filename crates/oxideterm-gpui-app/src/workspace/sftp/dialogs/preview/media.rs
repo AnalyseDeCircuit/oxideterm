@@ -341,21 +341,33 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
+        toolbar_button(
+            &self.tokens,
+            self.i18n.t("sftp.preview.open_external"),
+            Some(Self::render_lucide_icon(
+                LucideIcon::ExternalLink,
+                SFTP_ICON_MD,
+                rgb(theme.text),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                icon_gap: Some(8.0),
+                background: Some(rgb(theme.bg)),
+                border: Some(rgb(theme.border)),
+                text_color: Some(rgb(theme.text)),
+                // SFTP preview uses a normal panel hover, not the shared
+                // active-background alpha path used by dense toolbars.
+                hover_background: Some(rgb(theme.bg_hover)),
+                hover_text_color: None,
+                ..ToolbarButtonOptions::default()
+            },
+        )
             .mt_2()
-            .h(px(32.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg))
-            .px_3()
-            .text_size(px(SFTP_TEXT_XS))
-            .text_color(rgb(theme.text))
-            .cursor_pointer()
-            .hover(move |button| button.bg(rgb(theme.bg_hover)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -364,12 +376,6 @@ impl WorkspaceApp {
                     cx.notify();
                 }),
             )
-            .child(Self::render_lucide_icon(
-                LucideIcon::ExternalLink,
-                SFTP_ICON_MD,
-                rgb(theme.text),
-            ))
-            .child(self.i18n.t("sftp.preview.open_external"))
             .into_any_element()
     }
 

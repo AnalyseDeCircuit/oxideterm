@@ -21,6 +21,7 @@ impl WorkspaceApp {
             self.refresh_ai_model_selector_provider_statuses(cx);
             window.focus(&self.focus_handle);
         } else {
+            self.ai_model_selector_focus_origin = None;
             self.ai_model_selector_search_focused = false;
             self.ai_model_selector_search_query.clear();
             self.ai_model_selector_highlighted_model = None;
@@ -305,6 +306,7 @@ impl WorkspaceApp {
             self.update_ai_model_switch_warning(&provider_id, &model);
         }
         self.ai_model_selector_open = false;
+        self.ai_model_selector_focus_origin = None;
         self.ai_model_selector_search_focused = false;
         self.ai_model_selector_search_query.clear();
         self.ai_model_selector_highlighted_model = None;
