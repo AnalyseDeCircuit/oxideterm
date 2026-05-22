@@ -287,10 +287,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if active_ime_should_defer_printable_key(
-            self.active_ime_target().is_some(),
-            &event.keystroke,
-        ) {
+        if self.defer_active_ime_printable_key(&event.keystroke, window, cx) {
             // GPUI commits printable text through `InputHandler`; the shared
             // guard keeps the fallback page handler from appending it again.
             return;

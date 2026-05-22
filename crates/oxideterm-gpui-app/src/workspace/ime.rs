@@ -62,6 +62,14 @@ pub(super) struct WorkspaceImeDragSelection {
     anchor: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct PendingPlatformTextCommit {
+    target: WorkspaceImeTarget,
+    text: String,
+    generation: u64,
+    consumed: bool,
+}
+
 impl WorkspaceImeTarget {
     pub(super) fn anchor_id(self) -> TextInputAnchorId {
         let id = match self {
@@ -172,21 +180,24 @@ pub(super) struct WorkspaceInputHandler {
     fallback_bounds: Bounds<Pixels>,
 }
 
-pub(super) fn keystroke_commits_platform_text(keystroke: &Keystroke) -> bool {
+#[cfg(test)]
+fn keystroke_commits_platform_text(keystroke: &Keystroke) -> bool {
+    keystroke_platform_text(keystroke).is_some()
+}
+
+fn keystroke_platform_text(keystroke: &Keystroke) -> Option<&str> {
     if keystroke.modifiers.platform || keystroke.modifiers.control {
-        return false;
+        return None;
     }
 
     keystroke
         .key_char
         .as_deref()
-        .is_some_and(|text| !text.is_empty() && !text.chars().any(char::is_control))
+        .filter(|text| !text.is_empty() && !text.chars().any(char::is_control))
 }
 
-pub(super) fn active_ime_should_defer_printable_key(
-    active_ime_target: bool,
-    keystroke: &Keystroke,
-) -> bool {
+#[cfg(test)]
+fn active_ime_should_defer_printable_key(active_ime_target: bool, keystroke: &Keystroke) -> bool {
     // GPUI delivers printable text through `InputHandler`; when an input owns IME,
     // page-level key handlers must not append the same character again.
     active_ime_target && keystroke_commits_platform_text(keystroke)
@@ -326,6 +337,45 @@ impl InputHandler for WorkspaceInputHandler {
 }
 
 impl WorkspaceApp {
+    pub(super) fn defer_active_ime_printable_key(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(target) = self.active_ime_target() else {
+            return false;
+        };
+        let Some(text) = keystroke_platform_text(keystroke) else {
+            return false;
+        };
+
+        let generation = self.next_platform_text_commit_generation;
+        self.next_platform_text_commit_generation =
+            self.next_platform_text_commit_generation.wrapping_add(1);
+        self.pending_platform_text_commit = Some(PendingPlatformTextCommit {
+            target,
+            text: text.to_string(),
+            generation,
+            consumed: false,
+        });
+
+        // GPUI/macOS may deliver text after the key event has propagated. Keep
+        // the dedupe marker only for this event cycle so repeated literal input
+        // like "aa" and later clipboard commits are never coalesced.
+        cx.defer_in(window, move |this, _window, _cx| {
+            if this
+                .pending_platform_text_commit
+                .as_ref()
+                .is_some_and(|pending| pending.generation == generation)
+            {
+                this.pending_platform_text_commit = None;
+            }
+        });
+
+        true
+    }
+
     pub(super) fn update_text_input_anchor(
         &mut self,
         anchor: TextInputAnchor,
@@ -1053,6 +1103,10 @@ impl WorkspaceApp {
         let Some(target) = self.active_ime_target() else {
             return;
         };
+        if platform_text_commit_is_duplicate(&mut self.pending_platform_text_commit, target, text) {
+            self.ime_marked_text = None;
+            return;
+        }
         let caret = replacement_range
             .as_ref()
             .map(|range| range.start + text.encode_utf16().count());
@@ -2291,6 +2345,25 @@ fn estimated_read_only_char_width(ch: char) -> f32 {
     }
 }
 
+fn platform_text_commit_is_duplicate(
+    pending_commit: &mut Option<PendingPlatformTextCommit>,
+    target: WorkspaceImeTarget,
+    text: &str,
+) -> bool {
+    let Some(pending) = pending_commit.as_mut() else {
+        return false;
+    };
+    if pending.target != target || pending.text != text {
+        return false;
+    }
+    if pending.consumed {
+        *pending_commit = None;
+        return true;
+    }
+    pending.consumed = true;
+    false
+}
+
 fn previous_char_start(value: &str, byte_index: usize) -> usize {
     value[..byte_index]
         .char_indices()
@@ -2304,13 +2377,14 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
 
     use super::{
-        CopyShortcutOwner, WorkspaceImeTarget, active_ime_should_defer_printable_key,
-        collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
-        copy_shortcut_owner_for_target, keystroke_commits_platform_text, line_end_for_utf16_offset,
-        line_range_for_utf16_offset, line_start_for_utf16_offset, next_utf16_boundary,
-        next_word_boundary, previous_utf16_boundary, previous_word_boundary,
-        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
-        vertical_line_navigation_destination, word_range_for_utf16_offset,
+        CopyShortcutOwner, PendingPlatformTextCommit, WorkspaceImeTarget,
+        active_ime_should_defer_printable_key, collapsed_copy_shortcut_is_owned_by_target,
+        control_k_delete_end, copy_shortcut_owner_for_target, keystroke_commits_platform_text,
+        line_end_for_utf16_offset, line_range_for_utf16_offset, line_start_for_utf16_offset,
+        next_utf16_boundary, next_word_boundary, platform_text_commit_is_duplicate,
+        previous_utf16_boundary, previous_word_boundary, soft_wrapped_line_ranges_utf16,
+        transpose_text_at_utf16_offset, vertical_line_navigation_destination,
+        word_range_for_utf16_offset,
     };
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -2383,6 +2457,62 @@ mod tests {
         assert!(active_ime_should_defer_printable_key(true, &printable));
         assert!(!active_ime_should_defer_printable_key(false, &printable));
         assert!(!active_ime_should_defer_printable_key(true, &shortcut));
+    }
+
+    #[test]
+    fn platform_text_commit_dedupes_only_same_deferred_key() {
+        let mut pending = Some(PendingPlatformTextCommit {
+            target: WorkspaceImeTarget::CommandPalette,
+            text: "a".to_string(),
+            generation: 7,
+            consumed: false,
+        });
+
+        assert!(!platform_text_commit_is_duplicate(
+            &mut pending,
+            WorkspaceImeTarget::CommandPalette,
+            "a",
+        ));
+        assert!(platform_text_commit_is_duplicate(
+            &mut pending,
+            WorkspaceImeTarget::CommandPalette,
+            "a",
+        ));
+        assert_eq!(pending, None);
+
+        let mut next_key = Some(PendingPlatformTextCommit {
+            target: WorkspaceImeTarget::CommandPalette,
+            text: "a".to_string(),
+            generation: 8,
+            consumed: false,
+        });
+        assert!(!platform_text_commit_is_duplicate(
+            &mut next_key,
+            WorkspaceImeTarget::CommandPalette,
+            "a",
+        ));
+    }
+
+    #[test]
+    fn platform_text_commit_does_not_dedupe_other_targets_or_text() {
+        let mut pending = Some(PendingPlatformTextCommit {
+            target: WorkspaceImeTarget::CommandPalette,
+            text: "a".to_string(),
+            generation: 1,
+            consumed: true,
+        });
+
+        assert!(!platform_text_commit_is_duplicate(
+            &mut pending,
+            WorkspaceImeTarget::ShortcutsModalSearch,
+            "a",
+        ));
+        assert!(!platform_text_commit_is_duplicate(
+            &mut pending,
+            WorkspaceImeTarget::CommandPalette,
+            "b",
+        ));
+        assert!(pending.is_some());
     }
 
     #[test]

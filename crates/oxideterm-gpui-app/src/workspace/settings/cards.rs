@@ -7,13 +7,14 @@ impl WorkspaceApp {
         disabled: bool,
     ) -> Div {
         let focused = self.open_settings_select == Some(select_id);
-        let trigger = select_trigger(&self.tokens, value, placeholder, disabled);
         // Browser focus-visible depends on keyboard vs pointer origin. Keep the
         // setting select trigger path shared so individual settings pages do
         // not reimplement the same modality check.
-        select_trigger_focus_visible(
+        select_trigger_with_focus_visible(
             &self.tokens,
-            trigger,
+            value,
+            placeholder,
+            disabled,
             browser_behavior::browser_focus_visible(focused, self.settings_select_focus_origin),
         )
     }

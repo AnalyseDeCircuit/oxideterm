@@ -48,8 +48,8 @@ use oxideterm_gpui_ui::{
     select::{
         OverlayAnchor, SelectAnchorId, readonly_value_trigger, select_anchor_probe, select_label,
         select_option, select_option_action, select_overlay_popup,
-        select_panel_overlay_popup_with_max_height, select_separator, select_trigger,
-        select_trigger_focus_visible,
+        select_panel_overlay_popup_with_max_height, select_separator,
+        select_trigger_with_focus_visible,
     },
     separator::{SeparatorOrientation, separator},
     slider::{SliderView, slider},

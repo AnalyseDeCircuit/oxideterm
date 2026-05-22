@@ -9,7 +9,7 @@ use oxideterm_gpui_ui::button::{
 use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_actionable_row};
 use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::select::{
-    select_option, select_option_action, select_trigger, select_trigger_focus_visible,
+    select_option, select_option_action, select_trigger_with_focus_visible,
 };
 use oxideterm_topology::{
     ConnectionTopologyLayout, ConnectionTopologySnapshot, TOPOLOGY_NODE_HEIGHT,

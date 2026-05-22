@@ -9,6 +9,10 @@ use oxideterm_theme::ThemeTokens;
 
 use crate::button::tauri_focus_visible_ring;
 
+const TAURI_SELECT_TRIGGER_BG_ALPHA: u32 = 0x80;
+const TAURI_INLINE_SELECT_SELECTED_BG_ALPHA: u32 = 0x1f;
+const TAURI_INLINE_SELECT_HIGHLIGHT_BG_ALPHA: u32 = 0x26;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SelectAnchorId {
     SettingsLanguage,
@@ -182,12 +186,101 @@ pub fn select_trigger(
     )
 }
 
+pub fn select_trigger_with_focus_visible(
+    tokens: &ThemeTokens,
+    value: impl Into<String>,
+    placeholder: bool,
+    disabled: bool,
+    focused: bool,
+) -> Div {
+    // Tauri SelectTrigger owns both the base chrome and its focus-visible class.
+    // Native callers still decide keyboard-vs-pointer focus ownership, but the
+    // visual composition belongs in the shared select primitive.
+    select_trigger_focus_visible(
+        tokens,
+        select_trigger(tokens, value, placeholder, disabled),
+        focused,
+    )
+}
+
 pub fn readonly_value_trigger(tokens: &ThemeTokens, value: impl Into<String>) -> Div {
     // Some settings rows use Select chrome only as a fixed value display. Keep
     // that styling on a separate primitive so read-only values do not inherit
     // popup ownership, disabled affordance, or clickable cursor semantics from
     // true SelectTrigger instances.
     select_trigger_chrome(tokens, value.into(), false, CursorStyle::Arrow, 1.0, true)
+}
+
+pub fn select_inline_trigger_chrome(
+    tokens: &ThemeTokens,
+    open: bool,
+    focused: bool,
+    focus_visible: bool,
+) -> Div {
+    // Tauri SelectTrigger is h-9, border-theme-border/50, bg-theme-bg/50,
+    // px-3, text-sm, and only shows the ring for keyboard focus-visible.
+    let trigger = div()
+        .w_full()
+        .h(px(tokens.metrics.ui_control_height))
+        .min_w(px(0.0))
+        .rounded(px(tokens.radii.md))
+        .border_1()
+        .border_color(if open || focused {
+            rgb(tokens.ui.accent)
+        } else {
+            rgba((tokens.ui.border << 8) | TAURI_SELECT_TRIGGER_BG_ALPHA)
+        })
+        .bg(rgba((tokens.ui.bg << 8) | TAURI_SELECT_TRIGGER_BG_ALPHA))
+        .px(px(tokens.metrics.ui_control_padding_x))
+        .flex()
+        .items_center()
+        .justify_between()
+        .overflow_hidden()
+        .text_size(px(tokens.metrics.ui_text_sm))
+        .text_color(rgb(tokens.ui.text))
+        .cursor_pointer();
+
+    select_trigger_focus_visible(tokens, trigger, focus_visible)
+}
+
+pub fn select_inline_menu(tokens: &ThemeTokens) -> Div {
+    // Inline menus are rendered in-flow instead of through a portal, but still
+    // use SelectContent's panel chrome and wheel island behavior.
+    div()
+        .w_full()
+        .rounded(px(tokens.radii.md))
+        .border_1()
+        .border_color(rgb(tokens.ui.border))
+        .bg(rgb(tokens.ui.bg_panel))
+        .overflow_hidden()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+}
+
+pub fn select_inline_option_row(tokens: &ThemeTokens, selected: bool, highlighted: bool) -> Div {
+    // Mirrors Radix SelectItem focus:bg-theme-bg-hover and selected indicator
+    // semantics while letting callers render selectable/nonselectable labels.
+    div()
+        .w_full()
+        .h(px(tokens.metrics.ui_control_height))
+        .px(px(tokens.metrics.ui_control_padding_x))
+        .flex()
+        .items_center()
+        .justify_between()
+        .text_size(px(tokens.metrics.ui_text_sm))
+        .text_color(if selected {
+            rgb(tokens.ui.accent)
+        } else {
+            rgb(tokens.ui.text)
+        })
+        .bg(if highlighted {
+            rgba((tokens.ui.bg_hover << 8) | TAURI_INLINE_SELECT_HIGHLIGHT_BG_ALPHA)
+        } else if selected {
+            rgba((tokens.ui.accent << 8) | TAURI_INLINE_SELECT_SELECTED_BG_ALPHA)
+        } else {
+            rgba(0x00000000)
+        })
+        .cursor_pointer()
+        .hover(|style| style.bg(rgb(tokens.ui.bg_hover)))
 }
 
 fn select_trigger_chrome(
@@ -208,8 +301,10 @@ fn select_trigger_chrome(
         .overflow_hidden()
         .rounded(px(tokens.radii.md))
         .border_1()
-        .border_color(rgba((tokens.ui.border << 8) | 0x80))
-        .bg(rgba((tokens.ui.bg << 8) | 0x80))
+        .border_color(rgba(
+            (tokens.ui.border << 8) | TAURI_SELECT_TRIGGER_BG_ALPHA,
+        ))
+        .bg(rgba((tokens.ui.bg << 8) | TAURI_SELECT_TRIGGER_BG_ALPHA))
         .px(px(tokens.metrics.ui_control_padding_x))
         .text_size(px(tokens.metrics.ui_text_sm))
         .text_color(rgb(if placeholder {

@@ -37,7 +37,10 @@ use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, toolbar_button,
 };
-use oxideterm_gpui_ui::select::{select_option_action, select_trigger_focus_visible};
+use oxideterm_gpui_ui::select::{
+    select_inline_menu, select_inline_option_row, select_inline_trigger_chrome,
+    select_option_action,
+};
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
 
 use super::quick_commands::QuickCommandImportStrategy;
@@ -52,7 +55,6 @@ const CLOUD_SYNC_STAT_PADDING: f32 = 8.0;
 const CLOUD_SYNC_BG_MIX_ALPHA: u32 = 0x80;
 const CLOUD_SYNC_LIST_BORDER_ALPHA: u32 = 0xA6;
 const CLOUD_SYNC_LIST_BG_ALPHA: u32 = 0x8C;
-const CLOUD_SYNC_SELECT_HIGHLIGHT_ALPHA: u32 = 0x26; // Radix SelectItem focus:bg-theme-bg-hover.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CloudSyncSelect {
@@ -2701,61 +2703,32 @@ impl WorkspaceApp {
                 .filter(|(highlighted_select, _)| *highlighted_select == select)
                 .map(|(_, index)| index)
                 .unwrap_or_else(|| self.cloud_sync_selected_option_index(select));
-            let mut menu = div()
-                .w_full()
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(rgb(theme.border))
-                .bg(rgb(theme.bg_panel))
-                .overflow_hidden()
-                // Cloud Sync selects sit inside a settings-like scroll view; a
-                // wheel over the open menu should not scroll the page behind it.
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+            let mut menu = select_inline_menu(&self.tokens);
             for (index, option) in options.into_iter().enumerate() {
                 let label = option.label.clone();
                 let option_key = option.label.clone();
                 let selected = option.selected;
                 let action = option.action.clone();
                 let option_highlighted = highlighted == index;
-                let option_row = div()
-                    .w_full()
-                    .h(px(36.0))
-                    .px(px(12.0))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(if selected {
-                        rgb(theme.accent)
-                    } else {
-                        rgb(theme.text)
-                    })
-                    .bg(if option_highlighted {
-                        rgba((theme.bg_hover << 8) | CLOUD_SYNC_SELECT_HIGHLIGHT_ALPHA)
-                    } else if selected {
-                        rgba((theme.accent << 8) | 0x1f)
-                    } else {
-                        rgba(0x00000000)
-                    })
-                    .cursor_pointer()
-                    .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-                    .on_mouse_move(cx.listener(
-                        move |this, _event: &MouseMoveEvent, _window, cx| {
-                            if this.cloud_sync_select_highlighted != Some((select, index)) {
-                                this.cloud_sync_select_highlighted = Some((select, index));
-                                cx.notify();
-                            }
-                        },
-                    ))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::NonSelectable,
-                        "cloud-sync-select-option",
-                        option_key,
-                        label,
-                        if selected { theme.accent } else { theme.text },
-                        cx,
-                    ))
-                    .when(selected, |row| row.child("✓"));
+                let option_row =
+                    select_inline_option_row(&self.tokens, selected, option_highlighted)
+                        .on_mouse_move(cx.listener(
+                            move |this, _event: &MouseMoveEvent, _window, cx| {
+                                if this.cloud_sync_select_highlighted != Some((select, index)) {
+                                    this.cloud_sync_select_highlighted = Some((select, index));
+                                    cx.notify();
+                                }
+                            },
+                        ))
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::NonSelectable,
+                            "cloud-sync-select-option",
+                            option_key,
+                            label,
+                            if selected { theme.accent } else { theme.text },
+                            cx,
+                        ))
+                        .when(selected, |row| row.child("✓"));
                 menu = menu.child(select_option_action(
                     option_row,
                     false,
@@ -2783,61 +2756,36 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        // Cloud Sync is built in native rather than coming from a surviving
-        // Tauri React leaf. Keep the current inline SelectTrigger chrome in
-        // one helper so focus-visible, pointer ownership, and future wheel
-        // routing changes do not fork across Backend/Auth/Conflict selects.
-        select_trigger_focus_visible(
-            &self.tokens,
-            div()
-                .w_full()
-                .h(px(36.0))
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(if open || focused {
-                    rgb(theme.accent)
-                } else {
-                    rgb(theme.border)
-                })
-                .bg(rgba((theme.bg << 8) | CLOUD_SYNC_BG_MIX_ALPHA))
-                .px(px(12.0))
-                .flex()
-                .items_center()
-                .justify_between()
-                .text_size(px(self.tokens.metrics.ui_text_sm))
-                .text_color(rgb(theme.text))
-                .cursor_pointer()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(
-                        move |this: &mut WorkspaceApp,
-                              _event,
-                              _window,
-                              cx: &mut Context<WorkspaceApp>| {
-                            this.toggle_cloud_sync_select_from_pointer(select);
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    ),
-                )
-                // Select trigger/options are controls; labels stay outside read-only selection ownership.
-                .child(self.render_display_text_with_role(
-                    SelectableTextRole::NonSelectable,
-                    "cloud-sync-select-value",
-                    format!("{select:?}"),
-                    value,
-                    theme.text,
-                    cx,
-                ))
-                .child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgb(theme.text_muted))
-                        .child("⌄"),
+        select_inline_trigger_chrome(&self.tokens, open, focused, focus_visible)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(
+                    move |this: &mut WorkspaceApp,
+                          _event,
+                          _window,
+                          cx: &mut Context<WorkspaceApp>| {
+                        this.toggle_cloud_sync_select_from_pointer(select);
+                        cx.stop_propagation();
+                        cx.notify();
+                    },
                 ),
-            focus_visible,
-        )
-        .into_any_element()
+            )
+            // Select trigger/options are controls; labels stay outside read-only selection ownership.
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "cloud-sync-select-value",
+                format!("{select:?}"),
+                value,
+                theme.text,
+                cx,
+            ))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(theme.text_muted))
+                    .child("⌄"),
+            )
+            .into_any_element()
     }
 
     fn render_cloud_sync_toggle(

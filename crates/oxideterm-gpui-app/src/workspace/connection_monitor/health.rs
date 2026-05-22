@@ -328,16 +328,19 @@ impl WorkspaceApp {
             .find(|connection| connection.connection_id == selected_id)
             .map(monitor_connection_label)
             .unwrap_or_default();
-        let trigger = select_trigger_focus_visible(
+        let trigger = select_trigger_with_focus_visible(
             &self.tokens,
-            select_trigger(&self.tokens, selected_label, false, false).font_family("monospace"),
+            selected_label,
+            false,
+            false,
             // The monitor selector is pointer-opened today, but it should use
             // the same modality gate as other native Select triggers.
             browser_behavior::browser_focus_visible(
                 self.connection_monitor.selector_open,
                 self.connection_monitor.selector_focus_origin,
             ),
-        );
+        )
+        .font_family("monospace");
         let mut wrapper = div().relative().mb_4().child(trigger.on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {

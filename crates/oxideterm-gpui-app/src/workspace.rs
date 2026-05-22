@@ -135,7 +135,6 @@ use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
 use self::ime::{
     WorkspaceImeDragSelection, WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
-    active_ime_should_defer_printable_key,
 };
 use self::launcher::LauncherState;
 use self::new_connection::{
@@ -599,6 +598,8 @@ pub(crate) struct WorkspaceApp {
     selectable_text_autoscroll_scheduled: bool,
     selectable_text_scroll_handles: RefCell<HashMap<String, ScrollHandle>>,
     ime_marked_text: Option<String>,
+    pending_platform_text_commit: Option<ime::PendingPlatformTextCommit>,
+    next_platform_text_commit_generation: u64,
     selected_ime_target: Option<WorkspaceImeTarget>,
     selected_ime_range: Option<WorkspaceImeSelection>,
     ime_drag_selection: Option<WorkspaceImeDragSelection>,

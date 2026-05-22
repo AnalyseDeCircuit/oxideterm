@@ -111,10 +111,7 @@ impl Render for WorkspaceApp {
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let active_ime_commits_printable_key =
-                    active_ime_should_defer_printable_key(
-                        this.active_ime_target().is_some(),
-                        &event.keystroke,
-                    );
+                    this.defer_active_ime_printable_key(&event.keystroke, window, cx);
                 if this.keyboard_interactive_challenge.is_some() {
                     if active_ime_commits_printable_key {
                         return;

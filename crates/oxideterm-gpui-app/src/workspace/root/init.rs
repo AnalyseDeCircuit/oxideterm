@@ -296,6 +296,8 @@ impl WorkspaceApp {
             selectable_text_autoscroll_scheduled: false,
             selectable_text_scroll_handles: RefCell::new(HashMap::new()),
             ime_marked_text: None,
+            pending_platform_text_commit: None,
+            next_platform_text_commit_generation: 0,
             selected_ime_target: None,
             selected_ime_range: None,
             ime_drag_selection: None,

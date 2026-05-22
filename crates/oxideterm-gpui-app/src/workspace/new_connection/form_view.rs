@@ -32,7 +32,7 @@ use oxideterm_gpui_ui::{
     segmented_tab, segmented_tabs,
     select::{
         SelectAnchorId, select_anchor_probe, select_option, select_option_action,
-        select_overlay_popup_with_max_height, select_trigger, select_trigger_focus_visible,
+        select_overlay_popup_with_max_height, select_trigger_with_focus_visible,
     },
     text_input, text_input_anchor_probe,
 };

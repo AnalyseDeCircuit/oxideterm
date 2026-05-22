@@ -7,13 +7,14 @@ impl WorkspaceApp {
         disabled: bool,
     ) -> Div {
         let focused = self.open_new_connection_select == Some(select_id);
-        let trigger = select_trigger(&self.tokens, value, placeholder, disabled);
         // New-connection selects live inside modal forms; keep their keyboard
         // focus ring tied to the same browser focus-origin rule as settings
         // and Cloud Sync selects.
-        select_trigger_focus_visible(
+        select_trigger_with_focus_visible(
             &self.tokens,
-            trigger,
+            value,
+            placeholder,
+            disabled,
             browser_behavior::browser_focus_visible(focused, self.new_connection_select_focus_origin),
         )
     }
