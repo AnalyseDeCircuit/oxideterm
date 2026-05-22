@@ -296,8 +296,6 @@ impl WorkspaceApp {
             selectable_text_autoscroll_scheduled: false,
             selectable_text_scroll_handles: RefCell::new(HashMap::new()),
             ime_marked_text: None,
-            pending_platform_text_commit: None,
-            next_platform_text_commit_generation: 0,
             selected_ime_target: None,
             selected_ime_range: None,
             ime_drag_selection: None,
@@ -365,7 +363,11 @@ impl WorkspaceApp {
             notification_sidebar_list_state: ListState::new(
                 0,
                 ListAlignment::Top,
-                px(NOTIFICATION_SIDEBAR_LIST_OVERDRAW_PX),
+                TauriVirtualListSpec::new(
+                    px(NOTIFICATION_SIDEBAR_ROW_HEIGHT_ESTIMATE),
+                    NOTIFICATION_SIDEBAR_VIRTUAL_OVERSCAN,
+                )
+                .overdraw(),
             ),
             notification_sidebar_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             event_log_sidebar_scroll_handle: UniformListScrollHandle::new(),

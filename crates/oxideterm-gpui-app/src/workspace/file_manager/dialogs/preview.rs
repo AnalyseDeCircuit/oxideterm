@@ -751,23 +751,19 @@ impl WorkspaceApp {
             label.to_string(),
             None,
             ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Sm,
-                    disabled: false,
-                },
-                show_label: true,
-                height: Some(24.0),
-                padding_x: Some(8.0),
-                font_size: Some(FILE_MANAGER_TEXT_XS),
                 text_color: Some(rgb(theme.text_muted)),
                 hover_background: Some(rgb(theme.bg_hover)),
                 hover_text_color: Some(rgb(theme.text)),
                 // Tauri audio controls are real buttons, so their text never
                 // enters document selection; shared toolbar_button preserves
                 // that browser button boundary for native preview controls.
-                ..ToolbarButtonOptions::default()
+                ..ToolbarButtonOptions::compact_text(
+                    ButtonVariant::Ghost,
+                    ButtonRadius::Sm,
+                    24.0,
+                    8.0,
+                    FILE_MANAGER_TEXT_XS,
+                )
             },
         )
         .on_mouse_down(MouseButton::Left, on_click)
@@ -789,17 +785,6 @@ impl WorkspaceApp {
             label,
             None,
             ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Secondary,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Sm,
-                    disabled: false,
-                },
-                show_label: true,
-                height: Some(28.0),
-                min_width: Some(28.0),
-                padding_x: Some(8.0),
-                font_size: Some(FILE_MANAGER_TEXT_XS),
                 background: Some(if active {
                     rgb(theme.bg_hover)
                 } else {
@@ -808,7 +793,14 @@ impl WorkspaceApp {
                 text_color: Some(rgb(text_color)),
                 hover_background: Some(rgb(theme.bg_hover)),
                 hover_text_color: Some(rgb(theme.text)),
-                ..ToolbarButtonOptions::default()
+                ..ToolbarButtonOptions::compact_text_min_width(
+                    ButtonVariant::Secondary,
+                    ButtonRadius::Sm,
+                    28.0,
+                    28.0,
+                    8.0,
+                    FILE_MANAGER_TEXT_XS,
+                )
             },
         )
         .on_mouse_down(MouseButton::Left, on_click)
@@ -985,10 +977,14 @@ impl WorkspaceApp {
             .bg(file_manager_bg(theme.bg_sunken, has_background))
             .child(
                 div().size_full().p(px(16.0)).child(
-                    tracked_uniform_list(
+                    tauri_virtual_uniform_list(
                         "file-manager-preview-code-virtual",
                         row_count,
                         scroll,
+                        TauriVirtualListSpec::new(
+                            px(row_height),
+                            FILE_MANAGER_PREVIEW_CODE_OVERSCAN,
+                        ),
                         move |range, _window, _cx| {
                             let opts = opts.clone();
                             let language = language.clone();
@@ -1088,10 +1084,14 @@ impl WorkspaceApp {
             .bg(file_manager_bg(theme.bg_sunken, has_background))
             .child(
                 div().size_full().p(px(16.0)).overflow_x_scrollbar().child(
-                    tracked_uniform_list(
+                    tauri_virtual_uniform_list(
                         "file-manager-preview-stream-code-virtual",
                         row_count.max(1),
                         scroll,
+                        TauriVirtualListSpec::new(
+                            px(row_height),
+                            FILE_MANAGER_PREVIEW_CODE_OVERSCAN,
+                        ),
                         move |range, _window, _cx| {
                             let opts = opts.clone();
                             let language = language.clone();
@@ -1575,24 +1575,15 @@ impl WorkspaceApp {
             &self.tokens,
             Self::render_lucide_icon(icon, FILE_MANAGER_ICON_MD, rgb(theme.text)),
             IconButtonOptions {
-                size: 28.0,
-                radius: ButtonRadius::Sm,
-                disabled: false,
-                loading: false,
-                has_background: false,
                 background: Some(if active {
                     file_manager_hover_bg(theme.bg_hover, true)
                 } else {
                     rgba(0)
                 }),
-                border: None,
                 // Preview mode buttons keep the active hover tint even without
                 // a terminal background, matching the existing QuickLook chrome.
                 hover_background: Some(file_manager_hover_bg(theme.bg_hover, true)),
-                hover_opacity: None,
-                focus_visible: false,
-                idle_opacity: 1.0,
-                disabled_opacity: 0.35,
+                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
             },
         )
         .on_mouse_down(MouseButton::Left, listener)

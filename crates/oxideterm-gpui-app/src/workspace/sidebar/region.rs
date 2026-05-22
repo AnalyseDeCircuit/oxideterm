@@ -399,6 +399,10 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         let row_count = filtered.len();
         let signatures = notification_sidebar_row_signatures(&filtered);
+        let notification_spec = TauriVirtualListSpec::new(
+            px(NOTIFICATION_SIDEBAR_ROW_HEIGHT_ESTIMATE),
+            NOTIFICATION_SIDEBAR_VIRTUAL_OVERSCAN,
+        );
         {
             let mut cache = self.notification_sidebar_list_cache.borrow_mut();
             super::virtual_list::sync_tauri_variable_list_state_by_signatures(
@@ -406,6 +410,7 @@ impl WorkspaceApp {
                 &mut cache,
                 "notifications-sidebar",
                 &signatures,
+                notification_spec,
             );
         }
         let notification_rows = Arc::new(filtered);
@@ -465,6 +470,7 @@ impl WorkspaceApp {
                     .when(row_count > 0, |content| {
                         content.child(tauri_virtual_list(
                             notification_list_state,
+                            notification_spec,
                             move |index, _window, app| {
                                 let rows = notification_rows.clone();
                                 let Some(entry) = rows.get(index).cloned() else {
@@ -764,20 +770,14 @@ impl WorkspaceApp {
             &self.tokens,
             Self::render_lucide_icon(icon, 12.0, icon_color),
             oxideterm_gpui_ui::button::IconButtonOptions {
-                size: 22.0,
-                radius: oxideterm_gpui_ui::button::ButtonRadius::Sm,
-                disabled: false,
-                loading: false,
-                has_background: false,
                 background: Some(background),
-                border: None,
                 hover_background: Some(rgb(theme.bg_hover)),
-                hover_opacity: None,
-                focus_visible: false,
                 // Tauri activity toolbar icons are fully opaque in both normal
                 // and active states; muting is represented by icon color.
-                idle_opacity: 1.0,
-                disabled_opacity: 0.35,
+                ..oxideterm_gpui_ui::button::IconButtonOptions::opaque_toolbar(
+                    22.0,
+                    oxideterm_gpui_ui::button::ButtonRadius::Sm,
+                )
             },
         )
             .on_mouse_down(MouseButton::Left, listener)

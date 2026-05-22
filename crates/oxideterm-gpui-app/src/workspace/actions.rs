@@ -287,9 +287,13 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.defer_active_ime_printable_key(&event.keystroke, window, cx) {
-            // GPUI commits printable text through `InputHandler`; the shared
-            // guard keeps the fallback page handler from appending it again.
+        if active_ime_should_defer_printable_key(
+            self.active_ime_target().is_some(),
+            &event.keystroke,
+        ) {
+            // The capture handler deliberately lets platform text input own
+            // printable characters; the bubble fallback must follow the same
+            // rule so inputs do not append once per key path.
             return;
         }
 
@@ -326,6 +330,14 @@ impl WorkspaceApp {
         }
 
         if self.handle_cloud_sync_select_key(event, cx) {
+            return;
+        }
+
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor)
+            && self.handle_connection_monitor_select_key(event, cx)
+        {
             return;
         }
 

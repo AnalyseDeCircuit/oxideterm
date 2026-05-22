@@ -110,12 +110,14 @@ impl Render for WorkspaceApp {
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                let active_ime_commits_printable_key =
-                    this.defer_active_ime_printable_key(&event.keystroke, window, cx);
+                let active_ime_commits_printable_key = active_ime_should_defer_printable_key(
+                    this.active_ime_target().is_some(),
+                    &event.keystroke,
+                );
+                if active_ime_commits_printable_key {
+                    return;
+                }
                 if this.keyboard_interactive_challenge.is_some() {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     let _ = this.handle_keyboard_interactive_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -176,23 +178,14 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.auto_route_modal.open {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     let _ = this.handle_auto_route_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.new_connection_form.is_some() {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     let _ = this.handle_new_connection_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.command_palette.open {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     this.handle_command_palette_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -210,9 +203,6 @@ impl Render for WorkspaceApp {
                 } else if this.terminal_quick_commands_open
                     && this.quick_commands.focused_input.is_some()
                 {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     this.handle_quick_commands_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -223,9 +213,6 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.terminal_command_bar_focused {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     this.handle_terminal_command_bar_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -237,9 +224,6 @@ impl Render for WorkspaceApp {
                     .is_some_and(|tab| tab.kind == TabKind::SessionManager)
                     && this.session_manager.focused_input.is_some()
                 {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     let _ = this.handle_session_manager_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -248,9 +232,6 @@ impl Render for WorkspaceApp {
                     .is_some_and(|tab| tab.kind == TabKind::Forwards)
                     && this.forwarding_view.focused_input.is_some()
                 {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     let _ = this.handle_forwards_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -259,9 +240,6 @@ impl Render for WorkspaceApp {
                     .is_some_and(|tab| tab.kind == TabKind::Launcher)
                     && this.launcher.focused_input.is_some()
                 {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     let _ = this.handle_launcher_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -270,9 +248,6 @@ impl Render for WorkspaceApp {
                     .is_some_and(|tab| tab.kind == TabKind::Graphics)
                     && this.graphics.focused_input.is_some()
                 {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     let _ = this.handle_graphics_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -280,22 +255,6 @@ impl Render for WorkspaceApp {
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::Sftp)
                 {
-                    let sftp_key = event.keystroke.key.as_str();
-                    let sftp_quick_look_space = matches!(sftp_key, "space" | " ")
-                        && this.sftp_view.focused_input.is_none()
-                        && this.sftp_view.dialog.is_none();
-                    let sftp_markdown_preview_toggle = sftp_key == "u"
-                        && this.sftp_view.focused_input.is_none()
-                        && matches!(
-                            this.sftp_view.dialog.as_ref(),
-                            Some(sftp::SftpDialog::Preview { .. })
-                        );
-                    if active_ime_commits_printable_key
-                        && !sftp_quick_look_space
-                        && !sftp_markdown_preview_toggle
-                    {
-                        return;
-                    }
                     let _ = this.handle_sftp_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -303,38 +262,10 @@ impl Render for WorkspaceApp {
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::FileManager)
                 {
-                    let key = event.keystroke.key.as_str();
-                    let file_manager_preview_open = matches!(
-                        this.file_manager.dialog,
-                        Some(crate::workspace::file_manager::FileManagerDialog::Preview { .. })
-                    );
-                    let file_manager_quick_look_space = matches!(key, "space" | " ")
-                        && this.file_manager.focused_input.is_none()
-                        && (this.file_manager.dialog.is_none() || file_manager_preview_open);
-                    let file_manager_preview_info_toggle = key == "i"
-                        && this.file_manager.focused_input.is_none()
-                        && file_manager_preview_open;
-                    let file_manager_markdown_preview_toggle = key == "u"
-                        && this.file_manager.focused_input.is_none()
-                        && file_manager_preview_open;
-                    let file_manager_preview_transform = matches!(key, "+" | "=" | "-" | "0" | "r")
-                        && this.file_manager.focused_input.is_none()
-                        && file_manager_preview_open;
-                    if active_ime_commits_printable_key
-                        && !file_manager_quick_look_space
-                        && !file_manager_preview_info_toggle
-                        && !file_manager_markdown_preview_toggle
-                        && !file_manager_preview_transform
-                    {
-                        return;
-                    }
                     let _ = this.handle_file_manager_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.focused_settings_input.is_some() {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     let _ = this.handle_settings_input_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -343,9 +274,6 @@ impl Render for WorkspaceApp {
                         || this.ai_chat_footer_focus.is_some()
                         || this.ai_model_selector_search_focused)
                 {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     let _ = this.handle_ai_sidebar_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -354,9 +282,6 @@ impl Render for WorkspaceApp {
                     .as_ref()
                     .is_some_and(|player| player.search_focused)
                 {
-                    if active_ime_commits_printable_key {
-                        return;
-                    }
                     this.handle_terminal_cast_search_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();

@@ -12,13 +12,10 @@ fn terminal_cast_player_button(tokens: &ThemeTokens, icon: LucideIcon) -> gpui::
         tokens,
         WorkspaceApp::render_lucide_icon(icon, 15.0, rgb(tokens.ui.text)),
         IconButtonOptions {
-            size: 30.0,
-            radius: ButtonRadius::Md,
             background: Some(rgba((tokens.ui.bg_panel << 8) | 0xcc)),
             border: Some(rgb(tokens.ui.border)),
             hover_background: Some(rgb(tokens.ui.bg_hover)),
-            idle_opacity: 1.0,
-            ..IconButtonOptions::compact(30.0)
+            ..IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md)
         },
     )
 }

@@ -150,6 +150,46 @@ impl Default for ToolbarButtonOptions {
     }
 }
 
+impl ToolbarButtonOptions {
+    pub fn compact_text(
+        variant: ButtonVariant,
+        radius: ButtonRadius,
+        height: f32,
+        padding_x: f32,
+        font_size: f32,
+    ) -> Self {
+        // Tauri preview toolbars use small text buttons with explicit h/px/text-xs
+        // classes. Keep that browser button shape in the shared primitive so
+        // FileManager/SFTP previews do not reimplement local div-style buttons.
+        Self {
+            button: ButtonOptions {
+                variant,
+                size: ButtonSize::Sm,
+                radius,
+                disabled: false,
+            },
+            show_label: true,
+            height: Some(height),
+            padding_x: Some(padding_x),
+            font_size: Some(font_size),
+            ..Self::default()
+        }
+    }
+
+    pub fn compact_text_min_width(
+        variant: ButtonVariant,
+        radius: ButtonRadius,
+        height: f32,
+        min_width: f32,
+        padding_x: f32,
+        font_size: f32,
+    ) -> Self {
+        let mut options = Self::compact_text(variant, radius, height, padding_x, font_size);
+        options.min_width = Some(min_width);
+        options
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IconButtonOptions {
     pub size: f32,
@@ -181,6 +221,19 @@ impl IconButtonOptions {
             focus_visible: false,
             idle_opacity: ICON_BUTTON_IDLE_OPACITY,
             disabled_opacity: ICON_BUTTON_DISABLED_OPACITY,
+        }
+    }
+
+    pub fn opaque_toolbar(size: f32, radius: ButtonRadius) -> Self {
+        // Tauri toolbar icon buttons are often normal-opacity buttons whose
+        // disabled state fades, unlike muted icon-only affordances. Keep that
+        // option bundle in the shared primitive so feature toolbars do not copy
+        // the same opacity and radius defaults.
+        Self {
+            radius,
+            idle_opacity: 1.0,
+            disabled_opacity: ICON_BUTTON_DISABLED_OPACITY,
+            ..Self::compact(size)
         }
     }
 }
@@ -445,6 +498,28 @@ mod tests {
         assert_eq!(options.font_size, None);
         assert!(options.show_label);
         assert!(!options.loading);
+    }
+
+    #[test]
+    fn compact_text_toolbar_button_preserves_tauri_preview_metrics() {
+        let options = ToolbarButtonOptions::compact_text_min_width(
+            ButtonVariant::Secondary,
+            ButtonRadius::Sm,
+            28.0,
+            32.0,
+            8.0,
+            12.0,
+        );
+
+        assert_eq!(options.button.variant, ButtonVariant::Secondary);
+        assert_eq!(options.button.size, ButtonSize::Sm);
+        assert_eq!(options.button.radius, ButtonRadius::Sm);
+        assert_eq!(options.height, Some(28.0));
+        assert_eq!(options.min_width, Some(32.0));
+        assert_eq!(options.padding_x, Some(8.0));
+        assert_eq!(options.font_size, Some(12.0));
+        assert!(options.show_label);
+        assert!(!options.button.disabled);
     }
 
     #[test]

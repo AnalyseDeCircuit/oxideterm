@@ -451,13 +451,10 @@ impl WorkspaceApp {
                 color,
             ),
             IconButtonOptions {
-                size: KNOWLEDGE_ICON_BUTTON_SIZE,
-                radius: ButtonRadius::Sm,
                 hover_background: Some(rgba(
                     (0xffffff << 8) | KNOWLEDGE_ICON_BUTTON_HOVER_ALPHA,
                 )),
-                idle_opacity: 1.0,
-                ..IconButtonOptions::compact(KNOWLEDGE_ICON_BUTTON_SIZE)
+                ..IconButtonOptions::opaque_toolbar(KNOWLEDGE_ICON_BUTTON_SIZE, ButtonRadius::Sm)
             },
         )
     }

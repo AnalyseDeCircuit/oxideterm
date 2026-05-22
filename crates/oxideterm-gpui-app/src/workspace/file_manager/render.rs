@@ -1384,21 +1384,8 @@ impl WorkspaceApp {
         icon_button(
             &self.tokens,
             Self::render_lucide_icon(icon, FILE_MANAGER_ICON_MD, rgb(self.tokens.ui.text)),
-            IconButtonOptions {
-                size: FILE_MANAGER_TOOL_BUTTON,
-                radius: ButtonRadius::Sm,
-                disabled: false,
-                loading: false,
-                has_background: false,
-                background: None,
-                border: None,
-                hover_background: None,
-                hover_opacity: None,
-                focus_visible: false,
-                // Tauri file-manager toolbar icons are fully opaque until disabled.
-                idle_opacity: 1.0,
-                disabled_opacity: 0.35,
-            },
+            // Tauri file-manager toolbar icons are fully opaque until disabled.
+            IconButtonOptions::opaque_toolbar(FILE_MANAGER_TOOL_BUTTON, ButtonRadius::Sm),
         )
         .id((
             gpui::ElementId::from("file-manager-icon-button"),

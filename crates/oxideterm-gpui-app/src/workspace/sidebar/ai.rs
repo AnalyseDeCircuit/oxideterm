@@ -48,10 +48,10 @@ use oxideterm_gpui_ui::{
         ai_tool_section_label,
     },
     button::{
-        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonOptions, icon_button, toolbar_button,
+        ButtonRadius, ButtonVariant, IconButtonOptions, ToolbarButtonOptions, icon_button,
+        toolbar_button,
     },
-    context_menu::{ContextMenuActionableStyle, context_menu_actionable_row},
+    context_menu::ContextMenuActionableStyle,
     modal::overlay_content_boundary,
     tauri_ui_font_family as settings_ui_font_family,
     text_input::{text_caret, text_input, text_input_anchor_probe},
@@ -85,7 +85,7 @@ impl WorkspaceApp {
         // AI safety/chat menus are Radix dropdown-style command rows in Tauri.
         // Native keeps hover, cursor, and invocation blocking tied to the same
         // shared menu action guard used by file/session/terminal menus.
-        let item = context_menu_actionable_row(
+        self.workspace_context_menu_styled_action(
             item,
             disabled,
             loading,
@@ -93,11 +93,6 @@ impl WorkspaceApp {
                 hover_background: hover_bg,
                 hover_text_color: None,
             },
-        );
-        self.workspace_context_menu_action(
-            item,
-            disabled,
-            loading,
             |this| {
                 this.ai_chat_menu_open = false;
                 this.ai_conversation_list_open = false;

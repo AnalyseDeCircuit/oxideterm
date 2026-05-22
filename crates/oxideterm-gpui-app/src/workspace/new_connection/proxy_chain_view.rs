@@ -27,14 +27,7 @@ impl WorkspaceApp {
             .map(|form| form.group.as_str())
             .unwrap_or_default();
         let ungrouped_label = self.connection_form_ungrouped_label();
-        let mut popup = select_overlay_popup_with_max_height(&self.tokens, width, max_height)
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .child(
+        let mut popup = select_overlay_popup_with_max_height(&self.tokens, width, max_height).child(
                 select_option_action(
                     select_option(
                         &self.tokens,
@@ -97,7 +90,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        this.open_new_connection_select = None;
+                        this.close_new_connection_select();
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -105,7 +98,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Right,
                     cx.listener(|this, _event, _window, cx| {
-                        this.open_new_connection_select = None;
+                        this.close_new_connection_select();
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -387,11 +380,11 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.text),
             ),
             IconButtonOptions {
-                size: self.tokens.metrics.ui_button_sm_height,
-                radius: ButtonRadius::Md,
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
-                idle_opacity: 1.0,
-                ..IconButtonOptions::compact(self.tokens.metrics.ui_button_sm_height)
+                ..IconButtonOptions::opaque_toolbar(
+                    self.tokens.metrics.ui_button_sm_height,
+                    ButtonRadius::Md,
+                )
             },
         )
             .on_mouse_down(
@@ -443,7 +436,7 @@ impl WorkspaceApp {
                         form.focused_field = NewConnectionField::JumpHost;
                         form.selected_field = None;
                     }
-                    this.open_new_connection_select = None;
+                    this.close_new_connection_select();
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle);
                     cx.stop_propagation();
@@ -669,11 +662,8 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.text_muted),
             ),
             IconButtonOptions {
-                size: 24.0,
-                radius: ButtonRadius::Sm,
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
-                idle_opacity: 1.0,
-                ..IconButtonOptions::compact(24.0)
+                ..IconButtonOptions::opaque_toolbar(24.0, ButtonRadius::Sm)
             },
         )
             .on_mouse_down(

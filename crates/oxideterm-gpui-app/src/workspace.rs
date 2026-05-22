@@ -135,6 +135,7 @@ use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
 use self::ime::{
     WorkspaceImeDragSelection, WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
+    active_ime_should_defer_printable_key,
 };
 use self::launcher::LauncherState;
 use self::new_connection::{
@@ -180,7 +181,7 @@ pub(super) use selectable_text::{SelectableTextRole, SelectableTextScrollExt};
 pub(super) use virtual_list::{
     TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
     tauri_virtual_list, tauri_virtual_list_is_near_bottom, tauri_virtual_uniform_list,
-    tracked_uniform_list, uniform_list_edge_autoscroll,
+    uniform_list_edge_autoscroll,
 };
 use virtual_list::{VirtualListSignatureCache, sync_virtual_list_state_by_signatures};
 
@@ -304,10 +305,11 @@ struct AiCachedMarkdownDocument {
 
 const AI_MARKDOWN_DOCUMENT_CACHE_MAX_ENTRIES: usize = 128;
 const AI_CHAT_LIST_OVERDRAW_PX: f32 = 640.0;
-// Tauri NotificationsPanel uses a browser overflow container with variable
-// height grouped rows. Native keeps that model on GPUI `list`, with enough
-// overdraw to prevent row popping during high-frequency notification bursts.
-const NOTIFICATION_SIDEBAR_LIST_OVERDRAW_PX: f32 = 720.0;
+// Tauri NotificationsPanel uses variable-height grouped rows. Keep the native
+// estimate/overscan as a virtual-list spec instead of a raw overdraw number so
+// notification/event-log surfaces share the same browser virtualizer contract.
+const NOTIFICATION_SIDEBAR_ROW_HEIGHT_ESTIMATE: f32 = 72.0;
+const NOTIFICATION_SIDEBAR_VIRTUAL_OVERSCAN: usize = 10;
 const AI_MARKDOWN_WINDOW_OVERDRAW_PX: f32 = 720.0;
 const AI_MARKDOWN_CONTENT_OFFSET_PX: f32 = 56.0;
 
@@ -598,8 +600,6 @@ pub(crate) struct WorkspaceApp {
     selectable_text_autoscroll_scheduled: bool,
     selectable_text_scroll_handles: RefCell<HashMap<String, ScrollHandle>>,
     ime_marked_text: Option<String>,
-    pending_platform_text_commit: Option<ime::PendingPlatformTextCommit>,
-    next_platform_text_commit_generation: u64,
     selected_ime_target: Option<WorkspaceImeTarget>,
     selected_ime_range: Option<WorkspaceImeSelection>,
     ime_drag_selection: Option<WorkspaceImeDragSelection>,

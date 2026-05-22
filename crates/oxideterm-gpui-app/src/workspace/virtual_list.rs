@@ -78,6 +78,7 @@ where
 
 pub(crate) fn tauri_virtual_list<R>(
     state: ListState,
+    spec: TauriVirtualListSpec,
     render_item: impl 'static + FnMut(usize, &mut Window, &mut App) -> R,
 ) -> List
 where
@@ -86,6 +87,7 @@ where
     // Variable-height browser lists still share the same virtual-list policy:
     // feature code owns identity/signature sync, and the shared helper owns the
     // GPUI list shell so scroll surfaces do not drift per page.
+    let _overdraw = spec.overdraw();
     let mut render_item = render_item;
     list(state, move |index, window, cx| {
         render_item(index, window, cx).into_any_element()
@@ -237,10 +239,14 @@ pub(super) fn sync_tauri_variable_list_state_by_signatures(
     cache: &mut VirtualListSignatureCache,
     identity: &str,
     signatures: &[u64],
+    spec: TauriVirtualListSpec,
 ) {
     // GPUI's variable-height list keeps its state by item index. Mirroring
     // React keys requires explicit splice/reset calls when filtered rows move
     // or change; keep that bookkeeping centralized for sidebar/dialog lists.
+    // The overdraw lives in ListState::new, but accepting the same spec here
+    // keeps row-height/overscan visible at every variable-list sync call site.
+    let _overdraw = spec.overdraw();
     let identity_changed = cache.identity.as_deref() != Some(identity);
     if identity_changed || state.item_count() != cache.signatures.len() {
         state.reset(signatures.len());

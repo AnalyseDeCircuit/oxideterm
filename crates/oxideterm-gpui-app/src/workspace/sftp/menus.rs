@@ -31,19 +31,14 @@ impl WorkspaceApp {
             self.i18n.t("sftp.context.download")
         };
 
-        let popup = div()
+        let popup = context_menu_event_boundary(div()
             .w(px(SFTP_CONTEXT_MENU_WIDTH))
             .p(px(SFTP_CONTEXT_MENU_PADDING))
             .rounded(px(self.tokens.radii.sm))
             .border_1()
             .border_color(sftp_border(theme.border, has_background))
             .bg(sftp_panel_bg(theme.bg_elevated, has_background, 0xf2))
-            .shadow_lg()
-            .on_scroll_wheel(|_, _, cx| {
-                // Keep context-menu wheel input local, matching browser menu
-                // behavior and preventing the file pane behind it from moving.
-                cx.stop_propagation();
-            })
+            .shadow_lg())
             .when(selected_count > 0, |menu_el| {
                 menu_el.child(self.render_sftp_context_menu_guarded_item(
                     if menu.pane == SftpPane::Local {
@@ -200,7 +195,10 @@ impl WorkspaceApp {
             .text_color(rgb(color))
             .child(Self::render_lucide_icon(icon, SFTP_ICON_SM, rgb(color)))
             .child(div().truncate().child(label));
-        let item = context_menu_actionable_row(
+        // SFTP remote refresh/transfer can leave a context menu visible while
+        // the backing pane is loading. Route those rows through the shared menu
+        // guard so the UI cannot dispatch stale actions.
+        self.workspace_context_menu_styled_action(
             item,
             disabled,
             loading,
@@ -208,14 +206,6 @@ impl WorkspaceApp {
                 hover_background: Some(sftp_hover_bg(theme.bg_hover, has_background)),
                 hover_text_color: None,
             },
-        );
-        // SFTP remote refresh/transfer can leave a context menu visible while
-        // the backing pane is loading. Route those rows through the shared menu
-        // guard so the UI cannot dispatch stale actions.
-        self.workspace_context_menu_action(
-            item,
-            disabled,
-            loading,
             |this| {
                 this.sftp_view.context_menu = None;
             },

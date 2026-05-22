@@ -12,9 +12,8 @@ fn quick_command_icon_button(tokens: &ThemeTokens, icon: LucideIcon) -> gpui::Di
             rgb(tokens.ui.text_muted),
         ),
         IconButtonOptions {
-            idle_opacity: 1.0,
             hover_background: Some(rgb(tokens.ui.bg_hover)),
-            ..IconButtonOptions::compact(22.0)
+            ..IconButtonOptions::opaque_toolbar(22.0, ButtonRadius::Sm)
         },
     )
 }
@@ -28,9 +27,8 @@ fn quick_command_mini_button(tokens: &ThemeTokens, icon: LucideIcon) -> gpui::Di
             rgb(tokens.ui.text_muted),
         ),
         IconButtonOptions {
-            idle_opacity: 1.0,
             hover_background: Some(rgb(tokens.ui.bg_hover)),
-            ..IconButtonOptions::compact(18.0)
+            ..IconButtonOptions::opaque_toolbar(18.0, ButtonRadius::Sm)
         },
     )
 }
@@ -44,12 +42,9 @@ fn quick_command_action_button(tokens: &ThemeTokens, icon: LucideIcon) -> gpui::
             rgb(tokens.ui.text_muted),
         ),
         IconButtonOptions {
-            size: 26.0,
-            radius: ButtonRadius::Md,
             border: Some(rgb(tokens.ui.border)),
-            idle_opacity: 1.0,
             hover_background: Some(rgb(tokens.ui.bg_hover)),
-            ..IconButtonOptions::compact(26.0)
+            ..IconButtonOptions::opaque_toolbar(26.0, ButtonRadius::Md)
         },
     )
 }

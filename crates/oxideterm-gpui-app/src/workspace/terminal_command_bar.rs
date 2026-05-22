@@ -1,7 +1,7 @@
 use super::actions::TerminalBroadcastMenuPlacement;
 use super::ime::WorkspaceImeTarget;
 use super::*;
-use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_actionable_row};
+use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_event_boundary};
 use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
 use oxideterm_terminal_recording::format_recording_elapsed;
 
@@ -578,33 +578,29 @@ impl WorkspaceApp {
                 .iter()
                 .all(|pane_id| self.terminal_broadcast_targets.contains(pane_id));
 
-        let mut menu = div()
-            .absolute()
-            .right(px(12.0))
-            .w(px(260.0))
-            .max_h(px(320.0))
-            .overflow_hidden()
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgba((theme.bg_elevated << 8) | 0xf2))
-            .shadow_lg()
-            .p(px(6.0))
-            .text_size(px(12.0))
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .child(
-                div()
-                    .px(px(6.0))
-                    .py(px(4.0))
-                    .text_size(px(11.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("terminal.broadcast.select_targets")),
-            );
+        let mut menu = context_menu_event_boundary(
+            div()
+                .absolute()
+                .right(px(12.0))
+                .w(px(260.0))
+                .max_h(px(320.0))
+                .overflow_hidden()
+                .rounded(px(self.tokens.radii.lg))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgba((theme.bg_elevated << 8) | 0xf2))
+                .shadow_lg()
+                .p(px(6.0))
+                .text_size(px(12.0)),
+        )
+        .child(
+            div()
+                .px(px(6.0))
+                .py(px(4.0))
+                .text_size(px(11.0))
+                .text_color(rgb(theme.text_muted))
+                .child(self.i18n.t("terminal.broadcast.select_targets")),
+        );
         menu = match placement {
             TerminalBroadcastMenuPlacement::Bottom(offset) => menu.bottom(px(offset)),
             TerminalBroadcastMenuPlacement::Top(offset) => menu.top(px(offset)),
@@ -709,15 +705,6 @@ impl WorkspaceApp {
                 } else {
                     self.i18n.t("terminal.broadcast.select_all")
                 });
-            let select_all_label = context_menu_actionable_row(
-                select_all_label,
-                select_all_disabled,
-                false,
-                ContextMenuActionableStyle {
-                    hover_background: None,
-                    hover_text_color: Some(rgb(theme.accent)),
-                },
-            );
             menu = menu.child(
                 div()
                     .mt(px(4.0))
@@ -728,10 +715,14 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_between()
                     .px(px(6.0))
-                    .child(self.workspace_context_menu_persistent_action(
+                    .child(self.workspace_context_menu_persistent_styled_action(
                         select_all_label,
                         select_all_disabled,
                         false,
+                        ContextMenuActionableStyle {
+                            hover_background: None,
+                            hover_text_color: Some(rgb(theme.accent)),
+                        },
                         move |this, _event, _window, _cx| {
                             if all_selected {
                                 this.terminal_broadcast_enabled = false;
@@ -772,7 +763,7 @@ impl WorkspaceApp {
         // Tauri broadcast target rows are Radix menu items with a disabled
         // current-terminal row. Keep native hover/cursor and action blocking
         // coupled to the shared context-menu guard.
-        let item = context_menu_actionable_row(
+        self.workspace_context_menu_persistent_styled_action(
             item,
             disabled,
             loading,
@@ -780,11 +771,6 @@ impl WorkspaceApp {
                 hover_background: hover_bg,
                 hover_text_color: None,
             },
-        );
-        self.workspace_context_menu_persistent_action(
-            item,
-            disabled,
-            loading,
             move |_this, event, window, cx| listener(event, window, cx),
             cx,
         )

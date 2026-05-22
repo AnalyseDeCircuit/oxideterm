@@ -19,8 +19,10 @@ const COMMAND_PALETTE_TOP_RATIO: f32 = 0.15; // Tauri DialogContent top-[15%] tr
 const COMMAND_PALETTE_LIST_MAX_HEIGHT: f32 = 400.0; // Tauri CommandList max-h-[min(50vh,400px)] cap.
 const COMMAND_PALETTE_INPUT_HEIGHT: f32 = 40.0; // Tauri CommandInput h-10.
 const COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT: f32 = 32.0; // Tauri CommandItem py-1.5 + text-sm line height.
+const COMMAND_PALETTE_VIRTUAL_OVERSCAN: usize = 8; // Browser CommandList keeps a small DOM buffer around the viewport.
 const SHORTCUTS_MODAL_LIST_MAX_HEIGHT: f32 = 420.0;
 const SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT: f32 = 32.0;
+const SHORTCUTS_MODAL_VIRTUAL_OVERSCAN: usize = 8; // Tauri shortcuts modal uses the same command-row rhythm.
 const COMMAND_PALETTE_ICON_SLOT: f32 = 16.0; // Tauri CommandInput/CommandItem h-4 w-4 icons.
 const COMMAND_PALETTE_ITEM_GAP: f32 = 10.0; // Tauri CommandItem gap-2.5.
 const COMMAND_PALETTE_SELECTED_ALPHA: u32 = 0x26; // Tauri accent/15.
@@ -676,7 +678,7 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
-        self.open_new_connection_select = None;
+        self.close_new_connection_select();
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -699,7 +701,7 @@ impl WorkspaceApp {
                     self.drill_down_parent_node_id = None;
                     self.editing_saved_connection_id = None;
                     self.saved_connection_prompt_action = None;
-                    self.open_new_connection_select = None;
+                    self.close_new_connection_select();
                     self.new_connection_caret_visible = true;
                     self.needs_active_pane_focus = false;
                     window.focus(&self.focus_handle);
@@ -1047,10 +1049,14 @@ impl WorkspaceApp {
                             .w_full()
                             .h(px(rows_height))
                             .max_h(px(COMMAND_PALETTE_LIST_MAX_HEIGHT))
-                            .child(tracked_uniform_list(
+                            .child(tauri_virtual_uniform_list(
                                 "command-palette-virtual-list",
                                 row_count,
                                 self.command_palette.scroll_handle.clone(),
+                                TauriVirtualListSpec::new(
+                                    px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT),
+                                    COMMAND_PALETTE_VIRTUAL_OVERSCAN,
+                                ),
                                 move |range, _window, cx| {
                                     range
                                         .map(|row_index| {
@@ -1439,10 +1445,14 @@ impl WorkspaceApp {
                             .max_h(px(SHORTCUTS_MODAL_LIST_MAX_HEIGHT))
                             .px(px(16.0))
                             .py(px(4.0))
-                            .child(tracked_uniform_list(
+                            .child(tauri_virtual_uniform_list(
                                 "shortcuts-modal-virtual-list",
                                 row_count,
                                 self.shortcuts_modal.scroll_handle.clone(),
+                                TauriVirtualListSpec::new(
+                                    px(SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT),
+                                    SHORTCUTS_MODAL_VIRTUAL_OVERSCAN,
+                                ),
                                 move |range, _window, cx| {
                                     range
                                         .map(|row_index| {

@@ -32,6 +32,14 @@ impl WorkspaceApp {
         };
     }
 
+    pub(in crate::workspace) fn close_new_connection_select(&mut self) {
+        // Closing a browser select clears both popup ownership and focus-origin
+        // state. Keep new-connection modal selects on the same invariant so a
+        // stale pointer/keyboard origin cannot leak into the next open.
+        self.open_new_connection_select = None;
+        self.new_connection_select_focus_origin = None;
+    }
+
     fn render_connection_hint(&self, text: String) -> AnyElement {
         self.render_connection_hint_with_color(text, self.tokens.ui.text_muted)
     }
@@ -128,33 +136,39 @@ impl WorkspaceApp {
                     ),
                 )
                 .child(
-                    div()
-                        .absolute()
-                        .right(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
-                        .top(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
-                        .size(px(TAURI_PASSWORD_ICON_BUTTON_SIZE))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(self.tokens.radii.sm))
-                        .opacity(if form.password_loading { 0.5 } else { 1.0 })
-                        .cursor_pointer()
-                        .hover({
-                            let bg = rgba((self.tokens.ui.bg_hover << 8) | 0x99);
-                            move |button| button.bg(bg)
-                        })
-                        .child(Self::render_lucide_icon(
+                    icon_button(
+                        &self.tokens,
+                        Self::render_lucide_icon(
                             icon,
                             TAURI_PASSWORD_ICON_SIZE,
                             rgb(self.tokens.ui.text_muted),
-                        ))
-                        .on_mouse_down(
+                        ),
+                        IconButtonOptions {
+                            loading: form.password_loading,
+                            hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
+                            // Tauri places the reveal affordance inside the
+                            // password input as an icon-only toolbar button.
+                            // Keep size/radius/loading in the shared primitive
+                            // so password-like controls do not hand-roll div
+                            // opacity and cursor semantics.
+                            ..IconButtonOptions::opaque_toolbar(
+                                TAURI_PASSWORD_ICON_BUTTON_SIZE,
+                                ButtonRadius::Sm,
+                            )
+                        },
+                    )
+                    .absolute()
+                    .right(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
+                    .top(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
+                    .when(!form.password_loading, |button| {
+                        button.on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _event, _window, cx| {
                                 this.toggle_edit_saved_password_visibility(cx);
                                 cx.stop_propagation();
                             }),
-                        ),
+                        )
+                    }),
                 ),
         )
     }
@@ -192,19 +206,19 @@ impl WorkspaceApp {
                             button: ButtonOptions {
                                 variant: ButtonVariant::Outline,
                                 size: ButtonSize::Sm,
-                                ..ButtonOptions::default()
-                            },
-                            ..ToolbarButtonOptions::default()
-                        },
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.open_new_connection_select = None;
-                            this.pick_new_connection_path(field, cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
+                        ..ButtonOptions::default()
+                    },
+                    ..ToolbarButtonOptions::default()
+                },
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.close_new_connection_select();
+                    this.pick_new_connection_path(field, cx);
+                    cx.stop_propagation();
+                }),
+            ),
                 ),
         )
     }
@@ -258,8 +272,7 @@ impl WorkspaceApp {
             form.selected_field = None;
             form.error = None;
         }
-        self.open_new_connection_select = None;
-        self.new_connection_select_focus_origin = None;
+        self.close_new_connection_select();
         self.ime_marked_text = None;
         cx.notify();
     }
@@ -439,7 +452,7 @@ impl WorkspaceApp {
                         form.focused_field = field;
                         clear_connection_selection(form);
                     }
-                    this.open_new_connection_select = None;
+                    this.close_new_connection_select();
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle);
@@ -497,7 +510,7 @@ impl WorkspaceApp {
                                 form.auth_tab = tab;
                                 clear_connection_selection(form);
                             }
-                            this.open_new_connection_select = None;
+                            this.close_new_connection_select();
                             cx.notify();
                         }),
                     ),
@@ -562,7 +575,7 @@ impl WorkspaceApp {
                             form.auth_tab = tab;
                             clear_connection_selection(form);
                         }
-                        this.open_new_connection_select = None;
+                        this.close_new_connection_select();
                         cx.notify();
                     }),
                 )
@@ -601,7 +614,7 @@ impl WorkspaceApp {
                             form.auth_tab = tab;
                             clear_connection_selection(form);
                         }
-                        this.open_new_connection_select = None;
+                        this.close_new_connection_select();
                         cx.notify();
                     }),
                 ),
@@ -670,7 +683,7 @@ impl WorkspaceApp {
                     if let Some(form) = this.new_connection_form.as_mut() {
                         toggle(form);
                     }
-                    this.open_new_connection_select = None;
+                    this.close_new_connection_select();
                     cx.notify();
                 }),
             )

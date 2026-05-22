@@ -884,14 +884,11 @@ impl WorkspaceApp {
                 },
             ),
             IconButtonOptions {
-                radius: ButtonRadius::Md,
                 disabled,
                 hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x80)),
-                idle_opacity: 1.0,
                 // Tauri AI action buttons are fully opaque until disabled;
                 // keep that feature-specific opacity while sharing the button primitive.
-                disabled_opacity: 0.35,
-                ..IconButtonOptions::compact(30.0)
+                ..IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md)
             },
         );
         button

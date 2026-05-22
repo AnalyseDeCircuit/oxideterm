@@ -685,12 +685,9 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.text_muted),
             ),
             IconButtonOptions {
-                size: 28.0,
-                radius: ButtonRadius::Sm,
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
                 focus_visible,
-                idle_opacity: 1.0,
-                ..IconButtonOptions::compact(28.0)
+                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
             },
         )
     }

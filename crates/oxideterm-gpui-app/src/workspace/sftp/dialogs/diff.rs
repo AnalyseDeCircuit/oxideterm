@@ -159,10 +159,14 @@ impl WorkspaceApp {
                     .when(line_count > 0, |body| {
                         let diff_lines = diff_lines.clone();
                         body.child(
-                            tracked_uniform_list(
+                            tauri_virtual_uniform_list(
                                 "sftp-diff-virtual-list",
                                 line_count,
                                 diff_scroll,
+                                TauriVirtualListSpec::new(
+                                    px(SFTP_DIFF_ROW_HEIGHT),
+                                    SFTP_DIFF_VIRTUAL_OVERSCAN,
+                                ),
                                 move |range, _window, _cx| {
                                     range
                                         .map(|index| {

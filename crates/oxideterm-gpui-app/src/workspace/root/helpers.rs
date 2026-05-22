@@ -241,6 +241,26 @@ impl WorkspaceApp {
         )
     }
 
+    fn workspace_context_menu_styled_action(
+        &self,
+        item: gpui::Div,
+        disabled: bool,
+        loading: bool,
+        style: oxideterm_gpui_ui::context_menu::ContextMenuActionableStyle,
+        close_menu: impl Fn(&mut Self) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        // Closing Radix menu items share the same row hover/disabled/loading
+        // state as persistent checkbox-style items, but run a close callback
+        // before the action. Keep that two-step behavior centralized so file,
+        // SFTP, session, and terminal menus do not compose guards manually.
+        let item = oxideterm_gpui_ui::context_menu::context_menu_actionable_row(
+            item, disabled, loading, style,
+        );
+        self.workspace_context_menu_action(item, disabled, loading, close_menu, listener, cx)
+    }
+
     fn workspace_context_menu_persistent_action(
         &self,
         item: gpui::Div,
@@ -258,6 +278,24 @@ impl WorkspaceApp {
             listener,
             cx,
         )
+    }
+
+    fn workspace_context_menu_persistent_styled_action(
+        &self,
+        item: gpui::Div,
+        disabled: bool,
+        loading: bool,
+        style: oxideterm_gpui_ui::context_menu::ContextMenuActionableStyle,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        // Checkbox-like Radix menu rows, such as terminal broadcast targets,
+        // keep the menu open after activation but must still share the same
+        // disabled/loading guard and hover semantics as closing menu items.
+        let item = oxideterm_gpui_ui::context_menu::context_menu_actionable_row(
+            item, disabled, loading, style,
+        );
+        self.workspace_context_menu_persistent_action(item, disabled, loading, listener, cx)
     }
 
     fn workspace_context_menu_action_with_dismissal(
@@ -735,8 +773,7 @@ impl WorkspaceApp {
         // Tauri dialogs are Radix modal roots: opening one dismisses background
         // popovers and input focus before the overlay starts trapping events.
         self.open_settings_select = None;
-        self.open_new_connection_select = None;
-        self.new_connection_select_focus_origin = None;
+        self.close_new_connection_select();
         // Cloud Sync provider/config selects are Radix-like transient popovers;
         // a modal boundary must release both the open menu and the trigger
         // focus owner so keyboard rings do not leak behind the dialog.
@@ -774,6 +811,7 @@ impl WorkspaceApp {
         }
         if self.connection_monitor.selector_open {
             self.connection_monitor.selector_open = false;
+            self.connection_monitor.selector_highlighted_index = None;
             self.connection_monitor.selector_focus_origin = None;
             changed = true;
         }

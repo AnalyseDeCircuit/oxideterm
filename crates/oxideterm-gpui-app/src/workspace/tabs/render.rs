@@ -687,12 +687,12 @@ fn terminal_legacy_icon_button(
         tokens,
         WorkspaceApp::render_lucide_icon(icon, 14.0, rgb(theme.text_muted)),
         oxideterm_gpui_ui::button::IconButtonOptions {
-            size: 24.0,
-            radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
             disabled: !enabled,
             hover_background: Some(rgb(theme.bg_hover)),
-            idle_opacity: 1.0,
-            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+            ..oxideterm_gpui_ui::button::IconButtonOptions::opaque_toolbar(
+                24.0,
+                oxideterm_gpui_ui::button::ButtonRadius::Md,
+            )
         },
     )
 }

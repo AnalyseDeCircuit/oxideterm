@@ -13,6 +13,35 @@ const TAURI_SELECT_TRIGGER_BG_ALPHA: u32 = 0x80;
 const TAURI_INLINE_SELECT_SELECTED_BG_ALPHA: u32 = 0x1f;
 const TAURI_INLINE_SELECT_HIGHLIGHT_BG_ALPHA: u32 = 0x26;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SelectTriggerChromeSpec {
+    cursor: CursorStyle,
+    opacity: f32,
+    show_chevron: bool,
+}
+
+fn interactive_select_trigger_spec(disabled: bool) -> SelectTriggerChromeSpec {
+    SelectTriggerChromeSpec {
+        cursor: if disabled {
+            CursorStyle::OperationNotAllowed
+        } else {
+            CursorStyle::PointingHand
+        },
+        opacity: if disabled { 0.5 } else { 1.0 },
+        show_chevron: true,
+    }
+}
+
+fn readonly_value_trigger_spec() -> SelectTriggerChromeSpec {
+    // Read-only settings values borrow the select field chrome from Tauri, but
+    // they must not advertise popup affordance or click ownership.
+    SelectTriggerChromeSpec {
+        cursor: CursorStyle::Arrow,
+        opacity: 1.0,
+        show_chevron: false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SelectAnchorId {
     SettingsLanguage,
@@ -172,17 +201,14 @@ pub fn select_trigger(
     placeholder: bool,
     disabled: bool,
 ) -> Div {
+    let spec = interactive_select_trigger_spec(disabled);
     select_trigger_chrome(
         tokens,
         value.into(),
         placeholder,
-        if disabled {
-            CursorStyle::OperationNotAllowed
-        } else {
-            CursorStyle::PointingHand
-        },
-        if disabled { 0.5 } else { 1.0 },
-        true,
+        spec.cursor,
+        spec.opacity,
+        spec.show_chevron,
     )
 }
 
@@ -208,7 +234,15 @@ pub fn readonly_value_trigger(tokens: &ThemeTokens, value: impl Into<String>) ->
     // that styling on a separate primitive so read-only values do not inherit
     // popup ownership, disabled affordance, or clickable cursor semantics from
     // true SelectTrigger instances.
-    select_trigger_chrome(tokens, value.into(), false, CursorStyle::Arrow, 1.0, true)
+    let spec = readonly_value_trigger_spec();
+    select_trigger_chrome(
+        tokens,
+        value.into(),
+        false,
+        spec.cursor,
+        spec.opacity,
+        spec.show_chevron,
+    )
 }
 
 pub fn select_inline_trigger_chrome(
@@ -245,15 +279,16 @@ pub fn select_inline_trigger_chrome(
 
 pub fn select_inline_menu(tokens: &ThemeTokens) -> Div {
     // Inline menus are rendered in-flow instead of through a portal, but still
-    // use SelectContent's panel chrome and wheel island behavior.
-    div()
-        .w_full()
-        .rounded(px(tokens.radii.md))
-        .border_1()
-        .border_color(rgb(tokens.ui.border))
-        .bg(rgb(tokens.ui.bg_panel))
-        .overflow_hidden()
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+    // use SelectContent's panel chrome and event-island behavior.
+    select_event_boundary(
+        div()
+            .w_full()
+            .rounded(px(tokens.radii.md))
+            .border_1()
+            .border_color(rgb(tokens.ui.border))
+            .bg(rgb(tokens.ui.bg_panel))
+            .overflow_hidden(),
+    )
 }
 
 pub fn select_inline_option_row(tokens: &ThemeTokens, selected: bool, highlighted: bool) -> Div {
@@ -347,6 +382,8 @@ pub fn select_popup_with_max_height(
     width: f32,
     max_height: f32,
 ) -> Stateful<Div> {
+    // Radix SelectContent is portal-hosted and pointer/wheel input inside it
+    // does not bubble to the trigger row, scroll container, or terminal behind.
     div()
         .id("select-popup-scroll")
         .min_w(px(width.max(tokens.metrics.ui_select_min_width)))
@@ -359,7 +396,25 @@ pub fn select_popup_with_max_height(
         .p(px(tokens.metrics.ui_menu_padding))
         .text_color(rgb(tokens.ui.text))
         .shadow_lg()
+        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+            cx.stop_propagation();
+        })
+        .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+            cx.stop_propagation();
+        })
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+}
+
+pub fn select_event_boundary(menu: Div) -> Div {
+    // Custom select-like popups share SelectContent's event-island semantics
+    // even when a feature needs bespoke sizing or positioning.
+    menu.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+        cx.stop_propagation();
+    })
+    .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+        cx.stop_propagation();
+    })
+    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
 }
 
 pub fn select_panel_popup_with_max_height(
@@ -394,6 +449,22 @@ pub fn select_option(tokens: &ThemeTokens, label: impl Into<String>, selected: b
     select_item(tokens, label, selected)
         .cursor_pointer()
         .hover(|item| item.bg(rgb(tokens.ui.bg_hover)))
+}
+
+pub fn select_option_highlighted(
+    tokens: &ThemeTokens,
+    label: impl Into<String>,
+    selected: bool,
+    highlighted: bool,
+) -> Div {
+    // Radix SelectItem keeps keyboard highlight separate from the selected
+    // checkmark. Expose that state for portal/select popups that are not using
+    // the inline select row primitive.
+    select_option(tokens, label, selected).when(highlighted && !selected, |item| {
+        item.bg(rgba(
+            (tokens.ui.bg_hover << 8) | TAURI_INLINE_SELECT_HIGHLIGHT_BG_ALPHA,
+        ))
+    })
 }
 
 pub fn select_option_is_actionable(disabled: bool, loading: bool) -> bool {
@@ -485,7 +556,11 @@ fn elevated_background(tokens: &ThemeTokens) -> gpui::Rgba {
 
 #[cfg(test)]
 mod tests {
-    use super::select_option_is_actionable;
+    use gpui::CursorStyle;
+
+    use super::{
+        interactive_select_trigger_spec, readonly_value_trigger_spec, select_option_is_actionable,
+    };
 
     #[test]
     fn select_option_action_guard_blocks_disabled_or_loading_rows() {
@@ -493,5 +568,18 @@ mod tests {
         assert!(!select_option_is_actionable(true, false));
         assert!(!select_option_is_actionable(false, true));
         assert!(!select_option_is_actionable(true, true));
+    }
+
+    #[test]
+    fn readonly_value_trigger_does_not_expose_select_affordance() {
+        let readonly = readonly_value_trigger_spec();
+        assert_eq!(readonly.cursor, CursorStyle::Arrow);
+        assert_eq!(readonly.opacity, 1.0);
+        assert!(!readonly.show_chevron);
+
+        let interactive = interactive_select_trigger_spec(false);
+        assert_eq!(interactive.cursor, CursorStyle::PointingHand);
+        assert_eq!(interactive.opacity, 1.0);
+        assert!(interactive.show_chevron);
     }
 }

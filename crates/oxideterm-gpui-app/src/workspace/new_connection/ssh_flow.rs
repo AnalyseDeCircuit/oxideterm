@@ -109,7 +109,7 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
-        self.open_new_connection_select = None;
+        self.close_new_connection_select();
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -150,7 +150,7 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = Some(parent_node_id);
         self.editing_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
-        self.open_new_connection_select = None;
+        self.close_new_connection_select();
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -166,7 +166,7 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
-        self.open_new_connection_select = None;
+        self.close_new_connection_select();
         self.host_key_challenge = None;
         self.cancel_keyboard_interactive_challenge(cx);
         self.focus_active_pane(window, cx);
@@ -307,7 +307,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.saved_connection_prompt_action = Some(action);
-        self.open_new_connection_select = None;
+        self.close_new_connection_select();
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -328,7 +328,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.saved_connection_prompt_action = None;
-        self.open_new_connection_select = None;
+        self.close_new_connection_select();
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -391,7 +391,7 @@ impl WorkspaceApp {
                     Ok(_) => {
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
-                        self.open_new_connection_select = None;
+                        self.close_new_connection_select();
                         self.session_manager.status =
                             Some(self.i18n.t("sessionManager.edit_properties.save"));
                         self.queue_cloud_sync_dirty_refresh(cx);
@@ -825,7 +825,7 @@ impl WorkspaceApp {
                 };
                 self.new_connection_form = None;
                 self.host_key_challenge = None;
-                self.open_new_connection_select = None;
+                self.close_new_connection_select();
                 if config
                     .proxy_chain
                     .as_ref()
@@ -869,7 +869,7 @@ impl WorkspaceApp {
                     self.new_connection_form = None;
                     self.editing_saved_connection_id = None;
                     self.saved_connection_prompt_action = None;
-                    self.open_new_connection_select = None;
+                    self.close_new_connection_select();
                 }
                 let _ = self.connection_store.mark_used(&id);
                 self.session_manager.status = None;
@@ -908,7 +908,7 @@ impl WorkspaceApp {
                 self.active_ssh_node_id = Some(child_id.clone());
                 self.new_connection_form = None;
                 self.drill_down_parent_node_id = None;
-                self.open_new_connection_select = None;
+                self.close_new_connection_select();
                 self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
                 self.ensure_node_connection_started(&child_id);
                 self.persist_session_tree_snapshot();

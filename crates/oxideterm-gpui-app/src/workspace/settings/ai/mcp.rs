@@ -321,14 +321,12 @@ impl WorkspaceApp {
             &self.tokens,
             Self::render_lucide_icon(icon, AI_MCP_ACTION_ICON, icon_color),
             IconButtonOptions {
-                radius: ButtonRadius::Md,
                 disabled,
                 hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x80)),
-                idle_opacity: 1.0,
                 // MCP cards map Tauri disabled icon actions (`opacity-50`) while
                 // reusing the shared icon button action surface.
                 disabled_opacity: 0.5,
-                ..IconButtonOptions::compact(AI_MCP_CARD_ICON_BUTTON)
+                ..IconButtonOptions::opaque_toolbar(AI_MCP_CARD_ICON_BUTTON, ButtonRadius::Md)
             },
         );
         button
@@ -360,46 +358,51 @@ impl WorkspaceApp {
         } else {
             LucideIcon::Radio
         };
-        div()
-            .h(px(AI_MCP_CARD_ACTION_H))
-            .px(px(AI_MCP_CARD_ACTION_PX))
-            .rounded(px(self.tokens.radii.md))
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(4.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .opacity(if connecting { 0.5 } else { 1.0 })
-            .when(!connecting, |button| {
-                button
-                    .cursor_pointer()
-                    .hover(|style| style.bg(rgba((self.tokens.ui.bg_hover << 8) | 0x80)))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            let registry = this.ai_mcp_registry.clone();
-                            let config = config.clone();
-                            cx.spawn(async move |weak, cx| {
-                                if connected {
-                                    registry.disconnect_server(&config.id).await;
-                                } else {
-                                    registry.connect_config(config).await;
-                                }
-                                let _ = weak.update(cx, |_this, cx| cx.notify());
-                            })
-                            .detach();
-                            cx.stop_propagation();
-                        }),
-                    )
-            })
-            .child(Self::render_lucide_icon(
+        let mut options = ToolbarButtonOptions::compact_text(
+            ButtonVariant::Ghost,
+            ButtonRadius::Md,
+            AI_MCP_CARD_ACTION_H,
+            AI_MCP_CARD_ACTION_PX,
+            self.tokens.metrics.ui_text_xs,
+        );
+        options.button.disabled = connecting;
+        options.icon_gap = Some(4.0);
+        options.text_color = Some(rgb(self.tokens.ui.text));
+        options.hover_background = Some(rgba((self.tokens.ui.bg_hover << 8) | 0x80));
+        // Tauri MCP connect/disconnect is a compact shadcn-style card action.
+        // Keep loading/disabled behavior in the shared button primitive so the
+        // connecting state cannot still submit.
+        options.loading = connecting;
+        let button = toolbar_button(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(
                 icon,
                 AI_MCP_ACTION_ICON,
                 rgb(self.tokens.ui.text),
-            ))
-            .child(label)
+            )),
+            options,
+        );
+        button
+            .when(!connecting, |button| {
+                button.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        let registry = this.ai_mcp_registry.clone();
+                        let config = config.clone();
+                        cx.spawn(async move |weak, cx| {
+                            if connected {
+                                registry.disconnect_server(&config.id).await;
+                            } else {
+                                registry.connect_config(config).await;
+                            }
+                            let _ = weak.update(cx, |_this, cx| cx.notify());
+                        })
+                        .detach();
+                        cx.stop_propagation();
+                    }),
+                )
+            })
             .into_any_element()
     }
 

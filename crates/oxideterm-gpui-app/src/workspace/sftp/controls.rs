@@ -60,22 +60,9 @@ impl WorkspaceApp {
         icon_button(
             &self.tokens,
             Self::render_lucide_icon(icon, SFTP_ICON_SM, rgb(self.tokens.ui.text)),
-            IconButtonOptions {
-                size: SFTP_TOOL_BUTTON,
-                radius: ButtonRadius::Md,
-                disabled: false,
-                loading: false,
-                has_background: false,
-                background: None,
-                border: None,
-                hover_background: None,
-                hover_opacity: None,
-                focus_visible: false,
-                // Tauri SFTP toolbar buttons render normal opacity; disabled
-                // states are handled by callers that omit the action.
-                idle_opacity: 1.0,
-                disabled_opacity: 0.35,
-            },
+            // Tauri SFTP toolbar buttons render normal opacity; disabled states
+            // are handled by callers that omit the action.
+            IconButtonOptions::opaque_toolbar(SFTP_TOOL_BUTTON, ButtonRadius::Md),
         )
             .id((gpui::ElementId::from("sftp-icon-button"), title_element_id))
             .flex_none()
@@ -155,19 +142,16 @@ impl WorkspaceApp {
                 rgb(theme.text),
             )),
             ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Sm,
-                    disabled: false,
-                },
                 icon_gap: Some(4.0),
-                height: Some(24.0),
-                padding_x: Some(8.0),
-                font_size: Some(SFTP_TEXT_XS),
                 text_color: Some(rgb(theme.text)),
                 hover_background: Some(rgb(theme.bg_hover)),
-                ..ToolbarButtonOptions::default()
+                ..ToolbarButtonOptions::compact_text(
+                    ButtonVariant::Ghost,
+                    ButtonRadius::Sm,
+                    24.0,
+                    8.0,
+                    SFTP_TEXT_XS,
+                )
             },
         )
             .on_mouse_down(
@@ -232,21 +216,18 @@ impl WorkspaceApp {
             label,
             None,
             ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
                 background: Some(bg),
                 border: Some(border),
                 text_color: Some(text),
                 hover_background: Some(hover_bg),
                 hover_opacity,
-                height: Some(32.0),
-                padding_x: Some(12.0),
-                font_size: Some(SFTP_TEXT_XS),
-                ..ToolbarButtonOptions::default()
+                ..ToolbarButtonOptions::compact_text(
+                    ButtonVariant::Ghost,
+                    ButtonRadius::Md,
+                    32.0,
+                    12.0,
+                    SFTP_TEXT_XS,
+                )
             },
         )
             .on_mouse_down(MouseButton::Left, listener)

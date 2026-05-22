@@ -336,23 +336,46 @@ impl WorkspaceApp {
             // The monitor selector is pointer-opened today, but it should use
             // the same modality gate as other native Select triggers.
             browser_behavior::browser_focus_visible(
-                self.connection_monitor.selector_open,
+                self.connection_monitor.selector_focus_origin.is_some(),
                 self.connection_monitor.selector_focus_origin,
             ),
         )
         .font_family("monospace");
+        let selected_index = monitor_connection_selected_index(connections, selected_id);
         let mut wrapper = div().relative().mb_4().child(trigger.on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {
                 this.connection_monitor.selector_focus_origin =
                     Some(browser_behavior::BrowserFocusOrigin::Pointer);
-                this.connection_monitor.selector_open = !this.connection_monitor.selector_open;
+                if this.connection_monitor.selector_open {
+                    this.connection_monitor.selector_open = false;
+                    this.connection_monitor.selector_highlighted_index = None;
+                } else {
+                    let connections = this.monitor_connections();
+                    let selected_id = this
+                        .connection_monitor
+                        .selected_connection_id
+                        .as_deref()
+                        .unwrap_or_else(|| {
+                            connections
+                                .first()
+                                .map(|connection| connection.connection_id.as_str())
+                                .unwrap_or_default()
+                        });
+                    this.connection_monitor.selector_highlighted_index =
+                        Some(monitor_connection_selected_index(&connections, selected_id));
+                    this.connection_monitor.selector_open = true;
+                }
                 cx.stop_propagation();
                 cx.notify();
             }),
         ));
         if self.connection_monitor.selector_open {
-            let mut popup = div()
+            let highlighted = self
+                .connection_monitor
+                .selector_highlighted_index
+                .unwrap_or(selected_index);
+            let mut popup = select_event_boundary(div()
                 .absolute()
                 .top(px(38.0))
                 .left_0()
@@ -362,26 +385,29 @@ impl WorkspaceApp {
                 .border_color(rgb(self.tokens.ui.border))
                 .bg(rgb(self.tokens.ui.bg_panel))
                 .p_1()
-                .shadow_lg()
-                // Select popups are overlay islands in the browser: pointer
-                // and wheel events inside the list should not leak to the
-                // monitor page or terminal behind it.
-                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                    cx.stop_propagation();
-                })
-                .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                    cx.stop_propagation();
-                })
-                .on_scroll_wheel(|_event, _window, cx| {
-                    cx.stop_propagation();
-                });
-            for connection in connections {
+                .shadow_lg());
+            for (index, connection) in connections.iter().enumerate() {
                 let connection_id = connection.connection_id.clone();
                 let selected = connection.connection_id == selected_id;
+                let highlighted = highlighted == index;
                 popup = popup.child(
                     select_option_action(
-                        select_option(&self.tokens, monitor_connection_label(connection), selected)
+                        select_option_highlighted(
+                            &self.tokens,
+                            monitor_connection_label(connection),
+                            selected,
+                            highlighted,
+                        )
                             .font_family("monospace")
+                            .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
+                                if this.connection_monitor.selector_highlighted_index
+                                    != Some(index)
+                                {
+                                    this.connection_monitor.selector_highlighted_index =
+                                        Some(index);
+                                    cx.notify();
+                                }
+                            }))
                             .child(div().mr_2().child(Self::render_lucide_icon(
                                 LucideIcon::Server,
                                 14.0,
@@ -393,6 +419,7 @@ impl WorkspaceApp {
                             this.connection_monitor.selected_connection_id =
                                 Some(connection_id.clone());
                             this.connection_monitor.selector_open = false;
+                            this.connection_monitor.selector_highlighted_index = None;
                             this.connection_monitor.selector_focus_origin = None;
                             this.sync_connection_monitor_selection(cx);
                             cx.stop_propagation();
@@ -403,6 +430,141 @@ impl WorkspaceApp {
             wrapper = wrapper.child(popup);
         }
         wrapper.into_any_element()
+    }
+
+    pub(super) fn handle_connection_monitor_select_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            return false;
+        }
+        let connections = self.monitor_connections();
+        if connections.is_empty() {
+            return false;
+        }
+        let selected_id = self
+            .connection_monitor
+            .selected_connection_id
+            .as_deref()
+            .unwrap_or(connections[0].connection_id.as_str());
+        let selected_index = monitor_connection_selected_index(&connections, selected_id);
+        let current = self
+            .connection_monitor
+            .selector_highlighted_index
+            .unwrap_or(selected_index);
+
+        if self.connection_monitor.selector_open {
+            return self.handle_open_connection_monitor_select_key(event, &connections, current, cx);
+        }
+
+        match event.keystroke.key.as_str() {
+            "tab" => {
+                // Tauri/Radix exposes the select trigger as a keyboard tab stop.
+                // Native has no DOM focus chain, so the monitor page owns that
+                // first trigger focus explicitly.
+                self.connection_monitor.selector_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
+                cx.notify();
+                true
+            }
+            "enter" | "space" | " " | "arrowdown" | "down"
+                if self.connection_monitor.selector_focus_origin.is_some() =>
+            {
+                self.connection_monitor.selector_open = true;
+                self.connection_monitor.selector_highlighted_index = Some(selected_index);
+                self.connection_monitor.selector_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
+                cx.notify();
+                true
+            }
+            "escape" if self.connection_monitor.selector_focus_origin.is_some() => {
+                self.connection_monitor.selector_focus_origin = None;
+                self.connection_monitor.selector_highlighted_index = None;
+                cx.notify();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_open_connection_monitor_select_key(
+        &mut self,
+        event: &KeyDownEvent,
+        connections: &[oxideterm_ssh::ConnectionInfo],
+        current: usize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.connection_monitor.selector_open = false;
+                self.connection_monitor.selector_highlighted_index = None;
+                self.connection_monitor.selector_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
+                cx.notify();
+                true
+            }
+            "tab" => {
+                self.connection_monitor.selector_open = false;
+                self.connection_monitor.selector_highlighted_index = None;
+                self.connection_monitor.selector_focus_origin = None;
+                cx.notify();
+                true
+            }
+            "arrowdown" | "down" => {
+                self.connection_monitor.selector_highlighted_index =
+                    Some(browser_behavior::browser_select_next_index(
+                        current,
+                        connections.len(),
+                        browser_behavior::BrowserSelectKeyDirection::Next,
+                    ));
+                self.connection_monitor.selector_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
+                cx.notify();
+                true
+            }
+            "arrowup" | "up" => {
+                self.connection_monitor.selector_highlighted_index =
+                    Some(browser_behavior::browser_select_next_index(
+                        current,
+                        connections.len(),
+                        browser_behavior::BrowserSelectKeyDirection::Previous,
+                    ));
+                self.connection_monitor.selector_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
+                cx.notify();
+                true
+            }
+            "home" => {
+                self.connection_monitor.selector_highlighted_index = Some(0);
+                self.connection_monitor.selector_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
+                cx.notify();
+                true
+            }
+            "end" => {
+                self.connection_monitor.selector_highlighted_index =
+                    Some(connections.len().saturating_sub(1));
+                self.connection_monitor.selector_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
+                cx.notify();
+                true
+            }
+            "enter" | "space" | " " => {
+                if let Some(connection) = connections.get(current.min(connections.len() - 1)) {
+                    self.connection_monitor.selected_connection_id =
+                        Some(connection.connection_id.clone());
+                    self.connection_monitor.selector_open = false;
+                    self.connection_monitor.selector_highlighted_index = None;
+                    self.connection_monitor.selector_focus_origin =
+                        Some(browser_behavior::BrowserFocusOrigin::Keyboard);
+                    self.sync_connection_monitor_selection(cx);
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     fn render_monitor_panel_header(

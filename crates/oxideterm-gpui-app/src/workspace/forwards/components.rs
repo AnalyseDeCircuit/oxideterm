@@ -140,11 +140,8 @@ impl WorkspaceApp {
             &self.tokens,
             Self::render_lucide_icon(icon, 13.0, forwards_palette_color(color)),
             IconButtonOptions {
-                size: 28.0,
-                radius: ButtonRadius::Md,
                 has_background,
-                idle_opacity: 1.0,
-                ..IconButtonOptions::compact(28.0)
+                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Md)
             },
         )
             .on_mouse_down(MouseButton::Left, listener)

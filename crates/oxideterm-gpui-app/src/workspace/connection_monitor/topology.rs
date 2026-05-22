@@ -808,7 +808,7 @@ impl WorkspaceApp {
                 ));
         }
 
-        div()
+        context_menu_event_boundary(div()
             .absolute()
             .left(px(menu.x))
             .top(px(menu.y))
@@ -818,18 +818,7 @@ impl WorkspaceApp {
             .border_1()
             .border_color(rgb(theme.border))
             .bg(rgba((theme.bg_elevated << 8) | 0xf2))
-            .shadow_lg()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation()
-            })
-            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                cx.stop_propagation()
-            })
-            .on_scroll_wheel(|_, _, cx| {
-                // Topology menus float over a zoomable canvas; menu wheel
-                // events should stay inside the menu island like Radix.
-                cx.stop_propagation();
-            })
+            .shadow_lg())
             .child(
                 div()
                     .px_3()
@@ -921,7 +910,9 @@ impl WorkspaceApp {
                 theme.text_muted,
                 cx,
             ));
-        let item = context_menu_actionable_row(
+        // Topology node actions are menu items; route invocation, close, and
+        // disabled/loading behavior through the workspace shared menu action.
+        self.workspace_context_menu_styled_action(
             item,
             disabled,
             loading,
@@ -929,13 +920,6 @@ impl WorkspaceApp {
                 hover_background: Some(rgba((theme.accent << 8) | 0x1a)),
                 hover_text_color: Some(rgb(theme.text)),
             },
-        );
-        // Topology node actions are menu items; route invocation, close, and
-        // disabled/loading behavior through the workspace shared menu action.
-        self.workspace_context_menu_action(
-            item,
-            disabled,
-            loading,
             |this| {
                 this.connection_monitor.topology_menu = None;
             },

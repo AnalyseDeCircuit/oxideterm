@@ -77,12 +77,6 @@ struct CloudSyncSelectOption {
     action: CloudSyncSelectAction,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SelectKeyDirection {
-    Previous,
-    Next,
-}
-
 #[derive(Clone, Debug)]
 pub(super) struct CloudSyncFormDraft {
     pub(super) backend_type: BackendType,
@@ -2618,7 +2612,11 @@ impl WorkspaceApp {
             "arrowdown" | "down" => {
                 self.cloud_sync_select_highlighted = Some((
                     select,
-                    radix_select_next_index(current, options.len(), SelectKeyDirection::Next),
+                    browser_behavior::browser_select_next_index(
+                        current,
+                        options.len(),
+                        browser_behavior::BrowserSelectKeyDirection::Next,
+                    ),
                 ));
                 cx.notify();
                 true
@@ -2626,7 +2624,11 @@ impl WorkspaceApp {
             "arrowup" | "up" => {
                 self.cloud_sync_select_highlighted = Some((
                     select,
-                    radix_select_next_index(current, options.len(), SelectKeyDirection::Previous),
+                    browser_behavior::browser_select_next_index(
+                        current,
+                        options.len(),
+                        browser_behavior::BrowserSelectKeyDirection::Previous,
+                    ),
                 ));
                 cx.notify();
                 true
@@ -2851,37 +2853,37 @@ impl WorkspaceApp {
         &self,
         label_key: &str,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .h(px(36.0))
-            .px(px(12.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_panel))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(theme.text_muted))
-            .cursor_pointer()
-            .hover(|style| {
-                style
-                    .bg(rgb(self.tokens.ui.bg_hover))
-                    .text_color(rgb(self.tokens.ui.text))
-            })
-            .on_mouse_down(MouseButton::Left, listener)
-            .child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "cloud-sync-inline-button",
-                label_key,
-                self.i18n.t(label_key),
-                theme.text_muted,
-                cx,
-            ))
-            .into_any_element()
+        // Cloud Sync inline actions are shadcn-style outline buttons in Tauri;
+        // keep their chrome on the shared toolbar primitive instead of local
+        // div/button styling.
+        toolbar_button(
+            &self.tokens,
+            self.i18n.t(label_key),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                background: Some(rgb(theme.bg_panel)),
+                border: Some(rgb(theme.border)),
+                text_color: Some(rgb(theme.text_muted)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                hover_text_color: Some(rgb(theme.text)),
+                height: Some(36.0),
+                padding_x: Some(12.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                ..ToolbarButtonOptions::default()
+            },
+        )
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, listener)
+        .into_any_element()
     }
 
     fn save_cloud_sync_configuration(&mut self, cx: &mut Context<Self>) {
@@ -5397,20 +5399,6 @@ fn cloud_sync_platform_label() -> &'static str {
     }
 }
 
-fn radix_select_next_index(
-    current: usize,
-    option_count: usize,
-    direction: SelectKeyDirection,
-) -> usize {
-    if option_count == 0 {
-        return 0;
-    }
-    match direction {
-        SelectKeyDirection::Previous => current.saturating_sub(1),
-        SelectKeyDirection::Next => (current + 1).min(option_count - 1),
-    }
-}
-
 fn next_cloud_sync_select_focus(
     selects: &[CloudSyncSelect],
     current: CloudSyncSelect,
@@ -5512,17 +5500,6 @@ mod cloud_sync_preview_selection_tests {
         );
         assert!(!selection.can_apply(&summary));
         assert!(!legacy_apply_covers_full_remote(&summary, &selection));
-    }
-
-    #[test]
-    fn radix_select_keyboard_navigation_clamps_like_native_select() {
-        assert_eq!(
-            radix_select_next_index(0, 3, SelectKeyDirection::Previous),
-            0
-        );
-        assert_eq!(radix_select_next_index(0, 3, SelectKeyDirection::Next), 1);
-        assert_eq!(radix_select_next_index(2, 3, SelectKeyDirection::Next), 2);
-        assert_eq!(radix_select_next_index(0, 0, SelectKeyDirection::Next), 0);
     }
 
     #[test]

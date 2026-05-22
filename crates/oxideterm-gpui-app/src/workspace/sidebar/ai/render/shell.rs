@@ -652,32 +652,32 @@ impl WorkspaceApp {
         action: AiContextWarningAction,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        const AI_CONTEXT_WARNING_BUTTON_H: f32 = 18.0; // Tauri inline warning actions h-[18px].
+        const AI_CONTEXT_WARNING_BUTTON_PX: f32 = 8.0; // Tauri inline warning actions px-2.
+        const AI_CONTEXT_WARNING_BUTTON_TEXT: f32 = 10.0; // Tauri inline warning actions text-[10px].
+
         let label = label.into();
         let text_color = if disabled { 0xb78322 } else { 0xfbbf24 };
+        let mut options = ToolbarButtonOptions::compact_text(
+            ButtonVariant::Ghost,
+            ButtonRadius::Md,
+            AI_CONTEXT_WARNING_BUTTON_H,
+            AI_CONTEXT_WARNING_BUTTON_PX,
+            AI_CONTEXT_WARNING_BUTTON_TEXT,
+        );
+        options.button.disabled = disabled;
+        options.icon_gap = Some(4.0);
+        options.text_color = Some(rgb(text_color));
+        options.hover_background = Some(rgba((0xf59e0b << 8) | 0x1a));
+        options.hover_text_color = Some(rgb(0xfcd34d));
+        // Context warning buttons are compact inline actions rather than full
+        // footer buttons, but they still share disabled and hover semantics
+        // with the button primitive.
         toolbar_button(
             &self.tokens,
             label,
             Some(Self::render_lucide_icon(icon, 12.0, rgb(0xfbbf24))),
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled,
-                },
-                show_label: true,
-                icon_gap: Some(4.0),
-                height: Some(18.0),
-                padding_x: Some(8.0),
-                font_size: Some(10.0),
-                text_color: Some(rgb(text_color)),
-                hover_background: Some(rgba((0xf59e0b << 8) | 0x1a)),
-                hover_text_color: Some(rgb(0xfcd34d)),
-                // Context warning buttons are compact inline actions rather
-                // than full footer buttons, but they still share disabled and
-                // hover semantics with the button primitive.
-                ..ToolbarButtonOptions::default()
-            },
+            options,
         )
             .on_mouse_down(
                 MouseButton::Left,

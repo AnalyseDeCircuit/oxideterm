@@ -20,6 +20,29 @@ pub(crate) fn browser_focus_visible(focused: bool, origin: Option<BrowserFocusOr
     focused && origin.is_some_and(BrowserFocusOrigin::is_focus_visible)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BrowserSelectKeyDirection {
+    Previous,
+    Next,
+}
+
+pub(crate) fn browser_select_next_index(
+    current: usize,
+    option_count: usize,
+    direction: BrowserSelectKeyDirection,
+) -> usize {
+    // Radix Select clamps keyboard highlight movement at the first/last item.
+    // Keep the clamp shared so Cloud Sync, new connection, and future native
+    // selects do not each define their own arrow-key boundary behavior.
+    if option_count == 0 {
+        return 0;
+    }
+    match direction {
+        BrowserSelectKeyDirection::Previous => current.saturating_sub(1),
+        BrowserSelectKeyDirection::Next => (current + 1).min(option_count - 1),
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FocusCycle<'a, T> {
     actions: &'a [T],
@@ -101,6 +124,14 @@ pub(crate) enum ModalFooterKeyAction<T> {
 pub(crate) enum ModalFooterInputKeyAction<T> {
     Cancel,
     FocusInput,
+    FocusFooter(T),
+    Activate(T),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ModalFooterBodyInputKeyAction<T, I> {
+    Cancel,
+    FocusInput(I),
     FocusFooter(T),
     Activate(T),
 }
@@ -198,6 +229,86 @@ where
         "enter" | "space" | " " => current
             .or(activation_fallback)
             .map(ModalFooterInputKeyAction::Activate),
+        _ => None,
+    }
+}
+
+pub(crate) fn modal_footer_body_input_key_action<T, I>(
+    key: &str,
+    shift: bool,
+    actions: &[T],
+    current_footer: Option<T>,
+    inputs: &[I],
+    current_input: Option<I>,
+    fallback: T,
+    activation_fallback: Option<T>,
+) -> Option<ModalFooterBodyInputKeyAction<T, I>>
+where
+    T: Copy + Eq,
+    I: Copy + Eq,
+{
+    // Dialogs with several body inputs need browser focus edges, not a single
+    // "input vs footer" bit: Tab from the last body input enters the footer,
+    // Shift+Tab from the first footer action returns to the last body input,
+    // and inner body-to-body movement is left to the owning input group.
+    match key {
+        "escape" => Some(ModalFooterBodyInputKeyAction::Cancel),
+        "tab" => {
+            let forward = modal_footer_key_moves_forward(key, shift);
+            if let Some(input) = current_input {
+                let Some(index) = inputs.iter().position(|candidate| *candidate == input) else {
+                    return None;
+                };
+                if forward {
+                    if let Some(next_input) = inputs.get(index + 1).copied() {
+                        return Some(ModalFooterBodyInputKeyAction::FocusInput(next_input));
+                    }
+                    return Some(ModalFooterBodyInputKeyAction::FocusFooter(
+                        next_required_modal_footer_focus(actions, None, forward, fallback),
+                    ));
+                }
+
+                if let Some(previous) = index.checked_sub(1).and_then(|i| inputs.get(i).copied()) {
+                    return Some(ModalFooterBodyInputKeyAction::FocusInput(previous));
+                }
+                return Some(ModalFooterBodyInputKeyAction::FocusFooter(
+                    next_required_modal_footer_focus(actions, None, forward, fallback),
+                ));
+            }
+
+            if let (Some(first), Some(last)) = (inputs.first().copied(), inputs.last().copied()) {
+                let first_action = actions.first().copied().unwrap_or(fallback);
+                let last_action = actions.last().copied().unwrap_or(fallback);
+                if current_footer == Some(first_action) && !forward {
+                    return Some(ModalFooterBodyInputKeyAction::FocusInput(last));
+                }
+                if current_footer == Some(last_action) && forward {
+                    return Some(ModalFooterBodyInputKeyAction::FocusInput(first));
+                }
+            }
+
+            Some(ModalFooterBodyInputKeyAction::FocusFooter(
+                next_required_modal_footer_focus(actions, current_footer, forward, fallback),
+            ))
+        }
+        "arrowleft" | "left" | "arrowright" | "right" | "home" | "end"
+            if current_input.is_none() =>
+        {
+            modal_footer_key_action(key, shift, actions, current_footer, fallback).map(|action| {
+                match action {
+                    ModalFooterKeyAction::Cancel => ModalFooterBodyInputKeyAction::Cancel,
+                    ModalFooterKeyAction::Focus(action) => {
+                        ModalFooterBodyInputKeyAction::FocusFooter(action)
+                    }
+                    ModalFooterKeyAction::Activate(action) => {
+                        ModalFooterBodyInputKeyAction::Activate(action)
+                    }
+                }
+            })
+        }
+        "enter" | "space" | " " if current_input.is_none() => current_footer
+            .or(activation_fallback)
+            .map(ModalFooterBodyInputKeyAction::Activate),
         _ => None,
     }
 }
@@ -430,6 +541,26 @@ mod tests {
     }
 
     #[test]
+    fn browser_select_next_index_clamps_like_radix_select() {
+        assert_eq!(
+            super::browser_select_next_index(0, 3, super::BrowserSelectKeyDirection::Previous),
+            0
+        );
+        assert_eq!(
+            super::browser_select_next_index(0, 3, super::BrowserSelectKeyDirection::Next),
+            1
+        );
+        assert_eq!(
+            super::browser_select_next_index(2, 3, super::BrowserSelectKeyDirection::Next),
+            2
+        );
+        assert_eq!(
+            super::browser_select_next_index(0, 0, super::BrowserSelectKeyDirection::Next),
+            0
+        );
+    }
+
+    #[test]
     fn focus_cycle_uses_browser_footer_order() {
         let actions = ["cancel", "confirm", "extra"];
         let cycle = FocusCycle::new(&actions);
@@ -567,6 +698,64 @@ mod tests {
                 Some("confirm")
             ),
             Some(super::ModalFooterInputKeyAction::Activate("confirm"))
+        );
+    }
+
+    #[test]
+    fn modal_footer_body_input_key_action_keeps_multi_input_edges_browser_like() {
+        let actions = ["cancel", "confirm"];
+
+        assert_eq!(
+            super::modal_footer_body_input_key_action(
+                "tab",
+                false,
+                &actions,
+                None,
+                &["first", "middle", "last"],
+                Some("last"),
+                "cancel",
+                None,
+            ),
+            Some(super::ModalFooterBodyInputKeyAction::FocusFooter("cancel"))
+        );
+        assert_eq!(
+            super::modal_footer_body_input_key_action(
+                "tab",
+                true,
+                &actions,
+                Some("cancel"),
+                &["first", "middle", "last"],
+                None,
+                "cancel",
+                None,
+            ),
+            Some(super::ModalFooterBodyInputKeyAction::FocusInput("last"))
+        );
+        assert_eq!(
+            super::modal_footer_body_input_key_action(
+                "tab",
+                false,
+                &actions,
+                Some("confirm"),
+                &["first", "middle", "last"],
+                None,
+                "cancel",
+                None,
+            ),
+            Some(super::ModalFooterBodyInputKeyAction::FocusInput("first"))
+        );
+        assert_eq!(
+            super::modal_footer_body_input_key_action(
+                "tab",
+                false,
+                &actions,
+                None,
+                &["first", "middle", "last"],
+                Some("first"),
+                "cancel",
+                None,
+            ),
+            Some(super::ModalFooterBodyInputKeyAction::FocusInput("middle"))
         );
     }
 }

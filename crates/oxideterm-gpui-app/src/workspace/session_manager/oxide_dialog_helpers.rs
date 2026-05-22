@@ -208,6 +208,36 @@ fn oxide_import_footer_actions(dialog: &OxideImportDialogState) -> Vec<OxideDial
     }
 }
 
+const OXIDE_IMPORT_FOOTER_BODY_INPUTS: [SessionManagerInput; 1] =
+    [SessionManagerInput::OxideImportPassword];
+const OXIDE_EXPORT_FOOTER_BODY_INPUTS: [SessionManagerInput; 3] = [
+    SessionManagerInput::OxideExportDescription,
+    SessionManagerInput::OxideExportPassword,
+    SessionManagerInput::OxideExportConfirmPassword,
+];
+
+fn oxide_import_footer_body_inputs(dialog: &OxideImportDialogState) -> &'static [SessionManagerInput] {
+    // The decrypt password field is the only text input in the import stage
+    // before preview/result. Keep its focus edge explicit so footer Tab order
+    // does not leave the IME/input owner active behind a focused footer button.
+    if dialog.file_data.is_some() && dialog.preview.is_none() && dialog.result.is_none() {
+        &OXIDE_IMPORT_FOOTER_BODY_INPUTS
+    } else {
+        &[]
+    }
+}
+
+fn oxide_export_footer_body_inputs(dialog: &OxideExportDialogState) -> &'static [SessionManagerInput] {
+    // Tauri export modal body tab order reaches description before password
+    // and confirm-password. Native tracks that order explicitly because GPUI
+    // does not provide DOM tab stops for these custom-rendered inputs.
+    if dialog.busy {
+        &[]
+    } else {
+        &OXIDE_EXPORT_FOOTER_BODY_INPUTS
+    }
+}
+
 fn import_preview_selectable_names(preview: &ImportPreview) -> HashSet<String> {
     let mut names = HashSet::new();
     names.extend(preview.unchanged.iter().cloned());

@@ -556,7 +556,7 @@ impl WorkspaceApp {
                                                                     save_connection;
                                                                 let _ = this.settings_store.save();
                                                             }
-                                                            this.open_new_connection_select = None;
+                                                            this.close_new_connection_select();
                                                             cx.notify();
                                                         }),
                                                     ),

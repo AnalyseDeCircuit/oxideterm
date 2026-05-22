@@ -183,17 +183,6 @@ impl WorkspaceApp {
             label.into(),
             None,
             ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Secondary,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Sm,
-                    disabled: false,
-                },
-                show_label: true,
-                height: Some(28.0),
-                min_width: Some(28.0),
-                padding_x: Some(8.0),
-                font_size: Some(SFTP_TEXT_XS),
                 background: Some(if active {
                     rgb(theme.bg_hover)
                 } else {
@@ -202,10 +191,17 @@ impl WorkspaceApp {
                 text_color: Some(text_color),
                 hover_background: Some(rgb(theme.bg_hover)),
                 hover_text_color: Some(rgb(theme.text)),
-                ..ToolbarButtonOptions::default()
+                ..ToolbarButtonOptions::compact_text_min_width(
+                    ButtonVariant::Secondary,
+                    ButtonRadius::Sm,
+                    28.0,
+                    28.0,
+                    8.0,
+                    SFTP_TEXT_XS,
+                )
             },
         )
-            .on_mouse_down(MouseButton::Left, on_click)
+        .on_mouse_down(MouseButton::Left, on_click)
             .into_any_element()
     }
 
@@ -265,10 +261,14 @@ impl WorkspaceApp {
             .size_full()
             .bg(rgb(theme.bg_sunken))
             .child(
-                tracked_uniform_list(
+                tauri_virtual_uniform_list(
                     "sftp-preview-code-virtual",
                     row_count,
                     scroll,
+                    TauriVirtualListSpec::new(
+                        px(SFTP_PREVIEW_CODE_LINE_HEIGHT),
+                        SFTP_PREVIEW_CODE_OVERSCAN,
+                    ),
                     move |range, _window, _cx| {
                         let opts = opts.clone();
                         let language = language.clone();

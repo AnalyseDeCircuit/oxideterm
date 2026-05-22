@@ -85,8 +85,7 @@ impl WorkspaceApp {
             && matches!(key, "escape" | "enter" | "tab")
             && !modifiers.platform
         {
-            self.open_new_connection_select = None;
-            self.new_connection_select_focus_origin = None;
+            self.close_new_connection_select();
             cx.notify();
             return true;
         }

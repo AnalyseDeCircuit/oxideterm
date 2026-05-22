@@ -82,6 +82,9 @@ impl WorkspaceApp {
             cx.notify();
             return true;
         }
+        if self.handle_file_manager_dialog_input_footer_key(event, cx) {
+            return true;
+        }
         if let Some(input) = self.file_manager.focused_input {
             match key {
                 "tab"
@@ -99,13 +102,7 @@ impl WorkspaceApp {
                             self.file_manager.focused_input = None;
                             self.ime_marked_text = None;
                         }
-                        FileManagerInput::DialogValue => {
-                            self.file_manager.focused_input = None;
-                            self.file_manager.dialog = None;
-                            self.file_manager.focused_dialog_footer_action = None;
-                            self.file_manager.dialog_value.clear();
-                            self.ime_marked_text = None;
-                        }
+                        FileManagerInput::DialogValue => {}
                     }
                     cx.notify();
                     return true;
@@ -113,7 +110,7 @@ impl WorkspaceApp {
                 "enter" => {
                     match input {
                         FileManagerInput::Path => self.commit_file_manager_path_input(),
-                        FileManagerInput::DialogValue => self.accept_file_manager_dialog(cx),
+                        FileManagerInput::DialogValue => {}
                         FileManagerInput::Filter => {}
                     }
                     cx.notify();
@@ -395,6 +392,76 @@ impl WorkspaceApp {
             }
         }
         self.clear_ime_selection();
+    }
+
+    fn handle_file_manager_dialog_input_footer_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            return false;
+        }
+        let input_available = matches!(
+            self.file_manager.dialog,
+            Some(
+                FileManagerDialog::NewFolder
+                    | FileManagerDialog::NewFile
+                    | FileManagerDialog::Rename { .. }
+                    | FileManagerDialog::EditBookmark { .. }
+            )
+        );
+        if !input_available
+            && self.file_manager.focused_input != Some(FileManagerInput::DialogValue)
+        {
+            return false;
+        }
+
+        match crate::workspace::browser_behavior::modal_footer_input_key_action(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers.shift,
+            &FILE_MANAGER_DIALOG_FOOTER_ACTIONS,
+            input_available,
+            self.file_manager.focused_input == Some(FileManagerInput::DialogValue),
+            self.file_manager.focused_dialog_footer_action,
+            ConfirmDialogAction::Cancel,
+            Some(ConfirmDialogAction::Confirm),
+        ) {
+            Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::Cancel) => {
+                self.close_file_manager_dialog();
+                cx.notify();
+                true
+            }
+            Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::FocusInput) => {
+                self.file_manager.focused_input = Some(FileManagerInput::DialogValue);
+                self.file_manager.focused_dialog_footer_action = None;
+                self.ime_marked_text = None;
+                self.clear_ime_selection();
+                cx.notify();
+                true
+            }
+            Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::FocusFooter(
+                action,
+            )) => {
+                self.file_manager.focused_input = None;
+                self.file_manager.focused_dialog_footer_action = Some(action);
+                self.ime_marked_text = None;
+                self.clear_ime_selection();
+                cx.notify();
+                true
+            }
+            Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::Activate(
+                action,
+            )) => {
+                match action {
+                    ConfirmDialogAction::Cancel => self.close_file_manager_dialog(),
+                    ConfirmDialogAction::Confirm => self.accept_file_manager_dialog(cx),
+                }
+                cx.notify();
+                true
+            }
+            None => false,
+        }
     }
 
     pub(super) fn blur_file_manager_inline_inputs(&mut self) {

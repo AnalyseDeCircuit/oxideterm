@@ -1,3 +1,7 @@
+const AI_PROVIDER_ACTION_BUTTON_H: f32 = 28.0; // Tauri provider card action h-7.
+const AI_PROVIDER_ACTION_BUTTON_PX: f32 = 8.0; // Tauri provider card action px-2.
+const AI_PROVIDER_REFRESH_TEXT_SIZE: f32 = 10.0; // Tauri refresh action uses compact 10px text.
+
 impl WorkspaceApp {
     fn ai_provider_type_badge(&self, provider_type: String) -> AnyElement {
         div()
@@ -107,19 +111,16 @@ impl WorkspaceApp {
             self.i18n.t("settings_view.ai.remove"),
             None,
             ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                height: Some(28.0),
-                padding_x: Some(8.0),
-                font_size: Some(self.tokens.metrics.ui_text_xs),
                 text_color: Some(rgb(self.tokens.ui.error)),
                 hover_text_color: Some(rgb(self.tokens.ui.error)),
                 hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1a)),
-                ..ToolbarButtonOptions::default()
+                ..ToolbarButtonOptions::compact_text(
+                    ButtonVariant::Ghost,
+                    ButtonRadius::Md,
+                    AI_PROVIDER_ACTION_BUTTON_H,
+                    AI_PROVIDER_ACTION_BUTTON_PX,
+                    self.tokens.metrics.ui_text_xs,
+                )
             },
         )
         .on_mouse_down(
@@ -201,6 +202,16 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let refreshing = self.ai_model_refreshing.contains(&provider.id);
+        let mut options = ToolbarButtonOptions::compact_text(
+            ButtonVariant::Ghost,
+            ButtonRadius::Md,
+            AI_PROVIDER_ACTION_BUTTON_H,
+            AI_PROVIDER_ACTION_BUTTON_PX,
+            AI_PROVIDER_REFRESH_TEXT_SIZE,
+        );
+        options.button.disabled = refreshing;
+        options.icon_gap = Some(4.0);
+        options.loading = refreshing;
         // Tauri refresh is a compact ghost button with a leading RefreshCw
         // icon. Keep disabled/loading chrome in the shared toolbar button.
         toolbar_button(
@@ -211,20 +222,7 @@ impl WorkspaceApp {
                 12.0,
                 rgb(self.tokens.ui.text_muted),
             )),
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: refreshing,
-                },
-                height: Some(28.0),
-                padding_x: Some(8.0),
-                font_size: Some(10.0),
-                icon_gap: Some(4.0),
-                loading: refreshing,
-                ..ToolbarButtonOptions::default()
-            },
+            options,
         )
         .when(!refreshing, |button| {
             button.on_mouse_down(

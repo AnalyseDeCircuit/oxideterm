@@ -702,12 +702,13 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         cx,
-                    ),
-                    false,
-                    false,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, window, cx| {
+                ),
+                false,
+                false,
+                has_background,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, _event, window, cx| {
                             this.session_manager.row_menu_connection_id = None;
                             this.test_connection(&id, window, cx);
                             cx.stop_propagation();
@@ -726,12 +727,13 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         cx,
-                    ),
-                    false,
-                    false,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, _window, cx| {
+                ),
+                false,
+                false,
+                has_background,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, _event, _window, cx| {
                             this.session_manager.row_menu_connection_id = None;
                             this.duplicate_connection(&id, cx);
                             cx.stop_propagation();
@@ -756,12 +758,13 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         cx,
-                    ),
-                    false,
-                    false,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, _window, cx| {
+                ),
+                false,
+                false,
+                has_background,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, _event, _window, cx| {
                             this.session_manager.row_menu_connection_id = None;
                             this.delete_connection(&id, cx);
                             cx.stop_propagation();
@@ -791,7 +794,7 @@ impl WorkspaceApp {
             8.0,
         );
         let theme = self.tokens.ui;
-        div()
+        context_menu_event_boundary(div()
             .absolute()
             .left(px(placement.x))
             .top(px(placement.y))
@@ -801,18 +804,7 @@ impl WorkspaceApp {
             .border_1()
             .border_color(theme_border(theme.border, has_background))
             .bg(theme_panel_bg(theme.bg_panel, has_background))
-            .shadow_lg()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_scroll_wheel(|_, _, cx| {
-                // Match browser context menus: wheel over the menu is handled
-                // by the overlay layer and must not scroll the table below.
-                cx.stop_propagation();
-            })
+            .shadow_lg())
             .child(
                 self.render_session_manager_menu_action(
                     self.render_row_menu_item_with_icon_color(
@@ -824,12 +816,13 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         cx,
-                    ),
-                    false,
-                    false,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, window, cx| {
+                ),
+                false,
+                false,
+                has_background,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, _event, window, cx| {
                             this.close_session_row_menus();
                             this.open_saved_connection(&id, window, cx);
                             cx.stop_propagation();
@@ -849,12 +842,13 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         cx,
-                    ),
-                    false,
-                    false,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, window, cx| {
+                ),
+                false,
+                false,
+                has_background,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, _event, window, cx| {
                             this.close_session_row_menus();
                             this.test_connection(&id, window, cx);
                             cx.stop_propagation();
@@ -874,12 +868,13 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         cx,
-                    ),
-                    false,
-                    false,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, window, cx| {
+                ),
+                false,
+                false,
+                has_background,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, _event, window, cx| {
                             this.close_session_row_menus();
                             this.open_saved_connection_editor(&id, None, window, cx);
                             cx.stop_propagation();
@@ -899,12 +894,13 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         cx,
-                    ),
-                    false,
-                    false,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, _window, cx| {
+                ),
+                false,
+                false,
+                has_background,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, _event, _window, cx| {
                             this.close_session_row_menus();
                             this.duplicate_connection(&id, cx);
                             cx.stop_propagation();
@@ -930,12 +926,13 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         cx,
-                    ),
-                    false,
-                    false,
-                    cx.listener({
-                        let id = conn.id.clone();
-                        move |this, _event, _window, cx| {
+                ),
+                false,
+                false,
+                has_background,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, _event, _window, cx| {
                             this.close_session_row_menus();
                             this.delete_connection(&id, cx);
                             cx.stop_propagation();
@@ -952,9 +949,9 @@ impl WorkspaceApp {
         icon: LucideIcon,
         label: String,
         color: Rgba,
-        disabled: bool,
-        loading: bool,
-        has_background: bool,
+        _disabled: bool,
+        _loading: bool,
+        _has_background: bool,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let item = div()
@@ -975,15 +972,7 @@ impl WorkspaceApp {
                 color.into(),
                 cx,
             ));
-        context_menu_actionable_row(
-            item,
-            disabled,
-            loading,
-            ContextMenuActionableStyle {
-                hover_background: Some(theme_hover_bg(self.tokens.ui.bg_hover, has_background)),
-                hover_text_color: None,
-            },
-        )
+        item
     }
 
     fn render_row_menu_item_with_icon_color(
@@ -992,9 +981,9 @@ impl WorkspaceApp {
         label: String,
         text_color: Rgba,
         icon_color: Rgba,
-        disabled: bool,
-        loading: bool,
-        has_background: bool,
+        _disabled: bool,
+        _loading: bool,
+        _has_background: bool,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let item = div()
@@ -1015,15 +1004,7 @@ impl WorkspaceApp {
                 text_color.into(),
                 cx,
             ));
-        context_menu_actionable_row(
-            item,
-            disabled,
-            loading,
-            ContextMenuActionableStyle {
-                hover_background: Some(theme_hover_bg(self.tokens.ui.bg_hover, has_background)),
-                hover_text_color: None,
-            },
-        )
+        item
     }
 
     fn render_session_manager_menu_action(
@@ -1031,16 +1012,21 @@ impl WorkspaceApp {
         item: gpui::Div,
         disabled: bool,
         loading: bool,
+        has_background: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         // SessionManager has both inline "..." menus and row context menus.
         // Tauri routes both through Radix ContextMenuItem semantics, so native
         // keeps invocation, close, and disabled/loading guards in one path.
-        self.workspace_context_menu_action(
+        self.workspace_context_menu_styled_action(
             item,
             disabled,
             loading,
+            ContextMenuActionableStyle {
+                hover_background: Some(theme_hover_bg(self.tokens.ui.bg_hover, has_background)),
+                hover_text_color: None,
+            },
             |this| this.close_session_row_menus(),
             move |_this, event, window, cx| listener(event, window, cx),
             cx,
@@ -1059,10 +1045,8 @@ impl WorkspaceApp {
             &self.tokens,
             Self::render_lucide_icon(icon, icon_size, icon_color),
             IconButtonOptions {
-                size,
                 has_background,
-                idle_opacity: 1.0,
-                ..IconButtonOptions::compact(size)
+                ..IconButtonOptions::opaque_toolbar(size, ButtonRadius::Sm)
             },
         )
     }

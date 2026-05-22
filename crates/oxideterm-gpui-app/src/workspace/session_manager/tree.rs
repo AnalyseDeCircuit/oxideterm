@@ -278,19 +278,9 @@ impl WorkspaceApp {
             40.0,
             8.0,
         );
-        let menu = context_menu_content(&self.tokens)
+        let menu = context_menu_event_boundary(context_menu_content(&self.tokens)
             .w(px(MANAGER_ROW_MENU_WIDTH))
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_scroll_wheel(|_, _, cx| {
-                // Browser context menus are wheel islands; the folder tree
-                // behind the menu must not scroll while the menu is open.
-                cx.stop_propagation();
-            })
+        )
             .child(self.render_session_manager_menu_action(
                 context_menu_item(
                     &self.tokens,
@@ -299,6 +289,7 @@ impl WorkspaceApp {
                     false,
                     false,
                 ),
+                false,
                 false,
                 false,
                 cx.listener(|this, _event, _window, cx| {

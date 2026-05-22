@@ -152,6 +152,7 @@ impl WorkspaceApp {
                     .remove(&connection_id);
             }
             self.connection_monitor.selector_open = false;
+            self.connection_monitor.selector_highlighted_index = None;
             self.connection_monitor.selector_focus_origin = None;
             return;
         }

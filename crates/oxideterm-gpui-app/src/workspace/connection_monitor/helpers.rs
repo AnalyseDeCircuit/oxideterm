@@ -39,6 +39,19 @@ fn monitor_connection_label(connection: &oxideterm_ssh::ConnectionInfo) -> Strin
     )
 }
 
+fn monitor_connection_selected_index(
+    connections: &[oxideterm_ssh::ConnectionInfo],
+    selected_id: &str,
+) -> usize {
+    // Radix Select opens with the current value highlighted. Keep the lookup
+    // shared between pointer-open rendering and keyboard-open behavior so the
+    // monitor selector cannot drift by input modality.
+    connections
+        .iter()
+        .position(|connection| connection.connection_id == selected_id)
+        .unwrap_or(0)
+}
+
 fn topology_transform_x(x: f32, transform: TopologyTransform) -> f32 {
     transform.x + x * transform.k
 }

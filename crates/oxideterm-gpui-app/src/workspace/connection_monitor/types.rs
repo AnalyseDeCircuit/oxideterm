@@ -6,10 +6,11 @@ use oxideterm_connection_monitor::{ProfilerState, ResourceSampler};
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, toolbar_button,
 };
-use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_actionable_row};
+use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_event_boundary};
 use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::select::{
-    select_option, select_option_action, select_trigger_with_focus_visible,
+    select_event_boundary, select_option_highlighted, select_option_action,
+    select_trigger_with_focus_visible,
 };
 use oxideterm_topology::{
     ConnectionTopologyLayout, ConnectionTopologySnapshot, TOPOLOGY_NODE_HEIGHT,
@@ -120,6 +121,7 @@ pub(super) struct ConnectionMonitorState {
     pub(super) last_pool_refresh: Option<Instant>,
     pub(super) selected_connection_id: Option<String>,
     pub(super) selector_open: bool,
+    pub(super) selector_highlighted_index: Option<usize>,
     pub(super) selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     pub(super) disabled_profiler_connections: HashSet<String>,
     pub(super) profiler_registry: ProfilerRegistry,
@@ -143,6 +145,7 @@ impl ConnectionMonitorState {
             last_pool_refresh: None,
             selected_connection_id: None,
             selector_open: false,
+            selector_highlighted_index: None,
             selector_focus_origin: None,
             disabled_profiler_connections: HashSet::new(),
             profiler_registry: ProfilerRegistry::new(),

@@ -17,7 +17,7 @@ use oxideterm_gpui_ui::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
         ToolbarButtonOptions, icon_button, toolbar_button,
     },
-    context_menu::{ContextMenuActionableStyle, context_menu_actionable_row},
+    context_menu::{ContextMenuActionableStyle, context_menu_event_boundary},
     modal::{dismissible_dialog_backdrop, overlay_content_boundary},
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{text_caret, text_input_anchor_probe},
@@ -54,8 +54,10 @@ const SFTP_TOOL_BUTTON: f32 = 24.0; // Tauri h-6 w-6
 const SFTP_ROW_HEIGHT: f32 = 25.0; // Tauri px-2 py-1 text-xs
 const SFTP_VIRTUAL_OVERSCAN: usize = 15; // Keep SFTP file panes aligned with FileList virtual overdraw.
 const SFTP_DIFF_ROW_HEIGHT: f32 = 21.0; // Tauri FileDiffDialog text-xs py-0.5 border row
+const SFTP_DIFF_VIRTUAL_OVERSCAN: usize = 15; // Diff dialog keeps the same file-list overdraw budget.
 const SFTP_DIFF_LINE_NUMBER_COL: f32 = 48.0; // Tauri w-12
 const SFTP_PREVIEW_CODE_LINE_HEIGHT: f32 = 20.0; // Tauri CodeHighlight text-xs leading-normal
+const SFTP_PREVIEW_CODE_OVERSCAN: usize = 20; // Match Tauri VirtualTextPreview OVERSCAN_LINES.
 const SFTP_PREVIEW_CODE_WRAP_COLUMNS: usize = 96; // GPUI virtual rows need soft-wrapped chunks instead of hidden overflow.
 const SFTP_DIFF_WRAP_COLUMNS: usize = 64; // max-w-5xl split diff leaves roughly this many mono chars per side.
 const SFTP_PREVIEW_FONT_DEFAULT_SIZE: f32 = 32.0; // Tauri FontPreview initial fontSize

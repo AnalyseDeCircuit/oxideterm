@@ -116,28 +116,47 @@ impl WorkspaceApp {
         if actions.is_empty() {
             return false;
         }
+        let body_inputs = oxide_import_footer_body_inputs(dialog);
+        let current_input = self
+            .session_manager
+            .focused_input
+            .filter(|focused| body_inputs.contains(focused));
 
-        match browser_behavior::modal_footer_key_action(
+        match browser_behavior::modal_footer_body_input_key_action(
             event.keystroke.key.as_str(),
             event.keystroke.modifiers.shift,
             &actions,
             dialog.focused_footer_action,
+            body_inputs,
+            current_input,
             actions[0],
+            None,
         ) {
-            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
+            Some(browser_behavior::ModalFooterBodyInputKeyAction::Cancel) => {
                 self.session_manager.oxide_import_dialog = None;
                 self.session_manager.focused_input = None;
                 cx.notify();
                 true
             }
-            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+            Some(browser_behavior::ModalFooterBodyInputKeyAction::FocusInput(input)) => {
+                self.session_manager.focused_input = Some(input);
                 if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
-                    dialog.focused_footer_action = Some(action);
+                    dialog.focused_footer_action = None;
                 }
+                self.ime_marked_text = None;
                 cx.notify();
                 true
             }
-            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+            Some(browser_behavior::ModalFooterBodyInputKeyAction::FocusFooter(action)) => {
+                if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
+                    dialog.focused_footer_action = Some(action);
+                }
+                self.session_manager.focused_input = None;
+                self.ime_marked_text = None;
+                cx.notify();
+                true
+            }
+            Some(browser_behavior::ModalFooterBodyInputKeyAction::Activate(action)) => {
                 self.activate_oxide_import_footer_action(action, cx);
                 true
             }
@@ -202,27 +221,46 @@ impl WorkspaceApp {
             return false;
         }
         let actions = [OxideDialogFooterAction::Cancel, OxideDialogFooterAction::Primary];
-        match browser_behavior::modal_footer_key_action(
+        let body_inputs = oxide_export_footer_body_inputs(dialog);
+        let current_input = self
+            .session_manager
+            .focused_input
+            .filter(|focused| body_inputs.contains(focused));
+        match browser_behavior::modal_footer_body_input_key_action(
             event.keystroke.key.as_str(),
             event.keystroke.modifiers.shift,
             &actions,
             dialog.focused_footer_action,
+            body_inputs,
+            current_input,
             OxideDialogFooterAction::Cancel,
+            None,
         ) {
-            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
+            Some(browser_behavior::ModalFooterBodyInputKeyAction::Cancel) => {
                 self.session_manager.oxide_export_dialog = None;
                 self.session_manager.focused_input = None;
                 cx.notify();
                 true
             }
-            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+            Some(browser_behavior::ModalFooterBodyInputKeyAction::FocusInput(input)) => {
+                self.session_manager.focused_input = Some(input);
                 if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                    dialog.focused_footer_action = Some(action);
+                    dialog.focused_footer_action = None;
                 }
+                self.ime_marked_text = None;
                 cx.notify();
                 true
             }
-            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+            Some(browser_behavior::ModalFooterBodyInputKeyAction::FocusFooter(action)) => {
+                if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
+                    dialog.focused_footer_action = Some(action);
+                }
+                self.session_manager.focused_input = None;
+                self.ime_marked_text = None;
+                cx.notify();
+                true
+            }
+            Some(browser_behavior::ModalFooterBodyInputKeyAction::Activate(action)) => {
                 match action {
                     OxideDialogFooterAction::Cancel => {
                         self.session_manager.oxide_export_dialog = None;
