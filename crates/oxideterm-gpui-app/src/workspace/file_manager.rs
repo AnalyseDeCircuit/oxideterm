@@ -10,9 +10,9 @@ use oxideterm_gpui_markdown::{
 use oxideterm_gpui_ui::{
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonOptions, button_focus_visible, button_with, icon_button, toolbar_button,
+        ToolbarButtonOptions, icon_button, toolbar_button,
     },
-    context_menu::{context_menu_action, context_menu_backdrop, context_menu_item_is_actionable},
+    context_menu::{ContextMenuActionableStyle, context_menu_actionable_row},
     modal::{dismissible_dialog_backdrop, overlay_content_boundary, quicklook_backdrop},
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{TextInputView, text_caret, text_input, text_input_anchor_probe},

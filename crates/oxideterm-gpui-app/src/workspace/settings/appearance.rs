@@ -1201,14 +1201,20 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(8.0))
                             .child(
-                                button_with(
+                                // ThemeEditorModal uses a normal outline Button in Tauri, so this
+                                // footer action should share the native Button primitive too.
+                                toolbar_button(
                                     &self.tokens,
                                     self.i18n.t("settings_view.custom_theme.cancel"),
-                                    ButtonOptions {
-                                        variant: ButtonVariant::Outline,
-                                        size: ButtonSize::Sm,
-                                        radius: ButtonRadius::Md,
-                                        disabled: false,
+                                    None,
+                                    ToolbarButtonOptions {
+                                        button: ButtonOptions {
+                                            variant: ButtonVariant::Outline,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: false,
+                                        },
+                                        ..ToolbarButtonOptions::default()
                                     },
                                 )
                                 .on_mouse_down(
@@ -1220,14 +1226,22 @@ impl WorkspaceApp {
                                 ),
                             )
                             .child(
-                                button_with(
+                                toolbar_button(
                                     &self.tokens,
                                     self.i18n.t("settings_view.custom_theme.save"),
-                                    ButtonOptions {
-                                        variant: ButtonVariant::Default,
-                                        size: ButtonSize::Sm,
-                                        radius: ButtonRadius::Md,
-                                        disabled: save_disabled,
+                                    Some(Self::render_lucide_icon(
+                                        LucideIcon::Save,
+                                        12.0,
+                                        rgb(self.tokens.ui.accent_text),
+                                    )),
+                                    ToolbarButtonOptions {
+                                        button: ButtonOptions {
+                                            variant: ButtonVariant::Default,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: save_disabled,
+                                        },
+                                        ..ToolbarButtonOptions::default()
                                     },
                                 )
                                 .on_mouse_down(
@@ -1633,14 +1647,23 @@ impl WorkspaceApp {
                             .child(self.i18n.t("settings_view.custom_theme.ui_colors_hint")),
                     )
                     .child(
-                        button_with(
+                        // Mirrors Tauri ThemeEditorModal's outline Button with Copy icon.
+                        toolbar_button(
                             &self.tokens,
                             self.i18n.t("settings_view.custom_theme.auto_derive"),
-                            ButtonOptions {
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
+                            Some(Self::render_lucide_icon(
+                                LucideIcon::Copy,
+                                12.0,
+                                rgb(self.tokens.ui.text),
+                            )),
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                                ..ToolbarButtonOptions::default()
                             },
                         )
                         .on_mouse_down(

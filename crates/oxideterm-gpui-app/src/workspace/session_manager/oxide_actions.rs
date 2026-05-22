@@ -117,31 +117,31 @@ impl WorkspaceApp {
             return false;
         }
 
-        match event.keystroke.key.as_str() {
-            "escape" => {
+        match browser_behavior::modal_footer_key_action(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers.shift,
+            &actions,
+            dialog.focused_footer_action,
+            actions[0],
+        ) {
+            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
                 self.session_manager.oxide_import_dialog = None;
                 self.session_manager.focused_input = None;
                 cx.notify();
                 true
             }
-            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
-                let forward = browser_behavior::modal_footer_key_moves_forward(
-                    event.keystroke.key.as_str(),
-                    event.keystroke.modifiers.shift,
-                );
+            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
                 if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
-                    dialog.focused_footer_action =
-                        next_oxide_footer_action(&actions, dialog.focused_footer_action, forward);
+                    dialog.focused_footer_action = Some(action);
                 }
                 cx.notify();
                 true
             }
-            "enter" | "space" | " " => {
-                let focused = dialog.focused_footer_action.unwrap_or(actions[0]);
-                self.activate_oxide_import_footer_action(focused, cx);
+            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+                self.activate_oxide_import_footer_action(action, cx);
                 true
             }
-            _ => false,
+            None => false,
         }
     }
 
@@ -202,30 +202,28 @@ impl WorkspaceApp {
             return false;
         }
         let actions = [OxideDialogFooterAction::Cancel, OxideDialogFooterAction::Primary];
-        match event.keystroke.key.as_str() {
-            "escape" => {
+        match browser_behavior::modal_footer_key_action(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers.shift,
+            &actions,
+            dialog.focused_footer_action,
+            OxideDialogFooterAction::Cancel,
+        ) {
+            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
                 self.session_manager.oxide_export_dialog = None;
                 self.session_manager.focused_input = None;
                 cx.notify();
                 true
             }
-            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
-                let forward = browser_behavior::modal_footer_key_moves_forward(
-                    event.keystroke.key.as_str(),
-                    event.keystroke.modifiers.shift,
-                );
+            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
                 if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                    dialog.focused_footer_action =
-                        next_oxide_footer_action(&actions, dialog.focused_footer_action, forward);
+                    dialog.focused_footer_action = Some(action);
                 }
                 cx.notify();
                 true
             }
-            "enter" | "space" | " " => {
-                match dialog
-                    .focused_footer_action
-                    .unwrap_or(OxideDialogFooterAction::Cancel)
-                {
+            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+                match action {
                     OxideDialogFooterAction::Cancel => {
                         self.session_manager.oxide_export_dialog = None;
                         self.session_manager.focused_input = None;
@@ -242,7 +240,7 @@ impl WorkspaceApp {
                 }
                 true
             }
-            _ => false,
+            None => false,
         }
     }
 

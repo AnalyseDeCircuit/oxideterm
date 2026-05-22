@@ -10,8 +10,14 @@ use tokio::sync::oneshot;
 use crate::workspace::WorkspaceApp;
 use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_ui::{
-    TextInputView, form_field, modal::dismissible_dialog_backdrop, text_input,
-    text_input_anchor_probe,
+    TextInputView,
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
+        toolbar_button,
+    },
+    form_field,
+    modal::dismissible_dialog_backdrop,
+    text_input, text_input_anchor_probe,
 };
 
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
@@ -325,44 +331,45 @@ impl WorkspaceApp {
     fn render_keyboard_interactive_button(
         &self,
         label: String,
-        primary: bool,
+        _primary: bool,
         submit: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .h(px(self.tokens.metrics.form_button_height))
-            .px(px(self.tokens.metrics.form_button_padding_x))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(if primary {
-                rgb(theme.accent)
-            } else {
-                rgb(theme.bg_elevated)
-            })
-            .text_size(px(self.tokens.metrics.form_text_font_size))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(if primary {
-                rgb(theme.accent_text)
-            } else {
-                rgb(theme.text)
-            })
-            .cursor_pointer()
-            .child(label)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    if submit {
-                        this.submit_keyboard_interactive_challenge(window, cx);
-                    } else {
-                        this.cancel_keyboard_interactive_challenge(cx);
-                    }
-                }),
-            )
-            .into_any_element()
+        let variant = if submit {
+            ButtonVariant::Default
+        } else {
+            ButtonVariant::Ghost
+        };
+        // Keyboard-interactive prompts are authentication-protected dialogs, so
+        // keep submit/cancel ownership here while sharing the Tauri Button
+        // variant chrome.
+        toolbar_button(
+            &self.tokens,
+            label,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                height: Some(self.tokens.metrics.form_button_height),
+                padding_x: Some(self.tokens.metrics.form_button_padding_x),
+                font_size: Some(self.tokens.metrics.form_text_font_size),
+                ..ToolbarButtonOptions::default()
+            },
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, window, cx| {
+                if submit {
+                    this.submit_keyboard_interactive_challenge(window, cx);
+                } else {
+                    this.cancel_keyboard_interactive_challenge(cx);
+                }
+            }),
+        )
+        .into_any_element()
     }
 }

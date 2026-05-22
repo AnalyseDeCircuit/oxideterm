@@ -26,13 +26,12 @@ use oxideterm_gpui_ui::{
     TauriTableMetrics,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonIconPosition, ToolbarButtonOptions, button_focus_visible, button_with,
-        icon_button, toolbar_button,
+        ToolbarButtonIconPosition, ToolbarButtonOptions, icon_button, toolbar_button,
     },
     checkbox,
     context_menu::{
-        ContextMenuItemKind, context_menu_action, context_menu_backdrop, context_menu_content,
-        context_menu_item, context_menu_item_is_actionable,
+        ContextMenuActionableStyle, ContextMenuItemKind, context_menu_actionable_row,
+        context_menu_content, context_menu_item,
     },
     icon_badge,
     modal::{dismissible_dialog_backdrop, overlay_content_boundary},
@@ -99,6 +98,7 @@ const OXIDE_MODAL_SECTION_GAP: f32 = 16.0; // Tauri space-y-4
 const OXIDE_MODAL_CARD_P: f32 = 12.0; // Tauri p-3
 const OXIDE_MODAL_LIST_MAX_H: f32 = 256.0; // Tauri max-h-64
 const OXIDE_MODAL_FORWARDS_MAX_H: f32 = 208.0; // Tauri max-h-52
+const OXIDE_SELECT_ALL_BUTTON_HEIGHT: f32 = 28.0; // Tauri OxideExportModal Button h-7
 const OXIDE_BLUE_500: u32 = 0x3b82f6;
 const OXIDE_GREEN_500: u32 = 0x22c55e;
 const OXIDE_YELLOW_500: u32 = 0xeab308;
@@ -164,44 +164,6 @@ const SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS: [SessionManagerBasicDialogFoo
     SessionManagerBasicDialogFooterAction::Cancel,
     SessionManagerBasicDialogFooterAction::Primary,
 ];
-
-fn next_session_manager_basic_dialog_focus(
-    include_text_input: bool,
-    text_input_focused: bool,
-    current_footer: Option<SessionManagerBasicDialogFooterAction>,
-    forward: bool,
-) -> (bool, Option<SessionManagerBasicDialogFooterAction>) {
-    // Native dialogs do not get DOM tab order for free. This models the same
-    // small focus cycle used by the Tauri/Radix dialogs without hard-coding it
-    // into every footer renderer.
-    if include_text_input && text_input_focused {
-        return (
-            false,
-            Some(if forward {
-                SessionManagerBasicDialogFooterAction::Cancel
-            } else {
-                SessionManagerBasicDialogFooterAction::Primary
-            }),
-        );
-    }
-
-    if include_text_input {
-        match (current_footer, forward) {
-            (Some(SessionManagerBasicDialogFooterAction::Cancel), false)
-            | (Some(SessionManagerBasicDialogFooterAction::Primary), true) => {
-                return (true, None);
-            }
-            _ => {}
-        }
-    }
-
-    let footer_action = browser_behavior::next_modal_footer_focus(
-        &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
-        current_footer,
-        forward,
-    );
-    (false, footer_action)
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SessionTransferAction {

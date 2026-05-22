@@ -725,18 +725,25 @@ impl WorkspaceApp {
         action: TerminalCommandSpecsAction,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        button_with(
+        // Command-spec editor actions are inline settings toolbar buttons.
+        // Keep them on the shared primitive so disabled/loading/focus-visible
+        // behavior can be widened without another local button shape.
+        toolbar_button(
             &self.tokens,
             self.i18n.t(label_key),
-            ButtonOptions {
-                variant: if action == TerminalCommandSpecsAction::Save {
-                    ButtonVariant::Secondary
-                } else {
-                    ButtonVariant::Outline
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: if action == TerminalCommandSpecsAction::Save {
+                        ButtonVariant::Secondary
+                    } else {
+                        ButtonVariant::Outline
+                    },
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
                 },
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled: false,
+                ..ToolbarButtonOptions::default()
             },
         )
         .on_mouse_down(

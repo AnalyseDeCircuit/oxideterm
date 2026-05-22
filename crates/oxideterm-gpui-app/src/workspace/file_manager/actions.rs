@@ -8,20 +8,6 @@ pub(in crate::workspace::file_manager) use external::{open_path_external, reveal
 const FILE_MANAGER_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
 
-fn next_file_manager_dialog_footer_focus(
-    current: Option<ConfirmDialogAction>,
-    forward: bool,
-) -> ConfirmDialogAction {
-    // File-manager prompts mirror Tauri DialogFooter tab order. Keep their
-    // wrapping behavior on the same tested browser helper as other modals.
-    crate::workspace::browser_behavior::next_required_modal_footer_focus(
-        &FILE_MANAGER_DIALOG_FOOTER_ACTIONS,
-        current,
-        forward,
-        ConfirmDialogAction::Cancel,
-    )
-}
-
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_file_manager_tab(
         &mut self,
@@ -92,8 +78,7 @@ impl WorkspaceApp {
                 _ => return false,
             }
         }
-        if self.file_manager.context_menu.is_some() && key == "escape" {
-            self.file_manager.context_menu = None;
+        if key == "escape" && self.dismiss_workspace_context_menus() {
             cx.notify();
             return true;
         }
@@ -922,32 +907,32 @@ impl WorkspaceApp {
         let Some(focused) = self.file_manager.focused_dialog_footer_action else {
             return false;
         };
-        match event.keystroke.key.as_str() {
-            "escape" => {
+        match crate::workspace::browser_behavior::modal_footer_key_action(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers.shift,
+            &FILE_MANAGER_DIALOG_FOOTER_ACTIONS,
+            Some(focused),
+            ConfirmDialogAction::Cancel,
+        ) {
+            Some(crate::workspace::browser_behavior::ModalFooterKeyAction::Cancel) => {
                 self.close_file_manager_dialog();
                 cx.notify();
                 true
             }
-            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
-                let forward = crate::workspace::browser_behavior::modal_footer_key_moves_forward(
-                    event.keystroke.key.as_str(),
-                    event.keystroke.modifiers.shift,
-                );
-                self.file_manager.focused_dialog_footer_action = Some(
-                    next_file_manager_dialog_footer_focus(Some(focused), forward),
-                );
+            Some(crate::workspace::browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+                self.file_manager.focused_dialog_footer_action = Some(action);
                 cx.notify();
                 true
             }
-            "enter" | "space" | " " => {
-                match focused {
+            Some(crate::workspace::browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+                match action {
                     ConfirmDialogAction::Cancel => self.close_file_manager_dialog(),
                     ConfirmDialogAction::Confirm => self.accept_file_manager_dialog(cx),
                 }
                 cx.notify();
                 true
             }
-            _ => false,
+            None => false,
         }
     }
 

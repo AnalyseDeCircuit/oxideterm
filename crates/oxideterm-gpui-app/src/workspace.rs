@@ -70,7 +70,6 @@ use oxideterm_gpui_terminal::{
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,
-    context_menu::context_menu_backdrop,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
     toast::{ToastVariant, ToastView},
     toaster::toaster,
@@ -136,7 +135,7 @@ use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
 use self::ime::{
     WorkspaceImeDragSelection, WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
-    keystroke_commits_platform_text,
+    active_ime_should_defer_printable_key,
 };
 use self::launcher::LauncherState;
 use self::new_connection::{
@@ -265,34 +264,6 @@ const KEYBINDING_RECORDING_FOOTER_ACTIONS: [KeybindingRecordingFooterAction; 2] 
     KeybindingRecordingFooterAction::Confirm,
     KeybindingRecordingFooterAction::Cancel,
 ];
-
-fn next_confirm_dialog_footer_focus(
-    current: Option<ConfirmDialogAction>,
-    forward: bool,
-) -> ConfirmDialogAction {
-    // Confirm dialogs share the same DOM-style footer cycle across settings,
-    // Cloud Sync, and other Radix parity modals.
-    browser_behavior::next_required_modal_footer_focus(
-        &CONFIRM_DIALOG_FOOTER_ACTIONS,
-        current,
-        forward,
-        ConfirmDialogAction::Cancel,
-    )
-}
-
-fn next_keybinding_recording_footer_focus(
-    current: Option<KeybindingRecordingFooterAction>,
-    forward: bool,
-) -> KeybindingRecordingFooterAction {
-    // Recording uses a window-level key capture like Tauri. Once action buttons
-    // are visible, native has to model the browser's two-button Tab cycle.
-    browser_behavior::next_required_modal_footer_focus(
-        &KEYBINDING_RECORDING_FOOTER_ACTIONS,
-        current,
-        forward,
-        KeybindingRecordingFooterAction::Confirm,
-    )
-}
 
 impl KeybindingScopeFilter {
     fn matches(self, scope: crate::keybindings::ActionScope) -> bool {

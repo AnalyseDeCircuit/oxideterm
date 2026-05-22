@@ -179,13 +179,21 @@ impl WorkspaceApp {
                         .child(self.render_connection_input(value, placeholder, field, false, cx)),
                 )
                 .child(
-                    button_with(
+                    // Tauri browse controls are outline Buttons beside the
+                    // path input. Keep this modal-form action on the shared
+                    // toolbar primitive so disabled/focus behavior can be
+                    // centralized with other form buttons.
+                    toolbar_button(
                         &self.tokens,
                         self.i18n.t("sessionManager.edit_properties.browse"),
-                        ButtonOptions {
-                            variant: ButtonVariant::Outline,
-                            size: ButtonSize::Sm,
-                            ..ButtonOptions::default()
+                        None,
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Sm,
+                                ..ButtonOptions::default()
+                            },
+                            ..ToolbarButtonOptions::default()
                         },
                     )
                     .on_mouse_down(
@@ -676,17 +684,24 @@ impl WorkspaceApp {
         disabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let control = button_with(
+        // NewConnectionModal footer uses shadcn Button variants. Route native
+        // footer buttons through the shared toolbar primitive while keeping the
+        // existing form action dispatch unchanged.
+        let control = toolbar_button(
             &self.tokens,
             label,
-            ButtonOptions {
-                variant: if primary {
-                    ButtonVariant::Default
-                } else {
-                    ButtonVariant::Secondary
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: if primary {
+                        ButtonVariant::Default
+                    } else {
+                        ButtonVariant::Secondary
+                    },
+                    disabled,
+                    ..ButtonOptions::default()
                 },
-                disabled,
-                ..ButtonOptions::default()
+                ..ToolbarButtonOptions::default()
             },
         );
         if disabled {

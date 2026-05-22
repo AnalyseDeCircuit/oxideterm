@@ -222,14 +222,21 @@ impl WorkspaceApp {
     }
 
     fn outline_button(&self, label: String, size: ButtonSize) -> AnyElement {
-        button_with(
+        // Tauri settings utility actions are shadcn outline Buttons. Keep the
+        // reusable settings entry point on the shared toolbar primitive so
+        // focus-visible/loading behavior can be widened in one place.
+        toolbar_button(
             &self.tokens,
             label,
-            ButtonOptions {
-                variant: ButtonVariant::Outline,
-                size,
-                radius: ButtonRadius::Md,
-                disabled: false,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                ..ToolbarButtonOptions::default()
             },
         )
         .into_any_element()
@@ -246,19 +253,20 @@ impl WorkspaceApp {
         // focus-visible ring is owned by keyboard navigation rather than mouse
         // hover. Keep that mapping in one helper so dialogs do not each
         // reimplement Cancel/Confirm focus state.
-        button_focus_visible(
+        toolbar_button(
             &self.tokens,
-            button_with(
-                &self.tokens,
-                label,
-                ButtonOptions {
+            label,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
                     variant,
                     size: ButtonSize::Sm,
                     radius: ButtonRadius::Md,
                     disabled,
                 },
-            ),
-            self.standard_confirm_focus() == Some(action),
+                focus_visible: self.standard_confirm_focus() == Some(action),
+                ..ToolbarButtonOptions::default()
+            },
         )
     }
 

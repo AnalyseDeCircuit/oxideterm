@@ -6,7 +6,7 @@ use oxideterm_connection_monitor::{ProfilerState, ResourceSampler};
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, toolbar_button,
 };
-use oxideterm_gpui_ui::context_menu::{context_menu_action, context_menu_item_is_actionable};
+use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_actionable_row};
 use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::select::{
     select_option, select_option_action, select_trigger, select_trigger_focus_visible,

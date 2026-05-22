@@ -90,6 +90,118 @@ where
     next_modal_footer_focus(actions, current, forward).unwrap_or(fallback)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ModalFooterKeyAction<T> {
+    Cancel,
+    Focus(T),
+    Activate(T),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ModalFooterInputKeyAction<T> {
+    Cancel,
+    FocusInput,
+    FocusFooter(T),
+    Activate(T),
+}
+
+pub(crate) fn modal_footer_key_action<T>(
+    key: &str,
+    shift: bool,
+    actions: &[T],
+    current: Option<T>,
+    fallback: T,
+) -> Option<ModalFooterKeyAction<T>>
+where
+    T: Copy + Eq,
+{
+    // Dialog footer key handling has the same browser contract across standard
+    // confirms, Cloud Sync confirms, keybinding recorder, and .oxide
+    // import/export: Escape closes, Tab/arrows move focus, Home/End jump to
+    // the footer edges, and Enter/Space activates the focused action.
+    match key {
+        "escape" => Some(ModalFooterKeyAction::Cancel),
+        "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
+            let forward = modal_footer_key_moves_forward(key, shift);
+            Some(ModalFooterKeyAction::Focus(
+                next_required_modal_footer_focus(actions, current, forward, fallback),
+            ))
+        }
+        "home" => actions
+            .first()
+            .copied()
+            .or(Some(fallback))
+            .map(ModalFooterKeyAction::Focus),
+        "end" => actions
+            .last()
+            .copied()
+            .or(Some(fallback))
+            .map(ModalFooterKeyAction::Focus),
+        "enter" | "space" | " " => {
+            Some(ModalFooterKeyAction::Activate(current.unwrap_or(fallback)))
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn modal_footer_input_key_action<T>(
+    key: &str,
+    shift: bool,
+    actions: &[T],
+    input_available: bool,
+    input_focused: bool,
+    current: Option<T>,
+    fallback: T,
+    activation_fallback: Option<T>,
+) -> Option<ModalFooterInputKeyAction<T>>
+where
+    T: Copy + Eq,
+{
+    // Some Tauri dialogs place a real input before the footer buttons. GPUI has
+    // no DOM tab order, so keep the "input, cancel, primary" focus loop here
+    // instead of reimplementing it in each dialog key handler.
+    match key {
+        "escape" => Some(ModalFooterInputKeyAction::Cancel),
+        "tab" => {
+            let forward = modal_footer_key_moves_forward(key, shift);
+            if input_available && input_focused {
+                return Some(ModalFooterInputKeyAction::FocusFooter(
+                    next_required_modal_footer_focus(actions, None, forward, fallback),
+                ));
+            }
+
+            if input_available {
+                let first = actions.first().copied().unwrap_or(fallback);
+                let last = actions.last().copied().unwrap_or(fallback);
+                if (current == Some(first) && !forward) || (current == Some(last) && forward) {
+                    return Some(ModalFooterInputKeyAction::FocusInput);
+                }
+            }
+
+            Some(ModalFooterInputKeyAction::FocusFooter(
+                next_required_modal_footer_focus(actions, current, forward, fallback),
+            ))
+        }
+        "arrowleft" | "left" | "arrowright" | "right" | "home" | "end" => {
+            modal_footer_key_action(key, shift, actions, current, fallback).map(|action| {
+                match action {
+                    ModalFooterKeyAction::Cancel => ModalFooterInputKeyAction::Cancel,
+                    ModalFooterKeyAction::Focus(action) => {
+                        ModalFooterInputKeyAction::FocusFooter(action)
+                    }
+                    ModalFooterKeyAction::Activate(action) => {
+                        ModalFooterInputKeyAction::Activate(action)
+                    }
+                }
+            })
+        }
+        "enter" | "space" | " " => current
+            .or(activation_fallback)
+            .map(ModalFooterInputKeyAction::Activate),
+        _ => None,
+    }
+}
+
 pub(crate) fn modal_footer_key_moves_forward(key: &str, shift: bool) -> bool {
     // Browser/Radix dialogs let Shift+Tab and left-arrow walk backward through
     // footer actions. Keep key-direction mapping shared so standard confirms,
@@ -211,9 +323,9 @@ fn resolve_browser_pointer_capture_owner(
 mod tests {
     use super::{
         BrowserFocusOrigin, BrowserPointerCaptureOwner, BrowserPointerCaptureState, FocusCycle,
-        browser_focus_visible, clamp_context_menu_position, modal_footer_key_moves_forward,
-        next_required_modal_footer_focus, preserve_or_move_context_selection,
-        resolve_browser_pointer_capture_owner,
+        browser_focus_visible, clamp_context_menu_position, modal_footer_input_key_action,
+        modal_footer_key_action, modal_footer_key_moves_forward, next_required_modal_footer_focus,
+        preserve_or_move_context_selection, resolve_browser_pointer_capture_owner,
     };
     use std::collections::HashSet;
 
@@ -361,5 +473,100 @@ mod tests {
         assert!(!modal_footer_key_moves_forward("tab", true));
         assert!(!modal_footer_key_moves_forward("arrowleft", false));
         assert!(!modal_footer_key_moves_forward("left", false));
+    }
+
+    #[test]
+    fn modal_footer_key_action_centralizes_cancel_focus_and_activate() {
+        let actions = ["cancel", "confirm"];
+
+        assert_eq!(
+            modal_footer_key_action("escape", false, &actions, Some("confirm"), "cancel"),
+            Some(super::ModalFooterKeyAction::Cancel)
+        );
+        assert_eq!(
+            modal_footer_key_action("tab", false, &actions, Some("cancel"), "cancel"),
+            Some(super::ModalFooterKeyAction::Focus("confirm"))
+        );
+        assert_eq!(
+            modal_footer_key_action("tab", true, &actions, Some("cancel"), "cancel"),
+            Some(super::ModalFooterKeyAction::Focus("confirm"))
+        );
+        assert_eq!(
+            modal_footer_key_action("enter", false, &actions, Some("confirm"), "cancel"),
+            Some(super::ModalFooterKeyAction::Activate("confirm"))
+        );
+        assert_eq!(
+            modal_footer_key_action("home", false, &actions, Some("confirm"), "cancel"),
+            Some(super::ModalFooterKeyAction::Focus("cancel"))
+        );
+        assert_eq!(
+            modal_footer_key_action("end", false, &actions, Some("cancel"), "cancel"),
+            Some(super::ModalFooterKeyAction::Focus("confirm"))
+        );
+        assert_eq!(
+            modal_footer_key_action("a", false, &actions, Some("confirm"), "cancel"),
+            None
+        );
+    }
+
+    #[test]
+    fn modal_footer_input_key_action_models_input_then_footer_cycle() {
+        let actions = ["cancel", "confirm"];
+
+        assert_eq!(
+            modal_footer_input_key_action("tab", false, &actions, true, true, None, "cancel", None),
+            Some(super::ModalFooterInputKeyAction::FocusFooter("cancel"))
+        );
+        assert_eq!(
+            modal_footer_input_key_action(
+                "tab",
+                false,
+                &actions,
+                true,
+                false,
+                Some("confirm"),
+                "cancel",
+                None
+            ),
+            Some(super::ModalFooterInputKeyAction::FocusInput)
+        );
+        assert_eq!(
+            modal_footer_input_key_action(
+                "tab",
+                true,
+                &actions,
+                true,
+                false,
+                Some("cancel"),
+                "cancel",
+                None
+            ),
+            Some(super::ModalFooterInputKeyAction::FocusInput)
+        );
+    }
+
+    #[test]
+    fn modal_footer_input_key_action_keeps_activation_explicit() {
+        let actions = ["cancel", "confirm"];
+
+        assert_eq!(
+            modal_footer_input_key_action(
+                "enter", false, &actions, true, false, None, "cancel", None
+            ),
+            None
+        );
+        assert_eq!(
+            modal_footer_input_key_action(
+                "enter",
+                false,
+                &actions,
+                true,
+                false,
+                None,
+                "cancel",
+                Some("confirm")
+            ),
+            Some(super::ModalFooterInputKeyAction::Activate("confirm"))
+        );
     }
 }

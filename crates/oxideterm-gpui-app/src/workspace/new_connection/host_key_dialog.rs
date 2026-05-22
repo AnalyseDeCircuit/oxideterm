@@ -2,7 +2,13 @@ use gpui::{
     AnyElement, Context, MouseButton, ParentElement, SharedString, Styled, Window, div, prelude::*,
     px, rgb, rgba,
 };
-use oxideterm_gpui_ui::modal::dismissible_dialog_backdrop;
+use oxideterm_gpui_ui::{
+    button::{
+        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
+        toolbar_button,
+    },
+    modal::dismissible_dialog_backdrop,
+};
 use oxideterm_ssh::{HostKeyStatus, SshConfig, remove_host_key};
 
 use super::ssh_flow::SshConnectionIntent;
@@ -373,44 +379,43 @@ impl WorkspaceApp {
         action: HostKeyButtonAction,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .h(px(self.tokens.metrics.form_button_height))
-            .px(px(self.tokens.metrics.form_button_padding_x))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(if primary {
-                rgb(theme.accent)
-            } else {
-                rgb(theme.bg_elevated)
-            })
-            .text_size(px(self.tokens.metrics.form_text_font_size))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(if primary {
-                rgb(theme.accent_text)
-            } else {
-                rgb(theme.text)
-            })
-            .cursor_pointer()
-            .child(label)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| match action {
-                    HostKeyButtonAction::Cancel => this.cancel_host_key_challenge(cx),
-                    HostKeyButtonAction::TrustOnce => {
-                        this.accept_host_key_challenge(false, window, cx)
-                    }
-                    HostKeyButtonAction::TrustSave => {
-                        this.accept_host_key_challenge(true, window, cx)
-                    }
-                    HostKeyButtonAction::RemoveSaved => this.remove_changed_host_key_challenge(cx),
-                }),
-            )
-            .into_any_element()
+        let variant = match action {
+            HostKeyButtonAction::Cancel => ButtonVariant::Outline,
+            HostKeyButtonAction::TrustOnce => ButtonVariant::Secondary,
+            HostKeyButtonAction::TrustSave if primary => ButtonVariant::Default,
+            HostKeyButtonAction::RemoveSaved if primary => ButtonVariant::Destructive,
+            _ => ButtonVariant::Secondary,
+        };
+        // Host-key prompts are protected dialogs; only the button chrome moves
+        // to the shared shadcn-style primitive. The explicit challenge actions
+        // and non-dismissible backdrop semantics stay local.
+        toolbar_button(
+            &self.tokens,
+            label,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                height: Some(self.tokens.metrics.form_button_height),
+                padding_x: Some(self.tokens.metrics.form_button_padding_x),
+                font_size: Some(self.tokens.metrics.form_text_font_size),
+                ..ToolbarButtonOptions::default()
+            },
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, window, cx| match action {
+                HostKeyButtonAction::Cancel => this.cancel_host_key_challenge(cx),
+                HostKeyButtonAction::TrustOnce => this.accept_host_key_challenge(false, window, cx),
+                HostKeyButtonAction::TrustSave => this.accept_host_key_challenge(true, window, cx),
+                HostKeyButtonAction::RemoveSaved => this.remove_changed_host_key_challenge(cx),
+            }),
+        )
+        .into_any_element()
     }
 }
 

@@ -78,14 +78,22 @@ impl WorkspaceApp {
                                         .items_center()
                                         .gap(px(24.0))
                                         .child(
-                                            button_with(
+                                            // Tauri OxideImportModal uses the
+                                            // default accent Button for first
+                                            // file selection; keep the shape on
+                                            // the shared button primitive.
+                                            toolbar_button(
                                                 &self.tokens,
                                                 "选择 .oxide 文件".to_string(),
-                                                ButtonOptions {
-                                                    variant: ButtonVariant::Default,
-                                                    size: ButtonSize::Default,
-                                                    radius: ButtonRadius::Md,
-                                                    disabled: dialog.busy,
+                                                None,
+                                                ToolbarButtonOptions {
+                                                    button: ButtonOptions {
+                                                        variant: ButtonVariant::Default,
+                                                        size: ButtonSize::Default,
+                                                        radius: ButtonRadius::Md,
+                                                        disabled: dialog.busy,
+                                                    },
+                                                    ..ToolbarButtonOptions::default()
                                                 },
                                             )
                                             .on_mouse_down(

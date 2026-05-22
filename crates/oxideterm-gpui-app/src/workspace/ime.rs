@@ -183,6 +183,15 @@ pub(super) fn keystroke_commits_platform_text(keystroke: &Keystroke) -> bool {
         .is_some_and(|text| !text.is_empty() && !text.chars().any(char::is_control))
 }
 
+pub(super) fn active_ime_should_defer_printable_key(
+    active_ime_target: bool,
+    keystroke: &Keystroke,
+) -> bool {
+    // GPUI delivers printable text through `InputHandler`; when an input owns IME,
+    // page-level key handlers must not append the same character again.
+    active_ime_target && keystroke_commits_platform_text(keystroke)
+}
+
 impl InputHandler for WorkspaceInputHandler {
     fn selected_text_range(
         &mut self,
@@ -2295,10 +2304,11 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
 
     use super::{
-        CopyShortcutOwner, WorkspaceImeTarget, collapsed_copy_shortcut_is_owned_by_target,
-        control_k_delete_end, copy_shortcut_owner_for_target, keystroke_commits_platform_text,
-        line_end_for_utf16_offset, line_range_for_utf16_offset, line_start_for_utf16_offset,
-        next_utf16_boundary, next_word_boundary, previous_utf16_boundary, previous_word_boundary,
+        CopyShortcutOwner, WorkspaceImeTarget, active_ime_should_defer_printable_key,
+        collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
+        copy_shortcut_owner_for_target, keystroke_commits_platform_text, line_end_for_utf16_offset,
+        line_range_for_utf16_offset, line_start_for_utf16_offset, next_utf16_boundary,
+        next_word_boundary, previous_utf16_boundary, previous_word_boundary,
         soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
         vertical_line_navigation_destination, word_range_for_utf16_offset,
     };
@@ -2356,6 +2366,23 @@ mod tests {
                 ..Modifiers::default()
             }
         )));
+    }
+
+    #[test]
+    fn active_ime_defers_only_printable_platform_commits() {
+        let printable = key("a", Some("a"), Modifiers::default());
+        let shortcut = key(
+            "a",
+            Some("a"),
+            Modifiers {
+                platform: true,
+                ..Modifiers::default()
+            },
+        );
+
+        assert!(active_ime_should_defer_printable_key(true, &printable));
+        assert!(!active_ime_should_defer_printable_key(false, &printable));
+        assert!(!active_ime_should_defer_printable_key(true, &shortcut));
     }
 
     #[test]

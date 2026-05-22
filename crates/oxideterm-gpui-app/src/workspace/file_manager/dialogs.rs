@@ -369,37 +369,18 @@ impl WorkspaceApp {
                 cx,
             ));
 
-        context_menu_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
-                    // File manager context menus are transient overlays; use
-                    // the workspace-level closer so focus restoration and other
-                    // open popovers stay in one browser-like path.
-                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
-                    cx.stop_propagation();
-                }),
+        self.workspace_context_menu_backdrop(
+            deferred(
+                anchored()
+                    .anchor(Corner::TopLeft)
+                    .position(gpui::point(px(placement.x), px(placement.y)))
+                    .position_mode(AnchoredPositionMode::Window)
+                    .child(overlay_content_boundary(popup)),
             )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(|this, _event, window, cx| {
-                    // Right-clicking outside a browser context menu closes it
-                    // before the next menu owner can decide what to show.
-                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(
-                deferred(
-                    anchored()
-                        .anchor(Corner::TopLeft)
-                        .position(gpui::point(px(placement.x), px(placement.y)))
-                        .position_mode(AnchoredPositionMode::Window)
-                        .child(overlay_content_boundary(popup)),
-                )
-                .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
-            )
-            .into_any_element()
+            .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
+            cx,
+        )
+        .into_any_element()
     }
 
     fn render_file_manager_context_menu_item(
@@ -436,7 +417,6 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let color = if danger { FILE_MANAGER_RED } else { theme.text };
-        let actionable = context_menu_item_is_actionable(disabled, loading);
         let item = div()
             .h(px(FILE_MANAGER_CONTEXT_MENU_ITEM_HEIGHT))
             .w_full()
@@ -448,12 +428,6 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.xs))
             .text_size(px(FILE_MANAGER_TEXT_XS))
             .text_color(rgb(color))
-            .opacity(if actionable { 1.0 } else { 0.5 })
-            .when(actionable, |item| {
-                item.cursor_pointer().hover(move |item| {
-                    item.bg(file_manager_hover_bg(theme.bg_hover, has_background))
-                })
-            })
             .child(Self::render_lucide_icon(
                 icon,
                 FILE_MANAGER_ICON_SM,
@@ -467,10 +441,29 @@ impl WorkspaceApp {
                 color,
                 cx,
             )));
+        let item = context_menu_actionable_row(
+            item,
+            disabled,
+            loading,
+            ContextMenuActionableStyle {
+                hover_background: Some(file_manager_hover_bg(theme.bg_hover, has_background)),
+                hover_text_color: None,
+            },
+        );
         // File manager uses conditional rendering for most unavailable items,
         // but long-running local operations should leave visible menu rows inert
         // like disabled browser/Radix menu items.
-        context_menu_action(item, disabled, loading, listener).into_any_element()
+        self.workspace_context_menu_action(
+            item,
+            disabled,
+            loading,
+            |this| {
+                this.file_manager.context_menu = None;
+            },
+            move |_this, event, window, cx| listener(event, window, cx),
+            cx,
+        )
+        .into_any_element()
     }
 
     fn render_file_manager_separator(&self, has_background: bool) -> AnyElement {
@@ -1040,20 +1033,21 @@ impl WorkspaceApp {
                 // for create/rename/delete prompts. Keep native prompt
                 // buttons on the same shared button primitive as other modal
                 // footers instead of hand-drawing div chrome here.
-                button_focus_visible(
+                toolbar_button(
                     &self.tokens,
-                    button_with(
-                        &self.tokens,
-                        self.i18n.t("common.actions.cancel"),
-                        ButtonOptions {
+                    self.i18n.t("common.actions.cancel"),
+                    None,
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
                             variant: ButtonVariant::Ghost,
                             size: ButtonSize::Sm,
                             radius: ButtonRadius::Md,
                             disabled: false,
                         },
-                    ),
-                    self.file_manager.focused_dialog_footer_action
-                        == Some(ConfirmDialogAction::Cancel),
+                        focus_visible: self.file_manager.focused_dialog_footer_action
+                            == Some(ConfirmDialogAction::Cancel),
+                        ..ToolbarButtonOptions::default()
+                    },
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -1065,16 +1059,16 @@ impl WorkspaceApp {
                 ),
             )
             .child(
-                button_focus_visible(
+                toolbar_button(
                     &self.tokens,
-                    button_with(
-                        &self.tokens,
-                        if danger {
-                            self.i18n.t("fileManager.delete")
-                        } else {
-                            self.i18n.t("fileManager.go")
-                        },
-                        ButtonOptions {
+                    if danger {
+                        self.i18n.t("fileManager.delete")
+                    } else {
+                        self.i18n.t("fileManager.go")
+                    },
+                    None,
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
                             variant: if danger {
                                 ButtonVariant::Destructive
                             } else {
@@ -1084,9 +1078,10 @@ impl WorkspaceApp {
                             radius: ButtonRadius::Md,
                             disabled: primary_disabled,
                         },
-                    ),
-                    self.file_manager.focused_dialog_footer_action
-                        == Some(ConfirmDialogAction::Confirm),
+                        focus_visible: self.file_manager.focused_dialog_footer_action
+                            == Some(ConfirmDialogAction::Confirm),
+                        ..ToolbarButtonOptions::default()
+                    },
                 )
                 .when(!primary_disabled, |button| {
                     button.on_mouse_down(

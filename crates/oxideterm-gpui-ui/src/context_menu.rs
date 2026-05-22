@@ -1,6 +1,6 @@
 use gpui::{
     App, CursorStyle, Div, FontWeight, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, Styled, Window, div, prelude::*, px, rgb, rgba,
+    MouseDownEvent, ParentElement, Rgba, Styled, Window, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -31,6 +31,38 @@ pub fn context_menu_item_is_actionable(disabled: bool, loading: bool) -> bool {
     // Loading rows use the same action guard even if a caller keeps them styled
     // as active to show progress.
     !(disabled || loading)
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ContextMenuActionableStyle {
+    pub hover_background: Option<Rgba>,
+    pub hover_text_color: Option<Rgba>,
+}
+
+pub fn context_menu_actionable_row(
+    item: Div,
+    disabled: bool,
+    loading: bool,
+    style: ContextMenuActionableStyle,
+) -> Div {
+    // Radix keeps disabled/loading menu rows visible but inert. Centralizing the
+    // row state prevents feature menus from drifting on cursor, hover, or opacity.
+    if context_menu_item_is_actionable(disabled, loading) {
+        item.cursor_pointer().hover(move |item| {
+            let item = if let Some(background) = style.hover_background {
+                item.bg(background)
+            } else {
+                item
+            };
+            if let Some(text_color) = style.hover_text_color {
+                item.text_color(text_color)
+            } else {
+                item
+            }
+        })
+    } else {
+        item.opacity(CONTEXT_MENU_DISABLED_OPACITY)
+    }
 }
 
 pub fn context_menu_action(

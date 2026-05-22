@@ -27,29 +27,30 @@ impl WorkspaceApp {
     fn ai_provider_active_button(
         &self,
         provider: &AiProviderView,
-        active_provider: bool,
+        _active_provider: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let provider = provider.clone();
-        let label = if active_provider {
-            self.i18n.t("settings_view.ai.active")
-        } else {
-            self.i18n.t("settings_view.ai.set_active")
-        };
-        button_with(
-            &self.tokens,
-            label,
-            ButtonOptions {
-                variant: if active_provider {
-                    ButtonVariant::Default
-                } else {
-                    ButtonVariant::Outline
-                },
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled: false,
-            },
-        )
+        // Tauri AiTab renders "set active" as a rounded span[role=button]
+        // rather than a shadcn Button. Keep that pill shape here while still
+        // removing the old ad-hoc Button construction.
+        div()
+            .rounded_full()
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .px(px(10.0))
+            .py(px(4.0))
+            .text_size(px(11.0))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .cursor_pointer()
+            .hover({
+                let accent = self.tokens.ui.accent;
+                move |pill| {
+                    pill.border_color(rgba((accent << 8) | 0x99))
+                        .text_color(rgb(accent))
+                }
+            })
+            .child(self.i18n.t("settings_view.ai.set_active"))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {

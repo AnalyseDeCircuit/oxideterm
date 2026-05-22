@@ -11,58 +11,40 @@ impl WorkspaceApp {
             return false;
         }
 
-        match event.keystroke.key.as_str() {
-            "escape" => {
+        match browser_behavior::modal_footer_input_key_action(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers.shift,
+            &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
+            self.session_manager.show_new_group,
+            self.session_manager.focused_input == Some(SessionManagerInput::NewGroup),
+            self.session_manager.focused_basic_dialog_footer_action,
+            SessionManagerBasicDialogFooterAction::Cancel,
+            None,
+        ) {
+            Some(browser_behavior::ModalFooterInputKeyAction::Cancel) => {
                 self.close_session_manager_basic_dialog(cx);
                 true
             }
-            "tab" => {
-                // Browser focus traps walk visible dialog controls in order.
-                // These small native dialogs model the same cycle explicitly:
-                // optional text input, cancel, primary, then wrap.
-                self.move_session_manager_basic_dialog_footer_focus(
-                    !event.keystroke.modifiers.shift,
-                    true,
-                    cx,
-                );
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusInput) => {
+                self.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
+                self.session_manager.focused_basic_dialog_footer_action = None;
+                self.ime_marked_text = None;
+                cx.notify();
                 true
             }
-            "arrowleft" | "left" => {
-                self.move_session_manager_basic_dialog_footer_focus(false, false, cx);
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) => {
+                self.session_manager.focused_input = None;
+                self.session_manager.focused_basic_dialog_footer_action = Some(action);
+                self.ime_marked_text = None;
+                cx.notify();
                 true
             }
-            "arrowright" | "right" => {
-                self.move_session_manager_basic_dialog_footer_focus(true, false, cx);
+            Some(browser_behavior::ModalFooterInputKeyAction::Activate(action)) => {
+                self.activate_session_manager_basic_dialog_footer(action, cx);
                 true
             }
-            "enter" | "space" | " " => {
-                if let Some(action) = self.session_manager.focused_basic_dialog_footer_action {
-                    self.activate_session_manager_basic_dialog_footer(action, cx);
-                    return true;
-                }
-                false
-            }
-            _ => false,
+            None => false,
         }
-    }
-
-    fn move_session_manager_basic_dialog_footer_focus(
-        &mut self,
-        forward: bool,
-        include_text_input: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let (focus_text_input, footer_action) = next_session_manager_basic_dialog_focus(
-            include_text_input && self.session_manager.show_new_group,
-            self.session_manager.focused_input == Some(SessionManagerInput::NewGroup),
-            self.session_manager.focused_basic_dialog_footer_action,
-            forward,
-        );
-        self.session_manager.focused_input =
-            focus_text_input.then_some(SessionManagerInput::NewGroup);
-        self.session_manager.focused_basic_dialog_footer_action = footer_action;
-        self.ime_marked_text = None;
-        cx.notify();
     }
 
     fn activate_session_manager_basic_dialog_footer(
@@ -166,63 +148,20 @@ impl WorkspaceApp {
                 .as_deref()
                 .and_then(|id| self.connection_info_by_id(id)),
                 |surface, conn| {
-                    surface.child(
-                        context_menu_backdrop()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, window, cx| {
-                                    // Row menus are transient overlays; route
-                                    // outside dismissal through the shared root
-                                    // path so focus restoration stays uniform.
-                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
-                                        window, cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Right,
-                                cx.listener(|this, _event, window, cx| {
-                                    // Secondary outside clicks close the current
-                                    // menu before the next row can claim a menu.
-                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
-                                        window, cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .child(self.render_row_context_menu(conn, window, has_background, cx)),
-                    )
+                    surface.child(self.workspace_context_menu_backdrop(
+                        self.render_row_context_menu(conn, window, has_background, cx),
+                        cx,
+                    ))
                 },
             )
             .when(
                 self.session_manager.folder_tree_context_menu_x.is_some()
                     && self.session_manager.folder_tree_context_menu_y.is_some(),
                 |surface| {
-                    surface.child(
-                        context_menu_backdrop()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, window, cx| {
-                                    // Folder-tree context menus use the same
-                                    // Radix outside-dismiss path as row menus.
-                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
-                                        window, cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Right,
-                                cx.listener(|this, _event, window, cx| {
-                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
-                                        window, cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .child(self.render_folder_tree_context_menu(window, cx)),
-                    )
+                    surface.child(self.workspace_context_menu_backdrop(
+                        self.render_folder_tree_context_menu(window, cx),
+                        cx,
+                    ))
                 },
             )
             .into_any_element()

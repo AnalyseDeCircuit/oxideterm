@@ -17,7 +17,7 @@ use oxideterm_gpui_ui::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
         ToolbarButtonOptions, icon_button, toolbar_button,
     },
-    context_menu::{context_menu_action, context_menu_backdrop, context_menu_item_is_actionable},
+    context_menu::{ContextMenuActionableStyle, context_menu_actionable_row},
     modal::{dismissible_dialog_backdrop, overlay_content_boundary},
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{text_caret, text_input_anchor_probe},

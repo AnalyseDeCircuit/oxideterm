@@ -199,22 +199,30 @@ impl WorkspaceApp {
                             )),
                     )
                     .child(
-                        button_with(
+                        // Tauri OxideExportModal renders select-all as an
+                        // outline h-7 text-xs Button. Route through the shared
+                        // toolbar primitive so disabled/focus behavior matches
+                        // the rest of the dialog actions.
+                        toolbar_button(
                             &self.tokens,
                             if all_selected {
                                 "取消全选".to_string()
                             } else {
                                 "全选".to_string()
                             },
-                            ButtonOptions {
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: total == 0,
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: total == 0,
+                                },
+                                height: Some(OXIDE_SELECT_ALL_BUTTON_HEIGHT),
+                                font_size: Some(self.tokens.metrics.ui_text_xs),
+                                ..ToolbarButtonOptions::default()
                             },
                         )
-                        .h(px(28.0))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {

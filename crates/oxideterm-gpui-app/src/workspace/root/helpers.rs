@@ -188,7 +188,108 @@ fn reconnect_phase_label(phase: &ReconnectPhase) -> &'static str {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceContextMenuDismissal {
+    Close,
+    KeepOpen,
+}
+
 impl WorkspaceApp {
+    fn workspace_context_menu_backdrop(
+        &self,
+        menu: impl gpui::IntoElement,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        // Radix context menus close for primary and secondary outside clicks.
+        // Keep all native context-menu backdrops on the same dismissal path so
+        // focus restoration and overlay arbitration do not diverge by feature.
+        oxideterm_gpui_ui::context_menu::context_menu_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, window, cx| {
+                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event, window, cx| {
+                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(menu)
+    }
+
+    fn workspace_context_menu_action(
+        &self,
+        item: gpui::Div,
+        disabled: bool,
+        loading: bool,
+        close_menu: impl Fn(&mut Self) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        self.workspace_context_menu_action_with_dismissal(
+            item,
+            disabled,
+            loading,
+            WorkspaceContextMenuDismissal::Close,
+            close_menu,
+            listener,
+            cx,
+        )
+    }
+
+    fn workspace_context_menu_persistent_action(
+        &self,
+        item: gpui::Div,
+        disabled: bool,
+        loading: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        self.workspace_context_menu_action_with_dismissal(
+            item,
+            disabled,
+            loading,
+            WorkspaceContextMenuDismissal::KeepOpen,
+            |_| {},
+            listener,
+            cx,
+        )
+    }
+
+    fn workspace_context_menu_action_with_dismissal(
+        &self,
+        item: gpui::Div,
+        disabled: bool,
+        loading: bool,
+        dismissal: WorkspaceContextMenuDismissal,
+        close_menu: impl Fn(&mut Self) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        // Browser/Radix context-menu item activation has a common sequence:
+        // ignore disabled/loading rows, apply the menu's dismissal policy, run
+        // the action, then stop the pointer from reaching the underlying row or
+        // terminal. Checkbox/dropdown menus such as broadcast target selection
+        // intentionally keep the popover open while still sharing the guard.
+        oxideterm_gpui_ui::context_menu::context_menu_action(
+            item,
+            disabled,
+            loading,
+            cx.listener(move |this, event, window, cx| {
+                if dismissal == WorkspaceContextMenuDismissal::Close {
+                    close_menu(this);
+                }
+                listener(this, event, window, cx);
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+    }
+
     fn push_event_log_entry(
         &mut self,
         severity: WorkspaceEventSeverity,
@@ -676,13 +777,50 @@ impl WorkspaceApp {
             self.connection_monitor.selector_focus_origin = None;
             changed = true;
         }
-        if self.connection_monitor.dismiss_topology_menu() {
-            // Topology node menus are transient context menus over a canvas,
-            // so Esc/outside dismissal belongs to the shared overlay close path.
-            changed = true;
-        }
         if self.session_manager.show_batch_move {
             self.session_manager.show_batch_move = false;
+            changed = true;
+        }
+        if self.dismiss_workspace_context_menus() {
+            changed = true;
+        }
+        if self.detached_local_terminals_popover_open {
+            self.detached_local_terminals_popover_open = false;
+            changed = true;
+        }
+        if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
+            self.close_terminal_quick_commands_popover();
+            changed = true;
+        }
+        if self.terminal_command_suggestions_open {
+            self.terminal_command_suggestions_open = false;
+            self.terminal_command_suggestion_highlighted = None;
+            changed = true;
+        }
+        if self.has_ai_sidebar_floating_overlay() {
+            self.close_ai_sidebar_popovers();
+            changed = true;
+        }
+        if self.workspace_tooltip.is_some() || self.workspace_tooltip_pending.is_some() {
+            self.workspace_tooltip = None;
+            self.workspace_tooltip_pending = None;
+            self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+            changed = true;
+        }
+        if changed {
+            self.ime_marked_text = None;
+        }
+
+        changed
+    }
+
+    pub(super) fn dismiss_workspace_context_menus(&mut self) -> bool {
+        let mut changed = false;
+
+        // Radix ContextMenu uses one close policy for outside pointer and Esc.
+        // Keep all native context-menu owners here so feature handlers do not
+        // each mutate their own menu state differently.
+        if self.connection_monitor.dismiss_topology_menu() {
             changed = true;
         }
         if self
@@ -718,32 +856,6 @@ impl WorkspaceApp {
         if self.terminal_broadcast_menu_open {
             self.terminal_broadcast_menu_open = false;
             changed = true;
-        }
-        if self.detached_local_terminals_popover_open {
-            self.detached_local_terminals_popover_open = false;
-            changed = true;
-        }
-        if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
-            self.close_terminal_quick_commands_popover();
-            changed = true;
-        }
-        if self.terminal_command_suggestions_open {
-            self.terminal_command_suggestions_open = false;
-            self.terminal_command_suggestion_highlighted = None;
-            changed = true;
-        }
-        if self.has_ai_sidebar_floating_overlay() {
-            self.close_ai_sidebar_popovers();
-            changed = true;
-        }
-        if self.workspace_tooltip.is_some() || self.workspace_tooltip_pending.is_some() {
-            self.workspace_tooltip = None;
-            self.workspace_tooltip_pending = None;
-            self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
-            changed = true;
-        }
-        if changed {
-            self.ime_marked_text = None;
         }
 
         changed

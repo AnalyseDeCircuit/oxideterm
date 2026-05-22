@@ -208,16 +208,6 @@ fn oxide_import_footer_actions(dialog: &OxideImportDialogState) -> Vec<OxideDial
     }
 }
 
-fn next_oxide_footer_action(
-    actions: &[OxideDialogFooterAction],
-    current: Option<OxideDialogFooterAction>,
-    forward: bool,
-) -> Option<OxideDialogFooterAction> {
-    // Import/export dialogs can hide footer buttons by stage, so feed only the
-    // currently rendered buttons into the shared browser-style focus cycle.
-    browser_behavior::next_modal_footer_focus(actions, current, forward)
-}
-
 fn import_preview_selectable_names(preview: &ImportPreview) -> HashSet<String> {
     let mut names = HashSet::new();
     names.extend(preview.unchanged.iter().cloned());

@@ -713,6 +713,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }
                     }),
+                    cx,
                 ),
             )
             .child(
@@ -736,6 +737,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }
                     }),
+                    cx,
                 ),
             )
             .child(
@@ -765,6 +767,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }
                     }),
+                    cx,
                 ),
             )
             .into_any_element()
@@ -832,6 +835,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }
                     }),
+                    cx,
                 ),
             )
             .child(
@@ -856,6 +860,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }
                     }),
+                    cx,
                 ),
             )
             .child(
@@ -880,6 +885,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }
                     }),
+                    cx,
                 ),
             )
             .child(
@@ -904,6 +910,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }
                     }),
+                    cx,
                 ),
             )
             .child(
@@ -934,6 +941,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }
                     }),
+                    cx,
                 ),
             )
             .into_any_element()
@@ -949,7 +957,6 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        let actionable = context_menu_item_is_actionable(disabled, loading);
         let item = div()
             .h(px(30.0))
             .flex()
@@ -968,12 +975,15 @@ impl WorkspaceApp {
                 color.into(),
                 cx,
             ));
-        if actionable {
-            item.cursor_pointer()
-                .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
-        } else {
-            item.opacity(0.5)
-        }
+        context_menu_actionable_row(
+            item,
+            disabled,
+            loading,
+            ContextMenuActionableStyle {
+                hover_background: Some(theme_hover_bg(self.tokens.ui.bg_hover, has_background)),
+                hover_text_color: None,
+            },
+        )
     }
 
     fn render_row_menu_item_with_icon_color(
@@ -987,7 +997,6 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        let actionable = context_menu_item_is_actionable(disabled, loading);
         let item = div()
             .h(px(30.0))
             .flex()
@@ -1006,12 +1015,15 @@ impl WorkspaceApp {
                 text_color.into(),
                 cx,
             ));
-        if actionable {
-            item.cursor_pointer()
-                .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
-        } else {
-            item.opacity(0.5)
-        }
+        context_menu_actionable_row(
+            item,
+            disabled,
+            loading,
+            ContextMenuActionableStyle {
+                hover_background: Some(theme_hover_bg(self.tokens.ui.bg_hover, has_background)),
+                hover_text_color: None,
+            },
+        )
     }
 
     fn render_session_manager_menu_action(
@@ -1020,11 +1032,19 @@ impl WorkspaceApp {
         disabled: bool,
         loading: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        cx: &mut Context<Self>,
     ) -> gpui::Div {
         // SessionManager has both inline "..." menus and row context menus.
         // Tauri routes both through Radix ContextMenuItem semantics, so native
-        // keeps invocation and disabled/loading guards in one shared path.
-        context_menu_action(item, disabled, loading, listener)
+        // keeps invocation, close, and disabled/loading guards in one path.
+        self.workspace_context_menu_action(
+            item,
+            disabled,
+            loading,
+            |this| this.close_session_row_menus(),
+            move |_this, event, window, cx| listener(event, window, cx),
+            cx,
+        )
     }
 
     fn render_row_icon_button(

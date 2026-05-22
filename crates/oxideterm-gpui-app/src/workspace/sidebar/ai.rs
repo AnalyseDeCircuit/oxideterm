@@ -49,9 +49,9 @@ use oxideterm_gpui_ui::{
     },
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonOptions, button_focus_visible, icon_button, toolbar_button,
+        ToolbarButtonOptions, icon_button, toolbar_button,
     },
-    context_menu::{context_menu_action, context_menu_item_is_actionable},
+    context_menu::{ContextMenuActionableStyle, context_menu_actionable_row},
     modal::overlay_content_boundary,
     tauri_ui_font_family as settings_ui_font_family,
     text_input::{text_caret, text_input, text_input_anchor_probe},
@@ -80,22 +80,32 @@ impl WorkspaceApp {
         loading: bool,
         hover_bg: Option<Rgba>,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
     ) -> Div {
         // AI safety/chat menus are Radix dropdown-style command rows in Tauri.
         // Native keeps hover, cursor, and invocation blocking tied to the same
         // shared menu action guard used by file/session/terminal menus.
-        let actionable = context_menu_item_is_actionable(disabled, loading);
-        let item = if actionable {
-            let item = item.cursor_pointer();
-            if let Some(hover_bg) = hover_bg {
-                item.hover(move |row| row.bg(hover_bg))
-            } else {
-                item
-            }
-        } else {
-            item.opacity(0.5)
-        };
-        context_menu_action(item, disabled, loading, listener)
+        let item = context_menu_actionable_row(
+            item,
+            disabled,
+            loading,
+            ContextMenuActionableStyle {
+                hover_background: hover_bg,
+                hover_text_color: None,
+            },
+        );
+        self.workspace_context_menu_action(
+            item,
+            disabled,
+            loading,
+            |this| {
+                this.ai_chat_menu_open = false;
+                this.ai_conversation_list_open = false;
+                this.ai_safety_menu_open = false;
+            },
+            move |_this, event, window, cx| listener(event, window, cx),
+            cx,
+        )
     }
 }
 

@@ -8,6 +8,7 @@ use super::tokens::{
     AI_HOVER_BG_ALPHA, AI_MUTED_TEXT_70_ALPHA, AI_TEXT_9, AI_TEXT_10, AI_TEXT_12, AI_TW_AMBER,
     AI_TW_EMERALD, ai_font_family, bg_alpha, muted_text,
 };
+use crate::button::button_focus_visible;
 
 const MODEL_SELECTOR_DROPDOWN_WIDTH: f32 = 256.0; // Tauri w-64.
 const MODEL_SELECTOR_LIST_MAX_HEIGHT: f32 = 320.0; // Tauri max-h-80.
@@ -74,9 +75,10 @@ pub fn ai_model_selector_trigger_compact(
     label: impl Into<String>,
     ready: bool,
     open: bool,
+    focus_visible: bool,
     chevron: impl IntoElement,
 ) -> Div {
-    div()
+    let trigger = div()
         .flex()
         .w_full()
         .max_w_full()
@@ -116,7 +118,11 @@ pub fn ai_model_selector_trigger_compact(
                 .bg(rgb(if ready { AI_TW_EMERALD } else { AI_TW_AMBER })),
         )
         .child(div().min_w_0().flex_1().truncate().child(label.into()))
-        .child(div().flex_none().child(chevron))
+        .child(div().flex_none().child(chevron));
+    // The model selector is visually a compact select trigger. Keep its
+    // browser focus-visible ring inside the primitive so page renderers only
+    // decide keyboard-vs-pointer origin, not ring styling.
+    button_focus_visible(tokens, trigger, focus_visible)
 }
 
 pub fn ai_model_selector_dropdown(

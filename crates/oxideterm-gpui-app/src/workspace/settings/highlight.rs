@@ -107,15 +107,25 @@ impl WorkspaceApp {
                                 )),
                             )
                             .child(
-                                button_with(
+                                // Tauri uses the shared shadcn Button for this action; keep the
+                                // native focus/disabled semantics on the shared toolbar primitive.
+                                toolbar_button(
                                     &self.tokens,
                                     self.i18n
                                         .t("settings_view.terminal.highlight_rules.add_rule"),
-                                    ButtonOptions {
-                                        variant: ButtonVariant::Default,
-                                        size: ButtonSize::Sm,
-                                        radius: ButtonRadius::Md,
-                                        disabled: add_disabled,
+                                    Some(Self::render_lucide_icon(
+                                        LucideIcon::Plus,
+                                        14.0,
+                                        rgb(self.tokens.ui.accent_text),
+                                    )),
+                                    ToolbarButtonOptions {
+                                        button: ButtonOptions {
+                                            variant: ButtonVariant::Default,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: add_disabled,
+                                        },
+                                        ..ToolbarButtonOptions::default()
                                     },
                                 )
                                 .on_mouse_down(
@@ -427,14 +437,18 @@ impl WorkspaceApp {
         action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        button_with(
+        toolbar_button(
             &self.tokens,
             label,
-            ButtonOptions {
-                variant: ButtonVariant::Ghost,
-                size: ButtonSize::Sm,
-                radius: ButtonRadius::Md,
-                disabled: !enabled,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: !enabled,
+                },
+                ..ToolbarButtonOptions::default()
             },
         )
         .on_mouse_down(

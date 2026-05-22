@@ -743,27 +743,35 @@ impl WorkspaceApp {
         &self,
         label: &'static str,
         on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .px_2()
-            .py_1()
-            .rounded(px(self.tokens.radii.sm))
-            .text_size(px(FILE_MANAGER_TEXT_XS))
-            .text_color(rgb(theme.text_muted))
-            .cursor_pointer()
-            .hover(move |button| button.bg(rgb(theme.bg_hover)))
-            .on_mouse_down(MouseButton::Left, on_click)
-            .child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "file-preview-media-seek",
-                label,
-                label,
-                theme.text_muted,
-                cx,
-            ))
-            .into_any_element()
+        toolbar_button(
+            &self.tokens,
+            label.to_string(),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Sm,
+                    disabled: false,
+                },
+                show_label: true,
+                height: Some(24.0),
+                padding_x: Some(8.0),
+                font_size: Some(FILE_MANAGER_TEXT_XS),
+                text_color: Some(rgb(theme.text_muted)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                hover_text_color: Some(rgb(theme.text)),
+                // Tauri audio controls are real buttons, so their text never
+                // enters document selection; shared toolbar_button preserves
+                // that browser button boundary for native preview controls.
+                ..ToolbarButtonOptions::default()
+            },
+        )
+        .on_mouse_down(MouseButton::Left, on_click)
+        .into_any_element()
     }
 
     fn render_file_manager_font_size_button(

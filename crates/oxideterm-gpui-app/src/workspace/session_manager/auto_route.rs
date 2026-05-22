@@ -152,35 +152,44 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        match event.keystroke.key.as_str() {
-            "escape" => {
+        match browser_behavior::modal_footer_input_key_action(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers.shift,
+            &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
+            self.auto_route_modal.selected_node_id.is_some(),
+            self.session_manager.focused_input == Some(SessionManagerInput::AutoRouteDisplayName),
+            self.session_manager.focused_basic_dialog_footer_action,
+            SessionManagerBasicDialogFooterAction::Cancel,
+            Some(SessionManagerBasicDialogFooterAction::Primary),
+        ) {
+            Some(browser_behavior::ModalFooterInputKeyAction::Cancel) => {
                 self.close_auto_route_modal(cx);
                 true
             }
-            "tab" => {
-                self.move_auto_route_footer_focus(!event.keystroke.modifiers.shift, true, cx);
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusInput) => {
+                self.session_manager.focused_input = Some(SessionManagerInput::AutoRouteDisplayName);
+                self.session_manager.focused_basic_dialog_footer_action = None;
+                self.ime_marked_text = None;
+                cx.notify();
                 true
             }
-            "arrowleft" | "left" => {
-                self.move_auto_route_footer_focus(false, false, cx);
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) => {
+                self.session_manager.focused_input = None;
+                self.session_manager.focused_basic_dialog_footer_action = Some(action);
+                self.ime_marked_text = None;
+                cx.notify();
                 true
             }
-            "arrowright" | "right" => {
-                self.move_auto_route_footer_focus(true, false, cx);
+            Some(browser_behavior::ModalFooterInputKeyAction::Activate(action)) => {
+                self.activate_auto_route_footer(action, window, cx);
                 true
             }
-            "enter" | "space" | " " if self.session_manager.focused_input.is_none() => {
-                if let Some(action) = self.session_manager.focused_basic_dialog_footer_action {
-                    self.activate_auto_route_footer(action, window, cx);
-                } else {
-                    self.connect_auto_route(window, cx);
-                }
-                true
-            }
-            _ if self.session_manager.focused_input == Some(SessionManagerInput::AutoRouteDisplayName) => {
+            None if self.session_manager.focused_input
+                == Some(SessionManagerInput::AutoRouteDisplayName) =>
+            {
                 self.handle_session_manager_key(event, window, cx)
             }
-            _ => false,
+            None => false,
         }
     }
 
@@ -305,29 +314,6 @@ impl WorkspaceApp {
         self.close_auto_route_modal(cx);
         self.persist_session_tree_snapshot();
         window.focus(&self.focus_handle);
-        cx.notify();
-    }
-
-    fn move_auto_route_footer_focus(
-        &mut self,
-        forward: bool,
-        include_display_name: bool,
-        cx: &mut Context<Self>,
-    ) {
-        // Auto Route is a larger Tauri Dialog, but its footer still follows
-        // the same browser focus trap as the small session-manager dialogs:
-        // optional text field, Cancel, primary action, then wrap.
-        let display_name_visible = self.auto_route_modal.selected_node_id.is_some();
-        let (focus_display_name, footer_action) = next_session_manager_basic_dialog_focus(
-            include_display_name && display_name_visible,
-            self.session_manager.focused_input == Some(SessionManagerInput::AutoRouteDisplayName),
-            self.session_manager.focused_basic_dialog_footer_action,
-            forward,
-        );
-        self.session_manager.focused_input =
-            focus_display_name.then_some(SessionManagerInput::AutoRouteDisplayName);
-        self.session_manager.focused_basic_dialog_footer_action = footer_action;
-        self.ime_marked_text = None;
         cx.notify();
     }
 

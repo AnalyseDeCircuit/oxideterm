@@ -164,9 +164,15 @@ impl WorkspaceApp {
                 &self.tokens,
                 self.i18n.t("ai.input.stop"),
                 Self::render_lucide_icon(LucideIcon::StopCircle, 12.0, rgb(0xef4444)),
+                action_focused,
             )
         } else {
-            ai_send_button(&self.tokens, self.i18n.t("ai.input.send_btn"), send_disabled)
+            ai_send_button(
+                &self.tokens,
+                self.i18n.t("ai.input.send_btn"),
+                send_disabled,
+                action_focused,
+            )
         };
         let frame = ai_chat_input_frame(&self.tokens, focused)
             .when(!autocomplete_items.is_empty(), |frame| {
@@ -212,7 +218,7 @@ impl WorkspaceApp {
                         .child("SHIFT+ENTER"),
                 )
             })
-            .child(button_focus_visible(&self.tokens, action, action_focused).on_mouse_down(
+            .child(action.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
                     this.ai_chat_footer_focus = None;
@@ -556,6 +562,7 @@ impl WorkspaceApp {
                     this.open_ai_settings(window, cx);
                     cx.stop_propagation();
                 }),
+                cx,
             ))
             .into_any_element()
     }
@@ -633,9 +640,9 @@ impl WorkspaceApp {
             false,
             false,
             Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-            cx.listener(move |this, _event, _window, cx| {
-                match mode {
-                    AiSafetyMode::Default => this.set_ai_safety_mode_default(cx),
+                cx.listener(move |this, _event, _window, cx| {
+                    match mode {
+                        AiSafetyMode::Default => this.set_ai_safety_mode_default(cx),
                     AiSafetyMode::Bypass => {
                         if this.active_ai_safety_mode() != AiSafetyMode::Bypass {
                             this.ai_safety_confirm_open = true;
@@ -645,9 +652,10 @@ impl WorkspaceApp {
                         cx.notify();
                     }
                 }
-                cx.stop_propagation();
-            }),
-        )
+                    cx.stop_propagation();
+                }),
+                cx,
+            )
         .into_any_element()
     }
 

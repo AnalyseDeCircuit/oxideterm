@@ -110,8 +110,13 @@ impl Render for WorkspaceApp {
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let active_ime_commits_printable_key =
+                    active_ime_should_defer_printable_key(
+                        this.active_ime_target().is_some(),
+                        &event.keystroke,
+                    );
                 if this.keyboard_interactive_challenge.is_some() {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     let _ = this.handle_keyboard_interactive_key(event, window, cx);
@@ -174,27 +179,21 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.auto_route_modal.open {
-                    if this.active_ime_target().is_some()
-                        && keystroke_commits_platform_text(&event.keystroke)
-                    {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     let _ = this.handle_auto_route_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.new_connection_form.is_some() {
-                    if this.active_ime_target().is_some()
-                        && keystroke_commits_platform_text(&event.keystroke)
-                    {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     let _ = this.handle_new_connection_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.command_palette.open {
-                    if this.active_ime_target().is_some()
-                        && keystroke_commits_platform_text(&event.keystroke)
-                    {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     this.handle_command_palette_key(event, window, cx);
@@ -214,7 +213,7 @@ impl Render for WorkspaceApp {
                 } else if this.terminal_quick_commands_open
                     && this.quick_commands.focused_input.is_some()
                 {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     this.handle_quick_commands_key(event, cx);
@@ -227,7 +226,7 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.terminal_command_bar_focused {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     this.handle_terminal_command_bar_key(event, window, cx);
@@ -241,7 +240,7 @@ impl Render for WorkspaceApp {
                     .is_some_and(|tab| tab.kind == TabKind::SessionManager)
                     && this.session_manager.focused_input.is_some()
                 {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     let _ = this.handle_session_manager_key(event, window, cx);
@@ -252,7 +251,7 @@ impl Render for WorkspaceApp {
                     .is_some_and(|tab| tab.kind == TabKind::Forwards)
                     && this.forwarding_view.focused_input.is_some()
                 {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     let _ = this.handle_forwards_key(event, cx);
@@ -263,7 +262,7 @@ impl Render for WorkspaceApp {
                     .is_some_and(|tab| tab.kind == TabKind::Launcher)
                     && this.launcher.focused_input.is_some()
                 {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     let _ = this.handle_launcher_key(event, cx);
@@ -274,7 +273,7 @@ impl Render for WorkspaceApp {
                     .is_some_and(|tab| tab.kind == TabKind::Graphics)
                     && this.graphics.focused_input.is_some()
                 {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     let _ = this.handle_graphics_key(event, cx);
@@ -294,7 +293,7 @@ impl Render for WorkspaceApp {
                             this.sftp_view.dialog.as_ref(),
                             Some(sftp::SftpDialog::Preview { .. })
                         );
-                    if keystroke_commits_platform_text(&event.keystroke)
+                    if active_ime_commits_printable_key
                         && !sftp_quick_look_space
                         && !sftp_markdown_preview_toggle
                     {
@@ -324,7 +323,7 @@ impl Render for WorkspaceApp {
                     let file_manager_preview_transform = matches!(key, "+" | "=" | "-" | "0" | "r")
                         && this.file_manager.focused_input.is_none()
                         && file_manager_preview_open;
-                    if keystroke_commits_platform_text(&event.keystroke)
+                    if active_ime_commits_printable_key
                         && !file_manager_quick_look_space
                         && !file_manager_preview_info_toggle
                         && !file_manager_markdown_preview_toggle
@@ -336,7 +335,7 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.focused_settings_input.is_some() {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     let _ = this.handle_settings_input_key(event, cx);
@@ -347,7 +346,7 @@ impl Render for WorkspaceApp {
                         || this.ai_chat_footer_focus.is_some()
                         || this.ai_model_selector_search_focused)
                 {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     let _ = this.handle_ai_sidebar_key(event, cx);
@@ -358,7 +357,7 @@ impl Render for WorkspaceApp {
                     .as_ref()
                     .is_some_and(|player| player.search_focused)
                 {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    if active_ime_commits_printable_key {
                         return;
                     }
                     this.handle_terminal_cast_search_key(event, cx);
@@ -765,29 +764,10 @@ impl Render for WorkspaceApp {
                         )
                     };
                     root.child(
-                        // Broadcast target picking is rendered as a terminal
-                        // context menu, so outside pointer dismissal should use
-                        // the same event island primitive as file/SFTP menus.
-                        context_menu_backdrop()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, window, cx| {
-                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
-                                        window, cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Right,
-                                cx.listener(|this, _event, window, cx| {
-                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
-                                        window, cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .child(self.render_terminal_broadcast_menu(placement, cx)),
+                        self.workspace_context_menu_backdrop(
+                            self.render_terminal_broadcast_menu(placement, cx),
+                            cx,
+                        ),
                     )
                 },
             )

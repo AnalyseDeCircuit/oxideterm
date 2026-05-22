@@ -69,14 +69,26 @@ impl WorkspaceApp {
                 .items_center()
                 .justify_end()
                 .child(
-                    button_with(
+                    // Tauri DocumentManager renders this as an outline small
+                    // Button with a leading Plus icon. Use the shared toolbar
+                    // primitive so settings action buttons keep one disabled
+                    // and focus-visible contract.
+                    toolbar_button(
                         &self.tokens,
                         self.i18n.t("settings_view.knowledge.create_collection"),
-                        ButtonOptions {
-                            variant: ButtonVariant::Outline,
-                            size: ButtonSize::Sm,
-                            radius: ButtonRadius::Md,
-                            disabled: false,
+                        Some(Self::render_lucide_icon(
+                            LucideIcon::Plus,
+                            KNOWLEDGE_INLINE_ICON_SIZE,
+                            rgb(self.tokens.ui.text),
+                        )),
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Sm,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                            ..ToolbarButtonOptions::default()
                         },
                     )
                     .on_mouse_down(

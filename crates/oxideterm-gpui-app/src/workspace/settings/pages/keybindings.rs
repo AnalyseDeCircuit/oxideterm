@@ -5,6 +5,9 @@ enum KeybindingToolbarAction {
     ResetAll,
 }
 
+const KEYBINDING_SCOPE_FILTER_HEIGHT: f32 = 32.0; // Tauri KeybindingEditorSection scope Button h-8
+const KEYBINDING_SCOPE_FILTER_PADDING_X: f32 = 12.0; // Tauri px-3
+
 impl KeybindingToolbarAction {
     fn label_key(self) -> &'static str {
         match self {
@@ -189,31 +192,44 @@ impl WorkspaceApp {
         for filter in filters {
             let active = self.keybinding_scope_filter == filter;
             row = row.child(
-                button_with(
-                    &self.tokens,
-                    self.i18n.t(filter.label_key()),
-                    ButtonOptions {
-                        variant: if active {
-                            ButtonVariant::Secondary
-                        } else {
-                            ButtonVariant::Ghost
-                        },
-                        size: ButtonSize::Sm,
-                        radius: ButtonRadius::Md,
-                        disabled: false,
-                    },
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.keybinding_scope_filter = filter;
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                ),
+                self.keybinding_scope_filter_button(filter, active)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.keybinding_scope_filter = filter;
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
             );
         }
         row.into_any_element()
+    }
+
+    fn keybinding_scope_filter_button(&self, filter: KeybindingScopeFilter, active: bool) -> Div {
+        // Tauri renders these as compact shadcn Buttons (`h-8 px-3 text-xs`).
+        // Route through the shared toolbar primitive so disabled/focus/loading
+        // additions do not need another local button implementation.
+        toolbar_button(
+            &self.tokens,
+            self.i18n.t(filter.label_key()),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: if active {
+                        ButtonVariant::Secondary
+                    } else {
+                        ButtonVariant::Ghost
+                    },
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                height: Some(KEYBINDING_SCOPE_FILTER_HEIGHT),
+                padding_x: Some(KEYBINDING_SCOPE_FILTER_PADDING_X),
+                ..ToolbarButtonOptions::default()
+            },
+        )
     }
 
     fn keybinding_toolbar_button(
@@ -462,7 +478,7 @@ impl WorkspaceApp {
                             )
                             .when(modified, |controls| {
                                 controls.child(
-                                    self.keybinding_icon_button(LucideIcon::RotateCcw)
+                                    self.keybinding_icon_button(LucideIcon::RotateCcw, false)
                                         .on_mouse_down(
                                             MouseButton::Left,
                                             cx.listener(move |this, _event, window, cx| {
@@ -538,24 +554,35 @@ impl WorkspaceApp {
                     "settings_view.keybindings.override_anyway"
                 };
                 cell.child(
-                    button_focus_visible(
+                    toolbar_button(
                         &self.tokens,
-                        button_with(
-                            &self.tokens,
-                            if conflicts.is_empty() {
-                                label_key.to_string()
-                            } else {
-                                self.i18n.t(label_key)
-                            },
-                            ButtonOptions {
+                        if conflicts.is_empty() {
+                            label_key.to_string()
+                        } else {
+                            self.i18n.t(label_key)
+                        },
+                        None,
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
                                 variant: ButtonVariant::Ghost,
                                 size: ButtonSize::Sm,
                                 radius: ButtonRadius::Md,
                                 disabled: false,
                             },
-                        ),
-                        self.keybinding_recording_footer_focus
-                            == Some(KeybindingRecordingFooterAction::Confirm),
+                            text_color: Some(rgb(if conflicts.is_empty() {
+                                self.tokens.ui.accent
+                            } else {
+                                self.tokens.ui.warning
+                            })),
+                            hover_text_color: Some(rgb(if conflicts.is_empty() {
+                                self.tokens.ui.accent
+                            } else {
+                                self.tokens.ui.warning
+                            })),
+                            focus_visible: self.keybinding_recording_footer_focus
+                                == Some(KeybindingRecordingFooterAction::Confirm),
+                            ..ToolbarButtonOptions::default()
+                        },
                     )
                     .on_mouse_down(
                         MouseButton::Left,
@@ -567,9 +594,8 @@ impl WorkspaceApp {
                 )
             })
             .child(
-                button_focus_visible(
-                    &self.tokens,
-                    self.keybinding_icon_button(LucideIcon::X),
+                self.keybinding_icon_button(
+                    LucideIcon::X,
                     self.keybinding_recording_footer_focus
                         == Some(KeybindingRecordingFooterAction::Cancel),
                 )
@@ -648,7 +674,9 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn keybinding_icon_button(&self, icon: LucideIcon) -> Div {
+    fn keybinding_icon_button(&self, icon: LucideIcon, focus_visible: bool) -> Div {
+        // RecordingCell's icon buttons are still custom-sized, but focus-visible
+        // now enters through the shared icon primitive instead of a local wrapper.
         icon_button(
             &self.tokens,
             Self::render_lucide_icon(
@@ -660,6 +688,7 @@ impl WorkspaceApp {
                 size: 28.0,
                 radius: ButtonRadius::Sm,
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                focus_visible,
                 idle_opacity: 1.0,
                 ..IconButtonOptions::compact(28.0)
             },

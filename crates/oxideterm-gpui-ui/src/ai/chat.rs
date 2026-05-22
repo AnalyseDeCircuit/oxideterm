@@ -4,6 +4,8 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
+use crate::button::tauri_focus_visible_ring;
+
 use super::tokens::*;
 
 pub fn ai_sidebar_shell(tokens: &ThemeTokens, width: f32, content: impl IntoElement) -> Div {
@@ -232,7 +234,14 @@ pub fn ai_chat_input_status(tokens: &ThemeTokens, label: impl Into<String>, acti
         .child(label.into())
 }
 
-pub fn ai_send_button(tokens: &ThemeTokens, label: impl Into<String>, disabled: bool) -> Div {
+pub fn ai_send_button(
+    tokens: &ThemeTokens,
+    label: impl Into<String>,
+    disabled: bool,
+    focus_visible: bool,
+) -> Div {
+    // Tauri ChatInput uses bespoke footer buttons, but keyboard focus still
+    // follows browser :focus-visible. Keep that ring centralized in the button layer.
     div()
         .px(px(tokens.spacing.two + tokens.spacing.one / 2.0))
         .py(px(tokens.spacing.one / 2.0))
@@ -243,6 +252,9 @@ pub fn ai_send_button(tokens: &ThemeTokens, label: impl Into<String>, disabled: 
         .font_weight(FontWeight::BOLD)
         .opacity(if disabled { 0.2 } else { 1.0 })
         .cursor_pointer()
+        .when(focus_visible, |button| {
+            button.shadow(tauri_focus_visible_ring(tokens))
+        })
         .child(label.into())
 }
 
@@ -250,6 +262,7 @@ pub fn ai_stop_button(
     tokens: &ThemeTokens,
     label: impl Into<String>,
     icon: impl IntoElement,
+    focus_visible: bool,
 ) -> Div {
     div()
         .flex()
@@ -262,6 +275,9 @@ pub fn ai_stop_button(
         .text_color(rgb(AI_TW_RED))
         .text_size(px(AI_TEXT_10))
         .font_weight(FontWeight::BOLD)
+        .when(focus_visible, |button| {
+            button.shadow(tauri_focus_visible_ring(tokens))
+        })
         .child(icon)
         .child(label.into())
 }

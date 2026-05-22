@@ -181,57 +181,83 @@ mod tests {
 
     #[test]
     fn basic_dialog_tab_order_wraps_through_text_input_like_radix_dialog() {
-        let (text_focused, footer) =
-            next_session_manager_basic_dialog_focus(true, true, None, true);
-        assert!(!text_focused);
         assert_eq!(
-            footer,
-            Some(SessionManagerBasicDialogFooterAction::Cancel)
+            browser_behavior::modal_footer_input_key_action(
+                "tab",
+                false,
+                &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
+                true,
+                true,
+                None,
+                SessionManagerBasicDialogFooterAction::Cancel,
+                None,
+            ),
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(
+                SessionManagerBasicDialogFooterAction::Cancel
+            ))
         );
 
-        let (text_focused, footer) = next_session_manager_basic_dialog_focus(
-            true,
-            false,
-            Some(SessionManagerBasicDialogFooterAction::Primary),
-            true,
+        assert_eq!(
+            browser_behavior::modal_footer_input_key_action(
+                "tab",
+                false,
+                &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
+                true,
+                false,
+                Some(SessionManagerBasicDialogFooterAction::Primary),
+                SessionManagerBasicDialogFooterAction::Cancel,
+                None,
+            ),
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusInput)
         );
-        assert!(text_focused);
-        assert_eq!(footer, None);
 
-        let (text_focused, footer) = next_session_manager_basic_dialog_focus(
-            true,
-            false,
-            Some(SessionManagerBasicDialogFooterAction::Cancel),
-            false,
+        assert_eq!(
+            browser_behavior::modal_footer_input_key_action(
+                "tab",
+                true,
+                &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
+                true,
+                false,
+                Some(SessionManagerBasicDialogFooterAction::Cancel),
+                SessionManagerBasicDialogFooterAction::Cancel,
+                None,
+            ),
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusInput)
         );
-        assert!(text_focused);
-        assert_eq!(footer, None);
     }
 
     #[test]
     fn basic_dialog_footer_arrows_stay_inside_footer_actions() {
-        let (text_focused, footer) = next_session_manager_basic_dialog_focus(
-            false,
-            false,
-            Some(SessionManagerBasicDialogFooterAction::Cancel),
-            false,
-        );
-        assert!(!text_focused);
         assert_eq!(
-            footer,
-            Some(SessionManagerBasicDialogFooterAction::Primary)
+            browser_behavior::modal_footer_input_key_action(
+                "arrowleft",
+                false,
+                &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
+                false,
+                false,
+                Some(SessionManagerBasicDialogFooterAction::Cancel),
+                SessionManagerBasicDialogFooterAction::Cancel,
+                None,
+            ),
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(
+                SessionManagerBasicDialogFooterAction::Primary
+            ))
         );
 
-        let (text_focused, footer) = next_session_manager_basic_dialog_focus(
-            false,
-            false,
-            Some(SessionManagerBasicDialogFooterAction::Primary),
-            true,
-        );
-        assert!(!text_focused);
         assert_eq!(
-            footer,
-            Some(SessionManagerBasicDialogFooterAction::Cancel)
+            browser_behavior::modal_footer_input_key_action(
+                "arrowright",
+                false,
+                &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
+                false,
+                false,
+                Some(SessionManagerBasicDialogFooterAction::Primary),
+                SessionManagerBasicDialogFooterAction::Cancel,
+                None,
+            ),
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(
+                SessionManagerBasicDialogFooterAction::Cancel
+            ))
         );
     }
 

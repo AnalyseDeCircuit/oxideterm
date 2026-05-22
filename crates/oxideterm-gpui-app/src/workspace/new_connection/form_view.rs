@@ -23,7 +23,7 @@ use oxideterm_gpui_ui::{
     ButtonTone, TextInputView, button,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonOptions, button_with, icon_button, toolbar_button,
+        ToolbarButtonOptions, icon_button, toolbar_button,
     },
     checkbox, form_field,
     modal::{dismissible_dialog_backdrop, popover_backdrop},

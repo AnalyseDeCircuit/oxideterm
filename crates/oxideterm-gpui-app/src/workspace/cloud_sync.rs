@@ -3297,37 +3297,32 @@ impl WorkspaceApp {
             return false;
         }
 
-        let focused = self
-            .cloud_sync_confirm_focused_action
-            .unwrap_or(ConfirmDialogAction::Cancel);
-        match event.keystroke.key.as_str() {
-            "escape" => {
+        match browser_behavior::modal_footer_key_action(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers.shift,
+            &CONFIRM_DIALOG_FOOTER_ACTIONS,
+            self.cloud_sync_confirm_focused_action,
+            ConfirmDialogAction::Cancel,
+        ) {
+            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
                 self.cancel_cloud_sync_confirm();
                 cx.notify();
                 true
             }
-            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
-                // Tauri footer buttons are ordinary DOM buttons in a modal
-                // focus loop. Native keeps the same key direction mapping so
-                // Shift+Tab and left-arrow walk backward through the footer.
-                let forward = browser_behavior::modal_footer_key_moves_forward(
-                    event.keystroke.key.as_str(),
-                    event.keystroke.modifiers.shift,
-                );
-                self.cloud_sync_confirm_focused_action =
-                    Some(next_confirm_dialog_footer_focus(Some(focused), forward));
+            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+                self.cloud_sync_confirm_focused_action = Some(action);
                 cx.notify();
                 true
             }
-            "enter" | "space" | " " => {
-                match focused {
+            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+                match action {
                     ConfirmDialogAction::Cancel => self.cancel_cloud_sync_confirm(),
                     ConfirmDialogAction::Confirm => self.confirm_cloud_sync_confirm(cx),
                 }
                 cx.notify();
                 true
             }
-            _ => false,
+            None => false,
         }
     }
 

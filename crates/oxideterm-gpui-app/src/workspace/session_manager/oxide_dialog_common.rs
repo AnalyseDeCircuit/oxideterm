@@ -563,22 +563,21 @@ impl WorkspaceApp {
         // Tauri Oxide import/export modals use regular Button elements in a
         // footer row. Native focus is explicit, so keep Button chrome, disabled
         // state, and focus-visible ownership centralized for every footer mode.
-        button_focus_visible(
+        toolbar_button(
             &self.tokens,
-            button_with(
-                &self.tokens,
-                label,
-                ButtonOptions {
+            label,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
                     variant,
                     size: ButtonSize::Sm,
                     radius: ButtonRadius::Md,
                     disabled,
                 },
-            )
-            .when_some(min_width, |button, min_width| {
-                button.min_w(px(min_width))
-            }),
-            focused_action == Some(action),
+                min_width,
+                focus_visible: focused_action == Some(action),
+                ..ToolbarButtonOptions::default()
+            },
         )
     }
 

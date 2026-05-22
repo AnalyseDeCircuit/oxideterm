@@ -31,8 +31,7 @@ impl WorkspaceApp {
                 _ => return false,
             }
         }
-        if self.sftp_view.context_menu.is_some() && key == "escape" {
-            self.sftp_view.context_menu = None;
+        if key == "escape" && self.dismiss_workspace_context_menus() {
             cx.notify();
             return true;
         }

@@ -287,6 +287,15 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if active_ime_should_defer_printable_key(
+            self.active_ime_target().is_some(),
+            &event.keystroke,
+        ) {
+            // GPUI commits printable text through `InputHandler`; the shared
+            // guard keeps the fallback page handler from appending it again.
+            return;
+        }
+
         if self.new_connection_form.is_some() {
             let _ = self.handle_new_connection_key(event, window, cx);
             return;
@@ -479,32 +488,30 @@ impl WorkspaceApp {
             return None;
         }
 
-        let focused = self
-            .standard_confirm_focused_action
-            .unwrap_or(ConfirmDialogAction::Cancel);
-        match event.keystroke.key.as_str() {
-            "escape" => {
+        match browser_behavior::modal_footer_key_action(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers.shift,
+            &CONFIRM_DIALOG_FOOTER_ACTIONS,
+            self.standard_confirm_focused_action,
+            ConfirmDialogAction::Cancel,
+        ) {
+            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
                 self.clear_standard_confirm_focus();
                 Some(ConfirmKeyboardAction::Cancel)
             }
-            "tab" | "arrowleft" | "left" | "arrowright" | "right" => {
-                let forward = browser_behavior::modal_footer_key_moves_forward(
-                    event.keystroke.key.as_str(),
-                    event.keystroke.modifiers.shift,
-                );
-                self.standard_confirm_focused_action =
-                    Some(next_confirm_dialog_footer_focus(Some(focused), forward));
+            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+                self.standard_confirm_focused_action = Some(action);
                 cx.notify();
                 Some(ConfirmKeyboardAction::Handled)
             }
-            "enter" | "space" | " " => {
+            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
                 self.clear_standard_confirm_focus();
-                Some(match focused {
+                Some(match action {
                     ConfirmDialogAction::Cancel => ConfirmKeyboardAction::Cancel,
                     ConfirmDialogAction::Confirm => ConfirmKeyboardAction::Confirm,
                 })
             }
-            _ => None,
+            None => None,
         }
     }
 
@@ -703,41 +710,38 @@ impl WorkspaceApp {
             && !event.keystroke.modifiers.control
             && !event.keystroke.modifiers.alt
         {
-            match event.keystroke.key.as_str() {
-                "tab" => {
+            match browser_behavior::modal_footer_key_action(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                &KEYBINDING_RECORDING_FOOTER_ACTIONS,
+                self.keybinding_recording_footer_focus,
+                KeybindingRecordingFooterAction::Confirm,
+            ) {
+                Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
+                    self.cancel_keybinding_recording(cx);
+                    return;
+                }
+                Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
                     // Tauri renders real footer buttons once a combo exists.
-                    // Native captures keydown globally, so model that browser
-                    // Tab order explicitly instead of recording Tab again.
-                    self.move_keybinding_recording_footer_focus(
-                        !event.keystroke.modifiers.shift,
-                        cx,
-                    );
-                    return;
-                }
-                "home" | "arrowleft" | "left" => {
-                    self.keybinding_recording_footer_focus =
-                        Some(KeybindingRecordingFooterAction::Confirm);
+                    // Native captures keydown globally, so route recorder
+                    // footer navigation through the shared browser footer
+                    // contract instead of recording Tab/Home/End again.
+                    self.keybinding_recording_footer_focus = Some(action);
                     cx.notify();
                     return;
                 }
-                "end" | "arrowright" | "right" => {
-                    self.keybinding_recording_footer_focus =
-                        Some(KeybindingRecordingFooterAction::Cancel);
-                    cx.notify();
+                Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+                    match action {
+                        KeybindingRecordingFooterAction::Confirm => {
+                            self.confirm_keybinding_recording(window, cx);
+                        }
+                        KeybindingRecordingFooterAction::Cancel => {
+                            self.cancel_keybinding_recording(cx);
+                        }
+                    }
                     return;
                 }
-                "enter" | "space" | " " => match self.keybinding_recording_footer_focus {
-                    Some(KeybindingRecordingFooterAction::Confirm) => {
-                        self.confirm_keybinding_recording(window, cx);
-                        return;
-                    }
-                    Some(KeybindingRecordingFooterAction::Cancel) => {
-                        self.cancel_keybinding_recording(cx);
-                        return;
-                    }
-                    None => {}
-                },
-                _ => {}
+                None => {}
             }
         }
 
@@ -762,14 +766,6 @@ impl WorkspaceApp {
         self.keybinding_recording_combo = Some(combo);
         self.keybinding_recording_footer_focus = None;
         self.keybinding_conflict_action_ids = conflicts;
-        cx.notify();
-    }
-
-    fn move_keybinding_recording_footer_focus(&mut self, forward: bool, cx: &mut Context<Self>) {
-        self.keybinding_recording_footer_focus = Some(next_keybinding_recording_footer_focus(
-            self.keybinding_recording_footer_focus,
-            forward,
-        ));
         cx.notify();
     }
 
@@ -1796,32 +1792,6 @@ mod terminal_command_bar_behavior_tests {
                 TerminalCommandSuggestionDirection::Up
             ),
             Some(0)
-        );
-    }
-
-    #[test]
-    fn keybinding_recorder_footer_focus_cycles_like_two_browser_buttons() {
-        assert_eq!(
-            next_keybinding_recording_footer_focus(None, true),
-            KeybindingRecordingFooterAction::Confirm
-        );
-        assert_eq!(
-            next_keybinding_recording_footer_focus(
-                Some(KeybindingRecordingFooterAction::Confirm),
-                true
-            ),
-            KeybindingRecordingFooterAction::Cancel
-        );
-        assert_eq!(
-            next_keybinding_recording_footer_focus(
-                Some(KeybindingRecordingFooterAction::Cancel),
-                false
-            ),
-            KeybindingRecordingFooterAction::Confirm
-        );
-        assert_eq!(
-            next_keybinding_recording_footer_focus(None, false),
-            KeybindingRecordingFooterAction::Cancel
         );
     }
 

@@ -466,6 +466,7 @@ impl WorkspaceApp {
                 cx.stop_propagation();
                 cx.notify();
             }),
+            cx,
         )
         .into_any_element()
     }

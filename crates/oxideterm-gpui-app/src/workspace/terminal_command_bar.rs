@@ -1,7 +1,7 @@
 use super::actions::TerminalBroadcastMenuPlacement;
 use super::ime::WorkspaceImeTarget;
 use super::*;
-use oxideterm_gpui_ui::context_menu::{context_menu_action, context_menu_item_is_actionable};
+use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_actionable_row};
 use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
 use oxideterm_terminal_recording::format_recording_elapsed;
 
@@ -684,7 +684,7 @@ impl WorkspaceApp {
                     is_current,
                     false,
                     Some(rgb(theme.bg_hover)),
-                    cx.listener(move |this, _event, _window, cx| {
+                    cx.listener(move |this, _event, _window, _cx| {
                         if this.terminal_broadcast_targets.remove(&pane_id) {
                             if this.terminal_broadcast_targets.is_empty() {
                                 this.terminal_broadcast_enabled = false;
@@ -694,29 +694,30 @@ impl WorkspaceApp {
                             this.terminal_broadcast_enabled = true;
                         }
                         this.terminal_broadcast_menu_open = true;
-                        cx.stop_propagation();
-                        cx.notify();
                     }),
+                    cx,
                 );
                 menu = menu.child(row);
             }
 
             let select_all_disabled = selectable.is_empty();
-            let select_all_actionable = context_menu_item_is_actionable(select_all_disabled, false);
             let select_all_label = div()
                 .text_size(px(11.0))
                 .text_color(rgb(theme.text_muted))
-                .opacity(if select_all_disabled { 0.5 } else { 1.0 })
-                .when(select_all_actionable, |label| {
-                    label
-                        .cursor_pointer()
-                        .hover(move |style| style.text_color(rgb(theme.accent)))
-                })
                 .child(if all_selected {
                     self.i18n.t("terminal.broadcast.deselect_all")
                 } else {
                     self.i18n.t("terminal.broadcast.select_all")
                 });
+            let select_all_label = context_menu_actionable_row(
+                select_all_label,
+                select_all_disabled,
+                false,
+                ContextMenuActionableStyle {
+                    hover_background: None,
+                    hover_text_color: Some(rgb(theme.accent)),
+                },
+            );
             menu = menu.child(
                 div()
                     .mt(px(4.0))
@@ -727,11 +728,11 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_between()
                     .px(px(6.0))
-                    .child(context_menu_action(
+                    .child(self.workspace_context_menu_persistent_action(
                         select_all_label,
                         select_all_disabled,
                         false,
-                        cx.listener(move |this, _event, _window, cx| {
+                        move |this, _event, _window, _cx| {
                             if all_selected {
                                 this.terminal_broadcast_enabled = false;
                                 this.terminal_broadcast_targets.clear();
@@ -742,9 +743,8 @@ impl WorkspaceApp {
                                     !this.terminal_broadcast_targets.is_empty();
                             }
                             this.terminal_broadcast_menu_open = true;
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
+                        },
+                        cx,
                     ))
                     .when(self.terminal_broadcast_enabled, |footer| {
                         footer.child(
@@ -767,21 +767,26 @@ impl WorkspaceApp {
         loading: bool,
         hover_bg: Option<gpui::Rgba>,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        cx: &mut Context<Self>,
     ) -> gpui::Div {
         // Tauri broadcast target rows are Radix menu items with a disabled
         // current-terminal row. Keep native hover/cursor and action blocking
         // coupled to the shared context-menu guard.
-        let actionable = context_menu_item_is_actionable(disabled, loading);
-        let item = if actionable {
-            let item = item.cursor_pointer();
-            if let Some(hover_bg) = hover_bg {
-                item.hover(move |style| style.bg(hover_bg))
-            } else {
-                item
-            }
-        } else {
-            item.opacity(0.5)
-        };
-        context_menu_action(item, disabled, loading, listener)
+        let item = context_menu_actionable_row(
+            item,
+            disabled,
+            loading,
+            ContextMenuActionableStyle {
+                hover_background: hover_bg,
+                hover_text_color: None,
+            },
+        );
+        self.workspace_context_menu_persistent_action(
+            item,
+            disabled,
+            loading,
+            move |_this, event, window, cx| listener(event, window, cx),
+            cx,
+        )
     }
 }

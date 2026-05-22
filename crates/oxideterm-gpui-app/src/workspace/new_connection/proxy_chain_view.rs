@@ -454,36 +454,47 @@ impl WorkspaceApp {
     }
 
     fn render_jump_add_button(&self, disabled: bool, cx: &mut Context<Self>) -> AnyElement {
-        button_with(
+        // Jump-server editor actions mirror Tauri Button chrome. Keep add and
+        // cancel on the shared toolbar primitive instead of local button_with
+        // calls so disabled/focus handling can converge later.
+        toolbar_button(
             &self.tokens,
             self.i18n.t("ssh.form.proxy_jump_add"),
-            ButtonOptions {
-                variant: ButtonVariant::Default,
-                size: ButtonSize::Default,
-                disabled,
-                ..ButtonOptions::default()
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Default,
+                    size: ButtonSize::Default,
+                    disabled,
+                    ..ButtonOptions::default()
+                },
+                ..ToolbarButtonOptions::default()
             },
         )
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _event, _window, cx| {
-                if !disabled {
+        .when(!disabled, |button| {
+            button.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
                     this.add_pending_jump_server(cx);
-                }
-                cx.stop_propagation();
-            }),
-        )
+                    cx.stop_propagation();
+                }),
+            )
+        })
         .into_any_element()
     }
 
     fn render_jump_cancel_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        button_with(
+        toolbar_button(
             &self.tokens,
             self.i18n.t("ssh.form.cancel"),
-            ButtonOptions {
-                variant: ButtonVariant::Secondary,
-                size: ButtonSize::Default,
-                ..ButtonOptions::default()
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Default,
+                    ..ButtonOptions::default()
+                },
+                ..ToolbarButtonOptions::default()
             },
         )
         .on_mouse_down(

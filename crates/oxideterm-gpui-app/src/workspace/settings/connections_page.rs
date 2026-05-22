@@ -185,14 +185,29 @@ impl WorkspaceApp {
 
     fn connection_add_group_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let disabled = self.connection_new_group_text().trim().is_empty();
-        button_with(
+        // Tauri ConnectionsTab renders Add Group as the default shadcn Button
+        // with a leading Plus icon. Keep the disabled action guard local, but
+        // route the chrome through the shared toolbar primitive.
+        toolbar_button(
             &self.tokens,
             self.i18n.t("settings_view.connections.groups.add"),
-            ButtonOptions {
-                variant: ButtonVariant::Secondary,
-                size: ButtonSize::Default,
-                radius: ButtonRadius::Md,
-                disabled,
+            Some(Self::render_lucide_icon(
+                LucideIcon::Plus,
+                16.0,
+                rgb(if disabled {
+                    self.tokens.ui.text_muted
+                } else {
+                    self.tokens.ui.bg
+                }),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Default,
+                    size: ButtonSize::Default,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+                ..ToolbarButtonOptions::default()
             },
         )
         .when(!disabled, |button| {

@@ -903,7 +903,6 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let label_key = label.clone();
-        let actionable = context_menu_item_is_actionable(disabled, loading);
         let item = div()
             .w_full()
             .px_3()
@@ -922,18 +921,28 @@ impl WorkspaceApp {
                 theme.text_muted,
                 cx,
             ));
-        let item = if actionable {
-            item.cursor_pointer().hover(|style| {
-                style
-                    .bg(rgba((theme.accent << 8) | 0x1a))
-                    .text_color(rgb(theme.text))
-            })
-        } else {
-            item.opacity(0.5)
-        };
-        // Topology node actions are menu items; route invocation through the
-        // shared guard so future disabled/loading states do not bypass it.
-        context_menu_action(item, disabled, loading, listener).into_any_element()
+        let item = context_menu_actionable_row(
+            item,
+            disabled,
+            loading,
+            ContextMenuActionableStyle {
+                hover_background: Some(rgba((theme.accent << 8) | 0x1a)),
+                hover_text_color: Some(rgb(theme.text)),
+            },
+        );
+        // Topology node actions are menu items; route invocation, close, and
+        // disabled/loading behavior through the workspace shared menu action.
+        self.workspace_context_menu_action(
+            item,
+            disabled,
+            loading,
+            |this| {
+                this.connection_monitor.topology_menu = None;
+            },
+            move |_this, event, window, cx| listener(event, window, cx),
+            cx,
+        )
+        .into_any_element()
     }
 
     fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent) {
