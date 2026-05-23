@@ -174,6 +174,20 @@ impl WorkspaceApp {
             )
             .measure_all(),
             quick_command_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // Detached local terminals are a bounded popover list, but the
+            // number of retained background shells is user-driven, so keep it
+            // on the same ListState path as other browser-style popovers.
+            detached_local_terminal_list_state: ListState::new(
+                DETACHED_LOCAL_TERMINAL_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(DETACHED_LOCAL_TERMINAL_LIST_ESTIMATED_HEIGHT),
+                    DETACHED_LOCAL_TERMINAL_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            detached_local_terminal_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             // Plugin Manager has the same browser-page structure as Settings:
             // a small set of variable-height sections inside a scroll region.
             plugin_manager_section_list_state: ListState::new(
@@ -201,6 +215,21 @@ impl WorkspaceApp {
                 &settings.sidebar_ui.active_section,
             ),
             active_surface: ActiveSurface::Terminal,
+            // Session sidebar is a browser-style tree list. The first migration
+            // boundary is the top-level flattened node rows; expanded child
+            // actions stay inside their parent row until they get their own
+            // tree-row virtualization.
+            active_session_sidebar_list_state: ListState::new(
+                ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT),
+                    ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            active_session_sidebar_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             active_settings_tab: SettingsTab::General,
             terminal_settings_page: TerminalSettingsPage::Display,
             open_settings_select: None,
@@ -219,6 +248,60 @@ impl WorkspaceApp {
             )
             .measure_all(),
             settings_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // Execution profiles live inside the OxideSens section chrome, but
+            // user-created profile counts are unbounded. Keep the rows on their
+            // own ListState so scrolling the settings page does not rebuild all
+            // profile cards.
+            ai_execution_profile_list_state: ListState::new(
+                AI_EXECUTION_PROFILE_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(AI_EXECUTION_PROFILE_LIST_ESTIMATED_HEIGHT),
+                    AI_EXECUTION_PROFILE_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            ai_execution_profile_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // Expanded context/reasoning override tables are per-provider model
+            // rows. Store ListState by provider id to preserve each table's
+            // measurements independently.
+            ai_context_model_list_states: RefCell::new(HashMap::new()),
+            ai_context_model_list_caches: RefCell::new(HashMap::new()),
+            ai_reasoning_model_list_states: RefCell::new(HashMap::new()),
+            ai_reasoning_model_list_caches: RefCell::new(HashMap::new()),
+            // Provider model chips keep Tauri's wrapped chip look, but the
+            // chip rows are virtualized per provider when users expand all
+            // models.
+            ai_provider_model_chip_list_states: RefCell::new(HashMap::new()),
+            ai_provider_model_chip_list_caches: RefCell::new(HashMap::new()),
+            // Provider cards stay visually grouped in one OxideSens section,
+            // but the card list itself is virtual. This avoids outer settings
+            // scroll jumps when a provider expands or collapses.
+            ai_provider_card_list_state: ListState::new(
+                AI_PROVIDER_CARD_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(AI_PROVIDER_CARD_LIST_ESTIMATED_HEIGHT),
+                    AI_PROVIDER_CARD_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            ai_provider_card_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // MCP server cards are part of OxideSens but grow with user config
+            // and live status/tool chips. Keep them out of ordinary flex trees.
+            ai_mcp_server_list_state: ListState::new(
+                AI_MCP_SERVER_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(AI_MCP_SERVER_LIST_ESTIMATED_HEIGHT),
+                    AI_MCP_SERVER_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            ai_mcp_server_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             ai_new_provider_type: "openai_compatible".to_string(),
             ai_provider_settings_expanded: true,
             ai_tool_use_expanded: true,
@@ -440,6 +523,20 @@ impl WorkspaceApp {
             )
             .measure_all(),
             forwards_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // The table body is independently virtualized inside the Forwards
+            // page section so a long forwarding registry does not rebuild every
+            // row while the outer section list is measuring page chrome.
+            forwards_table_row_list_state: ListState::new(
+                FORWARDS_TABLE_ROW_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(FORWARDS_TABLE_ROW_LIST_ESTIMATED_HEIGHT),
+                    FORWARDS_TABLE_ROW_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            forwards_table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             forwarding_view: forwards::ForwardsViewState::default(),
             forwarding_port_detection_by_node: HashMap::new(),
             forwarding_port_profiler_nodes: HashSet::new(),
@@ -469,6 +566,20 @@ impl WorkspaceApp {
             )
             .measure_all(),
             launcher_wsl_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // macOS launcher keeps the Tauri grid visual, but the scroll owner
+            // is a GPUI ListState of grid rows so large application catalogs do
+            // not build every icon tile on every render.
+            launcher_app_grid_list_state: ListState::new(
+                LAUNCHER_APP_GRID_INITIAL_ROW_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(LAUNCHER_APP_GRID_ESTIMATED_ROW_HEIGHT),
+                    LAUNCHER_APP_GRID_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            launcher_app_grid_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             graphics: GraphicsState::new(),
             connection_monitor: ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx),
             // Monitor pages are variable-height browser sections; keep the
@@ -514,6 +625,33 @@ impl WorkspaceApp {
             )
             .measure_all(),
             cloud_sync_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // Cloud Sync rollback backups/history are nested record lists inside
+            // the page sections; give each list its own state so they do not
+            // share measurements with the outer section list.
+            cloud_sync_rollback_backup_list_state: ListState::new(
+                CLOUD_SYNC_ROLLBACK_BACKUP_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT),
+                    CLOUD_SYNC_ROLLBACK_BACKUP_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            cloud_sync_rollback_backup_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            cloud_sync_history_list_state: ListState::new(
+                CLOUD_SYNC_HISTORY_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT),
+                    CLOUD_SYNC_HISTORY_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            cloud_sync_history_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             cloud_sync_open_select: None,
             cloud_sync_focused_select: None,
             cloud_sync_select_focus_origin: None,
@@ -545,6 +683,102 @@ impl WorkspaceApp {
             settings_store,
             connection_store,
             session_manager: SessionManagerState::default(),
+            // Session manager folder tree is a nested browser tree. Virtualize
+            // the root rows first; expanded child rows stay grouped under their
+            // parent until tree-row flattening is migrated.
+            session_manager_folder_tree_list_state: ListState::new(
+                SESSION_MANAGER_FOLDER_TREE_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(SESSION_MANAGER_FOLDER_TREE_LIST_ESTIMATED_HEIGHT),
+                    SESSION_MANAGER_FOLDER_TREE_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            session_manager_folder_tree_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            // .oxide export can contain many saved connections. Keep the
+            // selectable record rows on the shared variable-list path while the
+            // dialog chrome remains ordinary GPUI layout.
+            oxide_export_connection_list_state: ListState::new(
+                OXIDE_EXPORT_CONNECTION_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_EXPORT_CONNECTION_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_EXPORT_CONNECTION_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_export_connection_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // Import file metadata may preview many connection names before the
+            // full import preview is opened; keep that read-only list virtual.
+            oxide_import_connection_preview_list_state: ListState::new(
+                OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_import_connection_preview_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            // Forward export is grouped by owner connection. Virtualize group
+            // rows so a large forwarding registry does not rebuild every group.
+            oxide_export_forward_group_list_state: ListState::new(
+                OXIDE_EXPORT_FORWARD_GROUP_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_EXPORT_FORWARD_GROUP_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_EXPORT_FORWARD_GROUP_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_export_forward_group_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            // Export preflight warnings can grow with selected content; keep
+            // the compact warning body virtual while preserving the Tauri
+            // 64px scroll window.
+            oxide_export_summary_line_list_state: ListState::new(
+                OXIDE_EXPORT_SUMMARY_LINE_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_EXPORT_SUMMARY_LINE_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_export_summary_line_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            // Import preview forward details are read-only rows inside the
+            // .oxide dialog, so keep them on a dedicated ListState.
+            oxide_import_forward_detail_list_state: ListState::new(
+                OXIDE_IMPORT_FORWARD_DETAIL_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_import_forward_detail_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            // Import preview can show several connection-name groups at once.
+            // Each group needs an isolated ListState/cache so virtual row
+            // measurements do not leak between conflict categories.
+            oxide_import_name_group_list_states: RefCell::new(HashMap::new()),
+            oxide_import_name_group_list_caches: RefCell::new(HashMap::new()),
             auto_route_modal: AutoRouteModalState::default(),
             settings_connection_new_group: String::new(),
             settings_selected_ssh_hosts: HashSet::new(),

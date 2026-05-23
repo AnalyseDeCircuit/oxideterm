@@ -69,7 +69,7 @@ impl Render for WorkspaceApp {
                     self.render_settings_surface(cx)
                 }
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
-                (TabKind::Launcher, _) => self.render_launcher_surface(cx),
+                (TabKind::Launcher, _) => self.render_launcher_surface(window, cx),
                 (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
                 (TabKind::ConnectionPool, _) => self.render_connection_pool_surface(cx),
                 (TabKind::ConnectionMonitor, _) => self.render_connection_monitor_surface(cx),

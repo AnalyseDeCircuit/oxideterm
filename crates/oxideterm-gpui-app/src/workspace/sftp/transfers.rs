@@ -18,6 +18,26 @@ fn sftp_transfer_queue_row_signature(transfer: &SftpTransferItem) -> u64 {
     hasher.finish()
 }
 
+fn sftp_incomplete_transfer_row_signature(transfer: &StoredTransferProgress) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Recovery rows are keyed by persisted transfer id. Progress, status, and
+    // error affect visible row content and can add an error line.
+    transfer.transfer_id.hash(&mut hasher);
+    transfer.source_path.hash(&mut hasher);
+    transfer.total_bytes.hash(&mut hasher);
+    transfer.transferred_bytes.hash(&mut hasher);
+    format!("{:?}", transfer.status).hash(&mut hasher);
+    format!("{:?}", transfer.transfer_type).hash(&mut hasher);
+    transfer.error.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn sftp_incomplete_loading_signature() -> u64 {
+    let mut hasher = DefaultHasher::new();
+    "sftp-incomplete-loading".hash(&mut hasher);
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     fn render_sftp_transfer_queue(
         &self,
@@ -257,47 +277,112 @@ impl WorkspaceApp {
             .child(
                 div()
                     .id("sftp-incomplete-transfer-scroll")
-                    .max_h(px(128.0))
-                    .selectable_overflow_y_scroll(
-                        &self.selectable_text_scroll_handle("sftp-incomplete-transfer-scroll"),
-                    )
-                    .p(px(8.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .children(
-                        self.sftp_view
-                            .incomplete_transfers
-                            .iter()
-                            .cloned()
-                            .map(|transfer| {
-                                self.render_sftp_incomplete_row(transfer, has_background, cx)
-                            }),
-                    )
-                    .when(self.sftp_view.incomplete_load_inflight, |list| {
-                        list.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .gap(px(8.0))
-                                .py(px(8.0))
-                                .text_size(px(SFTP_TEXT_XS))
-                                .text_color(rgb(theme.text_muted))
-                                .child(Self::render_lucide_icon(
-                                    LucideIcon::RefreshCw,
-                                    SFTP_ICON_SM,
-                                    rgb(theme.text_muted),
-                                ))
-                                .child(self.render_selectable_display_text(
-                                    "sftp-incomplete-loading",
-                                    "loading",
-                                    self.i18n.t("sftp.queue.loading"),
-                                    theme.text_muted,
-                                    cx,
-                                )),
-                        )
+                    .h(px(self.sftp_incomplete_transfer_list_height()))
+                    .when(self.sftp_incomplete_transfer_list_item_count() > 0, |list| {
+                        self.sync_sftp_incomplete_transfer_list_state();
+                        let state = self.sftp_view.incomplete_transfer_list_state.clone();
+                        let spec = self.sftp_incomplete_transfer_list_spec();
+                        let workspace = cx.entity();
+                        list.child(tauri_virtual_list(
+                            state,
+                            spec,
+                            move |index, _window, cx| {
+                                workspace.update(cx, |this, cx| {
+                                    this.render_sftp_incomplete_transfer_list_item(
+                                        index,
+                                        has_background,
+                                        cx,
+                                    )
+                                })
+                            },
+                        ))
                     }),
+            )
+            .into_any_element()
+    }
+
+    fn sftp_incomplete_transfer_list_item_count(&self) -> usize {
+        self.sftp_view.incomplete_transfers.len()
+            + usize::from(self.sftp_view.incomplete_load_inflight)
+    }
+
+    fn sftp_incomplete_transfer_list_height(&self) -> f32 {
+        (self.sftp_incomplete_transfer_list_item_count() as f32
+            * SFTP_INCOMPLETE_TRANSFER_LIST_ESTIMATED_HEIGHT)
+            .min(128.0)
+    }
+
+    fn sync_sftp_incomplete_transfer_list_state(&self) {
+        let mut signatures = self
+            .sftp_view
+            .incomplete_transfers
+            .iter()
+            .map(sftp_incomplete_transfer_row_signature)
+            .collect::<Vec<_>>();
+        if self.sftp_view.incomplete_load_inflight {
+            signatures.push(sftp_incomplete_loading_signature());
+        }
+        sync_tauri_variable_list_state_by_signatures(
+            &self.sftp_view.incomplete_transfer_list_state,
+            &mut self
+                .sftp_view
+                .incomplete_transfer_list_cache
+                .borrow_mut(),
+            "sftp-incomplete-transfers",
+            &signatures,
+            self.sftp_incomplete_transfer_list_spec(),
+        );
+    }
+
+    fn sftp_incomplete_transfer_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(SFTP_INCOMPLETE_TRANSFER_LIST_ESTIMATED_HEIGHT),
+            SFTP_INCOMPLETE_TRANSFER_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_sftp_incomplete_transfer_list_item(
+        &self,
+        index: usize,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if let Some(transfer) = self.sftp_view.incomplete_transfers.get(index).cloned() {
+            return div()
+                .px(px(8.0))
+                .when(index == 0, |item| item.pt(px(8.0)))
+                .pb(px(4.0))
+                .child(self.render_sftp_incomplete_row(transfer, has_background, cx))
+                .into_any_element();
+        }
+        self.render_sftp_incomplete_loading_row(cx)
+    }
+
+    fn render_sftp_incomplete_loading_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .px(px(8.0))
+            .py(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(8.0))
+                    .text_size(px(SFTP_TEXT_XS))
+                    .text_color(rgb(theme.text_muted))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::RefreshCw,
+                        SFTP_ICON_SM,
+                        rgb(theme.text_muted),
+                    ))
+                    .child(self.render_selectable_display_text(
+                        "sftp-incomplete-loading",
+                        "loading",
+                        self.i18n.t("sftp.queue.loading"),
+                        theme.text_muted,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

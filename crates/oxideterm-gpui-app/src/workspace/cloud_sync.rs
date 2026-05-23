@@ -69,6 +69,41 @@ enum CloudSyncSection {
     Notes,
 }
 
+fn cloud_sync_rollback_backup_signature(backup: &CloudSyncRollbackBackup) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Backups are keyed by id; metadata and byte size are visible in the row
+    // summary and must trigger a row remeasure when changed.
+    backup.id.hash(&mut hasher);
+    backup.created_at.hash(&mut hasher);
+    backup.source_revision.hash(&mut hasher);
+    backup.size_bytes.hash(&mut hasher);
+    if let Some(metadata) = backup.metadata.as_ref() {
+        metadata.num_connections.hash(&mut hasher);
+        metadata.connection_names.hash(&mut hasher);
+        metadata.has_app_settings.hash(&mut hasher);
+        metadata.plugin_settings_count.hash(&mut hasher);
+        metadata.forwards.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn cloud_sync_history_signature(entry: &CloudSyncHistoryEntry) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // History rows display action, timestamp, success/error, summary, and remote
+    // revision. Hash those fields for stable ListState splice decisions.
+    entry.id.hash(&mut hasher);
+    entry.action.hash(&mut hasher);
+    entry.timestamp.hash(&mut hasher);
+    entry.success.hash(&mut hasher);
+    entry.summary.connections.hash(&mut hasher);
+    entry.summary.forwards.hash(&mut hasher);
+    entry.summary.has_app_settings.hash(&mut hasher);
+    entry.summary.plugin_settings_count.hash(&mut hasher);
+    entry.error.hash(&mut hasher);
+    entry.remote_revision.hash(&mut hasher);
+    hasher.finish()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CloudSyncSelect {
     Backend,
@@ -1891,39 +1926,90 @@ impl WorkspaceApp {
     }
 
     fn render_cloud_sync_rollback_backups(
-        &self,
+        &mut self,
         state: &CloudSyncPersistedState,
         busy: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut card =
-            self.cloud_sync_card()
-                .child(self.render_cloud_sync_section_title(
+        self.sync_cloud_sync_rollback_backup_list_state(&state.rollback_backups);
+        let state_handle = self.cloud_sync_rollback_backup_list_state.clone();
+        let spec = self.cloud_sync_rollback_backup_list_spec();
+        let workspace = cx.entity();
+        let list_height =
+            state.rollback_backups.len() as f32 * CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT;
+        self.cloud_sync_card()
+            .child(
+                self.render_cloud_sync_section_title(
                     "plugin.cloud_sync.sections.rollback_backups",
                     cx,
-                ));
-        for backup in &state.rollback_backups {
-            let id = backup.id.clone();
-            let created_at = backup.created_at.clone();
-            let summary = backup
-                .metadata
-                .as_ref()
-                .map(|metadata| {
-                    self.i18n_replace(
-                        "plugin.cloud_sync.backup.summary_line",
-                        &[
-                            ("connections", metadata.num_connections.to_string()),
-                            ("forwards", metadata.forwards.to_string()),
-                            (
-                                "pluginSettingsCount",
-                                metadata.plugin_settings_count.to_string(),
-                            ),
-                            ("size", format_cloud_sync_bytes(backup.size_bytes)),
-                        ],
-                    )
-                })
-                .unwrap_or_else(|| format_cloud_sync_bytes(backup.size_bytes));
-            card = card.child(
+                ),
+            )
+            .child(div().h(px(list_height)).child(tauri_virtual_list(
+                state_handle,
+                spec,
+                move |index, _window, cx| {
+                    workspace.update(cx, |this, cx| {
+                        this.render_cloud_sync_rollback_backup_item(index, busy, cx)
+                    })
+                },
+            )))
+            .into_any_element()
+    }
+
+    fn sync_cloud_sync_rollback_backup_list_state(&self, backups: &[CloudSyncRollbackBackup]) {
+        let signatures = backups
+            .iter()
+            .map(cloud_sync_rollback_backup_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.cloud_sync_rollback_backup_list_state,
+            &mut self.cloud_sync_rollback_backup_list_cache.borrow_mut(),
+            "cloud-sync-rollback-backups",
+            &signatures,
+            self.cloud_sync_rollback_backup_list_spec(),
+        );
+    }
+
+    fn cloud_sync_rollback_backup_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT),
+            CLOUD_SYNC_ROLLBACK_BACKUP_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_cloud_sync_rollback_backup_item(
+        &self,
+        index: usize,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let state = self.cloud_sync_store.state().clone();
+        let Some(backup) = state.rollback_backups.get(index).cloned() else {
+            return div().into_any_element();
+        };
+        let id = backup.id.clone();
+        let created_at = backup.created_at.clone();
+        let summary = backup
+            .metadata
+            .as_ref()
+            .map(|metadata| {
+                self.i18n_replace(
+                    "plugin.cloud_sync.backup.summary_line",
+                    &[
+                        ("connections", metadata.num_connections.to_string()),
+                        ("forwards", metadata.forwards.to_string()),
+                        (
+                            "pluginSettingsCount",
+                            metadata.plugin_settings_count.to_string(),
+                        ),
+                        ("size", format_cloud_sync_bytes(backup.size_bytes)),
+                    ],
+                )
+            })
+            .unwrap_or_else(|| format_cloud_sync_bytes(backup.size_bytes));
+        div()
+            .pb(px(8.0))
+            .child(
                 div()
                     .w_full()
                     .min_w(px(0.0))
@@ -1990,13 +2076,12 @@ impl WorkspaceApp {
                         ),
                         cx,
                     )),
-            );
-        }
-        card.into_any_element()
+            )
+            .into_any_element()
     }
 
     fn render_cloud_sync_history(
-        &self,
+        &mut self,
         state: &CloudSyncPersistedState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -2039,11 +2124,65 @@ impl WorkspaceApp {
                     )),
             );
         } else {
-            for entry in state.sync_history.iter().take(10) {
-                card = card.child(self.render_cloud_sync_history_entry(entry, cx));
-            }
+            self.sync_cloud_sync_history_list_state(&state.sync_history);
+            let state_handle = self.cloud_sync_history_list_state.clone();
+            let spec = self.cloud_sync_history_list_spec();
+            let workspace = cx.entity();
+            let list_count = state.sync_history.len().min(10);
+            card = card.child(
+                div()
+                    .h(px(
+                        list_count as f32 * CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT
+                    ))
+                    .child(tauri_virtual_list(
+                        state_handle,
+                        spec,
+                        move |index, _window, cx| {
+                            workspace.update(cx, |this, cx| {
+                                this.render_cloud_sync_history_list_item(index, cx)
+                            })
+                        },
+                    )),
+            );
         }
         card.into_any_element()
+    }
+
+    fn sync_cloud_sync_history_list_state(&self, history: &[CloudSyncHistoryEntry]) {
+        let signatures = history
+            .iter()
+            .take(10)
+            .map(cloud_sync_history_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.cloud_sync_history_list_state,
+            &mut self.cloud_sync_history_list_cache.borrow_mut(),
+            "cloud-sync-history",
+            &signatures,
+            self.cloud_sync_history_list_spec(),
+        );
+    }
+
+    fn cloud_sync_history_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT),
+            CLOUD_SYNC_HISTORY_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_cloud_sync_history_list_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let state = self.cloud_sync_store.state().clone();
+        let Some(entry) = state.sync_history.get(index).cloned() else {
+            return div().into_any_element();
+        };
+        div()
+            .pb(px(8.0))
+            .child(self.render_cloud_sync_history_entry(&entry, cx))
+            .into_any_element()
     }
 
     fn render_cloud_sync_history_entry(

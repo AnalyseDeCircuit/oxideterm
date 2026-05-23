@@ -13,6 +13,37 @@ const AI_MCP_CARD_ICON_BUTTON: f32 = 28.0; // Tauri h-7 w-7 p-0.
 const AI_MCP_ACTION_ICON: f32 = 14.0; // Tauri w-3.5 h-3.5.
 const AI_MCP_STATUS_ICON: f32 = 12.0; // Tauri status icons w-3 h-3.
 
+fn ai_mcp_server_signature(
+    config: &oxideterm_ai::McpServerConfig,
+    snapshot: Option<&oxideterm_ai::McpServerStateSnapshot>,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Do not hash auth_token. The visible card is driven by public config,
+    // status, endpoint, error text, and tool names.
+    config.id.hash(&mut hasher);
+    config.name.hash(&mut hasher);
+    format!("{:?}", config.transport).hash(&mut hasher);
+    config.url.hash(&mut hasher);
+    config.command.hash(&mut hasher);
+    config.args.hash(&mut hasher);
+    config.env.len().hash(&mut hasher);
+    config.auth_header_name.hash(&mut hasher);
+    config.auth_header_mode.map(|mode| format!("{mode:?}")).hash(&mut hasher);
+    config.headers.len().hash(&mut hasher);
+    config.enabled.hash(&mut hasher);
+    config.retry_on_disconnect.hash(&mut hasher);
+    if let Some(snapshot) = snapshot {
+        snapshot.status.hash(&mut hasher);
+        snapshot.endpoint_url.hash(&mut hasher);
+        snapshot.error.hash(&mut hasher);
+        snapshot
+            .tools
+            .iter()
+            .for_each(|tool| tool.name.hash(&mut hasher));
+    }
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     fn ai_mcp_servers_section(
         &self,
@@ -38,9 +69,8 @@ impl WorkspaceApp {
             .detach();
         }
 
-        let mut list = div().flex().flex_col().gap(px(12.0));
-        if configs.is_empty() {
-            list = list.child(
+        let list = if configs.is_empty() {
+            div().flex().flex_col().gap(px(12.0)).child(
                 div()
                     .border_1()
                     .border_color(rgba((self.tokens.ui.border << 8) | AI_MCP_PANEL_BORDER_ALPHA))
@@ -50,15 +80,38 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t("settings_view.mcp.no_servers")),
-            );
+            )
         } else {
-            for config in configs {
-                let snapshot = snapshots
-                    .iter()
-                    .find(|snapshot| snapshot.config.id == config.id);
-                list = list.child(self.ai_mcp_server_card(config, snapshot, cx));
-            }
-        }
+            self.sync_ai_mcp_server_list_state(&configs, &snapshots);
+            let state = self.ai_mcp_server_list_state.clone();
+            let spec = self.ai_mcp_server_list_spec();
+            let workspace = cx.entity();
+            let configs_for_rows = configs.clone();
+            let snapshots_for_rows = snapshots.clone();
+            div()
+                .h(px(
+                    configs.len() as f32 * AI_MCP_SERVER_LIST_ESTIMATED_HEIGHT,
+                ))
+                .child(tauri_virtual_list(
+                    state,
+                    spec,
+                    move |index, _window, cx| {
+                        let Some(config) = configs_for_rows.get(index).cloned() else {
+                            return div().into_any_element();
+                        };
+                        let snapshots = snapshots_for_rows.clone();
+                        workspace.update(cx, |this, cx| {
+                            let snapshot = snapshots
+                                .iter()
+                                .find(|snapshot| snapshot.config.id == config.id);
+                            div()
+                                .pb(px(12.0))
+                                .child(this.ai_mcp_server_card(config, snapshot, cx))
+                                .into_any_element()
+                        })
+                    },
+                ))
+        };
 
         div()
             .flex()
@@ -107,6 +160,38 @@ impl WorkspaceApp {
             )
             .child(list)
             .into_any_element()
+    }
+
+    fn sync_ai_mcp_server_list_state(
+        &self,
+        configs: &[oxideterm_ai::McpServerConfig],
+        snapshots: &[oxideterm_ai::McpServerStateSnapshot],
+    ) {
+        let signatures = configs
+            .iter()
+            .map(|config| {
+                ai_mcp_server_signature(
+                    config,
+                    snapshots
+                        .iter()
+                        .find(|snapshot| snapshot.config.id == config.id),
+                )
+            })
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.ai_mcp_server_list_state,
+            &mut self.ai_mcp_server_list_cache.borrow_mut(),
+            "ai-mcp-servers",
+            &signatures,
+            self.ai_mcp_server_list_spec(),
+        );
+    }
+
+    fn ai_mcp_server_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(AI_MCP_SERVER_LIST_ESTIMATED_HEIGHT),
+            AI_MCP_SERVER_LIST_OVERSCAN,
+        )
     }
 
     fn ai_mcp_server_card(

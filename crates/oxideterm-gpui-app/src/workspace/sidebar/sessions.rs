@@ -1,5 +1,41 @@
+#[derive(Clone)]
+struct ActiveSessionSidebarRow {
+    node_id: NodeId,
+    node: WorkspaceSshNode,
+    node_view: ActiveSessionNode,
+    depth: usize,
+    is_last: bool,
+}
+
 impl WorkspaceApp {
-    fn render_active_sessions_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_active_sessions_sidebar_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let rows = self.active_session_sidebar_rows();
+        if rows.is_empty() {
+            return self.render_empty_sessions_sidebar_content(cx);
+        }
+
+        self.sync_active_session_sidebar_list_state(&rows);
+        let state = self.active_session_sidebar_list_state.clone();
+        let spec = self.active_session_sidebar_list_spec();
+        let workspace = cx.entity();
+        div()
+            .id("active-sessions-sidebar-scroll")
+            .flex_1()
+            .min_h(px(0.0))
+            .w_full()
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    workspace.update(cx, |this, cx| {
+                        this.render_active_session_sidebar_list_item(index, cx)
+                    })
+                },
+            ))
+            .into_any_element()
+    }
+
+    fn active_session_sidebar_rows(&self) -> Vec<ActiveSessionSidebarRow> {
         let mut tree_nodes = self.node_router.flatten_tree();
         let tree_node_ids = tree_nodes
             .iter()
@@ -19,20 +55,9 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         sort_active_session_nodes(&mut orphan_node_views);
 
-        if tree_nodes.is_empty() && orphan_node_views.is_empty() {
-            return self.render_empty_sessions_sidebar_content(cx);
-        }
-
-        div()
-            .id("active-sessions-sidebar-scroll")
-            .flex_1()
-            .min_h(px(0.0))
-            .w_full()
-            .selectable_overflow_y_scroll(
-                &self.selectable_text_scroll_handle("active-sessions-sidebar-scroll"),
-            )
-            .px_1()
-            .children(tree_nodes.drain(..).filter_map(|flat_node| {
+        let mut rows = tree_nodes
+            .drain(..)
+            .filter_map(|flat_node| {
                 let node_id = NodeId::new(flat_node.id.clone());
                 let node = self.ssh_nodes.get(&node_id)?.clone();
                 let node_view = ActiveSessionNode {
@@ -42,31 +67,94 @@ impl WorkspaceApp {
                     terminal_ids: node.terminal_ids.clone(),
                     readiness: active_session_readiness(&node.readiness),
                 };
-                Some(self.render_active_session_node(
+                Some(ActiveSessionSidebarRow {
                     node_id,
                     node,
                     node_view,
-                    flat_node.depth as usize,
-                    flat_node.is_last_child,
-                    cx,
-                ))
-            }))
-            .children({
-                let orphan_count = orphan_node_views.len();
-                orphan_node_views
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(index, node_view)| {
-                        let node_id = NodeId::new(node_view.id.clone());
-                        let node = self.ssh_nodes.get(&node_id)?.clone();
-                        let is_last = index + 1 == orphan_count;
-                        Some(self.render_active_session_node(
-                            node_id, node, node_view, 0, is_last, cx,
-                        ))
-                    })
-                    .collect::<Vec<_>>()
+                    depth: flat_node.depth as usize,
+                    is_last: flat_node.is_last_child,
+                })
             })
+            .collect::<Vec<_>>();
+        let orphan_count = orphan_node_views.len();
+        rows.extend(
+            orphan_node_views
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, node_view)| {
+                    let node_id = NodeId::new(node_view.id.clone());
+                    let node = self.ssh_nodes.get(&node_id)?.clone();
+                    Some(ActiveSessionSidebarRow {
+                        node_id,
+                        node,
+                        node_view,
+                        depth: 0,
+                        is_last: index + 1 == orphan_count,
+                    })
+                }),
+        );
+        rows
+    }
+
+    fn sync_active_session_sidebar_list_state(&mut self, rows: &[ActiveSessionSidebarRow]) {
+        let signatures = rows
+            .iter()
+            .map(|row| self.active_session_sidebar_row_signature(row))
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.active_session_sidebar_list_state,
+            &mut self.active_session_sidebar_list_cache.borrow_mut(),
+            "active-sessions-sidebar",
+            &signatures,
+            self.active_session_sidebar_list_spec(),
+        );
+    }
+
+    fn active_session_sidebar_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT),
+            ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_active_session_sidebar_list_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(row) = self.active_session_sidebar_rows().into_iter().nth(index) else {
+            return div().into_any_element();
+        };
+        div()
+            .px_1()
+            .child(self.render_active_session_node(
+                row.node_id,
+                row.node,
+                row.node_view,
+                row.depth,
+                row.is_last,
+                cx,
+            ))
             .into_any_element()
+    }
+
+    fn active_session_sidebar_row_signature(&self, row: &ActiveSessionSidebarRow) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        // This virtual row owns the node header plus expanded action/terminal
+        // children. Hash all state that can change its visible height or labels.
+        row.node_id.hash(&mut hasher);
+        row.node.title.hash(&mut hasher);
+        row.node.config.port.hash(&mut hasher);
+        row.node.terminal_ids.hash(&mut hasher);
+        row.node_view.title.hash(&mut hasher);
+        row.node_view.terminal_ids.hash(&mut hasher);
+        format!("{:?}", row.node_view.status()).hash(&mut hasher);
+        row.depth.hash(&mut hasher);
+        row.is_last.hash(&mut hasher);
+        self.expanded_ssh_nodes.contains(&row.node_id).hash(&mut hasher);
+        self.has_active_reconnect_job(&row.node_id).hash(&mut hasher);
+        (self.active_ssh_node_id.as_ref() == Some(&row.node_id)).hash(&mut hasher);
+        hasher.finish()
     }
 
     fn render_active_session_node(

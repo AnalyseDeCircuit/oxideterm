@@ -1,6 +1,18 @@
 use super::*;
 use gpui::StyledText;
 
+fn file_manager_archive_entry_signature(entry: &LocalArchiveEntry) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Archive rows expose every field below either as text or as row structure.
+    entry.path.hash(&mut hasher);
+    entry.name.hash(&mut hasher);
+    entry.is_dir.hash(&mut hasher);
+    entry.size.hash(&mut hasher);
+    entry.compressed_size.hash(&mut hasher);
+    entry.modified.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     pub(super) fn render_file_manager_preview_dialog(
         &self,
@@ -1246,11 +1258,47 @@ impl WorkspaceApp {
                     )),
             )
             .child(self.render_file_manager_archive_header(has_background, cx));
-        for (index, entry) in info.entries.iter().enumerate() {
-            body =
-                body.child(self.render_file_manager_archive_row(entry, index, has_background, cx));
-        }
+        self.sync_file_manager_archive_entry_list_state(&info.entries);
+        let state = self.file_manager.preview_archive_list_state.clone();
+        let spec = self.file_manager_archive_entry_list_spec();
+        let workspace = cx.entity();
+        let has_background_for_rows = has_background;
+        let entries = info.entries.clone();
+        let list_height = entries.len() as f32 * FILE_MANAGER_ARCHIVE_ROW_HEIGHT;
+        body = body.child(div().h(px(list_height)).child(tauri_virtual_list(
+            state,
+            spec,
+            move |index, _window, cx| {
+                let Some(entry) = entries.get(index).cloned() else {
+                    return div().into_any_element();
+                };
+                workspace.update(cx, |this, cx| {
+                    this.render_file_manager_archive_row(&entry, index, has_background_for_rows, cx)
+                })
+            },
+        )));
         body.into_any_element()
+    }
+
+    fn sync_file_manager_archive_entry_list_state(&self, entries: &[LocalArchiveEntry]) {
+        let signatures = entries
+            .iter()
+            .map(file_manager_archive_entry_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.file_manager.preview_archive_list_state,
+            &mut self.file_manager.preview_archive_list_cache.borrow_mut(),
+            "file-manager-archive-preview",
+            &signatures,
+            self.file_manager_archive_entry_list_spec(),
+        );
+    }
+
+    fn file_manager_archive_entry_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(FILE_MANAGER_ARCHIVE_ROW_HEIGHT),
+            FILE_MANAGER_ARCHIVE_LIST_OVERSCAN,
+        )
     }
 
     fn render_file_manager_archive_header(

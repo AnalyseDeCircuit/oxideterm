@@ -1,3 +1,9 @@
+#[derive(Clone, Debug, Hash)]
+enum SessionManagerFolderTreeRow {
+    Group(String),
+    Ungrouped,
+}
+
 impl WorkspaceApp {
     fn render_session_manager_toolbar(
         &self,
@@ -130,51 +136,35 @@ impl WorkspaceApp {
     }
 
     fn render_session_manager_folder_tree(
-        &self,
+        &mut self,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let all_count = self.connection_store.connections().len();
-        let ungrouped_count = self
-            .connection_store
-            .connections()
-            .iter()
-            .filter(|conn| conn.group.is_none())
-            .count();
-        let (root_groups, child_groups) = self.session_group_tree();
-        let mut groups = div()
+        let rows = self.session_manager_folder_tree_rows();
+        self.sync_session_manager_folder_tree_list_state(&rows);
+        let state = self.session_manager_folder_tree_list_state.clone();
+        let spec = self.session_manager_folder_tree_list_spec();
+        let workspace = cx.entity();
+        let groups = div()
             .id("session-manager-folder-tree-scroll")
             .flex_1()
             .min_h(px(0.0))
             .min_w(px(0.0))
-            .selectable_overflow_y_scroll(
-                &self.selectable_text_scroll_handle("session-manager-folder-tree-scroll"),
-            )
-            .px_1()
-            .py_1();
-
-        for group in root_groups {
-            groups = groups.child(self.render_group_tree_node(
-                group,
-                0,
-                &child_groups,
-                has_background,
-                cx,
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    workspace.update(cx, |this, cx| {
+                        this.render_session_manager_folder_tree_list_item(
+                            index,
+                            has_background,
+                            cx,
+                        )
+                    })
+                },
             ));
-        }
-
-        if ungrouped_count > 0 {
-            groups = groups.child(self.render_group_tree_item(
-                Some(UNGROUPED_FILTER.to_string()),
-                LucideIcon::Folder,
-                self.i18n.t("sessionManager.folder_tree.ungrouped"),
-                Some(ungrouped_count),
-                0,
-                has_background,
-                cx,
-            ));
-        }
 
         div()
             .id("session-manager-folder-tree")
@@ -240,6 +230,116 @@ impl WorkspaceApp {
                     )),
             )
             .into_any_element()
+    }
+
+    fn session_manager_folder_tree_rows(&self) -> Vec<SessionManagerFolderTreeRow> {
+        let (root_groups, _child_groups) = self.session_group_tree();
+        let mut rows = root_groups
+            .into_iter()
+            .map(SessionManagerFolderTreeRow::Group)
+            .collect::<Vec<_>>();
+        let ungrouped_count = self
+            .connection_store
+            .connections()
+            .iter()
+            .filter(|conn| conn.group.is_none())
+            .count();
+        if ungrouped_count > 0 {
+            rows.push(SessionManagerFolderTreeRow::Ungrouped);
+        }
+        rows
+    }
+
+    fn sync_session_manager_folder_tree_list_state(
+        &mut self,
+        rows: &[SessionManagerFolderTreeRow],
+    ) {
+        let signatures = rows
+            .iter()
+            .map(|row| self.session_manager_folder_tree_row_signature(row))
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.session_manager_folder_tree_list_state,
+            &mut self
+                .session_manager_folder_tree_list_cache
+                .borrow_mut(),
+            "session-manager-folder-tree",
+            &signatures,
+            self.session_manager_folder_tree_list_spec(),
+        );
+    }
+
+    fn session_manager_folder_tree_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(SESSION_MANAGER_FOLDER_TREE_LIST_ESTIMATED_HEIGHT),
+            SESSION_MANAGER_FOLDER_TREE_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_session_manager_folder_tree_list_item(
+        &self,
+        index: usize,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let rows = self.session_manager_folder_tree_rows();
+        let Some(row) = rows.get(index).cloned() else {
+            return div().into_any_element();
+        };
+        let (_root_groups, child_groups) = self.session_group_tree();
+        div()
+            .px_1()
+            .when(index == 0, |item| item.pt(px(4.0)))
+            .pb(px(4.0))
+            .child(match row {
+                SessionManagerFolderTreeRow::Group(group) => {
+                    self.render_group_tree_node(group, 0, &child_groups, has_background, cx)
+                }
+                SessionManagerFolderTreeRow::Ungrouped => {
+                    let ungrouped_count = self
+                        .connection_store
+                        .connections()
+                        .iter()
+                        .filter(|conn| conn.group.is_none())
+                        .count();
+                    self.render_group_tree_item(
+                        Some(UNGROUPED_FILTER.to_string()),
+                        LucideIcon::Folder,
+                        self.i18n.t("sessionManager.folder_tree.ungrouped"),
+                        Some(ungrouped_count),
+                        0,
+                        has_background,
+                        cx,
+                    )
+                }
+            })
+            .into_any_element()
+    }
+
+    fn session_manager_folder_tree_row_signature(&self, row: &SessionManagerFolderTreeRow) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        // Root folder rows can include expanded child rows, so hash expansion
+        // and child group counts along with connection counts used by badges.
+        row.hash(&mut hasher);
+        match row {
+            SessionManagerFolderTreeRow::Group(group) => {
+                self.session_manager.expanded_groups.contains(group).hash(&mut hasher);
+                self.connection_count_for_group(group).hash(&mut hasher);
+                let (_roots, child_groups) = self.session_group_tree();
+                child_groups.get(group).map(Vec::len).hash(&mut hasher);
+                self.session_manager.selected_group.hash(&mut hasher);
+            }
+            SessionManagerFolderTreeRow::Ungrouped => {
+                self.connection_store
+                    .connections()
+                    .iter()
+                    .filter(|conn| conn.group.is_none())
+                    .count()
+                    .hash(&mut hasher);
+                self.session_manager.selected_group.hash(&mut hasher);
+            }
+        }
+        hasher.finish()
     }
 
     fn render_folder_tree_context_menu(

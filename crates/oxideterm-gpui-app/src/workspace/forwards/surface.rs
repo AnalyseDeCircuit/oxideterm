@@ -9,6 +9,22 @@ enum ForwardsSection {
     RemotePorts,
 }
 
+fn forward_rule_row_signature(rule: &ForwardRule) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Forward table rows expose rule identity, addresses, type, status, and
+    // description. Live byte counters do not affect row height, so they stay
+    // out of the ListState splice signature.
+    rule.id.hash(&mut hasher);
+    format!("{:?}", rule.forward_type).hash(&mut hasher);
+    rule.bind_address.hash(&mut hasher);
+    rule.bind_port.hash(&mut hasher);
+    rule.target_host.hash(&mut hasher);
+    rule.target_port.hash(&mut hasher);
+    format!("{:?}", rule.status).hash(&mut hasher);
+    rule.description.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     pub(super) fn open_forwards_tab(
         &mut self,
@@ -420,6 +436,14 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let forward_count = forwards.len();
+        self.sync_forwards_table_row_list_state(&forwards);
+        let table_row_state = self.forwards_table_row_list_state.clone();
+        let table_row_spec = self.forwards_table_row_list_spec();
+        let workspace = cx.entity();
+        let row_node_id = node_id.clone();
+        let row_manager = manager.clone();
+        let row_forwards = forwards.clone();
+        let row_has_background = has_background;
         div()
             .flex()
             .flex_col()
@@ -507,26 +531,61 @@ impl WorkspaceApp {
                                 )),
                         )
                     })
-                    .children(forwards.into_iter().enumerate().map(|(index, rule)| {
-                        let stats = matches!(rule.status, ForwardStatus::Active)
-                            .then(|| {
-                                manager
-                                    .as_ref()
-                                    .and_then(|manager| manager.get_stats(&rule.id).ok())
-                            })
-                            .flatten();
-                        self.render_forward_row(
-                            node_id.clone(),
-                            tab_id,
-                            rule,
-                            stats,
-                            index + 1 == forward_count,
-                            has_background,
-                            cx,
+                    .when(!row_forwards.is_empty(), |table| {
+                        table.child(
+                            div()
+                                .h(px(forward_count as f32 * FORWARDS_TABLE_ROW_H))
+                                .child(tauri_virtual_list(
+                                    table_row_state,
+                                    table_row_spec,
+                                    move |index, _window, cx| {
+                                        let Some(rule) = row_forwards.get(index).cloned() else {
+                                            return div().into_any_element();
+                                        };
+                                        let manager = row_manager.clone();
+                                        let node_id = row_node_id.clone();
+                                        workspace.update(cx, |this, cx| {
+                                            let stats = matches!(rule.status, ForwardStatus::Active)
+                                                .then(|| {
+                                                    manager.as_ref().and_then(|manager| {
+                                                        manager.get_stats(&rule.id).ok()
+                                                    })
+                                                })
+                                                .flatten();
+                                            this.render_forward_row(
+                                                node_id,
+                                                tab_id,
+                                                rule,
+                                                stats,
+                                                index + 1 == forward_count,
+                                                row_has_background,
+                                                cx,
+                                            )
+                                        })
+                                    },
+                                )),
                         )
-                    })),
+                    }),
             )
             .into_any_element()
+    }
+
+    fn sync_forwards_table_row_list_state(&self, forwards: &[ForwardRule]) {
+        let signatures = forwards
+            .iter()
+            .map(forward_rule_row_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.forwards_table_row_list_state,
+            &mut self.forwards_table_row_list_cache.borrow_mut(),
+            "forwards-table-rows",
+            &signatures,
+            self.forwards_table_row_list_spec(),
+        );
+    }
+
+    fn forwards_table_row_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(px(FORWARDS_TABLE_ROW_H), FORWARDS_TABLE_ROW_LIST_OVERSCAN)
     }
 
     fn render_forward_table_header(&self, has_background: bool) -> AnyElement {

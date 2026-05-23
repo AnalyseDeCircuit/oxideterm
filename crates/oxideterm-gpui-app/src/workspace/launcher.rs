@@ -152,7 +152,11 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn render_launcher_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_launcher_surface(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         if cfg!(target_os = "windows") {
             return self.render_launcher_wsl_surface(cx);
@@ -187,7 +191,7 @@ impl WorkspaceApp {
             .when(self.launcher.core.show_disable_confirm, |surface| {
                 surface.child(self.render_launcher_disable_confirm(cx))
             })
-            .child(self.render_launcher_content(filtered_apps, cx))
+            .child(self.render_launcher_content(filtered_apps, window, cx))
             .into_any_element()
     }
 
@@ -960,8 +964,9 @@ impl WorkspaceApp {
     }
 
     fn render_launcher_content(
-        &self,
+        &mut self,
         filtered_apps: Vec<LauncherAppEntry>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if self.launcher.core.loading && self.launcher.core.apps.is_empty() {
@@ -997,27 +1002,99 @@ impl WorkspaceApp {
             );
         }
 
+        let columns = self.launcher_app_grid_columns(window);
+        self.sync_launcher_app_grid_list_state(&filtered_apps, columns);
+        let state = self.launcher_app_grid_list_state.clone();
+        let spec = self.launcher_app_grid_list_spec();
+        let workspace = cx.entity();
         div()
             .id("launcher-apps-scroll")
             .flex_1()
             .min_h(px(0.0))
-            .selectable_overflow_y_scrollbar(
-                &self.selectable_text_scroll_handle("launcher-apps-scroll"),
-            )
-            .child(
-                div()
-                    .px(px(LAUNCHER_HEADER_PADDING_X))
-                    .pt(px(4.0))
-                    .pb(px(LAUNCHER_GRID_PADDING_BOTTOM))
-                    .flex()
-                    .flex_wrap()
-                    .gap_x(px(LAUNCHER_GRID_GAP_X))
-                    .gap_y(px(LAUNCHER_GRID_GAP_Y))
-                    .children(
-                        filtered_apps
-                            .into_iter()
-                            .map(|app| self.render_launcher_app_icon(app, cx)),
-                    ),
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    workspace.update(cx, |this, cx| {
+                        this.render_launcher_app_grid_row(index, columns, cx)
+                    })
+                },
+            ))
+            .into_any_element()
+    }
+
+    fn launcher_app_grid_columns(&self, window: &Window) -> usize {
+        let settings = self.settings_store.settings();
+        let mut available_width = f32::from(window.viewport_size().width);
+        if !settings.sidebar_ui.zen_mode {
+            available_width -= self.tokens.metrics.activity_bar_width;
+            if !self.sidebar_collapsed {
+                available_width -= self.sidebar_panel_width();
+            }
+        }
+        if self.ai_sidebar_visible() {
+            available_width -= self.ai_sidebar_width;
+        }
+        let grid_width = (available_width - LAUNCHER_HEADER_PADDING_X * 2.0).max(LAUNCHER_TILE_W);
+        // The Tauri launcher is a wrapping icon grid. Native virtualizes one
+        // horizontal grid row at a time, so columns derive from the same tile
+        // width/gap constants instead of hard-coding an app count.
+        ((grid_width + LAUNCHER_GRID_GAP_X) / (LAUNCHER_TILE_W + LAUNCHER_GRID_GAP_X))
+            .floor()
+            .max(1.0) as usize
+    }
+
+    fn sync_launcher_app_grid_list_state(&mut self, apps: &[LauncherAppEntry], columns: usize) {
+        let signatures = apps
+            .chunks(columns.max(1))
+            .enumerate()
+            .map(|(row_index, row)| launcher_app_grid_row_signature(row_index, columns, row))
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.launcher_app_grid_list_state,
+            &mut self.launcher_app_grid_list_cache.borrow_mut(),
+            "launcher-app-grid",
+            &signatures,
+            self.launcher_app_grid_list_spec(),
+        );
+    }
+
+    fn launcher_app_grid_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(LAUNCHER_APP_GRID_ESTIMATED_ROW_HEIGHT),
+            LAUNCHER_APP_GRID_OVERSCAN,
+        )
+    }
+
+    fn render_launcher_app_grid_row(
+        &self,
+        row_index: usize,
+        columns: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let apps = self.filtered_launcher_apps();
+        let columns = columns.max(1);
+        let start = row_index.saturating_mul(columns);
+        let Some(row_apps) = apps.get(start..apps.len().min(start + columns)) else {
+            return div().into_any_element();
+        };
+        let row_count = apps.len().div_ceil(columns);
+        div()
+            .px(px(LAUNCHER_HEADER_PADDING_X))
+            .when(row_index == 0, |row| row.pt(px(4.0)))
+            .pb(px(if row_index + 1 == row_count {
+                LAUNCHER_GRID_PADDING_BOTTOM
+            } else {
+                LAUNCHER_GRID_GAP_Y
+            }))
+            .flex()
+            .items_start()
+            .gap_x(px(LAUNCHER_GRID_GAP_X))
+            .children(
+                row_apps
+                    .iter()
+                    .cloned()
+                    .map(|app| self.render_launcher_app_icon(app, cx)),
             )
             .into_any_element()
     }
@@ -1268,6 +1345,25 @@ fn launcher_wsl_distro_signature(distro: &WslDistro) -> u64 {
     distro.name.hash(&mut hasher);
     distro.is_default.hash(&mut hasher);
     distro.is_running.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn launcher_app_grid_row_signature(
+    row_index: usize,
+    columns: usize,
+    apps: &[LauncherAppEntry],
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // The virtual row key must change when responsive column count changes, and
+    // app metadata changes should remeasure the row without rebuilding the
+    // entire launcher grid.
+    row_index.hash(&mut hasher);
+    columns.hash(&mut hasher);
+    for app in apps {
+        app.path.hash(&mut hasher);
+        app.name.hash(&mut hasher);
+        app.icon_path.hash(&mut hasher);
+    }
     hasher.finish()
 }
 

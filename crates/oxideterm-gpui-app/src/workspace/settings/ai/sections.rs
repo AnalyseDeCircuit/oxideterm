@@ -18,6 +18,59 @@ struct AiToolPolicyGroup {
     items: Vec<AiToolPolicyItem>,
 }
 
+fn ai_execution_profile_signature(profile: &serde_json::Value, default_profile_id: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Profile cards expose the serialized profile fields plus default status.
+    // Hash the stable JSON representation so edits splice the right row.
+    serde_json::to_string(profile)
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    ai_execution_profile_id(profile)
+        .as_deref()
+        .map(|id| id == default_profile_id)
+        .unwrap_or(false)
+        .hash(&mut hasher);
+    hasher.finish()
+}
+
+fn ai_provider_model_row_signature(provider_id: &str, model: &str, override_value: Option<&serde_json::Value>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Model override rows expose provider/model identity and the current
+    // override cell. Hash those fields so only changed rows are remeasured.
+    provider_id.hash(&mut hasher);
+    model.hash(&mut hasher);
+    override_value
+        .map(serde_json::Value::to_string)
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    hasher.finish()
+}
+
+fn ai_provider_card_signature(
+    provider: &AiProviderView,
+    expanded: bool,
+    models_expanded: bool,
+    has_key: bool,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Provider cards expose config fields, expansion state, model chip count,
+    // and key-control visibility. Keep this signature scoped to height/visible
+    // card content so the inner ListState remeasures without moving the outer
+    // settings section.
+    provider.id.hash(&mut hasher);
+    provider.name.hash(&mut hasher);
+    provider.provider_type.hash(&mut hasher);
+    provider.enabled.hash(&mut hasher);
+    provider.custom.hash(&mut hasher);
+    provider.default_model.hash(&mut hasher);
+    provider.base_url.hash(&mut hasher);
+    provider.models.len().hash(&mut hasher);
+    expanded.hash(&mut hasher);
+    models_expanded.hash(&mut hasher);
+    has_key.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     fn ai_execution_profiles_section(
         &self,
@@ -33,17 +86,24 @@ impl WorkspaceApp {
             .unwrap_or_default();
         let default_profile_id = ai_default_execution_profile(settings).unwrap_or_else(|| "default".to_string());
 
-        let mut profile_list = div().flex().flex_col().gap(px(8.0));
-        for (index, profile) in profiles.iter().enumerate() {
-            profile_list = profile_list.child(self.ai_execution_profile_card(
-                index,
-                profile,
-                &default_profile_id,
-                profiles.len(),
-                settings,
-                cx,
+        self.sync_ai_execution_profile_list_state(&profiles, &default_profile_id);
+        let state = self.ai_execution_profile_list_state.clone();
+        let spec = self.ai_execution_profile_list_spec();
+        let workspace = cx.entity();
+        let profile_count = profiles.len();
+        let profile_list = div()
+            .h(px(
+                profile_count as f32 * AI_EXECUTION_PROFILE_LIST_ESTIMATED_HEIGHT,
+            ))
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    workspace.update(cx, |this, cx| {
+                        this.ai_execution_profile_list_item(index, cx)
+                    })
+                },
             ));
-        }
 
         div()
             .max_w(px(AI_PROVIDER_MAX_W))
@@ -97,6 +157,64 @@ impl WorkspaceApp {
                     ),
             )
             .child(profile_list)
+            .into_any_element()
+    }
+
+    fn sync_ai_execution_profile_list_state(
+        &self,
+        profiles: &[serde_json::Value],
+        default_profile_id: &str,
+    ) {
+        let signatures = profiles
+            .iter()
+            .map(|profile| ai_execution_profile_signature(profile, default_profile_id))
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.ai_execution_profile_list_state,
+            &mut self.ai_execution_profile_list_cache.borrow_mut(),
+            "ai-execution-profiles",
+            &signatures,
+            self.ai_execution_profile_list_spec(),
+        );
+    }
+
+    fn ai_execution_profile_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(AI_EXECUTION_PROFILE_LIST_ESTIMATED_HEIGHT),
+            AI_EXECUTION_PROFILE_LIST_OVERSCAN,
+        )
+    }
+
+    fn ai_execution_profile_list_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let settings = self.settings_store.settings();
+        let profiles = settings
+            .ai
+            .execution_profiles
+            .get("profiles")
+            .and_then(serde_json::Value::as_array);
+        let Some(profiles) = profiles else {
+            return div().into_any_element();
+        };
+        let Some(profile) = profiles.get(index) else {
+            return div().into_any_element();
+        };
+        let default_profile_id =
+            ai_default_execution_profile(settings).unwrap_or_else(|| "default".to_string());
+        let profile_count = profiles.len();
+        div()
+            .pb(px(8.0))
+            .child(self.ai_execution_profile_card(
+                index,
+                profile,
+                &default_profile_id,
+                profile_count,
+                settings,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -214,21 +332,35 @@ impl WorkspaceApp {
         providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut provider_list = div()
-            .w_full()
-            .max_w(px(AI_PROVIDER_MAX_W))
-            .flex()
-            .flex_col()
-            .gap(px(12.0));
-        for (index, provider) in providers.iter().enumerate() {
-            provider_list = provider_list.child(self.ai_provider_card(index, provider, cx));
-        }
-
         let expanded = self.ai_provider_settings_expanded;
         let summary = self.i18n_count(
             "settings_view.ai.provider_settings_summary",
             self.settings_store.settings().ai.providers.len(),
         );
+        self.sync_ai_provider_card_list_state(providers);
+        let provider_list = if expanded {
+            let state = self.ai_provider_card_list_state.clone();
+            let spec = self.ai_provider_card_list_spec();
+            let workspace = cx.entity();
+            let list_height = self.ai_provider_card_list_estimated_height(providers);
+            Some(
+                div()
+                    .mt(px(12.0))
+                    .h(px(list_height))
+                    .child(tauri_virtual_list(
+                        state,
+                        spec,
+                        move |index, _window, cx| {
+                            workspace.update(cx, |this, cx| {
+                                this.ai_provider_card_list_item(index, cx)
+                            })
+                        },
+                    ))
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
 
         div()
             .max_w(px(AI_PROVIDER_MAX_W))
@@ -245,16 +377,117 @@ impl WorkspaceApp {
                 },
                 cx,
             ))
-            .when(expanded, |section| {
-                section.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.0))
-                        .child(provider_list)
-                        .child(self.ai_provider_add_controls(cx)),
+            .when_some(provider_list, |section, provider_list| {
+                section.child(provider_list)
+            })
+            .into_any_element()
+    }
+
+    fn ai_provider_card_list_estimated_height(&self, providers: &[AiProviderView]) -> f32 {
+        providers
+            .iter()
+            .map(|provider| self.ai_provider_card_estimated_height(provider))
+            .sum::<f32>()
+            + AI_PROVIDER_CARD_LIST_ESTIMATED_HEIGHT
+    }
+
+    fn ai_provider_card_estimated_height(&self, provider: &AiProviderView) -> f32 {
+        let active_provider = self
+            .settings_store
+            .settings()
+            .ai
+            .active_provider_id
+            .as_deref()
+            == Some(provider.id.as_str());
+        let expanded = self
+            .expanded_ai_providers
+            .get(&provider.id)
+            .copied()
+            .unwrap_or(active_provider);
+        if !expanded {
+            return 72.0;
+        }
+        let models_expanded = self.expanded_ai_provider_models.contains(&provider.id);
+        let visible_model_count = if models_expanded {
+            provider.models.len()
+        } else {
+            provider.models.len().min(AI_PROVIDER_VISIBLE_MODEL_LIMIT)
+        };
+        let chip_rows = visible_model_count
+            .div_ceil(AI_PROVIDER_MODEL_CHIPS_PER_VIRTUAL_ROW)
+            .max(1);
+        let key_input_height = if self.ai_provider_key_display_state(provider).shows_key_control() {
+            72.0
+        } else {
+            0.0
+        };
+        // This mirrors the nested card structure: header, toolbar, two-column
+        // fields, model-chip rows, optional API-key editor, and row spacing.
+        72.0 + 52.0
+            + 112.0
+            + 34.0
+            + chip_rows as f32 * AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT
+            + key_input_height
+            + 16.0
+    }
+
+    fn sync_ai_provider_card_list_state(&self, providers: &[AiProviderView]) {
+        let mut signatures = providers
+            .iter()
+            .map(|provider| {
+                let active_provider = self
+                    .settings_store
+                    .settings()
+                    .ai
+                    .active_provider_id
+                    .as_deref()
+                    == Some(provider.id.as_str());
+                let expanded = self
+                    .expanded_ai_providers
+                    .get(&provider.id)
+                    .copied()
+                    .unwrap_or(active_provider);
+                ai_provider_card_signature(
+                    provider,
+                    expanded,
+                    self.expanded_ai_provider_models.contains(&provider.id),
+                    self.ai_provider_has_key_cached(&provider.id),
                 )
             })
+            .collect::<Vec<_>>();
+        // The add-provider controls are the final virtual row inside this
+        // section. Keep a stable sentinel signature for that fixed row.
+        signatures.push(0xadd0_0001);
+        sync_tauri_variable_list_state_by_signatures(
+            &self.ai_provider_card_list_state,
+            &mut self.ai_provider_card_list_cache.borrow_mut(),
+            "ai-provider-cards",
+            &signatures,
+            self.ai_provider_card_list_spec(),
+        );
+    }
+
+    fn ai_provider_card_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(AI_PROVIDER_CARD_LIST_ESTIMATED_HEIGHT),
+            AI_PROVIDER_CARD_LIST_OVERSCAN,
+        )
+    }
+
+    fn ai_provider_card_list_item(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let providers = ai_provider_views(self.settings_store.settings());
+        if index == providers.len() {
+            return div()
+                .pb(px(12.0))
+                .child(self.ai_provider_add_controls(cx))
+                .into_any_element();
+        }
+        let Some(provider) = providers.get(index) else {
+            return div().into_any_element();
+        };
+        div()
+            .pb(px(12.0))
+            .child(self.ai_provider_card(index, provider, cx))
             .into_any_element()
     }
 
@@ -1247,26 +1480,96 @@ impl WorkspaceApp {
                     ),
             );
         if expanded {
-            let mut rows = div()
+            let models = provider.models.clone();
+            let state = self.sync_ai_reasoning_model_list_state(settings, &provider.id, &models);
+            let spec = self.ai_provider_model_row_list_spec();
+            let workspace = cx.entity();
+            let provider_id_for_rows = provider.id.clone();
+            let list_height =
+                models.len() as f32 * AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT;
+            let rows = div()
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
                 .border_color(rgba(
                     (self.tokens.ui.border << 8) | AI_CONTEXT_PROVIDER_ROW_BORDER_ALPHA,
                 ))
-                .overflow_hidden();
-            for (index, model) in provider.models.iter().enumerate() {
-                rows = rows.child(self.ai_model_reasoning_row(
-                    provider_index,
-                    index,
-                    settings,
-                    &provider.id,
-                    model,
-                    cx,
+                .overflow_hidden()
+                .h(px(list_height))
+                .child(tauri_virtual_list(
+                    state,
+                    spec,
+                    move |model_index, _window, cx| {
+                        let Some(model) = models.get(model_index).cloned() else {
+                            return div().into_any_element();
+                        };
+                        let provider_id = provider_id_for_rows.clone();
+                        workspace.update(cx, |this, cx| {
+                            let settings = this.settings_store.settings();
+                            this.ai_model_reasoning_row(
+                                provider_index,
+                                model_index,
+                                settings,
+                                &provider_id,
+                                &model,
+                                cx,
+                            )
+                        })
+                    },
                 ));
-            }
             section = section.child(rows);
         }
         section.into_any_element()
+    }
+
+    fn sync_ai_reasoning_model_list_state(
+        &self,
+        settings: &PersistedSettings,
+        provider_id: &str,
+        models: &[String],
+    ) -> ListState {
+        let signatures = models
+            .iter()
+            .map(|model| {
+                ai_provider_model_row_signature(
+                    provider_id,
+                    model,
+                    settings
+                        .ai
+                        .reasoning_model_overrides
+                        .get(provider_id)
+                        .and_then(|overrides| overrides.get(model)),
+                )
+            })
+            .collect::<Vec<_>>();
+        let state = {
+            let mut states = self.ai_reasoning_model_list_states.borrow_mut();
+            states
+                .entry(provider_id.to_string())
+                .or_insert_with(|| {
+                    // Reasoning override rows are measured independently per
+                    // provider so expanding one provider does not perturb
+                    // another provider's virtual table.
+                    ListState::new(
+                        AI_PROVIDER_MODEL_ROW_LIST_INITIAL_ITEM_COUNT,
+                        ListAlignment::Top,
+                        self.ai_provider_model_row_list_spec().overdraw(),
+                    )
+                    .measure_all()
+                })
+                .clone()
+        };
+        {
+            let mut caches = self.ai_reasoning_model_list_caches.borrow_mut();
+            let cache = caches.entry(provider_id.to_string()).or_default();
+            sync_tauri_variable_list_state_by_signatures(
+                &state,
+                cache,
+                &format!("ai-reasoning-models:{provider_id}"),
+                &signatures,
+                self.ai_provider_model_row_list_spec(),
+            );
+        }
+        state
     }
 
     fn ai_model_reasoning_row(
@@ -1511,26 +1814,102 @@ impl WorkspaceApp {
                     ),
             );
         if expanded {
-            let mut rows = div()
+            let models = provider.models.clone();
+            let state = self.sync_ai_context_model_list_state(settings, &provider.id, &models);
+            let spec = self.ai_provider_model_row_list_spec();
+            let workspace = cx.entity();
+            let provider_id_for_rows = provider.id.clone();
+            let list_height =
+                models.len() as f32 * AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT;
+            let rows = div()
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
                 .border_color(rgba(
                     (self.tokens.ui.border << 8) | AI_CONTEXT_PROVIDER_ROW_BORDER_ALPHA,
                 ))
-                .overflow_hidden();
-            for (model_index, model) in provider.models.iter().enumerate() {
-                rows = rows.child(self.ai_context_window_row(
-                    provider_index,
-                    model_index,
-                    settings,
-                    &provider.id,
-                    model,
-                    cx,
+                .overflow_hidden()
+                .h(px(list_height))
+                .child(tauri_virtual_list(
+                    state,
+                    spec,
+                    move |model_index, _window, cx| {
+                        let Some(model) = models.get(model_index).cloned() else {
+                            return div().into_any_element();
+                        };
+                        let provider_id = provider_id_for_rows.clone();
+                        workspace.update(cx, |this, cx| {
+                            let settings = this.settings_store.settings();
+                            this.ai_context_window_row(
+                                provider_index,
+                                model_index,
+                                settings,
+                                &provider_id,
+                                &model,
+                                cx,
+                            )
+                        })
+                    },
                 ));
-            }
             section = section.child(rows);
         }
         section.into_any_element()
+    }
+
+    fn sync_ai_context_model_list_state(
+        &self,
+        settings: &PersistedSettings,
+        provider_id: &str,
+        models: &[String],
+    ) -> ListState {
+        let signatures = models
+            .iter()
+            .map(|model| {
+                ai_provider_model_row_signature(
+                    provider_id,
+                    model,
+                    settings
+                        .ai
+                        .user_context_windows
+                        .get(provider_id)
+                        .and_then(|windows| windows.get(model)),
+                )
+            })
+            .collect::<Vec<_>>();
+        let state = {
+            let mut states = self.ai_context_model_list_states.borrow_mut();
+            states
+                .entry(provider_id.to_string())
+                .or_insert_with(|| {
+                    // Context override rows are measured independently per
+                    // provider for the same reason as reasoning rows.
+                    ListState::new(
+                        AI_PROVIDER_MODEL_ROW_LIST_INITIAL_ITEM_COUNT,
+                        ListAlignment::Top,
+                        self.ai_provider_model_row_list_spec().overdraw(),
+                    )
+                    .measure_all()
+                })
+                .clone()
+        };
+        {
+            let mut caches = self.ai_context_model_list_caches.borrow_mut();
+            let cache = caches.entry(provider_id.to_string()).or_default();
+            sync_tauri_variable_list_state_by_signatures(
+                &state,
+                cache,
+                &format!("ai-context-models:{provider_id}"),
+                &signatures,
+                self.ai_provider_model_row_list_spec(),
+            );
+        }
+        state
+    }
+
+    fn ai_provider_model_row_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT),
+            AI_PROVIDER_MODEL_ROW_LIST_OVERSCAN,
+        )
     }
 
     fn ai_context_window_row(

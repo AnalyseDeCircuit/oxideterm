@@ -1,5 +1,6 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::DefaultHasher},
+    hash::{Hash, Hasher},
     path::PathBuf,
     time::Duration,
 };
@@ -12,9 +13,9 @@ use oxideterm_connections::{
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
     SavedProxyHop, SecretString, SshConfigHost, list_ssh_config_hosts,
     oxide_file::{
-        ExportPreflightResult, ImportConflictStrategy, ImportPreview, ImportResultEnvelope,
-        OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord, OxideImportOptions,
-        OxideMetadata, apply_oxide_import_with_options_with_progress,
+        ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
+        ImportResultEnvelope, OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord,
+        OxideImportOptions, OxideMetadata, apply_oxide_import_with_options_with_progress,
         export_connections_to_oxide_with_progress, preflight_export,
         preview_oxide_import_with_progress,
     },

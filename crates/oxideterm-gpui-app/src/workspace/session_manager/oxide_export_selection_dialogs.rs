@@ -1,3 +1,35 @@
+fn oxide_export_connection_signature(connection: &SavedConnection) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Export rows are keyed by saved connection id. Other visible fields affect
+    // labels/badges and should remeasure the dialog row after edits/imports.
+    connection.id.hash(&mut hasher);
+    connection.name.hash(&mut hasher);
+    connection.username.hash(&mut hasher);
+    connection.host.hash(&mut hasher);
+    connection.port.hash(&mut hasher);
+    connection.group.hash(&mut hasher);
+    connection.created_at.timestamp_millis().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn oxide_export_forward_group_signature(owner: &str, forwards: &[PersistedForward]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Owner groups are the virtual rows. Hash child forwards because the group
+    // row height and selected checkbox labels depend on every child row.
+    owner.hash(&mut hasher);
+    forwards.len().hash(&mut hasher);
+    for forward in forwards {
+        forward.id.hash(&mut hasher);
+        forward.session_id.hash(&mut hasher);
+        forward.owner_connection_id.hash(&mut hasher);
+        format!("{:?}", forward.forward_type).hash(&mut hasher);
+        format!("{:?}", forward.rule).hash(&mut hasher);
+        forward.auto_start.hash(&mut hasher);
+        forward.version.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     fn render_oxide_connection_selection(
         &self,
@@ -20,22 +52,15 @@ impl WorkspaceApp {
                     .count()
             })
             .unwrap_or(0);
-        let mut list = div()
-            .id("oxide-export-connections-selection")
-            .max_h(px(OXIDE_MODAL_LIST_MAX_H))
-            .selectable_overflow_y_scrollbar(
-                &self.selectable_text_scroll_handle("oxide-export-connections-selection"),
-            )
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg))
-            .p(px(8.0))
-            .flex()
-            .flex_col()
-            .gap(px(4.0));
-        if connections.is_empty() {
-            list = list.child(
+        let list = if connections.is_empty() {
+            div()
+                .id("oxide-export-connections-selection")
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgb(theme.bg))
+                .p(px(8.0))
+                .child(
                 div()
                     .py(px(16.0))
                     .text_align(gpui::TextAlign::Center)
@@ -49,132 +74,34 @@ impl WorkspaceApp {
                         theme.text_muted,
                         cx,
                     )),
-            );
+                )
+                .into_any_element()
         } else {
-            for connection in connections {
-                let id = connection.id.clone();
-                let row_key = id.clone();
-                let checked = self.session_manager.oxide_export_dialog.as_ref().is_some_and(
-                    |dialog| dialog.selected_ids.contains(&connection.id),
-                );
-                let meta = format!(
-                    "{}@{}:{}{}",
-                    connection.username,
-                    connection.host,
-                    connection.port,
-                    connection
-                        .group
-                        .as_ref()
-                        .map(|group| format!(" [{group}]"))
-                        .unwrap_or_default()
-                );
-                let is_new_since_last_export = self
-                    .session_manager
-                    .oxide_export_dialog
-                    .as_ref()
-                    .and_then(|dialog| dialog.last_export_timestamp)
-                    .is_some_and(|timestamp| connection.created_at.timestamp_millis() > timestamp);
-                list = list.child(
-                    div()
-                        .p(px(8.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .rounded(px(self.tokens.radii.sm))
-                        .hover(move |row| row.bg(rgb(theme.bg_hover)))
-                        .cursor_pointer()
-                        .child(self.render_oxide_checkbox(
-                            String::new(),
-                            checked,
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Some(dialog) =
-                                    this.session_manager.oxide_export_dialog.as_mut()
-                                {
-                                    if dialog.selected_ids.contains(&id) {
-                                        dialog.selected_ids.remove(&id);
-                                    } else {
-                                        dialog.selected_ids.insert(id.clone());
-                                    }
-                                }
-                                this.refresh_oxide_export_preflight();
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .flex()
-                                .flex_col()
-                                .gap(px(2.0))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(6.0))
-                                        .truncate()
-                                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .text_color(rgb(theme.text))
-                                        .child(self.render_display_text_with_role(
-                                            SelectableTextRole::NonSelectable,
-                                            "oxide-export-connection-name",
-                                            row_key.as_str(),
-                                            connection.name.clone(),
-                                            theme.text,
-                                            cx,
-                                        ))
-                                        .when(is_new_since_last_export, |row| {
-                                            row.child(
-                                                div()
-                                                    .px(px(6.0))
-                                                    .py(px(2.0))
-                                                    .rounded_full()
-                                                    .bg(rgba(
-                                                        (OXIDE_GREEN_500 << 8)
-                                                            | OXIDE_NEW_BADGE_BG_ALPHA,
-                                                    ))
-                                                    .flex()
-                                                    .items_center()
-                                                    .gap(px(2.0))
-                                                    .text_size(px(10.0))
-                                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                                    .text_color(rgb(OXIDE_GREEN_500))
-                                                    .child(Self::render_lucide_icon(
-                                                        LucideIcon::Sparkles,
-                                                        10.0,
-                                                        rgb(OXIDE_GREEN_500),
-                                                    ))
-                                                    .child(self.render_display_text_with_role(
-                                                        SelectableTextRole::PlainDocument,
-                                                        "oxide-export-new-badge",
-                                                        row_key.as_str(),
-                                                        "新",
-                                                        OXIDE_GREEN_500,
-                                                        cx,
-                                                    )),
-                                            )
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .text_color(rgb(theme.text_muted))
-                                        .child(self.render_display_text_with_role(
-                                            SelectableTextRole::NonSelectable,
-                                            "oxide-export-connection-meta",
-                                            row_key.as_str(),
-                                            meta,
-                                            theme.text_muted,
-                                            cx,
-                                        )),
-                                ),
-                        ),
-                );
-            }
-        }
+            self.sync_oxide_export_connection_list_state(connections);
+            let state = self.oxide_export_connection_list_state.clone();
+            let spec = self.oxide_export_connection_list_spec();
+            let workspace = cx.entity();
+            let list_height = (connections.len() as f32
+                * OXIDE_EXPORT_CONNECTION_LIST_ESTIMATED_HEIGHT)
+                .min(OXIDE_MODAL_LIST_MAX_H);
+            div()
+                .id("oxide-export-connections-selection")
+                .h(px(list_height))
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgb(theme.bg))
+                .child(tauri_virtual_list(
+                    state,
+                    spec,
+                    move |index, _window, cx| {
+                        workspace.update(cx, |this, cx| {
+                            this.render_oxide_export_connection_list_item(index, cx)
+                        })
+                    },
+                ))
+                .into_any_element()
+        };
 
         div()
             .flex()
@@ -268,6 +195,171 @@ impl WorkspaceApp {
                 )
             })
             .child(list)
+            .into_any_element()
+    }
+
+    fn sync_oxide_export_connection_list_state(&self, connections: &[SavedConnection]) {
+        let signatures = connections
+            .iter()
+            .map(oxide_export_connection_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.oxide_export_connection_list_state,
+            &mut self.oxide_export_connection_list_cache.borrow_mut(),
+            "oxide-export-connections",
+            &signatures,
+            self.oxide_export_connection_list_spec(),
+        );
+    }
+
+    fn oxide_export_connection_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(OXIDE_EXPORT_CONNECTION_LIST_ESTIMATED_HEIGHT),
+            OXIDE_EXPORT_CONNECTION_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_oxide_export_connection_list_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let connections = self.connection_store.connections();
+        let Some(connection) = connections.get(index).cloned() else {
+            return div().into_any_element();
+        };
+        div()
+            .px(px(8.0))
+            .when(index == 0, |item| item.pt(px(8.0)))
+            .pb(px(4.0))
+            .child(self.render_oxide_export_connection_row(connection, cx))
+            .into_any_element()
+    }
+
+    fn render_oxide_export_connection_row(
+        &self,
+        connection: SavedConnection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let id = connection.id.clone();
+        let row_key = id.clone();
+        let checked = self
+            .session_manager
+            .oxide_export_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.selected_ids.contains(&connection.id));
+        let meta = format!(
+            "{}@{}:{}{}",
+            connection.username,
+            connection.host,
+            connection.port,
+            connection
+                .group
+                .as_ref()
+                .map(|group| format!(" [{group}]"))
+                .unwrap_or_default()
+        );
+        let is_new_since_last_export = self
+            .session_manager
+            .oxide_export_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.last_export_timestamp)
+            .is_some_and(|timestamp| connection.created_at.timestamp_millis() > timestamp);
+        div()
+            .p(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.sm))
+            .hover(move |row| row.bg(rgb(theme.bg_hover)))
+            .cursor_pointer()
+            .child(self.render_oxide_checkbox(
+                String::new(),
+                checked,
+                cx.listener(move |this, _event, _window, cx| {
+                    if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
+                        if dialog.selected_ids.contains(&id) {
+                            dialog.selected_ids.remove(&id);
+                        } else {
+                            dialog.selected_ids.insert(id.clone());
+                        }
+                    }
+                    this.refresh_oxide_export_preflight();
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "oxide-export-connection-name",
+                                row_key.as_str(),
+                                connection.name.clone(),
+                                theme.text,
+                                cx,
+                            ))
+                            .when(is_new_since_last_export, |row| {
+                                row.child(
+                                    div()
+                                        .px(px(6.0))
+                                        .py(px(2.0))
+                                        .rounded_full()
+                                        .bg(rgba(
+                                            (OXIDE_GREEN_500 << 8) | OXIDE_NEW_BADGE_BG_ALPHA,
+                                        ))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(2.0))
+                                        .text_size(px(10.0))
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .text_color(rgb(OXIDE_GREEN_500))
+                                        .child(Self::render_lucide_icon(
+                                            LucideIcon::Sparkles,
+                                            10.0,
+                                            rgb(OXIDE_GREEN_500),
+                                        ))
+                                        .child(self.render_display_text_with_role(
+                                            SelectableTextRole::PlainDocument,
+                                            "oxide-export-new-badge",
+                                            row_key.as_str(),
+                                            "新",
+                                            OXIDE_GREEN_500,
+                                            cx,
+                                        )),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "oxide-export-connection-meta",
+                                row_key.as_str(),
+                                meta,
+                                theme.text_muted,
+                                cx,
+                            )),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -469,6 +561,32 @@ impl WorkspaceApp {
         dialog: &OxideExportDialogState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let entries = self.oxide_export_forward_groups(dialog);
+        self.sync_oxide_export_forward_group_list_state(&entries);
+        let state = self.oxide_export_forward_group_list_state.clone();
+        let spec = self.oxide_export_forward_group_list_spec();
+        let workspace = cx.entity();
+        let list_height = (entries.len() as f32 * OXIDE_EXPORT_FORWARD_GROUP_LIST_ESTIMATED_HEIGHT)
+            .min(OXIDE_MODAL_FORWARDS_MAX_H);
+        div()
+            .id("oxide-export-forwards-selection")
+            .h(px(list_height))
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    workspace.update(cx, |this, cx| {
+                        this.render_oxide_export_forward_group_item(index, cx)
+                    })
+                },
+            ))
+            .into_any_element()
+    }
+
+    fn oxide_export_forward_groups(
+        &self,
+        dialog: &OxideExportDialogState,
+    ) -> Vec<(String, Vec<PersistedForward>)> {
         let mut groups: HashMap<String, Vec<PersistedForward>> = HashMap::new();
         let names = self
             .connection_store
@@ -486,77 +604,117 @@ impl WorkspaceApp {
         }
         let mut entries = groups.into_iter().collect::<Vec<_>>();
         entries.sort_by(|left, right| left.0.cmp(&right.0));
+        entries
+    }
 
-        let mut list = div()
-            .id("oxide-export-forwards-selection")
-            .max_h(px(OXIDE_MODAL_FORWARDS_MAX_H))
-            .selectable_overflow_y_scrollbar(
-                &self.selectable_text_scroll_handle("oxide-export-forwards-selection"),
-            )
-            .flex()
-            .flex_col()
-            .gap(px(12.0));
-        for (owner, forwards) in entries {
-            let mut group = div().flex().flex_col().gap(px(4.0)).child(
+    fn sync_oxide_export_forward_group_list_state(
+        &self,
+        entries: &[(String, Vec<PersistedForward>)],
+    ) {
+        let signatures = entries
+            .iter()
+            .map(|(owner, forwards)| oxide_export_forward_group_signature(owner, forwards))
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.oxide_export_forward_group_list_state,
+            &mut self
+                .oxide_export_forward_group_list_cache
+                .borrow_mut(),
+            "oxide-export-forward-groups",
+            &signatures,
+            self.oxide_export_forward_group_list_spec(),
+        );
+    }
+
+    fn oxide_export_forward_group_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(OXIDE_EXPORT_FORWARD_GROUP_LIST_ESTIMATED_HEIGHT),
+            OXIDE_EXPORT_FORWARD_GROUP_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_oxide_export_forward_group_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(dialog) = self.session_manager.oxide_export_dialog.as_ref() else {
+            return div().into_any_element();
+        };
+        let entries = self.oxide_export_forward_groups(dialog);
+        let Some((owner, forwards)) = entries.get(index).cloned() else {
+            return div().into_any_element();
+        };
+        div()
+            .pb(px(12.0))
+            .child(self.render_oxide_export_forward_group(owner, forwards, dialog, cx))
+            .into_any_element()
+    }
+
+    fn render_oxide_export_forward_group(
+        &self,
+        owner: String,
+        forwards: Vec<PersistedForward>,
+        dialog: &OxideExportDialogState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut group = div().flex().flex_col().gap(px(4.0)).child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(self.tokens.ui.text))
                     .child(owner),
             );
-            for forward in forwards {
-                let forward_id = forward.id.clone();
-                let checked = dialog.selected_forward_ids.contains(&forward.id);
-                group = group.child(
-                    div()
-                        .px_1()
-                        .py(px(4.0))
-                        .rounded(px(self.tokens.radii.sm))
-                        .flex()
-                        .items_start()
-                        .gap(px(8.0))
-                        .hover(|row| row.bg(rgb(self.tokens.ui.bg_hover)))
-                        .cursor_pointer()
-                        .child(self.render_oxide_checkbox(
-                            String::new(),
-                            checked,
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Some(dialog) =
-                                    this.session_manager.oxide_export_dialog.as_mut()
-                                {
-                                    if dialog.selected_forward_ids.contains(&forward_id) {
-                                        dialog.selected_forward_ids.remove(&forward_id);
-                                    } else {
-                                        dialog.selected_forward_ids.insert(forward_id.clone());
-                                    }
+        for forward in forwards {
+            let forward_id = forward.id.clone();
+            let checked = dialog.selected_forward_ids.contains(&forward.id);
+            group = group.child(
+                div()
+                    .px_1()
+                    .py(px(4.0))
+                    .rounded(px(self.tokens.radii.sm))
+                    .flex()
+                    .items_start()
+                    .gap(px(8.0))
+                    .hover(|row| row.bg(rgb(self.tokens.ui.bg_hover)))
+                    .cursor_pointer()
+                    .child(self.render_oxide_checkbox(
+                        String::new(),
+                        checked,
+                        cx.listener(move |this, _event, _window, cx| {
+                            if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut()
+                            {
+                                if dialog.selected_forward_ids.contains(&forward_id) {
+                                    dialog.selected_forward_ids.remove(&forward_id);
+                                } else {
+                                    dialog.selected_forward_ids.insert(forward_id.clone());
                                 }
-                                this.refresh_oxide_export_preflight();
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(2.0))
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .child(
-                                    div()
-                                        .text_color(rgb(self.tokens.ui.text))
-                                        .child(oxide_forward_description_or_summary(&forward)),
-                                )
-                                .child(
-                                    div()
-                                        .text_color(rgb(self.tokens.ui.text_muted))
-                                        .child(oxide_forward_summary(&forward)),
-                                ),
-                        ),
-                );
-            }
-            list = list.child(group);
+                            }
+                            this.refresh_oxide_export_preflight();
+                            cx.notify();
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .child(
+                                div()
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(oxide_forward_description_or_summary(&forward)),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(oxide_forward_summary(&forward)),
+                            ),
+                    ),
+            );
         }
-        list.into_any_element()
+        group.into_any_element()
     }
 
     fn render_oxide_export_plugin_settings(

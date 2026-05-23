@@ -1,7 +1,7 @@
 use gpui::StatefulInteractiveElement;
 
 impl WorkspaceApp {
-    pub(super) fn render_activity_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_activity_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let top_items = [
             (SidebarSection::Sessions, LucideIcon::Link2),

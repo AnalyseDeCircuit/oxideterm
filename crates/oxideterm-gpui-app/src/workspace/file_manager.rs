@@ -40,6 +40,9 @@ const FILE_MANAGER_GAP: f32 = 8.0; // Tauri gap-2.
 const FILE_MANAGER_HEADER_HEIGHT: f32 = 40.0; // Tauri h-10.
 const FILE_MANAGER_ROW_HEIGHT: f32 = 28.0; // Tauri FileList FILE_ROW_HEIGHT.
 const FILE_MANAGER_VIRTUAL_OVERSCAN: usize = 15; // Tauri useVirtualizer overscan.
+const FILE_MANAGER_ARCHIVE_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const FILE_MANAGER_ARCHIVE_ROW_HEIGHT: f32 = 28.0; // Tauri archive preview row min-h-7.
+const FILE_MANAGER_ARCHIVE_LIST_OVERSCAN: usize = 12;
 const FILE_MANAGER_PREVIEW_CODE_OVERSCAN: usize = 20; // Tauri VirtualTextPreview OVERSCAN_LINES.
 const FILE_MANAGER_PREVIEW_CODE_WRAP_COLUMNS: usize = 96; // Virtual rows pre-wrap long `whitespace-pre` lines.
 const FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE: u64 = 128 * 1024; // Tauri VirtualTextPreview CHUNK_SIZE.
@@ -213,6 +216,8 @@ pub(super) struct FileManagerState {
     pub(super) preview_image_rotation: i32,
     pub(super) preview_code_scroll: UniformListScrollHandle,
     pub(super) preview_markdown_scroll: MarkdownVirtualListScrollHandle,
+    pub(super) preview_archive_list_state: ListState,
+    pub(super) preview_archive_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) preview_stream: FileManagerPreviewStreamState,
     pub(super) preview_audio: RodioAudioPreviewBackend,
     pub(super) preview_video_surface: SharedSftpNativeVideoSurface,
@@ -262,6 +267,19 @@ impl Default for FileManagerState {
             preview_image_rotation: 0,
             preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
+            // Archive previews can contain thousands of entries. Keep the file
+            // rows on ListState instead of rebuilding the entire archive tree.
+            preview_archive_list_state: ListState::new(
+                FILE_MANAGER_ARCHIVE_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(FILE_MANAGER_ARCHIVE_ROW_HEIGHT),
+                    FILE_MANAGER_ARCHIVE_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            preview_archive_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             preview_stream: FileManagerPreviewStreamState::default(),
             preview_audio: RodioAudioPreviewBackend::default(),
             preview_video_surface: SharedSftpNativeVideoSurface::default(),

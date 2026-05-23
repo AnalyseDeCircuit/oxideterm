@@ -1,3 +1,11 @@
+fn oxide_import_connection_preview_signature(name: &String) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // The file-info preview is read-only; the connection name is both identity
+    // and visible text for each virtual row.
+    name.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     fn render_oxide_import_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
@@ -264,30 +272,27 @@ impl WorkspaceApp {
                 .into_any_element(),
         );
         if !metadata.connection_names.is_empty() {
-            let mut list = div()
+            let names = metadata.connection_names.clone();
+            self.sync_oxide_import_connection_preview_list_state(&names);
+            let state = self.oxide_import_connection_preview_list_state.clone();
+            let spec = self.oxide_import_connection_preview_list_spec();
+            let workspace = cx.entity();
+            let list_height = (names.len() as f32
+                * OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_ESTIMATED_HEIGHT)
+                .min(128.0);
+            let list = div()
                 .id("oxide-import-connections-preview")
                 .mt(px(4.0))
-                .max_h(px(128.0))
-                .selectable_overflow_y_scrollbar(
-                    &self.selectable_text_scroll_handle("oxide-import-connections-preview"),
-                )
-                .flex()
-                .flex_col()
-                .gap(px(4.0));
-            for (index, name) in metadata.connection_names.into_iter().enumerate() {
-                list = list.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.render_selectable_text_scoped(
-                            "oxide-import-file-info-connection-name",
-                            index,
-                            format!("• {name}"),
-                            self.tokens.ui.text_muted,
-                            cx,
-                        )),
-                );
-            }
+                .h(px(list_height))
+                .child(tauri_virtual_list(
+                    state,
+                    spec,
+                    move |index, _window, cx| {
+                        workspace.update(cx, |this, cx| {
+                            this.render_oxide_import_connection_preview_item(index, cx)
+                        })
+                    },
+                ));
             children.push(
                 div()
                     .mt(px(4.0))
@@ -307,6 +312,56 @@ impl WorkspaceApp {
         }
 
         self.render_oxide_padded_card(16.0, None, children, cx)
+    }
+
+    fn sync_oxide_import_connection_preview_list_state(&self, names: &[String]) {
+        let signatures = names
+            .iter()
+            .map(oxide_import_connection_preview_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.oxide_import_connection_preview_list_state,
+            &mut self
+                .oxide_import_connection_preview_list_cache
+                .borrow_mut(),
+            "oxide-import-connection-preview",
+            &signatures,
+            self.oxide_import_connection_preview_list_spec(),
+        );
+    }
+
+    fn oxide_import_connection_preview_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_ESTIMATED_HEIGHT),
+            OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_oxide_import_connection_preview_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(name) = self
+            .session_manager
+            .oxide_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.metadata.as_ref())
+            .and_then(|metadata| metadata.connection_names.get(index))
+        else {
+            return div().into_any_element();
+        };
+        div()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(self.render_selectable_text_scoped(
+                "oxide-import-file-info-connection-name",
+                index,
+                format!("• {name}"),
+                self.tokens.ui.text_muted,
+                cx,
+            ))
+            .into_any_element()
     }
 
     fn render_oxide_conflict_strategy(&self, cx: &mut Context<Self>) -> AnyElement {

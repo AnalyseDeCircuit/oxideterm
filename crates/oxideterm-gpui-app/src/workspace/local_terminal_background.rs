@@ -219,144 +219,32 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_detached_local_terminals_popover(
-        &self,
+        &mut self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if !self.detached_local_terminals_popover_open || self.detached_local_terminals.is_empty() {
             return None;
         }
         let theme = self.tokens.ui;
-        let mut sessions = self
-            .detached_local_terminals
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        sessions.sort_by(|left, right| left.detached_at.cmp(&right.detached_at));
-
-        let mut list = div()
+        let sessions = self.sorted_detached_local_terminal_sessions();
+        self.sync_detached_local_terminal_list_state(&sessions);
+        let list_height = (sessions.len() as f32 * DETACHED_LOCAL_TERMINAL_LIST_ESTIMATED_HEIGHT)
+            .min(DETACHED_TERMINAL_POPOVER_MAX_HEIGHT);
+        let state = self.detached_local_terminal_list_state.clone();
+        let spec = self.detached_local_terminal_list_spec();
+        let workspace = cx.entity();
+        let list = div()
             .id("detached-local-terminals-scroll")
-            .max_h(px(DETACHED_TERMINAL_POPOVER_MAX_HEIGHT))
-            .selectable_overflow_y_scrollbar(
-                &self.selectable_text_scroll_handle("detached-local-terminals-scroll"),
-            );
-        for session in sessions {
-            let session_id = session.session_id;
-            let buffer_lines = session
-                .session
-                .lock()
-                .snapshot()
-                .lines
-                .len()
-                .max(session.buffer_lines);
-            list = list.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .hover(|row| {
-                        row.bg(rgba((theme.bg_hover << 8) | DETACHED_TERMINAL_HOVER_ALPHA))
+            .h(px(list_height))
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    workspace.update(cx, |this, cx| {
+                        this.render_detached_local_terminal_list_item(index, cx)
                     })
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Square,
-                        14.0,
-                        rgb(DETACHED_TERMINAL_AMBER),
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .line_height(px(16.0))
-                                    .text_color(rgb(theme.text))
-                                    .truncate()
-                                    .child(session.title),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(2.0))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .text_size(px(10.0))
-                                    .line_height(px(14.0))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(2.0))
-                                            .child(Self::render_lucide_icon(
-                                                LucideIcon::Clock,
-                                                10.0,
-                                                rgb(theme.text_muted),
-                                            ))
-                                            .child(format_duration(session.detached_at.elapsed())),
-                                    )
-                                    .child(format!(
-                                        "{} {}",
-                                        buffer_lines,
-                                        self.i18n.t("local_shell.background.lines")
-                                    )),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .size(px(24.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .cursor_pointer()
-                                    .hover(|button| button.bg(rgba((theme.accent << 8) | 0x33)))
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::Play,
-                                        12.0,
-                                        rgb(theme.accent),
-                                    ))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, _event, window, cx| {
-                                            this.attach_detached_local_terminal_session(
-                                                session_id, window, cx,
-                                            );
-                                        }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .size(px(24.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .cursor_pointer()
-                                    .hover(|button| button.bg(rgba(0xef444433)))
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::X,
-                                        12.0,
-                                        rgb(0xf87171),
-                                    ))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, _event, _window, cx| {
-                                            this.kill_detached_local_terminal_session(
-                                                session_id, cx,
-                                            );
-                                        }),
-                                    ),
-                            ),
-                    ),
-            );
-        }
+                },
+            ));
 
         Some(
             div()
@@ -417,6 +305,178 @@ impl WorkspaceApp {
                 .into_any_element(),
         )
     }
+
+    fn sorted_detached_local_terminal_sessions(&self) -> Vec<DetachedLocalTerminalSession> {
+        let mut sessions = self
+            .detached_local_terminals
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| left.detached_at.cmp(&right.detached_at));
+        sessions
+    }
+
+    fn sync_detached_local_terminal_list_state(
+        &mut self,
+        sessions: &[DetachedLocalTerminalSession],
+    ) {
+        let signatures = sessions
+            .iter()
+            .map(detached_local_terminal_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.detached_local_terminal_list_state,
+            &mut self.detached_local_terminal_list_cache.borrow_mut(),
+            "detached-local-terminals",
+            &signatures,
+            self.detached_local_terminal_list_spec(),
+        );
+    }
+
+    fn detached_local_terminal_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(DETACHED_LOCAL_TERMINAL_LIST_ESTIMATED_HEIGHT),
+            DETACHED_LOCAL_TERMINAL_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_detached_local_terminal_list_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let sessions = self.sorted_detached_local_terminal_sessions();
+        let Some(session) = sessions.get(index).cloned() else {
+            return div().into_any_element();
+        };
+        self.render_detached_local_terminal_row(session, cx)
+    }
+
+    fn render_detached_local_terminal_row(
+        &self,
+        session: DetachedLocalTerminalSession,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let session_id = session.session_id;
+        let buffer_lines = session
+            .session
+            .lock()
+            .snapshot()
+            .lines
+            .len()
+            .max(session.buffer_lines);
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(12.0))
+            .py(px(8.0))
+            .hover(|row| row.bg(rgba((theme.bg_hover << 8) | DETACHED_TERMINAL_HOVER_ALPHA)))
+            .child(Self::render_lucide_icon(
+                LucideIcon::Square,
+                14.0,
+                rgb(DETACHED_TERMINAL_AMBER),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .line_height(px(16.0))
+                            .text_color(rgb(theme.text))
+                            .truncate()
+                            .child(session.title),
+                    )
+                    .child(
+                        div()
+                            .mt(px(2.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .text_size(px(10.0))
+                            .line_height(px(14.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(2.0))
+                                    .child(Self::render_lucide_icon(
+                                        LucideIcon::Clock,
+                                        10.0,
+                                        rgb(theme.text_muted),
+                                    ))
+                                    .child(format_duration(session.detached_at.elapsed())),
+                            )
+                            .child(format!(
+                                "{} {}",
+                                buffer_lines,
+                                self.i18n.t("local_shell.background.lines")
+                            )),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .hover(|button| button.bg(rgba((theme.accent << 8) | 0x33)))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Play,
+                                12.0,
+                                rgb(theme.accent),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.attach_detached_local_terminal_session(
+                                        session_id, window, cx,
+                                    );
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .hover(|button| button.bg(rgba(0xef444433)))
+                            .child(Self::render_lucide_icon(LucideIcon::X, 12.0, rgb(0xf87171)))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.kill_detached_local_terminal_session(session_id, cx);
+                                }),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+fn detached_local_terminal_signature(session: &DetachedLocalTerminalSession) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Session id is the stable row key. Title and retained buffer count affect
+    // row content, while elapsed time only changes text in-place and keeps the
+    // same row height.
+    session.session_id.hash(&mut hasher);
+    session.title.hash(&mut hasher);
+    session.buffer_lines.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn format_duration(duration: Duration) -> String {

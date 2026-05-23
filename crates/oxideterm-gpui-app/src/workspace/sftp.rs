@@ -50,6 +50,9 @@ const SFTP_QUEUE_HEIGHT: f32 = 192.0; // Tauri h-48
 const SFTP_TRANSFER_QUEUE_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const SFTP_TRANSFER_QUEUE_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
 const SFTP_TRANSFER_QUEUE_LIST_OVERSCAN: usize = 6;
+const SFTP_INCOMPLETE_TRANSFER_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const SFTP_INCOMPLETE_TRANSFER_LIST_ESTIMATED_HEIGHT: f32 = 52.0;
+const SFTP_INCOMPLETE_TRANSFER_LIST_OVERSCAN: usize = 4;
 const SFTP_TEXT_XS: f32 = 12.0; // Tauri text-xs
 const SFTP_TEXT_SM: f32 = 14.0; // Tauri text-sm
 const SFTP_TEXT_10: f32 = 10.0; // Tauri text-[10px]
@@ -535,6 +538,8 @@ pub(super) struct SftpViewState {
     transfer_queue_list_cache: RefCell<VirtualListSignatureCache>,
     transfer_batches: HashMap<u64, SftpTransferBatch>,
     incomplete_transfers: Vec<StoredTransferProgress>,
+    incomplete_transfer_list_state: ListState,
+    incomplete_transfer_list_cache: RefCell<VirtualListSignatureCache>,
     incomplete_load_inflight: bool,
     show_incomplete: bool,
     context_menu: Option<SftpContextMenu>,
@@ -631,6 +636,20 @@ impl Default for SftpViewState {
             transfer_queue_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             transfer_batches: HashMap::new(),
             incomplete_transfers: Vec::new(),
+            // Incomplete transfer recovery is another fixed-height browser list;
+            // keep its rows virtualized separately from the active queue because
+            // loading/error rows follow a different identity set.
+            incomplete_transfer_list_state: ListState::new(
+                SFTP_INCOMPLETE_TRANSFER_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(SFTP_INCOMPLETE_TRANSFER_LIST_ESTIMATED_HEIGHT),
+                    SFTP_INCOMPLETE_TRANSFER_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            incomplete_transfer_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             incomplete_load_inflight: false,
             show_incomplete: false,
             context_menu: None,

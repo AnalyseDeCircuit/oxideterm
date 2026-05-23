@@ -1,5 +1,5 @@
 impl WorkspaceApp {
-    pub(super) fn render_sidebar_region(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_sidebar_region(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .relative()
@@ -152,7 +152,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .w_full()
@@ -257,7 +257,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_sidebar_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         if self.active_sidebar_section == SidebarSection::Connections {
             return self.render_saved_connections_sidebar_content(cx);
         }

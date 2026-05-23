@@ -1,3 +1,22 @@
+fn oxide_import_forward_detail_signature(detail: &ForwardDetail) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Forward detail rows are read-only preview records; all fields are visible
+    // in the row text or source identity.
+    detail.owner_connection_name.hash(&mut hasher);
+    detail.direction.hash(&mut hasher);
+    detail.description.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn oxide_import_name_group_signature(name: &str, label: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Name-group rows are short read-only labels plus a checkbox state owned by
+    // the dialog; identity is the source name and the visible conflict label.
+    name.hash(&mut hasher);
+    label.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     fn render_oxide_import_preview(
         &self,
@@ -121,6 +140,7 @@ impl WorkspaceApp {
         let mut groups = Vec::new();
         if !preview.unchanged.is_empty() {
             groups.push(self.render_oxide_import_name_group(
+                "unchanged",
                 format!("✓ {} 个连接将原样导入:", preview.unchanged.len()),
                 OXIDE_GREEN_500,
                 None,
@@ -134,6 +154,7 @@ impl WorkspaceApp {
         }
         if !preview.will_rename.is_empty() {
             groups.push(self.render_oxide_import_name_group(
+                "rename",
                 format!("{} 个连接因名称冲突将被重命名:", preview.will_rename.len()),
                 OXIDE_YELLOW_500,
                 Some(LucideIcon::AlertTriangle),
@@ -147,6 +168,7 @@ impl WorkspaceApp {
         }
         if !preview.will_merge.is_empty() {
             groups.push(self.render_oxide_import_name_group(
+                "merge",
                 format!("{} 个连接将合并到现有连接:", preview.will_merge.len()),
                 OXIDE_BLUE_500,
                 Some(LucideIcon::CheckCircle),
@@ -160,6 +182,7 @@ impl WorkspaceApp {
         }
         if !preview.will_replace.is_empty() {
             groups.push(self.render_oxide_import_name_group(
+                "replace",
                 format!("{} 个连接将替换现有连接:", preview.will_replace.len()),
                 OXIDE_ORANGE_500,
                 Some(LucideIcon::AlertTriangle),
@@ -173,6 +196,7 @@ impl WorkspaceApp {
         }
         if !preview.will_skip.is_empty() {
             groups.push(self.render_oxide_import_name_group(
+                "skip",
                 format!("{} 个连接将因冲突被跳过:", preview.will_skip.len()),
                 OXIDE_SLATE_400,
                 Some(LucideIcon::AlertTriangle),
@@ -189,29 +213,41 @@ impl WorkspaceApp {
 
     fn render_oxide_import_name_group(
         &self,
+        group_key: &'static str,
         title: String,
         color: u32,
         icon: Option<LucideIcon>,
         items: Vec<(String, String)>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let state = self.sync_oxide_import_name_group_list_state(group_key, &items);
+        let spec = self.oxide_import_name_group_list_spec();
+        let workspace = cx.entity();
+        let item_count = items.len();
+        let list_height =
+            (item_count as f32 * OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT).min(96.0);
+        let virtual_items = items;
         let scroll_handle =
-            self.selectable_text_scroll_handle(format!("oxide-import-preview-section-{title}"));
-        let mut list = div()
-            .id(("oxide-import-preview-section", color as u64))
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .max_h(px(96.0))
-            .selectable_overflow_y_scrollbar(&scroll_handle);
-        for (name, label) in items {
-            let checked = self
-                .session_manager
-                .oxide_import_dialog
-                .as_ref()
-                .is_some_and(|dialog| dialog.selected_names.contains(&name));
-            list = list.child(self.render_oxide_import_check_line(name, label, checked, cx));
-        }
+            self.selectable_text_scroll_handle(format!("oxide-import-preview-section-{group_key}"));
+        let list = div()
+            .id((
+                "oxide-import-preview-section",
+                oxide_import_name_group_signature(group_key, group_key),
+            ))
+            .h(px(list_height))
+            .selectable_overflow_y_scrollbar(&scroll_handle)
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    let Some((name, label)) = virtual_items.get(index).cloned() else {
+                        return div().into_any_element();
+                    };
+                    workspace.update(cx, |this, cx| {
+                        this.render_oxide_import_name_group_list_item(name, label, cx)
+                    })
+                },
+            ));
 
         div()
             .flex()
@@ -241,6 +277,69 @@ impl WorkspaceApp {
                     ),
             )
             .child(list)
+            .into_any_element()
+    }
+
+    fn sync_oxide_import_name_group_list_state(
+        &self,
+        group_key: &'static str,
+        items: &[(String, String)],
+    ) -> ListState {
+        let signatures = items
+            .iter()
+            .map(|(name, label)| oxide_import_name_group_signature(name, label))
+            .collect::<Vec<_>>();
+        let state = {
+            let mut states = self.oxide_import_name_group_list_states.borrow_mut();
+            states
+                .entry(group_key.to_string())
+                .or_insert_with(|| {
+                    // Name groups are nested preview rows, so each conflict
+                    // category owns a small variable-height ListState.
+                    ListState::new(
+                        OXIDE_IMPORT_NAME_GROUP_LIST_INITIAL_ITEM_COUNT,
+                        ListAlignment::Top,
+                        self.oxide_import_name_group_list_spec().overdraw(),
+                    )
+                    .measure_all()
+                })
+                .clone()
+        };
+        {
+            let mut caches = self.oxide_import_name_group_list_caches.borrow_mut();
+            let cache = caches.entry(group_key.to_string()).or_default();
+            sync_tauri_variable_list_state_by_signatures(
+                &state,
+                cache,
+                group_key,
+                &signatures,
+                self.oxide_import_name_group_list_spec(),
+            );
+        }
+        state
+    }
+
+    fn oxide_import_name_group_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT),
+            OXIDE_IMPORT_NAME_GROUP_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_oxide_import_name_group_list_item(
+        &self,
+        name: String,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.selected_names.contains(&name));
+        div()
+            .pb(px(4.0))
+            .child(self.render_oxide_import_check_line(name, label, checked, cx))
             .into_any_element()
     }
 
@@ -791,36 +890,86 @@ impl WorkspaceApp {
             cx,
         )];
         if !preview.forward_details.is_empty() {
-            let mut list = div()
+            self.sync_oxide_import_forward_detail_list_state(&preview.forward_details);
+            let state = self.oxide_import_forward_detail_list_state.clone();
+            let spec = self.oxide_import_forward_detail_list_spec();
+            let workspace = cx.entity();
+            let list_height = (preview.forward_details.len() as f32
+                * OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT)
+                .min(112.0);
+            let list = div()
                 .id("oxide-import-preview-forwards")
-                .max_h(px(112.0))
-                .selectable_overflow_y_scrollbar(
-                    &self.selectable_text_scroll_handle("oxide-import-preview-forwards"),
-                )
-                .flex()
-                .flex_col()
-                .gap(px(4.0));
-            for (index, detail) in preview.forward_details.iter().enumerate() {
-                list = list.child(
-                    div()
-                        .rounded(px(self.tokens.radii.md))
-                        .bg(self.render_oxide_subcard_bg(false))
-                        .px_2()
-                        .py(px(6.0))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.render_selectable_text_scoped(
-                            "oxide-import-forward-detail",
-                            index,
-                            format!("{} · {}", detail.owner_connection_name, detail.description),
-                            self.tokens.ui.text_muted,
-                            cx,
-                        )),
-                );
-            }
+                .h(px(list_height))
+                .child(tauri_virtual_list(
+                    state,
+                    spec,
+                    move |index, _window, cx| {
+                        workspace.update(cx, |this, cx| {
+                            this.render_oxide_import_forward_detail_item(index, cx)
+                        })
+                    },
+                ));
             children.push(list.into_any_element());
         }
         self.render_oxide_import_preview_subcard(children)
+    }
+
+    fn sync_oxide_import_forward_detail_list_state(&self, details: &[ForwardDetail]) {
+        let signatures = details
+            .iter()
+            .map(oxide_import_forward_detail_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.oxide_import_forward_detail_list_state,
+            &mut self
+                .oxide_import_forward_detail_list_cache
+                .borrow_mut(),
+            "oxide-import-forward-details",
+            &signatures,
+            self.oxide_import_forward_detail_list_spec(),
+        );
+    }
+
+    fn oxide_import_forward_detail_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT),
+            OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_oxide_import_forward_detail_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(detail) = self
+            .session_manager
+            .oxide_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.preview.as_ref())
+            .and_then(|preview| preview.forward_details.get(index))
+        else {
+            return div().into_any_element();
+        };
+        div()
+            .pb(px(4.0))
+            .child(
+                div()
+                    .rounded(px(self.tokens.radii.md))
+                    .bg(self.render_oxide_subcard_bg(false))
+                    .px_2()
+                    .py(px(6.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-import-forward-detail",
+                        index,
+                        format!("{} · {}", detail.owner_connection_name, detail.description),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
+            )
+            .into_any_element()
     }
 
     fn render_oxide_import_preview_subcard(&self, children: Vec<AnyElement>) -> AnyElement {

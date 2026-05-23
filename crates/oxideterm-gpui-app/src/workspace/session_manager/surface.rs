@@ -86,7 +86,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_session_manager_surface(
-        &self,
+        &mut self,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {

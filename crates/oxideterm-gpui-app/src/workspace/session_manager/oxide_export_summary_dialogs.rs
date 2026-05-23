@@ -1,3 +1,10 @@
+fn oxide_export_summary_line_signature(line: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Warning lines are visible verbatim in the compact preflight body.
+    line.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     fn render_oxide_export_preflight(
         &self,
@@ -287,6 +294,43 @@ impl WorkspaceApp {
         lines: Vec<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let line_list = if lines.is_empty() {
+            None
+        } else {
+            self.sync_oxide_export_summary_line_list_state(&lines);
+            let state = self.oxide_export_summary_line_list_state.clone();
+            let spec = self.oxide_export_summary_line_list_spec();
+            let workspace = cx.entity();
+            let line_color = color;
+            let item_count = lines.len();
+            let virtual_lines = lines;
+            Some(
+                div()
+                    .id("oxide-export-summary-lines")
+                    .h(px(
+                        (item_count as f32 * OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT)
+                            .min(64.0),
+                    ))
+                    .selectable_overflow_y_scrollbar(
+                        &self.selectable_text_scroll_handle("oxide-export-summary-lines"),
+                    )
+                    .child(tauri_virtual_list(
+                        state,
+                        spec,
+                        move |index, _window, cx| {
+                            let Some(line) = virtual_lines.get(index).cloned() else {
+                                return div().into_any_element();
+                            };
+                            workspace.update(cx, |this, cx| {
+                                this.render_oxide_export_summary_line_item(
+                                    index, line, line_color, cx,
+                                )
+                            })
+                        },
+                    ))
+                    .into_any_element(),
+            )
+        };
         div()
             .px(px(8.0))
             .py(px(6.0))
@@ -318,31 +362,48 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .when(!lines.is_empty(), |notice| {
-                notice.child(
-                    div()
-                        .id("oxide-export-summary-lines")
-                        .max_h(px(64.0))
-                        .selectable_overflow_y_scrollbar(
-                            &self.selectable_text_scroll_handle("oxide-export-summary-lines"),
-                        )
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.0))
-                        .children(lines.into_iter().enumerate().map(|(index, line)| {
-                            div()
-                                .opacity(0.8)
-                                .line_height(px(16.0))
-                                .child(self.render_selectable_text_scoped(
-                                    "oxide-export-compact-warning-line",
-                                    index,
-                                    format!("• {line}"),
-                                    color,
-                                    cx,
-                                ))
-                        })),
-                )
-            })
+            .when_some(line_list, |notice, line_list| notice.child(line_list))
+            .into_any_element()
+    }
+
+    fn sync_oxide_export_summary_line_list_state(&self, lines: &[String]) {
+        let signatures = lines
+            .iter()
+            .map(|line| oxide_export_summary_line_signature(line))
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.oxide_export_summary_line_list_state,
+            &mut self.oxide_export_summary_line_list_cache.borrow_mut(),
+            "oxide-export-summary-lines",
+            &signatures,
+            self.oxide_export_summary_line_list_spec(),
+        );
+    }
+
+    fn oxide_export_summary_line_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT),
+            OXIDE_EXPORT_SUMMARY_LINE_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_oxide_export_summary_line_item(
+        &self,
+        index: usize,
+        line: String,
+        color: u32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .opacity(0.8)
+            .line_height(px(16.0))
+            .child(self.render_selectable_text_scoped(
+                "oxide-export-compact-warning-line",
+                index,
+                format!("• {line}"),
+                color,
+                cx,
+            ))
             .into_any_element()
     }
 

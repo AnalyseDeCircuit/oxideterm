@@ -195,8 +195,24 @@ const SETTINGS_SECTION_HEADER_ITEM_COUNT: usize = 1;
 const SETTINGS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 4;
 const SETTINGS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 260.0;
 const SETTINGS_SECTION_LIST_OVERSCAN: usize = 2;
-const AI_SETTINGS_SECTION_ITEM_COUNT: usize = 7;
+const AI_SETTINGS_FIXED_SECTION_COUNT: usize = 6;
 const AI_SETTINGS_SECTION_ESTIMATED_HEIGHT: f32 = 360.0;
+const AI_EXECUTION_PROFILE_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const AI_EXECUTION_PROFILE_LIST_ESTIMATED_HEIGHT: f32 = 136.0;
+const AI_EXECUTION_PROFILE_LIST_OVERSCAN: usize = 4;
+const AI_PROVIDER_MODEL_ROW_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT: f32 = 48.0;
+const AI_PROVIDER_MODEL_ROW_LIST_OVERSCAN: usize = 6;
+const AI_PROVIDER_MODEL_CHIP_LIST_INITIAL_ROW_COUNT: usize = 0;
+const AI_PROVIDER_MODEL_CHIPS_PER_VIRTUAL_ROW: usize = 4;
+const AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT: f32 = 28.0;
+const AI_PROVIDER_MODEL_CHIP_ROW_OVERSCAN: usize = 6;
+const AI_PROVIDER_CARD_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const AI_PROVIDER_CARD_LIST_ESTIMATED_HEIGHT: f32 = 220.0;
+const AI_PROVIDER_CARD_LIST_OVERSCAN: usize = 3;
+const AI_MCP_SERVER_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const AI_MCP_SERVER_LIST_ESTIMATED_HEIGHT: f32 = 156.0;
+const AI_MCP_SERVER_LIST_OVERSCAN: usize = 4;
 const CLOUD_SYNC_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 7;
 const CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 240.0;
 const CLOUD_SYNC_SECTION_LIST_OVERSCAN: usize = 2;
@@ -206,6 +222,9 @@ const PLUGIN_MANAGER_SECTION_LIST_OVERSCAN: usize = 1;
 const FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 5;
 const FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 180.0;
 const FORWARDS_SECTION_LIST_OVERSCAN: usize = 2;
+const FORWARDS_TABLE_ROW_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const FORWARDS_TABLE_ROW_LIST_ESTIMATED_HEIGHT: f32 = 42.0;
+const FORWARDS_TABLE_ROW_LIST_OVERSCAN: usize = 8;
 const CONNECTION_MONITOR_SECTION_LIST_ITEM_COUNT: usize = 2;
 const CONNECTION_MONITOR_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 280.0;
 const CONNECTION_MONITOR_SECTION_LIST_OVERSCAN: usize = 1;
@@ -215,9 +234,45 @@ const CONNECTION_POOL_BODY_LIST_OVERSCAN: usize = 3;
 const LAUNCHER_WSL_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
 const LAUNCHER_WSL_LIST_OVERSCAN: usize = 6;
+const LAUNCHER_APP_GRID_INITIAL_ROW_COUNT: usize = 0;
+const LAUNCHER_APP_GRID_ESTIMATED_ROW_HEIGHT: f32 = 104.0;
+const LAUNCHER_APP_GRID_OVERSCAN: usize = 4;
 const QUICK_COMMAND_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const QUICK_COMMAND_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
 const QUICK_COMMAND_LIST_OVERSCAN: usize = 6;
+const DETACHED_LOCAL_TERMINAL_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const DETACHED_LOCAL_TERMINAL_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
+const DETACHED_LOCAL_TERMINAL_LIST_OVERSCAN: usize = 4;
+const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 48.0;
+const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
+const SESSION_MANAGER_FOLDER_TREE_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const SESSION_MANAGER_FOLDER_TREE_LIST_ESTIMATED_HEIGHT: f32 = 36.0;
+const SESSION_MANAGER_FOLDER_TREE_LIST_OVERSCAN: usize = 8;
+const OXIDE_EXPORT_CONNECTION_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const OXIDE_EXPORT_CONNECTION_LIST_ESTIMATED_HEIGHT: f32 = 58.0;
+const OXIDE_EXPORT_CONNECTION_LIST_OVERSCAN: usize = 8;
+const OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_ESTIMATED_HEIGHT: f32 = 22.0;
+const OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_OVERSCAN: usize = 8;
+const OXIDE_EXPORT_FORWARD_GROUP_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const OXIDE_EXPORT_FORWARD_GROUP_LIST_ESTIMATED_HEIGHT: f32 = 84.0;
+const OXIDE_EXPORT_FORWARD_GROUP_LIST_OVERSCAN: usize = 4;
+const OXIDE_EXPORT_SUMMARY_LINE_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT: f32 = 18.0;
+const OXIDE_EXPORT_SUMMARY_LINE_LIST_OVERSCAN: usize = 6;
+const OXIDE_IMPORT_FORWARD_DETAIL_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT: f32 = 36.0;
+const OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN: usize = 6;
+const OXIDE_IMPORT_NAME_GROUP_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT: f32 = 28.0;
+const OXIDE_IMPORT_NAME_GROUP_LIST_OVERSCAN: usize = 6;
+const CLOUD_SYNC_ROLLBACK_BACKUP_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT: f32 = 72.0;
+const CLOUD_SYNC_ROLLBACK_BACKUP_LIST_OVERSCAN: usize = 4;
+const CLOUD_SYNC_HISTORY_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT: f32 = 72.0;
+const CLOUD_SYNC_HISTORY_LIST_OVERSCAN: usize = 4;
 
 #[derive(Clone, Debug)]
 struct AiMcpServerDraft {
@@ -520,6 +575,8 @@ pub(crate) struct WorkspaceApp {
     quick_commands: QuickCommandsState,
     quick_command_list_state: ListState,
     quick_command_list_cache: RefCell<VirtualListSignatureCache>,
+    detached_local_terminal_list_state: ListState,
+    detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     plugin_manager_section_list_state: ListState,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
@@ -533,12 +590,26 @@ pub(crate) struct WorkspaceApp {
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,
     active_surface: ActiveSurface,
+    active_session_sidebar_list_state: ListState,
+    active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     active_settings_tab: SettingsTab,
     terminal_settings_page: TerminalSettingsPage,
     open_settings_select: Option<SettingsSelect>,
     settings_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     settings_section_list_state: ListState,
     settings_section_list_cache: RefCell<VirtualListSignatureCache>,
+    ai_execution_profile_list_state: ListState,
+    ai_execution_profile_list_cache: RefCell<VirtualListSignatureCache>,
+    ai_context_model_list_states: RefCell<HashMap<String, ListState>>,
+    ai_context_model_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
+    ai_reasoning_model_list_states: RefCell<HashMap<String, ListState>>,
+    ai_reasoning_model_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
+    ai_provider_model_chip_list_states: RefCell<HashMap<String, ListState>>,
+    ai_provider_model_chip_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
+    ai_provider_card_list_state: ListState,
+    ai_provider_card_list_cache: RefCell<VirtualListSignatureCache>,
+    ai_mcp_server_list_state: ListState,
+    ai_mcp_server_list_cache: RefCell<VirtualListSignatureCache>,
     ai_new_provider_type: String,
     ai_provider_settings_expanded: bool,
     ai_tool_use_expanded: bool,
@@ -734,6 +805,8 @@ pub(crate) struct WorkspaceApp {
     forward_tab_nodes: HashMap<TabId, NodeId>,
     forwards_section_list_state: ListState,
     forwards_section_list_cache: RefCell<VirtualListSignatureCache>,
+    forwards_table_row_list_state: ListState,
+    forwards_table_row_list_cache: RefCell<VirtualListSignatureCache>,
     forwarding_view: forwards::ForwardsViewState,
     forwarding_port_detection_by_node: HashMap<NodeId, forwards::PortDetectionViewState>,
     forwarding_port_profiler_nodes: HashSet<NodeId>,
@@ -751,6 +824,8 @@ pub(crate) struct WorkspaceApp {
     launcher: LauncherState,
     launcher_wsl_list_state: ListState,
     launcher_wsl_list_cache: RefCell<VirtualListSignatureCache>,
+    launcher_app_grid_list_state: ListState,
+    launcher_app_grid_list_cache: RefCell<VirtualListSignatureCache>,
     graphics: GraphicsState,
     connection_monitor: ConnectionMonitorState,
     connection_monitor_section_list_state: ListState,
@@ -762,6 +837,10 @@ pub(crate) struct WorkspaceApp {
     cloud_sync_form: cloud_sync::CloudSyncFormDraft,
     cloud_sync_section_list_state: ListState,
     cloud_sync_section_list_cache: RefCell<VirtualListSignatureCache>,
+    cloud_sync_rollback_backup_list_state: ListState,
+    cloud_sync_rollback_backup_list_cache: RefCell<VirtualListSignatureCache>,
+    cloud_sync_history_list_state: ListState,
+    cloud_sync_history_list_cache: RefCell<VirtualListSignatureCache>,
     cloud_sync_open_select: Option<cloud_sync::CloudSyncSelect>,
     cloud_sync_focused_select: Option<cloud_sync::CloudSyncSelect>,
     cloud_sync_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
@@ -793,6 +872,20 @@ pub(crate) struct WorkspaceApp {
     settings_store: SettingsStore,
     connection_store: ConnectionStore,
     session_manager: SessionManagerState,
+    session_manager_folder_tree_list_state: ListState,
+    session_manager_folder_tree_list_cache: RefCell<VirtualListSignatureCache>,
+    oxide_export_connection_list_state: ListState,
+    oxide_export_connection_list_cache: RefCell<VirtualListSignatureCache>,
+    oxide_import_connection_preview_list_state: ListState,
+    oxide_import_connection_preview_list_cache: RefCell<VirtualListSignatureCache>,
+    oxide_export_forward_group_list_state: ListState,
+    oxide_export_forward_group_list_cache: RefCell<VirtualListSignatureCache>,
+    oxide_export_summary_line_list_state: ListState,
+    oxide_export_summary_line_list_cache: RefCell<VirtualListSignatureCache>,
+    oxide_import_forward_detail_list_state: ListState,
+    oxide_import_forward_detail_list_cache: RefCell<VirtualListSignatureCache>,
+    oxide_import_name_group_list_states: RefCell<HashMap<String, ListState>>,
+    oxide_import_name_group_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
     auto_route_modal: AutoRouteModalState,
     settings_connection_new_group: String,
     settings_selected_ssh_hosts: HashSet<String>,

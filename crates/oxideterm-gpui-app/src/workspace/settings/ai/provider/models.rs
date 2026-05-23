@@ -1,3 +1,9 @@
+#[derive(Clone, Debug)]
+struct AiProviderModelChipItem {
+    model: String,
+    active: bool,
+}
+
 impl WorkspaceApp {
     fn ai_provider_models(
         &self,
@@ -55,39 +61,177 @@ impl WorkspaceApp {
         );
 
         if visible_model_count > 0 {
-            let mut chips = div()
-                .px(px(16.0))
-                .pb(px(16.0))
-                .flex()
-                .flex_wrap()
-                .gap(px(4.0));
-            // GPUI rebuilds this tree on scroll, so borrow the model list and
-            // clone only the labels that are actually painted as chips.
-            for model in provider.models.iter().take(visible_model_count) {
-                chips = chips.child(self.ai_provider_model_chip(
-                    index,
-                    model.to_string(),
-                    provider.default_model == *model,
-                    cx,
-                ));
-            }
-            if hidden_count > 0 {
-                chips = chips.child(
-                    div()
-                        .px(px(6.0))
-                        .py(px(2.0))
-                        .text_size(px(10.0))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(format!("+{hidden_count}")),
-                );
-            }
-            body = body.child(chips);
+            let chip_rows = self.ai_provider_model_chip_rows(provider, visible_model_count);
+            self.sync_ai_provider_model_chip_list_state(&provider.id, &chip_rows, hidden_count);
+            let state = self
+                .ai_provider_model_chip_list_states
+                .borrow()
+                .get(&provider.id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    ListState::new(
+                        AI_PROVIDER_MODEL_CHIP_LIST_INITIAL_ROW_COUNT,
+                        ListAlignment::Top,
+                        self.ai_provider_model_chip_list_spec().overdraw(),
+                    )
+                    .measure_all()
+                });
+            let spec = self.ai_provider_model_chip_list_spec();
+            let workspace = cx.entity();
+            let provider_index = index;
+            let row_count = chip_rows.len();
+            let hidden_count_for_rows = hidden_count;
+            let list_height = row_count as f32 * AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT;
+            body = body.child(
+                div()
+                    .px(px(16.0))
+                    .pb(px(16.0))
+                    .h(px(list_height))
+                    .child(tauri_virtual_list(
+                        state,
+                        spec,
+                        move |row_index, _window, cx| {
+                            workspace.update(cx, |this, cx| {
+                                this.ai_provider_model_chip_row(
+                                    provider_index,
+                                    row_index,
+                                    hidden_count_for_rows,
+                                    cx,
+                                )
+                            })
+                        },
+                    )),
+            );
         }
 
         body.into_any_element()
     }
 
-fn ai_provider_model_chip(
+    fn ai_provider_model_chip_rows(
+        &self,
+        provider: &AiProviderView,
+        visible_model_count: usize,
+    ) -> Vec<Vec<AiProviderModelChipItem>> {
+        provider
+            .models
+            .iter()
+            .take(visible_model_count)
+            .map(|model| AiProviderModelChipItem {
+                model: model.clone(),
+                active: provider.default_model == *model,
+            })
+            .collect::<Vec<_>>()
+            .chunks(AI_PROVIDER_MODEL_CHIPS_PER_VIRTUAL_ROW)
+            .map(|row| row.to_vec())
+            .collect()
+    }
+
+    fn sync_ai_provider_model_chip_list_state(
+        &self,
+        provider_id: &str,
+        rows: &[Vec<AiProviderModelChipItem>],
+        hidden_count: usize,
+    ) {
+        let signatures = rows
+            .iter()
+            .enumerate()
+            .map(|(row_index, row)| {
+                let mut hasher = DefaultHasher::new();
+                // Chip rows preserve the old flex-wrap look in bounded chunks;
+                // visible labels, active state, and the final hidden counter
+                // determine row measurement.
+                row_index.hash(&mut hasher);
+                for item in row {
+                    item.model.hash(&mut hasher);
+                    item.active.hash(&mut hasher);
+                }
+                if row_index + 1 == rows.len() {
+                    hidden_count.hash(&mut hasher);
+                }
+                hasher.finish()
+            })
+            .collect::<Vec<_>>();
+        let state = {
+            let mut states = self.ai_provider_model_chip_list_states.borrow_mut();
+            states
+                .entry(provider_id.to_string())
+                .or_insert_with(|| {
+                    ListState::new(
+                        AI_PROVIDER_MODEL_CHIP_LIST_INITIAL_ROW_COUNT,
+                        ListAlignment::Top,
+                        self.ai_provider_model_chip_list_spec().overdraw(),
+                    )
+                    .measure_all()
+                })
+                .clone()
+        };
+        {
+            let mut caches = self.ai_provider_model_chip_list_caches.borrow_mut();
+            let cache = caches.entry(provider_id.to_string()).or_default();
+            sync_tauri_variable_list_state_by_signatures(
+                &state,
+                cache,
+                &format!("ai-provider-model-chips:{provider_id}"),
+                &signatures,
+                self.ai_provider_model_chip_list_spec(),
+            );
+        }
+    }
+
+    fn ai_provider_model_chip_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT),
+            AI_PROVIDER_MODEL_CHIP_ROW_OVERSCAN,
+        )
+    }
+
+    fn ai_provider_model_chip_row(
+        &self,
+        provider_index: usize,
+        row_index: usize,
+        hidden_count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(provider) = ai_provider_views(self.settings_store.settings())
+            .get(provider_index)
+            .cloned()
+        else {
+            return div().into_any_element();
+        };
+        let models_expanded = self.expanded_ai_provider_models.contains(&provider.id);
+        let visible_model_count = if models_expanded {
+            provider.models.len()
+        } else {
+            provider.models.len().min(AI_PROVIDER_VISIBLE_MODEL_LIMIT)
+        };
+        let rows = self.ai_provider_model_chip_rows(&provider, visible_model_count);
+        let Some(row) = rows.get(row_index) else {
+            return div().into_any_element();
+        };
+        let is_last_row = row_index + 1 == rows.len();
+        let mut chips = div().flex().flex_wrap().gap(px(4.0));
+        for item in row {
+            chips = chips.child(self.ai_provider_model_chip(
+                provider_index,
+                item.model.clone(),
+                item.active,
+                cx,
+            ));
+        }
+        if is_last_row && hidden_count > 0 {
+            chips = chips.child(
+                div()
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .text_size(px(10.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(format!("+{hidden_count}")),
+            );
+        }
+        chips.into_any_element()
+    }
+
+    fn ai_provider_model_chip(
         &self,
         index: usize,
         model: String,

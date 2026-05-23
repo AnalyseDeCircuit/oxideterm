@@ -308,6 +308,7 @@ impl WorkspaceApp {
             }
             SettingsTab::Ai => {
                 settings.ai.enabled.hash(&mut hasher);
+                settings.ai.providers.len().hash(&mut hasher);
                 self.ai_provider_settings_expanded.hash(&mut hasher);
                 self.ai_tool_use_expanded.hash(&mut hasher);
                 self.ai_context_windows_expanded.hash(&mut hasher);
@@ -359,7 +360,7 @@ impl WorkspaceApp {
             SettingsTab::Reconnect => 3,
             SettingsTab::Sftp => 3,
             SettingsTab::Ide => 5,
-            SettingsTab::Ai => AI_SETTINGS_SECTION_ITEM_COUNT - SETTINGS_SECTION_HEADER_ITEM_COUNT,
+            SettingsTab::Ai => AI_SETTINGS_FIXED_SECTION_COUNT,
             SettingsTab::Knowledge => self.knowledge_settings_section_count(),
             SettingsTab::Keybindings => self.keybinding_settings_section_count(),
             SettingsTab::Help => 3,
