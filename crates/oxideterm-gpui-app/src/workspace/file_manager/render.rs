@@ -249,37 +249,40 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let mut panel = div()
-            .w(px(FILE_MANAGER_SIDEBAR_WIDTH))
-            .h_full()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .border_1()
-            .rounded(px(self.tokens.radii.sm))
-            .border_color(file_manager_border(theme.border, has_background))
-            .bg(file_manager_panel_bg(
-                theme.bg_panel,
-                has_background,
-                FILE_MANAGER_PANEL_80_ALPHA,
-            ))
-            .child(
-                div()
-                    .h(px(FILE_MANAGER_HEADER_HEIGHT))
-                    .flex()
-                    .items_center()
-                    .px(px(12.0))
-                    .text_size(px(FILE_MANAGER_TEXT_XS))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "file-manager-bookmarks-title",
-                        (),
-                        self.i18n.t("fileManager.favorites").to_uppercase(),
-                        theme.text_muted,
-                        cx,
-                    )),
-            );
+        let mut panel = file_manager_card_surface(
+            div()
+                .w(px(FILE_MANAGER_SIDEBAR_WIDTH))
+                .h_full()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .border_1()
+                .rounded(px(self.tokens.radii.sm))
+                .border_color(file_manager_border(theme.border, has_background))
+                .bg(file_manager_panel_bg(
+                    theme.bg_card,
+                    has_background,
+                    FILE_MANAGER_PANEL_80_ALPHA,
+                )),
+            theme.bg_card,
+        )
+        .child(
+            div()
+                .h(px(FILE_MANAGER_HEADER_HEIGHT))
+                .flex()
+                .items_center()
+                .px(px(12.0))
+                .text_size(px(FILE_MANAGER_TEXT_XS))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(theme.text_muted))
+                .child(self.render_selectable_display_text(
+                    "file-manager-bookmarks-title",
+                    (),
+                    self.i18n.t("fileManager.favorites").to_uppercase(),
+                    theme.text_muted,
+                    cx,
+                )),
+        );
         if self.file_manager.bookmarks.is_empty() {
             panel = panel.child(
                 div()

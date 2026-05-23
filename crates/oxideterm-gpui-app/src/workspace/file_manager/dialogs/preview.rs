@@ -224,19 +224,22 @@ impl WorkspaceApp {
                 dialog.child(self.render_file_manager_preview_metadata(has_background, cx))
             })
             .child(
-                div()
-                    .px(px(16.0))
-                    .py(px(8.0))
-                    .border_t_1()
-                    .border_color(file_manager_border(theme.border, has_background))
-                    .bg(file_manager_panel_bg(theme.bg_card, has_background, 0xff))
-                    .text_size(px(FILE_MANAGER_TEXT_XS))
-                    .text_color(rgb(theme.text_muted))
-                    .child(if can_navigate {
-                        self.i18n.t("fileManager.quickLookHintNav")
-                    } else {
-                        self.i18n.t("fileManager.quickLookHint")
-                    }),
+                file_manager_card_surface(
+                    div()
+                        .px(px(16.0))
+                        .py(px(8.0))
+                        .border_t_1()
+                        .border_color(file_manager_border(theme.border, has_background))
+                        .bg(file_manager_panel_bg(theme.bg_card, has_background, 0xff)),
+                    theme.bg_card,
+                )
+                .text_size(px(FILE_MANAGER_TEXT_XS))
+                .text_color(rgb(theme.text_muted))
+                .child(if can_navigate {
+                    self.i18n.t("fileManager.quickLookHintNav")
+                } else {
+                    self.i18n.t("fileManager.quickLookHint")
+                }),
             )
             .into_any_element()
     }

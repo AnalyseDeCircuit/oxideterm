@@ -347,14 +347,17 @@ impl WorkspaceApp {
                     ),
             )
             .child(
-                div()
+                forwards_theme_card_surface(
+                    div()
                     .min_h(px(100.0))
                     .w_full()
                     .overflow_hidden()
                     .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(forwards_theme_border(theme.border, has_background))
-                    .bg(forwards_theme_card_bg(theme.bg_card, has_background))
+                    .bg(forwards_theme_card_bg(theme.bg_card, has_background)),
+                    theme.bg_card,
+                )
                     .child(self.render_forward_table_header(has_background))
                     .when(forwards.is_empty(), |table| {
                         table.child(

@@ -11,7 +11,9 @@ use oxideterm_gpui_ui::{
     button::{ButtonRadius, ButtonVariant, IconButtonOptions, ToolbarButtonOptions},
     context_menu::{ContextMenuActionableStyle, context_menu_event_boundary},
     modal::{dismissible_dialog_backdrop, overlay_content_boundary, quicklook_backdrop},
-    surface::{color_for_background, color_with_background_scaled_alpha},
+    surface::{
+        color_for_background, color_with_background_scaled_alpha, tauri_glass_surface_shadow,
+    },
     text_input::{TextInputView, text_caret, text_input, text_input_anchor_probe},
 };
 use oxideterm_local_files::{
@@ -307,6 +309,12 @@ fn file_manager_panel_bg(color: u32, has_background: bool, alpha: u32) -> Rgba {
         alpha,
         FILE_MANAGER_BG_ACTIVE_PANEL_ALPHA,
     )
+}
+
+fn file_manager_card_surface(surface: gpui::Div, color: u32) -> gpui::Div {
+    // LocalFileManager's bookmark sidebar is Tauri bg-theme-bg-card, which
+    // inherits --theme-card-shadow even when its opacity comes from data-bg-active.
+    tauri_glass_surface_shadow(surface, color)
 }
 
 fn file_manager_hover_bg(color: u32, has_background: bool) -> Rgba {

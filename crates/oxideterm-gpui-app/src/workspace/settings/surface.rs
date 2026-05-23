@@ -35,7 +35,7 @@ impl WorkspaceApp {
                 rgb(theme.bg)
             })
             .text_color(rgb(theme.text))
-            .child(self.render_settings_nav(has_settings_background, cx))
+            .child(self.render_settings_nav(cx))
             .child(
                 div()
                     .id("settings-content-scroll")
@@ -44,15 +44,14 @@ impl WorkspaceApp {
                     .min_h(px(0.0))
                     .selectable_overflow_y_scrollbar(&settings_content_scroll)
                     .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
-                        // GPUI can advance scroll state without rebuilding the settings view,
-                        // so cached trigger bounds must not survive a settings scroll.
-                        let had_open_select =
-                            browser_behavior::close_browser_trigger_select_on_container_scroll(
-                                &mut this.open_settings_select,
-                                &mut this.settings_select_focus_origin,
-                            );
-                        this.clear_settings_select_anchors();
-                        if had_open_select {
+                        // Tauri only closes an open select on page scroll. When no select is
+                        // visible, keep wheel scrolling free of state writes so large settings
+                        // pages do not rebuild just to maintain stale overlay anchors.
+                        if browser_behavior::close_browser_trigger_select_on_container_scroll(
+                            &mut this.open_settings_select,
+                            &mut this.settings_select_focus_origin,
+                        ) {
+                            this.clear_settings_select_anchors();
                             cx.notify();
                         }
                     }))
@@ -70,15 +69,18 @@ impl WorkspaceApp {
             .when_some(self.render_ai_mcp_add_server_dialog(cx), |surface, modal| {
                 surface.child(modal)
             })
-            .when_some(self.render_knowledge_create_collection_dialog(cx), |surface, modal| {
-                surface.child(modal)
-            })
-            .when_some(self.render_knowledge_new_document_dialog(cx), |surface, modal| {
-                surface.child(modal)
-            })
-            .when_some(self.render_knowledge_delete_confirm_dialog(cx), |surface, modal| {
-                surface.child(modal)
-            })
+            .when_some(
+                self.render_knowledge_create_collection_dialog(cx),
+                |surface, modal| surface.child(modal),
+            )
+            .when_some(
+                self.render_knowledge_new_document_dialog(cx),
+                |surface, modal| surface.child(modal),
+            )
+            .when_some(
+                self.render_knowledge_delete_confirm_dialog(cx),
+                |surface, modal| surface.child(modal),
+            )
             .when(self.keybinding_reset_all_confirm_open, |surface| {
                 surface.child(self.render_keybinding_reset_all_confirm_dialog(cx))
             })
@@ -96,11 +98,7 @@ impl WorkspaceApp {
             .retain(|id, _| matches!(id, SelectAnchorId::NewConnectionGroup));
     }
 
-    fn render_settings_nav(
-        &self,
-        has_settings_background: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_settings_nav(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let mut nav = div()
             .w(px(self.tokens.metrics.settings_nav_width))
@@ -109,11 +107,7 @@ impl WorkspaceApp {
             .flex_col()
             .pt(px(24.0))
             .pb_4()
-            .bg(if has_settings_background {
-                rgba((theme.bg_panel << 8) | alpha_byte(self.tokens.metrics.panel_vibrancy_alpha))
-            } else {
-                rgb(theme.bg_panel)
-            })
+            .bg(self.settings_panel_background(theme.bg_panel))
             .border_r_1()
             .border_color(rgb(theme.border));
 
@@ -186,24 +180,32 @@ impl WorkspaceApp {
             }))
             .cursor_pointer()
             .hover(move |item| {
-                item.bg(if active {
-                    rgb(theme.bg_panel)
+                if active {
+                    item
                 } else {
-                    rgb(theme.bg_hover)
-                })
+                    item.bg(rgba((theme.bg_hover << 8) | 0x80))
+                }
             })
             .child(Self::render_lucide_icon(
                 settings_tab_lucide(tab.icon()),
-                16.0,
-                rgb(theme.text),
+                18.0,
+                rgb(theme.accent),
             ))
-            .child(self.i18n.t(tab.label_key()))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .child(self.i18n.t(tab.label_key())),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
                     this.active_settings_tab = tab;
-                    this.active_surface = ActiveSurface::Settings;
                     this.close_settings_select();
+                    this.focused_settings_input = None;
+                    this.settings_slider_drag = None;
+                    this.clear_ime_selection();
+                    cx.stop_propagation();
                     cx.notify();
                 }),
             )

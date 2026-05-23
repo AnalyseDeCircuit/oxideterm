@@ -238,6 +238,9 @@ impl WorkspaceApp {
                         .border_1()
                         .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
                         .bg(self.settings_panel_background(self.tokens.ui.bg_card))
+                        .shadow(oxideterm_gpui_ui::tauri_card_shadow(
+                            self.tokens.ui.bg_card,
+                        ))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(self.i18n.t("settings_view.reconnect.formula_hint")),

@@ -77,6 +77,9 @@ impl WorkspaceApp {
                             .border_1()
                             .border_color(rgb(theme.border))
                             .bg(rgb(theme.bg_card))
+                            // PluginManagerView uses bg-theme-bg-card, which
+                            // carries --theme-card-shadow in the Tauri theme.
+                            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
                             .p(px(self.tokens.metrics.settings_card_padding))
                             .flex()
                             .flex_col()

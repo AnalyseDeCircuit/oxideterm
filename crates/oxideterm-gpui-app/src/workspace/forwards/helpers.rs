@@ -32,6 +32,12 @@ fn forwards_theme_card_bg(color: u32, has_background: bool) -> gpui::Rgba {
     forwards_theme_bg(color, has_background)
 }
 
+fn forwards_theme_card_surface(surface: gpui::Div, color: u32) -> gpui::Div {
+    // Forwards tables use Tauri bg-theme-bg-card, so keep the shared
+    // --theme-card-shadow separate from the per-page background alpha helper.
+    tauri_glass_surface_shadow(surface, color)
+}
+
 fn forwards_theme_sunken_bg(color: u32, has_background: bool) -> gpui::Rgba {
     color_for_background(color, has_background, FORWARDS_BG_ACTIVE_SUNKEN_ALPHA)
 }

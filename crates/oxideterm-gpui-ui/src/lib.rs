@@ -50,7 +50,8 @@ pub use state::{
 };
 pub use surface::{
     color_for_background, color_for_background_or_alpha, color_with_alpha,
-    color_with_background_scaled_alpha, scale_alpha_byte,
+    color_with_background_scaled_alpha, scale_alpha_byte, tauri_card_shadow, tauri_card_surface,
+    tauri_glass_surface_shadow,
 };
 pub use table::{
     TauriTableCellOptions, TauriTableCellStyle, TauriTableColors, TauriTableMetrics,

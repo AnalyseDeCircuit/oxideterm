@@ -92,18 +92,18 @@ impl WorkspaceApp {
     }
 
     fn sftp_settings_card(&self, rows: Vec<AnyElement>, gap: f32) -> AnyElement {
-        div()
+        let card = div()
             .w_full()
             .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
             .p(px(SFTP_SETTINGS_CARD_PADDING))
             .flex()
             .flex_col()
             .gap(px(gap))
-            .children(rows)
+            .children(rows);
+        self.settings_card_surface(card, self.tokens.ui.bg_card)
             .into_any_element()
     }
 

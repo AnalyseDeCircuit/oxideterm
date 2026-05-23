@@ -163,10 +163,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
+        sftp_card_surface(
+            div()
             .border_b_1()
             .border_color(sftp_border(theme.border, has_background))
-            .bg(sftp_panel_bg(theme.bg_card, has_background, 0xff))
+            .bg(sftp_panel_bg(theme.bg_card, has_background, 0xff)),
+            theme.bg_card,
+        )
             .child(
                 div()
                     .px(px(8.0))

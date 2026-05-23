@@ -387,12 +387,15 @@ impl WorkspaceApp {
                     }),
             )
             .child(
-                div()
+                forwards_theme_card_surface(
+                    div()
                     .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(forwards_theme_border(theme.border, has_background))
                     .overflow_hidden()
-                    .bg(forwards_theme_card_bg(theme.bg_card, has_background))
+                    .bg(forwards_theme_card_bg(theme.bg_card, has_background)),
+                    theme.bg_card,
+                )
                     .child(
                         self.forward_row_base(
                             FORWARDS_TABLE_HEADER_H,

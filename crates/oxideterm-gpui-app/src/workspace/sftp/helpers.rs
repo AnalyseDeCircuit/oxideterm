@@ -12,6 +12,12 @@ fn sftp_panel_bg(color: u32, has_background: bool, alpha: u32) -> Rgba {
     color_with_background_scaled_alpha(color, has_background, alpha, SFTP_BG_ACTIVE_PANEL_ALPHA)
 }
 
+fn sftp_card_surface(surface: gpui::Div, color: u32) -> gpui::Div {
+    // SFTP queue subcards mirror Tauri bg-theme-bg-card; the shadow belongs to
+    // that card token even when the caller keeps a custom active-background alpha.
+    tauri_glass_surface_shadow(surface, color)
+}
+
 fn sftp_hover_bg(color: u32, has_background: bool) -> Rgba {
     color_for_background(color, has_background, SFTP_BG_ACTIVE_HOVER_ALPHA)
 }

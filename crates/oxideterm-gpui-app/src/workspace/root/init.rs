@@ -498,14 +498,7 @@ impl WorkspaceApp {
                             if workspace.any_terminal_recording_active(cx) {
                                 cx.notify();
                             }
-                            if workspace.new_connection_form.is_some()
-                                || workspace.keyboard_interactive_challenge.is_some()
-                                || workspace.focused_settings_input.is_some()
-                                || workspace.session_manager.focused_input.is_some()
-                                || workspace.sftp_view.focused_input.is_some()
-                                || workspace.graphics.focused_input.is_some()
-                                || workspace.ai_editing_message_focused
-                            {
+                            if workspace.active_ime_target_blinks_caret() {
                                 workspace.new_connection_caret_visible =
                                     !workspace.new_connection_caret_visible;
                                 cx.notify();
@@ -741,9 +734,10 @@ impl WorkspaceApp {
             return None;
         }
         let path = PathBuf::from(terminal.background_image.as_deref()?);
-        if !path.exists() {
-            return None;
-        }
+        // Keep render-time background checks off the filesystem hot path.
+        // GPUI image fallback and the blurred-image loader already handle
+        // missing files; doing path.exists() here made settings pages with many
+        // translucent cards stat the same image repeatedly while scrolling.
         Some(TerminalBackgroundPreferences {
             path,
             opacity: terminal.background_opacity.clamp(0.0, 1.0) as f32,

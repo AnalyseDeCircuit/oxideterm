@@ -3,7 +3,9 @@ use super::ime::WorkspaceImeTarget;
 use super::*;
 use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_event_boundary};
-use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
+use oxideterm_gpui_ui::text_input::{
+    text_caret, text_input_anchor_probe, text_input_value_segments_with_color,
+};
 use oxideterm_terminal_recording::format_recording_elapsed;
 
 pub(in crate::workspace) mod completion;
@@ -85,6 +87,7 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let focused = self.terminal_command_bar_focused;
         let marked_text = self.marked_text_for_target(target);
+        let selected_range = self.ime_selected_range_for_target(target);
         let command_is_empty = self.terminal_command_bar_draft.is_empty();
         let command_suggestions = if focused {
             self.terminal_command_bar_suggestions(false, cx)
@@ -98,6 +101,16 @@ impl WorkspaceApp {
         } else {
             self.terminal_command_bar_draft.clone()
         };
+        let input_range = selected_range
+            .clone()
+            .filter(|_| focused && !command_is_empty && marked_text.is_none());
+        let selection_range = input_range.clone().filter(|range| range.start < range.end);
+        let caret_offset = input_range
+            .as_ref()
+            .filter(|range| range.start == range.end)
+            .map(|range| range.start);
+        let shows_selection = selection_range.is_some();
+        let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
         let target_label = self
             .active_tab()
             .map(|tab| match tab.kind {
@@ -405,7 +418,24 @@ impl WorkspaceApp {
                                     self.new_connection_caret_visible,
                                 ))
                             })
-                            .child(command_text)
+                            // Tauri uses a real textarea, so the painted caret
+                            // follows selectionStart instead of always sitting
+                            // at the end of the value. Keep native rendering
+                            // tied to the shared IME range for click/arrow parity.
+                            .child(if showing_placeholder {
+                                div().child(command_text).into_any_element()
+                            } else {
+                                text_input_value_segments_with_color(
+                                    &self.tokens,
+                                    &command_text,
+                                    false,
+                                    selection_range,
+                                    caret_offset,
+                                    self.new_connection_caret_visible,
+                                    Some(theme.text),
+                                )
+                                .into_any_element()
+                            })
                             .when_some(marked_text, |input, marked| {
                                 input.child(
                                     div()
@@ -414,12 +444,18 @@ impl WorkspaceApp {
                                         .child(marked.to_string()),
                                 )
                             })
-                            .when(focused && !showing_placeholder, |input| {
-                                input.child(text_caret(
-                                    &self.tokens,
-                                    self.new_connection_caret_visible,
-                                ))
-                            })
+                            .when(
+                                focused
+                                    && !showing_placeholder
+                                    && !shows_selection
+                                    && !shows_positioned_caret,
+                                |input| {
+                                    input.child(text_caret(
+                                        &self.tokens,
+                                        self.new_connection_caret_visible,
+                                    ))
+                                },
+                            )
                             .when_some(ghost_text, |input, ghost| {
                                 input.child(
                                     div()

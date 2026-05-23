@@ -1,4 +1,6 @@
 impl WorkspaceApp {
+    const SETTINGS_BG_ACTIVE_SURFACE_ALPHA: u32 = 0x66; // Tauri [data-bg-active] bg-theme-bg-panel/card color-mix(... 40%, transparent).
+
     fn settings_select_trigger(
         &self,
         select_id: SettingsSelect,
@@ -95,13 +97,12 @@ impl WorkspaceApp {
         _description_key: &str,
         rows: Vec<AnyElement>,
     ) -> AnyElement {
-        div()
+        let card = div()
             .w_full()
             .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
             .p(px(self.tokens.metrics.settings_card_padding))
             .flex()
             .flex_col()
@@ -114,23 +115,24 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t(title_key).to_uppercase()),
             )
-            .children(rows)
+            .children(rows);
+        self.settings_card_surface(card, self.tokens.ui.bg_card)
             .into_any_element()
     }
 
     fn plain_settings_card(&self, rows: Vec<AnyElement>) -> AnyElement {
-        div()
+        let card = div()
             .w_full()
             .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
             .p(px(self.tokens.metrics.settings_card_padding))
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.settings_card_gap))
-            .children(rows)
+            .children(rows);
+        self.settings_card_surface(card, self.tokens.ui.bg_card)
             .into_any_element()
     }
 
@@ -145,7 +147,6 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
             .p(px(self.tokens.metrics.settings_card_padding))
             .flex()
             .flex_col()
@@ -192,7 +193,7 @@ impl WorkspaceApp {
             ));
         }
 
-        rows.child(self.settings_row_with_margin(
+        let rows = rows.child(self.settings_row_with_margin(
             self.checkbox_row(
                 "settings_view.terminal.copy_on_select",
                 "settings_view.terminal.copy_on_select_hint",
@@ -235,8 +236,9 @@ impl WorkspaceApp {
             settings.terminal.autosuggest.local_shell_history,
             set_autosuggest_local_history,
             cx,
-        ))
-        .into_any_element()
+        ));
+        self.settings_card_surface(rows, self.tokens.ui.bg_card)
+            .into_any_element()
     }
 
     fn settings_row_with_margin(&self, row: AnyElement, margin_top: f32) -> AnyElement {
@@ -266,10 +268,19 @@ impl WorkspaceApp {
 
     fn settings_panel_background(&self, color: u32) -> Rgba {
         if self.settings_background_active() {
-            rgba((color << 8) | alpha_byte(self.tokens.metrics.panel_vibrancy_alpha))
+            rgba((color << 8) | Self::SETTINGS_BG_ACTIVE_SURFACE_ALPHA)
         } else {
             rgb(color)
         }
+    }
+
+    fn settings_card_surface(&self, card: Div, color: u32) -> Div {
+        oxideterm_gpui_ui::tauri_card_surface(
+            card,
+            color,
+            self.settings_background_active(),
+            Self::SETTINGS_BG_ACTIVE_SURFACE_ALPHA,
+        )
     }
 
     fn text_badge(&self, label: String, color: u32) -> AnyElement {
@@ -415,6 +426,7 @@ impl WorkspaceApp {
             .border_1()
             .border_color(rgb(theme.border))
             .bg(self.settings_panel_background(theme.bg_card))
+            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
             .p(px(8.0));
 
         for page in TerminalSettingsPage::all() {

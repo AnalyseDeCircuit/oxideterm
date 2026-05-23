@@ -37,14 +37,14 @@ impl WorkspaceApp {
     }
 
     fn ide_card(&self) -> Div {
-        div()
+        let card = div()
             .w_full()
             .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
-            .p(px(IDE_SETTINGS_CARD_PADDING))
+            .p(px(IDE_SETTINGS_CARD_PADDING));
+        self.settings_card_surface(card, self.tokens.ui.bg_card)
     }
 
     fn ide_toggle_card(

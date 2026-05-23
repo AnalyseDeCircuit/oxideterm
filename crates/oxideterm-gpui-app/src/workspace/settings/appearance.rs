@@ -686,19 +686,19 @@ impl WorkspaceApp {
     }
 
     fn appearance_card_shell(&self, header: AnyElement, rows: Vec<AnyElement>) -> AnyElement {
-        div()
+        let card = div()
             .w_full()
             .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
             .p(px(self.tokens.metrics.settings_card_padding))
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.settings_card_gap))
             .child(header)
-            .children(rows)
+            .children(rows);
+        self.settings_card_surface(card, self.tokens.ui.bg_card)
             .into_any_element()
     }
 

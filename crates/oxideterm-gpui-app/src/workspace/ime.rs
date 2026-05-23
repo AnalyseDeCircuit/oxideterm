@@ -526,6 +526,16 @@ impl WorkspaceApp {
         self.search.visible.then_some(WorkspaceImeTarget::Search)
     }
 
+    pub(super) fn active_ime_target_blinks_caret(&self) -> bool {
+        // Browser editable inputs keep their caret blinking regardless of which
+        // page owns the field. Drive the shared native blink timer from the IME
+        // owner instead of a hand-maintained list of focused booleans, otherwise
+        // newly migrated inputs such as the AI sidebar can render a stale
+        // invisible caret after text input.
+        self.active_ime_target()
+            .is_some_and(ime_target_should_blink_caret)
+    }
+
     pub(super) fn marked_text_for_target(&self, target: WorkspaceImeTarget) -> Option<&str> {
         (self.active_ime_target() == Some(target))
             .then_some(self.ime_marked_text.as_deref())
@@ -804,11 +814,8 @@ impl WorkspaceApp {
         }
 
         let bounds = self.text_input_anchors.get(&target.anchor_id())?.bounds;
-        let padding = if ime_target_is_read_only(target) {
-            px(0.0)
-        } else {
-            px(self.tokens.metrics.ui_control_padding_x)
-        };
+        let padding =
+            Self::ime_target_horizontal_padding(target, self.tokens.metrics.ui_control_padding_x);
         let left = bounds.left() + padding;
         let right = bounds.right() - padding;
         let width = right - left;
@@ -886,6 +893,21 @@ impl WorkspaceApp {
                 px(inferred.clamp(16.0, 40.0))
             }
             _ => px(self.tokens.metrics.ui_control_height),
+        }
+    }
+
+    fn ime_target_horizontal_padding(target: WorkspaceImeTarget, control_padding_x: f32) -> Pixels {
+        match target {
+            WorkspaceImeTarget::TerminalCommandBar
+            | WorkspaceImeTarget::AiChatInput
+            | WorkspaceImeTarget::AiMessageEdit
+            | WorkspaceImeTarget::ReadOnlyText(_) => {
+                // These targets report an anchor around the painted text itself.
+                // Applying the shared form-control padding again makes hit testing
+                // drift right of the visible caret.
+                px(0.0)
+            }
+            _ => px(control_padding_x),
         }
     }
 
@@ -1971,6 +1993,10 @@ fn ime_target_is_read_only(target: WorkspaceImeTarget) -> bool {
     matches!(target, WorkspaceImeTarget::ReadOnlyText(_))
 }
 
+fn ime_target_should_blink_caret(target: WorkspaceImeTarget) -> bool {
+    !ime_target_is_read_only(target)
+}
+
 fn collapsed_copy_shortcut_is_owned_by_target(target: WorkspaceImeTarget) -> bool {
     !ime_target_is_read_only(target)
 }
@@ -2377,17 +2403,17 @@ fn previous_char_start(value: &str, byte_index: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Keystroke, Modifiers};
+    use gpui::{Keystroke, Modifiers, px};
 
     use super::{
-        CopyShortcutOwner, PendingPlatformTextCommit, WorkspaceImeTarget,
+        CopyShortcutOwner, PendingPlatformTextCommit, WorkspaceApp, WorkspaceImeTarget,
         active_ime_should_defer_printable_key, collapsed_copy_shortcut_is_owned_by_target,
-        control_k_delete_end, copy_shortcut_owner_for_target, keystroke_commits_platform_text,
-        line_end_for_utf16_offset, line_range_for_utf16_offset, line_start_for_utf16_offset,
-        next_utf16_boundary, next_word_boundary, platform_text_commit_is_duplicate,
-        previous_utf16_boundary, previous_word_boundary, soft_wrapped_line_ranges_utf16,
-        transpose_text_at_utf16_offset, vertical_line_navigation_destination,
-        word_range_for_utf16_offset,
+        control_k_delete_end, copy_shortcut_owner_for_target, ime_target_should_blink_caret,
+        keystroke_commits_platform_text, line_end_for_utf16_offset, line_range_for_utf16_offset,
+        line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
+        platform_text_commit_is_duplicate, previous_utf16_boundary, previous_word_boundary,
+        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
+        vertical_line_navigation_destination, word_range_for_utf16_offset,
     };
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -2460,6 +2486,38 @@ mod tests {
         assert!(active_ime_should_defer_printable_key(true, &printable));
         assert!(!active_ime_should_defer_printable_key(false, &printable));
         assert!(!active_ime_should_defer_printable_key(true, &shortcut));
+    }
+
+    #[test]
+    fn editable_ime_targets_drive_the_shared_caret_blink_timer() {
+        assert!(ime_target_should_blink_caret(
+            WorkspaceImeTarget::AiChatInput
+        ));
+        assert!(ime_target_should_blink_caret(
+            WorkspaceImeTarget::AiModelSelectorSearch
+        ));
+        assert!(!ime_target_should_blink_caret(
+            WorkspaceImeTarget::ReadOnlyText(1)
+        ));
+    }
+
+    #[test]
+    fn self_padded_text_targets_do_not_shift_hit_testing() {
+        assert_eq!(
+            WorkspaceApp::ime_target_horizontal_padding(
+                WorkspaceImeTarget::TerminalCommandBar,
+                12.0,
+            ),
+            px(0.0)
+        );
+        assert_eq!(
+            WorkspaceApp::ime_target_horizontal_padding(WorkspaceImeTarget::AiChatInput, 12.0),
+            px(0.0)
+        );
+        assert_eq!(
+            WorkspaceApp::ime_target_horizontal_padding(WorkspaceImeTarget::CommandPalette, 12.0),
+            px(12.0)
+        );
     }
 
     #[test]

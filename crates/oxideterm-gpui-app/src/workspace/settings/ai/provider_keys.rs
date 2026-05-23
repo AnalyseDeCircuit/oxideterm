@@ -120,6 +120,9 @@ impl WorkspaceApp {
                                 (self.tokens.ui.border << 8) | AI_PROVIDER_MODEL_BORDER_ALPHA,
                             ))
                             .bg(self.settings_panel_background(self.tokens.ui.bg_card))
+                            .shadow(oxideterm_gpui_ui::tauri_card_shadow(
+                                self.tokens.ui.bg_card,
+                            ))
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .italic()
                             .text_color(rgb(self.tokens.ui.text_muted))

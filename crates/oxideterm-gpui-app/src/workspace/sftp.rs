@@ -19,7 +19,9 @@ use oxideterm_gpui_ui::{
     },
     context_menu::{ContextMenuActionableStyle, context_menu_event_boundary},
     modal::{dismissible_dialog_backdrop, overlay_content_boundary},
-    surface::{color_for_background, color_with_background_scaled_alpha},
+    surface::{
+        color_for_background, color_with_background_scaled_alpha, tauri_glass_surface_shadow,
+    },
     text_input::{text_caret, text_input_anchor_probe},
 };
 use oxideterm_preview::{

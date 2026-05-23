@@ -137,6 +137,9 @@ impl WorkspaceApp {
             .border_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x73))
             .bg(rgba((self.tokens.ui.bg_card << 8) | 0x73))
+            .shadow(oxideterm_gpui_ui::tauri_card_shadow(
+                self.tokens.ui.bg_card,
+            ))
             .p(px(12.0))
             .flex()
             .flex_col()

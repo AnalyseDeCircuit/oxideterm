@@ -1247,7 +1247,10 @@ fn ai_input_line_segments(
     caret_offset: Option<usize>,
     caret_visible: bool,
 ) -> Div {
-    let base = div().min_w_0().max_w_full().overflow_hidden().flex().items_center();
+    // The shared caret is a zero-width anchor with an absolutely painted 1px
+    // bar. Keep clipping on the editor/frame, not on this text segment, or a
+    // caret placed after the final character can be clipped away.
+    let base = div().min_w_0().max_w_full().flex().items_center();
     let len = line.encode_utf16().count();
     if let Some(range) = selection_range {
         let start = range.start.min(len);

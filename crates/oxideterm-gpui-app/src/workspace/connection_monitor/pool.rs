@@ -91,6 +91,9 @@ impl WorkspaceApp {
                     .border_b_1()
                     .border_color(rgb(theme.border))
                     .bg(rgb(theme.bg_card))
+                    // Tauri gives bg-theme-bg-card surfaces the shared card
+                    // elevation even outside the Settings view.
+                    .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
                     .child(
                         div()
                             .child(

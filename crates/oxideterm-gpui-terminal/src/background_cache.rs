@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     path::PathBuf,
     sync::{Arc, mpsc},
-    time::UNIX_EPOCH,
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 use gpui::RenderImage;
@@ -11,9 +11,11 @@ use image::{Frame, RgbaImage};
 use crate::terminal_ui::TerminalBackgroundPreferences;
 
 const DEFAULT_BACKGROUND_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const BACKGROUND_METADATA_RECHECK_INTERVAL: Duration = Duration::from_secs(2);
 
 pub struct BackgroundImageRenderCache {
     entries: HashMap<BackgroundImageCacheKey, CachedBackgroundImage>,
+    key_cache: HashMap<BackgroundImageRequestKey, CachedBackgroundImageKey>,
     order: VecDeque<BackgroundImageCacheKey>,
     pending: HashSet<BackgroundImageCacheKey>,
     sender: mpsc::Sender<BackgroundImageLoadResult>,
@@ -27,6 +29,11 @@ struct CachedBackgroundImage {
     bytes: usize,
 }
 
+struct CachedBackgroundImageKey {
+    key: BackgroundImageCacheKey,
+    checked_at: Instant,
+}
+
 enum BackgroundImageLoadResult {
     Loaded {
         key: BackgroundImageCacheKey,
@@ -36,6 +43,12 @@ enum BackgroundImageLoadResult {
     Failed {
         key: BackgroundImageCacheKey,
     },
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+struct BackgroundImageRequestKey {
+    path: PathBuf,
+    blur_millis: u32,
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
@@ -62,7 +75,7 @@ impl BackgroundImageRenderCache {
             return None;
         }
 
-        let key = BackgroundImageCacheKey::new(background);
+        let key = self.cached_key_for_background(background);
         if self.entries.contains_key(&key) {
             self.touch(&key);
             return self.entries.get(&key).map(|entry| entry.image.clone());
@@ -81,6 +94,30 @@ impl BackgroundImageRenderCache {
         }
 
         None
+    }
+
+    fn cached_key_for_background(
+        &mut self,
+        background: &TerminalBackgroundPreferences,
+    ) -> BackgroundImageCacheKey {
+        let request = BackgroundImageRequestKey::new(background);
+        if let Some(cached) = self.key_cache.get(&request)
+            && cached.checked_at.elapsed() < BACKGROUND_METADATA_RECHECK_INTERVAL
+        {
+            return cached.key.clone();
+        }
+
+        // The cache key includes file metadata so a changed image is eventually
+        // reloaded, but metadata() must not run on every render/scroll frame.
+        let key = BackgroundImageCacheKey::new(background);
+        self.key_cache.insert(
+            request,
+            CachedBackgroundImageKey {
+                key: key.clone(),
+                checked_at: Instant::now(),
+            },
+        );
+        key
     }
 
     pub fn drain_completed(&mut self) -> bool {
@@ -106,6 +143,7 @@ impl BackgroundImageRenderCache {
                 }
                 BackgroundImageLoadResult::Failed { key } => {
                     self.pending.remove(&key);
+                    self.key_cache.retain(|_, cached| cached.key != key);
                     changed = true;
                 }
             }
@@ -140,12 +178,22 @@ impl Default for BackgroundImageRenderCache {
         let (sender, receiver) = mpsc::channel();
         Self {
             entries: HashMap::new(),
+            key_cache: HashMap::new(),
             order: VecDeque::new(),
             pending: HashSet::new(),
             sender,
             receiver,
             bytes: 0,
             byte_limit: DEFAULT_BACKGROUND_IMAGE_CACHE_BYTES,
+        }
+    }
+}
+
+impl BackgroundImageRequestKey {
+    fn new(background: &TerminalBackgroundPreferences) -> Self {
+        Self {
+            path: background.path.clone(),
+            blur_millis: (background.blur.max(0.0) * 1000.0).round() as u32,
         }
     }
 }

@@ -21,13 +21,12 @@ impl WorkspaceApp {
             });
         }
 
-        div()
+        let card = div()
             .w_full()
             .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
             .p(px(20.0))
             .flex()
             .flex_col()
@@ -42,7 +41,8 @@ impl WorkspaceApp {
             .child(self.ai_enabled_row(settings.ai.enabled, cx))
             .child(self.ai_privacy_notice())
             .child(self.ai_separator())
-            .child(disabled_body)
+            .child(disabled_body);
+        self.settings_card_surface(card, self.tokens.ui.bg_card)
             .into_any_element()
     }
 
@@ -104,6 +104,9 @@ impl WorkspaceApp {
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
             .bg(self.settings_panel_background(self.tokens.ui.bg_card))
+            .shadow(oxideterm_gpui_ui::tauri_card_shadow(
+                self.tokens.ui.bg_card,
+            ))
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
