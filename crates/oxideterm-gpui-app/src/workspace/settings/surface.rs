@@ -22,8 +22,6 @@ impl WorkspaceApp {
     pub(super) fn render_settings_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let has_settings_background = self.settings_background_active();
-        let settings_content_scroll =
-            self.selectable_text_scroll_handle("settings-content-scroll");
         div()
             .size_full()
             .relative()
@@ -38,33 +36,11 @@ impl WorkspaceApp {
             .child(self.render_settings_nav(cx))
             .child(
                 div()
-                    .id("settings-content-scroll")
                     .flex_1()
                     .min_w(px(0.0))
                     .min_h(px(0.0))
-                    .selectable_overflow_y_scrollbar(&settings_content_scroll)
-                    .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
-                        // Tauri only closes an open select on page scroll. When no select is
-                        // visible, keep wheel scrolling free of state writes so large settings
-                        // pages do not rebuild just to maintain stale overlay anchors.
-                        if browser_behavior::close_browser_trigger_select_on_container_scroll(
-                            &mut this.open_settings_select,
-                            &mut this.settings_select_focus_origin,
-                        ) {
-                            this.clear_settings_select_anchors();
-                            cx.notify();
-                        }
-                    }))
-                    .child(
-                        div()
-                            .w_full()
-                            .min_w(px(0.0))
-                            // Tauri SettingsView uses max-w-4xl mx-auto p-10 for the content rail.
-                            .max_w(px(self.tokens.metrics.settings_content_max_width))
-                            .mx_auto()
-                            .p(px(self.tokens.metrics.settings_content_padding))
-                            .child(self.render_settings_tab_content(cx)),
-                    ),
+                    .relative()
+                    .child(self.render_settings_section_list_scroll(cx)),
             )
             .when_some(self.render_ai_mcp_add_server_dialog(cx), |surface, modal| {
                 surface.child(modal)
@@ -93,13 +69,399 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    fn render_settings_section_list_scroll(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.sync_settings_section_list_state();
+        let state = self.settings_section_list_state.clone();
+        let workspace = cx.entity();
+        let spec = self.settings_section_list_spec();
+        // All settings pages now share the same variable-height section list.
+        // This matches the browser/TanStack virtualizer direction and avoids
+        // keeping a full flex tree mounted just because a tab is inside Settings.
+        div()
+            .id("settings-content-scroll")
+            .size_full()
+            .min_w(px(0.0))
+            .min_h(px(0.0))
+            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                this.pause_settings_caret_blink_during_scroll();
+                // Tauri only closes an open select on page scroll. When no select is
+                // visible, keep wheel scrolling free of state writes so large settings
+                // pages do not rebuild just to maintain stale overlay anchors.
+                if browser_behavior::close_browser_trigger_select_on_container_scroll(
+                    &mut this.open_settings_select,
+                    &mut this.settings_select_focus_origin,
+                ) {
+                    this.clear_settings_select_anchors();
+                    cx.notify();
+                }
+            }))
+            .child(tauri_virtual_list(state, spec, move |index, _window, cx| {
+                workspace.update(cx, |this, cx| {
+                    this.render_settings_section_list_item(index, cx)
+                })
+            }))
+            .into_any_element()
+    }
+
+    fn render_settings_section_list_item(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if self.active_settings_tab == SettingsTab::Ai {
+            return self.render_settings_ai_section_item(index, cx);
+        }
+
+        let padding = self.tokens.metrics.settings_content_padding;
+        let gap = self.tokens.metrics.settings_page_gap;
+        let section_index = index.saturating_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT);
+        let mut item = div()
+            .w_full()
+            .min_w(px(0.0))
+            .max_w(px(self.tokens.metrics.settings_content_max_width))
+            .mx_auto()
+            .px(px(padding))
+            .pb(px(gap));
+        if index == 0 {
+            item = item.pt(px(padding));
+        }
+        if index + 1 == self.settings_section_list_item_count() {
+            item = item.pb(px(padding));
+        }
+
+        item.child(if index == 0 {
+            self.render_settings_virtual_header(self.active_settings_tab, cx)
+        } else {
+            self.render_settings_tab_section(self.active_settings_tab, section_index, cx)
+        })
+        .into_any_element()
+    }
+
+    fn render_settings_ai_section_item(&mut self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        self.normalize_ai_execution_profiles_for_settings_render();
+        let item = match index {
+            0 => self.render_settings_virtual_header(SettingsTab::Ai, cx),
+            1 => {
+                let settings = self.settings_store.settings();
+                self.ai_general_settings_card(settings, cx)
+            }
+            2 => {
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_execution_profiles_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            3 => {
+                let provider_views = self.ai_provider_views_for_settings_render(cx);
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_provider_settings_section(&provider_views, cx),
+                    settings.ai.enabled,
+                )
+            }
+            4 => {
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_context_controls_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            5 => {
+                let settings = self.settings_store.settings();
+                let provider_views = ai_provider_views(settings);
+                self.ai_disabled_settings_card(
+                    self.ai_system_prompt_section(settings, &provider_views, cx),
+                    settings.ai.enabled,
+                )
+            }
+            6 => {
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_tool_use_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            _ => div().into_any_element(),
+        };
+
+        self.wrap_settings_section_list_item(index, item)
+    }
+
+    fn wrap_settings_section_list_item(&self, index: usize, child: AnyElement) -> AnyElement {
+        let padding = self.tokens.metrics.settings_content_padding;
+        let gap = self.tokens.metrics.settings_page_gap;
+        let mut item = div()
+            .w_full()
+            .min_w(px(0.0))
+            .max_w(px(self.tokens.metrics.settings_content_max_width))
+            .mx_auto()
+            .px(px(padding))
+            .pb(px(gap));
+        if index == 0 {
+            item = item.pt(px(padding));
+        }
+        if index + 1 == self.settings_section_list_item_count() {
+            item = item.pb(px(padding));
+        }
+        item.child(child).into_any_element()
+    }
+
+    fn render_settings_virtual_header(&self, tab: SettingsTab, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .w_full()
+            .relative()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_page_gap))
+            .child(self.render_settings_page_header(tab, cx))
+            .child(separator(&self.tokens, SeparatorOrientation::Horizontal))
+            .into_any_element()
+    }
+
+    fn ai_provider_views_for_settings_render(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Vec<AiProviderView> {
+        let provider_views = ai_provider_views(self.settings_store.settings());
+        self.ensure_ai_provider_key_statuses_for_views(&provider_views, cx);
+        provider_views
+    }
+
+    fn sync_settings_section_list_state(&mut self) {
+        let spec = self.settings_section_list_spec();
+        let identity = self.settings_section_list_identity();
+        let signatures = self.settings_section_list_signatures();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.settings_section_list_state,
+            &mut self.settings_section_list_cache.borrow_mut(),
+            &identity,
+            &signatures,
+            spec,
+        );
+    }
+
+    fn settings_section_list_spec(&self) -> TauriVirtualListSpec {
+        if self.active_settings_tab == SettingsTab::Ai {
+            TauriVirtualListSpec::new(
+                px(AI_SETTINGS_SECTION_ESTIMATED_HEIGHT),
+                SETTINGS_SECTION_LIST_OVERSCAN,
+            )
+        } else {
+            TauriVirtualListSpec::new(
+                px(SETTINGS_SECTION_LIST_ESTIMATED_HEIGHT),
+                SETTINGS_SECTION_LIST_OVERSCAN,
+            )
+        }
+    }
+
+    fn settings_section_list_identity(&self) -> String {
+        // Tauri keys virtual rows by tab plus the nested tab/filter state that
+        // can change the section set. Preserve that identity before asking GPUI
+        // ListState to reuse measured variable-height rows.
+        format!(
+            "{:?}:{:?}:{:?}:{}",
+            self.active_settings_tab,
+            self.terminal_settings_page,
+            self.keybinding_scope_filter,
+            self.keybinding_search_query.trim()
+        )
+    }
+
+    fn settings_section_list_signatures(&self) -> Vec<u64> {
+        (0..self.settings_section_list_item_count())
+            .map(|index| self.settings_section_signature(index))
+            .collect()
+    }
+
+    fn settings_section_signature(&self, index: usize) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        // GPUI caches variable-row measurements. Hash only states that can
+        // change section height so ListState remeasures affected rows without
+        // serializing the entire settings file on every scroll render.
+        format!("{:?}", self.active_settings_tab).hash(&mut hasher);
+        index.hash(&mut hasher);
+        let settings = self.settings_store.settings();
+
+        match self.active_settings_tab {
+            SettingsTab::Terminal => {
+                format!("{:?}", self.terminal_settings_page).hash(&mut hasher);
+                settings
+                    .terminal
+                    .command_bar
+                    .focus_handoff_commands
+                    .len()
+                    .hash(&mut hasher);
+            }
+            SettingsTab::Local => {
+                settings.local_terminal.oh_my_posh_enabled.hash(&mut hasher);
+                settings.local_terminal.default_shell_id.hash(&mut hasher);
+                self.local_shells.len().hash(&mut hasher);
+            }
+            SettingsTab::Sftp => {
+                settings.sftp.speed_limit_enabled.hash(&mut hasher);
+            }
+            SettingsTab::Connections => {
+                self.connection_store.connections().len().hash(&mut hasher);
+                self.settings_connection_groups_signature().hash(&mut hasher);
+                self.settings_connection_status.is_some().hash(&mut hasher);
+            }
+            SettingsTab::Ai => {
+                settings.ai.enabled.hash(&mut hasher);
+                self.ai_provider_settings_expanded.hash(&mut hasher);
+                self.ai_tool_use_expanded.hash(&mut hasher);
+                self.ai_context_windows_expanded.hash(&mut hasher);
+                self.ai_model_reasoning_expanded.hash(&mut hasher);
+                hash_string_bool_map(&self.expanded_ai_providers, &mut hasher);
+                hash_string_set(&self.expanded_ai_provider_models, &mut hasher);
+                hash_string_set(&self.expanded_ai_context_providers, &mut hasher);
+                hash_string_set(&self.expanded_ai_model_reasoning_providers, &mut hasher);
+            }
+            SettingsTab::Knowledge => {
+                self.knowledge_selected_collection_id.hash(&mut hasher);
+                self.knowledge_error.is_some().hash(&mut hasher);
+                self.knowledge_import_progress.hash(&mut hasher);
+                self.knowledge_embedding_progress.hash(&mut hasher);
+                self.knowledge_reindex_progress.hash(&mut hasher);
+            }
+            SettingsTab::Keybindings => {
+                format!("{:?}", self.keybinding_scope_filter).hash(&mut hasher);
+                self.keybinding_search_query.trim().hash(&mut hasher);
+                settings.keybindings.overrides.len().hash(&mut hasher);
+            }
+            _ => {}
+        }
+
+        hasher.finish()
+    }
+
+    fn settings_connection_groups_signature(&self) -> usize {
+        self.connection_store
+            .connections()
+            .iter()
+            .map(|connection| connection.group.as_deref().unwrap_or_default().len())
+            .sum()
+    }
+
+    fn settings_section_list_item_count(&self) -> usize {
+        SETTINGS_SECTION_HEADER_ITEM_COUNT + self.settings_tab_section_count(self.active_settings_tab)
+    }
+
+    fn settings_tab_section_count(&self, tab: SettingsTab) -> usize {
+        match tab {
+            SettingsTab::General => 3,
+            SettingsTab::Portable => 1,
+            SettingsTab::Terminal => self.terminal_settings_section_count(),
+            SettingsTab::Appearance => 3,
+            SettingsTab::Local => 5,
+            SettingsTab::Connections => 4,
+            SettingsTab::Ssh => 1,
+            SettingsTab::Reconnect => 3,
+            SettingsTab::Sftp => 3,
+            SettingsTab::Ide => 5,
+            SettingsTab::Ai => AI_SETTINGS_SECTION_ITEM_COUNT - SETTINGS_SECTION_HEADER_ITEM_COUNT,
+            SettingsTab::Knowledge => self.knowledge_settings_section_count(),
+            SettingsTab::Keybindings => self.keybinding_settings_section_count(),
+            SettingsTab::Help => 3,
+        }
+    }
+
+    fn terminal_settings_section_count(&self) -> usize {
+        let page_cards = match self.terminal_settings_page {
+            TerminalSettingsPage::Display => 2,
+            TerminalSettingsPage::Input => 1,
+            TerminalSettingsPage::CommandBar => 1,
+            TerminalSettingsPage::History => 2,
+            TerminalSettingsPage::Transfer => 1,
+            TerminalSettingsPage::Highlight => 1,
+        };
+        1 + page_cards
+    }
+
+    fn keybinding_settings_section_count(&self) -> usize {
+        let query = self.keybinding_search_query.trim().to_lowercase();
+        let visible_scope_count = [
+            crate::keybindings::ActionScope::Global,
+            crate::keybindings::ActionScope::Terminal,
+            crate::keybindings::ActionScope::Split,
+            crate::keybindings::ActionScope::Palette,
+        ]
+        .into_iter()
+        .filter(|scope| {
+            crate::keybindings::ACTION_DEFINITIONS
+                .iter()
+                .filter(|definition| definition.scope == *scope)
+                .filter(|definition| self.keybinding_scope_filter.matches(definition.scope))
+                .any(|definition| {
+                    if query.is_empty() {
+                        return true;
+                    }
+                    let label = self.i18n.t(&definition.label_key()).to_lowercase();
+                    label.contains(&query) || definition.id.to_lowercase().contains(&query)
+                })
+        })
+        .count();
+        1 + visible_scope_count.max(1)
+    }
+
+    fn knowledge_settings_section_count(&self) -> usize {
+        let collections = oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
+            .unwrap_or_default();
+        let selected_id = self
+            .knowledge_selected_collection_id
+            .as_deref()
+            .filter(|id| collections.iter().any(|collection| collection.id == *id))
+            .or_else(|| collections.first().map(|collection| collection.id.as_str()));
+        1 + usize::from(self.knowledge_error.is_some()) + usize::from(selected_id.is_some())
+    }
+
+    fn render_settings_tab_section(
+        &mut self,
+        tab: SettingsTab,
+        section_index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Section virtualization only pays off if item rendering is lazy.
+        // Dispatch by section index instead of constructing the old full
+        // settings Vec and discarding every non-visible card.
+        match tab {
+            SettingsTab::General => self.settings_general_section(section_index, cx),
+            SettingsTab::Portable => self.settings_portable_section(section_index, cx),
+            SettingsTab::Terminal => self.settings_terminal_section(section_index, cx),
+            SettingsTab::Appearance => self.settings_appearance_section(section_index, cx),
+            SettingsTab::Local => self.settings_local_section(section_index, cx),
+            SettingsTab::Connections => self.settings_connections_section(section_index, cx),
+            SettingsTab::Ssh => self.settings_ssh_section(section_index),
+            SettingsTab::Reconnect => self.settings_reconnect_section(section_index, cx),
+            SettingsTab::Sftp => self.settings_sftp_section(section_index, cx),
+            SettingsTab::Ide => self.settings_ide_section(section_index, cx),
+            SettingsTab::Ai => div().into_any_element(),
+            SettingsTab::Knowledge => self.settings_knowledge_section(section_index, cx),
+            SettingsTab::Keybindings => self.settings_keybindings_section(section_index, cx),
+            SettingsTab::Help => self.settings_help_section(section_index, cx),
+        }
+    }
+
     fn clear_settings_select_anchors(&mut self) {
         self.select_anchors
             .retain(|id, _| matches!(id, SelectAnchorId::NewConnectionGroup));
     }
 
+    fn pause_settings_caret_blink_during_scroll(&mut self) {
+        if self.focused_settings_input.is_none() {
+            return;
+        }
+        // Browser caret blinking is compositor-local. Native blinking repaints
+        // the workspace, so keep the caret visible while a settings scroll is
+        // active and let blinking resume shortly after scrolling stops.
+        self.settings_caret_blink_pause_until =
+            Some(Instant::now() + Duration::from_millis(180));
+        self.new_connection_caret_visible = true;
+    }
+
     fn render_settings_nav(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let settings_nav_scroll = self.selectable_text_scroll_handle("settings-nav-scroll");
         let mut nav = div()
             .w(px(self.tokens.metrics.settings_nav_width))
             .h_full()
@@ -123,11 +485,9 @@ impl WorkspaceApp {
 
         let mut list = div()
             .id("settings-nav-scroll")
-            .flex_1()
+            .size_full()
             .min_h(px(0.0))
-            .selectable_overflow_y_scrollbar(
-                &self.selectable_text_scroll_handle("settings-nav-scroll"),
-            )
+            .selectable_overflow_y_scroll(&settings_nav_scroll)
             .px_3()
             .flex()
             .flex_col();
@@ -145,7 +505,18 @@ impl WorkspaceApp {
             }
         }
 
-        nav.child(list).into_any_element()
+        nav.child(
+            div()
+                .flex_1()
+                .min_h(px(0.0))
+                .relative()
+                .child(list)
+                .child(selectable_vertical_scrollbar_layer(
+                    "settings-nav-scrollbar",
+                    &settings_nav_scroll,
+                )),
+        )
+        .into_any_element()
     }
 
     fn render_settings_nav_item(&self, tab: SettingsTab, cx: &mut Context<Self>) -> AnyElement {
@@ -209,34 +580,6 @@ impl WorkspaceApp {
                     cx.notify();
                 }),
             )
-            .into_any_element()
-    }
-
-    fn render_settings_tab_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .w_full()
-            .relative()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_page_gap))
-            .child(self.render_settings_page_header(self.active_settings_tab, cx))
-            .child(separator(&self.tokens, SeparatorOrientation::Horizontal))
-            .children(match self.active_settings_tab {
-                SettingsTab::General => self.settings_general(cx),
-                SettingsTab::Portable => self.settings_portable(cx),
-                SettingsTab::Terminal => self.settings_terminal(cx),
-                SettingsTab::Appearance => self.settings_appearance(cx),
-                SettingsTab::Local => self.settings_local(cx),
-                SettingsTab::Connections => self.settings_connections(cx),
-                SettingsTab::Ssh => self.settings_ssh(),
-                SettingsTab::Reconnect => self.settings_reconnect(cx),
-                SettingsTab::Sftp => self.settings_sftp(cx),
-                SettingsTab::Ide => self.settings_ide(cx),
-                SettingsTab::Ai => self.settings_ai(cx),
-                SettingsTab::Knowledge => self.settings_knowledge(cx),
-                SettingsTab::Keybindings => self.settings_keybindings(cx),
-                SettingsTab::Help => self.settings_help(cx),
-            })
             .into_any_element()
     }
 
@@ -348,5 +691,22 @@ impl WorkspaceApp {
         let _ = self.settings_store.save();
         self.sync_tab_titles(cx);
         cx.notify();
+    }
+}
+
+fn hash_string_set(values: &HashSet<String>, hasher: &mut impl Hasher) {
+    let mut values = values.iter().collect::<Vec<_>>();
+    values.sort();
+    for value in values {
+        value.hash(hasher);
+    }
+}
+
+fn hash_string_bool_map(values: &HashMap<String, bool>, hasher: &mut impl Hasher) {
+    let mut values = values.iter().collect::<Vec<_>>();
+    values.sort_by(|(left, _), (right, _)| left.cmp(right));
+    for (key, value) in values {
+        key.hash(hasher);
+        value.hash(hasher);
     }
 }

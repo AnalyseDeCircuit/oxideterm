@@ -978,7 +978,7 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Ai | SettingsTab::Knowledge, SettingsSelect::AiEmbeddingProvider) => {
+            (SettingsTab::Knowledge, SettingsSelect::AiEmbeddingProvider) => {
                 let current = settings
                     .ai
                     .embedding_config

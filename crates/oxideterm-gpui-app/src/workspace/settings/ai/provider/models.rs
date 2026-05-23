@@ -3,7 +3,7 @@ impl WorkspaceApp {
         &self,
         index: usize,
         provider: &AiProviderView,
-        visible_models: Vec<String>,
+        visible_model_count: usize,
         hidden_count: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -54,18 +54,20 @@ impl WorkspaceApp {
                 }),
         );
 
-        if !visible_models.is_empty() {
+        if visible_model_count > 0 {
             let mut chips = div()
                 .px(px(16.0))
                 .pb(px(16.0))
                 .flex()
                 .flex_wrap()
                 .gap(px(4.0));
-            for model in visible_models {
+            // GPUI rebuilds this tree on scroll, so borrow the model list and
+            // clone only the labels that are actually painted as chips.
+            for model in provider.models.iter().take(visible_model_count) {
                 chips = chips.child(self.ai_provider_model_chip(
                     index,
-                    model.clone(),
-                    provider.default_model == model,
+                    model.to_string(),
+                    provider.default_model == *model,
                     cx,
                 ));
             }

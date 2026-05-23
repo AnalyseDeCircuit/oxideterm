@@ -31,17 +31,20 @@ impl KeybindingToolbarAction {
 }
 
 impl WorkspaceApp {
-    fn settings_keybindings(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn settings_keybindings_section(
+        &self,
+        section_index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let settings = self.settings_store.settings();
-        let side = crate::keybindings::KeybindingSide::current();
         let modified = crate::keybindings::modified_count(&settings.keybindings.overrides);
+        if section_index == 0 {
+            return self.keybinding_toolbar(modified, cx);
+        }
+
+        let side = crate::keybindings::KeybindingSide::current();
         let query = self.keybinding_search_query.trim().to_lowercase();
-
-        let mut rows = vec![
-            self.keybinding_toolbar(modified, cx),
-        ];
-
-        let mut visible_scope_count = 0;
+        let mut visible_index = 0;
         for scope in [
             crate::keybindings::ActionScope::Global,
             crate::keybindings::ActionScope::Terminal,
@@ -61,16 +64,18 @@ impl WorkspaceApp {
                 })
                 .collect::<Vec<_>>();
             if !definitions.is_empty() {
-                visible_scope_count += 1;
-                rows.push(self.keybinding_scope_table(scope, &definitions, side, cx));
+                visible_index += 1;
+                if visible_index == section_index {
+                    return self.keybinding_scope_table(scope, &definitions, side, cx);
+                }
             }
         }
 
-        if visible_scope_count == 0 {
-            rows.push(self.keybinding_no_results(cx));
+        if section_index == 1 && visible_index == 0 {
+            return self.keybinding_no_results(cx);
         }
 
-        rows
+        div().into_any_element()
     }
 
     fn keybinding_toolbar(&self, modified: usize, cx: &mut Context<Self>) -> AnyElement {

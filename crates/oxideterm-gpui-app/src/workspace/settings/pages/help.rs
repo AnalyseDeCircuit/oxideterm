@@ -1,8 +1,8 @@
 impl WorkspaceApp {
-    fn settings_help(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn settings_help_section(&self, section_index: usize, cx: &mut Context<Self>) -> AnyElement {
         let settings = self.settings_store.settings();
-        vec![
-            self.settings_card(
+        match section_index {
+            0 => self.settings_card(
                 "settings_view.help.version_info",
                 "settings_view.help.description",
                 vec![
@@ -39,7 +39,7 @@ impl WorkspaceApp {
                     ),
                 ],
             ),
-            self.settings_card(
+            1 => self.settings_card(
                 "settings_view.help.shortcuts",
                 "settings_view.help.resources",
                 vec![
@@ -81,7 +81,7 @@ impl WorkspaceApp {
                     ),
                 ],
             ),
-            self.settings_card(
+            2 => self.settings_card(
                 "settings_view.help.diagnostics",
                 "settings_view.help.open_logs_hint",
                 vec![
@@ -105,7 +105,8 @@ impl WorkspaceApp {
                     ),
                 ],
             ),
-        ]
+            _ => div().into_any_element(),
+        }
     }
 
     fn cycle_row(

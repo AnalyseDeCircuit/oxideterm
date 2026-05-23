@@ -1,79 +1,163 @@
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ConnectionMonitorSection {
+    Pool,
+    Health,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ConnectionPoolBodySection {
+    Error,
+    Loading,
+    Empty,
+    Connection(usize),
+}
+
 impl WorkspaceApp {
-    pub(super) fn render_connection_monitor_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_connection_monitor_surface(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        self.sync_connection_monitor_section_list_state();
+        let state = self.connection_monitor_section_list_state.clone();
+        let workspace = cx.entity();
+        let spec = self.connection_monitor_section_list_spec();
         div()
             .id("connection-monitor-scroll")
             .size_full()
-            .selectable_overflow_y_scrollbar(
-                &self.selectable_text_scroll_handle("connection-monitor-scroll"),
-            )
-            .p(px(MONITOR_PAGE_PADDING))
             .bg(rgb(theme.bg))
             .text_color(rgb(theme.text))
-            .child(
-                div()
-                    .max_w(px(MONITOR_CONTENT_MAX_WIDTH))
-                    .mx_auto()
-                    .flex()
-                    .flex_col()
-                    .gap(px(MONITOR_SECTION_GAP))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .mb_6()
-                                    .text_size(px(24.0))
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .text_color(rgb(theme.text))
-                                    .child(self.render_display_text_with_role(
-                                        SelectableTextRole::PlainDocument,
-                                        "connection-monitor-page-title",
-                                        "pool",
-                                        self.i18n.t("layout.connection_monitor.title"),
-                                        theme.text,
-                                        cx,
-                                    )),
-                            )
-                            .child(self.render_connection_pool_monitor(cx)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .mb_4()
-                                    .text_size(px(20.0))
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .text_color(rgb(theme.text))
-                                    .child(self.render_display_text_with_role(
-                                        SelectableTextRole::PlainDocument,
-                                        "connection-monitor-page-title",
-                                        "health",
-                                        self.i18n.t("sidebar.panels.system_health"),
-                                        theme.text,
-                                        cx,
-                                    )),
-                            )
-                            .child(self.render_system_health_panel(cx)),
-                    ),
-            )
+            .child(tauri_virtual_list(state, spec, move |index, _window, cx| {
+                workspace.update(cx, |this, cx| {
+                    this.render_connection_monitor_section_item(index, cx)
+                })
+            }))
             .into_any_element()
     }
 
-    pub(super) fn render_connection_pool_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn sync_connection_monitor_section_list_state(&mut self) {
+        let spec = self.connection_monitor_section_list_spec();
+        let signatures = [
+            self.connection_monitor_section_signature(ConnectionMonitorSection::Pool),
+            self.connection_monitor_section_signature(ConnectionMonitorSection::Health),
+        ];
+        sync_tauri_variable_list_state_by_signatures(
+            &self.connection_monitor_section_list_state,
+            &mut self.connection_monitor_section_list_cache.borrow_mut(),
+            "connection-monitor",
+            &signatures,
+            spec,
+        );
+    }
+
+    fn connection_monitor_section_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(CONNECTION_MONITOR_SECTION_LIST_ESTIMATED_HEIGHT),
+            CONNECTION_MONITOR_SECTION_LIST_OVERSCAN,
+        )
+    }
+
+    fn connection_monitor_section_signature(&self, section: ConnectionMonitorSection) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        // Pool/health cards change height when loading, errors, or profiler
+        // selection state changes; include those browser-section states so
+        // GPUI remeasures the variable-height List rows.
+        section.hash(&mut hasher);
+        self.connection_monitor.pool_error.is_some().hash(&mut hasher);
+        self.connection_monitor.pool_stats.is_some().hash(&mut hasher);
+        self.connection_monitor.pool_summaries.len().hash(&mut hasher);
+        if matches!(section, ConnectionMonitorSection::Health) {
+            self.connection_monitor.selected_connection_id.hash(&mut hasher);
+            self.connection_monitor
+                .disabled_profiler_connections
+                .len()
+                .hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    fn render_connection_monitor_section_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let section = match index {
+            0 => ConnectionMonitorSection::Pool,
+            1 => ConnectionMonitorSection::Health,
+            _ => return div().into_any_element(),
+        };
+        div()
+            .max_w(px(MONITOR_CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .px(px(MONITOR_PAGE_PADDING))
+            .pb(px(MONITOR_SECTION_GAP))
+            .when(index == 0, |item| item.pt(px(MONITOR_PAGE_PADDING)))
+            .when(
+                index + 1 == CONNECTION_MONITOR_SECTION_LIST_ITEM_COUNT,
+                |item| item.pb(px(MONITOR_PAGE_PADDING)),
+            )
+            .child(self.render_connection_monitor_section(section, cx))
+            .into_any_element()
+    }
+
+    fn render_connection_monitor_section(
+        &self,
+        section: ConnectionMonitorSection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        match section {
+            ConnectionMonitorSection::Pool => div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .mb_6()
+                        .text_size(px(24.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(rgb(theme.text))
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "connection-monitor-page-title",
+                            "pool",
+                            self.i18n.t("layout.connection_monitor.title"),
+                            theme.text,
+                            cx,
+                        )),
+                )
+                .child(self.render_connection_pool_monitor(cx))
+                .into_any_element(),
+            ConnectionMonitorSection::Health => div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .mb_4()
+                        .text_size(px(20.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(rgb(theme.text))
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "connection-monitor-page-title",
+                            "health",
+                            self.i18n.t("sidebar.panels.system_health"),
+                            theme.text,
+                            cx,
+                        )),
+                )
+                .child(self.render_system_health_panel(cx))
+                .into_any_element(),
+        }
+    }
+
+    pub(super) fn render_connection_pool_surface(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let stats = self.connection_monitor.pool_stats.as_ref();
         let idle_timeout_secs = stats.map_or(0, |stats| stats.idle_timeout_secs);
-        let connection_list = self
-            .connection_monitor
-            .pool_summaries
-            .iter()
-            .filter(|summary| summary.is_displayed_in_pool())
-            .cloned()
-            .collect::<Vec<_>>();
+        self.sync_connection_pool_body_list_state();
 
         div()
             .size_full()
@@ -131,44 +215,150 @@ impl WorkspaceApp {
                 div()
                     .id("connection-pool-scroll")
                     .flex_1()
-                    .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("connection-pool-scroll"),
-                    )
-                    .p(px(CONNECTION_POOL_BODY_PADDING))
-                    .child(if let Some(error) = &self.connection_monitor.pool_error {
-                        monitor_center_state(
-                            self,
-                            LucideIcon::AlertTriangle,
-                            MONITOR_RED,
-                            error.clone(),
-                            cx,
-                        )
-                    } else if self.connection_monitor.pool_stats.is_none() {
-                        monitor_center_state(
-                            self,
-                            LucideIcon::RefreshCw,
-                            theme.text_muted,
-                            self.i18n.t("connections.monitor.loading"),
-                            cx,
-                        )
-                    } else if connection_list.is_empty() {
-                        self.render_connection_pool_empty_state(cx)
-                    } else {
-                        let mut list = div()
-                            .grid()
-                            .gap(px(CONNECTION_POOL_CARD_GAP))
-                            .max_w(px(896.0));
-                        for connection in connection_list {
-                            list = list.child(self.render_connection_pool_card(
-                                connection,
-                                idle_timeout_secs,
-                                cx,
-                            ));
-                        }
-                        list.into_any_element()
-                    }),
+                    .child(self.render_connection_pool_body_list(idle_timeout_secs, cx)),
             )
             .child(self.render_connection_pool_keep_alive_legend(idle_timeout_secs, cx))
+            .into_any_element()
+    }
+
+    fn sync_connection_pool_body_list_state(&mut self) {
+        let spec = self.connection_pool_body_list_spec();
+        let signatures = self.connection_pool_body_signatures();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.connection_pool_body_list_state,
+            &mut self.connection_pool_body_list_cache.borrow_mut(),
+            "connection-pool-body",
+            &signatures,
+            spec,
+        );
+    }
+
+    fn connection_pool_body_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(CONNECTION_POOL_BODY_LIST_ESTIMATED_HEIGHT),
+            CONNECTION_POOL_BODY_LIST_OVERSCAN,
+        )
+    }
+
+    fn connection_pool_body_sections(&self) -> Vec<ConnectionPoolBodySection> {
+        if self.connection_monitor.pool_error.is_some() {
+            return vec![ConnectionPoolBodySection::Error];
+        }
+        if self.connection_monitor.pool_stats.is_none() {
+            return vec![ConnectionPoolBodySection::Loading];
+        }
+        let count = self
+            .connection_monitor
+            .pool_summaries
+            .iter()
+            .filter(|summary| summary.is_displayed_in_pool())
+            .count();
+        if count == 0 {
+            vec![ConnectionPoolBodySection::Empty]
+        } else {
+            (0..count).map(ConnectionPoolBodySection::Connection).collect()
+        }
+    }
+
+    fn connection_pool_body_signatures(&self) -> Vec<u64> {
+        self.connection_pool_body_sections()
+            .into_iter()
+            .map(|section| self.connection_pool_body_signature(section))
+            .collect()
+    }
+
+    fn connection_pool_body_signature(&self, section: ConnectionPoolBodySection) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        // Connection cards are variable height because idle hints and metric
+        // counts can appear/disappear. Hash the visible card state so ListState
+        // remeasures only the affected card instead of rebuilding a full grid.
+        section.hash(&mut hasher);
+        match section {
+            ConnectionPoolBodySection::Error => {
+                self.connection_monitor.pool_error.hash(&mut hasher);
+            }
+            ConnectionPoolBodySection::Loading | ConnectionPoolBodySection::Empty => {}
+            ConnectionPoolBodySection::Connection(index) => {
+                if let Some(summary) = self.visible_connection_pool_summary(index) {
+                    summary.id.hash(&mut hasher);
+                    format!("{:?}", summary.state).hash(&mut hasher);
+                    summary.terminal_count.hash(&mut hasher);
+                    summary.forward_count.hash(&mut hasher);
+                    summary.has_sftp_session.hash(&mut hasher);
+                    summary.keep_alive.hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
+    }
+
+    fn visible_connection_pool_summary(&self, index: usize) -> Option<ConnectionPoolEntrySummary> {
+        self.connection_monitor
+            .pool_summaries
+            .iter()
+            .filter(|summary| summary.is_displayed_in_pool())
+            .nth(index)
+            .cloned()
+    }
+
+    fn render_connection_pool_body_list(
+        &self,
+        idle_timeout_secs: u64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let state = self.connection_pool_body_list_state.clone();
+        let workspace = cx.entity();
+        let spec = self.connection_pool_body_list_spec();
+        tauri_virtual_list(state, spec, move |index, _window, cx| {
+            workspace.update(cx, |this, cx| {
+                this.render_connection_pool_body_item(index, idle_timeout_secs, cx)
+            })
+        })
+        .into_any_element()
+    }
+
+    fn render_connection_pool_body_item(
+        &self,
+        index: usize,
+        idle_timeout_secs: u64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let Some(section) = self.connection_pool_body_sections().get(index).copied() else {
+            return div().into_any_element();
+        };
+        let child = match section {
+            ConnectionPoolBodySection::Error => monitor_center_state(
+                self,
+                LucideIcon::AlertTriangle,
+                MONITOR_RED,
+                self.connection_monitor.pool_error.clone().unwrap_or_default(),
+                cx,
+            ),
+            ConnectionPoolBodySection::Loading => monitor_center_state(
+                self,
+                LucideIcon::RefreshCw,
+                theme.text_muted,
+                self.i18n.t("connections.monitor.loading"),
+                cx,
+            ),
+            ConnectionPoolBodySection::Empty => self.render_connection_pool_empty_state(cx),
+            ConnectionPoolBodySection::Connection(connection_index) => self
+                .visible_connection_pool_summary(connection_index)
+                .map(|connection| {
+                    self.render_connection_pool_card(connection, idle_timeout_secs, cx)
+                })
+                .unwrap_or_else(|| div().into_any_element()),
+        };
+        div()
+            .max_w(px(896.0))
+            .px(px(CONNECTION_POOL_BODY_PADDING))
+            .pb(px(CONNECTION_POOL_CARD_GAP))
+            .when(index == 0, |item| item.pt(px(CONNECTION_POOL_BODY_PADDING)))
+            .when(index + 1 == self.connection_pool_body_sections().len(), |item| {
+                item.pb(px(CONNECTION_POOL_BODY_PADDING))
+            })
+            .child(child)
             .into_any_element()
     }
 

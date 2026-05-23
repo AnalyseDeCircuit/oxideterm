@@ -13,27 +13,28 @@ const IDE_SETTINGS_BLUE_400: u32 = 0x60a5fa;
 const IDE_SETTINGS_BLUE_500: u32 = 0x3b82f6;
 
 impl WorkspaceApp {
-    fn settings_ide(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn settings_ide_section(&self, section_index: usize, cx: &mut Context<Self>) -> AnyElement {
         let settings = self.settings_store.settings();
-        vec![
-            self.ide_toggle_card(
+        match section_index {
+            0 => self.ide_toggle_card(
                 "settings_view.ide.auto_save",
                 "settings_view.ide.auto_save_hint",
                 settings.ide.auto_save,
                 set_ide_auto_save,
                 cx,
             ),
-            self.ide_toggle_card(
+            1 => self.ide_toggle_card(
                 "settings_view.ide.word_wrap",
                 "settings_view.ide.word_wrap_hint",
                 settings.ide.word_wrap,
                 set_ide_word_wrap,
                 cx,
             ),
-            self.ide_typography_card(settings, cx),
-            self.ide_agent_card(settings, cx),
-            self.ide_agent_privacy_card(),
-        ]
+            2 => self.ide_typography_card(settings, cx),
+            3 => self.ide_agent_card(settings, cx),
+            4 => self.ide_agent_privacy_card(),
+            _ => div().into_any_element(),
+        }
     }
 
     fn ide_card(&self) -> Div {

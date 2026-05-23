@@ -2,7 +2,7 @@ impl WorkspaceApp {
     fn ai_provider_card(
         &self,
         index: usize,
-        provider: AiProviderView,
+        provider: &AiProviderView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let active_provider = self
@@ -18,17 +18,12 @@ impl WorkspaceApp {
             .copied()
             .unwrap_or(active_provider);
         let models_expanded = self.expanded_ai_provider_models.contains(&provider.id);
-        let visible_models = if models_expanded {
-            provider.models.clone()
+        let visible_model_count = if models_expanded {
+            provider.models.len()
         } else {
-            provider
-                .models
-                .iter()
-                .take(AI_PROVIDER_VISIBLE_MODEL_LIMIT)
-                .cloned()
-                .collect()
+            provider.models.len().min(AI_PROVIDER_VISIBLE_MODEL_LIMIT)
         };
-        let hidden_count = provider.models.len().saturating_sub(visible_models.len());
+        let hidden_count = provider.models.len().saturating_sub(visible_model_count);
 
         let mut card = div()
             .rounded(px(self.tokens.radii.lg))
@@ -45,19 +40,19 @@ impl WorkspaceApp {
             })
             .flex()
             .flex_col()
-            .child(self.ai_provider_card_header(&provider, active_provider, expanded, cx));
+            .child(self.ai_provider_card_header(provider, active_provider, expanded, cx));
 
         if expanded {
             card = card
-                .child(self.ai_provider_expanded_toolbar(index, &provider, cx))
-                .child(self.ai_provider_fields(index, &provider, cx))
-                .child(self.ai_provider_models(index, &provider, visible_models, hidden_count, cx));
+                .child(self.ai_provider_expanded_toolbar(index, provider, cx))
+                .child(self.ai_provider_fields(index, provider, cx))
+                .child(self.ai_provider_models(index, provider, visible_model_count, hidden_count, cx));
 
             if self
-                .ai_provider_key_display_state(&provider)
+                .ai_provider_key_display_state(provider)
                 .shows_key_control()
             {
-                card = card.child(self.ai_provider_key_input(index, &provider, cx));
+                card = card.child(self.ai_provider_key_input(index, provider, cx));
             }
         }
 

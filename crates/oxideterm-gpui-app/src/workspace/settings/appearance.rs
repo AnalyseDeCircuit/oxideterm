@@ -455,13 +455,18 @@ fn current_millis() -> u128 {
 }
 
 impl WorkspaceApp {
-    fn settings_appearance(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn settings_appearance_section(
+        &self,
+        section_index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let settings = self.settings_store.settings();
-        vec![
-            self.appearance_theme_card(settings, cx),
-            self.appearance_layout_card(settings, cx),
-            self.appearance_background_card(settings, cx),
-        ]
+        match section_index {
+            0 => self.appearance_theme_card(settings, cx),
+            1 => self.appearance_layout_card(settings, cx),
+            2 => self.appearance_background_card(settings, cx),
+            _ => div().into_any_element(),
+        }
     }
 
     fn appearance_theme_card(

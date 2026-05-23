@@ -47,6 +47,9 @@ const SFTP_ROOT_PADDING: f32 = 8.0; // Tauri p-2
 const SFTP_GAP: f32 = 8.0; // Tauri gap-2
 const SFTP_PANE_HEADER_HEIGHT: f32 = 40.0; // Tauri h-10
 const SFTP_QUEUE_HEIGHT: f32 = 192.0; // Tauri h-48
+const SFTP_TRANSFER_QUEUE_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const SFTP_TRANSFER_QUEUE_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
+const SFTP_TRANSFER_QUEUE_LIST_OVERSCAN: usize = 6;
 const SFTP_TEXT_XS: f32 = 12.0; // Tauri text-xs
 const SFTP_TEXT_SM: f32 = 14.0; // Tauri text-sm
 const SFTP_TEXT_10: f32 = 10.0; // Tauri text-[10px]
@@ -528,6 +531,8 @@ pub(super) struct SftpViewState {
     preview_editor_last_saved_mtime: Option<u64>,
     preview_editor_last_atomic_write: Option<bool>,
     transfers: Vec<SftpTransferItem>,
+    transfer_queue_list_state: ListState,
+    transfer_queue_list_cache: RefCell<VirtualListSignatureCache>,
     transfer_batches: HashMap<u64, SftpTransferBatch>,
     incomplete_transfers: Vec<StoredTransferProgress>,
     incomplete_load_inflight: bool,
@@ -610,6 +615,20 @@ impl Default for SftpViewState {
             preview_editor_last_saved_mtime: None,
             preview_editor_last_atomic_write: None,
             transfers: Vec::new(),
+            // Transfer queues are fixed-height browser scroll regions; use the
+            // shared variable list state so large transfer batches do not build
+            // every row while progress/status updates are repainting.
+            transfer_queue_list_state: ListState::new(
+                SFTP_TRANSFER_QUEUE_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(SFTP_TRANSFER_QUEUE_LIST_ESTIMATED_HEIGHT),
+                    SFTP_TRANSFER_QUEUE_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            transfer_queue_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             transfer_batches: HashMap::new(),
             incomplete_transfers: Vec::new(),
             incomplete_load_inflight: false,

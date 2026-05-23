@@ -124,6 +124,20 @@ fn quick_command_highlight_at(visible_commands: &[QuickCommand], index: usize) -
         .map(|command| command.id.clone())
 }
 
+fn quick_command_row_signature(command: &QuickCommand) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // The command id is the row key; text fields and edit timestamps affect
+    // visible row content, so include them when syncing GPUI ListState.
+    command.id.hash(&mut hasher);
+    command.name.hash(&mut hasher);
+    command.command.hash(&mut hasher);
+    command.category.hash(&mut hasher);
+    command.description.hash(&mut hasher);
+    command.host_pattern.hash(&mut hasher);
+    command.updated_at.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     fn visible_quick_commands_for_active_terminal(&self) -> Vec<QuickCommand> {
         let active_label = self
@@ -706,19 +720,62 @@ impl WorkspaceApp {
                 .into_any_element();
         }
 
-        let mut list = div()
+        self.sync_quick_command_list_state(&visible_commands);
+        let state = self.quick_command_list_state.clone();
+        let spec = self.quick_command_list_spec();
+        let workspace = cx.entity();
+        div()
             .flex_1()
             .min_h(px(0.0))
-            .overflow_y_scrollbar()
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-            .p(px(8.0))
-            .flex()
-            .flex_col()
-            .gap(px(4.0));
-        for command in visible_commands {
-            list = list.child(self.render_quick_command_row(command, cx));
-        }
-        list.into_any_element()
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    workspace
+                        .update(cx, |this, cx| this.render_quick_command_list_item(index, cx))
+                },
+            ))
+            .into_any_element()
+    }
+
+    fn sync_quick_command_list_state(&self, commands: &[QuickCommand]) {
+        let signatures = commands
+            .iter()
+            .map(quick_command_row_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.quick_command_list_state,
+            &mut self.quick_command_list_cache.borrow_mut(),
+            "terminal-quick-commands",
+            &signatures,
+            self.quick_command_list_spec(),
+        );
+    }
+
+    fn quick_command_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(QUICK_COMMAND_LIST_ESTIMATED_HEIGHT),
+            QUICK_COMMAND_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_quick_command_list_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let visible_commands = self.visible_quick_commands_for_active_terminal();
+        let total = visible_commands.len();
+        let Some(command) = visible_commands.into_iter().nth(index) else {
+            return div().into_any_element();
+        };
+        div()
+            .px(px(8.0))
+            .when(index == 0, |item| item.pt(px(8.0)))
+            .pb(px(if index + 1 == total { 8.0 } else { 4.0 }))
+            .child(self.render_quick_command_row(command, cx))
+            .into_any_element()
     }
 
     fn render_quick_command_row(

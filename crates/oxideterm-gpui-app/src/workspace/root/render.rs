@@ -65,7 +65,9 @@ impl Render for WorkspaceApp {
 
         let content = if let Some(tab) = self.active_tab() {
             match (&tab.kind, &tab.root_pane) {
-                (TabKind::Settings, _) => self.render_settings_surface(cx),
+                (TabKind::Settings, _) => {
+                    self.render_settings_surface(cx)
+                }
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
                 (TabKind::Launcher, _) => self.render_launcher_surface(cx),
                 (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
@@ -77,7 +79,7 @@ impl Render for WorkspaceApp {
                 (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
                 (TabKind::SessionManager, _) => self.render_session_manager_surface(window, cx),
-                (TabKind::PluginManager, _) => self.render_plugin_manager_surface(),
+                (TabKind::PluginManager, _) => self.render_plugin_manager_surface(cx),
                 (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
                 (_, Some(root_pane)) => self.render_terminal_surface(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
