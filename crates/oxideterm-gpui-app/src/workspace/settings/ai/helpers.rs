@@ -140,15 +140,29 @@ fn ai_normalize_execution_profiles(settings: &mut PersistedSettings) {
     if default_is_valid {
         return;
     }
-    let next_default = profiles
-        .iter()
-        .find_map(ai_execution_profile_id)
-        .unwrap_or_else(|| "default".to_string());
     let object = settings
         .ai
         .execution_profiles
         .as_object_mut()
         .expect("execution_profiles with a profiles array must be an object");
+    let next_default = profiles
+        .iter()
+        .find_map(ai_execution_profile_id)
+        .unwrap_or_else(|| {
+            // Migrated profiles can exist without ids. If we only write
+            // defaultProfileId here, the next render still sees an invalid
+            // default and schedules the same normalization again.
+            let profile_id = "default".to_string();
+            if let Some(first_profile) = object
+                .get_mut("profiles")
+                .and_then(serde_json::Value::as_array_mut)
+                .and_then(|profiles| profiles.first_mut())
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                first_profile.insert("id".to_string(), serde_json::json!(profile_id.clone()));
+            }
+            profile_id
+        });
     object.insert(
         "defaultProfileId".to_string(),
         serde_json::json!(next_default),
@@ -398,5 +412,46 @@ fn set_ai_model_max_response_tokens(
     }
     if model_tokens.is_empty() {
         settings.ai.model_max_response_tokens.remove(provider_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizing_legacy_execution_profile_without_id_converges() {
+        let mut settings = PersistedSettings::default();
+        settings.ai.execution_profiles = serde_json::json!({
+            "profiles": [{
+                "name": "Migrated",
+                "providerId": "custom",
+                "model": "model"
+            }]
+        });
+
+        assert!(ai_execution_profiles_need_normalization(&settings));
+        ai_normalize_execution_profiles(&mut settings);
+
+        assert!(!ai_execution_profiles_need_normalization(&settings));
+        assert_eq!(
+            settings
+                .ai
+                .execution_profiles
+                .get("defaultProfileId")
+                .and_then(serde_json::Value::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            settings
+                .ai
+                .execution_profiles
+                .get("profiles")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|profiles| profiles.first())
+                .and_then(|profile| profile.get("id"))
+                .and_then(serde_json::Value::as_str),
+            Some("default")
+        );
     }
 }

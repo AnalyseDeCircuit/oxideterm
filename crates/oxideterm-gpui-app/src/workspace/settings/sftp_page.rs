@@ -2,8 +2,65 @@ const SFTP_SETTINGS_CARD_PADDING: f32 = 20.0; // Tauri p-5
 const SFTP_SETTINGS_SELECT_WIDTH: f32 = 180.0; // Tauri w-[180px]
 
 impl WorkspaceApp {
-    fn settings_sftp(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn settings_sftp_section(&self, section_index: usize, cx: &mut Context<Self>) -> AnyElement {
         let settings = self.settings_store.settings();
+        if section_index == 0 {
+            return self.sftp_settings_card(
+                vec![
+                    self.sftp_settings_row(
+                        "settings_view.sftp.concurrent",
+                        Some("settings_view.sftp.concurrent_hint"),
+                        self.sftp_select_control(
+                            SettingsSelect::SftpConcurrent,
+                            sftp_transfer_count_label(
+                                &self.i18n,
+                                settings.sftp.max_concurrent_transfers,
+                            ),
+                            cx,
+                        ),
+                    ),
+                    self.card_separator(),
+                    self.sftp_settings_row(
+                        "settings_view.sftp.directory_parallelism",
+                        Some("settings_view.sftp.directory_parallelism_hint"),
+                        self.sftp_select_control(
+                            SettingsSelect::SftpDirectoryParallelism,
+                            sftp_transfer_count_label(
+                                &self.i18n,
+                                settings.sftp.directory_parallelism,
+                            ),
+                            cx,
+                        ),
+                    ),
+                ],
+                20.0,
+            );
+        }
+
+        if section_index == 2 {
+            return self.sftp_settings_card(
+                vec![
+                    div()
+                        .mb(px(8.0))
+                        .child(self.sftp_settings_row(
+                            "settings_view.sftp.conflict",
+                            Some("settings_view.sftp.conflict_hint"),
+                            self.sftp_select_control(
+                                SettingsSelect::SftpConflict,
+                                conflict_label(settings.sftp.conflict_action, &self.i18n),
+                                cx,
+                            ),
+                        ))
+                        .into_any_element(),
+                ],
+                0.0,
+            );
+        }
+
+        if section_index != 1 {
+            return div().into_any_element();
+        }
+
         let mut speed_rows = vec![self.sftp_settings_row(
             "settings_view.sftp.bandwidth",
             Some("settings_view.sftp.bandwidth_hint"),
@@ -42,53 +99,7 @@ impl WorkspaceApp {
             );
         }
 
-        vec![
-            self.sftp_settings_card(
-                vec![
-                    self.sftp_settings_row(
-                        "settings_view.sftp.concurrent",
-                        Some("settings_view.sftp.concurrent_hint"),
-                        self.sftp_select_control(
-                            SettingsSelect::SftpConcurrent,
-                            sftp_transfer_count_label(
-                                &self.i18n,
-                                settings.sftp.max_concurrent_transfers,
-                            ),
-                            cx,
-                        ),
-                    ),
-                    self.card_separator(),
-                    self.sftp_settings_row(
-                        "settings_view.sftp.directory_parallelism",
-                        Some("settings_view.sftp.directory_parallelism_hint"),
-                        self.sftp_select_control(
-                            SettingsSelect::SftpDirectoryParallelism,
-                            sftp_transfer_count_label(&self.i18n, settings.sftp.directory_parallelism),
-                            cx,
-                        ),
-                    ),
-                ],
-                20.0,
-            ),
-            self.sftp_settings_card(speed_rows, 16.0),
-            self.sftp_settings_card(
-                vec![
-                    div()
-                        .mb(px(8.0))
-                        .child(self.sftp_settings_row(
-                            "settings_view.sftp.conflict",
-                            Some("settings_view.sftp.conflict_hint"),
-                            self.sftp_select_control(
-                                SettingsSelect::SftpConflict,
-                                conflict_label(settings.sftp.conflict_action, &self.i18n),
-                                cx,
-                            ),
-                        ))
-                        .into_any_element(),
-                ],
-                0.0,
-            ),
-        ]
+        self.sftp_settings_card(speed_rows, 16.0)
     }
 
     fn sftp_settings_card(&self, rows: Vec<AnyElement>, gap: f32) -> AnyElement {

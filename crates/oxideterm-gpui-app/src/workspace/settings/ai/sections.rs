@@ -46,7 +46,6 @@ impl WorkspaceApp {
         }
 
         div()
-            .mb(px(24.0))
             .max_w(px(AI_PROVIDER_MAX_W))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
@@ -136,10 +135,9 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x73))
+            // Profile rows are nested surfaces, not standalone settings cards;
+            // avoid stacking another translucent shadow inside OxideSens.
             .bg(rgba((self.tokens.ui.bg_card << 8) | 0x73))
-            .shadow(oxideterm_gpui_ui::tauri_card_shadow(
-                self.tokens.ui.bg_card,
-            ))
             .p(px(12.0))
             .flex()
             .flex_col()
@@ -211,15 +209,18 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn ai_provider_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let providers = ai_provider_views(self.settings_store.settings());
+    fn ai_provider_settings_section(
+        &self,
+        providers: &[AiProviderView],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut provider_list = div()
             .w_full()
             .max_w(px(AI_PROVIDER_MAX_W))
             .flex()
             .flex_col()
             .gap(px(12.0));
-        for (index, provider) in providers.into_iter().enumerate() {
+        for (index, provider) in providers.iter().enumerate() {
             provider_list = provider_list.child(self.ai_provider_card(index, provider, cx));
         }
 
@@ -247,7 +248,6 @@ impl WorkspaceApp {
             .when(expanded, |section| {
                 section.child(
                     div()
-                        .mb(px(24.0))
                         .flex()
                         .flex_col()
                         .gap(px(12.0))
@@ -424,6 +424,7 @@ impl WorkspaceApp {
     fn ai_system_prompt_section(
         &self,
         settings: &PersistedSettings,
+        providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
@@ -495,10 +496,10 @@ impl WorkspaceApp {
             )
             .child(self.ai_separator())
             .child(self.ai_global_reasoning_section(settings, cx))
-            .child(self.ai_model_reasoning_overrides_section(settings, cx))
+            .child(self.ai_model_reasoning_overrides_section(settings, providers, cx))
             .child(self.ai_active_model_max_response_tokens_row(settings, cx))
             .child(self.ai_separator())
-            .child(self.ai_model_context_windows_section(settings, cx))
+            .child(self.ai_model_context_windows_section(settings, providers, cx))
             .into_any_element()
     }
 
@@ -645,7 +646,6 @@ impl WorkspaceApp {
             })
             .child(self.ai_separator())
             .child(self.ai_mcp_summary_section(settings, cx))
-            .child(self.ai_embedding_config_section(settings, cx))
             .into_any_element()
     }
 
@@ -1049,10 +1049,11 @@ impl WorkspaceApp {
     fn ai_model_reasoning_overrides_section(
         &self,
         settings: &PersistedSettings,
+        providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let providers_with_models: Vec<_> = ai_provider_views(settings)
-            .into_iter()
+        let providers_with_models: Vec<_> = providers
+            .iter()
             .enumerate()
             .filter(|(_, provider)| !provider.models.is_empty())
             .collect();
@@ -1157,7 +1158,7 @@ impl WorkspaceApp {
         &self,
         provider_index: usize,
         settings: &PersistedSettings,
-        provider: AiProviderView,
+        provider: &AiProviderView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let provider_id = provider.id.clone();
@@ -1323,10 +1324,11 @@ impl WorkspaceApp {
     fn ai_model_context_windows_section(
         &self,
         settings: &PersistedSettings,
+        providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let providers_with_models: Vec<_> = ai_provider_views(settings)
-            .into_iter()
+        let providers_with_models: Vec<_> = providers
+            .iter()
             .enumerate()
             .filter(|(_, provider)| !provider.models.is_empty())
             .collect();
@@ -1426,7 +1428,7 @@ impl WorkspaceApp {
         &self,
         provider_index: usize,
         settings: &PersistedSettings,
-        provider: AiProviderView,
+        provider: &AiProviderView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let provider_id = provider.id.clone();
@@ -1893,55 +1895,4 @@ impl WorkspaceApp {
     ) -> AnyElement {
         self.ai_mcp_servers_section(settings, cx)
     }
-
-    fn ai_embedding_config_section(
-        &self,
-        settings: &PersistedSettings,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let provider_label = settings
-            .ai
-            .embedding_config
-            .as_ref()
-            .and_then(|config| config.get("providerId"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(|provider_id| {
-                settings
-                    .ai
-                    .providers
-                    .iter()
-                    .find(|provider| ai_provider_id(provider).as_deref() == Some(provider_id))
-                    .and_then(|provider| ai_provider_string(provider, "name"))
-            })
-            .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.auto_embedding_provider"));
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(self.ai_section_heading(
-                "settings_view.ai.embedding_title",
-                "settings_view.ai.embedding_description",
-            ))
-            .child(
-                div()
-                    .grid()
-                    .grid_cols(2)
-                    .gap(px(12.0))
-                    .child(self.ai_settings_select_control(
-                        SettingsSelect::AiEmbeddingProvider,
-                        provider_label,
-                        224.0,
-                        cx,
-                    ))
-                    .child(self.settings_text_input_control(
-                        SettingsInput::AiEmbeddingModel,
-                        self.current_settings_input_value(SettingsInput::AiEmbeddingModel),
-                        self.i18n.t("settings_view.ai.embedding_model"),
-                        224.0,
-                        cx,
-                    )),
-            )
-            .into_any_element()
-    }
-
 }

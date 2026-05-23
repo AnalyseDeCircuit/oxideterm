@@ -1,26 +1,9 @@
 impl WorkspaceApp {
-    fn ai_settings_surface(&self, cx: &mut Context<Self>) -> AnyElement {
-        let settings = self.settings_store.settings();
-        let mut disabled_body = div()
-            .flex()
-            .flex_col()
-            .opacity(if settings.ai.enabled { 1.0 } else { 0.5 })
-            .child(self.ai_execution_profiles_section(settings, cx))
-            .child(self.ai_separator())
-            .child(self.ai_provider_settings_section(cx))
-            .child(self.ai_separator())
-            .child(self.ai_context_controls_section(settings, cx))
-            .child(self.ai_separator())
-            .child(self.ai_system_prompt_section(settings, cx))
-            .child(self.ai_separator())
-            .child(self.ai_tool_use_section(settings, cx));
-
-        if !settings.ai.enabled {
-            disabled_body = disabled_body.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            });
-        }
-
+    fn ai_general_settings_card(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let card = div()
             .w_full()
             .min_w(px(0.0))
@@ -39,9 +22,36 @@ impl WorkspaceApp {
                     .child(self.i18n.t("settings_view.ai.general").to_uppercase()),
             )
             .child(self.ai_enabled_row(settings.ai.enabled, cx))
-            .child(self.ai_privacy_notice())
-            .child(self.ai_separator())
-            .child(disabled_body);
+            .child(self.ai_privacy_notice());
+        self.settings_card_surface(card, self.tokens.ui.bg_card)
+            .into_any_element()
+    }
+
+    fn ai_disabled_settings_card(&self, body: AnyElement, enabled: bool) -> AnyElement {
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .opacity(if enabled { 1.0 } else { 0.5 })
+            .child(body);
+        if !enabled {
+            // Disabled OxideSens subsections should look inert and must not let
+            // nested controls fire while the top-level feature toggle remains
+            // usable in the separate general card.
+            body = body.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            });
+        }
+
+        let card = div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .p(px(20.0))
+            .flex()
+            .flex_col()
+            .child(body);
         self.settings_card_surface(card, self.tokens.ui.bg_card)
             .into_any_element()
     }
@@ -103,10 +113,9 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.sm))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
+            // Keep the nested notice as border-only chrome; the surrounding
+            // settings card already owns the Tauri card elevation.
             .bg(self.settings_panel_background(self.tokens.ui.bg_card))
-            .shadow(oxideterm_gpui_ui::tauri_card_shadow(
-                self.tokens.ui.bg_card,
-            ))
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))

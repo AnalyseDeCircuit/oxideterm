@@ -1,3 +1,23 @@
+fn sftp_transfer_queue_row_signature(transfer: &SftpTransferItem) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Transfer id is the row key; progress, speed, state, and error are visible
+    // row fields and can change height when an error line appears.
+    transfer.id.hash(&mut hasher);
+    transfer.transfer_id.hash(&mut hasher);
+    transfer.batch_id.hash(&mut hasher);
+    transfer.node_id.hash(&mut hasher);
+    transfer.name.hash(&mut hasher);
+    transfer.local_path.hash(&mut hasher);
+    transfer.remote_path.hash(&mut hasher);
+    format!("{:?}", transfer.direction).hash(&mut hasher);
+    transfer.size.hash(&mut hasher);
+    transfer.transferred.hash(&mut hasher);
+    transfer.speed.hash(&mut hasher);
+    format!("{:?}", transfer.state).hash(&mut hasher);
+    transfer.error.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl WorkspaceApp {
     fn render_sftp_transfer_queue(
         &self,
@@ -125,13 +145,6 @@ impl WorkspaceApp {
                     .id("sftp-transfer-queue-scroll")
                     .flex_1()
                     .min_h(px(0.0))
-                    .selectable_overflow_y_scroll(
-                        &self.selectable_text_scroll_handle("sftp-transfer-queue-scroll"),
-                    )
-                    .p(px(8.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
                     .when(self.sftp_view.transfers.is_empty(), |body| {
                         body.child(
                             div()
@@ -150,10 +163,67 @@ impl WorkspaceApp {
                                 )),
                         )
                     })
-                    .children(self.sftp_view.transfers.iter().cloned().map(|transfer| {
-                        self.render_sftp_transfer_row(transfer, has_background, cx)
-                    })),
+                    .when(!self.sftp_view.transfers.is_empty(), |body| {
+                        self.sync_sftp_transfer_queue_list_state();
+                        let state = self.sftp_view.transfer_queue_list_state.clone();
+                        let spec = self.sftp_transfer_queue_list_spec();
+                        let workspace = cx.entity();
+                        body.child(tauri_virtual_list(
+                            state,
+                            spec,
+                            move |index, _window, cx| {
+                                workspace.update(cx, |this, cx| {
+                                    this.render_sftp_transfer_queue_list_item(
+                                        index,
+                                        has_background,
+                                        cx,
+                                    )
+                                })
+                            },
+                        ))
+                    }),
             )
+            .into_any_element()
+    }
+
+    fn sync_sftp_transfer_queue_list_state(&self) {
+        let signatures = self
+            .sftp_view
+            .transfers
+            .iter()
+            .map(sftp_transfer_queue_row_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.sftp_view.transfer_queue_list_state,
+            &mut self.sftp_view.transfer_queue_list_cache.borrow_mut(),
+            "sftp-transfer-queue",
+            &signatures,
+            self.sftp_transfer_queue_list_spec(),
+        );
+    }
+
+    fn sftp_transfer_queue_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(SFTP_TRANSFER_QUEUE_LIST_ESTIMATED_HEIGHT),
+            SFTP_TRANSFER_QUEUE_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_sftp_transfer_queue_list_item(
+        &self,
+        index: usize,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let total = self.sftp_view.transfers.len();
+        let Some(transfer) = self.sftp_view.transfers.get(index).cloned() else {
+            return div().into_any_element();
+        };
+        div()
+            .px(px(8.0))
+            .when(index == 0, |item| item.pt(px(8.0)))
+            .pb(px(if index + 1 == total { 8.0 } else { 8.0 }))
+            .child(self.render_sftp_transfer_row(transfer, has_background, cx))
             .into_any_element()
     }
 

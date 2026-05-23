@@ -1,41 +1,48 @@
 impl WorkspaceApp {
-    fn settings_connections(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn settings_connections_section(
+        &self,
+        section_index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let settings = self.settings_store.settings();
-        let existing_names = self
-            .connection_store
-            .connections()
-            .iter()
-            .map(|conn| conn.name.clone())
-            .collect::<HashSet<_>>();
-        let ssh_hosts = list_ssh_config_hosts(&existing_names).unwrap_or_default();
-
-        vec![
-            self.connection_defaults_section(settings, cx),
-            self.connection_groups_section(cx),
-            self.connection_section(
+        match section_index {
+            0 => self.connection_defaults_section(settings, cx),
+            1 => self.connection_groups_section(cx),
+            2 => self.connection_section(
                 "settings_view.connections.idle_timeout.title",
                 "settings_view.connections.idle_timeout.description",
                 vec![self.connection_idle_timeout_control(settings, cx)],
             ),
-            self.ssh_config_import_section(ssh_hosts, cx),
-        ]
+            3 => {
+                let existing_names = self
+                    .connection_store
+                    .connections()
+                    .iter()
+                    .map(|conn| conn.name.clone())
+                    .collect::<HashSet<_>>();
+                let ssh_hosts = list_ssh_config_hosts(&existing_names).unwrap_or_default();
+                self.ssh_config_import_section(ssh_hosts, cx)
+            }
+            _ => div().into_any_element(),
+        }
     }
 
-    fn settings_ssh(&self) -> Vec<AnyElement> {
+    fn settings_ssh_section(&self, section_index: usize) -> AnyElement {
+        if section_index != 0 {
+            return div().into_any_element();
+        }
         let keys = list_available_ssh_keys();
         if keys.is_empty() {
-            vec![
-                div()
-                    .max_w(px(768.0))
-                    .child(self.ssh_keys_empty_state())
-                    .into_any_element(),
-            ]
+            div()
+                .max_w(px(768.0))
+                .child(self.ssh_keys_empty_state())
+                .into_any_element()
         } else {
             let mut list = div().max_w(px(768.0)).flex().flex_col().gap(px(12.0));
             for key in keys {
                 list = list.child(self.ssh_key_row(key));
             }
-            vec![list.into_any_element()]
+            list.into_any_element()
         }
     }
 

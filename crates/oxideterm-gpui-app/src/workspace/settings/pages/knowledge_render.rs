@@ -1,13 +1,21 @@
 impl WorkspaceApp {
-    fn settings_ai(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        self.ensure_ai_provider_key_statuses(cx);
-        if ai_execution_profiles_need_normalization(self.settings_store.settings()) {
-            self.edit_settings(ai_normalize_execution_profiles, cx);
+    fn normalize_ai_execution_profiles_for_settings_render(&mut self) {
+        if !ai_execution_profiles_need_normalization(self.settings_store.settings()) {
+            return;
         }
-        vec![self.ai_settings_surface(cx)]
+        // This is a data migration for legacy OxideSens profile shapes, not a
+        // user-visible settings edit. Avoid edit_settings() here because it
+        // refreshes every dependent surface and calls cx.notify() from the
+        // settings render path.
+        ai_normalize_execution_profiles(self.settings_store.settings_mut());
+        let _ = self.settings_store.save();
     }
 
-    fn settings_knowledge(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn settings_knowledge_section(
+        &mut self,
+        section_index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.ensure_ai_provider_key_statuses(cx);
         let collections = oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
             .unwrap_or_default();
@@ -29,19 +37,30 @@ impl WorkspaceApp {
             .as_deref()
             .and_then(|id| oxideterm_ai::rag_get_collection_stats(&self.ai_rag_store, id).ok());
 
-        let mut rows = vec![self.knowledge_collections_card(&collections, selected_id.as_deref(), cx)];
+        let mut index = section_index;
         if let Some(error) = self.knowledge_error.as_ref() {
-            rows.insert(0, self.knowledge_error_row(error));
+            if index == 0 {
+                return self.knowledge_error_row(error);
+            }
+            index -= 1;
         }
-        if let Some(collection) = selected_collection {
-            rows.push(self.knowledge_documents_card(
+
+        if index == 0 {
+            return self.knowledge_collections_card(&collections, selected_id.as_deref(), cx);
+        }
+
+        if index == 1 {
+            if let Some(collection) = selected_collection {
+                return self.knowledge_documents_card(
                 collection,
                 selected_documents,
                 selected_stats,
                 cx,
-            ));
+                );
+            }
         }
-        rows
+
+        div().into_any_element()
     }
 
     fn knowledge_error_row(&self, error: &str) -> AnyElement {

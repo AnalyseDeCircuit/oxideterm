@@ -21,9 +21,15 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let configs = ai_mcp_configs(settings);
         let snapshots = self.ai_mcp_registry.snapshots();
+        let configured_server_ids: HashSet<_> =
+            configs.iter().map(|config| config.id.as_str()).collect();
+        // Only live configured MCP rows should drive the retry/status ticker.
+        // Stale registry snapshots can otherwise keep the AI settings page
+        // repainting even when the MCP section is visually empty.
         if snapshots.iter().any(|snapshot| {
-            snapshot.status == "connecting"
-                || (snapshot.status == "error" && snapshot.config.retry_on_disconnect)
+            configured_server_ids.contains(snapshot.config.id.as_str())
+                && (snapshot.status == "connecting"
+                    || (snapshot.status == "error" && snapshot.config.retry_on_disconnect))
         }) {
             cx.spawn(async move |weak, cx| {
                 Timer::after(Duration::from_millis(500)).await;

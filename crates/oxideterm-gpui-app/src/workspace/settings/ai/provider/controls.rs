@@ -183,7 +183,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(self.ai_provider_refresh_button(index, provider.clone(), cx))
+                    .child(self.ai_provider_refresh_button(index, provider, cx))
                     .when(provider.custom, |row| {
                         row.child(self.ai_provider_remove_button(index, provider.name.clone(), cx))
                     }),
@@ -194,10 +194,11 @@ impl WorkspaceApp {
     fn ai_provider_refresh_button(
         &self,
         index: usize,
-        provider: AiProviderView,
+        provider: &AiProviderView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let refreshing = self.ai_model_refreshing.contains(&provider.id);
+        let provider_for_refresh = provider.clone();
         let mut options = ToolbarButtonOptions::compact_text(
             ButtonVariant::Ghost,
             ButtonRadius::Md,
@@ -219,7 +220,7 @@ impl WorkspaceApp {
             )),
             options,
             cx.listener(move |this, _event, _window, cx| {
-                this.refresh_ai_provider_models(index, provider.clone(), cx);
+                this.refresh_ai_provider_models(index, provider_for_refresh.clone(), cx);
                 cx.stop_propagation();
             }),
         )

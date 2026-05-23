@@ -160,6 +160,32 @@ impl WorkspaceApp {
             },
             settings_reset_confirm_open: false,
             quick_commands: QuickCommandsState::load(settings_store.path()),
+            // Quick command popovers can contain user-sized command sets; keep
+            // their rows on the same variable-height list path as migrated
+            // browser popovers instead of constructing every row on each render.
+            quick_command_list_state: ListState::new(
+                QUICK_COMMAND_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(QUICK_COMMAND_LIST_ESTIMATED_HEIGHT),
+                    QUICK_COMMAND_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            quick_command_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // Plugin Manager has the same browser-page structure as Settings:
+            // a small set of variable-height sections inside a scroll region.
+            plugin_manager_section_list_state: ListState::new(
+                PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(PLUGIN_MANAGER_SECTION_LIST_ESTIMATED_HEIGHT),
+                    PLUGIN_MANAGER_SECTION_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
             split_drag: None,
             sidebar_resizing: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,
@@ -179,6 +205,20 @@ impl WorkspaceApp {
             terminal_settings_page: TerminalSettingsPage::Display,
             open_settings_select: None,
             settings_select_focus_origin: None,
+            // Settings tabs are variable-height browser sections, not a single
+            // flex tree. Initialize the shared GPUI ListState here and let the
+            // settings surface reset it by active tab/signature during render.
+            settings_section_list_state: ListState::new(
+                SETTINGS_SECTION_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(SETTINGS_SECTION_LIST_ESTIMATED_HEIGHT),
+                    SETTINGS_SECTION_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            settings_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             ai_new_provider_type: "openai_compatible".to_string(),
             ai_provider_settings_expanded: true,
             ai_tool_use_expanded: true,
@@ -308,6 +348,7 @@ impl WorkspaceApp {
             focused_settings_input: None,
             settings_input_draft: String::new(),
             settings_slider_drag: None,
+            settings_caret_blink_pause_until: None,
             keybinding_recording_action_id: None,
             keybinding_recording_combo: None,
             keybinding_recording_footer_focus: None,
@@ -385,6 +426,20 @@ impl WorkspaceApp {
             active_ssh_node_id: None,
             next_ssh_node_id: 1,
             forward_tab_nodes: HashMap::new(),
+            // Forwards is a variable-height browser page with optional banner,
+            // form, error, and remote-port sections. Keep it on the same
+            // ListState section-list path as Settings and Cloud Sync.
+            forwards_section_list_state: ListState::new(
+                FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT),
+                    FORWARDS_SECTION_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            forwards_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             forwarding_view: forwards::ForwardsViewState::default(),
             forwarding_port_detection_by_node: HashMap::new(),
             forwarding_port_profiler_nodes: HashSet::new(),
@@ -400,11 +455,65 @@ impl WorkspaceApp {
             ide_last_closed_at_by_node: HashMap::new(),
             sftp_view: sftp::SftpViewState::default(),
             launcher: LauncherState::new(settings.launcher.enabled),
+            // WSL launcher rows are browser-list content: keep their row
+            // estimate/overscan centralized instead of rebuilding every distro
+            // row through a plain flex tree.
+            launcher_wsl_list_state: ListState::new(
+                LAUNCHER_WSL_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT),
+                    LAUNCHER_WSL_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            launcher_wsl_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             graphics: GraphicsState::new(),
             connection_monitor: ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx),
+            // Monitor pages are variable-height browser sections; keep the
+            // summary page and pool body on shared ListState-backed render paths.
+            connection_monitor_section_list_state: ListState::new(
+                CONNECTION_MONITOR_SECTION_LIST_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(CONNECTION_MONITOR_SECTION_LIST_ESTIMATED_HEIGHT),
+                    CONNECTION_MONITOR_SECTION_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            connection_monitor_section_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            connection_pool_body_list_state: ListState::new(
+                CONNECTION_POOL_BODY_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(CONNECTION_POOL_BODY_LIST_ESTIMATED_HEIGHT),
+                    CONNECTION_POOL_BODY_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            connection_pool_body_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             cloud_sync_store,
             cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService::new(),
             cloud_sync_form,
+            // Cloud Sync is a variable-height browser page with optional preview
+            // and rollback sections; render it through the shared section list
+            // instead of rebuilding one scroll-sized flex tree.
+            cloud_sync_section_list_state: ListState::new(
+                CLOUD_SYNC_SECTION_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT),
+                    CLOUD_SYNC_SECTION_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            cloud_sync_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             cloud_sync_open_select: None,
             cloud_sync_focused_select: None,
             cloud_sync_select_focus_origin: None,

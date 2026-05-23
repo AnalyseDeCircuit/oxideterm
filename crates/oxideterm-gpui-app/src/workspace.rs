@@ -28,8 +28,9 @@ mod virtual_list;
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
     fs,
+    hash::{Hash, Hasher},
     path::PathBuf,
     sync::{
         Arc,
@@ -177,13 +178,46 @@ use oxideterm_gpui_ui::typography::{
     css_font_family_head as settings_css_font_family_head, gpui_font_family_name,
     tauri_ui_font_family as settings_ui_font_family,
 };
-pub(super) use selectable_text::{SelectableTextRole, SelectableTextScrollExt};
+pub(super) use selectable_text::{
+    SelectableTextRole, SelectableTextScrollExt, selectable_vertical_scrollbar_layer,
+};
 pub(super) use virtual_list::{
     TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
     tauri_virtual_list, tauri_virtual_list_is_near_bottom, tauri_virtual_list_state,
     tauri_virtual_uniform_list, uniform_list_edge_autoscroll,
 };
-use virtual_list::{VirtualListSignatureCache, sync_tauri_virtual_list_state_by_signatures};
+use virtual_list::{
+    VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures,
+    sync_tauri_virtual_list_state_by_signatures,
+};
+
+const SETTINGS_SECTION_HEADER_ITEM_COUNT: usize = 1;
+const SETTINGS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 4;
+const SETTINGS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 260.0;
+const SETTINGS_SECTION_LIST_OVERSCAN: usize = 2;
+const AI_SETTINGS_SECTION_ITEM_COUNT: usize = 7;
+const AI_SETTINGS_SECTION_ESTIMATED_HEIGHT: f32 = 360.0;
+const CLOUD_SYNC_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 7;
+const CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 240.0;
+const CLOUD_SYNC_SECTION_LIST_OVERSCAN: usize = 2;
+const PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT: usize = 3;
+const PLUGIN_MANAGER_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 180.0;
+const PLUGIN_MANAGER_SECTION_LIST_OVERSCAN: usize = 1;
+const FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 5;
+const FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 180.0;
+const FORWARDS_SECTION_LIST_OVERSCAN: usize = 2;
+const CONNECTION_MONITOR_SECTION_LIST_ITEM_COUNT: usize = 2;
+const CONNECTION_MONITOR_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 280.0;
+const CONNECTION_MONITOR_SECTION_LIST_OVERSCAN: usize = 1;
+const CONNECTION_POOL_BODY_LIST_INITIAL_ITEM_COUNT: usize = 1;
+const CONNECTION_POOL_BODY_LIST_ESTIMATED_HEIGHT: f32 = 180.0;
+const CONNECTION_POOL_BODY_LIST_OVERSCAN: usize = 3;
+const LAUNCHER_WSL_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
+const LAUNCHER_WSL_LIST_OVERSCAN: usize = 6;
+const QUICK_COMMAND_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const QUICK_COMMAND_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
+const QUICK_COMMAND_LIST_OVERSCAN: usize = 6;
 
 #[derive(Clone, Debug)]
 struct AiMcpServerDraft {
@@ -484,6 +518,9 @@ pub(crate) struct WorkspaceApp {
     shortcuts_modal: ShortcutsModalState,
     settings_reset_confirm_open: bool,
     quick_commands: QuickCommandsState,
+    quick_command_list_state: ListState,
+    quick_command_list_cache: RefCell<VirtualListSignatureCache>,
+    plugin_manager_section_list_state: ListState,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
     sidebar_collapsed: bool,
@@ -500,6 +537,8 @@ pub(crate) struct WorkspaceApp {
     terminal_settings_page: TerminalSettingsPage,
     open_settings_select: Option<SettingsSelect>,
     settings_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
+    settings_section_list_state: ListState,
+    settings_section_list_cache: RefCell<VirtualListSignatureCache>,
     ai_new_provider_type: String,
     ai_provider_settings_expanded: bool,
     ai_tool_use_expanded: bool,
@@ -625,6 +664,7 @@ pub(crate) struct WorkspaceApp {
     focused_settings_input: Option<SettingsInput>,
     settings_input_draft: String,
     settings_slider_drag: Option<SettingsSlider>,
+    settings_caret_blink_pause_until: Option<Instant>,
     keybinding_recording_action_id: Option<String>,
     keybinding_recording_combo: Option<crate::keybindings::KeyCombo>,
     keybinding_recording_footer_focus: Option<KeybindingRecordingFooterAction>,
@@ -692,6 +732,8 @@ pub(crate) struct WorkspaceApp {
     active_ssh_node_id: Option<NodeId>,
     next_ssh_node_id: u64,
     forward_tab_nodes: HashMap<TabId, NodeId>,
+    forwards_section_list_state: ListState,
+    forwards_section_list_cache: RefCell<VirtualListSignatureCache>,
     forwarding_view: forwards::ForwardsViewState,
     forwarding_port_detection_by_node: HashMap<NodeId, forwards::PortDetectionViewState>,
     forwarding_port_profiler_nodes: HashSet<NodeId>,
@@ -707,11 +749,19 @@ pub(crate) struct WorkspaceApp {
     ide_last_closed_at_by_node: HashMap<NodeId, SystemTime>,
     sftp_view: sftp::SftpViewState,
     launcher: LauncherState,
+    launcher_wsl_list_state: ListState,
+    launcher_wsl_list_cache: RefCell<VirtualListSignatureCache>,
     graphics: GraphicsState,
     connection_monitor: ConnectionMonitorState,
+    connection_monitor_section_list_state: ListState,
+    connection_monitor_section_list_cache: RefCell<VirtualListSignatureCache>,
+    connection_pool_body_list_state: ListState,
+    connection_pool_body_list_cache: RefCell<VirtualListSignatureCache>,
     cloud_sync_store: oxideterm_cloud_sync::state::CloudSyncStateStore,
     cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService,
     cloud_sync_form: cloud_sync::CloudSyncFormDraft,
+    cloud_sync_section_list_state: ListState,
+    cloud_sync_section_list_cache: RefCell<VirtualListSignatureCache>,
     cloud_sync_open_select: Option<cloud_sync::CloudSyncSelect>,
     cloud_sync_focused_select: Option<cloud_sync::CloudSyncSelect>,
     cloud_sync_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,

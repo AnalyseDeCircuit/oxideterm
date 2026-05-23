@@ -4,11 +4,12 @@ use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Context, CursorStyle, Entity, Hsla, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Pixels, Point, ScrollHandle, SharedString,
+    AnyElement, App, Context, CursorStyle, ElementId, Entity, Hsla, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Pixels, Point, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, StyledText, TextLayout, TextRun, Timer, Window, div, font,
     prelude::FluentBuilder, px, rgb,
 };
+use gpui_component::scroll::{Scrollbar, ScrollbarAxis};
 use oxideterm_gpui_ui::{
     tauri_ui_font_family,
     text_input::{TextInputAnchor, text_input_anchor_probe},
@@ -37,6 +38,22 @@ pub(crate) trait SelectableTextScrollExt:
 impl<T> SelectableTextScrollExt for T where
     T: StatefulInteractiveElement + gpui_component::scroll::ScrollableElement + Sized
 {
+}
+
+pub(crate) fn selectable_vertical_scrollbar_layer(
+    id: impl Into<ElementId>,
+    handle: &ScrollHandle,
+) -> AnyElement {
+    // Keep scrollbar chrome outside the scrolled content tree; otherwise the
+    // thumb is translated with the page and disappears while dragging down.
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .child(Scrollbar::new(handle).id(id).axis(ScrollbarAxis::Vertical))
+        .into_any_element()
 }
 
 #[derive(Clone)]

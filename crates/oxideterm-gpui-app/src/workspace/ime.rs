@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, time::Instant};
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId,
@@ -382,16 +382,14 @@ impl WorkspaceApp {
     pub(super) fn update_text_input_anchor(
         &mut self,
         anchor: TextInputAnchor,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) {
         if self.text_input_anchors.get(&anchor.id) != Some(&anchor) {
-            let should_notify = self
-                .active_ime_target()
-                .is_some_and(|target| target.anchor_id() == anchor.id);
+            // Anchor probes run during layout, so scrolling a focused input can
+            // update its bounds every frame. Browsers do not schedule an app
+            // render for that geometry-only change; store it for hit-testing
+            // and IME math without feeding another cx.notify loop.
             self.text_input_anchors.insert(anchor.id, anchor);
-            if should_notify {
-                cx.notify();
-            }
         }
     }
 
@@ -532,8 +530,19 @@ impl WorkspaceApp {
         // owner instead of a hand-maintained list of focused booleans, otherwise
         // newly migrated inputs such as the AI sidebar can render a stale
         // invisible caret after text input.
+        if self.settings_caret_blink_paused() {
+            return false;
+        }
         self.active_ime_target()
             .is_some_and(ime_target_should_blink_caret)
+    }
+
+    fn settings_caret_blink_paused(&self) -> bool {
+        self.active_ime_target()
+            .is_some_and(|target| matches!(target, WorkspaceImeTarget::Settings(_)))
+            && self
+                .settings_caret_blink_pause_until
+                .is_some_and(|until| Instant::now() < until)
     }
 
     pub(super) fn marked_text_for_target(&self, target: WorkspaceImeTarget) -> Option<&str> {

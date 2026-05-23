@@ -152,7 +152,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn render_launcher_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_launcher_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         if cfg!(target_os = "windows") {
             return self.render_launcher_wsl_surface(cx);
@@ -191,7 +191,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_launcher_wsl_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_launcher_wsl_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let filtered_distros = self.launcher.core.filtered_wsl_distros();
         div()
@@ -334,7 +334,7 @@ impl WorkspaceApp {
     }
 
     fn render_launcher_wsl_content(
-        &self,
+        &mut self,
         filtered_distros: Vec<WslDistro>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -371,22 +371,64 @@ impl WorkspaceApp {
             );
         }
 
+        self.sync_launcher_wsl_list_state(&filtered_distros);
+        let state = self.launcher_wsl_list_state.clone();
+        let spec = self.launcher_wsl_list_spec();
+        let workspace = cx.entity();
         div()
             .id("launcher-wsl-scroll")
             .flex_1()
             .min_h(px(0.0))
-            .selectable_overflow_y_scrollbar(
-                &self.selectable_text_scroll_handle("launcher-wsl-scroll"),
-            )
-            .p(px(LAUNCHER_WSL_CONTENT_PADDING))
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .children(
-                filtered_distros
-                    .into_iter()
-                    .map(|distro| self.render_launcher_wsl_row(distro, cx)),
-            )
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    workspace.update(cx, |this, cx| this.render_launcher_wsl_list_item(index, cx))
+                },
+            ))
+            .into_any_element()
+    }
+
+    fn sync_launcher_wsl_list_state(&mut self, distros: &[WslDistro]) {
+        let signatures = distros
+            .iter()
+            .map(launcher_wsl_distro_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.launcher_wsl_list_state,
+            &mut self.launcher_wsl_list_cache.borrow_mut(),
+            "launcher-wsl-distros",
+            &signatures,
+            self.launcher_wsl_list_spec(),
+        );
+    }
+
+    fn launcher_wsl_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT),
+            LAUNCHER_WSL_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_launcher_wsl_list_item(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let distros = self.launcher.core.filtered_wsl_distros();
+        let total = distros.len();
+        let Some(distro) = distros.into_iter().nth(index) else {
+            return div().into_any_element();
+        };
+        div()
+            .px(px(LAUNCHER_WSL_CONTENT_PADDING))
+            .when(index == 0, |item| item.pt(px(LAUNCHER_WSL_CONTENT_PADDING)))
+            .pb(px(if index + 1 == total {
+                LAUNCHER_WSL_CONTENT_PADDING
+            } else {
+                8.0
+            }))
+            .child(self.render_launcher_wsl_row(distro, cx))
             .into_any_element()
     }
 
@@ -1216,6 +1258,16 @@ fn launcher_requires_opt_in() -> bool {
 fn launcher_element_id_for_path(path: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     path.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn launcher_wsl_distro_signature(distro: &WslDistro) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Distro name is the row identity; default/running badges affect visible row
+    // content, so include them when deciding whether GPUI should remeasure.
+    distro.name.hash(&mut hasher);
+    distro.is_default.hash(&mut hasher);
+    distro.is_running.hash(&mut hasher);
     hasher.finish()
 }
 

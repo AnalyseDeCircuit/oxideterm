@@ -489,25 +489,29 @@ impl WorkspaceApp {
         anchor: OverlayAnchor,
         cx: &mut Context<Self>,
     ) {
+        let should_notify = self
+            .open_settings_select
+            .is_some_and(|select| select.anchor_id() == anchor.id)
+            || (self.open_new_connection_select == Some(NewConnectionSelect::Group)
+                && anchor.id == SelectAnchorId::NewConnectionGroup)
+            || (matches!(
+                anchor.id,
+                SelectAnchorId::AiPanelRoot
+                    | SelectAnchorId::AiConversationList
+                    | SelectAnchorId::AiChatMenu
+                    | SelectAnchorId::AiModelSelector
+                    | SelectAnchorId::AiProfileSelector
+                    | SelectAnchorId::AiSafetyMenu
+                    | SelectAnchorId::AiContextPopover
+            ) && self.has_ai_sidebar_floating_overlay())
+            || self
+                .settings_slider_drag
+                .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
+        if !should_notify && !select_anchor_tracks_while_closed(anchor.id) {
+            self.select_anchors.remove(&anchor.id);
+            return;
+        }
         if self.select_anchors.get(&anchor.id) != Some(&anchor) {
-            let should_notify = self
-                .open_settings_select
-                .is_some_and(|select| select.anchor_id() == anchor.id)
-                || (self.open_new_connection_select == Some(NewConnectionSelect::Group)
-                    && anchor.id == SelectAnchorId::NewConnectionGroup)
-                || (matches!(
-                    anchor.id,
-                    SelectAnchorId::AiPanelRoot
-                        | SelectAnchorId::AiConversationList
-                        | SelectAnchorId::AiChatMenu
-                        | SelectAnchorId::AiModelSelector
-                        | SelectAnchorId::AiProfileSelector
-                        | SelectAnchorId::AiSafetyMenu
-                        | SelectAnchorId::AiContextPopover
-                ) && self.has_ai_sidebar_floating_overlay())
-                || self
-                    .settings_slider_drag
-                    .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
             self.select_anchors.insert(anchor.id, anchor);
             if should_notify {
                 cx.notify();
@@ -1758,6 +1762,29 @@ fn settings_input_is_secret(input: SettingsInput) -> bool {
             | SettingsInput::CloudSyncSecretAccessKey
             | SettingsInput::CloudSyncSessionToken
             | SettingsInput::CloudSyncSyncPassword
+    )
+}
+
+fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
+    // Sliders and non-settings overlays need an anchor before pointer-down can
+    // open or drag them. Plain settings selects can be measured lazily once the
+    // popup is open, which avoids per-scroll anchor churn on dense pages.
+    matches!(
+        anchor_id,
+        SelectAnchorId::SettingsAppearanceBorderRadiusSlider
+            | SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider
+            | SelectAnchorId::SettingsAppearanceBackgroundBlurSlider
+            | SelectAnchorId::SettingsTerminalFontSizeSlider
+            | SelectAnchorId::AiPanelRoot
+            | SelectAnchorId::AiConversationList
+            | SelectAnchorId::AiChatMenu
+            | SelectAnchorId::AiModelSelector
+            | SelectAnchorId::AiProfileSelector
+            | SelectAnchorId::AiSafetyMenu
+            | SelectAnchorId::AiContextPopover
+            | SelectAnchorId::NewConnectionGroup
+            | SelectAnchorId::IdeAgentStatus
+            | SelectAnchorId::TerminalCastSeekbar
     )
 }
 

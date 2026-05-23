@@ -119,10 +119,9 @@ impl WorkspaceApp {
                             .border_color(rgba(
                                 (self.tokens.ui.border << 8) | AI_PROVIDER_MODEL_BORDER_ALPHA,
                             ))
+                            // The masked key display sits inside a provider
+                            // card, so border/background is enough elevation.
                             .bg(self.settings_panel_background(self.tokens.ui.bg_card))
-                            .shadow(oxideterm_gpui_ui::tauri_card_shadow(
-                                self.tokens.ui.bg_card,
-                            ))
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .italic()
                             .text_color(rgb(self.tokens.ui.text_muted))
@@ -227,12 +226,23 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn ensure_ai_provider_key_statuses(&mut self, cx: &mut Context<Self>) {
-        let provider_jobs: Vec<_> = ai_provider_views(self.settings_store.settings())
-            .into_iter()
+        let provider_views = ai_provider_views(self.settings_store.settings());
+        self.ensure_ai_provider_key_statuses_for_views(&provider_views, cx);
+    }
+
+    pub(in crate::workspace) fn ensure_ai_provider_key_statuses_for_views(
+        &mut self,
+        provider_views: &[AiProviderView],
+        cx: &mut Context<Self>,
+    ) {
+        // Rendering OxideSens already derives provider views, so reuse that
+        // snapshot when available instead of parsing the same JSON again.
+        let provider_jobs: Vec<_> = provider_views
+            .iter()
             .filter(|provider| {
                 ai_provider_key_display_state(&provider.provider_type, false).shows_key_control()
             })
-            .map(|provider| provider.id)
+            .map(|provider| provider.id.clone())
             .collect();
 
         for provider_id in provider_jobs {

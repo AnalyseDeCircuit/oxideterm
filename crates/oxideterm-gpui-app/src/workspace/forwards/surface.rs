@@ -1,3 +1,14 @@
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ForwardsSection {
+    PortDetection,
+    QuickActions,
+    Separator,
+    Table,
+    CreateForm,
+    Error,
+    RemotePorts,
+}
+
 impl WorkspaceApp {
     pub(super) fn open_forwards_tab(
         &mut self,
@@ -41,7 +52,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_forwards_surface(
-        &self,
+        &mut self,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -52,25 +63,15 @@ impl WorkspaceApp {
         let Some(node_id) = self.forward_tab_nodes.get(&tab_id).cloned() else {
             return self.render_empty_workspace(cx);
         };
-        let node_ready = self
-            .ssh_nodes
-            .get(&node_id)
-            .is_some_and(|node| node.readiness == NodeReadiness::Ready);
-        let manager = self.forwarding_manager_for_node_readonly(&node_id);
-        let forwards = manager
-            .as_ref()
-            .map(|manager| manager.list_forwards())
-            .unwrap_or_default();
-        let forwards_for_remote_ports = forwards.clone();
+        self.sync_forwards_section_list_state(tab_id, &node_id);
         let has_background = self.terminal_background_preferences("forwards").is_some();
-
+        let state = self.forwards_section_list_state.clone();
+        let workspace = cx.entity();
+        let spec = self.forwards_section_list_spec();
+        let list_node_id = node_id.clone();
         let mut surface = div()
             .id("forwards-view-scroll")
             .size_full()
-            .selectable_overflow_y_scroll(
-                &self.selectable_text_scroll_handle("forwards-view-scroll"),
-            )
-            .p(px(FORWARDS_PAGE_PADDING))
             .font_family(settings_ui_font_family(
                 &self.settings_store.settings().appearance.ui_font_family,
             ))
@@ -79,59 +80,11 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.bg)
             })
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(FORWARDS_MAX_WIDTH))
-                    .mx_auto()
-                    .flex()
-                    .flex_col()
-                    .gap(px(FORWARDS_SECTION_GAP))
-                    .when(!self.forwarding_view.new_ports.is_empty(), |page| {
-                        page.child(self.render_port_detection_banner(
-                            node_id.clone(),
-                            tab_id,
-                            self.forwarding_view.new_ports.clone(),
-                            has_background,
-                            cx,
-                        ))
-                    })
-                    .child(self.render_forwards_quick_actions(
-                        node_id.clone(),
-                        node_ready,
-                        tab_id,
-                        has_background,
-                        cx,
-                    ))
-                    .child(self.render_forwards_separator(has_background))
-                    .child(self.render_forwards_table(
-                        node_id.clone(),
-                        tab_id,
-                        forwards,
-                        manager,
-                        has_background,
-                        cx,
-                    ))
-                    .when(self.forwarding_view.show_new_form, |page| {
-                        page.child(self.render_forward_create_form(
-                            node_id.clone(),
-                            tab_id,
-                            has_background,
-                            cx,
-                        ))
-                    })
-                    .when_some(self.forwarding_view.error.as_ref(), |page, error| {
-                        page.child(self.render_forwards_error(error))
-                    })
-                    .child(self.render_forwards_separator(has_background))
-                    .child(self.render_remote_ports_section(
-                        node_id.clone(),
-                        tab_id,
-                        &forwards_for_remote_ports,
-                        has_background,
-                        cx,
-                    )),
-            );
+            .child(tauri_virtual_list(state, spec, move |index, _window, cx| {
+                workspace.update(cx, |this, cx| {
+                    this.render_forwards_section_item(index, tab_id, list_node_id.clone(), cx)
+                })
+            }));
         if self.forwarding_view.editing_forward.is_some() {
             surface = surface.child(self.render_forward_edit_modal(
                 node_id.clone(),
@@ -149,6 +102,176 @@ impl WorkspaceApp {
             ));
         }
         surface.into_any_element()
+    }
+
+    fn sync_forwards_section_list_state(&mut self, tab_id: TabId, node_id: &NodeId) {
+        let spec = self.forwards_section_list_spec();
+        let identity = format!("forwards:{}:{}", tab_id.0, node_id.0);
+        let signatures = self.forwards_section_signatures(node_id);
+        sync_tauri_variable_list_state_by_signatures(
+            &self.forwards_section_list_state,
+            &mut self.forwards_section_list_cache.borrow_mut(),
+            &identity,
+            &signatures,
+            spec,
+        );
+    }
+
+    fn forwards_section_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT),
+            FORWARDS_SECTION_LIST_OVERSCAN,
+        )
+    }
+
+    fn forwards_sections(&self) -> Vec<ForwardsSection> {
+        let mut sections = Vec::new();
+        if !self.forwarding_view.new_ports.is_empty() {
+            sections.push(ForwardsSection::PortDetection);
+        }
+        sections.extend([
+            ForwardsSection::QuickActions,
+            ForwardsSection::Separator,
+            ForwardsSection::Table,
+        ]);
+        if self.forwarding_view.show_new_form {
+            sections.push(ForwardsSection::CreateForm);
+        }
+        if self.forwarding_view.error.is_some() {
+            sections.push(ForwardsSection::Error);
+        }
+        sections.extend([ForwardsSection::Separator, ForwardsSection::RemotePorts]);
+        sections
+    }
+
+    fn forwards_section_signatures(&self, node_id: &NodeId) -> Vec<u64> {
+        self.forwards_sections()
+            .into_iter()
+            .enumerate()
+            .map(|(index, section)| self.forwards_section_signature(index, section, node_id))
+            .collect()
+    }
+
+    fn forwards_section_signature(
+        &self,
+        index: usize,
+        section: ForwardsSection,
+        node_id: &NodeId,
+    ) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        // Forward rows, detected ports, and form/error visibility all affect
+        // section height. Hash those states so GPUI ListState remeasures after
+        // port operations instead of reusing stale browser-section geometry.
+        index.hash(&mut hasher);
+        section.hash(&mut hasher);
+        node_id.hash(&mut hasher);
+        match section {
+            ForwardsSection::PortDetection => {
+                self.forwarding_view.new_ports.len().hash(&mut hasher);
+            }
+            ForwardsSection::QuickActions => {
+                self.ssh_nodes
+                    .get(node_id)
+                    .map(|node| node.readiness == NodeReadiness::Ready)
+                    .hash(&mut hasher);
+            }
+            ForwardsSection::Table | ForwardsSection::RemotePorts => {
+                if let Some(manager) = self.forwarding_manager_for_node_readonly(node_id) {
+                    let forwards = manager.list_forwards();
+                    forwards.len().hash(&mut hasher);
+                    for rule in forwards {
+                        rule.id.hash(&mut hasher);
+                        format!("{:?}", rule.status).hash(&mut hasher);
+                    }
+                }
+            }
+            ForwardsSection::CreateForm => {
+                format!("{:?}", self.forwarding_view.forward_type).hash(&mut hasher);
+                self.forwarding_view.skip_health_check.hash(&mut hasher);
+            }
+            ForwardsSection::Error => {
+                self.forwarding_view.error.hash(&mut hasher);
+            }
+            ForwardsSection::Separator => {}
+        }
+        hasher.finish()
+    }
+
+    fn render_forwards_section_item(
+        &mut self,
+        index: usize,
+        tab_id: TabId,
+        node_id: NodeId,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(section) = self.forwards_sections().get(index).copied() else {
+            return div().into_any_element();
+        };
+        let has_background = self.terminal_background_preferences("forwards").is_some();
+        div()
+            .w_full()
+            .max_w(px(FORWARDS_MAX_WIDTH))
+            .mx_auto()
+            .px(px(FORWARDS_PAGE_PADDING))
+            .pb(px(FORWARDS_SECTION_GAP))
+            .when(index == 0, |item| item.pt(px(FORWARDS_PAGE_PADDING)))
+            .when(index + 1 == self.forwards_sections().len(), |item| {
+                item.pb(px(FORWARDS_PAGE_PADDING))
+            })
+            .child(self.render_forwards_section(section, tab_id, node_id, has_background, cx))
+            .into_any_element()
+    }
+
+    fn render_forwards_section(
+        &self,
+        section: ForwardsSection,
+        tab_id: TabId,
+        node_id: NodeId,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match section {
+            ForwardsSection::PortDetection => self.render_port_detection_banner(
+                node_id,
+                tab_id,
+                self.forwarding_view.new_ports.clone(),
+                has_background,
+                cx,
+            ),
+            ForwardsSection::QuickActions => {
+                let node_ready = self
+                    .ssh_nodes
+                    .get(&node_id)
+                    .is_some_and(|node| node.readiness == NodeReadiness::Ready);
+                self.render_forwards_quick_actions(node_id, node_ready, tab_id, has_background, cx)
+            }
+            ForwardsSection::Separator => self.render_forwards_separator(has_background),
+            ForwardsSection::Table => {
+                let manager = self.forwarding_manager_for_node_readonly(&node_id);
+                let forwards = manager
+                    .as_ref()
+                    .map(|manager| manager.list_forwards())
+                    .unwrap_or_default();
+                self.render_forwards_table(node_id, tab_id, forwards, manager, has_background, cx)
+            }
+            ForwardsSection::CreateForm => {
+                self.render_forward_create_form(node_id, tab_id, has_background, cx)
+            }
+            ForwardsSection::Error => self
+                .forwarding_view
+                .error
+                .as_ref()
+                .map(|error| self.render_forwards_error(error))
+                .unwrap_or_else(|| div().into_any_element()),
+            ForwardsSection::RemotePorts => {
+                let forwards = self
+                    .forwarding_manager_for_node_readonly(&node_id)
+                    .as_ref()
+                    .map(|manager| manager.list_forwards())
+                    .unwrap_or_default();
+                self.render_remote_ports_section(node_id, tab_id, &forwards, has_background, cx)
+            }
+        }
     }
 
     fn render_forwards_quick_actions(
