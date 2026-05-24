@@ -332,11 +332,15 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .gap(px(4.0))
-            .child(self.settings_text_input_control(
+            .child(self.settings_text_input_control_with_align(
                 input,
                 value,
                 placeholder,
                 IDE_SETTINGS_INPUT_WIDTH,
+                // Tauri renders IDE typography overrides as number inputs. Keep
+                // their placeholder/value centered like the terminal numeric
+                // controls while ordinary text settings remain start-aligned.
+                TextInputContentAlign::Center,
                 cx,
             ));
         if let Some(suffix) = suffix {

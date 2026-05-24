@@ -5,6 +5,10 @@ impl WorkspaceApp {
         settings_store.settings_mut().sidebar_ui.zen_mode = false;
         let connection_store = ConnectionStore::load(default_connections_path())?;
         let settings = settings_store.settings().clone();
+        // Native plugin discovery intentionally stops at manifest parsing.
+        // Legacy Tauri ESM plugins remain visible in Plugin Manager, but
+        // the native path never evaluates JS or creates a WebView runtime.
+        let plugin_registry = plugin_host::NativePluginRegistry::discover(settings_store.path());
         let local_shells = scan_shells();
         let tokens = tokens_from_settings(&settings);
         let detected_graphics = detect_graphics(window);
@@ -215,10 +219,16 @@ impl WorkspaceApp {
                 &settings.sidebar_ui.active_section,
             ),
             active_surface: ActiveSurface::Terminal,
-            // Session sidebar is a browser-style tree list. The first migration
-            // boundary is the top-level flattened node rows; expanded child
-            // actions stay inside their parent row until they get their own
-            // tree-row virtualization.
+            active_session_sidebar_view_mode: ActiveSessionSidebarViewMode::Tree,
+            active_session_sidebar_focused_node_id: settings
+                .tree_ui
+                .focused_node_id
+                .clone()
+                .map(NodeId::new),
+            // Session sidebar is a browser-style tree/focus list from Tauri's
+            // Sidebar.tsx. The same ListState is resynced by mode-specific
+            // row signatures so switching views does not leave stale row
+            // measurements behind.
             active_session_sidebar_list_state: ListState::new(
                 ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT,
                 ListAlignment::Top,
@@ -682,6 +692,7 @@ impl WorkspaceApp {
             background_image_cache,
             settings_store,
             connection_store,
+            plugin_registry,
             session_manager: SessionManagerState::default(),
             // Session manager folder tree is a nested browser tree. Virtualize
             // the root rows first; expanded child rows stay grouped under their

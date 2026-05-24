@@ -1668,7 +1668,13 @@ impl WorkspaceApp {
         show_separator: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // Tauri KeyboardShortcutsModal renders each item as
+        // `flex items-center justify-between`: the label owns the left side and
+        // the kbd badge stays pinned to the row's right edge. Keep the explicit
+        // full-width/flex split here so GPUI virtual rows do not shrink to
+        // content and pull shortcuts next to the text.
         div()
+            .w_full()
             .h(px(SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT))
             .flex()
             .items_center()
@@ -1680,6 +1686,7 @@ impl WorkspaceApp {
             })
             .child(
                 div()
+                    .flex_1()
                     .min_w(px(0.0))
                     .truncate()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
@@ -1695,6 +1702,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex_none()
+                    .ml_auto()
                     .rounded(px(self.tokens.radii.sm))
                     .border_1()
                     .border_color(rgb(self.tokens.ui.border))

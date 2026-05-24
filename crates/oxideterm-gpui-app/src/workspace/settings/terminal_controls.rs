@@ -16,7 +16,7 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
-            text_input(
+            text_input_with_content_align(
                 &self.tokens,
                 TextInputView {
                     value: display_value,
@@ -28,9 +28,12 @@ impl WorkspaceApp {
                     selected_range: self.ime_selected_range_for_target(target),
                     marked_text: self.marked_text_for_target(target),
                 },
+                TextInputContentAlign::Center,
             )
             .w(px(width))
-            .justify_end()
+            // Tauri number inputs use the browser input text box; keep numeric
+            // settings values centered in the padded field instead of inheriting
+            // the old right-aligned GPUI flex row.
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(
                 MouseButton::Left,
@@ -191,6 +194,25 @@ impl WorkspaceApp {
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.settings_text_input_control_with_align(
+            input,
+            value,
+            placeholder,
+            width,
+            TextInputContentAlign::Start,
+            cx,
+        )
+    }
+
+    fn settings_text_input_control_with_align(
+        &self,
+        input: SettingsInput,
+        value: String,
+        placeholder: String,
+        width: f32,
+        align: TextInputContentAlign,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let focused = self.focused_settings_input == Some(input);
         let display_value = if focused {
             self.settings_input_draft.as_str()
@@ -201,7 +223,7 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
-            text_input(
+            text_input_with_content_align(
                 &self.tokens,
                 TextInputView {
                     value: display_value,
@@ -213,6 +235,7 @@ impl WorkspaceApp {
                     selected_range: self.ime_selected_range_for_target(target),
                     marked_text: self.marked_text_for_target(target),
                 },
+                align,
             )
             .w(px(width))
             .cursor(CursorStyle::IBeam)

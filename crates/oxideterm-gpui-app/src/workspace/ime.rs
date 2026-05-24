@@ -15,7 +15,7 @@ use super::launcher::LauncherInput;
 use super::new_connection::NewConnectionField;
 use super::quick_commands::QuickCommandInput;
 use super::session_manager::SessionManagerInput;
-use super::settings::settings_input_accepts_newline;
+use super::settings::{settings_input_accepts_newline, settings_input_line_height};
 use super::sftp::SftpInput;
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::{
@@ -881,7 +881,8 @@ impl WorkspaceApp {
             return 0;
         }
         let line_height = self.ime_target_line_height(target, bounds, lines.len());
-        let relative_y = (position.y - bounds.top()).max(px(0.0));
+        let relative_y =
+            (position.y - bounds.top() - Self::ime_target_vertical_padding(target)).max(px(0.0));
         let line_index =
             ((relative_y / line_height).floor() as usize).min(lines.len().saturating_sub(1));
         let line_range = lines[line_index].clone();
@@ -897,6 +898,12 @@ impl WorkspaceApp {
     ) -> Pixels {
         match target {
             WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => px(20.0),
+            WorkspaceImeTarget::Settings(input) if settings_input_accepts_newline(input) => {
+                // Tauri textareas hit-test by their visual line box. Settings
+                // multiline fields are hand-rendered in GPUI, so keep the IME
+                // y-to-line mapping tied to the shared textarea renderer.
+                px(settings_input_line_height(input))
+            }
             _ if ime_target_is_read_only(target) && line_count > 0 => {
                 let inferred = f32::from(bounds.size.height) / line_count as f32;
                 px(inferred.clamp(16.0, 40.0))
@@ -917,6 +924,18 @@ impl WorkspaceApp {
                 px(0.0)
             }
             _ => px(control_padding_x),
+        }
+    }
+
+    fn ime_target_vertical_padding(target: WorkspaceImeTarget) -> Pixels {
+        match target {
+            WorkspaceImeTarget::Settings(input) if settings_input_accepts_newline(input) => {
+                // Settings textareas render their own `py-2` equivalent. Browser
+                // hit-testing starts from the content box, so subtract that top
+                // inset before mapping y to a UTF-16 line.
+                px(8.0)
+            }
+            _ => px(0.0),
         }
     }
 

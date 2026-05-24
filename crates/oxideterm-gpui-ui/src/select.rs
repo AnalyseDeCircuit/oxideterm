@@ -95,6 +95,53 @@ pub enum SelectAnchorId {
     TerminalCastSeekbar,
 }
 
+impl SelectAnchorId {
+    pub fn is_settings_select_trigger(self) -> bool {
+        // Settings SelectTrigger mirrors Radix: the popup can read the trigger
+        // rect immediately on pointer-down. GPUI portal overlays need the same
+        // rect prewarmed while closed so the first click does not wait for a
+        // follow-up notify/prepaint cycle.
+        matches!(
+            self,
+            Self::SettingsLanguage
+                | Self::SettingsAppearanceTheme
+                | Self::SettingsAppearanceDensity
+                | Self::SettingsAppearanceAnimation
+                | Self::SettingsAppearanceRenderProfile
+                | Self::SettingsAppearanceFrostedGlass
+                | Self::SettingsAppearanceBackgroundFit
+                | Self::SettingsCustomThemeDuplicate
+                | Self::SettingsTerminalFontFamily
+                | Self::SettingsTerminalEncoding
+                | Self::SettingsTerminalCursorStyle
+                | Self::SettingsIdeAgentMode
+                | Self::SettingsLocalShell
+                | Self::SettingsConnectionIdleTimeout
+                | Self::SettingsReconnectMaxAttempts
+                | Self::SettingsReconnectBaseDelay
+                | Self::SettingsReconnectMaxDelay
+                | Self::SettingsAiProviderTemplate
+                | Self::SettingsAiContextMaxChars
+                | Self::SettingsAiContextVisibleLines
+                | Self::SettingsAiGlobalReasoning
+                | Self::SettingsAiProfileProvider(_)
+                | Self::SettingsAiProfileReasoning(_)
+                | Self::SettingsAiProviderReasoning(_)
+                | Self::SettingsAiModelReasoning(_, _)
+                | Self::SettingsAiEmbeddingProvider
+                | Self::SettingsKnowledgeCollectionScope
+                | Self::SettingsKnowledgeDocumentFormat
+                | Self::SettingsAiMcpTransport
+                | Self::SettingsAiMcpAuthMode
+                | Self::SettingsSftpConcurrent
+                | Self::SettingsSftpDirectoryParallelism
+                | Self::SettingsSftpConflict
+                | Self::SettingsHighlightPreset
+                | Self::SettingsHighlightRenderMode(_)
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OverlayAnchor {
     pub id: SelectAnchorId,
@@ -559,7 +606,8 @@ mod tests {
     use gpui::CursorStyle;
 
     use super::{
-        interactive_select_trigger_spec, readonly_value_trigger_spec, select_option_is_actionable,
+        SelectAnchorId, interactive_select_trigger_spec, readonly_value_trigger_spec,
+        select_option_is_actionable,
     };
 
     #[test]
@@ -581,5 +629,17 @@ mod tests {
         assert_eq!(interactive.cursor, CursorStyle::PointingHand);
         assert_eq!(interactive.opacity, 1.0);
         assert!(interactive.show_chevron);
+    }
+
+    #[test]
+    fn settings_select_anchor_ids_are_distinct_from_slider_and_sidebar_anchors() {
+        assert!(SelectAnchorId::SettingsLanguage.is_settings_select_trigger());
+        assert!(SelectAnchorId::SettingsAiProfileProvider(2).is_settings_select_trigger());
+        assert!(SelectAnchorId::SettingsAiModelReasoning(1, 3).is_settings_select_trigger());
+        assert!(SelectAnchorId::SettingsSftpConflict.is_settings_select_trigger());
+
+        assert!(!SelectAnchorId::SettingsTerminalFontSizeSlider.is_settings_select_trigger());
+        assert!(!SelectAnchorId::AiModelSelector.is_settings_select_trigger());
+        assert!(!SelectAnchorId::NewConnectionGroup.is_settings_select_trigger());
     }
 }

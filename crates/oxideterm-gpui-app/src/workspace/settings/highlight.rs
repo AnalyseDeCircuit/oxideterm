@@ -177,6 +177,7 @@ impl WorkspaceApp {
             rule.label.clone()
         };
         let mode_label = highlight_render_mode_label(rule.render_mode, &self.i18n);
+        let validation_error = highlight_rule_validation_error(rule);
 
         div()
             .w_full()
@@ -375,26 +376,22 @@ impl WorkspaceApp {
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(if highlight_rule_validation_error(rule).is_some() {
+                    .text_color(if validation_error.is_some() {
                         rgb(self.tokens.ui.warning)
                     } else {
                         rgb(self.tokens.ui.text_muted)
                     })
-                    .child(
-                        highlight_rule_validation_error(rule)
-                            .map(|reason| {
-                                self.i18n.t(&format!(
-                                    "settings_view.terminal.highlight_rules.validation.{reason}"
-                                ))
-                            })
-                            .unwrap_or_else(|| {
-                                self.i18n.t(if rule.is_regex {
-                                    "settings_view.terminal.highlight_rules.mode_hint.regex"
-                                } else {
-                                    "settings_view.terminal.highlight_rules.mode_hint.literal"
-                                })
-                            }),
-                    ),
+                    .child(validation_error.map(|reason| {
+                        self.i18n.t(&format!(
+                            "settings_view.terminal.highlight_rules.validation.{reason}"
+                        ))
+                    }).unwrap_or_else(|| {
+                        self.i18n.t(if rule.is_regex {
+                            "settings_view.terminal.highlight_rules.mode_hint.regex"
+                        } else {
+                            "settings_view.terminal.highlight_rules.mode_hint.literal"
+                        })
+                    })),
             )
             .into_any_element()
     }

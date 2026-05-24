@@ -1,3 +1,5 @@
+use gpui::StatefulInteractiveElement;
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_new_connection_modal(
         &self,
@@ -487,7 +489,8 @@ impl WorkspaceApp {
                                                     cx,
                                                 ))
                                                 .child(
-                                                    div()
+                                                        div()
+                                                        .id("new-connection-agent-forwarding-help")
                                                         .size(px(18.0))
                                                         .flex()
                                                         .items_center()
@@ -523,7 +526,20 @@ impl WorkspaceApp {
                                                                     cx.stop_propagation();
                                                                 },
                                                             ),
-                                                        ),
+                                                        )
+                                                        .on_hover(cx.listener(
+                                                            |this, hovered: &bool, _window, cx| {
+                                                                if !*hovered {
+                                                                    // TooltipContent is rendered in a
+                                                                    // portal, so the trigger must clear
+                                                                    // ownership explicitly on leave.
+                                                                    this.clear_workspace_tooltip(
+                                                                        "new-connection-agent-forwarding",
+                                                                        cx,
+                                                                    );
+                                                                }
+                                                            },
+                                                        )),
                                                 ),
                                         )
                                         .child(self.render_connection_field(

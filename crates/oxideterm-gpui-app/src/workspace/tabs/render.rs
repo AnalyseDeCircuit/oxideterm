@@ -1,3 +1,5 @@
+use gpui::StatefulInteractiveElement;
+
 impl WorkspaceApp {
     pub(super) fn render_tab_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
@@ -267,6 +269,10 @@ impl WorkspaceApp {
             .child(div().max_w(px(72.0)).truncate().child(phase_text))
             .child(
                 div()
+                    .id((
+                        gpui::ElementId::from("tabbar-cancel-reconnect"),
+                        node_id.0.clone(),
+                    ))
                     .size(px(self.tokens.metrics.tab_close_button_size))
                     .flex()
                     .items_center()
@@ -289,6 +295,14 @@ impl WorkspaceApp {
                                 f32::from(event.position.y) + 16.0,
                                 cx,
                             );
+                        }
+                    }))
+                    .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                        if !*hovered {
+                            // The reconnect tooltip is mounted at the workspace
+                            // root, so the tab button owns the explicit leave
+                            // clear just like a browser TooltipTrigger.
+                            this.clear_workspace_tooltip("tabbar-cancel-reconnect", cx);
                         }
                     }))
                     .on_mouse_down(

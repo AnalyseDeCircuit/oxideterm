@@ -5,6 +5,8 @@ enum TerminalCommandSpecsAction {
     Save,
 }
 
+const SETTINGS_TERMINAL_TEXTAREA_LINE_GAP: f32 = 2.0; // Existing GPUI visual gap between rendered textarea rows.
+
 impl WorkspaceApp {
     fn settings_general_section(&self, section_index: usize, cx: &mut Context<Self>) -> AnyElement {
         let settings = self.settings_store.settings();
@@ -483,6 +485,7 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let theme = self.tokens.ui;
+        let line_height = settings_input_line_height(input);
         let mut textarea = div()
             .w_full()
             .min_h(px(96.0))
@@ -506,28 +509,37 @@ impl WorkspaceApp {
             .text_color(rgb(theme.text))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                 }),
             );
 
         if value.is_empty() {
-            for placeholder in ["vim", "nvim", "lazygit"] {
-                textarea = textarea.child(
-                    div()
-                        .min_h(px(18.0))
-                        .text_color(rgb(theme.text_muted))
-                        .child(placeholder),
-                );
-            }
+            textarea = self.render_settings_multiline_textarea_lines(
+                textarea,
+                target,
+                "vim\nnvim\nlazygit",
+                true,
+                line_height,
+            );
         } else {
-            for line in value.split('\n') {
-                textarea = textarea.child(div().min_h(px(18.0)).child(line.to_string()));
-            }
+            textarea = self.render_settings_multiline_textarea_lines(
+                textarea,
+                target,
+                &value,
+                false,
+                line_height,
+            );
         }
 
         if let Some(marked) = self.marked_text_for_target(target) {
@@ -537,13 +549,6 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text))
                     .child(marked.to_string()),
             );
-        }
-
-        if focused {
-            textarea = textarea.child(text_caret(
-                &self.tokens,
-                self.new_connection_caret_visible,
-            ));
         }
 
         let control = text_input_anchor_probe(target.anchor_id(), textarea, move |anchor, _window, cx| {
@@ -596,6 +601,7 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let theme = self.tokens.ui;
+        let line_height = settings_input_line_height(input);
         let mut textarea = div()
             .w_full()
             .min_h(px(220.0))
@@ -619,12 +625,18 @@ impl WorkspaceApp {
             .text_color(rgb(theme.text))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                 }),
             );
 
@@ -633,9 +645,8 @@ impl WorkspaceApp {
         } else {
             value
         };
-        for line in display.lines() {
-            textarea = textarea.child(div().min_h(px(18.0)).child(line.to_string()));
-        }
+        textarea =
+            self.render_settings_multiline_textarea_lines(textarea, target, &display, false, line_height);
         if let Some(marked) = self.marked_text_for_target(target) {
             textarea = textarea.child(
                 div()
@@ -643,12 +654,6 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text))
                     .child(marked.to_string()),
             );
-        }
-        if focused {
-            textarea = textarea.child(text_caret(
-                &self.tokens,
-                self.new_connection_caret_visible,
-            ));
         }
         let control = text_input_anchor_probe(target.anchor_id(), textarea, move |anchor, _window, cx| {
             let _ = workspace.update(cx, |this, cx| {
@@ -727,6 +732,43 @@ impl WorkspaceApp {
                     ),
             )
             .into_any_element()
+    }
+
+    fn render_settings_multiline_textarea_lines(
+        &self,
+        mut textarea: Div,
+        target: WorkspaceImeTarget,
+        value: &str,
+        placeholder: bool,
+        line_height: f32,
+    ) -> Div {
+        let selection = self.ime_selected_range_for_target(target);
+        let theme = self.tokens.ui;
+        for (line_range, line_text) in settings_multiline_line_ranges(value) {
+            let (selection_range, caret_offset) =
+                settings_multiline_line_selection(selection.as_ref(), &line_range);
+            let line_box_height = (line_height - SETTINGS_TERMINAL_TEXTAREA_LINE_GAP).max(1.0);
+            let mut line = div().min_h(px(line_box_height));
+            if placeholder {
+                // Browser placeholder text is not part of the editable value;
+                // keep it muted and do not feed it through selection segments.
+                line = line.text_color(rgb(theme.text_muted)).child(line_text);
+            } else {
+                // Tauri uses a real textarea, so caret/selection sit inside the
+                // current visual line. Native renders line elements manually and
+                // must split the shared UTF-16 IME selection per line.
+                line = line.child(text_input_value_segments(
+                    &self.tokens,
+                    &line_text,
+                    false,
+                    selection_range,
+                    caret_offset,
+                    self.new_connection_caret_visible,
+                ));
+            }
+            textarea = textarea.child(line);
+        }
+        textarea
     }
 
     fn terminal_command_specs_button(
@@ -908,5 +950,76 @@ impl WorkspaceApp {
                     .t("settings_view.terminal.in_band_transfer.runtime_note"),
             )
             .into_any_element()
+    }
+}
+
+fn settings_multiline_line_ranges(value: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    let mut ranges = Vec::new();
+    let mut utf16_start = 0usize;
+    let mut utf16_offset = 0usize;
+    let mut byte_start = 0usize;
+
+    for (byte_index, ch) in value.char_indices() {
+        if ch == '\n' {
+            ranges.push((utf16_start..utf16_offset, value[byte_start..byte_index].to_string()));
+            utf16_offset += ch.len_utf16();
+            utf16_start = utf16_offset;
+            byte_start = byte_index + ch.len_utf8();
+        } else {
+            utf16_offset += ch.len_utf16();
+        }
+    }
+
+    ranges.push((utf16_start..utf16_offset, value[byte_start..].to_string()));
+    ranges
+}
+
+fn settings_multiline_line_selection(
+    selection: Option<&std::ops::Range<usize>>,
+    line_range: &std::ops::Range<usize>,
+) -> (Option<std::ops::Range<usize>>, Option<usize>) {
+    let Some(selection) = selection else {
+        return (None, None);
+    };
+
+    if selection.start == selection.end {
+        let caret = selection.start;
+        if caret >= line_range.start && caret <= line_range.end {
+            return (None, Some(caret.saturating_sub(line_range.start)));
+        }
+        return (None, None);
+    }
+
+    let start = selection.start.max(line_range.start);
+    let end = selection.end.min(line_range.end);
+    if start < end {
+        (
+            Some(start.saturating_sub(line_range.start)..end.saturating_sub(line_range.start)),
+            None,
+        )
+    } else {
+        (None, None)
+    }
+}
+
+#[cfg(test)]
+mod settings_terminal_textarea_tests {
+    use super::{settings_multiline_line_ranges, settings_multiline_line_selection};
+
+    #[test]
+    fn multiline_textarea_ranges_keep_trailing_empty_line() {
+        let ranges = settings_multiline_line_ranges("vim\n");
+
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0], (0..3, "vim".to_string()));
+        assert_eq!(ranges[1], (4..4, String::new()));
+    }
+
+    #[test]
+    fn multiline_textarea_selection_maps_global_caret_to_line_offset() {
+        let caret = 5..5;
+        let (_selection, caret_offset) = settings_multiline_line_selection(Some(&caret), &(4..8));
+
+        assert_eq!(caret_offset, Some(1));
     }
 }

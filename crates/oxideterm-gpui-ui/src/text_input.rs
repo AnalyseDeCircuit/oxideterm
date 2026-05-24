@@ -37,6 +37,12 @@ pub struct TextInputView<'a> {
     pub marked_text: Option<&'a str>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TextInputContentAlign {
+    Start,
+    Center,
+}
+
 pub fn text_input_anchor_probe(
     id: TextInputAnchorId,
     child: impl IntoElement,
@@ -125,6 +131,14 @@ impl Element for TextInputAnchorProbe {
 }
 
 pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
+    text_input_with_content_align(tokens, view, TextInputContentAlign::Start)
+}
+
+pub fn text_input_with_content_align(
+    tokens: &ThemeTokens,
+    view: TextInputView<'_>,
+    align: TextInputContentAlign,
+) -> Div {
     let theme = tokens.ui;
     let empty = view.value.is_empty();
     let marked = view.marked_text.unwrap_or_default();
@@ -180,35 +194,42 @@ pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
         })
         .cursor(CursorStyle::IBeam)
         .overflow_hidden()
-        .child(
-            div()
+        .child({
+            // Browser inputs align text inside the padded control box. GPUI
+            // text is composed from segments for selection/caret support, so
+            // centered number fields need the segment row to span the input.
+            let row = div()
                 .flex()
                 .flex_row()
                 .items_center()
-                .when(view.focused && visually_empty, |row| {
-                    row.child(text_caret(tokens, view.caret_visible))
-                })
-                .child(text_input_value_segments(
-                    tokens,
-                    &display,
-                    visually_empty,
-                    selection_range,
-                    caret_offset,
-                    view.caret_visible,
-                ))
-                .when(view.focused && !marked.is_empty(), |row| {
-                    row.child(
-                        div()
-                            .underline()
-                            .text_color(rgb(theme.text))
-                            .child(marked_display),
-                    )
-                })
-                .when(
-                    view.focused && !visually_empty && !show_selection && !show_positioned_caret,
-                    |row| row.child(text_caret(tokens, view.caret_visible)),
-                ),
-        )
+                .when(align == TextInputContentAlign::Center, |row| {
+                    row.w_full().justify_center()
+                });
+
+            row.when(view.focused && visually_empty, |row| {
+                row.child(text_caret(tokens, view.caret_visible))
+            })
+            .child(text_input_value_segments(
+                tokens,
+                &display,
+                visually_empty,
+                selection_range,
+                caret_offset,
+                view.caret_visible,
+            ))
+            .when(view.focused && !marked.is_empty(), |row| {
+                row.child(
+                    div()
+                        .underline()
+                        .text_color(rgb(theme.text))
+                        .child(marked_display),
+                )
+            })
+            .when(
+                view.focused && !visually_empty && !show_selection && !show_positioned_caret,
+                |row| row.child(text_caret(tokens, view.caret_visible)),
+            )
+        })
 }
 
 pub fn text_caret(tokens: &ThemeTokens, visible: bool) -> Div {

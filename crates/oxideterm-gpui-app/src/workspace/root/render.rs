@@ -804,11 +804,12 @@ impl WorkspaceApp {
         let id = id.into();
         let label = label.into();
         if let Some(tooltip) = self.workspace_tooltip.as_mut()
-            && self
-                .workspace_tooltip_pending
-                .as_ref()
-                .is_some_and(|pending| pending.id == id)
+            && tooltip.id == id
         {
+            // Once visible, a tooltip tracks pointer movement immediately like
+            // Tauri/Radix TooltipContent. Re-queueing it would restart the
+            // delay on every mouse move and leave stale text behind.
+            tooltip.label = label;
             tooltip.x = x;
             tooltip.y = y;
             return;
@@ -841,6 +842,7 @@ impl WorkspaceApp {
                     return;
                 }
                 workspace.workspace_tooltip = Some(WorkspaceTooltip {
+                    id: pending.id.clone(),
                     label: pending.label.clone(),
                     x: pending.x,
                     y: pending.y,
@@ -865,12 +867,7 @@ impl WorkspaceApp {
         if self
             .workspace_tooltip
             .as_ref()
-            .is_some_and(|tooltip| tooltip.label == id)
-        {
-            self.workspace_tooltip = None;
-            changed = true;
-        } else if self.workspace_tooltip.is_some()
-            && self.workspace_tooltip_pending.is_none()
+            .is_some_and(|tooltip| tooltip.id == id)
         {
             self.workspace_tooltip = None;
             changed = true;

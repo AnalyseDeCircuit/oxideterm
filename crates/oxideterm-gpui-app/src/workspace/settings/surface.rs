@@ -114,11 +114,12 @@ impl WorkspaceApp {
 
         let padding = self.tokens.metrics.settings_content_padding;
         let gap = self.tokens.metrics.settings_page_gap;
+        let outer_max_width = self.settings_content_outer_max_width();
         let section_index = index.saturating_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT);
         let mut item = div()
             .w_full()
             .min_w(px(0.0))
-            .max_w(px(self.tokens.metrics.settings_content_max_width))
+            .max_w(px(outer_max_width))
             .mx_auto()
             .px(px(padding))
             .pb(px(gap));
@@ -191,10 +192,11 @@ impl WorkspaceApp {
     fn wrap_settings_section_list_item(&self, index: usize, child: AnyElement) -> AnyElement {
         let padding = self.tokens.metrics.settings_content_padding;
         let gap = self.tokens.metrics.settings_page_gap;
+        let outer_max_width = self.settings_content_outer_max_width();
         let mut item = div()
             .w_full()
             .min_w(px(0.0))
-            .max_w(px(self.tokens.metrics.settings_content_max_width))
+            .max_w(px(outer_max_width))
             .mx_auto()
             .px(px(padding))
             .pb(px(gap));
@@ -205,6 +207,16 @@ impl WorkspaceApp {
             item = item.pb(px(padding));
         }
         item.child(child).into_any_element()
+    }
+
+    fn settings_content_outer_max_width(&self) -> f32 {
+        // Tauri SettingsView uses `max-w-4xl mx-auto p-10`: the 4xl max-width
+        // applies to the content box and padding is added outside it. GPUI's
+        // max_w constrains this padded wrapper directly, so include both sides
+        // of settings_content_padding or every settings page becomes visually
+        // narrower and more fixed-width than the browser version.
+        self.tokens.metrics.settings_content_max_width
+            + self.tokens.metrics.settings_content_padding * 2.0
     }
 
     fn render_settings_virtual_header(&self, tab: SettingsTab, cx: &mut Context<Self>) -> AnyElement {
