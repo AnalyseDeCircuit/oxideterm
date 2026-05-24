@@ -1,3 +1,8 @@
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
+
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, prelude::*, px, rgb};
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
@@ -64,11 +69,7 @@ fn collect_preview_matches<'a>(
     matches: &mut Vec<HighlightPreviewMatch<'a>>,
 ) {
     if rule.is_regex {
-        let Ok(regex) = regex::RegexBuilder::new(&rule.pattern)
-            .case_insensitive(!rule.case_sensitive)
-            .unicode(true)
-            .build()
-        else {
+        let Some(regex) = cached_highlight_regex(&rule.pattern, rule.case_sensitive) else {
             return;
         };
         for matched in regex.find_iter(line) {
@@ -157,17 +158,41 @@ pub fn highlight_rule_validation_error(rule: &HighlightRule) -> Option<&'static 
     if !rule.is_regex {
         return None;
     }
-    let Ok(regex) = regex::RegexBuilder::new(pattern)
-        .case_insensitive(!rule.case_sensitive)
-        .unicode(true)
-        .build()
-    else {
+    let Some(regex) = cached_highlight_regex(pattern, rule.case_sensitive) else {
         return Some("invalid-regex");
     };
     if regex.is_match("") {
         return Some("empty-match");
     }
     None
+}
+
+fn cached_highlight_regex(pattern: &str, case_sensitive: bool) -> Option<regex::Regex> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<regex::Regex>>>> = OnceLock::new();
+    let key = format!("{case_sensitive}\u{1f}{pattern}");
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(compiled) = cache.lock().ok().and_then(|cache| cache.get(&key).cloned()) {
+        return compiled;
+    }
+
+    // Tauri builds RuntimeHighlightRule with useMemo instead of compiling regexes
+    // during every render. Native preview and validation share this small cache
+    // so adding regex rules does not repeatedly rebuild the same automata while
+    // scrolling or typing in unrelated settings fields.
+    let compiled = regex::RegexBuilder::new(pattern)
+        .case_insensitive(!case_sensitive)
+        .unicode(true)
+        .build()
+        .ok();
+    if let Ok(mut cache) = cache.lock() {
+        if cache.len() > 64
+            && let Some(first_key) = cache.keys().next().cloned()
+        {
+            cache.remove(&first_key);
+        }
+        cache.insert(key, compiled.clone());
+    }
+    compiled
 }
 
 pub fn parse_hex_u32(value: &str) -> Option<u32> {
@@ -380,4 +405,48 @@ fn highlight_rule(
         rule.foreground = Some(foreground.to_string());
         rule.background = Some(background.to_string());
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{accepted_highlight_preview_matches, highlight_rule_validation_error};
+    use oxideterm_settings::create_default_highlight_rule;
+
+    #[test]
+    fn regex_preview_and_validation_share_compiled_cache_behavior() {
+        let rule = create_default_highlight_rule(|rule| {
+            rule.pattern = r"\berror\b".to_string();
+            rule.is_regex = true;
+        });
+
+        // The second validation/preview pass exercises the cached path while
+        // preserving the same public result as Tauri's memoized runtime rules.
+        assert_eq!(highlight_rule_validation_error(&rule), None);
+        assert_eq!(highlight_rule_validation_error(&rule), None);
+        assert_eq!(
+            accepted_highlight_preview_matches("fatal error happened", &[rule.clone()]).len(),
+            1
+        );
+        assert_eq!(
+            accepted_highlight_preview_matches("fatal error happened", &[rule]).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn invalid_regex_is_cached_as_invalid() {
+        let rule = create_default_highlight_rule(|rule| {
+            rule.pattern = "(".to_string();
+            rule.is_regex = true;
+        });
+
+        assert_eq!(
+            highlight_rule_validation_error(&rule),
+            Some("invalid-regex")
+        );
+        assert_eq!(
+            highlight_rule_validation_error(&rule),
+            Some("invalid-regex")
+        );
+    }
 }

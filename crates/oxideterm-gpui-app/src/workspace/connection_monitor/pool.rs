@@ -1,3 +1,5 @@
+use gpui::StatefulInteractiveElement;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum ConnectionMonitorSection {
     Pool,
@@ -533,6 +535,10 @@ impl WorkspaceApp {
                     )
                     .child(
                         div()
+                            .id((
+                                gpui::ElementId::from("connection-pool-keepalive-action"),
+                                connection_id.clone(),
+                            ))
                             .w(px(CONNECTION_POOL_BUTTON_SIZE))
                             .h(px(CONNECTION_POOL_BUTTON_SIZE))
                             .flex()
@@ -557,6 +563,17 @@ impl WorkspaceApp {
                                         f32::from(event.position.y) + 16.0,
                                         cx,
                                     );
+                                }
+                            }))
+                            .on_hover(cx.listener({
+                                let tooltip_id = format!("pool-keepalive-{}", connection_id);
+                                move |this, hovered: &bool, _window, cx| {
+                                    if !*hovered {
+                                        // Keep the portal tooltip tied to the
+                                        // row button hover owner, matching the
+                                        // browser TooltipTrigger leave path.
+                                        this.clear_workspace_tooltip(&tooltip_id, cx);
+                                    }
                                 }
                             }))
                             .on_mouse_down(

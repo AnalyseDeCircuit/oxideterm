@@ -99,23 +99,34 @@ impl WorkspaceApp {
                 .h(px(1.0))
                 .bg(rgb(theme.border))
                 .into_any_element(),
-            2 => div()
-                .w_full()
-                .min_w(px(0.0))
-                .rounded(px(self.tokens.radii.lg))
-                .border_1()
-                .border_color(rgb(theme.border))
-                .bg(rgb(theme.bg_card))
-                // PluginManagerView uses bg-theme-bg-card, which carries
-                // --theme-card-shadow in the Tauri theme.
-                .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
-                .p(px(self.tokens.metrics.settings_card_padding))
-                .flex()
-                .flex_col()
+            2 => self.render_native_plugin_registry_card(),
+            _ => div().into_any_element(),
+        }
+    }
+
+    fn render_native_plugin_registry_card(&self) -> AnyElement {
+        let theme = self.tokens.ui;
+        let plugin_rows = self.plugin_registry.plugins();
+        let card = div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_card))
+            // PluginManagerView uses bg-theme-bg-card, which carries
+            // --theme-card-shadow in the Tauri theme.
+            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
+            .p(px(self.tokens.metrics.settings_card_padding))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .min_h(px(260.0));
+
+        if plugin_rows.is_empty() {
+            return card
                 .items_center()
                 .justify_center()
-                .gap(px(12.0))
-                .min_h(px(260.0))
                 .child(Self::render_lucide_icon(
                     LucideIcon::Puzzle,
                     36.0,
@@ -149,9 +160,140 @@ impl WorkspaceApp {
                         .child(self.i18n.t("plugin.native_webview_note"))
                         .child(self.i18n.t("plugin.native_api_note")),
                 )
-                .into_any_element(),
-            _ => div().into_any_element(),
+                .into_any_element();
         }
+
+        card.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(4.0))
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_base))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(theme.text_heading))
+                                .child("已发现插件"),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                .line_height(px(20.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child("native 只读取 manifest 和贡献点；legacy JS 插件不会在 GPUI 中执行。"),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.text_muted))
+                        .child(format!("{} 个", plugin_rows.len())),
+                ),
+        )
+        .children(plugin_rows.iter().map(|plugin| {
+            self.render_native_plugin_registry_row(plugin)
+        }))
+        .into_any_element()
+    }
+
+    fn render_native_plugin_registry_row(
+        &self,
+        plugin: &plugin_host::NativePluginInfo,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let (state_label, state_color, note) = match &plugin.runtime_plan {
+            plugin_host::NativePluginRuntimePlan::ManifestOnly => {
+                ("manifest", theme.text_muted, "仅声明贡献点")
+            }
+            plugin_host::NativePluginRuntimePlan::Wasm { .. } => {
+                ("wasm", theme.success, "等待 native WASI runtime 接入")
+            }
+            plugin_host::NativePluginRuntimePlan::Process { .. } => {
+                ("process", theme.success, "等待 native process runtime 接入")
+            }
+            plugin_host::NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => {
+                ("legacy-js", theme.warning, "Tauri ESM 插件：已发现但不执行")
+            }
+        };
+        let contribution_summary = native_plugin_contribution_summary(&plugin.manifest);
+        div()
+            .w_full()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_panel))
+            .p(px(14.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(5.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .min_w(px(0.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_base))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text))
+                                    .child(plugin.manifest.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .rounded_full()
+                                    .px(px(8.0))
+                                    .py(px(2.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(state_color))
+                                    .bg(rgb(theme.bg_card))
+                                    .child(state_label),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .line_height(px(20.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(
+                                plugin
+                                    .manifest
+                                    .description
+                                    .clone()
+                                    .unwrap_or_else(|| plugin.manifest.id.clone()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(contribution_summary),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_right()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .line_height(px(18.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(format!("v{}", plugin.manifest.version))
+                    .child(div().child(note)),
+            )
+            .into_any_element()
     }
 
     pub(super) fn render_plugin_sidebar_placeholder(&self) -> AnyElement {
@@ -196,5 +338,44 @@ impl WorkspaceApp {
                     ),
             )
             .into_any_element()
+    }
+}
+
+fn native_plugin_contribution_summary(manifest: &plugin_host::NativePluginManifest) -> String {
+    let Some(contributes) = &manifest.contributes else {
+        return "无声明贡献点".to_string();
+    };
+
+    let mut parts = Vec::new();
+    if let Some(tabs) = &contributes.tabs {
+        if !tabs.is_empty() {
+            parts.push(format!("标签页 {}", tabs.len()));
+        }
+    }
+    if let Some(sidebar_panels) = &contributes.sidebar_panels {
+        if !sidebar_panels.is_empty() {
+            parts.push(format!("侧边栏 {}", sidebar_panels.len()));
+        }
+    }
+    if let Some(settings) = &contributes.settings {
+        if !settings.is_empty() {
+            parts.push(format!("设置 {}", settings.len()));
+        }
+    }
+    if let Some(ai_tools) = &contributes.ai_tools {
+        if !ai_tools.is_empty() {
+            parts.push(format!("AI 工具 {}", ai_tools.len()));
+        }
+    }
+    if contributes.terminal_hooks.as_ref().is_some_and(|hooks| {
+        hooks.input_interceptor == Some(true) || hooks.output_processor == Some(true)
+    }) {
+        parts.push("终端 hook".to_string());
+    }
+
+    if parts.is_empty() {
+        "无声明贡献点".to_string()
+    } else {
+        parts.join(" / ")
     }
 }

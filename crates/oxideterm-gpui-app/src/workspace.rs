@@ -13,6 +13,7 @@ mod local_terminal_background;
 mod new_connection;
 mod notification_center;
 mod pane_tree;
+mod plugin_host;
 mod plugin_manager;
 mod plugin_settings_store;
 mod quick_commands;
@@ -149,7 +150,7 @@ use self::quick_commands::QuickCommandsState;
 use self::session_manager::{AutoRouteModalState, SessionManagerState};
 use self::settings::AiModelRefreshDelivery;
 use self::settings::ThemeEditorState;
-use self::sidebar::SidebarSection;
+use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
 use self::sidebar::{
     AiCompactionDelivery, AiModelSelectorProbeDelivery, AiPendingChatStream, AiStreamDelivery,
 };
@@ -217,7 +218,7 @@ const CLOUD_SYNC_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 7;
 const CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 240.0;
 const CLOUD_SYNC_SECTION_LIST_OVERSCAN: usize = 2;
 const PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT: usize = 3;
-const PLUGIN_MANAGER_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 180.0;
+const PLUGIN_MANAGER_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 220.0;
 const PLUGIN_MANAGER_SECTION_LIST_OVERSCAN: usize = 1;
 const FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 5;
 const FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 180.0;
@@ -246,6 +247,7 @@ const DETACHED_LOCAL_TERMINAL_LIST_OVERSCAN: usize = 4;
 const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 48.0;
 const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
+const ACTIVE_SESSION_FOCUS_LIST_ESTIMATED_HEIGHT: f32 = 76.0;
 const SESSION_MANAGER_FOLDER_TREE_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const SESSION_MANAGER_FOLDER_TREE_LIST_ESTIMATED_HEIGHT: f32 = 36.0;
 const SESSION_MANAGER_FOLDER_TREE_LIST_OVERSCAN: usize = 8;
@@ -590,6 +592,8 @@ pub(crate) struct WorkspaceApp {
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,
     active_surface: ActiveSurface,
+    active_session_sidebar_view_mode: ActiveSessionSidebarViewMode,
+    active_session_sidebar_focused_node_id: Option<NodeId>,
     active_session_sidebar_list_state: ListState,
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     active_settings_tab: SettingsTab,
@@ -871,6 +875,7 @@ pub(crate) struct WorkspaceApp {
     background_image_cache: BackgroundImageRenderCache,
     settings_store: SettingsStore,
     connection_store: ConnectionStore,
+    plugin_registry: plugin_host::NativePluginRegistry,
     session_manager: SessionManagerState,
     session_manager_folder_tree_list_state: ListState,
     session_manager_folder_tree_list_cache: RefCell<VirtualListSignatureCache>,
@@ -1048,6 +1053,7 @@ struct ConnectionChainRun {
 
 #[derive(Clone, Debug)]
 struct WorkspaceTooltip {
+    id: String,
     label: String,
     x: f32,
     y: f32,

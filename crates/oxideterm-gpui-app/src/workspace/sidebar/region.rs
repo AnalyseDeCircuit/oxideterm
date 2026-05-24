@@ -198,12 +198,17 @@ impl WorkspaceApp {
                         cx,
                     )),
             );
-        if matches!(
-            self.active_sidebar_section,
-            SidebarSection::Sessions | SidebarSection::Notifications
-        ) {
+        if self.active_sidebar_section == SidebarSection::Sessions {
+            let (view_icon, view_action) = match self.active_session_sidebar_view_mode {
+                ActiveSessionSidebarViewMode::Tree => {
+                    (LucideIcon::Folder, SidebarActionKind::ToggleSessionView)
+                }
+                ActiveSessionSidebarViewMode::Focus => {
+                    (LucideIcon::ListChecks, SidebarActionKind::ToggleSessionView)
+                }
+            };
             header = header
-                .child(self.render_sidebar_action(LucideIcon::Folder, SidebarActionKind::None, cx))
+                .child(self.render_sidebar_action(view_icon, view_action, cx))
                 .child(self.render_sidebar_action(LucideIcon::Network, SidebarActionKind::AutoRoute, cx))
                 .child(self.render_sidebar_action(LucideIcon::Plus, SidebarActionKind::NewConnection, cx));
         }
@@ -218,14 +223,20 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let label = match action {
+            SidebarActionKind::ToggleSessionView => match self.active_session_sidebar_view_mode {
+                ActiveSessionSidebarViewMode::Tree => self.i18n.t("sidebar.tooltips.switch_focus"),
+                ActiveSessionSidebarViewMode::Focus => self.i18n.t("sidebar.tooltips.switch_tree"),
+            },
             SidebarActionKind::NewConnection => self.i18n.t("sidebar.tooltips.new_connection"),
             SidebarActionKind::AutoRoute => self.i18n.t("sidebar.tooltips.auto_route"),
-            SidebarActionKind::None => self.i18n.t("sidebar.panels.sftp"),
         };
 
+        let toggle_focus_active = action == SidebarActionKind::ToggleSessionView
+            && self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Focus;
+
         // Tauri sidebar header actions are icon buttons with title tooltips.
-        // Use the shared tooltip icon primitive so hover tooltip ownership and
-        // pointer activation guards do not diverge from FileManager/SFTP tools.
+        // The view-mode action is the old Folder/ListChecks toggle from
+        // Sidebar.tsx; keep its active "secondary" chrome only in focus mode.
         div()
             .ml_1()
             .child(self.workspace_tooltip_icon_button(
@@ -233,6 +244,8 @@ impl WorkspaceApp {
                 self.tokens.metrics.sidebar_action_icon_size,
                 rgb(theme.text),
                 IconButtonOptions {
+                    has_background: toggle_focus_active,
+                    background: toggle_focus_active.then_some(rgb(theme.bg_hover)),
                     hover_background: Some(rgb(theme.bg_hover)),
                     ..IconButtonOptions::opaque_toolbar(
                         self.tokens.metrics.sidebar_action_size,
@@ -244,13 +257,13 @@ impl WorkspaceApp {
                 false,
                 cx.listener(move |this, _event, window, cx| {
                     match action {
+                        SidebarActionKind::ToggleSessionView => {
+                            this.toggle_active_session_sidebar_view(cx)
+                        }
                         SidebarActionKind::NewConnection => this.open_new_connection_form(window, cx),
                         SidebarActionKind::AutoRoute => this.open_auto_route_modal(window, cx),
-                        SidebarActionKind::None => {}
                     }
-                    if !matches!(action, SidebarActionKind::None) {
-                        cx.stop_propagation();
-                    }
+                    cx.stop_propagation();
                 }),
                 cx.entity(),
             ))
@@ -1256,7 +1269,7 @@ fn notification_sidebar_row_signatures(entries: &[WorkspaceNotificationEntry]) -
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SidebarActionKind {
-    None,
+    ToggleSessionView,
     AutoRoute,
     NewConnection,
 }

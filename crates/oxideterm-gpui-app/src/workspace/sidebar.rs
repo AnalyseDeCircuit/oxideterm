@@ -10,6 +10,20 @@ const SESSION_TREE_TEXT_SIZE: f32 = 13.0;
 const SESSION_TREE_META_TEXT_SIZE: f32 = 11.0;
 const SESSION_TREE_ICON_SIZE: f32 = 16.0;
 const SESSION_TREE_CHILD_ICON_SIZE: f32 = 14.0;
+// Tauri FocusedNodeList uses accent/emerald alpha utility classes such as
+// `bg-oxide-accent/5`, `border-oxide-accent/50`, and `bg-emerald-500/20`.
+// Keep the translated alpha roles named so this card view does not drift into
+// feature-local magic colors.
+const SESSION_FOCUS_CARD_SELECTED_BG_ALPHA: u32 = 0x0d;
+const SESSION_FOCUS_CARD_SELECTED_BORDER_ALPHA: u32 = 0x80;
+const SESSION_FOCUS_CARD_BORDER_ALPHA: u32 = 0x80;
+const SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA: u32 = 0x1a;
+const SESSION_FOCUS_TERMINAL_BADGE_BG_ALPHA: u32 = 0x33;
+const SESSION_FOCUS_TERMINAL_BADGE_HOVER_ALPHA: u32 = 0x4d;
+const SESSION_FOCUS_ACTION_BG_ALPHA: u32 = 0x1a;
+const SESSION_FOCUS_ACTION_HOVER_ALPHA: u32 = 0x26;
+const SESSION_FOCUS_DIVIDER_ALPHA: u32 = 0x4d;
+const SESSION_FOCUS_EMERALD: u32 = 0x10b981;
 // Tauri EventLogPanel rows use `min-h-[24px]` with `px-3 py-1`; keep the
 // native estimate next to the shared virtual-list call so scroll-to-index and
 // sticky-bottom behavior stay browser-like.
@@ -48,6 +62,12 @@ struct SessionStatusStyle {
 enum SessionActionVariant {
     Primary,
     Danger,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) enum ActiveSessionSidebarViewMode {
+    Tree,
+    Focus,
 }
 
 impl SidebarSection {

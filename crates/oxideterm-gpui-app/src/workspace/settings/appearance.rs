@@ -19,6 +19,7 @@ const THEME_EDITOR_PREVIEW_CURSOR_HEIGHT: f32 = 16.0; // Tauri cursor h-4.
 const THEME_EDITOR_SWATCH_LABEL_SIZE: f32 = 10.0; // Tauri text-[10px].
 const THEME_EDITOR_SECTION_TITLE_SIZE: f32 = 11.0; // Tauri section heading text-[11px].
 const BACKGROUND_THUMBNAIL_ASPECT_RATIO: f32 = 16.0 / 9.0; // Tauri aspect-video.
+const BACKGROUND_GALLERY_COLUMNS: f32 = 4.0; // Tauri BackgroundImageSection grid-cols-4.
 
 #[derive(Clone, Copy)]
 struct ThemeColorField {
@@ -607,18 +608,26 @@ impl WorkspaceApp {
         let background_blur = self
             .background_blur_preview
             .unwrap_or(settings.terminal.background_blur);
-        self.appearance_card_with_icon(
-            LucideIcon::Image,
-            self.i18n.t("settings_view.terminal.bg_title"),
-            vec![
-                self.appearance_checkbox_row(
-                    "settings_view.terminal.bg_enabled",
-                    "settings_view.terminal.bg_enabled_hint",
-                    settings.terminal.background_enabled,
-                    set_terminal_background_enabled,
-                    cx,
-                ),
-                self.appearance_background_gallery(settings, cx),
+        let has_background_image = settings.terminal.background_image.is_some();
+        let mut rows = Vec::new();
+        if has_background_image {
+            // Tauri only shows the master enable checkbox after an image exists.
+            // Keep the same conditional layout so the empty gallery card does not
+            // reserve controls that the browser version hides.
+            rows.push(self.appearance_checkbox_row(
+                "settings_view.terminal.bg_enabled",
+                "settings_view.terminal.bg_enabled_hint",
+                settings.terminal.background_enabled,
+                set_terminal_background_enabled,
+                cx,
+            ));
+        }
+        rows.push(self.appearance_background_gallery(settings, cx));
+        if has_background_image {
+            // Matches BackgroundImageSection.tsx: sliders, fit select, and tab
+            // pills live directly after the gallery with normal `space-y-4`
+            // flow instead of stretching the gallery row to fill the card.
+            rows.extend([
                 self.appearance_row(
                     "settings_view.terminal.bg_opacity",
                     "settings_view.terminal.bg_opacity_hint",
@@ -656,7 +665,12 @@ impl WorkspaceApp {
                     ),
                 ),
                 self.appearance_background_tabs(settings, cx),
-            ],
+            ]);
+        }
+        self.appearance_card_with_icon(
+            LucideIcon::Image,
+            self.i18n.t("settings_view.terminal.bg_title"),
+            rows,
         )
     }
 
@@ -2216,12 +2230,22 @@ impl WorkspaceApp {
                 .into_any_element();
         };
 
+        // GPUI's grid row measurement can overestimate an aspect-ratio child
+        // from the full container width. Tauri's `grid-cols-4 gap-2` means each
+        // thumbnail owns one quarter-width slot, so model that slot explicitly
+        // before applying the 16:9 thumbnail ratio.
         div()
             .w_full()
-            .grid()
-            .grid_cols(4)
+            .flex()
+            .flex_row()
+            .flex_wrap()
             .gap(px(8.0))
-            .child(self.background_thumbnail(current, true, cx))
+            .child(
+                div()
+                    .w(relative(1.0 / BACKGROUND_GALLERY_COLUMNS))
+                    .flex_none()
+                    .child(self.background_thumbnail(current, true, cx)),
+            )
             .into_any_element()
     }
 
@@ -2274,17 +2298,14 @@ impl WorkspaceApp {
         let fallback_text_color = self.tokens.ui.text_muted;
         let fallback_icon_color = self.tokens.ui.text_muted;
         let fallback_bg = self.tokens.ui.bg_sunken;
-        let thumbnail_radius = self.tokens.radii.md;
         let image = gpui::img(image_source)
             .w_full()
             .h_full()
-            .rounded(px(thumbnail_radius))
             .object_fit(ObjectFit::Cover)
             .with_fallback(move || {
                 div()
                     .w_full()
                     .h_full()
-                    .rounded(px(thumbnail_radius))
                     .flex()
                     .flex_col()
                     .items_center()
@@ -2320,6 +2341,9 @@ impl WorkspaceApp {
                 self.tokens.ui.border
             }))
             .cursor_pointer()
+            // Tauri applies rounded overflow on the thumbnail wrapper and leaves
+            // the `<img className="w-full h-full object-cover">` itself square;
+            // doing the same keeps the crop aligned with the border box in GPUI.
             .child(image);
         thumbnail.style().aspect_ratio = Some(BACKGROUND_THUMBNAIL_ASPECT_RATIO);
         thumbnail

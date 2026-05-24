@@ -325,6 +325,7 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_card))
             .overflow_hidden()
             .child(
                 div()
@@ -333,6 +334,10 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .justify_between()
+                    // Tauri relies on `overflow-hidden` on the rounded table.
+                    // GPUI can leave child paint visible at the mask edge, so
+                    // round the header explicitly to preserve the browser clip.
+                    .rounded_t(px(self.tokens.radii.lg))
                     .bg(rgba((theme.bg_panel << 8) | 0x80))
                     .border_b_1()
                     .border_color(rgb(theme.border))
@@ -365,8 +370,13 @@ impl WorkspaceApp {
                     ),
             );
 
-        for definition in definitions {
-            table = table.child(self.keybinding_action_row(definition, side, cx));
+        for (index, definition) in definitions.iter().enumerate() {
+            table = table.child(self.keybinding_action_row(
+                definition,
+                side,
+                index + 1 == definitions.len(),
+                cx,
+            ));
         }
 
         table.into_any_element()
@@ -376,6 +386,7 @@ impl WorkspaceApp {
         &self,
         definition: &crate::keybindings::ActionDefinition,
         side: crate::keybindings::KeybindingSide,
+        is_last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -406,8 +417,13 @@ impl WorkspaceApp {
             .items_center()
             .justify_between()
             .gap(px(12.0))
-            .border_b_1()
-            .border_color(rgb(theme.border))
+            // Tauri's `divide-y` does not draw a divider after the last row.
+            // Avoid a final border inside the rounded bottom because GPUI's
+            // rounded overflow can otherwise expose the line outside the mask.
+            .when(!is_last, |row| {
+                row.border_b_1().border_color(rgb(theme.border))
+            })
+            .when(is_last, |row| row.rounded_b(px(self.tokens.radii.lg)))
             .when(recording, |row| row.bg(rgba((theme.accent << 8) | 0x0d)))
             .child(
                 div()

@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{
     AnchoredPositionMode, Corner, Div, ObjectFit, PathPromptOptions, Rgba, StyledImage, anchored,
-    deferred, point,
+    deferred, point, relative,
 };
 use oxideterm_settings::{
     FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
@@ -53,7 +53,10 @@ use oxideterm_gpui_ui::{
     },
     separator::{SeparatorOrientation, separator},
     slider::{SliderView, slider},
-    text_input::{TextInputView, text_caret, text_input, text_input_anchor_probe},
+    text_input::{
+        TextInputContentAlign, TextInputView, text_caret, text_input, text_input_anchor_probe,
+        text_input_value_segments, text_input_with_content_align,
+    },
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

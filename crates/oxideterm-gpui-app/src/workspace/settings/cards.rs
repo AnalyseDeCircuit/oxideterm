@@ -1749,6 +1749,18 @@ pub(super) fn settings_input_accepts_newline(input: SettingsInput) -> bool {
     )
 }
 
+pub(super) fn settings_input_line_height(input: SettingsInput) -> f32 {
+    match input {
+        SettingsInput::TerminalCommandBarFocusHandoff
+        | SettingsInput::TerminalCommandSpecsJson => 20.0,
+        SettingsInput::AiSystemPrompt | SettingsInput::AiMemoryContent => 22.0,
+        SettingsInput::AiMcpArgs => 20.0,
+        _ => self::DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT,
+    }
+}
+
+const DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT: f32 = 20.0;
+
 fn settings_input_is_secret(input: SettingsInput) -> bool {
     matches!(
         input,
@@ -1766,9 +1778,16 @@ fn settings_input_is_secret(input: SettingsInput) -> bool {
 }
 
 fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
-    // Sliders and non-settings overlays need an anchor before pointer-down can
-    // open or drag them. Plain settings selects can be measured lazily once the
-    // popup is open, which avoids per-scroll anchor churn on dense pages.
+    // Browser/Radix selects can synchronously read their trigger rect on the
+    // opening click. GPUI portals cannot, so settings select triggers keep a
+    // closed-state anchor cache without notifying; that makes first-click open
+    // immediate while preserving scroll performance.
+    if anchor_id.is_settings_select_trigger() {
+        return true;
+    }
+
+    // Sliders and non-settings overlays also need an anchor before pointer-down
+    // can open or drag them.
     matches!(
         anchor_id,
         SelectAnchorId::SettingsAppearanceBorderRadiusSlider
