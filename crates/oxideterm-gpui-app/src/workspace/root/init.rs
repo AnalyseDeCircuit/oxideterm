@@ -216,6 +216,8 @@ impl WorkspaceApp {
             plugin_manager_pending_overwrite: None,
             plugin_manager_delivery_rx: None,
             plugin_manager_delivery_polling: false,
+            plugin_manager_expanded_plugin_ids: HashSet::new(),
+            active_native_plugin_sidebar_panel: None,
             split_drag: None,
             sidebar_resizing: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,

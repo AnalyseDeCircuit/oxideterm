@@ -169,6 +169,24 @@ impl WorkspaceApp {
 
     pub(super) fn render_sidebar_header(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let plugin_panel_title =
+            (self.active_sidebar_section == SidebarSection::Extensions)
+                .then(|| {
+                    self.active_native_plugin_sidebar_panel
+                        .as_ref()
+                        .and_then(|selection| {
+                            self.plugin_registry
+                                .contributions()
+                                .runtime_sidebar_panels()
+                                .into_iter()
+                                .find(|panel| {
+                                    panel.plugin_id == selection.plugin_id
+                                        && panel.panel_id == selection.panel_id
+                                })
+                                .map(|panel| panel.title)
+                        })
+                })
+                .flatten();
         let title_key = match self.active_sidebar_section {
             SidebarSection::Connections => "sidebar.panels.saved_connections",
             SidebarSection::Extensions => "sidebar.panels.plugins",
@@ -176,6 +194,8 @@ impl WorkspaceApp {
             SidebarSection::Notifications => "sidebar.panels.event_log",
             _ => "sidebar.panels.sessions",
         };
+        let title = plugin_panel_title
+            .unwrap_or_else(|| self.i18n.t(title_key).to_uppercase());
         let mut header = div()
             .h(px(self.tokens.metrics.sidebar_header_height))
             .flex()
@@ -193,7 +213,7 @@ impl WorkspaceApp {
                         SelectableTextRole::PlainDocument,
                         "sidebar-header-title",
                         title_key,
-                        self.i18n.t(title_key).to_uppercase(),
+                        title,
                         theme.text_muted,
                         cx,
                     )),

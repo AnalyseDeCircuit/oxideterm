@@ -146,6 +146,7 @@
   },
   "plugin": {
     "manager_title": "플러그인 관리",
+    "manager_description": "Native 플러그인은 native runtime(manifest-only / WASM / process)을 사용합니다. Tauri legacy-js 플러그인은 발견, 확인, 제거는 가능하지만 native 빌드에서는 실행되지 않습니다.",
     "native_description": "native 플러그인 호스트는 아직 활성화되지 않았습니다.",
     "native_empty_title": "native에서 플러그인 시스템을 사용할 수 없음",
     "native_empty_description": "OxideTerm native는 플러그인 진입점을 유지하지만 WebView 없는 플러그인 API는 아직 설계 중입니다. 설치, 활성화, 마켓, 런타임 동작은 아직 제공하지 않습니다.",

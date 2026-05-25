@@ -1,15 +1,20 @@
 use gpui::StatefulInteractiveElement;
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 impl WorkspaceApp {
     pub(super) fn render_activity_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let top_items = [
+        let top_items_before_plugins = [
             (SidebarSection::Sessions, LucideIcon::Link2),
             (SidebarSection::Connections, LucideIcon::LayoutList),
             (SidebarSection::Terminal, LucideIcon::Terminal),
             (SidebarSection::Activity, LucideIcon::Activity),
             (SidebarSection::Network, LucideIcon::Network),
-            (SidebarSection::Extensions, LucideIcon::Puzzle),
+        ];
+        let top_items_after_plugins = [
             (SidebarSection::CloudSync, LucideIcon::Cloud),
             (SidebarSection::Assistant, LucideIcon::Sparkles),
         ];
@@ -87,7 +92,24 @@ impl WorkspaceApp {
                     .bg(rgb(theme.divider)),
             );
 
-        for (section, icon) in top_items {
+        for (section, icon) in top_items_before_plugins {
+            bar = bar.child(self.render_activity_icon(section, icon, cx));
+        }
+        bar = bar.child(self.render_activity_icon(
+            SidebarSection::Extensions,
+            LucideIcon::Puzzle,
+            cx,
+        ));
+        // Tauri inserts plugin-provided sidebar panels as independent activity
+        // buttons immediately after the built-in Plugin Manager tab button.
+        for panel in self
+            .plugin_registry
+            .contributions()
+            .runtime_sidebar_panels()
+        {
+            bar = bar.child(self.render_plugin_sidebar_activity_icon(panel, cx));
+        }
+        for (section, icon) in top_items_after_plugins {
             bar = bar.child(self.render_activity_icon(section, icon, cx));
         }
 
@@ -126,6 +148,9 @@ impl WorkspaceApp {
         let active = if section == SidebarSection::Notifications {
             self.active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::NotificationCenter)
+        } else if section == SidebarSection::Extensions {
+            self.active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::PluginManager)
         } else if section == SidebarSection::CloudSync {
             self.active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::CloudSync)
@@ -319,6 +344,108 @@ impl WorkspaceApp {
         }
     }
 
+    fn render_plugin_sidebar_activity_icon(
+        &self,
+        panel: plugin_host::NativePluginRuntimeSidebarPanelContribution,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let selection = plugin_ui::NativePluginSidebarPanelSelection {
+            plugin_id: panel.plugin_id.clone(),
+            panel_id: panel.panel_id.clone(),
+        };
+        let active = self.active_sidebar_section == SidebarSection::Extensions
+            && self
+                .active_native_plugin_sidebar_panel
+                .as_ref()
+                .is_some_and(|active_panel| active_panel == &selection);
+        let tooltip = panel.title.clone();
+        let tooltip_id = format!(
+            "activity-plugin-{}-{}",
+            panel.plugin_id, panel.panel_id
+        );
+        let tooltip_id_for_move = tooltip_id.clone();
+        let icon = native_plugin_sidebar_icon(&panel.icon);
+
+        div()
+            .id((
+                "activity-plugin-icon",
+                native_plugin_sidebar_activity_id(&panel),
+            ))
+            .relative()
+            .size(px(self.tokens.metrics.activity_icon_size))
+            .mb(px(self.tokens.spacing.icon_gap))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.md))
+            .bg(if active {
+                rgb(theme.bg_active)
+            } else {
+                rgb(theme.bg)
+            })
+            .border_1()
+            .border_color(if active {
+                rgb(theme.border)
+            } else {
+                rgb(theme.bg)
+            })
+            .cursor_pointer()
+            .when(active, |icon_el| {
+                icon_el.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top(px(self.tokens.metrics.activity_indicator_inset))
+                        .bottom(px(self.tokens.metrics.activity_indicator_inset))
+                        .w(px(self.tokens.metrics.activity_indicator_width))
+                        .rounded(px(self.tokens.radii.active_indicator))
+                        .bg(rgb(theme.accent)),
+                )
+            })
+            .child(Self::render_lucide_icon(
+                icon,
+                self.tokens.metrics.activity_icon_glyph_size,
+                if active {
+                    rgb(theme.text_heading)
+                } else {
+                    rgb(theme.text)
+                },
+            ))
+            .on_mouse_move(cx.listener({
+                let tooltip = tooltip.clone();
+                move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.queue_workspace_tooltip(
+                        tooltip_id_for_move.clone(),
+                        tooltip.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                }
+            }))
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    this.clear_workspace_tooltip(&tooltip_id, cx);
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    // Mirrors Tauri's `sidebarActiveSection = "plugin:<id>:<panel>"`
+                    // path: choosing a plugin panel switches only the sidebar
+                    // content, while Plugin Manager remains a separate tab.
+                    this.active_native_plugin_sidebar_panel = Some(selection.clone());
+                    this.active_sidebar_section = SidebarSection::Extensions;
+                    this.active_surface = ActiveSurface::Terminal;
+                    this.persist_sidebar_settings();
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn render_lucide_icon(icon: LucideIcon, size: f32, color: Rgba) -> AnyElement {
         svg()
             .path(icon.path())
@@ -326,4 +453,33 @@ impl WorkspaceApp {
             .text_color(color)
             .into_any_element()
     }
+}
+
+fn native_plugin_sidebar_icon(icon: &str) -> LucideIcon {
+    // Tauri resolves plugin sidebar icons through lucide-react names. Native
+    // maps the same common names to bundled lucide assets and falls back to
+    // Puzzle when a plugin asks for an icon this build does not expose yet.
+    match icon {
+        "activity" => LucideIcon::Activity,
+        "bell" => LucideIcon::Bell,
+        "bot" => LucideIcon::Bot,
+        "cloud" => LucideIcon::Cloud,
+        "folder" | "folder-open" => LucideIcon::FolderOpen,
+        "monitor" => LucideIcon::Monitor,
+        "network" => LucideIcon::Network,
+        "settings" => LucideIcon::Settings,
+        "sparkles" => LucideIcon::Sparkles,
+        "terminal" => LucideIcon::Terminal,
+        _ => LucideIcon::Puzzle,
+    }
+}
+
+fn native_plugin_sidebar_activity_id(
+    panel: &plugin_host::NativePluginRuntimeSidebarPanelContribution,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    panel.registration_id.hash(&mut hasher);
+    panel.plugin_id.hash(&mut hasher);
+    panel.panel_id.hash(&mut hasher);
+    hasher.finish()
 }

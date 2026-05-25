@@ -396,6 +396,33 @@ mod tests {
     }
 
     #[test]
+    fn plugin_manager_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = ["plugin.manager_title", "plugin.manager_description"];
+
+        // The plugin page is easy to visually miss in locale smoke tests because
+        // the title key existed while the descriptive key fell through to raw UI.
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
+            }
+        }
+    }
+
+    #[test]
     fn ssh_connection_strings_exist_in_every_locale() {
         let locales = [
             Locale::De,

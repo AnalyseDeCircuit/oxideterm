@@ -146,6 +146,7 @@
   },
   "plugin": {
     "manager_title": "Plugin-Verwaltung",
+    "manager_description": "Native Plugins verwenden die native Runtime (manifest-only / WASM / process); Tauri legacy-js-Plugins können erkannt, geprüft oder deinstalliert werden, laufen aber nicht im nativen Build.",
     "native_description": "Das native Plugin-Hosting ist noch nicht aktiviert.",
     "native_empty_title": "Plugin-System in native nicht verfügbar",
     "native_empty_description": "OxideTerm native reserviert den Plugin-Einstieg, während die Plugin-API ohne WebView entworfen wird. Installation, Aktivierung, Marktplatz und Laufzeitaktionen sind hier noch nicht verfügbar.",

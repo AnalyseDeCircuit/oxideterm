@@ -370,6 +370,10 @@ impl WorkspaceApp {
             .absolute()
             .bottom(px(56.0))
             .right(px(12.0))
+            // The popover sits inside an occluding outside-dismiss backdrop.
+            // Mark the panel itself as occluding too, so category-row clicks
+            // are hit-tested against this event island instead of the backdrop.
+            .occlude()
             .w(px(860.0))
             .max_w(px(860.0))
             .max_h(px(520.0))
