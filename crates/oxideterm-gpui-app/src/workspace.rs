@@ -594,6 +594,8 @@ pub(crate) struct WorkspaceApp {
     plugin_manager_delivery_rx:
         Option<std::sync::mpsc::Receiver<plugin_manager::NativePluginManagerDelivery>>,
     plugin_manager_delivery_polling: bool,
+    plugin_manager_expanded_plugin_ids: HashSet<String>,
+    active_native_plugin_sidebar_panel: Option<plugin_ui::NativePluginSidebarPanelSelection>,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
     sidebar_collapsed: bool,

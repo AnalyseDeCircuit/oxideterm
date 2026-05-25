@@ -146,6 +146,7 @@
   },
   "plugin": {
     "manager_title": "Gestore plugin",
+    "manager_description": "I plugin nativi usano il runtime nativo (manifest-only / WASM / process); i plugin Tauri legacy-js possono essere rilevati, ispezionati o disinstallati, ma non vengono eseguiti nella versione nativa.",
     "native_description": "L’hosting nativo dei plugin non è ancora abilitato.",
     "native_empty_title": "Sistema plugin non disponibile in native",
     "native_empty_description": "OxideTerm native mantiene l’ingresso plugin mentre viene progettata l’API senza WebView. Installazione, abilitazione, marketplace e azioni runtime non sono ancora disponibili.",

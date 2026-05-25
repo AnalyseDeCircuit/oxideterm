@@ -5,6 +5,14 @@ const NATIVE_PLUGIN_UI_LIST_ROW_HEIGHT: f32 = 34.0;
 const NATIVE_PLUGIN_UI_LIST_OVERSCAN: usize = 8;
 const NATIVE_PLUGIN_UI_MAX_VISIBLE_ROWS: usize = 8;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct NativePluginSidebarPanelSelection {
+    // Native keeps the selected plugin panel as data instead of encoding it in
+    // a string key, but it represents Tauri's `plugin:<pluginId>:<panelId>`.
+    pub plugin_id: String,
+    pub panel_id: String,
+}
+
 impl WorkspaceApp {
     pub(super) fn open_native_plugin_tab(
         &mut self,
@@ -43,7 +51,6 @@ impl WorkspaceApp {
         };
         self.active_tab_id = Some(tab_id_value);
         self.active_surface = ActiveSurface::Terminal;
-        self.active_sidebar_section = SidebarSection::Extensions;
         self.needs_active_pane_focus = false;
         self.persist_sidebar_settings();
         cx.notify();
@@ -120,15 +127,23 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let Some(selection) = self.active_native_plugin_sidebar_panel.as_ref() else {
+            return self.render_plugin_sidebar_placeholder();
+        };
         let panels = self
             .plugin_registry
             .contributions()
             .runtime_sidebar_panels();
-        if panels.is_empty() {
+        let Some(panel) = panels.iter().find(|panel| {
+            panel.plugin_id == selection.plugin_id && panel.panel_id == selection.panel_id
+        }) else {
             return self.render_plugin_sidebar_placeholder();
-        }
+        };
 
-        let mut content = div()
+        // Tauri renders exactly the selected plugin panel component under
+        // `sidebarActiveSection === "plugin:<pluginId>:<panelId>"`. Do not add
+        // a native panel header here; the plugin-provided schema owns its body.
+        div()
             .flex_1()
             .min_h_0()
             .w_full()
@@ -138,42 +153,15 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(10.0))
-            .bg(rgb(theme.bg_panel));
-        for panel in panels {
-            content = content.child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .pb(px(10.0))
-                    .border_b_1()
-                    .border_color(rgb(theme.border))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(theme.text_heading))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Puzzle,
-                                14.0,
-                                rgb(theme.text_muted),
-                            ))
-                            .child(div().truncate().child(panel.title.clone())),
-                    )
-                    .child(self.render_native_plugin_declarative_schema(
-                        &panel.plugin_id,
-                        "sidebarPanel",
-                        &panel.panel_id,
-                        &panel.schema,
-                        cx,
-                    )),
-            );
-        }
-        content.into_any_element()
+            .bg(rgb(theme.bg_panel))
+            .child(self.render_native_plugin_declarative_schema(
+                &panel.plugin_id,
+                "sidebarPanel",
+                &panel.panel_id,
+                &panel.schema,
+                cx,
+            ))
+            .into_any_element()
     }
 
     fn render_native_plugin_surface_header(

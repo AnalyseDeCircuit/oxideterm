@@ -147,6 +147,7 @@
   },
   "plugin": {
     "manager_title": "插件管理器",
+    "manager_description": "Native 插件使用 native runtime（manifest-only / WASM / process）；Tauri legacy-js 插件只能被发现、卸载或查看信息，不能在 native 版本中执行。",
     "cloud_sync": {
       "panel_title": "Oxide 云同步",
       "backend": {
