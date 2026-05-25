@@ -79,6 +79,9 @@ impl WorkspaceApp {
         let (sftp_worker_tx, sftp_worker_rx) = std::sync::mpsc::channel();
         let (terminal_notice_tx, terminal_notice_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = std::sync::mpsc::channel();
+        let (native_plugin_confirm_tx, native_plugin_confirm_rx) = std::sync::mpsc::channel();
+        let (native_plugin_terminal_tx, native_plugin_terminal_rx) = std::sync::mpsc::channel();
+        let (native_plugin_sync_tx, native_plugin_sync_rx) = std::sync::mpsc::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
@@ -204,6 +207,15 @@ impl WorkspaceApp {
                 .overdraw(),
             )
             .measure_all(),
+            plugin_manager_active_tab: plugin_manager::NativePluginManagerTab::Installed,
+            plugin_manager_install_url_draft: String::new(),
+            plugin_manager_install_checksum_draft: String::new(),
+            plugin_manager_registry_url_draft: String::new(),
+            plugin_manager_available_updates: Vec::new(),
+            plugin_manager_operation_status: plugin_manager::NativePluginManagerOperationStatus::Idle,
+            plugin_manager_pending_overwrite: None,
+            plugin_manager_delivery_rx: None,
+            plugin_manager_delivery_polling: false,
             split_drag: None,
             sidebar_resizing: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,
@@ -693,6 +705,38 @@ impl WorkspaceApp {
             settings_store,
             connection_store,
             plugin_registry,
+            plugin_runtime_host: Arc::new(tokio::sync::Mutex::new(
+                plugin_runtime::NativePluginRuntimeHost::default(),
+            )),
+            native_plugin_confirm_tx,
+            native_plugin_confirm_rx,
+            native_plugin_confirm: None,
+            native_plugin_confirm_polling: false,
+            native_plugin_terminal_tx,
+            native_plugin_terminal_rx,
+            native_plugin_terminal_ui_requests: VecDeque::new(),
+            native_plugin_terminal_polling: false,
+            native_plugin_sync_tx,
+            native_plugin_sync_rx,
+            native_plugin_sync_polling: false,
+            native_plugin_layout_snapshot: serde_json::Value::Null,
+            native_plugin_layout_polling: false,
+            native_plugin_session_tree_snapshot: serde_json::Value::Null,
+            native_plugin_session_polling: false,
+            native_plugin_saved_forwards_snapshot: serde_json::Value::Null,
+            native_plugin_saved_forwards_polling: false,
+            native_plugin_transfer_snapshot: serde_json::Value::Null,
+            native_plugin_transfer_polling: false,
+            native_plugin_transfer_progress_last_emitted: None,
+            native_plugin_profiler_snapshot: serde_json::Value::Null,
+            native_plugin_profiler_polling: false,
+            native_plugin_profiler_last_emitted: None,
+            native_plugin_ide_snapshot: serde_json::Value::Null,
+            native_plugin_ide_polling: false,
+            native_plugin_ai_snapshot: serde_json::Value::Null,
+            native_plugin_ai_polling: false,
+            native_plugin_event_log_last_id: 0,
+            native_plugin_event_log_polling: false,
             session_manager: SessionManagerState::default(),
             // Session manager folder tree is a nested browser tree. Virtualize
             // the root rows first; expanded child rows stay grouped under their
@@ -798,6 +842,7 @@ impl WorkspaceApp {
             terminal_notice_tx,
             terminal_notice_rx,
             workspace_toasts: Vec::new(),
+            plugin_progress_toasts: HashMap::new(),
             connection_trace_tx,
             connection_trace_rx,
             connection_trace_toasts: HashMap::new(),
@@ -821,6 +866,30 @@ impl WorkspaceApp {
         if workspace.ai_sidebar_visible() {
             workspace.bootstrap_ai_mcp_registry();
         }
+        workspace.native_plugin_layout_snapshot = workspace.native_plugin_layout_snapshot();
+        workspace.start_native_plugin_layout_polling(cx);
+        workspace.native_plugin_session_tree_snapshot = workspace.native_plugin_session_tree_snapshot();
+        workspace.start_native_plugin_session_polling(cx);
+        workspace.native_plugin_saved_forwards_snapshot =
+            workspace.native_plugin_saved_forwards_snapshot();
+        workspace.start_native_plugin_saved_forwards_polling(cx);
+        workspace.native_plugin_transfer_snapshot = workspace.native_plugin_transfer_snapshot();
+        workspace.start_native_plugin_transfer_polling(cx);
+        workspace.native_plugin_profiler_snapshot = workspace.native_plugin_profiler_snapshot();
+        workspace.start_native_plugin_profiler_polling(cx);
+        workspace.native_plugin_ide_snapshot = workspace.native_plugin_ide_snapshot(cx);
+        workspace.start_native_plugin_ide_polling(cx);
+        workspace.native_plugin_ai_snapshot = workspace.native_plugin_ai_snapshot();
+        workspace.start_native_plugin_ai_polling(cx);
+        workspace.native_plugin_event_log_last_id = workspace.native_plugin_last_event_log_id();
+        workspace.start_native_plugin_event_log_polling(cx);
+        // Tauri initializePluginSystem() activates enabled plugins after
+        // discovery. Native only starts declared process runtimes here; legacy
+        // ESM plugins remain visible but never execute JS or WebView code.
+        workspace.start_native_plugin_confirm_polling(cx);
+        workspace.start_native_plugin_terminal_polling(cx);
+        workspace.start_native_plugin_sync_polling(cx);
+        workspace.bootstrap_native_plugin_runtime(cx);
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.restore_session_tree_snapshot();
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);

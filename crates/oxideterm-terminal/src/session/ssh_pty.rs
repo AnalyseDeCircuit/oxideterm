@@ -17,6 +17,7 @@ pub struct SshPtySession {
     magic_scan: MagicScanWindow,
     encoding: TerminalEncoding,
     output_decoder: TerminalOutputDecoder,
+    output_processor: Option<TerminalOutputProcessor>,
     input_encoder: TerminalInputEncoder,
     encoding_detector: EncodingMismatchDetector,
     trzsz_consumer: Option<TrzszConsumer>,
@@ -104,6 +105,7 @@ impl SshPtySession {
             magic_scan: MagicScanWindow::default(),
             encoding,
             output_decoder: TerminalOutputDecoder::new(encoding),
+            output_processor: None,
             input_encoder: TerminalInputEncoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             trzsz_consumer,
@@ -149,11 +151,17 @@ impl SshPtySession {
     }
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
+        let processed_output = self.process_terminal_output(bytes);
+        let bytes = processed_output.as_slice();
         if self.trzsz_consumer.is_some() {
             self.feed_trzsz_transport_output(bytes);
             return;
         }
         self.feed_transport_output_to_terminal(bytes);
+    }
+
+    fn process_terminal_output(&self, bytes: &[u8]) -> Vec<u8> {
+        apply_terminal_output_processor(&self.output_processor, bytes)
     }
 
     fn feed_transport_output_to_terminal(&mut self, bytes: &[u8]) {
@@ -501,6 +509,12 @@ impl TerminalSessionBackend for SshPtySession {
         self.encoding_detector.set_encoding(encoding);
     }
 
+    fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
+        self.output_processor = processor;
+        self.output_decoder.reset();
+        self.encoding_detector.set_encoding(self.encoding);
+    }
+
     fn set_trzsz_policy(&mut self, policy: Option<TrzszTransferPolicy>) {
         // Tauri's terminal controller applies in-band transfer settings to an
         // existing terminal controller, not only to future panes. Native keeps
@@ -648,6 +662,11 @@ impl TerminalSessionBackend for SshPtySession {
         }
 
         matches
+    }
+
+    fn clear_buffer(&mut self) {
+        let mut term = self.term.lock();
+        clear_terminal_buffer(&mut term);
     }
 
     fn command_output_text(&self, mark: &TerminalCommandMark) -> String {

@@ -6,7 +6,7 @@ use alacritty_terminal::{
     index::Line,
     sync::FairMutex,
     term::{Config, Term},
-    vte::ansi::Processor,
+    vte::ansi::{self, Handler, Processor},
 };
 use anyhow::Result;
 use crossbeam_channel::{Receiver, unbounded};
@@ -19,8 +19,12 @@ use oxideterm_terminal_encoding::{
 };
 use oxideterm_terminal_graphics::{GraphicsIngress, GraphicsOptions};
 use oxideterm_trzsz::{TrzszConsumer, TrzszConsumerEvent, TrzszTransfer, TrzszTransferPolicy};
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc::error::TryRecvError;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+    runtime::Runtime,
+};
 
 pub use crate::backpressure::{TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind};
 
@@ -81,6 +85,25 @@ fn command_output_text_from_term<T: EventListener>(
     text
 }
 
+pub(crate) fn clear_terminal_buffer<T: EventListener>(term: &mut Term<T>) {
+    // Tauri clear_buffer clears the host-owned scroll buffer rather than
+    // sending input to the shell. Native keeps the same boundary by mutating
+    // the emulator state directly: first blank the viewport, then discard saved
+    // scrollback so plugins cannot recover stale pre-clear output.
+    Handler::clear_screen(term, ansi::ClearMode::All);
+    Handler::clear_screen(term, ansi::ClearMode::Saved);
+}
+
+fn apply_terminal_output_processor(
+    processor: &Option<TerminalOutputProcessor>,
+    bytes: &[u8],
+) -> Vec<u8> {
+    let Some(processor) = processor else {
+        return bytes.to_vec();
+    };
+    processor(bytes)
+}
+
 // Session backends are kept in this module scope so the TerminalSession
 // facade, local PTY adapter, and SSH PTY owner keep their existing API and
 // private access while avoiding another thousand-line implementation file.
@@ -90,3 +113,4 @@ include!("session/playback.rs");
 include!("session/local_backend.rs");
 include!("session/ssh_config.rs");
 include!("session/ssh_pty.rs");
+include!("session/telnet.rs");

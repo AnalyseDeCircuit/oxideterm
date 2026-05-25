@@ -51,6 +51,10 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::set_encoding(self, encoding);
     }
 
+    fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
+        LocalPtySession::set_output_processor(self, processor);
+    }
+
     fn mode(&self) -> TermMode {
         LocalPtySession::mode(self)
     }
@@ -89,6 +93,10 @@ impl TerminalSessionBackend for LocalPtySession {
 
     fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch> {
         LocalPtySession::search_matches(self, query)
+    }
+
+    fn clear_buffer(&mut self) {
+        LocalPtySession::clear_buffer(self);
     }
 
     fn command_output_text(&self, mark: &TerminalCommandMark) -> String {

@@ -211,6 +211,12 @@ impl WorkspaceApp {
             ai_key_store: self.ai_key_store.clone(),
             ai_providers: settings.ai.providers.clone(),
             ai_embedding_config: settings.ai.embedding_config.clone(),
+            plugin_pending_tool_names: self
+                .plugin_registry
+                .contributions()
+                .ai_tool_names()
+                .into_iter()
+                .collect(),
             ai_context_window: AI_COMPACTION_DEFAULT_CONTEXT_WINDOW,
             runtime_epoch: self.ai_runtime_epoch.clone(),
             settings_summary: serde_json::json!({

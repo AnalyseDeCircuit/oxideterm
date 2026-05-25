@@ -34,6 +34,7 @@ pub enum TabKind {
     Forwards,
     SessionManager,
     PluginManager,
+    Plugin { plugin_id: String, tab_id: String },
     CloudSync,
     Settings,
 }

@@ -14,6 +14,7 @@ impl Render for WorkspaceApp {
         self.maybe_refresh_connection_monitor(cx);
         self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
+        self.poll_native_plugin_terminal_ui_requests(window, cx);
         self.poll_ai_chat_stream_events(Some(window), cx);
         self.poll_ai_compaction_results(cx);
         self.poll_ai_model_selector_probe_results(cx);
@@ -49,6 +50,7 @@ impl Render for WorkspaceApp {
                             | TabKind::Topology
                             | TabKind::NotificationCenter
                             | TabKind::PluginManager
+                            | TabKind::Plugin { .. }
                             | TabKind::CloudSync
                     )
                 })
@@ -80,6 +82,11 @@ impl Render for WorkspaceApp {
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
                 (TabKind::SessionManager, _) => self.render_session_manager_surface(window, cx),
                 (TabKind::PluginManager, _) => self.render_plugin_manager_surface(cx),
+                (TabKind::Plugin { plugin_id, tab_id }, _) => {
+                    let plugin_id = plugin_id.clone();
+                    let tab_id = tab_id.clone();
+                    self.render_native_plugin_tab_surface(&plugin_id, &tab_id, cx)
+                }
                 (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
                 (_, Some(root_pane)) => self.render_terminal_surface(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
@@ -147,6 +154,9 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_active_text_input_navigation(&event.keystroke, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_native_plugin_confirm_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_cloud_sync_confirm_key(event, cx) {
@@ -224,6 +234,11 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.dispatch_registered_keybinding(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if !this.registered_keybinding_matches(event)
+                    && this.dispatch_runtime_plugin_keybinding(event, cx)
+                {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
@@ -645,6 +660,9 @@ impl Render for WorkspaceApp {
             .when(self.cloud_sync_confirm.is_some(), |root| {
                 root.child(self.render_cloud_sync_confirm_dialog(cx))
             })
+            .when_some(self.render_native_plugin_confirm_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
             .when_some(self.render_ai_sidebar_floating_overlay(window, cx), |root, overlay| {
                 root.child(overlay)
             })
@@ -895,6 +913,8 @@ impl WorkspaceApp {
         let now = Instant::now();
         self.workspace_toasts
             .retain(|toast| toast.expires_at > now);
+        self.plugin_progress_toasts
+            .retain(|_, toast| toast.expires_at > now);
         self.connection_trace_toasts
             .retain(|_, trace| trace.expires_at.map_or(true, |expires_at| expires_at > now));
 
@@ -915,6 +935,9 @@ impl WorkspaceApp {
                     workspace
                         .workspace_toasts
                         .retain(|toast| toast.expires_at > now);
+                    workspace
+                        .plugin_progress_toasts
+                        .retain(|_, toast| toast.expires_at > now);
                     cx.notify();
                 });
             })
@@ -924,6 +947,7 @@ impl WorkspaceApp {
 
     fn render_workspace_toasts(&self) -> Option<AnyElement> {
         if self.workspace_toasts.is_empty()
+            && self.plugin_progress_toasts.is_empty()
             && !self
                 .connection_trace_toasts
                 .values()
@@ -933,6 +957,13 @@ impl WorkspaceApp {
         }
 
         let standard_toasts = self.workspace_toasts.iter().map(|toast| ToastView {
+            title: toast.notice.title.clone(),
+            description: toast.notice.description.clone(),
+            status_text: toast.notice.status_text.clone(),
+            progress: toast.notice.progress,
+            variant: toast_variant_from_terminal(toast.notice.variant),
+        });
+        let plugin_progress_toasts = self.plugin_progress_toasts.values().map(|toast| ToastView {
             title: toast.notice.title.clone(),
             description: toast.notice.description.clone(),
             status_text: toast.notice.status_text.clone(),
@@ -953,7 +984,7 @@ impl WorkspaceApp {
                     _ => ToastVariant::Default,
                 },
             });
-        let toasts = standard_toasts.chain(trace_toasts);
+        let toasts = standard_toasts.chain(plugin_progress_toasts).chain(trace_toasts);
         Some(toaster(&self.tokens, toasts).into_any_element())
     }
 

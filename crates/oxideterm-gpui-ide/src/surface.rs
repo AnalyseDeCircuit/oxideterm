@@ -192,6 +192,32 @@ pub struct IdeAiContextSnapshot {
     pub snippet_start_line: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdePluginProjectSnapshot {
+    pub node_id: String,
+    pub root_path: String,
+    pub name: String,
+    pub is_git_repo: bool,
+    pub git_branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdePluginFileSnapshot {
+    pub path: String,
+    pub name: String,
+    pub language: String,
+    pub is_dirty: bool,
+    pub is_active: bool,
+    pub is_pinned: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdePluginSnapshot {
+    pub project: IdePluginProjectSnapshot,
+    pub open_files: Vec<IdePluginFileSnapshot>,
+    pub active_file: Option<IdePluginFileSnapshot>,
+}
+
 #[derive(Clone, Debug)]
 struct ProjectOpenResult {
     node_id: String,

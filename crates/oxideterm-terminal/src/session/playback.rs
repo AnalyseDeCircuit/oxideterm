@@ -300,6 +300,11 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
         PlaybackTerminalSession::search_matches(self, query)
     }
 
+    fn clear_buffer(&mut self) {
+        let mut term = self.term.lock();
+        clear_terminal_buffer(&mut term);
+    }
+
     fn snapshot(&self) -> TerminalSnapshot {
         let term = self.term.lock();
         snapshot_from_term(&term, self.size, &self.graphics)

@@ -160,6 +160,17 @@ impl WorkspaceApp {
         self.dispatch_keybinding_action(definition.id, window, cx)
     }
 
+    pub(super) fn registered_keybinding_matches(&self, event: &KeyDownEvent) -> bool {
+        // Tauri's capture dispatcher checks built-in actions before plugin
+        // keybindings. Even when terminal gating lets the key pass through, the
+        // plugin layer must not steal a built-in combo.
+        crate::keybindings::matched_action_for_keystroke(
+            &event.keystroke,
+            &self.settings_store.settings().keybindings.overrides,
+        )
+        .is_some()
+    }
+
     pub(super) fn dispatch_keybinding_action(
         &mut self,
         action_id: &str,
@@ -333,6 +344,10 @@ impl WorkspaceApp {
 
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+
+        if self.handle_native_plugin_confirm_key(event, cx) {
+            return;
+        }
 
         if self.handle_ai_settings_confirm_key(event, cx) {
             return;
@@ -1519,21 +1534,13 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.i18n.set_locale(locale);
-        self.settings_store.settings_mut().general.language = settings_language_from_locale(locale);
-        let _ = self.settings_store.save();
-        self.sync_tab_titles(cx);
-        let panes = self
-            .panes
-            .iter()
-            .map(|(pane_id, pane)| (*pane_id, pane.clone()))
-            .collect::<Vec<_>>();
-        for (pane_id, pane) in panes {
-            let preferences = self.terminal_preferences_for_pane(pane_id);
-            let _ = pane.update(cx, |pane, cx| {
-                pane.set_preferences(preferences, cx);
-            });
-        }
+        // Route language changes through the same settings mutation path as the
+        // settings UI so native plugin language/settings subscriptions observe
+        // menu-triggered locale switches too.
+        self.edit_settings(
+            |settings| settings.general.language = settings_language_from_locale(locale),
+            cx,
+        );
 
         let menus = crate::platform::app_menus(&self.i18n);
         let _ = cx.update_window(window.window_handle(), move |_root, _window, app| {

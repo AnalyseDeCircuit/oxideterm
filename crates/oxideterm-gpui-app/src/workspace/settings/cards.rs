@@ -1044,6 +1044,24 @@ impl WorkspaceApp {
             SettingsInput::CloudSyncAutoUploadInterval => {
                 self.cloud_sync_form.auto_upload_interval_mins.clone()
             }
+            SettingsInput::NativePluginInstallUrl => self.plugin_manager_install_url_draft.clone(),
+            SettingsInput::NativePluginInstallChecksum => {
+                self.plugin_manager_install_checksum_draft.clone()
+            }
+            SettingsInput::NativePluginRegistryUrl => {
+                self.plugin_manager_registry_url_draft.clone()
+            }
+            SettingsInput::PluginSetting(index) => self
+                .plugin_registry
+                .contributions()
+                .settings
+                .get(index)
+                .and_then(|setting| {
+                    self.plugin_registry
+                        .plugin_setting_value(&setting.plugin_id, &setting.definition.id)
+                })
+                .map(|value| plugin_setting_input_value(&value))
+                .unwrap_or_default(),
         }
     }
 
@@ -1580,6 +1598,55 @@ impl WorkspaceApp {
                     self.settings_input_draft.clone();
                 cx.notify();
             }
+            SettingsInput::NativePluginInstallUrl => {
+                self.plugin_manager_install_url_draft =
+                    self.settings_input_draft.trim().to_string();
+                cx.notify();
+            }
+            SettingsInput::NativePluginInstallChecksum => {
+                self.plugin_manager_install_checksum_draft =
+                    self.settings_input_draft.trim().to_string();
+                cx.notify();
+            }
+            SettingsInput::NativePluginRegistryUrl => {
+                self.plugin_manager_registry_url_draft =
+                    self.settings_input_draft.trim().to_string();
+                cx.notify();
+            }
+            SettingsInput::PluginSetting(index) => {
+                let Some(setting) = self
+                    .plugin_registry
+                    .contributions()
+                    .settings
+                    .get(index)
+                    .cloned()
+                else {
+                    cx.notify();
+                    return;
+                };
+                let value = match plugin_setting_draft_to_value(
+                    &setting.definition.setting_type,
+                    &self.settings_input_draft,
+                ) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        self.plugin_registry
+                            .record_manager_error(setting.plugin_id.clone(), error);
+                        cx.notify();
+                        return;
+                    }
+                };
+                if let Err(error) = self.set_native_plugin_setting_value_and_emit(
+                    &setting.plugin_id,
+                    &setting.definition.id,
+                    value,
+                    cx,
+                ) {
+                    self.plugin_registry
+                        .record_manager_error(setting.plugin_id.clone(), error);
+                }
+                cx.notify();
+            }
         }
     }
 
@@ -1805,6 +1872,39 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             | SelectAnchorId::IdeAgentStatus
             | SelectAnchorId::TerminalCastSeekbar
     )
+}
+
+fn plugin_setting_input_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        serde_json::Value::Null => String::new(),
+        value => value.to_string(),
+    }
+}
+
+fn plugin_setting_draft_to_value(
+    setting_type: &str,
+    draft: &str,
+) -> Result<serde_json::Value, String> {
+    match setting_type {
+        "string" => Ok(serde_json::Value::String(draft.to_string())),
+        "number" => {
+            let value = draft.trim().parse::<f64>().map_err(|error| {
+                format!("Plugin number setting requires a numeric value: {error}")
+            })?;
+            serde_json::Number::from_f64(value)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| "Plugin number setting cannot be NaN or infinite".to_string())
+        }
+        // Boolean/select plugin settings are edited by their own controls. This
+        // guard keeps the shared SettingsInput route from accepting mismatched
+        // runtime indices if the contribution list changes while focused.
+        other => Err(format!(
+            "Plugin text input cannot edit setting type \"{other}\""
+        )),
+    }
 }
 
 fn parse_focus_handoff_command_list(input: &str) -> Vec<String> {

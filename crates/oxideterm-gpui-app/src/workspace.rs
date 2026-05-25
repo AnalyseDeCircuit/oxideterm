@@ -14,8 +14,11 @@ mod new_connection;
 mod notification_center;
 mod pane_tree;
 mod plugin_host;
+mod plugin_lifecycle;
 mod plugin_manager;
+mod plugin_runtime;
 mod plugin_settings_store;
+mod plugin_ui;
 mod quick_commands;
 mod selectable_text;
 mod session_manager;
@@ -66,9 +69,10 @@ use oxideterm_gpui_platform::{
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, SharedTerminalSession, TerminalBackgroundFit,
     TerminalBackgroundPreferences, TerminalCommandSelectionLabels, TerminalHighlightRenderMode,
-    TerminalHighlightRule as UiHighlightRule, TerminalNotice, TerminalNoticeVariant, TerminalPane,
-    TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus, TerminalTrzszLabels,
-    TerminalUiPreferences, TerminalUiTheme,
+    TerminalHighlightRule as UiHighlightRule, TerminalInputInterceptor,
+    TerminalInputInterceptorResult, TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor,
+    TerminalPane, TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus,
+    TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme,
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,
@@ -119,7 +123,7 @@ use oxideterm_ssh::{
 };
 use oxideterm_terminal::TerminalCommandMarkDetectionSource;
 use oxideterm_terminal::{
-    LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
+    LocalPtyConfig, ShellInfo, SshSessionConfig, TelnetSessionConfig, TerminalCursorShape,
     TerminalEncoding as SessionTerminalEncoding, TerminalLifecycle, scan_shells,
 };
 use oxideterm_theme::{
@@ -217,7 +221,7 @@ const AI_MCP_SERVER_LIST_OVERSCAN: usize = 4;
 const CLOUD_SYNC_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 7;
 const CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 240.0;
 const CLOUD_SYNC_SECTION_LIST_OVERSCAN: usize = 2;
-const PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT: usize = 3;
+const PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT: usize = 4;
 const PLUGIN_MANAGER_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 220.0;
 const PLUGIN_MANAGER_SECTION_LIST_OVERSCAN: usize = 1;
 const FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 5;
@@ -580,6 +584,16 @@ pub(crate) struct WorkspaceApp {
     detached_local_terminal_list_state: ListState,
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     plugin_manager_section_list_state: ListState,
+    plugin_manager_active_tab: plugin_manager::NativePluginManagerTab,
+    plugin_manager_install_url_draft: String,
+    plugin_manager_install_checksum_draft: String,
+    plugin_manager_registry_url_draft: String,
+    plugin_manager_available_updates: Vec<plugin_host::NativePluginRegistryEntry>,
+    plugin_manager_operation_status: plugin_manager::NativePluginManagerOperationStatus,
+    plugin_manager_pending_overwrite: Option<plugin_manager::NativePluginPendingOverwrite>,
+    plugin_manager_delivery_rx:
+        Option<std::sync::mpsc::Receiver<plugin_manager::NativePluginManagerDelivery>>,
+    plugin_manager_delivery_polling: bool,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
     sidebar_collapsed: bool,
@@ -876,6 +890,39 @@ pub(crate) struct WorkspaceApp {
     settings_store: SettingsStore,
     connection_store: ConnectionStore,
     plugin_registry: plugin_host::NativePluginRegistry,
+    plugin_runtime_host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
+    native_plugin_confirm_tx: std::sync::mpsc::Sender<plugin_lifecycle::NativePluginConfirmRequest>,
+    native_plugin_confirm_rx:
+        std::sync::mpsc::Receiver<plugin_lifecycle::NativePluginConfirmRequest>,
+    native_plugin_confirm: Option<plugin_lifecycle::NativePluginConfirmDialog>,
+    native_plugin_confirm_polling: bool,
+    native_plugin_terminal_tx:
+        std::sync::mpsc::Sender<plugin_lifecycle::NativePluginTerminalRequest>,
+    native_plugin_terminal_rx:
+        std::sync::mpsc::Receiver<plugin_lifecycle::NativePluginTerminalRequest>,
+    native_plugin_terminal_ui_requests: VecDeque<plugin_lifecycle::NativePluginTerminalRequest>,
+    native_plugin_terminal_polling: bool,
+    native_plugin_sync_tx: std::sync::mpsc::Sender<plugin_lifecycle::NativePluginSyncRequest>,
+    native_plugin_sync_rx: std::sync::mpsc::Receiver<plugin_lifecycle::NativePluginSyncRequest>,
+    native_plugin_sync_polling: bool,
+    native_plugin_layout_snapshot: serde_json::Value,
+    native_plugin_layout_polling: bool,
+    native_plugin_session_tree_snapshot: serde_json::Value,
+    native_plugin_session_polling: bool,
+    native_plugin_saved_forwards_snapshot: serde_json::Value,
+    native_plugin_saved_forwards_polling: bool,
+    native_plugin_transfer_snapshot: serde_json::Value,
+    native_plugin_transfer_polling: bool,
+    native_plugin_transfer_progress_last_emitted: Option<Instant>,
+    native_plugin_profiler_snapshot: serde_json::Value,
+    native_plugin_profiler_polling: bool,
+    native_plugin_profiler_last_emitted: Option<Instant>,
+    native_plugin_ide_snapshot: serde_json::Value,
+    native_plugin_ide_polling: bool,
+    native_plugin_ai_snapshot: serde_json::Value,
+    native_plugin_ai_polling: bool,
+    native_plugin_event_log_last_id: u64,
+    native_plugin_event_log_polling: bool,
     session_manager: SessionManagerState,
     session_manager_folder_tree_list_state: ListState,
     session_manager_folder_tree_list_cache: RefCell<VirtualListSignatureCache>,
@@ -899,6 +946,7 @@ pub(crate) struct WorkspaceApp {
     terminal_notice_tx: std::sync::mpsc::Sender<TerminalNotice>,
     terminal_notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
     workspace_toasts: Vec<WorkspaceToast>,
+    plugin_progress_toasts: HashMap<String, WorkspaceToast>,
     connection_trace_tx: std::sync::mpsc::Sender<ConnectionTraceEvent>,
     connection_trace_rx: std::sync::mpsc::Receiver<ConnectionTraceEvent>,
     connection_trace_toasts: HashMap<String, ActiveConnectionTrace>,

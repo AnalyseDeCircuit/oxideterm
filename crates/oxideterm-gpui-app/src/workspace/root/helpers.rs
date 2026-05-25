@@ -14,6 +14,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::Forwards => "forwards",
         TabKind::SessionManager => "session_manager",
         TabKind::PluginManager => "plugin_manager",
+        TabKind::Plugin { .. } => "plugin",
         TabKind::CloudSync => "cloud_sync",
         TabKind::Settings => "settings",
     }

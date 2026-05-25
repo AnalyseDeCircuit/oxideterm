@@ -118,6 +118,27 @@ impl TerminalPane {
         }
     }
 
+    pub(crate) fn mark_open_command_marks_stale_for_terminal_reset(&mut self) {
+        let now = now_millis();
+        let fallback_end_line = self.absolute_cursor_line();
+        for mark in &mut self.command_marks {
+            if mark.is_closed {
+                continue;
+            }
+            // Tauri marks only open command facts stale on clear_buffer. Native
+            // mirrors that by closing open visual command marks as terminal
+            // resets while preserving already closed command history.
+            mark.is_closed = true;
+            mark.closed_by = Some(TerminalCommandMarkClosedBy::TerminalReset);
+            mark.output_confidence = TerminalCommandMarkConfidence::Unknown;
+            mark.end_line = Some(fallback_end_line.max(mark.start_line));
+            mark.finished_at = Some(now);
+            mark.duration_ms = Some(now.saturating_sub(mark.started_at));
+            mark.stale = true;
+            self.command_fact_ledger.close_from_mark(mark);
+        }
+    }
+
     fn shell_integration_dedup_candidate(
         &self,
         mark: &TerminalCommandMark,

@@ -278,7 +278,7 @@ impl WorkspaceApp {
             return self.render_active_sessions_sidebar_content(cx);
         }
         if self.active_sidebar_section == SidebarSection::Extensions {
-            return self.render_plugin_sidebar_placeholder();
+            return self.render_native_plugin_sidebar_content(cx);
         }
         if self.active_sidebar_section == SidebarSection::CloudSync {
             return self.render_cloud_sync_sidebar_content(cx);
