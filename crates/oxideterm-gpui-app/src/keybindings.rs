@@ -548,7 +548,8 @@ pub(crate) fn matched_action_for_keystroke(
         .map(|definition| (definition, combo))
 }
 
-pub(crate) fn normalize_plugin_key_combo(keybinding: &str) -> Option<String> {
+#[cfg(test)]
+fn normalize_plugin_key_combo(keybinding: &str) -> Option<String> {
     let mut parts = keybinding
         .split('+')
         .filter_map(normalize_plugin_key_part)

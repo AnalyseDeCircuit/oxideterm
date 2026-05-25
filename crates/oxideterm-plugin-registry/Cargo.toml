@@ -1,0 +1,14 @@
+[package]
+name = "oxideterm-plugin-registry"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-ai = { path = "../oxideterm-ai" }
+oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
+oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
+reqwest.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }

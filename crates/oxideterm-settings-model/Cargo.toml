@@ -1,0 +1,10 @@
+[package]
+name = "oxideterm-settings-model"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-ai = { path = "../oxideterm-ai" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+serde_json.workspace = true

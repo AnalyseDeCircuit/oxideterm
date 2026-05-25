@@ -1,0 +1,21 @@
+[package]
+name = "oxideterm-plugin-host-api"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-ai = { path = "../oxideterm-ai" }
+oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
+oxideterm-gpui-ide = { path = "../oxideterm-gpui-ide" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-sftp = { path = "../oxideterm-sftp" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true

@@ -33,9 +33,14 @@ oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
 oxideterm-launcher = { path = "../oxideterm-launcher" }
 oxideterm-local-files = { path = "../oxideterm-local-files" }
 oxideterm-notification-center = { path = "../oxideterm-notification-center" }
+oxideterm-plugin-host-api = { path = "../oxideterm-plugin-host-api" }
+oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
+oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
+oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }
 oxideterm-preview = { path = "../oxideterm-preview" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-settings-model = { path = "../oxideterm-settings-model" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }

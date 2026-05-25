@@ -196,12 +196,3 @@ impl WorkspaceApp {
     }
 
 }
-
-const AI_MODEL_REFRESH_MISSING_API_KEY: &str = "__missing_api_key__";
-
-pub(super) struct AiModelRefreshDelivery {
-    pub(super) index: usize,
-    pub(super) provider_id: String,
-    pub(super) generation: u64,
-    pub(super) result: Result<oxideterm_ai::ProviderModelRefresh, String>,
-}

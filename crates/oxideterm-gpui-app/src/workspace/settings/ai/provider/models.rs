@@ -1,9 +1,3 @@
-#[derive(Clone, Debug)]
-struct AiProviderModelChipItem {
-    model: String,
-    active: bool,
-}
-
 impl WorkspaceApp {
     fn ai_provider_models(
         &self,
@@ -61,7 +55,11 @@ impl WorkspaceApp {
         );
 
         if visible_model_count > 0 {
-            let chip_rows = self.ai_provider_model_chip_rows(provider, visible_model_count);
+            let chip_rows = ai_provider_model_chip_rows(
+                provider,
+                visible_model_count,
+                AI_PROVIDER_MODEL_CHIPS_PER_VIRTUAL_ROW,
+            );
             self.sync_ai_provider_model_chip_list_state(&provider.id, &chip_rows, hidden_count);
             let state = self
                 .ai_provider_model_chip_list_states
@@ -105,25 +103,6 @@ impl WorkspaceApp {
         }
 
         body.into_any_element()
-    }
-
-    fn ai_provider_model_chip_rows(
-        &self,
-        provider: &AiProviderView,
-        visible_model_count: usize,
-    ) -> Vec<Vec<AiProviderModelChipItem>> {
-        provider
-            .models
-            .iter()
-            .take(visible_model_count)
-            .map(|model| AiProviderModelChipItem {
-                model: model.clone(),
-                active: provider.default_model == *model,
-            })
-            .collect::<Vec<_>>()
-            .chunks(AI_PROVIDER_MODEL_CHIPS_PER_VIRTUAL_ROW)
-            .map(|row| row.to_vec())
-            .collect()
     }
 
     fn sync_ai_provider_model_chip_list_state(
@@ -204,7 +183,11 @@ impl WorkspaceApp {
         } else {
             provider.models.len().min(AI_PROVIDER_VISIBLE_MODEL_LIMIT)
         };
-        let rows = self.ai_provider_model_chip_rows(&provider, visible_model_count);
+        let rows = ai_provider_model_chip_rows(
+            &provider,
+            visible_model_count,
+            AI_PROVIDER_MODEL_CHIPS_PER_VIRTUAL_ROW,
+        );
         let Some(row) = rows.get(row_index) else {
             return div().into_any_element();
         };

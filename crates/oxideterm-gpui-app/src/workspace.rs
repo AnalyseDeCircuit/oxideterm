@@ -104,6 +104,10 @@ use oxideterm_settings::{
     FrostedGlassMode, HighlightRuleRenderMode, Language, PersistedSettings, SettingsStore,
     TerminalEncoding as SettingsTerminalEncoding, default_settings_path,
 };
+use oxideterm_settings_model::{
+    AiMcpServerDraft, AiModelRefreshDelivery, AiProviderKeyStatusDelivery, KnowledgeDeleteConfirm,
+    KnowledgeDeleteTarget, KnowledgeExternalEdit,
+};
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
     BackgroundTransferState, DummyProgressStore, ProgressStore, RedbProgressStore,
@@ -152,7 +156,6 @@ use self::new_connection::{
 use self::pane_tree::SplitDrag;
 use self::quick_commands::QuickCommandsState;
 use self::session_manager::{AutoRouteModalState, SessionManagerState};
-use self::settings::AiModelRefreshDelivery;
 use self::settings::ThemeEditorState;
 use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
 use self::sidebar::{
@@ -280,42 +283,6 @@ const CLOUD_SYNC_HISTORY_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT: f32 = 72.0;
 const CLOUD_SYNC_HISTORY_LIST_OVERSCAN: usize = 4;
 
-#[derive(Clone, Debug)]
-struct AiMcpServerDraft {
-    name: String,
-    transport: oxideterm_ai::McpTransport,
-    command: String,
-    args: String,
-    env: Vec<(String, String)>,
-    url: String,
-    auth_header_name: String,
-    auth_header_mode: oxideterm_ai::McpAuthHeaderMode,
-    auth_token: String,
-    headers: Vec<(String, String)>,
-    retry_on_disconnect: bool,
-    show_auth_token: bool,
-}
-
-#[derive(Clone, Debug)]
-enum KnowledgeDeleteTarget {
-    Collection,
-    Document,
-}
-
-#[derive(Clone, Debug)]
-struct KnowledgeDeleteConfirm {
-    target: KnowledgeDeleteTarget,
-    id: String,
-    name: String,
-}
-
-#[derive(Clone, Debug)]
-struct KnowledgeExternalEdit {
-    doc_id: String,
-    path: PathBuf,
-    version: u64,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum AiCompactionNoticePhase {
     Running,
@@ -383,11 +350,6 @@ impl KeybindingScopeFilter {
 enum KnowledgeReindexDelivery {
     Progress { current: usize, total: usize },
     Finished(Result<usize, String>),
-}
-
-struct AiProviderKeyStatusDelivery {
-    provider_id: String,
-    has_key: bool,
 }
 
 #[derive(Default)]
@@ -516,25 +478,6 @@ struct TabDragState {
     tab_widths: Vec<f32>,
     active: bool,
     drop_target_index: usize,
-}
-
-impl Default for AiMcpServerDraft {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            transport: oxideterm_ai::McpTransport::Stdio,
-            command: String::new(),
-            args: String::new(),
-            env: Vec::new(),
-            url: String::new(),
-            auth_header_name: "Authorization".to_string(),
-            auth_header_mode: oxideterm_ai::McpAuthHeaderMode::Bearer,
-            auth_token: String::new(),
-            headers: Vec::new(),
-            retry_on_disconnect: false,
-            show_auth_token: false,
-        }
-    }
 }
 
 #[derive(Clone)]

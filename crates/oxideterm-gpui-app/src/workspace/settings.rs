@@ -8,6 +8,20 @@ use oxideterm_settings::{
     FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
     PersistedSettings, create_default_highlight_rule, reindex_highlight_rules,
 };
+use oxideterm_settings_model::{
+    AI_MODEL_REFRESH_MISSING_API_KEY, AiModelRefreshDelivery, AiProviderModelChipItem,
+    KNOWLEDGE_EMBEDDING_BATCH_SIZE, ai_add_execution_profile, ai_default_execution_profile,
+    ai_delete_execution_profile, ai_duplicate_execution_profile, ai_execution_profile_id,
+    ai_execution_profiles_need_normalization, ai_normalize_execution_profiles,
+    ai_patch_execution_profile, ai_provider_model_chip_rows, ai_provider_views,
+    ai_reasoning_effort_from_profile_value, ai_reasoning_profile_value,
+    ai_set_default_execution_profile, ai_update_provider, current_time_millis,
+    import_knowledge_file, parse_focus_handoff_command_list, plugin_setting_draft_to_value,
+    plugin_setting_input_value, reconnect_attempt_label, reconnect_base_delay_options,
+    reconnect_delay_label, reconnect_max_attempt_options, reconnect_max_delay_options,
+    set_ai_model_max_response_tokens, set_ai_model_reasoning_override,
+    set_ai_provider_reasoning_override, set_ai_user_context_window, toggle_string_set,
+};
 use oxideterm_theme::BUILT_IN_THEMES;
 
 use super::ime::WorkspaceImeTarget;
@@ -21,12 +35,10 @@ use oxideterm_ai::{
     provider_refresh_key_policy as ai_provider_refresh_key_policy,
     provider_string as ai_provider_string,
     provider_template_by_type as ai_provider_template_by_type, provider_view as ai_provider_view,
-    provider_views as ai_provider_views_from_values,
     remove_provider_at_with_scoped_settings as ai_remove_provider_at_with_scoped_settings,
     set_active_provider_selection as ai_set_active_provider_selection,
     set_provider_default_model as ai_set_provider_default_model,
     take_provider_key_secret as ai_take_provider_key_secret,
-    update_provider as ai_update_provider_values,
 };
 use oxideterm_connections::{
     SshConfigHost, list_available_ssh_keys, list_ssh_config_hosts, resolve_ssh_config_alias,

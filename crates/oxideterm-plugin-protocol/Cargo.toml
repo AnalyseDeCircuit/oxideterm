@@ -1,0 +1,10 @@
+[package]
+name = "oxideterm-plugin-protocol"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
+serde.workspace = true
+serde_json.workspace = true

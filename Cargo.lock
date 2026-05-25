@@ -7173,9 +7173,14 @@ dependencies = [
  "oxideterm-launcher",
  "oxideterm-local-files",
  "oxideterm-notification-center",
+ "oxideterm-plugin-host-api",
+ "oxideterm-plugin-manifest",
+ "oxideterm-plugin-protocol",
+ "oxideterm-plugin-registry",
  "oxideterm-preview",
  "oxideterm-render-policy",
  "oxideterm-settings",
+ "oxideterm-settings-model",
  "oxideterm-sftp",
  "oxideterm-ssh",
  "oxideterm-terminal",
@@ -7359,6 +7364,56 @@ name = "oxideterm-notification-center"
 version = "0.1.0"
 
 [[package]]
+name = "oxideterm-plugin-host-api"
+version = "0.1.0"
+dependencies = [
+ "oxideterm-ai",
+ "oxideterm-connection-monitor",
+ "oxideterm-forwarding",
+ "oxideterm-gpui-ide",
+ "oxideterm-i18n",
+ "oxideterm-plugin-protocol",
+ "oxideterm-settings",
+ "oxideterm-sftp",
+ "oxideterm-ssh",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "oxideterm-plugin-manifest"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "oxideterm-plugin-protocol"
+version = "0.1.0"
+dependencies = [
+ "oxideterm-plugin-manifest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "oxideterm-plugin-registry"
+version = "0.1.0"
+dependencies = [
+ "oxideterm-ai",
+ "oxideterm-plugin-manifest",
+ "oxideterm-plugin-protocol",
+ "reqwest",
+ "serde_json",
+ "sha2 0.10.9",
+ "zip",
+]
+
+[[package]]
 name = "oxideterm-preview"
 version = "0.1.0"
 dependencies = [
@@ -7393,6 +7448,15 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "oxideterm-settings-model"
+version = "0.1.0"
+dependencies = [
+ "oxideterm-ai",
+ "oxideterm-settings",
+ "serde_json",
 ]
 
 [[package]]
