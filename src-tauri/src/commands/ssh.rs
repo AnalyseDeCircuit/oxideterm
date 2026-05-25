@@ -778,7 +778,7 @@ pub async fn create_terminal(
                 "Session {} WebSocket bridge disconnected: {:?}",
                 session_id_clone, reason
             );
-            if reason.is_recoverable() {
+            if reason.can_reattach_existing_pty() {
                 // 🔧 修复 ref_count 泄漏：超时后释放连接引用
                 let conn_reg_for_cleanup = conn_registry_clone.clone();
                 let session_id_for_cleanup = session_id_clone.clone();
@@ -798,6 +798,14 @@ pub async fn create_terminal(
                             let _ = conn_reg.release(&conn_id).await;
                         });
                     }),
+                );
+            } else if matches!(reason, crate::bridge::DisconnectReason::SshChannelClosed) {
+                // The WebSocket can be rebuilt, but this shell channel is gone.
+                // Keep the session registered so recreate_terminal_pty opens a
+                // fresh PTY instead of reattaching to a dead command channel.
+                warn!(
+                    "Session {} SSH channel closed; next recovery must recreate PTY",
+                    session_id_clone
                 );
             } else {
                 // AcceptTimeout 或其他不可恢复的断开：清理会话
@@ -1015,7 +1023,7 @@ pub async fn recreate_terminal_pty(
                         "Reattached session {} WS bridge disconnected: {:?}",
                         session_id_for_monitor, reason
                     );
-                    if reason.is_recoverable() {
+                    if reason.can_reattach_existing_pty() {
                         let conn_reg = conn_registry_for_monitor.clone();
                         let sid = session_id_for_monitor.clone();
                         let cid = conn_id_for_monitor.clone();
@@ -1032,6 +1040,13 @@ pub async fn recreate_terminal_pty(
                                     let _ = conn_reg.release(&cid).await;
                                 });
                             }),
+                        );
+                    } else if matches!(reason, crate::bridge::DisconnectReason::SshChannelClosed) {
+                        // The previously detached shell has exited. Do not mark
+                        // it as reattachable; the next recovery opens a new PTY.
+                        warn!(
+                            "Reattached session {} SSH channel closed; next recovery must recreate PTY",
+                            session_id_for_monitor
                         );
                     } else if matches!(reason, crate::bridge::DisconnectReason::AcceptTimeout) {
                         // 代际校验：确保本 bridge 仍拥有该 session
@@ -1185,7 +1200,7 @@ pub async fn recreate_terminal_pty(
                 "Recreated session {} WebSocket bridge disconnected: {:?}",
                 session_id_clone, reason
             );
-            if reason.is_recoverable() {
+            if reason.can_reattach_existing_pty() {
                 // 🔧 修复 ref_count 泄漏：超时后释放连接引用
                 let conn_reg_for_cleanup = conn_registry_clone.clone();
                 let session_id_for_cleanup = session_id_clone.clone();
@@ -1201,6 +1216,14 @@ pub async fn recreate_terminal_pty(
                             let _ = conn_reg.release(&conn_id).await;
                         });
                     }),
+                );
+            } else if matches!(reason, crate::bridge::DisconnectReason::SshChannelClosed) {
+                // The recreated shell channel has exited; leave the session
+                // alive so frontend recovery can create a new PTY once, instead
+                // of reattaching to the dead channel and looping on input.
+                warn!(
+                    "Recreated session {} SSH channel closed; next recovery must recreate PTY",
+                    session_id_clone
                 );
             } else {
                 // AcceptTimeout: 前端没有连接，清理会话

@@ -220,6 +220,22 @@ mod tests {
     use crate::session::parse_terminal_output;
     use crate::ssh::{ExtendedSessionHandle as SshExtendedSessionHandle, SessionCommand};
 
+    #[test]
+    fn ssh_channel_close_requires_fresh_pty_recreation() {
+        let reason = DisconnectReason::SshChannelClosed;
+
+        assert!(reason.is_recoverable());
+        assert!(!reason.can_reattach_existing_pty());
+    }
+
+    #[test]
+    fn webview_transport_drops_can_reattach_existing_pty() {
+        let network_error = DisconnectReason::NetworkError("send_timeout".to_string());
+
+        assert!(DisconnectReason::HeartbeatTimeout.can_reattach_existing_pty());
+        assert!(network_error.can_reattach_existing_pty());
+    }
+
     fn decode_frame(bytes: Bytes) -> Frame {
         let mut buf = BytesMut::from(bytes.as_ref());
         Frame::decode(&mut buf)
@@ -453,6 +469,18 @@ impl DisconnectReason {
             DisconnectReason::HeartbeatTimeout
                 | DisconnectReason::NetworkError(_)
                 | DisconnectReason::SshChannelClosed
+        )
+    }
+
+    /// Check whether the existing terminal PTY/shell channel is still reusable.
+    ///
+    /// A lost WebSocket can reattach to the same SSH shell, but an SSH channel
+    /// close means the shell itself is gone. In that case the frontend recovery
+    /// path must recreate a fresh PTY instead of reusing the old command sender.
+    pub fn can_reattach_existing_pty(&self) -> bool {
+        matches!(
+            self,
+            DisconnectReason::HeartbeatTimeout | DisconnectReason::NetworkError(_)
         )
     }
 
