@@ -20,6 +20,7 @@ impl WorkspaceApp {
         });
 
         self.panes.insert(pane_id, pane.clone());
+        self.refresh_native_plugin_terminal_hooks(cx);
         self.tabs.push(Tab {
             id: tab_id,
             kind: TabKind::LocalTerminal,
@@ -35,6 +36,49 @@ impl WorkspaceApp {
         self.reveal_active_tab(window);
         cx.notify();
         Ok(())
+    }
+
+    pub(super) fn create_telnet_terminal_tab(
+        &mut self,
+        config: TelnetSessionConfig,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
+        let tab_id = self.alloc_tab_id();
+        let pane_id = self.alloc_pane_id();
+        let session_id = self.alloc_session_id();
+        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::LocalTerminal);
+        let title = format!("Telnet {}", config.endpoint_label());
+        let pane_config = config.clone();
+        let pane = cx.new(|cx| {
+            TerminalPane::new_telnet_with_preferences(
+                pane_config,
+                preferences,
+                window,
+                cx,
+            )
+            .expect("failed to initialize Telnet terminal pane")
+        });
+
+        // Telnet is a local transport in the plugin API: it owns no SSH node,
+        // but it still participates in the normal tab/pane/session registry.
+        self.panes.insert(pane_id, pane.clone());
+        self.refresh_native_plugin_terminal_hooks(cx);
+        self.tabs.push(Tab {
+            id: tab_id,
+            kind: TabKind::LocalTerminal,
+            title,
+            title_source: TabTitleSource::Static,
+            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+            active_pane_id: Some(pane_id),
+        });
+        self.active_tab_id = Some(tab_id);
+        self.active_surface = ActiveSurface::Terminal;
+        self.needs_active_pane_focus = true;
+        pane.read(cx).focus(window);
+        self.reveal_active_tab(window);
+        cx.notify();
+        Ok(session_id)
     }
 
     pub(super) fn create_ssh_terminal_tab(
@@ -307,6 +351,7 @@ impl WorkspaceApp {
         });
 
         self.panes.insert(pane_id, pane.clone());
+        self.refresh_native_plugin_terminal_hooks(cx);
         self.tabs.push(Tab {
             id: tab_id,
             kind: TabKind::SshTerminal,
@@ -442,6 +487,7 @@ impl WorkspaceApp {
                 .expect("failed to remount ssh terminal pane")
         });
         self.panes.insert(pane_id, pane);
+        self.refresh_native_plugin_terminal_hooks(cx);
         self.persist_session_tree_snapshot();
         Ok((pane_id, session_id))
     }

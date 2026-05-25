@@ -656,8 +656,43 @@ impl WorkspaceApp {
         edit: impl FnOnce(&mut PersistedSettings),
         cx: &mut Context<Self>,
     ) {
+        let previous_settings = self.settings_store.settings().clone();
         edit(self.settings_store.settings_mut());
         let settings = self.settings_store.settings().clone();
+        self.apply_loaded_settings_to_runtime(&settings, cx);
+        let _ = self.settings_store.save();
+        self.emit_native_plugin_settings_events(&previous_settings, &settings, cx);
+        self.sync_tab_titles(cx);
+        cx.notify();
+    }
+
+    pub(super) fn reload_after_external_sync(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        let previous_settings = self.settings_store.settings().clone();
+        let settings_path = self.settings_store.path().to_path_buf();
+        let connection_path = self.connection_store.path().to_path_buf();
+        let next_settings = SettingsStore::load_from_path(settings_path, None)
+            .map_err(|error| format!("Failed to reload settings after external sync: {error}"))?;
+        let next_connections = ConnectionStore::load(connection_path)
+            .map_err(|error| format!("Failed to reload connections after external sync: {error}"))?;
+        let settings = next_settings.settings().clone();
+        self.settings_store = next_settings;
+        self.connection_store = next_connections;
+        // External sync mutates persisted stores outside the GPUI controls.
+        // Re-apply the same runtime side effects used by edit_settings instead
+        // of relying on stale in-memory settings or browser-style stores.
+        self.apply_loaded_settings_to_runtime(&settings, cx);
+        self.emit_native_plugin_settings_events(&previous_settings, &settings, cx);
+        self.queue_cloud_sync_dirty_refresh(cx);
+        self.sync_tab_titles(cx);
+        cx.notify();
+        Ok(())
+    }
+
+    fn apply_loaded_settings_to_runtime(
+        &mut self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) {
         self.i18n
             .set_locale(locale_from_settings(settings.general.language));
         self.tokens = tokens_from_settings(&settings);
@@ -701,9 +736,51 @@ impl WorkspaceApp {
         // surfaces keep their own GPUI owners, so push typography/wrap/autosave
         // changes into each open surface after the settings store changes.
         self.apply_ide_runtime_settings_to_surfaces(cx);
-        let _ = self.settings_store.save();
-        self.sync_tab_titles(cx);
-        cx.notify();
+    }
+
+    fn emit_native_plugin_settings_events(
+        &mut self,
+        previous_settings: &PersistedSettings,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) {
+        if previous_settings.terminal.theme != settings.terminal.theme {
+            self.emit_native_plugin_event_to_subscribers(
+                plugin_host::NATIVE_PLUGIN_APP_THEME_CHANGED_EVENT,
+                serde_json::json!({
+                    "theme": crate::workspace::plugin_lifecycle::native_plugin_theme_snapshot(
+                        &settings.terminal.theme
+                    ),
+                }),
+                cx,
+            );
+        }
+
+        if previous_settings.general.language != settings.general.language {
+            let language = settings.general.language.as_str();
+            self.emit_native_plugin_event_to_subscribers(
+                plugin_host::NATIVE_PLUGIN_I18N_LANGUAGE_CHANGED_EVENT,
+                serde_json::json!({ "language": language }),
+                cx,
+            );
+        }
+
+        let previous_value = serde_json::to_value(previous_settings).unwrap_or_else(|_| {
+            serde_json::json!({})
+        });
+        let current_value = serde_json::to_value(settings).unwrap_or_else(|_| {
+            serde_json::json!({})
+        });
+        if previous_value != current_value {
+            // Tauri exposes app.onSettingsChange as an application-level
+            // snapshot callback. Native sends the same immutable snapshot over
+            // the plugin event channel after persistence succeeds.
+            self.emit_native_plugin_event_to_subscribers(
+                plugin_host::NATIVE_PLUGIN_APP_SETTINGS_CHANGED_EVENT,
+                serde_json::json!({ "settings": current_value }),
+                cx,
+            );
+        }
     }
 }
 

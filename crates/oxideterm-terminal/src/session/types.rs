@@ -2,7 +2,10 @@
 pub enum TerminalSessionKind {
     LocalPty,
     SshPty,
+    Telnet,
 }
+
+pub type TerminalOutputProcessor = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalResize {
@@ -48,6 +51,7 @@ pub trait TerminalSessionBackend: Send {
     fn write_text(&mut self, text: &str) -> Result<()>;
     fn paste_text(&mut self, text: &str) -> Result<()>;
     fn set_encoding(&mut self, encoding: TerminalEncoding);
+    fn set_output_processor(&mut self, _processor: Option<TerminalOutputProcessor>) {}
     fn set_trzsz_policy(&mut self, _policy: Option<TrzszTransferPolicy>) {}
     fn take_trzsz_transfer(&mut self) -> Option<TrzszTransfer> {
         None
@@ -67,6 +71,7 @@ pub trait TerminalSessionBackend: Send {
     fn scroll_to_bottom(&mut self);
     fn scroll_to_display_offset(&mut self, offset: usize);
     fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch>;
+    fn clear_buffer(&mut self);
     fn command_output_text(&self, _mark: &TerminalCommandMark) -> String {
         String::new()
     }

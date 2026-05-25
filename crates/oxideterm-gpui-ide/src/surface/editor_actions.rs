@@ -52,6 +52,52 @@ impl IdeSurface {
         })
     }
 
+    pub fn plugin_snapshot(&self) -> Option<IdePluginSnapshot> {
+        let snapshot = self.workspace.snapshot().ok()?;
+        let (node_id, root_path) = match &snapshot.project.root {
+            IdeLocation::Remote { node_id, path } => (node_id.clone(), path.clone()),
+            IdeLocation::Local { .. } => return None,
+        };
+        let open_files = snapshot
+            .tabs
+            .iter()
+            .map(|tab| {
+                // Tauri exposes tab metadata only; native keeps file text inside
+                // buffers and projects just language/dirty state into this API.
+                let buffer = snapshot
+                    .buffers
+                    .iter()
+                    .find(|buffer| buffer.tab_id == tab.id);
+                let language = buffer
+                    .and_then(|buffer| language_for_location(&tab.location, &buffer.text))
+                    .map(|language| format!("{language:?}"))
+                    .unwrap_or_default();
+                IdePluginFileSnapshot {
+                    path: ide_plugin_file_path(&tab.location),
+                    name: tab.title.clone(),
+                    language,
+                    is_dirty: buffer.is_some_and(|buffer| {
+                        buffer.revision != buffer.saved_revision || buffer.text != buffer.saved_text
+                    }),
+                    is_active: snapshot.active_tab == Some(tab.id),
+                    is_pinned: tab.is_pinned,
+                }
+            })
+            .collect::<Vec<_>>();
+        let active_file = open_files.iter().find(|file| file.is_active).cloned();
+        Some(IdePluginSnapshot {
+            project: IdePluginProjectSnapshot {
+                node_id,
+                root_path,
+                name: snapshot.project.title,
+                is_git_repo: self.git_branch.is_some(),
+                git_branch: self.git_branch.clone(),
+            },
+            open_files,
+            active_file,
+        })
+    }
+
     pub fn retry_open_project(&mut self, cx: &mut Context<Self>) {
         let Some(node_id) = self.node_id.clone() else {
             return;
@@ -1512,4 +1558,11 @@ fn ai_code_snippet_around_start(text: &str) -> (Option<String>, usize) {
         .last()
         .unwrap_or(0);
     (Some(format!("{}\n... (truncated)", &snippet[..end])), 1)
+}
+
+fn ide_plugin_file_path(location: &IdeLocation) -> String {
+    match location {
+        IdeLocation::Remote { path, .. } => path.clone(),
+        IdeLocation::Local { path } => path.to_string_lossy().into_owned(),
+    }
 }

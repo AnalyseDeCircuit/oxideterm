@@ -584,6 +584,7 @@ fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
         TabKind::Graphics => "graphics",
         TabKind::NotificationCenter => "notifications",
         TabKind::PluginManager => "plugin_manager",
+        TabKind::Plugin { .. } => "plugin",
         TabKind::CloudSync => "cloud_sync",
     }
 }

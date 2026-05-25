@@ -1,5 +1,8 @@
 use oxideterm_gpui_ui::select::SelectAnchorId;
 
+const PLUGIN_MANAGER_INPUT_ANCHOR_BASE: u64 = 28_000;
+const PLUGIN_SETTING_INPUT_ANCHOR_BASE: u64 = 29_000;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActiveSurface {
     Terminal,
@@ -184,6 +187,10 @@ pub enum SettingsInput {
     CloudSyncSessionToken,
     CloudSyncSyncPassword,
     CloudSyncAutoUploadInterval,
+    NativePluginInstallUrl,
+    NativePluginInstallChecksum,
+    NativePluginRegistryUrl,
+    PluginSetting(usize),
 }
 
 impl SettingsInput {
@@ -256,6 +263,16 @@ impl SettingsInput {
             Self::CloudSyncSessionToken => 27_012,
             Self::CloudSyncSyncPassword => 27_013,
             Self::CloudSyncAutoUploadInterval => 27_014,
+            // Plugin Manager install controls are native UI fields, but they
+            // still use the shared SettingsInput IME route so text selection,
+            // paste, and marked text match Settings and plugin setting fields.
+            Self::NativePluginInstallUrl => PLUGIN_MANAGER_INPUT_ANCHOR_BASE,
+            Self::NativePluginInstallChecksum => PLUGIN_MANAGER_INPUT_ANCHOR_BASE + 1,
+            Self::NativePluginRegistryUrl => PLUGIN_MANAGER_INPUT_ANCHOR_BASE + 2,
+            // Plugin settings are discovered from plugin.json at runtime. Keep
+            // their IME anchors in a reserved range instead of assigning
+            // feature-local constants for every possible plugin key.
+            Self::PluginSetting(index) => PLUGIN_SETTING_INPUT_ANCHOR_BASE + index as u64,
         }
     }
 }

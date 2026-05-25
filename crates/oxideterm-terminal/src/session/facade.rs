@@ -2,6 +2,18 @@ pub struct TerminalSession {
     backend: Box<dyn TerminalSessionBackend>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TelnetSessionConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+impl TelnetSessionConfig {
+    pub fn endpoint_label(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
+}
+
 impl TerminalSession {
     pub fn local_default(cols: usize, rows: usize) -> Result<Self> {
         Self::local_with_graphics_options(cols, rows, GraphicsOptions::default())
@@ -115,6 +127,26 @@ impl TerminalSession {
         }
     }
 
+    pub fn telnet_with_graphics_and_encoding(
+        config: TelnetSessionConfig,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback_lines: usize,
+    ) -> Self {
+        Self {
+            backend: Box::new(TelnetSession::new(
+                config,
+                cols,
+                rows,
+                graphics_options,
+                encoding,
+                scrollback_lines,
+            )),
+        }
+    }
+
     pub fn kind(&self) -> TerminalSessionKind {
         self.backend.kind()
     }
@@ -157,6 +189,10 @@ impl TerminalSession {
 
     pub fn set_encoding(&mut self, encoding: TerminalEncoding) {
         self.backend.set_encoding(encoding);
+    }
+
+    pub fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
+        self.backend.set_output_processor(processor);
     }
 
     pub fn set_trzsz_policy(&mut self, policy: Option<TrzszTransferPolicy>) {
@@ -256,6 +292,10 @@ impl TerminalSession {
 
     pub fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch> {
         self.backend.search_matches(query)
+    }
+
+    pub fn clear_buffer(&mut self) {
+        self.backend.clear_buffer();
     }
 
     pub fn command_output_text(&self, mark: &TerminalCommandMark) -> String {

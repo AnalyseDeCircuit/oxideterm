@@ -548,6 +548,62 @@ pub(crate) fn matched_action_for_keystroke(
         .map(|definition| (definition, combo))
 }
 
+pub(crate) fn normalize_plugin_key_combo(keybinding: &str) -> Option<String> {
+    let mut parts = keybinding
+        .split('+')
+        .filter_map(normalize_plugin_key_part)
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    parts.sort();
+    Some(parts.join("+"))
+}
+
+pub(crate) fn normalize_plugin_keystroke(keystroke: &Keystroke) -> Option<String> {
+    let combo = combo_from_keystroke(keystroke)?;
+    let mut parts = Vec::new();
+    // Tauri's pluginHostUi collapses Cmd/Meta and Ctrl into the same "ctrl"
+    // token for plugin keybindings. Preserve that public contract so existing
+    // plugin descriptors such as "Cmd+Shift+R" keep working cross-platform.
+    if combo.ctrl || combo.meta {
+        parts.push("ctrl".to_string());
+    }
+    if combo.shift {
+        parts.push("shift".to_string());
+    }
+    if combo.alt {
+        parts.push("alt".to_string());
+    }
+    parts.push(normalize_plugin_event_key(&combo.key)?);
+    parts.sort();
+    Some(parts.join("+"))
+}
+
+fn normalize_plugin_key_part(part: &str) -> Option<String> {
+    let normalized = part.trim().to_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(match normalized.as_str() {
+        "cmd" | "command" | "meta" | "super" | "win" | "⌘" => "ctrl".to_string(),
+        "control" | "ctrl" | "⌃" => "ctrl".to_string(),
+        "option" | "alt" | "⌥" => "alt".to_string(),
+        "shift" | "⇧" => "shift".to_string(),
+        "escape" | "esc" => "esc".to_string(),
+        "spacebar" | "space" | " " => "space".to_string(),
+        "left" => "arrowleft".to_string(),
+        "right" => "arrowright".to_string(),
+        "up" => "arrowup".to_string(),
+        "down" => "arrowdown".to_string(),
+        key => key.to_string(),
+    })
+}
+
+fn normalize_plugin_event_key(key: &str) -> Option<String> {
+    normalize_plugin_key_part(if key == " " { "space" } else { key })
+}
+
 pub(crate) fn action_allowed_by_terminal_behavior(
     definition: &ActionDefinition,
     combo: &KeyCombo,
@@ -981,5 +1037,49 @@ mod tests {
             true,
             false,
         ));
+    }
+
+    #[test]
+    fn plugin_keybindings_match_tauri_normalization() {
+        assert_eq!(
+            normalize_plugin_key_combo("Cmd+Shift+R").as_deref(),
+            Some("ctrl+r+shift")
+        );
+        assert_eq!(
+            normalize_plugin_key_combo("K+SHIFT+CTRL").as_deref(),
+            Some("ctrl+k+shift")
+        );
+        assert_eq!(
+            normalize_plugin_key_combo("Command+Option+Escape").as_deref(),
+            Some("alt+ctrl+esc")
+        );
+
+        let cmd_shift_r = Keystroke {
+            modifiers: Modifiers {
+                platform: true,
+                shift: true,
+                ..Default::default()
+            },
+            key: "r".to_string(),
+            key_char: None,
+        };
+        assert_eq!(
+            normalize_plugin_keystroke(&cmd_shift_r).as_deref(),
+            Some("ctrl+r+shift")
+        );
+
+        let ctrl_shift_k = Keystroke {
+            modifiers: Modifiers {
+                control: true,
+                shift: true,
+                ..Default::default()
+            },
+            key: "k".to_string(),
+            key_char: None,
+        };
+        assert_eq!(
+            normalize_plugin_keystroke(&ctrl_shift_k).as_deref(),
+            Some("ctrl+k+shift")
+        );
     }
 }

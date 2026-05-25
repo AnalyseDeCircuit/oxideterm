@@ -58,6 +58,7 @@ impl WorkspaceApp {
                 TabKind::Forwards => LucideIcon::ArrowLeftRight,
                 TabKind::SessionManager => LucideIcon::LayoutList,
                 TabKind::PluginManager => LucideIcon::Puzzle,
+                TabKind::Plugin { .. } => LucideIcon::Puzzle,
                 TabKind::CloudSync => LucideIcon::Cloud,
                 TabKind::Settings => LucideIcon::Settings,
             };

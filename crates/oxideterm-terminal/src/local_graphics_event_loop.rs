@@ -36,7 +36,7 @@ use oxideterm_terminal_graphics::{GraphicsIngress, GraphicsOptions, TerminalGrap
 use polling::{Event as PollingEvent, Events, PollMode, Poller};
 
 use crate::{
-    TerminalEvent, TerminalSize,
+    TerminalEvent, TerminalOutputProcessor, TerminalSize,
     backpressure::{
         LOCAL_MAX_LOCKED_PARSE_BYTES, LOCAL_PTY_READ_BUFFER_BYTES, MagicScanWindow,
         TerminalMagicKind, Utf8ResidualGuard,
@@ -50,12 +50,12 @@ const PTY_READ_WRITE_TOKEN: usize = 2;
 const PTY_READ_WRITE_TOKEN: usize = 0;
 const PTY_CHILD_EVENT_TOKEN: usize = 1;
 
-#[derive(Debug)]
 pub(crate) enum LocalGraphicsMsg {
     Input(Cow<'static, [u8]>),
     Shutdown,
     Resize(WindowSize),
     SetEncoding(TerminalEncoding),
+    SetOutputProcessor(Option<TerminalOutputProcessor>),
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -199,6 +199,10 @@ where
                 LocalGraphicsMsg::SetEncoding(encoding) => {
                     state.set_encoding(encoding);
                 }
+                LocalGraphicsMsg::SetOutputProcessor(processor) => {
+                    state.output_processor = processor;
+                    state.utf8_guard = Utf8ResidualGuard::default();
+                }
                 LocalGraphicsMsg::Shutdown => return false,
             }
         }
@@ -245,7 +249,8 @@ where
             };
 
             let mut parsed_bytes = 0usize;
-            if let Some(guarded) = state.utf8_guard.push(&buf[..unprocessed]) {
+            let processed_output = state.process_output(&buf[..unprocessed]);
+            if let Some(guarded) = state.utf8_guard.push(&processed_output) {
                 let (bytes, changed) = Self::advance_guarded_bytes(
                     state,
                     terminal,
@@ -554,6 +559,7 @@ struct LocalGraphicsState {
     graphics: GraphicsIngress,
     utf8_guard: Utf8ResidualGuard,
     magic_scan: MagicScanWindow,
+    output_processor: Option<TerminalOutputProcessor>,
     output_decoder: TerminalOutputDecoder,
     encoding_detector: EncodingMismatchDetector,
     shell_integration: TerminalShellIntegration,
@@ -568,6 +574,7 @@ impl LocalGraphicsState {
             graphics: GraphicsIngress::new(graphics_options),
             utf8_guard: Utf8ResidualGuard::default(),
             magic_scan: MagicScanWindow::default(),
+            output_processor: None,
             output_decoder: TerminalOutputDecoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             shell_integration: TerminalShellIntegration::default(),
@@ -578,6 +585,15 @@ impl LocalGraphicsState {
         self.output_decoder.set_encoding(encoding);
         self.output_decoder.reset();
         self.encoding_detector.set_encoding(encoding);
+    }
+
+    fn process_output(&self, bytes: &[u8]) -> Vec<u8> {
+        let Some(processor) = &self.output_processor else {
+            return bytes.to_vec();
+        };
+        // Output processors sit before UTF-8 buffering and ANSI parsing so
+        // transformed bytes, including suppression, are what the terminal sees.
+        processor(bytes)
     }
 
     fn ensure_next(&mut self) {

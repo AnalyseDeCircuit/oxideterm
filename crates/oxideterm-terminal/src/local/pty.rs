@@ -269,6 +269,16 @@ impl LocalPtySession {
             .send(LocalGraphicsMsg::SetEncoding(encoding));
     }
 
+    pub fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
+        // Local PTY output is parsed on the graphics reader thread, so the
+        // processor must be transferred to that owner instead of stored only on
+        // the UI-side session facade.
+        let _ = self
+            .notifier
+            .0
+            .send(LocalGraphicsMsg::SetOutputProcessor(processor));
+    }
+
     pub fn lifecycle(&self) -> TerminalLifecycle {
         self.lifecycle.clone()
     }
@@ -539,6 +549,11 @@ impl LocalPtySession {
         }
 
         matches
+    }
+
+    pub fn clear_buffer(&mut self) {
+        let mut term = self.term.lock();
+        crate::session::clear_terminal_buffer(&mut term);
     }
 
     pub fn snapshot(&self) -> TerminalSnapshot {

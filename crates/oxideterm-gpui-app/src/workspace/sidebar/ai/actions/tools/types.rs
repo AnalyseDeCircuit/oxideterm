@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use sha2::Digest as _;
 
@@ -20,6 +20,7 @@ struct AiOrchestratorRuntimeSnapshot {
     ai_key_store: oxideterm_ai::AiProviderKeyStore,
     ai_providers: Vec<serde_json::Value>,
     ai_embedding_config: Option<serde_json::Value>,
+    plugin_pending_tool_names: HashSet<String>,
     ai_context_window: usize,
     runtime_epoch: String,
 }

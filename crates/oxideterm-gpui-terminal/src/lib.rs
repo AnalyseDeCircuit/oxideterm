@@ -5,12 +5,15 @@ pub mod terminal_ui;
 mod terminal_view;
 mod trzsz_worker;
 
-pub use app::{SharedTerminalSession, TerminalPane};
+pub use app::{
+    SharedTerminalSession, TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalPane,
+};
 pub use background_cache::BackgroundImageRenderCache;
 pub use command_facts::{
     TerminalAiCommandRecord, TerminalAutosuggestCommandRecord, TerminalAutosuggestInputState,
     TerminalCommandFact, TerminalCommandFactStatus,
 };
+pub use oxideterm_terminal::TerminalOutputProcessor;
 pub use oxideterm_terminal_recording::{TerminalRecordingState, TerminalRecordingStatus};
 pub use terminal_ui::{
     TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalCommandSelectionLabels,

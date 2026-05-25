@@ -84,6 +84,11 @@ enum PaletteAction {
     ThemeNext(bool),
     CursorStyle(SettingsCursorStyle),
     ToggleFps,
+    RuntimePluginCommand {
+        plugin_id: String,
+        command: String,
+    },
+    PluginCommandPending,
 }
 
 #[derive(Clone)]
@@ -472,6 +477,13 @@ impl WorkspaceApp {
                     },
                     cx,
                 );
+            }
+            PaletteAction::RuntimePluginCommand { plugin_id, command } => {
+                self.dispatch_native_plugin_command(plugin_id, command, cx);
+            }
+            PaletteAction::PluginCommandPending => {
+                self.command_palette.error =
+                    Some("Plugin command runtime is not available yet.".to_string());
             }
         }
         cx.notify();
@@ -935,6 +947,7 @@ impl WorkspaceApp {
                     TabKind::Topology => self.i18n.t("topology.title"),
                     TabKind::NotificationCenter => self.i18n.t("sidebar.panels.notifications"),
                     TabKind::PluginManager => self.i18n.t("plugin.manager_title"),
+                    TabKind::Plugin { .. } => self.i18n.t("sidebar.panels.plugins"),
                     TabKind::CloudSync => self.i18n.t("plugin.cloud_sync.panel_title"),
                     TabKind::Forwards => self.i18n.t("sidebar.panels.forwarding"),
                     TabKind::Sftp => self.i18n.t("sidebar.panels.sftp"),
@@ -983,11 +996,105 @@ impl WorkspaceApp {
     }
 
     fn command_palette_plugin_items(&self) -> Vec<PaletteItem> {
-        // Tauri shows plugin commands supplied by the plugin command registry.
-        // Native has a plugin manager placeholder but no executable command
-        // registry yet, so keep this section empty instead of pretending that
-        // commands can run.
-        Vec::new()
+        let contributions = self.plugin_registry.contributions();
+        let mut items = Vec::new();
+        items.extend(contributions.api_commands.iter().map(|command| {
+            // Phase 2 mirrors Tauri command registry visibility without
+            // executing handlers before the native runtime bridge exists.
+            PaletteItem {
+                id: format!("plugin-command:{}:{}", command.plugin_id, command.command),
+                label: format!("{}: {}", command.plugin_name, command.command),
+                section: PaletteSection::Plugins,
+                icon: LucideIcon::Puzzle,
+                detail: Some("等待 native plugin runtime".to_string()),
+                shortcut: None,
+                value: format!(
+                    "{} {} {}",
+                    command.plugin_name, command.plugin_id, command.command
+                ),
+                action: PaletteAction::PluginCommandPending,
+                disabled: true,
+            }
+        }));
+        items.extend(contributions.runtime_commands.iter().map(|command| {
+            // Tauri registerCommand installs a command palette entry backed by
+            // a plugin handler. Native dispatches the same command id through
+            // the process runtime RPC boundary instead of running JS handlers.
+            PaletteItem {
+                id: format!(
+                    "plugin-runtime-command:{}:{}",
+                    command.plugin_id, command.registration_id
+                ),
+                label: format!("{}: {}", command.plugin_name, command.label),
+                section: PaletteSection::Plugins,
+                icon: LucideIcon::Puzzle,
+                detail: Some("插件命令".to_string()),
+                shortcut: command.shortcut.clone(),
+                value: format!(
+                    "{} {} {} {}",
+                    command.plugin_name, command.plugin_id, command.command, command.label
+                ),
+                action: PaletteAction::RuntimePluginCommand {
+                    plugin_id: command.plugin_id.clone(),
+                    command: command.command.clone(),
+                },
+                disabled: false,
+            }
+        }));
+        items.extend(contributions.runtime_keybindings.iter().map(|keybinding| {
+            // Tauri registerKeybinding stores a key combo plus handler. Native
+            // keeps the keybinding as host-owned metadata and dispatches the
+            // associated command through the same runtime RPC path as commands.
+            PaletteItem {
+                id: format!(
+                    "plugin-runtime-keybinding:{}:{}",
+                    keybinding.plugin_id, keybinding.registration_id
+                ),
+                label: format!("{}: {}", keybinding.plugin_name, keybinding.label),
+                section: PaletteSection::Plugins,
+                icon: LucideIcon::Keyboard,
+                detail: Some("插件快捷键".to_string()),
+                shortcut: Some(keybinding.keybinding.clone()),
+                value: format!(
+                    "{} {} {} {}",
+                    keybinding.plugin_name,
+                    keybinding.plugin_id,
+                    keybinding.command,
+                    keybinding.keybinding
+                ),
+                action: PaletteAction::RuntimePluginCommand {
+                    plugin_id: keybinding.plugin_id.clone(),
+                    command: keybinding.command.clone(),
+                },
+                disabled: false,
+            }
+        }));
+        items.extend(
+            contributions
+                .terminal_shortcuts
+                .iter()
+                .map(|shortcut| PaletteItem {
+                    id: format!(
+                        "plugin-shortcut:{}:{}",
+                        shortcut.plugin_id, shortcut.definition.command
+                    ),
+                    label: format!("{}: {}", shortcut.plugin_name, shortcut.definition.command),
+                    section: PaletteSection::Plugins,
+                    icon: LucideIcon::Keyboard,
+                    detail: Some("插件终端快捷键等待 runtime".to_string()),
+                    shortcut: Some(shortcut.definition.key.clone()),
+                    value: format!(
+                        "{} {} {} {}",
+                        shortcut.plugin_name,
+                        shortcut.plugin_id,
+                        shortcut.definition.command,
+                        shortcut.definition.key
+                    ),
+                    action: PaletteAction::PluginCommandPending,
+                    disabled: true,
+                }),
+        );
+        items
     }
 
     fn quick_connect_label(&self, target: &str) -> String {
@@ -1984,6 +2091,7 @@ fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
         TabKind::Sftp => LucideIcon::HardDrive,
         TabKind::Ide => LucideIcon::Code2,
         TabKind::PluginManager => LucideIcon::Puzzle,
+        TabKind::Plugin { .. } => LucideIcon::Puzzle,
         TabKind::CloudSync => LucideIcon::Cloud,
         TabKind::Settings => LucideIcon::Settings,
         TabKind::SessionManager => LucideIcon::LayoutList,

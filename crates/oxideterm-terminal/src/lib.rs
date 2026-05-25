@@ -49,9 +49,9 @@ pub use oxideterm_terminal_encoding::{
 pub use oxideterm_trzsz::{TrzszTransferDirection, TrzszTransferPolicy, TrzszTransferSelection};
 pub use process::{TerminalLifecycle, TerminalProcessInfo};
 pub use session::{
-    SshPtySession, SshSessionConfig, TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind,
-    TerminalResize, TerminalSession, TerminalSessionBackend, TerminalSessionKind,
-    TerminalSessionStatus,
+    SshPtySession, SshSessionConfig, TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport,
+    TerminalMagicKind, TerminalOutputProcessor, TerminalResize, TerminalSession,
+    TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
 };
 pub use shell_integration::{
     ShellIntegrationEvent, ShellIntegrationEventKind, ShellIntegrationLifecycleState,

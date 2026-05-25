@@ -16,10 +16,11 @@ use gpui::{
 use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
     GraphicsOptions, LocalPtyConfig, ShellIntegrationLifecycleState, ShellIntegrationStatus,
-    SshSessionConfig, TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy,
-    TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
-    TerminalDrainBudget, TerminalDrainReport, TerminalEvent, TerminalLifecycle, TerminalSession,
-    TerminalSnapshot, TrzszTransferDirection, TrzszTransferSelection,
+    SshSessionConfig, TelnetSessionConfig, TermMode, TerminalCommandMark,
+    TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource,
+    TerminalCommandMarkEvent, TerminalDrainBudget, TerminalDrainReport, TerminalEvent,
+    TerminalLifecycle, TerminalOutputProcessor, TerminalSession, TerminalSnapshot,
+    TrzszTransferDirection, TrzszTransferSelection,
 };
 use oxideterm_trzsz::TrzszState;
 use parking_lot::Mutex;
@@ -51,6 +52,13 @@ pub(crate) use ime::TerminalInputHandler;
 use scrollbar::{ScrollbarDrag, ScrollbarGeometry};
 
 pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
+pub type TerminalInputInterceptor =
+    Arc<dyn Fn(&[u8]) -> TerminalInputInterceptorResult + Send + Sync>;
+
+pub enum TerminalInputInterceptorResult {
+    Continue(Vec<u8>),
+    Suppress,
+}
 
 pub struct TerminalPane {
     terminal: Arc<Mutex<TerminalSession>>,
@@ -62,6 +70,7 @@ pub struct TerminalPane {
     metrics: TerminalMetrics,
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
+    plugin_input_interceptor: Option<TerminalInputInterceptor>,
     marked_text: Option<String>,
     search_query: Option<String>,
     selected_search_match: Option<usize>,
@@ -191,6 +200,25 @@ impl TerminalPane {
         )))
     }
 
+    pub fn new_telnet_with_preferences(
+        config: TelnetSessionConfig,
+        preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        let terminal = Arc::new(Mutex::new(
+            TerminalSession::telnet_with_graphics_and_encoding(
+                config,
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                graphics_options_from_preferences(&preferences),
+                preferences.terminal_encoding,
+                preferences.scrollback_lines,
+            ),
+        ));
+        Self::from_session(terminal, preferences, window, cx)
+    }
+
     pub fn from_shared_session(
         terminal: SharedTerminalSession,
         preferences: TerminalUiPreferences,
@@ -264,6 +292,7 @@ impl TerminalPane {
             metrics,
             selection: None,
             pending_paste: None,
+            plugin_input_interceptor: None,
             marked_text: None,
             search_query: None,
             selected_search_match: None,
@@ -446,7 +475,19 @@ impl TerminalPane {
     }
 
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
-        if self.terminal_accepts_input() && self.terminal.lock().paste_text(text).is_ok() {
+        if !self.terminal_accepts_input() {
+            return;
+        }
+        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
+            return;
+        };
+        // Preserve bracketed paste encoding when hook output is still text;
+        // binary hook output falls back to raw protocol bytes.
+        let result = match std::str::from_utf8(&bytes) {
+            Ok(text) => self.terminal.lock().paste_text(text),
+            Err(_) => self.terminal.lock().write_protocol_bytes(&bytes),
+        };
+        if result.is_ok() {
             self.input_tracker.reset();
             self.last_terminal_input = Instant::now();
             self.reset_cursor_blink();
@@ -469,6 +510,28 @@ impl TerminalPane {
             return;
         }
         self.send_user_protocol_bytes(bytes, cx);
+    }
+
+    pub fn set_plugin_input_interceptor(&mut self, interceptor: Option<TerminalInputInterceptor>) {
+        self.plugin_input_interceptor = interceptor;
+    }
+
+    pub fn set_plugin_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
+        self.terminal.lock().set_output_processor(processor);
+    }
+
+    pub fn clear_buffer(&mut self, cx: &mut Context<Self>) {
+        // Plugin clearBuffer mirrors Tauri's host-side buffer reset: it must not
+        // send Ctrl-L or other bytes to the running shell. The emulator and the
+        // command fact ledger are both owned by this pane, so keep the mutation
+        // on the GPUI entity thread.
+        self.terminal.lock().clear_buffer();
+        self.snapshot = self.terminal.lock().snapshot();
+        self.selection = None;
+        self.search_query = None;
+        self.selected_search_match = None;
+        self.mark_open_command_marks_stale_for_terminal_reset();
+        cx.notify();
     }
 
     pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
@@ -769,8 +832,11 @@ impl TerminalPane {
         if !self.terminal_accepts_input() {
             return;
         }
-        self.observe_user_input(bytes, cx);
-        self.send_protocol_bytes(bytes, cx);
+        let Some(bytes) = self.apply_plugin_input_interceptor(bytes) else {
+            return;
+        };
+        self.observe_user_input(&bytes, cx);
+        self.send_protocol_bytes(&bytes, cx);
     }
 
     fn send_text(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -792,8 +858,23 @@ impl TerminalPane {
         if !self.terminal_accepts_input() {
             return;
         }
-        self.observe_user_input(text.as_bytes(), cx);
-        self.send_text(text, cx);
+        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
+            return;
+        };
+        self.observe_user_input(&bytes, cx);
+        self.send_protocol_bytes(&bytes, cx);
+    }
+
+    fn apply_plugin_input_interceptor(&self, bytes: &[u8]) -> Option<Vec<u8>> {
+        let Some(interceptor) = &self.plugin_input_interceptor else {
+            return Some(bytes.to_vec());
+        };
+        // Plugin input hooks run before command tracking and shell writes so a
+        // transformed or suppressed payload has the same boundary as Tauri.
+        match interceptor(bytes) {
+            TerminalInputInterceptorResult::Continue(bytes) => Some(bytes),
+            TerminalInputInterceptorResult::Suppress => None,
+        }
     }
 
     fn observe_user_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {

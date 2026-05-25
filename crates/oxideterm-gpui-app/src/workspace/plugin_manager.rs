@@ -1,4 +1,47 @@
 use super::*;
+use oxideterm_gpui_ui::text_input::{
+    TextInputContentAlign, TextInputView, text_input_anchor_probe, text_input_with_content_align,
+};
+use std::sync::mpsc;
+
+const PLUGIN_ID_CONFLICT_ERROR_PREFIX: &str = "PLUGIN_ID_CONFLICT:";
+const PLUGIN_MANAGER_DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(50);
+// Tauri PluginManagerView uses text-[11px] for URL hints and legal copy.
+const PLUGIN_MANAGER_HINT_TEXT_SIZE: f32 = 11.0;
+const PLUGIN_MANAGER_TW_ALPHA_10: u32 = 0x1a;
+const PLUGIN_MANAGER_TW_ALPHA_30: u32 = 0x4d;
+const PLUGIN_MANAGER_TW_ALPHA_40: u32 = 0x66;
+const PLUGIN_MANAGER_TW_GREEN_400: u32 = 0x4ade80;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum NativePluginManagerOperationStatus {
+    Idle,
+    Busy(String),
+    Success(String),
+    Error(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct NativePluginPendingOverwrite {
+    pub plugin_id: String,
+    pub download_url: String,
+    pub checksum: Option<String>,
+}
+
+pub(super) enum NativePluginManagerDelivery {
+    Install {
+        download_url: String,
+        checksum: Option<String>,
+        result: Result<plugin_host::NativePluginUrlInstallResult, String>,
+    },
+    CheckUpdates(Result<Vec<plugin_host::NativePluginRegistryEntry>, String>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum NativePluginManagerTab {
+    Installed,
+    Browse,
+}
 
 impl WorkspaceApp {
     pub(super) fn open_plugin_manager_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -47,15 +90,19 @@ impl WorkspaceApp {
                 state,
                 spec,
                 move |index, _window, cx| {
-                    workspace.update(cx, |this, _cx| {
-                        this.render_plugin_manager_section_item(index)
+                    workspace.update(cx, |this, cx| {
+                        this.render_plugin_manager_section_item(index, cx)
                     })
                 },
             ))
             .into_any_element()
     }
 
-    fn render_plugin_manager_section_item(&self, index: usize) -> AnyElement {
+    fn render_plugin_manager_section_item(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let padding = self.tokens.metrics.settings_content_padding;
         let gap = self.tokens.metrics.settings_page_gap;
         div()
@@ -69,11 +116,11 @@ impl WorkspaceApp {
                 index + 1 == PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT,
                 |item| item.pb(px(padding)),
             )
-            .child(self.render_plugin_manager_section(index))
+            .child(self.render_plugin_manager_section(index, cx))
             .into_any_element()
     }
 
-    fn render_plugin_manager_section(&self, index: usize) -> AnyElement {
+    fn render_plugin_manager_section(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         match index {
             0 => div()
@@ -82,7 +129,7 @@ impl WorkspaceApp {
                 .gap(px(8.0))
                 .child(
                     div()
-                        .text_size(px(24.0))
+                        .text_size(px(self.tokens.metrics.ui_text_2xl))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(rgb(theme.text_heading))
                         .child(self.i18n.t("plugin.manager_title")),
@@ -91,7 +138,7 @@ impl WorkspaceApp {
                     div()
                         .text_size(px(self.tokens.metrics.ui_text_base))
                         .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t("plugin.native_description")),
+                        .child("管理已安装的插件并浏览插件仓库"),
                 )
                 .into_any_element(),
             1 => div()
@@ -99,14 +146,232 @@ impl WorkspaceApp {
                 .h(px(1.0))
                 .bg(rgb(theme.border))
                 .into_any_element(),
-            2 => self.render_native_plugin_registry_card(),
+            2 => self.render_native_plugin_actions_card(cx),
+            3 => self.render_native_plugin_tabbed_content(cx),
             _ => div().into_any_element(),
         }
     }
 
-    fn render_native_plugin_registry_card(&self) -> AnyElement {
+    fn render_native_plugin_actions_card(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let plugin_rows = self.plugin_registry.plugins();
+        let plugin_count = self.plugin_registry.plugins().len();
+        let active_count = self
+            .plugin_registry
+            .plugins()
+            .iter()
+            .filter(|plugin| plugin.state == plugin_host::NativePluginState::Active)
+            .count();
+        div()
+            .w_full()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_card))
+            // Tauri PluginManagerView uses the same SettingsView action card:
+            // rounded-lg border bg-theme-bg-card p-5 with compact text buttons.
+            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
+            .p(px(self.tokens.metrics.settings_card_padding))
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text))
+                    .child(self.i18n.t("plugin.manager_title").to_uppercase()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(12.0))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(Self::render_lucide_icon(
+                                        LucideIcon::Puzzle,
+                                        16.0,
+                                        rgb(theme.accent),
+                                    ))
+                                    .child(format!("已安装 {plugin_count} 个插件")),
+                            )
+                            .child(div().child("·"))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(Self::render_lucide_icon(
+                                        LucideIcon::CheckCircle,
+                                        14.0,
+                                        plugin_manager_palette_alpha(
+                                            PLUGIN_MANAGER_TW_GREEN_400,
+                                            0xff,
+                                        ),
+                                    ))
+                                    .child(format!("{active_count} 个活跃")),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(self.render_native_plugin_manager_text_button(
+                                "新建插件",
+                                true,
+                                |_event, _window, cx| {
+                                    cx.stop_propagation();
+                                },
+                            ))
+                            .child(self.render_native_plugin_manager_text_button(
+                                "打开目录",
+                                true,
+                                |_event, _window, cx| {
+                                    cx.stop_propagation();
+                                },
+                            ))
+                            .child(self.render_native_plugin_manager_button(
+                                LucideIcon::RefreshCw,
+                                "刷新",
+                                false,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.plugin_registry =
+                                        plugin_host::NativePluginRegistry::discover(
+                                            this.settings_store.path(),
+                                        );
+                                    this.plugin_manager_operation_status =
+                                        NativePluginManagerOperationStatus::Success(
+                                            "插件列表已刷新。".to_string(),
+                                        );
+                                    cx.notify();
+                                }),
+                            )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_native_plugin_tabbed_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(24.0))
+            .child(self.render_native_plugin_tab_bar(cx))
+            .child(match self.plugin_manager_active_tab {
+                NativePluginManagerTab::Installed => self.render_native_plugin_installed_card(cx),
+                NativePluginManagerTab::Browse => self.render_native_plugin_browse_content(cx),
+            })
+            .into_any_element()
+    }
+
+    fn render_native_plugin_tab_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let plugin_count = self.plugin_registry.plugins().len();
+        let update_count = self.plugin_manager_available_updates.len();
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(self.render_native_plugin_tab_button(
+                NativePluginManagerTab::Installed,
+                LucideIcon::Puzzle,
+                "已安装",
+                Some(plugin_count.to_string()),
+                cx,
+            ))
+            .child(self.render_native_plugin_tab_button(
+                NativePluginManagerTab::Browse,
+                LucideIcon::Network,
+                "浏览",
+                (update_count > 0).then(|| format!("{update_count} 更新")),
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_native_plugin_tab_button(
+        &self,
+        tab: NativePluginManagerTab,
+        icon: LucideIcon,
+        label: &'static str,
+        badge: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.plugin_manager_active_tab == tab;
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(if active { theme.border } else { theme.bg }))
+            .bg(rgb(if active { theme.bg_panel } else { theme.bg }))
+            .px(px(16.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(if active { theme.text } else { theme.text_muted }))
+            .cursor(CursorStyle::PointingHand)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.plugin_manager_active_tab = tab;
+                    cx.notify();
+                }),
+            )
+            .child(Self::render_lucide_icon(
+                icon,
+                16.0,
+                rgb(if active {
+                    theme.accent
+                } else {
+                    theme.text_muted
+                }),
+            ))
+            .child(label)
+            .when_some(badge, |button, badge| {
+                button.child(
+                    div()
+                        .ml(px(4.0))
+                        .rounded(px(self.tokens.radii.sm))
+                        .border_1()
+                        .border_color(rgb(if active { theme.accent } else { theme.border }))
+                        .bg(if active {
+                            plugin_manager_theme_alpha(theme.accent, PLUGIN_MANAGER_TW_ALPHA_10)
+                        } else {
+                            rgb(theme.bg_panel)
+                        })
+                        .px(px(6.0))
+                        .py(px(2.0))
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(if active {
+                            theme.accent
+                        } else {
+                            theme.text_muted
+                        }))
+                        .child(badge),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_native_plugin_installed_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let plugin_rows = self.plugin_registry.plugins().to_vec();
+        let diagnostics = self.plugin_registry.diagnostics().to_vec();
         let card = div()
             .w_full()
             .min_w(px(0.0))
@@ -123,176 +388,1361 @@ impl WorkspaceApp {
             .gap(px(12.0))
             .min_h(px(260.0));
 
-        if plugin_rows.is_empty() {
+        if plugin_rows.is_empty() && diagnostics.is_empty() {
             return card
-                .items_center()
-                .justify_center()
-                .child(Self::render_lucide_icon(
-                    LucideIcon::Puzzle,
-                    36.0,
-                    rgb(theme.text_muted),
-                ))
                 .child(
                     div()
-                        .text_size(px(self.tokens.metrics.ui_text_base))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(theme.text))
-                        .child(self.i18n.t("plugin.native_empty_title")),
-                )
-                .child(
-                    div()
-                        .max_w(px(560.0))
-                        .text_center()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .line_height(px(20.0))
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t("plugin.native_empty_description")),
-                )
-                .child(
-                    div()
-                        .mt(px(6.0))
+                        .min_h(px(180.0))
                         .flex()
                         .flex_col()
-                        .gap(px(6.0))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t("plugin.native_runtime_note"))
-                        .child(self.i18n.t("plugin.native_webview_note"))
-                        .child(self.i18n.t("plugin.native_api_note")),
+                        .items_center()
+                        .justify_center()
+                        .gap(px(10.0))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::Puzzle,
+                            36.0,
+                            rgb(theme.text_muted),
+                        ))
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_base))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(theme.text))
+                                .child("已安装插件"),
+                        )
+                        .child(
+                            div()
+                                .max_w(px(560.0))
+                                .text_center()
+                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                .line_height(px(20.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child("将插件文件夹放入 OxideTerm 插件目录即可开始使用。"),
+                        ),
                 )
                 .into_any_element();
         }
 
         card.child(
             div()
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(theme.text))
+                .child("已安装插件"),
+        )
+        .children(
+            diagnostics
+                .iter()
+                .map(|diagnostic| self.render_native_plugin_diagnostic_row(diagnostic)),
+        )
+        .children(
+            plugin_rows
+                .iter()
+                .map(|plugin| self.render_native_plugin_registry_row(plugin, cx)),
+        )
+        .into_any_element()
+    }
+
+    fn render_native_plugin_browse_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(self.render_native_plugin_package_manager(cx))
+            .child(self.render_native_plugin_url_disclaimer())
+            .into_any_element()
+    }
+
+    fn render_native_plugin_url_disclaimer(&self) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .w_full()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(plugin_manager_theme_alpha(
+                theme.border,
+                PLUGIN_MANAGER_TW_ALPHA_40,
+            ))
+            .bg(plugin_manager_theme_alpha(
+                theme.bg_panel,
+                PLUGIN_MANAGER_TW_ALPHA_30,
+            ))
+            .p(px(16.0))
+            .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
+            .line_height(px(18.0))
+            .text_color(rgb(theme.text_muted))
+            .child("第三方插件由其各自的开发者提供。OxideTerm 仅作为运行时宿主，不对第三方插件的内容、功能或合法性进行审核、背书或承担任何责任。请仅从您信任的来源安装插件。")
+            .into_any_element()
+    }
+
+    fn render_native_plugin_package_manager(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let busy = matches!(
+            self.plugin_manager_operation_status,
+            NativePluginManagerOperationStatus::Busy(_)
+        );
+        div()
+            .w_full()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_card))
+            // Tauri Browse tab shows URL install as its own SettingsView card.
+            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
+            .p(px(self.tokens.metrics.settings_card_padding))
+            .flex()
+            .flex_col()
+            .gap(px(14.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child("从 URL 安装"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .line_height(px(18.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child("粘贴插件 ZIP 包或 GitHub 仓库的链接以直接安装。"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
+                            .line_height(px(18.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child("支持通过 #tag 或 #branch 锁定 GitHub 仓库的具体版本"),
+                    ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(self.render_native_plugin_manager_icon_input(
+                        LucideIcon::Download,
+                        SettingsInput::NativePluginInstallUrl,
+                        "https://example.com/plugin.zip",
+                        cx,
+                    ))
+                    .child(self.render_native_plugin_manager_button(
+                        LucideIcon::Download,
+                        "安装",
+                        busy || self.plugin_manager_install_url_draft.trim().is_empty(),
+                        cx.listener(|this, _event, _window, cx| {
+                            let download_url = this.plugin_manager_install_url_draft.clone();
+                            let checksum =
+                                normalized_optional_string(&this.plugin_manager_install_checksum_draft);
+                            this.start_native_plugin_package_install(download_url, checksum, false, cx);
+                        }),
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text_muted))
+                            .child("可选 SHA-256 校验值"),
+                    )
+                    .child(self.render_native_plugin_manager_labeled_input(
+                        "",
+                        SettingsInput::NativePluginInstallChecksum,
+                        "sha256:... 或原始十六进制摘要",
+                        520.0,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
+                            .line_height(px(18.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child("如果作者提供了校验值，可粘贴到这里验证下载内容。安装完成后会显示已安装包的实际 SHA-256，方便手动比对。"),
+                    ),
+            )
+            .when_some(self.plugin_manager_pending_overwrite.as_ref(), |panel, pending| {
+                let confirm_download_url = pending.download_url.clone();
+                let confirm_checksum = pending.checksum.clone();
+                panel.child(
+                    div()
+                        .w_full()
+                        .rounded(px(self.tokens.radii.md))
+                        .border_1()
+                        .border_color(rgb(theme.warning))
+                        .bg(rgb(theme.bg_card))
+                        .p(px(10.0))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(10.0))
+                        .child(
+                            div()
+                                .min_w(px(0.0))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .line_height(px(18.0))
+                                .text_color(rgb(theme.warning))
+                                .child(format!(
+                                    "插件 {} 已存在，需要确认后覆盖安装。",
+                                    pending.plugin_id
+                                )),
+                        )
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .flex()
+                                .gap(px(8.0))
+                                .child(self.render_native_plugin_manager_text_button(
+                                    "取消",
+                                    false,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.plugin_manager_pending_overwrite = None;
+                                        this.plugin_manager_operation_status =
+                                            NativePluginManagerOperationStatus::Idle;
+                                        cx.notify();
+                                    }),
+                                ))
+                                .child(self.render_native_plugin_manager_text_button(
+                                    "覆盖安装",
+                                    busy,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.start_native_plugin_package_install(
+                                            confirm_download_url.clone(),
+                                            confirm_checksum.clone(),
+                                            true,
+                                            cx,
+                                        );
+                                    }),
+                                )),
+                        ),
+                )
+            })
+            .child(self.render_native_plugin_registry_fetch_row(cx))
+            .when(
+                !self.plugin_manager_available_updates.is_empty(),
+                |panel| {
+                    panel.child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .children(self.plugin_manager_available_updates.iter().map(|entry| {
+                                self.render_native_plugin_update_row(entry, cx)
+                            })),
+                    )
+                },
+            )
+            .child(self.render_native_plugin_manager_status())
+            .into_any_element()
+    }
+
+    fn render_native_plugin_registry_fetch_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let busy = matches!(
+            self.plugin_manager_operation_status,
+            NativePluginManagerOperationStatus::Busy(_)
+        );
+        div()
+            .w_full()
+            .pt(px(8.0))
+            .border_t_1()
+            .border_color(plugin_manager_theme_alpha(
+                theme.border,
+                PLUGIN_MANAGER_TW_ALPHA_40,
+            ))
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .child(self.render_native_plugin_manager_icon_input(
+                LucideIcon::Search,
+                SettingsInput::NativePluginRegistryUrl,
+                "https://example.com/registry.json",
+                cx,
+            ))
+            .child(self.render_native_plugin_manager_button(
+                LucideIcon::RefreshCw,
+                "刷新",
+                busy || self.plugin_manager_registry_url_draft.trim().is_empty(),
+                cx.listener(|this, _event, _window, cx| {
+                    this.start_native_plugin_update_check(cx);
+                }),
+            ))
+            .into_any_element()
+    }
+
+    fn render_native_plugin_manager_labeled_input(
+        &self,
+        label: &'static str,
+        input: SettingsInput,
+        placeholder: &'static str,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(5.0))
+            .min_w(px(0.0))
+            .when(!label.is_empty(), |field| {
+                field.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(theme.text_muted))
+                        .child(label),
+                )
+            })
+            .child(self.render_native_plugin_manager_text_input(input, placeholder, width, cx))
+            .into_any_element()
+    }
+
+    fn render_native_plugin_manager_icon_input(
+        &self,
+        icon: LucideIcon,
+        input: SettingsInput,
+        placeholder: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .relative()
+            .flex_1()
+            .min_w(px(0.0))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(12.0))
+                    .top(px(10.0))
+                    .child(Self::render_lucide_icon(icon, 16.0, rgb(theme.text_muted))),
+            )
+            .child(self.render_native_plugin_manager_text_input(input, placeholder, 640.0, cx))
+            .into_any_element()
+    }
+
+    fn render_native_plugin_manager_text_input(
+        &self,
+        input: SettingsInput,
+        placeholder: &'static str,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let focused = self.focused_settings_input == Some(input);
+        let display_value = if focused {
+            self.settings_input_draft.clone()
+        } else {
+            self.current_settings_input_value(input)
+        };
+        let target = WorkspaceImeTarget::Settings(input);
+        let workspace = cx.entity();
+        // These fields are not persisted settings, but routing them through the
+        // shared settings IME path keeps Plugin Manager text behavior identical
+        // to Tauri-style form fields already used elsewhere in GPUI.
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input_with_content_align(
+                &self.tokens,
+                TextInputView {
+                    value: &display_value,
+                    placeholder: placeholder.to_string(),
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+                TextInputContentAlign::Start,
+            )
+            .w(px(width))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    let current = this.current_settings_input_value(input);
+                    this.focus_settings_input(input, current, cx);
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(
+                |this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                },
+            )),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_native_plugin_manager_button(
+        &self,
+        icon: LucideIcon,
+        label: &'static str,
+        disabled: bool,
+        listener: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(if disabled {
+                theme.bg_card
+            } else {
+                theme.accent
+            }))
+            .px(px(10.0))
+            .py(px(7.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(if disabled { theme.text_muted } else { theme.bg }))
+            .cursor(if disabled {
+                CursorStyle::Arrow
+            } else {
+                CursorStyle::PointingHand
+            })
+            .when(!disabled, |button| {
+                button.on_mouse_down(MouseButton::Left, listener)
+            })
+            .child(Self::render_lucide_icon(
+                icon,
+                13.0,
+                rgb(if disabled { theme.text_muted } else { theme.bg }),
+            ))
+            .child(label)
+            .into_any_element()
+    }
+
+    fn render_native_plugin_manager_text_button(
+        &self,
+        label: &'static str,
+        disabled: bool,
+        listener: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_card))
+            .px(px(10.0))
+            .py(px(6.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(if disabled {
+                theme.text_muted
+            } else {
+                theme.text
+            }))
+            .cursor(if disabled {
+                CursorStyle::Arrow
+            } else {
+                CursorStyle::PointingHand
+            })
+            .when(!disabled, |button| {
+                button.on_mouse_down(MouseButton::Left, listener)
+            })
+            .child(label)
+            .into_any_element()
+    }
+
+    fn render_native_plugin_update_row(
+        &self,
+        entry: &plugin_host::NativePluginRegistryEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let busy = matches!(
+            self.plugin_manager_operation_status,
+            NativePluginManagerOperationStatus::Busy(_)
+        );
+        let download_url = entry.download_url.clone();
+        let checksum = entry.checksum.clone();
+        let capabilities = native_plugin_registry_capabilities_label(entry);
+        div()
+            .w_full()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_card))
+            .p(px(10.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(format!("{} v{}", entry.name, entry.version)),
+                    )
+                    .when_some(entry.description.as_ref(), |label, description| {
+                        label.child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .line_height(px(18.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(description.clone()),
+                        )
+                    })
+                    .when_some(capabilities, |label, capabilities| {
+                        label.child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .line_height(px(18.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(capabilities),
+                        )
+                    }),
+            )
+            .child(self.render_native_plugin_manager_button(
+                LucideIcon::Download,
+                "更新",
+                busy,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.start_native_plugin_package_install(
+                        download_url.clone(),
+                        checksum.clone(),
+                        false,
+                        cx,
+                    );
+                }),
+            ))
+            .into_any_element()
+    }
+
+    fn render_native_plugin_manager_status(&self) -> AnyElement {
+        let theme = self.tokens.ui;
+        let (icon, color, message) = match &self.plugin_manager_operation_status {
+            NativePluginManagerOperationStatus::Idle => (
+                LucideIcon::ShieldCheck,
+                theme.text_muted,
+                "安装包会在 staging 目录验证后再替换现有插件。".to_string(),
+            ),
+            NativePluginManagerOperationStatus::Busy(message) => {
+                (LucideIcon::RefreshCw, theme.warning, message.clone())
+            }
+            NativePluginManagerOperationStatus::Success(message) => {
+                (LucideIcon::CheckCircle, theme.success, message.clone())
+            }
+            NativePluginManagerOperationStatus::Error(message) => {
+                (LucideIcon::ShieldAlert, theme.error, message.clone())
+            }
+        };
+        div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .line_height(px(18.0))
+            .text_color(rgb(color))
+            .child(Self::render_lucide_icon(icon, 14.0, rgb(color)))
+            .child(message)
+            .into_any_element()
+    }
+
+    fn start_native_plugin_package_install(
+        &mut self,
+        download_url: String,
+        checksum: Option<String>,
+        overwrite: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let download_url = download_url.trim().to_string();
+        if download_url.is_empty() {
+            self.plugin_manager_operation_status =
+                NativePluginManagerOperationStatus::Error("请输入插件包 URL。".to_string());
+            cx.notify();
+            return;
+        }
+        if self.plugin_manager_delivery_rx.is_some() {
+            self.plugin_manager_operation_status =
+                NativePluginManagerOperationStatus::Busy("已有插件管理任务正在运行。".to_string());
+            cx.notify();
+            return;
+        }
+
+        let settings_path = self.settings_store.path().to_path_buf();
+        let (tx, rx) = mpsc::channel();
+        self.plugin_manager_delivery_rx = Some(rx);
+        self.plugin_manager_operation_status =
+            NativePluginManagerOperationStatus::Busy("正在下载并验证插件包...".to_string());
+        if overwrite {
+            self.plugin_manager_pending_overwrite = None;
+        }
+        self.schedule_native_plugin_manager_delivery_poll(cx);
+        let delivery_download_url = download_url.clone();
+        let delivery_checksum = checksum.clone();
+        self.forwarding_runtime.spawn(async move {
+            let result = plugin_host::NativePluginRegistry::install_plugin_package_from_url(
+                &settings_path,
+                &download_url,
+                checksum.as_deref(),
+                overwrite,
+            )
+            .await;
+            let _ = tx.send(NativePluginManagerDelivery::Install {
+                download_url: delivery_download_url,
+                checksum: delivery_checksum,
+                result,
+            });
+        });
+    }
+
+    fn start_native_plugin_update_check(&mut self, cx: &mut Context<Self>) {
+        let registry_url = self.plugin_manager_registry_url_draft.trim().to_string();
+        if registry_url.is_empty() {
+            self.plugin_manager_operation_status =
+                NativePluginManagerOperationStatus::Error("请输入 registry URL。".to_string());
+            cx.notify();
+            return;
+        }
+        if self.plugin_manager_delivery_rx.is_some() {
+            self.plugin_manager_operation_status =
+                NativePluginManagerOperationStatus::Busy("已有插件管理任务正在运行。".to_string());
+            cx.notify();
+            return;
+        }
+
+        let installed = self
+            .plugin_registry
+            .plugins()
+            .iter()
+            .map(|plugin| plugin_host::NativePluginInstalledInfo {
+                id: plugin.manifest.id.clone(),
+                version: plugin.manifest.version.clone(),
+            })
+            .collect::<Vec<_>>();
+        let (tx, rx) = mpsc::channel();
+        self.plugin_manager_delivery_rx = Some(rx);
+        self.plugin_manager_operation_status =
+            NativePluginManagerOperationStatus::Busy("正在读取 registry index...".to_string());
+        self.schedule_native_plugin_manager_delivery_poll(cx);
+        self.forwarding_runtime.spawn(async move {
+            let result =
+                match plugin_host::NativePluginRegistry::fetch_plugin_registry(&registry_url).await
+                {
+                    Ok(index) => Ok(plugin_host::NativePluginRegistry::check_plugin_updates(
+                        index, &installed,
+                    )),
+                    Err(error) => Err(error),
+                };
+            let _ = tx.send(NativePluginManagerDelivery::CheckUpdates(result));
+        });
+    }
+
+    fn schedule_native_plugin_manager_delivery_poll(&mut self, cx: &mut Context<Self>) {
+        if self.plugin_manager_delivery_polling {
+            return;
+        }
+        self.plugin_manager_delivery_polling = true;
+        cx.spawn(async move |weak, cx| {
+            loop {
+                Timer::after(PLUGIN_MANAGER_DELIVERY_POLL_INTERVAL).await;
+                let keep_polling = weak
+                    .update(cx, |this, cx| {
+                        this.poll_native_plugin_manager_delivery(cx);
+                        this.plugin_manager_delivery_polling
+                    })
+                    .unwrap_or(false);
+                if !keep_polling {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn poll_native_plugin_manager_delivery(&mut self, cx: &mut Context<Self>) {
+        let Some(rx) = self.plugin_manager_delivery_rx.as_ref() else {
+            self.plugin_manager_delivery_polling = false;
+            return;
+        };
+        let mut deliveries = Vec::new();
+        let mut disconnected = false;
+        loop {
+            match rx.try_recv() {
+                Ok(delivery) => deliveries.push(delivery),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
+        }
+        for delivery in deliveries {
+            self.handle_native_plugin_manager_delivery(delivery, cx);
+        }
+        if disconnected {
+            self.plugin_manager_delivery_rx = None;
+            self.plugin_manager_delivery_polling = false;
+        }
+        cx.notify();
+    }
+
+    fn handle_native_plugin_manager_delivery(
+        &mut self,
+        delivery: NativePluginManagerDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        match delivery {
+            NativePluginManagerDelivery::Install {
+                download_url,
+                checksum,
+                result,
+            } => self.handle_native_plugin_install_result(download_url, checksum, result, cx),
+            NativePluginManagerDelivery::CheckUpdates(result) => match result {
+                Ok(updates) => {
+                    let update_count = updates.len();
+                    self.plugin_manager_available_updates = updates;
+                    self.plugin_manager_operation_status =
+                        NativePluginManagerOperationStatus::Success(format!(
+                            "发现 {update_count} 个可用更新。"
+                        ));
+                }
+                Err(error) => {
+                    self.plugin_manager_operation_status =
+                        NativePluginManagerOperationStatus::Error(error);
+                }
+            },
+        }
+    }
+
+    fn handle_native_plugin_install_result(
+        &mut self,
+        download_url: String,
+        checksum: Option<String>,
+        result: Result<plugin_host::NativePluginUrlInstallResult, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(result) => {
+                let installed_id = result.manifest.id.clone();
+                self.plugin_registry =
+                    plugin_host::NativePluginRegistry::discover(self.settings_store.path());
+                self.plugin_manager_available_updates
+                    .retain(|entry| entry.id != installed_id);
+                self.plugin_manager_pending_overwrite = None;
+                self.plugin_manager_operation_status =
+                    NativePluginManagerOperationStatus::Success(format!(
+                        "{} v{} 已{}。",
+                        result.manifest.name,
+                        result.manifest.version,
+                        if result.replaced_existing {
+                            "覆盖安装"
+                        } else {
+                            "安装"
+                        }
+                    ));
+            }
+            Err(error) => {
+                if let Some(plugin_id) = native_plugin_conflict_id(&error) {
+                    // Tauri asks before overwriting an existing package. Native
+                    // keeps the pending request so the confirmation button can
+                    // retry with the same URL/checksum without retyping.
+                    self.plugin_manager_pending_overwrite = Some(NativePluginPendingOverwrite {
+                        plugin_id,
+                        download_url,
+                        checksum,
+                    });
+                    self.plugin_manager_operation_status =
+                        NativePluginManagerOperationStatus::Error(
+                            "插件已存在，请确认是否覆盖安装。".to_string(),
+                        );
+                } else {
+                    self.plugin_manager_operation_status =
+                        NativePluginManagerOperationStatus::Error(error);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn render_native_plugin_diagnostic_row(
+        &self,
+        diagnostic: &plugin_host::NativePluginDiagnostic,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let title = diagnostic
+            .plugin_id
+            .clone()
+            .unwrap_or_else(|| diagnostic.plugin_dir.display().to_string());
+        div()
+            .w_full()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.error))
+            .bg(rgb(theme.bg_panel))
+            .p(px(14.0))
+            .flex()
+            .items_start()
+            .gap(px(10.0))
+            .child(Self::render_lucide_icon(
+                LucideIcon::AlertTriangle,
+                16.0,
+                rgb(theme.error),
+            ))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .line_height(px(18.0))
+                            .text_color(rgb(theme.error))
+                            .child(diagnostic.message.clone()),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_native_plugin_registry_row(
+        &self,
+        plugin: &plugin_host::NativePluginInfo,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let (state_label, state_color, note) = match plugin.state {
+            plugin_host::NativePluginState::Discovered => {
+                ("discovered", theme.text_muted, "已发现")
+            }
+            plugin_host::NativePluginState::Disabled => ("disabled", theme.text_muted, "已禁用"),
+            plugin_host::NativePluginState::UnsupportedLegacyJs => {
+                ("legacy-js", theme.warning, "Tauri ESM 插件：已发现但不执行")
+            }
+            plugin_host::NativePluginState::ReadyManifestOnly => {
+                ("manifest", theme.text_muted, "仅声明贡献点")
+            }
+            plugin_host::NativePluginState::ReadyWasm => {
+                ("wasm", theme.success, "等待 native WASI runtime 激活")
+            }
+            plugin_host::NativePluginState::ReadyProcess => {
+                ("process", theme.success, "等待 native process runtime 接入")
+            }
+            plugin_host::NativePluginState::Loading => ("loading", theme.warning, "加载中"),
+            plugin_host::NativePluginState::Active => ("active", theme.success, "已激活"),
+            plugin_host::NativePluginState::Error => ("error", theme.error, "配置或加载错误"),
+            plugin_host::NativePluginState::AutoDisabled => {
+                ("auto-disabled", theme.error, "错误过多，已自动禁用")
+            }
+        };
+        let contribution_summary = native_plugin_contribution_summary(&plugin.manifest);
+        let note = plugin
+            .config
+            .last_error
+            .clone()
+            .unwrap_or_else(|| note.to_string());
+        let runtime_kind = plugin_host::native_runtime_kind_label(&plugin.runtime_plan);
+        let supports_native_toggle = !matches!(
+            plugin.runtime_plan,
+            plugin_host::NativePluginRuntimePlan::UnsupportedLegacyJs { .. }
+        );
+        let next_enabled = plugin.state == plugin_host::NativePluginState::Disabled;
+        let action_label = if next_enabled {
+            "启用配置"
+        } else {
+            "禁用配置"
+        };
+        let plugin_id = plugin.manifest.id.clone();
+        let uninstall_plugin_id = plugin.manifest.id.clone();
+        let setting_value_summary =
+            native_plugin_setting_value_summary(&self.plugin_registry, plugin);
+        let setting_controls = self.render_native_plugin_manifest_settings(plugin, cx);
+        let mut row = div().w_full().flex().flex_col().gap(px(12.0)).child(
+            div()
+                .w_full()
                 .flex()
                 .items_center()
                 .justify_between()
-                .gap(px(12.0))
+                .gap(px(16.0))
                 .child(
                     div()
+                        .min_w(px(0.0))
                         .flex()
                         .flex_col()
-                        .gap(px(4.0))
+                        .gap(px(5.0))
                         .child(
                             div()
-                                .text_size(px(self.tokens.metrics.ui_text_base))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(theme.text_heading))
-                                .child("已发现插件"),
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(
+                                    div()
+                                        .min_w(px(0.0))
+                                        .text_size(px(self.tokens.metrics.ui_text_base))
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(rgb(theme.text))
+                                        .child(plugin.manifest.name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(6.0))
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(theme.text_muted))
+                                        .child(
+                                            div().size(px(8.0)).rounded_full().bg(rgb(state_color)),
+                                        )
+                                        .child(state_label),
+                                ),
                         )
                         .child(
                             div()
                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .line_height(px(20.0))
                                 .text_color(rgb(theme.text_muted))
-                                .child("native 只读取 manifest 和贡献点；legacy JS 插件不会在 GPUI 中执行。"),
-                        ),
+                                .child(
+                                    plugin
+                                        .manifest
+                                        .description
+                                        .clone()
+                                        .unwrap_or_else(|| plugin.manifest.id.clone()),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(theme.text_muted))
+                                .child(format!("{contribution_summary} · runtime {runtime_kind}")),
+                        )
+                        .when_some(setting_value_summary, |left, summary| {
+                            left.child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(summary),
+                            )
+                        }),
                 )
                 .child(
                     div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(theme.text_muted))
-                        .child(format!("{} 个", plugin_rows.len())),
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child(
+                            div()
+                                .text_right()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .line_height(px(18.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(format!("v{}", plugin.manifest.version))
+                                .child(div().child(note)),
+                        )
+                        .when(supports_native_toggle, |right| {
+                            right.child(
+                                div()
+                                    .rounded(px(self.tokens.radii.md))
+                                    .border_1()
+                                    .border_color(rgb(theme.border))
+                                    .px(px(10.0))
+                                    .py(px(6.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(if next_enabled {
+                                        theme.success
+                                    } else {
+                                        theme.text_muted
+                                    }))
+                                    .bg(rgb(theme.bg_card))
+                                    // Phase 1 only persists the enabled flag. Real
+                                    // runtime activation/deactivation starts in Phase 3.
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            if let Err(error) = this
+                                                .plugin_registry
+                                                .set_plugin_enabled(&plugin_id, next_enabled)
+                                            {
+                                                this.plugin_registry
+                                                    .record_manager_error(plugin_id.clone(), error);
+                                            }
+                                            cx.notify();
+                                        }),
+                                    )
+                                    .child(action_label),
+                            )
+                        })
+                        .child(
+                            div()
+                                .rounded(px(self.tokens.radii.md))
+                                .border_1()
+                                .border_color(rgb(theme.border))
+                                .px(px(10.0))
+                                .py(px(6.0))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(theme.error))
+                                .bg(rgb(theme.bg_card))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        // Native uninstall removes package files and
+                                        // contribution rows. Settings are preserved here
+                                        // until a future confirm flow asks explicitly.
+                                        if let Err(error) = this
+                                            .plugin_registry
+                                            .uninstall_plugin(&uninstall_plugin_id, false)
+                                        {
+                                            this.plugin_registry.record_manager_error(
+                                                uninstall_plugin_id.clone(),
+                                                error,
+                                            );
+                                        }
+                                        cx.notify();
+                                    }),
+                                )
+                                .child("卸载"),
+                        )
+                        .when(!supports_native_toggle, |right| {
+                            right.child(
+                                div()
+                                    .text_right()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .line_height(px(18.0))
+                                    .text_color(rgb(theme.warning))
+                                    .child("legacy JS 不支持启用"),
+                            )
+                        }),
                 ),
-        )
-        .children(plugin_rows.iter().map(|plugin| {
-            self.render_native_plugin_registry_row(plugin)
-        }))
-        .into_any_element()
+        );
+        if let Some(setting_controls) = setting_controls {
+            // Tauri's PluginManager expands plugin settings inline below the
+            // registry row. Native keeps that ownership here instead of opening
+            // a separate editor surface so manifest-only plugins remain useful
+            // before Phase 3 runtime execution exists.
+            row = row.child(setting_controls);
+        }
+        row.into_any_element()
     }
 
-    fn render_native_plugin_registry_row(
+    fn render_native_plugin_manifest_settings(
         &self,
         plugin: &plugin_host::NativePluginInfo,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let theme = self.tokens.ui;
+        let settings = self
+            .plugin_registry
+            .contributions()
+            .settings
+            .iter()
+            .enumerate()
+            .filter_map(|(setting_index, setting)| {
+                (setting.plugin_id == plugin.manifest.id).then(|| (setting_index, setting.clone()))
+            })
+            .collect::<Vec<_>>();
+        if settings.is_empty() {
+            return None;
+        }
+
+        let mut body = div()
+            .w_full()
+            .mt(px(12.0))
+            .pt(px(12.0))
+            .border_t_1()
+            .border_color(rgb(theme.border))
+            .flex()
+            .flex_col()
+            .gap(px(8.0));
+        for (setting_index, setting) in settings {
+            body =
+                body.child(self.render_native_plugin_setting_control(setting_index, &setting, cx));
+        }
+        Some(body.into_any_element())
+    }
+
+    fn render_native_plugin_setting_control(
+        &self,
+        setting_index: usize,
+        setting: &plugin_host::NativePluginSettingContribution,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let (state_label, state_color, note) = match &plugin.runtime_plan {
-            plugin_host::NativePluginRuntimePlan::ManifestOnly => {
-                ("manifest", theme.text_muted, "仅声明贡献点")
-            }
-            plugin_host::NativePluginRuntimePlan::Wasm { .. } => {
-                ("wasm", theme.success, "等待 native WASI runtime 接入")
-            }
-            plugin_host::NativePluginRuntimePlan::Process { .. } => {
-                ("process", theme.success, "等待 native process runtime 接入")
-            }
-            plugin_host::NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => {
-                ("legacy-js", theme.warning, "Tauri ESM 插件：已发现但不执行")
-            }
-        };
-        let contribution_summary = native_plugin_contribution_summary(&plugin.manifest);
+        let value = self
+            .plugin_registry
+            .plugin_setting_value(&setting.plugin_id, &setting.definition.id)
+            .unwrap_or_else(|| setting.definition.default.clone());
         div()
             .w_full()
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_panel))
-            .p(px(14.0))
+            .bg(rgb(theme.bg_card))
+            .p(px(10.0))
             .flex()
             .items_center()
             .justify_between()
-            .gap(px(16.0))
+            .gap(px(12.0))
             .child(
                 div()
                     .min_w(px(0.0))
                     .flex()
                     .flex_col()
-                    .gap(px(5.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .min_w(px(0.0))
-                                    .text_size(px(self.tokens.metrics.ui_text_base))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(theme.text))
-                                    .child(plugin.manifest.name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .rounded_full()
-                                    .px(px(8.0))
-                                    .py(px(2.0))
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(state_color))
-                                    .bg(rgb(theme.bg_card))
-                                    .child(state_label),
-                            ),
-                    )
+                    .gap(px(3.0))
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .line_height(px(20.0))
-                            .text_color(rgb(theme.text_muted))
-                            .child(
-                                plugin
-                                    .manifest
-                                    .description
-                                    .clone()
-                                    .unwrap_or_else(|| plugin.manifest.id.clone()),
-                            ),
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(setting.definition.title.clone()),
                     )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.text_muted))
-                            .child(contribution_summary),
+                    .when_some(
+                        setting.definition.description.as_ref(),
+                        |label, description| {
+                            label.child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .line_height(px(18.0))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(description.clone()),
+                            )
+                        },
                     ),
             )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .text_right()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .line_height(px(18.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(format!("v{}", plugin.manifest.version))
-                    .child(div().child(note)),
+            .child(self.render_native_plugin_setting_value_control(
+                setting_index,
+                setting,
+                value,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_native_plugin_setting_value_control(
+        &self,
+        setting_index: usize,
+        setting: &plugin_host::NativePluginSettingContribution,
+        value: serde_json::Value,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match setting.definition.setting_type.as_str() {
+            "boolean" => {
+                let checked = value.as_bool().unwrap_or(false);
+                self.render_native_plugin_boolean_setting(setting, checked, cx)
+            }
+            "select" => self.render_native_plugin_select_setting(setting, value, cx),
+            "string" | "number" => {
+                self.render_native_plugin_text_setting(setting_index, &value, cx)
+            }
+            _ => self.render_native_plugin_readonly_setting_value(&value),
+        }
+    }
+
+    fn render_native_plugin_boolean_setting(
+        &self,
+        setting: &plugin_host::NativePluginSettingContribution,
+        checked: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let plugin_id = setting.plugin_id.clone();
+        let setting_id = setting.definition.id.clone();
+        div()
+            .flex_none()
+            .rounded_full()
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(if checked {
+                theme.accent
+            } else {
+                theme.bg_panel
+            }))
+            .px(px(10.0))
+            .py(px(5.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(if checked { theme.bg } else { theme.text_muted }))
+            .cursor(CursorStyle::PointingHand)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if let Err(error) = this.set_native_plugin_setting_value_and_emit(
+                        &plugin_id,
+                        &setting_id,
+                        serde_json::Value::Bool(!checked),
+                        cx,
+                    ) {
+                        this.plugin_registry
+                            .record_manager_error(plugin_id.clone(), error);
+                    }
+                    cx.notify();
+                }),
             )
+            .child(if checked { "true" } else { "false" })
+            .into_any_element()
+    }
+
+    fn render_native_plugin_text_setting(
+        &self,
+        setting_index: usize,
+        value: &serde_json::Value,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let input = SettingsInput::PluginSetting(setting_index);
+        let focused = self.focused_settings_input == Some(input);
+        let display_value = if focused {
+            self.settings_input_draft.clone()
+        } else {
+            native_plugin_setting_value_label(value)
+        };
+        let target = WorkspaceImeTarget::Settings(input);
+        let workspace = cx.entity();
+        // Tauri plugin settings are normal browser inputs. Native routes them
+        // through the shared settings IME owner so caret hit-testing, selection,
+        // paste, and Cmd/Ctrl shortcuts match the rest of settings instead of
+        // adding a plugin-manager-only text path.
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input_with_content_align(
+                &self.tokens,
+                TextInputView {
+                    value: &display_value,
+                    placeholder: String::new(),
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+                TextInputContentAlign::Start,
+            )
+            .w(px(220.0))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    let current = this.current_settings_input_value(input);
+                    this.focus_settings_input(input, current, cx);
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(
+                |this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                },
+            )),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_native_plugin_select_setting(
+        &self,
+        setting: &plugin_host::NativePluginSettingContribution,
+        value: serde_json::Value,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let options = setting.definition.options.clone().unwrap_or_default();
+        let current_index = options
+            .iter()
+            .position(|option| option.value == value)
+            .unwrap_or(0);
+        let current_label = options
+            .get(current_index)
+            .map(|option| option.label.clone())
+            .unwrap_or_else(|| native_plugin_setting_value_label(&value));
+        let next_value = if options.is_empty() {
+            None
+        } else {
+            Some(options[(current_index + 1) % options.len()].value.clone())
+        };
+        let plugin_id = setting.plugin_id.clone();
+        let setting_id = setting.definition.id.clone();
+        div()
+            .flex_none()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_panel))
+            .px(px(10.0))
+            .py(px(6.0))
+            .min_w(px(120.0))
+            .text_center()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(theme.text))
+            .cursor(CursorStyle::PointingHand)
+            .when_some(next_value, |control, next_value| {
+                control.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        if let Err(error) = this.set_native_plugin_setting_value_and_emit(
+                            &plugin_id,
+                            &setting_id,
+                            next_value.clone(),
+                            cx,
+                        ) {
+                            this.plugin_registry
+                                .record_manager_error(plugin_id.clone(), error);
+                        }
+                        cx.notify();
+                    }),
+                )
+            })
+            .child(current_label)
+            .into_any_element()
+    }
+
+    fn render_native_plugin_readonly_setting_value(&self, value: &serde_json::Value) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex_none()
+            .max_w(px(220.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_panel))
+            .px(px(10.0))
+            .py(px(6.0))
+            .truncate()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(theme.text))
+            .child(native_plugin_setting_value_label(value))
             .into_any_element()
     }
 
@@ -377,5 +1827,126 @@ fn native_plugin_contribution_summary(manifest: &plugin_host::NativePluginManife
         "无声明贡献点".to_string()
     } else {
         parts.join(" / ")
+    }
+}
+
+fn native_plugin_setting_value_summary(
+    registry: &plugin_host::NativePluginRegistry,
+    plugin: &plugin_host::NativePluginInfo,
+) -> Option<String> {
+    let settings = plugin.manifest.contributes.as_ref()?.settings.as_ref()?;
+    if settings.is_empty() {
+        return None;
+    }
+    let values = settings
+        .iter()
+        .take(3)
+        .filter_map(|setting| {
+            registry
+                .plugin_setting_value(&plugin.manifest.id, &setting.id)
+                .map(|value| {
+                    format!(
+                        "{}={}",
+                        setting.id,
+                        native_plugin_setting_value_label(&value)
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        None
+    } else {
+        // Tauri PluginManager exposes plugin details inline; native keeps this
+        // read-only until Phase 2 settings controls are wired.
+        Some(format!("设置 {}", values.join(" / ")))
+    }
+}
+
+fn native_plugin_setting_value_label(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn normalized_optional_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn native_plugin_conflict_id(error: &str) -> Option<String> {
+    error
+        .strip_prefix(PLUGIN_ID_CONFLICT_ERROR_PREFIX)
+        .map(str::trim)
+        .filter(|plugin_id| !plugin_id.is_empty())
+        .map(str::to_string)
+}
+
+fn native_plugin_registry_capabilities_label(
+    entry: &plugin_host::NativePluginRegistryEntry,
+) -> Option<String> {
+    let capabilities = entry.capabilities_summary.as_ref()?;
+    if capabilities.is_empty() {
+        return None;
+    }
+    Some(format!("能力：{}", capabilities.join(" / ")))
+}
+
+fn plugin_manager_theme_alpha(color: u32, alpha: u32) -> Rgba {
+    rgba((color << 8) | alpha)
+}
+
+fn plugin_manager_palette_alpha(color: u32, alpha: u32) -> Rgba {
+    rgba((color << 8) | alpha)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn registry_entry_with_capabilities(
+        capabilities_summary: Option<Vec<String>>,
+    ) -> plugin_host::NativePluginRegistryEntry {
+        plugin_host::NativePluginRegistryEntry {
+            id: "com.example.demo".to_string(),
+            name: "Demo".to_string(),
+            description: None,
+            author: None,
+            version: "1.2.0".to_string(),
+            min_oxideterm_version: None,
+            download_url: "https://example.invalid/demo.zip".to_string(),
+            checksum: None,
+            size: None,
+            tags: None,
+            capabilities_summary,
+            homepage: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn plugin_manager_conflict_error_preserves_plugin_id() {
+        assert_eq!(
+            native_plugin_conflict_id("PLUGIN_ID_CONFLICT:com.example.demo").as_deref(),
+            Some("com.example.demo")
+        );
+        assert!(native_plugin_conflict_id("checksum mismatch").is_none());
+    }
+
+    #[test]
+    fn plugin_manager_renders_registry_capabilities_summary() {
+        let entry = registry_entry_with_capabilities(Some(vec![
+            "terminal read".to_string(),
+            "status item".to_string(),
+        ]));
+        assert_eq!(
+            native_plugin_registry_capabilities_label(&entry).as_deref(),
+            Some("能力：terminal read / status item")
+        );
+
+        let entry = registry_entry_with_capabilities(Some(Vec::new()));
+        assert!(native_plugin_registry_capabilities_label(&entry).is_none());
     }
 }

@@ -106,6 +106,17 @@ impl AiOrchestratorRuntimeSnapshot {
         let started = std::time::Instant::now();
         let result = if oxideterm_ai::is_mcp_tool_name(&tool_name) {
             self.execute_mcp_tool(&tool_name, args.clone()).await
+        } else if self.plugin_pending_tool_names.contains(&tool_name)
+            || plugin_host::is_native_plugin_ai_tool_name(&tool_name)
+        {
+            self.fail(
+                "Plugin runtime unavailable.",
+                "plugin_runtime_unavailable",
+                format!(
+                    "Plugin tool {tool_name} is declared in plugin.json, but native plugin runtime execution starts in Phase 3."
+                ),
+                "plugin.invoke",
+            )
         } else {
             match tool_name.as_str() {
             "list_targets" => self.list_targets(&args),
