@@ -22,7 +22,6 @@ use super::{
     plugin_runtime::PluginResponseResult,
 };
 
-mod backend_api;
 mod constants;
 mod forwarding;
 mod host_api_snapshot;
@@ -39,7 +38,6 @@ mod types;
 mod ui_helpers;
 mod ui_host_calls;
 
-use backend_api::*;
 use constants::*;
 use forwarding::*;
 use host_api_snapshot::*;
@@ -57,7 +55,9 @@ pub(super) use ui_helpers::native_plugin_theme_snapshot;
 use ui_helpers::*;
 use ui_host_calls::*;
 
-use oxideterm_plugin_host_api::{ai::*, terminal::*, transfers::*};
+#[cfg(test)]
+use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
+use oxideterm_plugin_host_api::{ai::*, transfers::*};
 
 impl WorkspaceApp {
     pub(super) fn start_native_plugin_confirm_polling(&mut self, cx: &mut Context<Self>) {
@@ -489,7 +489,7 @@ impl WorkspaceApp {
             .apply_oxide_import_quick_commands(
                 envelope.quick_commands_json.as_deref(),
                 options.import_quick_commands,
-                options.quick_command_strategy,
+                native_plugin_quick_command_import_strategy(options.quick_command_strategy),
             );
         let imported_plugin_settings = self.apply_oxide_import_plugin_settings(
             &envelope.plugin_settings,
@@ -1770,7 +1770,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> plugin_runtime::NativeHostApiResolver {
-        let snapshot = NativePluginHostApiSnapshot::from_workspace(self, cx);
+        let snapshot = native_plugin_host_api_snapshot_from_workspace(self, cx);
         let confirm_tx = self.native_plugin_confirm_tx.clone();
         let terminal_tx = self.native_plugin_terminal_tx.clone();
         let sync_tx = self.native_plugin_sync_tx.clone();

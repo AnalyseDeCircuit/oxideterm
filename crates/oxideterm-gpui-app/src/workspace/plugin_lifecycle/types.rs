@@ -1,16 +1,17 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashSet, sync::mpsc};
+use std::sync::mpsc;
 
 use oxideterm_connections::{
     SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
-    oxide_file::{ImportResultEnvelope, OxideImportOptions},
+    oxide_file::ImportResultEnvelope,
 };
+use oxideterm_plugin_host_api::sync::NativePluginOxideImportOptions;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use crate::workspace::{plugin_runtime, quick_commands::QuickCommandImportStrategy};
+use crate::workspace::plugin_runtime;
 
 pub(in crate::workspace) enum NativePluginRuntimeDelivery {
     Activation {
@@ -101,17 +102,6 @@ pub(in crate::workspace) enum NativePluginSyncAction {
         progress_registration_id: Option<String>,
         plugin_id: String,
     },
-}
-
-#[derive(Clone, Debug)]
-pub(in crate::workspace) struct NativePluginOxideImportOptions {
-    pub(super) oxide_options: OxideImportOptions,
-    pub(super) import_app_settings: bool,
-    pub(super) selected_app_settings_sections: Option<HashSet<String>>,
-    pub(super) import_plugin_settings: bool,
-    pub(super) selected_plugin_ids: Option<HashSet<String>>,
-    pub(super) import_quick_commands: bool,
-    pub(super) quick_command_strategy: QuickCommandImportStrategy,
 }
 
 pub(in crate::workspace) struct NativePluginOxideImportCoreResult {

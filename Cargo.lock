@@ -7202,9 +7202,6 @@ dependencies = [
  "tokio",
  "uuid",
  "walkdir",
- "wasmtime",
- "wasmtime-wasi",
- "wat",
  "windows 0.61.3",
  "x11-dl",
  "zeroize",
@@ -7272,6 +7269,7 @@ dependencies = [
  "oxideterm-i18n",
  "oxideterm-render-policy",
  "oxideterm-settings",
+ "oxideterm-settings-model",
  "oxideterm-theme",
  "regex",
 ]
@@ -7367,20 +7365,31 @@ version = "0.1.0"
 name = "oxideterm-plugin-host-api"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
  "oxideterm-ai",
  "oxideterm-connection-monitor",
+ "oxideterm-connections",
  "oxideterm-forwarding",
  "oxideterm-gpui-ide",
  "oxideterm-i18n",
+ "oxideterm-plugin-manifest",
  "oxideterm-plugin-protocol",
+ "oxideterm-plugin-registry",
  "oxideterm-settings",
  "oxideterm-sftp",
  "oxideterm-ssh",
  "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
  "uuid",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wat",
+ "zeroize",
 ]
 
 [[package]]
@@ -7456,6 +7465,7 @@ version = "0.1.0"
 dependencies = [
  "oxideterm-ai",
  "oxideterm-settings",
+ "oxideterm-theme",
  "serde_json",
 ]
 

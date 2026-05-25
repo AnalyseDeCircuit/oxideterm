@@ -1,28 +1,32 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::mpsc,
-};
+use std::sync::mpsc;
 
 use oxideterm_connections::{
-    LocalSyncMetadata as SavedConnectionsLocalSyncMetadata, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot,
+    LocalSyncMetadata as SavedConnectionsLocalSyncMetadata, SavedConnectionsSyncSnapshot,
     oxide_file::{
-        ImportConflictStrategy, ImportResultEnvelope, OxideExportOptions, OxideFile,
-        OxideImportOptions, apply_oxide_import_with_options_with_progress,
-        export_connections_to_oxide, export_connections_to_oxide_with_progress, preflight_export,
-        preview_oxide_import, preview_oxide_import_with_progress,
+        ImportConflictStrategy, OxideExportOptions, OxideFile, export_connections_to_oxide,
+        export_connections_to_oxide_with_progress, preflight_export, preview_oxide_import,
+        preview_oxide_import_with_progress,
     },
+};
+#[cfg(test)]
+pub(super) use oxideterm_plugin_host_api::sync::native_plugin_apply_oxide_import_core;
+pub(super) use oxideterm_plugin_host_api::sync::{
+    NativePluginOxideImportOptions, NativePluginQuickCommandImportStrategy,
+    native_plugin_apply_oxide_import_core_with_progress, native_plugin_bool_arg,
+    native_plugin_file_data_arg, native_plugin_optional_string_arg,
+    native_plugin_selected_plugin_settings, native_plugin_settings_revision_map,
+    native_plugin_sync_apply_saved_connections_args, native_plugin_sync_connection_ids,
+    native_plugin_sync_import_oxide_args, native_plugin_sync_import_result_value,
+    native_plugin_sync_oxide_error, native_plugin_sync_progress_registration_id,
+    native_plugin_sync_progress_value,
 };
 use serde_json::{Map, Value, json};
 use zeroize::Zeroizing;
 
-use super::{
-    native_plugin_u8_array,
-    types::{NativePluginOxideImportOptions, NativePluginSyncAction, NativePluginSyncRequest},
-};
+use super::types::{NativePluginSyncAction, NativePluginSyncRequest};
 use crate::workspace::{plugin_runtime, quick_commands::QuickCommandImportStrategy};
 
 // Sync owns the plugin-facing .oxide and saved-connection protocol. Mutating
@@ -343,35 +347,6 @@ fn native_plugin_sync_apply_saved_connections_response(
     })
 }
 
-pub(super) fn native_plugin_sync_apply_saved_connections_args(
-    args: &Value,
-) -> Result<
-    (
-        SavedConnectionsSyncSnapshot,
-        SavedConnectionsConflictStrategy,
-    ),
-    String,
-> {
-    let snapshot = args
-        .get("snapshot")
-        .cloned()
-        .ok_or_else(|| "sync.applySavedConnectionsSnapshot requires args.snapshot".to_string())
-        .and_then(|value| serde_json::from_value(value).map_err(|error| error.to_string()))?;
-    let conflict_strategy = SavedConnectionsConflictStrategy::parse(
-        args.get("conflictStrategy").and_then(Value::as_str),
-    )
-    .map_err(|error| error.to_string())?;
-    Ok((snapshot, conflict_strategy))
-}
-
-fn native_plugin_sync_progress_registration_id(args: &Value) -> Option<String> {
-    args.get("progressRegistrationId")
-        .or_else(|| args.get("progressId"))
-        .and_then(Value::as_str)
-        .filter(|registration_id| !registration_id.is_empty())
-        .map(str::to_string)
-}
-
 pub(super) fn native_plugin_emit_sync_progress(
     sync_tx: Option<&mpsc::Sender<NativePluginSyncRequest>>,
     plugin_id: &str,
@@ -393,102 +368,6 @@ pub(super) fn native_plugin_emit_sync_progress(
         },
         response_tx,
     });
-}
-
-pub(super) fn native_plugin_sync_progress_value(
-    title: &str,
-    stage: &str,
-    current: usize,
-    total: usize,
-    done: bool,
-) -> Value {
-    let progress = if total == 0 {
-        0.0
-    } else {
-        ((current.min(total) as f32 / total as f32) * 100.0).min(100.0)
-    };
-    json!({
-        "title": title,
-        "message": stage,
-        "stage": stage,
-        "current": current,
-        "total": total,
-        "progress": progress,
-        "done": done,
-    })
-}
-
-fn native_plugin_selected_plugin_settings(
-    plugin_settings: &[oxideterm_connections::oxide_file::EncryptedPluginSetting],
-    args: &Value,
-) -> Result<Vec<oxideterm_connections::oxide_file::EncryptedPluginSetting>, String> {
-    if !native_plugin_bool_arg(args, "includePluginSettings").unwrap_or(false) {
-        return Ok(Vec::new());
-    }
-    let selected_plugin_ids = native_plugin_optional_string_set_arg(args, "selectedPluginIds")?;
-    Ok(plugin_settings
-        .iter()
-        .filter(|setting| {
-            selected_plugin_ids.as_ref().is_none_or(|ids| {
-                native_plugin_id_from_setting_storage_key(&setting.storage_key)
-                    .is_some_and(|plugin_id| ids.contains(&plugin_id))
-            })
-        })
-        .cloned()
-        .collect())
-}
-
-pub(super) fn native_plugin_settings_revision_map(
-    plugin_settings: &[oxideterm_connections::oxide_file::EncryptedPluginSetting],
-) -> Map<String, Value> {
-    let mut grouped = HashMap::<String, Vec<(String, String)>>::new();
-    for setting in plugin_settings {
-        let Some(plugin_id) = native_plugin_id_from_setting_storage_key(&setting.storage_key)
-        else {
-            continue;
-        };
-        grouped.entry(plugin_id).or_default().push((
-            setting.storage_key.clone(),
-            setting.serialized_value.clone(),
-        ));
-    }
-    let mut plugin_ids = grouped.keys().cloned().collect::<Vec<_>>();
-    plugin_ids.sort();
-    plugin_ids
-        .into_iter()
-        .filter_map(|plugin_id| {
-            let mut entries = grouped.remove(&plugin_id)?;
-            entries.sort_by(|left, right| left.0.cmp(&right.0));
-            let text = serde_json::to_string(&entries).ok()?;
-            Some((
-                plugin_id,
-                Value::String(native_plugin_stable_hash_string(&text)),
-            ))
-        })
-        .collect()
-}
-
-fn native_plugin_id_from_setting_storage_key(storage_key: &str) -> Option<String> {
-    const PREFIX: &str = "oxide-plugin-";
-    const SEPARATOR: &str = "-setting-";
-
-    let remainder = storage_key.strip_prefix(PREFIX)?;
-    let separator_index = remainder.find(SEPARATOR)?;
-    let plugin_id = &remainder[..separator_index];
-    let setting_id = &remainder[separator_index + SEPARATOR.len()..];
-    if plugin_id.is_empty() || setting_id.is_empty() {
-        return None;
-    }
-    Some(plugin_id.to_string())
-}
-
-fn native_plugin_stable_hash_string(text: &str) -> String {
-    let mut hash = 2166136261u32;
-    for byte in text.bytes() {
-        hash ^= byte as u32;
-        hash = hash.wrapping_mul(16777619);
-    }
-    format!("fnv1a-{hash:x}")
 }
 
 fn native_plugin_sync_import_oxide_response(
@@ -550,233 +429,13 @@ fn native_plugin_sync_import_oxide_response(
     })
 }
 
-pub(super) fn native_plugin_sync_import_oxide_args(
-    args: &Value,
-) -> Result<(Vec<u8>, Zeroizing<String>, NativePluginOxideImportOptions), String> {
-    let bytes = native_plugin_file_data_arg(args)?;
-    let password = args
-        .get("password")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "sync.importOxide requires args.password".to_string())
-        .map(|password| Zeroizing::new(password.to_string()))?;
-    let conflict_strategy =
-        ImportConflictStrategy::parse(args.get("conflictStrategy").and_then(Value::as_str))
-            .map_err(|error| error.to_string())?;
-    let options = NativePluginOxideImportOptions {
-        oxide_options: OxideImportOptions {
-            selected_names: native_plugin_optional_string_array_arg(args, "selectedNames")?,
-            conflict_strategy,
-            import_forwards: native_plugin_bool_arg(args, "importForwards").unwrap_or(true),
-            import_portable_secrets: native_plugin_bool_arg(args, "importPortableSecrets")
-                .unwrap_or(false),
-        },
-        import_app_settings: native_plugin_bool_arg(args, "importAppSettings").unwrap_or(true),
-        selected_app_settings_sections: native_plugin_optional_string_set_arg(
-            args,
-            "selectedAppSettingsSections",
-        )?,
-        import_plugin_settings: native_plugin_bool_arg(args, "importPluginSettings")
-            .unwrap_or(true),
-        selected_plugin_ids: native_plugin_optional_string_set_arg(args, "selectedPluginIds")?,
-        import_quick_commands: native_plugin_bool_arg(args, "importQuickCommands").unwrap_or(true),
-        quick_command_strategy: native_plugin_quick_command_strategy_from_oxide(conflict_strategy),
-    };
-    Ok((bytes, password, options))
-}
-
-#[cfg(test)]
-pub(super) fn native_plugin_apply_oxide_import_core(
-    store: &mut oxideterm_connections::ConnectionStore,
-    bytes: &[u8],
-    password: &str,
-    options: OxideImportOptions,
-) -> Result<ImportResultEnvelope, String> {
-    oxideterm_connections::oxide_file::apply_oxide_import_with_options(
-        store, bytes, password, options,
-    )
-    .map_err(native_plugin_oxide_file_error_message)
-}
-
-pub(super) fn native_plugin_apply_oxide_import_core_with_progress<F>(
-    store: &mut oxideterm_connections::ConnectionStore,
-    bytes: &[u8],
-    password: &str,
-    options: OxideImportOptions,
-    on_progress: F,
-) -> Result<ImportResultEnvelope, String>
-where
-    F: FnMut(&str, usize, usize),
-{
-    apply_oxide_import_with_options_with_progress(store, bytes, password, options, on_progress)
-        .map_err(native_plugin_oxide_file_error_message)
-}
-
-fn native_plugin_quick_command_strategy_from_oxide(
-    strategy: ImportConflictStrategy,
+pub(super) fn native_plugin_quick_command_import_strategy(
+    strategy: NativePluginQuickCommandImportStrategy,
 ) -> QuickCommandImportStrategy {
     match strategy {
-        ImportConflictStrategy::Rename => QuickCommandImportStrategy::Rename,
-        ImportConflictStrategy::Skip => QuickCommandImportStrategy::Skip,
-        ImportConflictStrategy::Replace => QuickCommandImportStrategy::Replace,
-        ImportConflictStrategy::Merge => QuickCommandImportStrategy::Merge,
-    }
-}
-
-pub(super) fn native_plugin_sync_import_result_value(
-    envelope: &ImportResultEnvelope,
-    imported_app_settings: bool,
-    skipped_app_settings: bool,
-    imported_quick_commands: usize,
-    skipped_quick_commands: bool,
-    quick_commands_errors: Vec<String>,
-    imported_plugin_settings: usize,
-    skipped_plugin_settings: bool,
-) -> Value {
-    let mut value = json!(envelope);
-    if let Value::Object(fields) = &mut value {
-        // PluginContext's importOxide result mirrors oxideClientState.ts: raw
-        // side-car payloads are consumed by the host and are not returned.
-        fields.remove("appSettingsJson");
-        fields.remove("quickCommandsJson");
-        fields.remove("pluginSettings");
-        fields.insert(
-            "importedAppSettings".to_string(),
-            json!(imported_app_settings),
-        );
-        fields.insert(
-            "skippedAppSettings".to_string(),
-            json!(skipped_app_settings),
-        );
-        fields.insert(
-            "importedQuickCommands".to_string(),
-            json!(imported_quick_commands),
-        );
-        fields.insert(
-            "skippedQuickCommands".to_string(),
-            json!(skipped_quick_commands),
-        );
-        fields.insert(
-            "quickCommandsErrors".to_string(),
-            json!(quick_commands_errors),
-        );
-        fields.insert(
-            "importedPluginSettings".to_string(),
-            json!(imported_plugin_settings),
-        );
-        fields.insert(
-            "skippedPluginSettings".to_string(),
-            json!(skipped_plugin_settings),
-        );
-    }
-    value
-}
-
-fn native_plugin_sync_connection_ids(
-    connection_store: &oxideterm_connections::ConnectionStore,
-    args: &Value,
-) -> Result<Vec<String>, String> {
-    if let Some(values) = args.get("connectionIds") {
-        if values.is_null() {
-            return Ok(native_plugin_all_saved_connection_ids(connection_store));
-        }
-        let Some(values) = values.as_array() else {
-            return Err("sync connectionIds must be an array".to_string());
-        };
-        return values
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_string)
-                    .ok_or_else(|| "sync connectionIds must contain strings".to_string())
-            })
-            .collect();
-    }
-    Ok(native_plugin_all_saved_connection_ids(connection_store))
-}
-
-fn native_plugin_all_saved_connection_ids(
-    connection_store: &oxideterm_connections::ConnectionStore,
-) -> Vec<String> {
-    connection_store
-        .connections()
-        .iter()
-        .map(|connection| connection.id.clone())
-        .collect()
-}
-
-fn native_plugin_file_data_arg(args: &Value) -> Result<Vec<u8>, String> {
-    let Some(file_data) = args.get("fileData").and_then(Value::as_array) else {
-        return Err("oxide fileData must be an array of bytes".to_string());
-    };
-    native_plugin_u8_array(file_data)
-        .ok_or_else(|| "oxide fileData contains a non-byte value".to_string())
-}
-
-fn native_plugin_optional_string_array_arg(
-    args: &Value,
-    field: &str,
-) -> Result<Option<Vec<String>>, String> {
-    let Some(value) = args.get(field) else {
-        return Ok(None);
-    };
-    if value.is_null() {
-        return Ok(None);
-    }
-    let Some(values) = value.as_array() else {
-        return Err(format!("sync.{field} must be an array of strings"));
-    };
-    values
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_string)
-                .ok_or_else(|| format!("sync.{field} must contain only strings"))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Some)
-}
-
-fn native_plugin_optional_string_set_arg(
-    args: &Value,
-    field: &str,
-) -> Result<Option<HashSet<String>>, String> {
-    native_plugin_optional_string_array_arg(args, field)
-        .map(|values| values.map(|values| values.into_iter().collect()))
-}
-
-fn native_plugin_bool_arg(args: &Value, field: &str) -> Option<bool> {
-    args.get(field).and_then(Value::as_bool)
-}
-
-fn native_plugin_optional_string_arg(args: &Value, field: &str) -> Option<String> {
-    args.get(field).and_then(Value::as_str).map(str::to_string)
-}
-
-fn native_plugin_sync_oxide_error(
-    request_id: String,
-    error: oxideterm_connections::oxide_file::OxideFileError,
-) -> plugin_runtime::PluginResponse {
-    plugin_runtime::PluginResponse::error(
-        request_id,
-        plugin_runtime::PluginError::runtime("plugin_sync_oxide_error", error.to_string()),
-    )
-}
-
-fn native_plugin_oxide_file_error_message(
-    error: oxideterm_connections::oxide_file::OxideFileError,
-) -> String {
-    match error {
-        oxideterm_connections::oxide_file::OxideFileError::DecryptionFailed => {
-            "密码错误，无法解密文件".to_string()
-        }
-        oxideterm_connections::oxide_file::OxideFileError::ChecksumMismatch => {
-            "文件验证失败，数据可能已被篡改".to_string()
-        }
-        oxideterm_connections::oxide_file::OxideFileError::PasswordTooShort => {
-            "密码长度至少为 6 位".to_string()
-        }
-        other => other.to_string(),
+        NativePluginQuickCommandImportStrategy::Rename => QuickCommandImportStrategy::Rename,
+        NativePluginQuickCommandImportStrategy::Skip => QuickCommandImportStrategy::Skip,
+        NativePluginQuickCommandImportStrategy::Replace => QuickCommandImportStrategy::Replace,
+        NativePluginQuickCommandImportStrategy::Merge => QuickCommandImportStrategy::Merge,
     }
 }

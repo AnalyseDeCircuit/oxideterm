@@ -222,7 +222,7 @@ impl WorkspaceApp {
     }
 
     fn open_ai_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.active_settings_tab = SettingsTab::Ai;
+        self.settings_page.set_active_tab(SettingsTab::Ai);
         self.open_settings(window, cx);
     }
 

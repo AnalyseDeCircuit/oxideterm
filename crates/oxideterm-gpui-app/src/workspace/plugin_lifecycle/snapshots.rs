@@ -10,6 +10,10 @@ use oxideterm_ssh::{
 };
 use serde_json::{Map, Value, json};
 
+pub(super) use oxideterm_plugin_host_api::readonly::{
+    native_plugin_session_state_map, native_plugin_session_state_map_from_nodes,
+};
+
 pub(super) fn native_plugin_connection_snapshot(connection: &ConnectionInfo) -> Value {
     // Tauri pluginUtils.toSnapshot exposes this exact read-only projection from
     // SshConnectionInfo. Native derives terminal ids from registry consumers so
@@ -133,53 +137,6 @@ pub(super) fn native_plugin_session_connection_state(
     }
 }
 
-pub(super) fn native_plugin_active_session_nodes(session_tree: &[Value]) -> Value {
-    let active_nodes = session_tree
-        .iter()
-        .filter(|node| {
-            matches!(
-                node.get("connectionState").and_then(Value::as_str),
-                Some("active" | "connected")
-            )
-        })
-        .map(|node| {
-            json!({
-                "nodeId": node.get("id").and_then(Value::as_str).unwrap_or_default(),
-                "sessionId": node
-                    .get("terminalIds")
-                    .and_then(Value::as_array)
-                    .and_then(|terminal_ids| terminal_ids.first())
-                    .cloned()
-                    .unwrap_or(Value::Null),
-                "connectionState": node
-                    .get("connectionState")
-                    .and_then(Value::as_str)
-                    .unwrap_or("idle"),
-            })
-        })
-        .collect::<Vec<_>>();
-    json!(active_nodes)
-}
-
-pub(super) fn native_plugin_session_state_map(tree: &Value) -> HashMap<String, String> {
-    tree.as_array()
-        .map(|nodes| native_plugin_session_state_map_from_nodes(nodes))
-        .unwrap_or_default()
-}
-
-pub(super) fn native_plugin_session_state_map_from_nodes(
-    nodes: &[Value],
-) -> HashMap<String, String> {
-    nodes
-        .iter()
-        .filter_map(|node| {
-            let node_id = node.get("id").and_then(Value::as_str)?;
-            let state = node.get("connectionState").and_then(Value::as_str)?;
-            Some((node_id.to_string(), state.to_string()))
-        })
-        .collect()
-}
-
 pub(super) fn native_plugin_event_log_entries<'a>(
     entries: impl Iterator<Item = &'a EventLogEntry>,
 ) -> Vec<Value> {
@@ -215,24 +172,6 @@ pub(super) fn native_plugin_event_log_entry_snapshot(entry: &EventLogEntry) -> V
     }
     snapshot.insert("source".to_string(), json!(entry.source));
     Value::Object(snapshot)
-}
-
-pub(super) fn native_plugin_filtered_event_log_entries(entries: &[Value], args: &Value) -> Value {
-    let filter = args.get("filter").unwrap_or(args);
-    let severity = filter.get("severity").and_then(Value::as_str);
-    let category = filter.get("category").and_then(Value::as_str);
-    let filtered = entries
-        .iter()
-        .filter(|entry| {
-            severity.is_none_or(|severity| {
-                entry.get("severity").and_then(Value::as_str) == Some(severity)
-            }) && category.is_none_or(|category| {
-                entry.get("category").and_then(Value::as_str) == Some(category)
-            })
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    json!(filtered)
 }
 
 fn native_plugin_event_severity(severity: EventSeverity) -> &'static str {

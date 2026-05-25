@@ -431,7 +431,7 @@ impl WorkspaceApp {
 
         for page in TerminalSettingsPage::all() {
             let page_id = *page;
-            let active = self.terminal_settings_page == page_id;
+            let active = self.settings_page.terminal_page == page_id;
             let item = div()
                 .rounded(px(self.tokens.radii.md))
                 .px(px(12.0))
@@ -459,7 +459,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.terminal_settings_page = page_id;
+                        this.settings_page.set_terminal_page(page_id);
                         cx.notify();
                     }),
                 );
@@ -531,7 +531,7 @@ impl WorkspaceApp {
         let modifiers = event.keystroke.modifiers;
 
         match key {
-            "tab" if self.ai_mcp_add_dialog.is_some() && settings_input_is_ai_mcp(input) => {
+            "tab" if self.ai_mcp_add_dialog.is_some() && input.is_ai_mcp() => {
                 // Tauri MCP add dialog lets Tab leave the active input and enter
                 // the DialogFooter. GPUI settings inputs are manually owned, so
                 // delegate the input-to-footer edge to the shared browser model.
@@ -573,7 +573,7 @@ impl WorkspaceApp {
                     cx.notify();
                     return true;
                 }
-                if settings_input_accepts_newline(input) {
+                if input.accepts_newline() {
                     self.settings_input_draft.push('\n');
                     self.apply_settings_input_draft(input, cx);
                     return true;
@@ -759,7 +759,7 @@ impl WorkspaceApp {
     }
 
     fn clear_settings_input_draft(&mut self, input: SettingsInput) {
-        if settings_input_is_secret(input) {
+        if input.is_secret() {
             zeroize::Zeroize::zeroize(&mut self.settings_input_draft);
         }
         self.settings_input_draft.clear();
@@ -767,210 +767,16 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn current_settings_input_value(&self, input: SettingsInput) -> String {
         let settings = self.settings_store.settings();
+        if let Some(value) = persisted_settings_input_value(settings, input) {
+            return value;
+        }
+        if let Some(value) = self.settings_page.page_input_value(input) {
+            return value;
+        }
         match input {
-            SettingsInput::TerminalFontSize => settings.terminal.font_size.to_string(),
-            SettingsInput::TerminalLineHeight => compact_decimal(settings.terminal.line_height),
-            SettingsInput::IdeFontSize => settings
-                .ide
-                .font_size
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-            SettingsInput::IdeLineHeight => settings
-                .ide
-                .line_height
-                .map(compact_decimal)
-                .unwrap_or_default(),
-            SettingsInput::AppearanceUiFont => settings.appearance.ui_font_family.clone(),
-            SettingsInput::LocalDefaultCwd => settings
-                .local_terminal
-                .default_cwd
-                .clone()
-                .unwrap_or_default(),
-            SettingsInput::LocalGitBashPath => settings
-                .local_terminal
-                .git_bash_path
-                .clone()
-                .unwrap_or_default(),
-            SettingsInput::LocalOhMyPoshTheme => settings
-                .local_terminal
-                .oh_my_posh_theme
-                .clone()
-                .unwrap_or_default(),
-            SettingsInput::ConnectionDefaultUsername => {
-                settings.connection_defaults.username.clone()
-            }
-            SettingsInput::ConnectionDefaultPort => settings.connection_defaults.port.to_string(),
-            SettingsInput::ConnectionNewGroup => self.settings_connection_new_group.clone(),
-            SettingsInput::SftpSpeedLimitKbps => settings.sftp.speed_limit_kbps.to_string(),
-            SettingsInput::InBandTransferMaxChunkBytes => {
-                settings.terminal.in_band_transfer.max_chunk_bytes.to_string()
-            }
-            SettingsInput::InBandTransferMaxFileCount => {
-                settings.terminal.in_band_transfer.max_file_count.to_string()
-            }
-            SettingsInput::InBandTransferMaxTotalBytes => settings
-                .terminal
-                .in_band_transfer
-                .max_total_bytes
-                .to_string(),
-            SettingsInput::TerminalCommandBarFocusHandoff => settings
-                .terminal
-                .command_bar
-                .focus_handoff_commands
-                .join("\n"),
             SettingsInput::TerminalCommandSpecsJson => {
                 self.load_terminal_command_specs_editor_value()
             }
-            SettingsInput::KeybindingSearch => self.keybinding_search_query.clone(),
-            SettingsInput::CustomThemeName => self
-                .theme_editor
-                .as_ref()
-                .map(|editor| editor.name.clone())
-                .unwrap_or_default(),
-            SettingsInput::CustomThemeTerminalColor(index) => self
-                .theme_editor
-                .as_ref()
-                .and_then(|editor| editor.terminal_colors.get(index).cloned())
-                .unwrap_or_default(),
-            SettingsInput::CustomThemeUiColor(index) => self
-                .theme_editor
-                .as_ref()
-                .and_then(|editor| editor.ui_colors.get(index).cloned())
-                .unwrap_or_default(),
-            SettingsInput::HighlightLabel(index) => settings
-                .terminal
-                .highlight_rules
-                .get(index)
-                .map(|rule| rule.label.clone())
-                .unwrap_or_default(),
-            SettingsInput::HighlightPattern(index) => settings
-                .terminal
-                .highlight_rules
-                .get(index)
-                .map(|rule| rule.pattern.clone())
-                .unwrap_or_default(),
-            SettingsInput::HighlightForeground(index) => settings
-                .terminal
-                .highlight_rules
-                .get(index)
-                .and_then(|rule| rule.foreground.clone())
-                .unwrap_or_default(),
-            SettingsInput::HighlightBackground(index) => settings
-                .terminal
-                .highlight_rules
-                .get(index)
-                .and_then(|rule| rule.background.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiProviderName(index) => settings
-                .ai
-                .providers
-                .get(index)
-                .and_then(|provider| ai_provider_string(provider, "name"))
-                .unwrap_or_default(),
-            SettingsInput::AiProviderBaseUrl(index) => settings
-                .ai
-                .providers
-                .get(index)
-                .and_then(|provider| ai_provider_string(provider, "baseUrl"))
-                .unwrap_or_default(),
-            SettingsInput::AiProviderDefaultModel(index) => settings
-                .ai
-                .providers
-                .get(index)
-                .and_then(|provider| ai_provider_string(provider, "defaultModel"))
-                .unwrap_or_default(),
-            SettingsInput::AiProviderApiKey(_) => String::new(),
-            SettingsInput::AiProfileName(index) => settings
-                .ai
-                .execution_profiles
-                .get("profiles")
-                .and_then(|profiles| profiles.as_array())
-                .and_then(|profiles| profiles.get(index))
-                .and_then(|profile| profile.get("name"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            SettingsInput::AiProfileModel(index) => settings
-                .ai
-                .execution_profiles
-                .get("profiles")
-                .and_then(|profiles| profiles.as_array())
-                .and_then(|profiles| profiles.get(index))
-                .and_then(|profile| profile.get("model"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            SettingsInput::AiSystemPrompt => settings.ai.custom_system_prompt.clone(),
-            SettingsInput::AiMemoryContent => settings.ai.memory.content.clone(),
-            SettingsInput::AiToolUseMaxRounds => settings
-                .ai
-                .tool_use
-                .max_rounds
-                .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS)
-                .to_string(),
-            SettingsInput::AiToolUseMaxCallsPerRound => settings
-                .ai
-                .tool_use
-                .max_calls_per_round
-                .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND)
-                .to_string(),
-            SettingsInput::AiModelContextWindow(provider_index, model_index) => settings
-                .ai
-                .providers
-                .get(provider_index)
-                .and_then(ai_provider_id)
-                .and_then(|provider_id| {
-                    let model = settings
-                        .ai
-                        .providers
-                        .get(provider_index)
-                        .and_then(|provider| provider.get("models"))
-                        .and_then(serde_json::Value::as_array)
-                        .and_then(|models| models.get(model_index))
-                        .and_then(serde_json::Value::as_str)?;
-                    settings
-                        .ai
-                        .user_context_windows
-                        .get(&provider_id)
-                        .and_then(|windows| windows.get(model))
-                        .and_then(serde_json::Value::as_i64)
-                        .or_else(|| {
-                            Some(
-                                ai_model_context_window_info(
-                                    model,
-                                    &settings.ai.model_context_windows,
-                                    Some(&provider_id),
-                                    &settings.ai.user_context_windows,
-                                )
-                                .value,
-                            )
-                        })
-                        .map(|value| value.to_string())
-                })
-                .unwrap_or_default(),
-            SettingsInput::AiActiveModelMaxResponseTokens => settings
-                .ai
-                .active_provider_id
-                .as_ref()
-                .zip(settings.ai.active_model.as_ref())
-                .and_then(|(provider_id, model)| {
-                    settings
-                        .ai
-                        .model_max_response_tokens
-                        .get(provider_id)
-                        .and_then(|models| models.get(model))
-                        .and_then(serde_json::Value::as_i64)
-                })
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-            SettingsInput::AiEmbeddingModel => settings
-                .ai
-                .embedding_config
-                .as_ref()
-                .and_then(|config| config.get("model"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
             SettingsInput::AiMcpName => self
                 .ai_mcp_add_dialog
                 .as_ref()
@@ -1025,8 +831,6 @@ impl WorkspaceApp {
                 .and_then(|draft| draft.headers.get(index))
                 .map(|(_, value)| value.clone())
                 .unwrap_or_default(),
-            SettingsInput::KnowledgeCollectionName => self.knowledge_new_collection_name.clone(),
-            SettingsInput::KnowledgeDocumentTitle => self.knowledge_new_document_title.clone(),
             SettingsInput::CloudSyncEndpoint => self.cloud_sync_form.endpoint.clone(),
             SettingsInput::CloudSyncNamespace => self.cloud_sync_form.namespace.clone(),
             SettingsInput::CloudSyncS3Bucket => self.cloud_sync_form.s3_bucket.clone(),
@@ -1062,6 +866,7 @@ impl WorkspaceApp {
                 })
                 .map(|value| plugin_setting_input_value(&value))
                 .unwrap_or_default(),
+            _ => String::new(),
         }
     }
 
@@ -1070,380 +875,37 @@ impl WorkspaceApp {
         input: SettingsInput,
         cx: &mut Context<Self>,
     ) {
-        match input {
-            SettingsInput::TerminalFontSize => {
-                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
-                    self.edit_settings(
-                        |settings| settings.terminal.font_size = value.clamp(8, 32),
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
+        let mut next_settings = self.settings_store.settings().clone();
+        match apply_persisted_settings_input_draft(
+            &mut next_settings,
+            input,
+            &self.settings_input_draft,
+        ) {
+            SettingsInputDraftApply::Applied => {
+                self.edit_settings(move |settings| *settings = next_settings, cx);
+                return;
             }
-            SettingsInput::TerminalLineHeight => {
-                if let Ok(value) = self.settings_input_draft.parse::<f64>() {
-                    self.edit_settings(
-                        |settings| settings.terminal.line_height = value.clamp(0.8, 2.0),
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::IdeFontSize => {
-                let value = self.settings_input_draft.trim();
-                if value.is_empty() {
-                    self.edit_settings(|settings| settings.ide.font_size = None, cx);
-                } else if let Ok(value) = value.parse::<i64>() {
-                    self.edit_settings(|settings| settings.ide.font_size = Some(value.clamp(8, 32)), cx);
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::IdeLineHeight => {
-                let value = self.settings_input_draft.trim();
-                if value.is_empty() {
-                    self.edit_settings(|settings| settings.ide.line_height = None, cx);
-                } else if let Ok(value) = value.parse::<f64>() {
-                    self.edit_settings(
-                        |settings| settings.ide.line_height = Some(value.clamp(0.8, 3.0)),
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::AppearanceUiFont => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(|settings| settings.appearance.ui_font_family = value, cx);
-            }
-            SettingsInput::LocalDefaultCwd => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    |settings| {
-                        settings.local_terminal.default_cwd =
-                            (!value.is_empty()).then(|| value.clone());
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::LocalGitBashPath => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    |settings| {
-                        settings.local_terminal.git_bash_path =
-                            (!value.is_empty()).then(|| value.clone());
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::LocalOhMyPoshTheme => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    |settings| {
-                        settings.local_terminal.oh_my_posh_theme =
-                            (!value.is_empty()).then(|| value.clone());
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::ConnectionDefaultUsername => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(|settings| settings.connection_defaults.username = value, cx);
-            }
-            SettingsInput::ConnectionDefaultPort => {
-                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
-                    self.edit_settings(
-                        |settings| settings.connection_defaults.port = value.clamp(1, 65535),
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::ConnectionNewGroup => {
-                self.settings_connection_new_group = self.settings_input_draft.clone();
+            SettingsInputDraftApply::Invalid => {
                 cx.notify();
+                return;
             }
-            SettingsInput::SftpSpeedLimitKbps => {
-                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
-                    self.edit_settings(
-                        |settings| settings.sftp.speed_limit_kbps = value.max(0),
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::InBandTransferMaxChunkBytes => {
-                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
-                    self.edit_settings(
-                        |settings| {
-                            settings.terminal.in_band_transfer.max_chunk_bytes = value.max(1024)
-                        },
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::InBandTransferMaxFileCount => {
-                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
-                    self.edit_settings(
-                        |settings| settings.terminal.in_band_transfer.max_file_count = value.max(1),
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::InBandTransferMaxTotalBytes => {
-                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
-                    self.edit_settings(
-                        |settings| {
-                            settings.terminal.in_band_transfer.max_total_bytes = value.max(1024)
-                        },
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::TerminalCommandBarFocusHandoff => {
-                let commands = parse_focus_handoff_command_list(&self.settings_input_draft);
-                self.edit_settings(
-                    move |settings| settings.terminal.command_bar.focus_handoff_commands = commands,
-                    cx,
-                );
-            }
+            SettingsInputDraftApply::Unhandled => {}
+        }
+
+        if self
+            .settings_page
+            .apply_page_input_draft(input, &self.settings_input_draft)
+        {
+            cx.notify();
+            return;
+        }
+
+        match input {
             SettingsInput::TerminalCommandSpecsJson => {
                 cx.notify();
             }
-            SettingsInput::KeybindingSearch => {
-                self.keybinding_search_query = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::CustomThemeName => {
-                if let Some(editor) = self.theme_editor.as_mut() {
-                    editor.name = self.settings_input_draft.clone();
-                }
-                cx.notify();
-            }
-            SettingsInput::CustomThemeTerminalColor(index) => {
-                self.apply_theme_editor_color(ThemeEditorSection::Terminal, index, cx);
-            }
-            SettingsInput::CustomThemeUiColor(index) => {
-                self.apply_theme_editor_color(ThemeEditorSection::Ui, index, cx);
-            }
-            SettingsInput::HighlightLabel(index) => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_highlight_rule(index, move |rule| rule.label = value.clone(), cx);
-            }
-            SettingsInput::HighlightPattern(index) => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_highlight_rule(index, move |rule| rule.pattern = value.clone(), cx);
-            }
-            SettingsInput::HighlightForeground(index) => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_highlight_rule(
-                    index,
-                    move |rule| {
-                        rule.foreground = (!value.is_empty()).then(|| value.clone());
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::HighlightBackground(index) => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_highlight_rule(
-                    index,
-                    move |rule| {
-                        rule.background = (!value.is_empty()).then(|| value.clone());
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::AiProviderName(index) => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    |settings| {
-                        ai_update_provider(settings, index, |provider| {
-                            provider.insert("name".to_string(), serde_json::json!(value.clone()));
-                        });
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::AiProviderBaseUrl(index) => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    |settings| {
-                        ai_update_provider(settings, index, |provider| {
-                            provider.insert("baseUrl".to_string(), serde_json::json!(value.clone()));
-                        });
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::AiProviderDefaultModel(index) => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    |settings| {
-                        ai_update_provider(settings, index, |provider| {
-                            provider.insert(
-                                "defaultModel".to_string(),
-                                serde_json::json!(value.clone()),
-                            );
-                        });
-                    },
-                    cx,
-                );
-            }
             SettingsInput::AiProviderApiKey(_) => {
                 cx.notify();
-            }
-            SettingsInput::AiProfileName(index) => {
-                let value = self.settings_input_draft.clone();
-                self.edit_settings(
-                    move |settings| {
-                        ai_patch_execution_profile(settings, index, |profile| {
-                            profile.insert("name".to_string(), serde_json::json!(value.clone()));
-                            profile.insert(
-                                "updatedAt".to_string(),
-                                serde_json::json!(current_time_millis()),
-                            );
-                        });
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::AiProfileModel(index) => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    move |settings| {
-                        ai_patch_execution_profile(settings, index, |profile| {
-                            profile.insert(
-                                "model".to_string(),
-                                if value.is_empty() {
-                                    serde_json::Value::Null
-                                } else {
-                                    serde_json::json!(value.clone())
-                                },
-                            );
-                            profile.insert(
-                                "updatedAt".to_string(),
-                                serde_json::json!(current_time_millis()),
-                            );
-                        });
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::AiSystemPrompt => {
-                let value = self.settings_input_draft.clone();
-                self.edit_settings(|settings| settings.ai.custom_system_prompt = value.clone(), cx);
-            }
-            SettingsInput::AiMemoryContent => {
-                let value = self.settings_input_draft.clone();
-                self.edit_settings(|settings| settings.ai.memory.content = value.clone(), cx);
-            }
-            SettingsInput::AiToolUseMaxRounds => {
-                if let Ok(value) = self.settings_input_draft.trim().parse::<i64>() {
-                    self.edit_settings(
-                        |settings| {
-                            set_ai_tool_use_max_rounds(
-                                settings,
-                                value.clamp(
-                                    oxideterm_settings::MIN_AI_TOOL_MAX_ROUNDS,
-                                    oxideterm_settings::MAX_AI_TOOL_MAX_ROUNDS,
-                                ),
-                            );
-                        },
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::AiToolUseMaxCallsPerRound => {
-                if let Ok(value) = self.settings_input_draft.trim().parse::<i64>() {
-                    self.edit_settings(
-                        |settings| {
-                            set_ai_tool_use_max_calls_per_round(
-                                settings,
-                                value.clamp(
-                                    oxideterm_settings::MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
-                                    oxideterm_settings::MAX_AI_TOOL_MAX_CALLS_PER_ROUND,
-                                ),
-                            );
-                        },
-                        cx,
-                    );
-                } else {
-                    cx.notify();
-                }
-            }
-            SettingsInput::AiModelContextWindow(provider_index, model_index) => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    move |settings| {
-                        let Some(provider_id) = settings
-                            .ai
-                            .providers
-                            .get(provider_index)
-                            .and_then(ai_provider_id)
-                        else {
-                            return;
-                        };
-                        let Some(model) = settings
-                            .ai
-                            .providers
-                            .get(provider_index)
-                            .and_then(|provider| provider.get("models"))
-                            .and_then(serde_json::Value::as_array)
-                            .and_then(|models| models.get(model_index))
-                            .and_then(serde_json::Value::as_str)
-                            .map(str::to_string)
-                        else {
-                            return;
-                        };
-                        set_ai_user_context_window(settings, &provider_id, &model, value.parse().ok());
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::AiActiveModelMaxResponseTokens => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    move |settings| {
-                        let Some(provider_id) = settings.ai.active_provider_id.clone() else {
-                            return;
-                        };
-                        let Some(model) = settings.ai.active_model.clone() else {
-                            return;
-                        };
-                        set_ai_model_max_response_tokens(settings, &provider_id, &model, value.parse().ok());
-                    },
-                    cx,
-                );
-            }
-            SettingsInput::AiEmbeddingModel => {
-                let value = self.settings_input_draft.trim().to_string();
-                self.edit_settings(
-                    move |settings| {
-                        let mut config = settings
-                            .ai
-                            .embedding_config
-                            .take()
-                            .unwrap_or_else(|| serde_json::json!({ "providerId": null, "model": "" }));
-                        if let Some(object) = config.as_object_mut() {
-                            object.insert("model".to_string(), serde_json::json!(value.clone()));
-                        }
-                        settings.ai.embedding_config = Some(config);
-                    },
-                    cx,
-                );
             }
             SettingsInput::AiMcpName => {
                 if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
@@ -1519,14 +981,6 @@ impl WorkspaceApp {
                 {
                     *value = self.settings_input_draft.clone();
                 }
-                cx.notify();
-            }
-            SettingsInput::KnowledgeCollectionName => {
-                self.knowledge_new_collection_name = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::KnowledgeDocumentTitle => {
-                self.knowledge_new_document_title = self.settings_input_draft.clone();
                 cx.notify();
             }
             SettingsInput::CloudSyncEndpoint => {
@@ -1645,6 +1099,9 @@ impl WorkspaceApp {
                     self.plugin_registry
                         .record_manager_error(setting.plugin_id.clone(), error);
                 }
+                cx.notify();
+            }
+            _ => {
                 cx.notify();
             }
         }
@@ -1768,17 +1225,13 @@ impl WorkspaceApp {
         let width = f32::from(anchor.bounds.size.width).max(1.0);
         let percent = ((x - left) / width).clamp(0.0, 1.0);
         let value = (percent * 20.0).round() as i64;
-        if self.background_blur_preview == Some(value)
-            || (self.background_blur_preview.is_none()
-                && self.settings_store.settings().terminal.background_blur == value)
-        {
+        let persisted_background_blur = self.settings_store.settings().terminal.background_blur;
+        let Some(generation) = self
+            .settings_page
+            .update_background_blur_preview(persisted_background_blur, value)
+        else {
             return;
-        }
-
-        self.background_blur_preview = Some(value);
-        self.background_blur_commit_generation =
-            self.background_blur_commit_generation.wrapping_add(1);
-        let generation = self.background_blur_commit_generation;
+        };
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
@@ -1791,10 +1244,7 @@ impl WorkspaceApp {
     }
 
     fn commit_background_blur_preview(&mut self, generation: u64, cx: &mut Context<Self>) {
-        if self.background_blur_commit_generation != generation {
-            return;
-        }
-        let Some(value) = self.background_blur_preview.take() else {
+        let Some(value) = self.settings_page.take_background_blur_preview(generation) else {
             return;
         };
         if self.settings_store.settings().terminal.background_blur != value {
@@ -1803,45 +1253,6 @@ impl WorkspaceApp {
             cx.notify();
         }
     }
-}
-
-pub(super) fn settings_input_accepts_newline(input: SettingsInput) -> bool {
-    matches!(
-        input,
-        SettingsInput::TerminalCommandBarFocusHandoff
-            | SettingsInput::TerminalCommandSpecsJson
-            | SettingsInput::AiSystemPrompt
-            | SettingsInput::AiMemoryContent
-            | SettingsInput::AiMcpArgs
-    )
-}
-
-pub(super) fn settings_input_line_height(input: SettingsInput) -> f32 {
-    match input {
-        SettingsInput::TerminalCommandBarFocusHandoff
-        | SettingsInput::TerminalCommandSpecsJson => 20.0,
-        SettingsInput::AiSystemPrompt | SettingsInput::AiMemoryContent => 22.0,
-        SettingsInput::AiMcpArgs => 20.0,
-        _ => self::DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT,
-    }
-}
-
-const DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT: f32 = 20.0;
-
-fn settings_input_is_secret(input: SettingsInput) -> bool {
-    matches!(
-        input,
-        SettingsInput::AiProviderApiKey(_)
-            | SettingsInput::AiMcpAuthToken
-            | SettingsInput::CloudSyncToken
-            | SettingsInput::CloudSyncGitToken
-            | SettingsInput::CloudSyncBasicUsername
-            | SettingsInput::CloudSyncBasicPassword
-            | SettingsInput::CloudSyncAccessKeyId
-            | SettingsInput::CloudSyncSecretAccessKey
-            | SettingsInput::CloudSyncSessionToken
-            | SettingsInput::CloudSyncSyncPassword
-    )
 }
 
 fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {

@@ -184,7 +184,7 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if !this.command_palette.open
-                    && this.keybinding_recording_action_id.is_none()
+                    && this.settings_page.keybinding_recording_action_id.is_none()
                     && crate::keybindings::keystroke_matches_action(
                         &event.keystroke,
                         "app.commandPalette",
@@ -210,9 +210,9 @@ impl Render for WorkspaceApp {
                     this.handle_shortcuts_modal_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.keybinding_recording_action_id.is_some()
+                } else if this.settings_page.keybinding_recording_action_id.is_some()
                     && this.active_surface == ActiveSurface::Settings
-                    && this.active_settings_tab == SettingsTab::Keybindings
+                    && this.settings_page.active_tab == SettingsTab::Keybindings
                 {
                     this.handle_keybinding_recording_key(event, window, cx);
                     window.prevent_default();
@@ -633,13 +633,13 @@ impl Render for WorkspaceApp {
             .when(self.keyboard_interactive_challenge.is_some(), |root| {
                 root.child(self.render_keyboard_interactive_dialog(cx))
             })
-            .when(self.show_ai_enable_confirm, |root| {
+            .when(self.settings_page.show_ai_enable_confirm, |root| {
                 root.child(self.render_ai_enable_confirm_dialog(cx))
             })
-            .when(self.ai_provider_key_remove_confirm.is_some(), |root| {
+            .when(self.settings_page.ai_provider_key_remove_confirm.is_some(), |root| {
                 root.child(self.render_ai_provider_key_remove_confirm_dialog(cx))
             })
-            .when(self.ai_provider_remove_confirm.is_some(), |root| {
+            .when(self.settings_page.ai_provider_remove_confirm.is_some(), |root| {
                 root.child(self.render_ai_provider_remove_confirm_dialog(cx))
             })
             .when(self.ai_safety_confirm_open, |root| {
@@ -654,7 +654,7 @@ impl Render for WorkspaceApp {
             .when(self.ai_delete_message_confirm.is_some(), |root| {
                 root.child(self.render_ai_delete_message_confirm_dialog(cx))
             })
-            .when(self.settings_reset_confirm_open, |root| {
+            .when(self.settings_page.settings_reset_confirm_open, |root| {
                 root.child(self.render_settings_reset_confirm_dialog(cx))
             })
             .when(self.cloud_sync_confirm.is_some(), |root| {

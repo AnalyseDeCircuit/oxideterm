@@ -20,7 +20,7 @@ impl WorkspaceApp {
         let collections = oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
             .unwrap_or_default();
         let selected_id = self
-            .knowledge_selected_collection_id
+            .settings_page.knowledge_selected_collection_id
             .as_deref()
             .filter(|id| collections.iter().any(|collection| collection.id == *id))
             .map(str::to_string)
@@ -38,7 +38,7 @@ impl WorkspaceApp {
             .and_then(|id| oxideterm_ai::rag_get_collection_stats(&self.ai_rag_store, id).ok());
 
         let mut index = section_index;
-        if let Some(error) = self.knowledge_error.as_ref() {
+        if let Some(error) = self.settings_page.knowledge_error.as_ref() {
             if index == 0 {
                 return self.knowledge_error_row(error);
             }
@@ -109,7 +109,7 @@ impl WorkspaceApp {
                             ..ToolbarButtonOptions::default()
                         },
                         cx.listener(|this, _event, _window, cx| {
-                            this.knowledge_create_dialog_open = true;
+                            this.settings_page.open_knowledge_create_dialog();
                             this.reset_standard_confirm_focus();
                             cx.stop_propagation();
                             cx.notify();
@@ -149,15 +149,15 @@ impl WorkspaceApp {
         let embedding_collection_id = collection.id.clone();
         let documents = documents.map(|page| page.documents).unwrap_or_default();
         let import_label = self
-            .knowledge_import_progress
+            .settings_page.knowledge_import_progress
             .map(|(current, total)| format!("{current}/{total}"))
             .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.import_files"));
         let embedding_label = self
-            .knowledge_embedding_progress
+            .settings_page.knowledge_embedding_progress
             .map(|(current, total)| format!("{current}/{total}"))
             .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.generate_embeddings"));
         let reindex_label = self
-            .knowledge_reindex_progress
+            .settings_page.knowledge_reindex_progress
             .map(|(current, total)| {
                 if total == 0 {
                     self.i18n.t("settings_view.knowledge.reindex")
@@ -197,7 +197,7 @@ impl WorkspaceApp {
                         .items_center()
                         .gap(px(8.0))
                         .child({
-                            let import_disabled = self.knowledge_import_progress.is_some();
+                            let import_disabled = self.settings_page.knowledge_import_progress.is_some();
                             self.knowledge_text_icon_button(
                                 LucideIcon::FolderOpen,
                                 import_label,
@@ -218,7 +218,7 @@ impl WorkspaceApp {
                                 self.i18n.t("settings_view.knowledge.new_document"),
                                 false,
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.knowledge_new_document_dialog_open = true;
+                                    this.settings_page.open_knowledge_new_document_dialog();
                                     this.reset_standard_confirm_focus();
                                     cx.stop_propagation();
                                     cx.notify();
@@ -226,7 +226,7 @@ impl WorkspaceApp {
                             ),
                         )
                         .child({
-                            let embedding_disabled = self.knowledge_embedding_progress.is_some();
+                            let embedding_disabled = self.settings_page.knowledge_embedding_progress.is_some();
                             self.knowledge_text_icon_button(
                                 LucideIcon::Sparkles,
                                 embedding_label,
@@ -242,9 +242,9 @@ impl WorkspaceApp {
                         })
                         .child({
                             let reindex_disabled =
-                                matches!(self.knowledge_reindex_progress, Some((_current, 0)));
+                                matches!(self.settings_page.knowledge_reindex_progress, Some((_current, 0)));
                             self.knowledge_text_icon_button(
-                                if self.knowledge_reindex_progress.is_some() {
+                                if self.settings_page.knowledge_reindex_progress.is_some() {
                                     LucideIcon::X
                                 } else {
                                     LucideIcon::RefreshCw
@@ -252,7 +252,7 @@ impl WorkspaceApp {
                                 reindex_label,
                                 reindex_disabled,
                                 cx.listener(move |this, _event, _window, cx| {
-                                    if this.knowledge_reindex_progress.is_some() {
+                                    if this.settings_page.knowledge_reindex_progress.is_some() {
                                         this.knowledge_cancel_reindex(cx);
                                     } else {
                                         this.knowledge_reindex(reindex_collection_id.clone(), cx);
@@ -321,7 +321,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.knowledge_selected_collection_id = Some(collection_id.clone());
+                    this.settings_page.select_knowledge_collection(collection_id.clone());
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -372,11 +372,9 @@ impl WorkspaceApp {
                         rgb(self.tokens.ui.text_muted),
                         Some(rgb(self.tokens.ui.error)),
                         move |this, _event, _window, cx| {
-                            this.knowledge_delete_confirm = Some(KnowledgeDeleteConfirm {
-                                target: KnowledgeDeleteTarget::Collection,
-                                id: delete_id.clone(),
-                                name: delete_name.clone(),
-                            });
+                            this
+                                .settings_page
+                                .request_delete_collection(delete_id.clone(), delete_name.clone());
                             this.reset_standard_confirm_focus();
                             cx.stop_propagation();
                             cx.notify();
@@ -461,7 +459,7 @@ impl WorkspaceApp {
         let delete_name = document.title.clone();
         let edit_id = document.id.clone();
         let editing_this = self
-            .knowledge_external_edit
+            .settings_page.knowledge_external_edit
             .as_ref()
             .is_some_and(|edit| edit.doc_id == document.id);
         div()
@@ -549,11 +547,9 @@ impl WorkspaceApp {
                             rgb(self.tokens.ui.text_muted),
                             Some(rgb(self.tokens.ui.error)),
                             move |this, _event, _window, cx| {
-                                this.knowledge_delete_confirm = Some(KnowledgeDeleteConfirm {
-                                    target: KnowledgeDeleteTarget::Document,
-                                    id: delete_id.clone(),
-                                    name: delete_name.clone(),
-                                });
+                                this
+                                    .settings_page
+                                    .request_delete_document(delete_id.clone(), delete_name.clone());
                                 this.reset_standard_confirm_focus();
                                 cx.stop_propagation();
                                 cx.notify();
@@ -626,7 +622,7 @@ impl WorkspaceApp {
         } else {
             self.tokens.ui.text_muted
         };
-        let chevron = if self.knowledge_embedding_config_expanded {
+        let chevron = if self.settings_page.knowledge_embedding_config_expanded {
             LucideIcon::ChevronDown
         } else {
             LucideIcon::ChevronRight
@@ -744,15 +740,14 @@ impl WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.knowledge_embedding_config_expanded =
-                                        !this.knowledge_embedding_config_expanded;
+                                    this.settings_page.toggle_knowledge_embedding_config();
                                     cx.stop_propagation();
                                     cx.notify();
                                 }),
                             ),
                     ),
             )
-            .when(self.knowledge_embedding_config_expanded, |section| {
+            .when(self.settings_page.knowledge_embedding_config_expanded, |section| {
                 section.child(
                     div()
                         .border_t_1()
@@ -947,7 +942,7 @@ impl WorkspaceApp {
     }
 
     fn knowledge_document_format_label(&self) -> String {
-        match self.knowledge_new_document_format.as_str() {
+        match self.settings_page.knowledge_new_document_format.as_str() {
             "plaintext" => "Plain Text".to_string(),
             _ => "Markdown".to_string(),
         }

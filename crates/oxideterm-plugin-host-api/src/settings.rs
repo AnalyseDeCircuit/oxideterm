@@ -9,6 +9,24 @@ pub struct NativeSyncableSettingsNormalization {
     pub warnings: Vec<Value>,
 }
 
+pub struct NativeSyncableSettingsApplyPlan {
+    pub language: Option<Language>,
+    pub ui_density: Option<UiDensity>,
+    pub font_size: Option<i64>,
+    pub theme: Option<String>,
+    pub auto_reconnect: Option<bool>,
+}
+
+impl NativeSyncableSettingsApplyPlan {
+    pub fn is_empty(&self) -> bool {
+        self.language.is_none()
+            && self.ui_density.is_none()
+            && self.font_size.is_none()
+            && self.theme.is_none()
+            && self.auto_reconnect.is_none()
+    }
+}
+
 pub fn native_syncable_settings_payload(settings: &Value) -> Value {
     let mut payload = Map::new();
     let mut appearance = Map::new();
@@ -193,6 +211,35 @@ pub fn native_normalize_syncable_settings_payload(
     }
 }
 
+pub fn native_syncable_settings_apply_plan(
+    payload: &Value,
+) -> Result<NativeSyncableSettingsApplyPlan, String> {
+    // The host API owns protocol payload interpretation. GPUI callers receive a
+    // typed plan and only perform the workspace-specific settings write.
+    Ok(NativeSyncableSettingsApplyPlan {
+        language: payload
+            .pointer("/appearance/language")
+            .and_then(Value::as_str)
+            .map(native_parse_language)
+            .transpose()?,
+        ui_density: payload
+            .pointer("/appearance/uiDensity")
+            .and_then(Value::as_str)
+            .map(native_parse_ui_density)
+            .transpose()?,
+        font_size: payload
+            .pointer("/terminal/fontSize")
+            .and_then(Value::as_i64),
+        theme: payload
+            .pointer("/terminal/theme")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        auto_reconnect: payload
+            .pointer("/reconnect/autoReconnect")
+            .and_then(Value::as_bool),
+    })
+}
+
 fn native_syncable_settings_warning(
     path: &str,
     code: &str,
@@ -217,6 +264,16 @@ fn native_language_supported(language: &str) -> bool {
 
 fn native_ui_density_supported(ui_density: &str) -> bool {
     serde_json::from_value::<UiDensity>(json!(ui_density)).is_ok()
+}
+
+fn native_parse_language(language: &str) -> Result<Language, String> {
+    serde_json::from_value::<Language>(json!(language))
+        .map_err(|_| format!("Unsupported language: {language}"))
+}
+
+fn native_parse_ui_density(ui_density: &str) -> Result<UiDensity, String> {
+    serde_json::from_value::<UiDensity>(json!(ui_density))
+        .map_err(|_| format!("Unsupported ui density: {ui_density}"))
 }
 
 fn native_syncable_warning_value(value: &Value) -> String {

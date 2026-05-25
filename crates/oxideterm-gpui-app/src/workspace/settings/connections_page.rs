@@ -143,7 +143,7 @@ impl WorkspaceApp {
                 .child(
                     self.settings_text_input_control(
                         SettingsInput::ConnectionNewGroup,
-                        self.settings_connection_new_group.clone(),
+                        self.settings_page.settings_connection_new_group.clone(),
                         self.i18n
                             .t("settings_view.connections.groups.new_placeholder"),
                         self.tokens.metrics.settings_select_width,
@@ -158,7 +158,7 @@ impl WorkspaceApp {
         for group in self.connection_store.groups() {
             rows.push(self.connection_group_row(group.clone(), cx));
         }
-        if let Some(status) = self.settings_connection_status.clone() {
+        if let Some(status) = self.settings_page.settings_connection_status.clone() {
             rows.push(self.connection_status_row(status));
         }
 
@@ -207,7 +207,7 @@ impl WorkspaceApp {
         if self.focused_settings_input == Some(SettingsInput::ConnectionNewGroup) {
             &self.settings_input_draft
         } else {
-            &self.settings_connection_new_group
+            &self.settings_page.settings_connection_new_group
         }
     }
 
@@ -263,7 +263,7 @@ impl WorkspaceApp {
             .iter()
             .filter(|host| !host.already_imported)
             .count();
-        let selected_count = self.settings_selected_ssh_hosts.len();
+        let selected_count = self.settings_page.settings_selected_ssh_hosts.len();
         let all_selected = importable_count > 0 && selected_count == importable_count;
 
         let mut rows = Vec::new();
@@ -430,7 +430,7 @@ impl WorkspaceApp {
     fn ssh_config_host_row(&self, host: SshConfigHost, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let alias = host.alias.clone();
-        let checked = self.settings_selected_ssh_hosts.contains(&alias);
+        let checked = self.settings_page.settings_selected_ssh_hosts.contains(&alias);
         let disabled = host.already_imported;
         let detail = format!(
             "{}@{}:{}",
@@ -717,24 +717,24 @@ impl WorkspaceApp {
         let group = if self.focused_settings_input == Some(SettingsInput::ConnectionNewGroup) {
             self.settings_input_draft.trim().to_string()
         } else {
-            self.settings_connection_new_group.trim().to_string()
+            self.settings_page.settings_connection_new_group.trim().to_string()
         };
         if group.is_empty() {
             return false;
         }
         let created = match self.connection_store.create_group(group.clone()) {
             Ok(()) => {
-                self.settings_connection_new_group.clear();
+                self.settings_page.clear_connection_new_group();
                 self.settings_input_draft.clear();
-                self.settings_connection_status = None;
+                self.settings_page.set_connection_status(None);
                 true
             }
             Err(error) => {
-                self.settings_connection_status = Some(
+                self.settings_page.set_connection_status(Some(
                     self.i18n
                         .t("settings_view.errors.create_group_failed")
                         .replace("{{error}}", &error.to_string()),
-                );
+                ));
                 false
             }
         };
@@ -748,24 +748,22 @@ impl WorkspaceApp {
     fn delete_settings_connection_group(&mut self, group: String, cx: &mut Context<Self>) {
         match self.connection_store.delete_group(&group) {
             Ok(()) => {
-                self.settings_connection_status = None;
+                self.settings_page.set_connection_status(None);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
             Err(error) => {
-                self.settings_connection_status = Some(
+                self.settings_page.set_connection_status(Some(
                     self.i18n
                         .t("settings_view.errors.delete_group_failed")
                         .replace("{{error}}", &error.to_string()),
-                );
+                ));
             }
         }
         cx.notify();
     }
 
     fn toggle_settings_ssh_config_host(&mut self, alias: String, cx: &mut Context<Self>) {
-        if !self.settings_selected_ssh_hosts.insert(alias.clone()) {
-            self.settings_selected_ssh_hosts.remove(&alias);
-        }
+        self.settings_page.toggle_ssh_host_selection(alias);
         cx.notify();
     }
 
@@ -775,7 +773,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if all_selected {
-            self.settings_selected_ssh_hosts.clear();
+            self.settings_page.clear_ssh_host_selection();
         } else {
             let existing_names = self
                 .connection_store
@@ -784,11 +782,13 @@ impl WorkspaceApp {
                 .map(|conn| conn.name.clone())
                 .collect::<HashSet<_>>();
             if let Ok(hosts) = list_ssh_config_hosts(&existing_names) {
-                self.settings_selected_ssh_hosts = hosts
-                    .into_iter()
-                    .filter(|host| !host.already_imported)
-                    .map(|host| host.alias)
-                    .collect();
+                self.settings_page.set_selected_ssh_hosts(
+                    hosts
+                        .into_iter()
+                        .filter(|host| !host.already_imported)
+                        .map(|host| host.alias)
+                        .collect(),
+                );
             }
         }
         cx.notify();
@@ -797,27 +797,27 @@ impl WorkspaceApp {
     fn import_settings_ssh_host(&mut self, alias: String, cx: &mut Context<Self>) {
         match import_ssh_config_alias(&mut self.connection_store, &alias) {
             Ok(true) => {
-                self.settings_selected_ssh_hosts.remove(&alias);
-                self.settings_connection_status = Some(
+                self.settings_page.remove_selected_ssh_host(&alias);
+                self.settings_page.set_connection_status(Some(
                     self.i18n
                         .t("settings_view.errors.import_success")
                         .replace("{{name}}", &alias),
-                );
+                ));
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
             Ok(false) => {
-                self.settings_connection_status = Some(
+                self.settings_page.set_connection_status(Some(
                     self.i18n
                         .t("settings_view.connections.ssh_config.batch_import_skipped")
                         .replace("{{count}}", "1"),
-                );
+                ));
             }
             Err(error) => {
-                self.settings_connection_status = Some(
+                self.settings_page.set_connection_status(Some(
                     self.i18n
                         .t("settings_view.errors.import_failed")
                         .replace("{{error}}", &error.to_string()),
-                );
+                ));
             }
         }
         cx.notify();
@@ -825,7 +825,7 @@ impl WorkspaceApp {
 
     fn import_selected_settings_ssh_hosts(&mut self, cx: &mut Context<Self>) {
         let aliases = self
-            .settings_selected_ssh_hosts
+            .settings_page.settings_selected_ssh_hosts
             .iter()
             .cloned()
             .collect::<Vec<_>>();
@@ -837,11 +837,11 @@ impl WorkspaceApp {
             match import_ssh_config_alias(&mut self.connection_store, &alias) {
                 Ok(true) => {
                     imported += 1;
-                    self.settings_selected_ssh_hosts.remove(&alias);
+                    self.settings_page.remove_selected_ssh_host(&alias);
                 }
                 Ok(false) => {
                     skipped += 1;
-                    self.settings_selected_ssh_hosts.remove(&alias);
+                    self.settings_page.remove_selected_ssh_host(&alias);
                 }
                 Err(error) => errors.push(format!("{alias}: {error}")),
             }
@@ -865,7 +865,8 @@ impl WorkspaceApp {
         if !errors.is_empty() {
             parts.push(errors.join(", "));
         }
-        self.settings_connection_status = (!parts.is_empty()).then(|| parts.join("; "));
+        self.settings_page
+            .set_connection_status((!parts.is_empty()).then(|| parts.join("; ")));
         if imported > 0 {
             self.queue_cloud_sync_dirty_refresh(cx);
         }

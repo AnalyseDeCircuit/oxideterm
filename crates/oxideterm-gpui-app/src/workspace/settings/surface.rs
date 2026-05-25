@@ -57,7 +57,7 @@ impl WorkspaceApp {
                 self.render_knowledge_delete_confirm_dialog(cx),
                 |surface, modal| surface.child(modal),
             )
-            .when(self.keybinding_reset_all_confirm_open, |surface| {
+            .when(self.settings_page.keybinding_reset_all_confirm_open, |surface| {
                 surface.child(self.render_keybinding_reset_all_confirm_dialog(cx))
             })
             .when_some(self.render_settings_select_overlay(cx), |surface, overlay| {
@@ -108,7 +108,7 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.active_settings_tab == SettingsTab::Ai {
+        if self.settings_page.active_tab == SettingsTab::Ai {
             return self.render_settings_ai_section_item(index, cx);
         }
 
@@ -131,9 +131,9 @@ impl WorkspaceApp {
         }
 
         item.child(if index == 0 {
-            self.render_settings_virtual_header(self.active_settings_tab, cx)
+            self.render_settings_virtual_header(self.settings_page.active_tab, cx)
         } else {
-            self.render_settings_tab_section(self.active_settings_tab, section_index, cx)
+            self.render_settings_tab_section(self.settings_page.active_tab, section_index, cx)
         })
         .into_any_element()
     }
@@ -254,7 +254,7 @@ impl WorkspaceApp {
     }
 
     fn settings_section_list_spec(&self) -> TauriVirtualListSpec {
-        if self.active_settings_tab == SettingsTab::Ai {
+        if self.settings_page.active_tab == SettingsTab::Ai {
             TauriVirtualListSpec::new(
                 px(AI_SETTINGS_SECTION_ESTIMATED_HEIGHT),
                 SETTINGS_SECTION_LIST_OVERSCAN,
@@ -271,12 +271,11 @@ impl WorkspaceApp {
         // Tauri keys virtual rows by tab plus the nested tab/filter state that
         // can change the section set. Preserve that identity before asking GPUI
         // ListState to reuse measured variable-height rows.
-        format!(
-            "{:?}:{:?}:{:?}:{}",
-            self.active_settings_tab,
-            self.terminal_settings_page,
-            self.keybinding_scope_filter,
-            self.keybinding_search_query.trim()
+        settings_model_section_list_identity(
+            self.settings_page.active_tab,
+            self.settings_page.terminal_page,
+            &format!("{:?}", self.settings_page.keybinding_scope_filter),
+            self.settings_page.keybinding_search_query.trim(),
         )
     }
 
@@ -291,13 +290,13 @@ impl WorkspaceApp {
         // GPUI caches variable-row measurements. Hash only states that can
         // change section height so ListState remeasures affected rows without
         // serializing the entire settings file on every scroll render.
-        format!("{:?}", self.active_settings_tab).hash(&mut hasher);
+        format!("{:?}", self.settings_page.active_tab).hash(&mut hasher);
         index.hash(&mut hasher);
         let settings = self.settings_store.settings();
 
-        match self.active_settings_tab {
+        match self.settings_page.active_tab {
             SettingsTab::Terminal => {
-                format!("{:?}", self.terminal_settings_page).hash(&mut hasher);
+                format!("{:?}", self.settings_page.terminal_page).hash(&mut hasher);
                 settings
                     .terminal
                     .command_bar
@@ -316,30 +315,30 @@ impl WorkspaceApp {
             SettingsTab::Connections => {
                 self.connection_store.connections().len().hash(&mut hasher);
                 self.settings_connection_groups_signature().hash(&mut hasher);
-                self.settings_connection_status.is_some().hash(&mut hasher);
+                self.settings_page.settings_connection_status.is_some().hash(&mut hasher);
             }
             SettingsTab::Ai => {
                 settings.ai.enabled.hash(&mut hasher);
                 settings.ai.providers.len().hash(&mut hasher);
-                self.ai_provider_settings_expanded.hash(&mut hasher);
-                self.ai_tool_use_expanded.hash(&mut hasher);
-                self.ai_context_windows_expanded.hash(&mut hasher);
-                self.ai_model_reasoning_expanded.hash(&mut hasher);
-                hash_string_bool_map(&self.expanded_ai_providers, &mut hasher);
-                hash_string_set(&self.expanded_ai_provider_models, &mut hasher);
-                hash_string_set(&self.expanded_ai_context_providers, &mut hasher);
-                hash_string_set(&self.expanded_ai_model_reasoning_providers, &mut hasher);
+                self.settings_page.ai_provider_settings_expanded.hash(&mut hasher);
+                self.settings_page.ai_tool_use_expanded.hash(&mut hasher);
+                self.settings_page.ai_context_windows_expanded.hash(&mut hasher);
+                self.settings_page.ai_model_reasoning_expanded.hash(&mut hasher);
+                hash_string_bool_map(&self.settings_page.expanded_ai_providers, &mut hasher);
+                hash_string_set(&self.settings_page.expanded_ai_provider_models, &mut hasher);
+                hash_string_set(&self.settings_page.expanded_ai_context_providers, &mut hasher);
+                hash_string_set(&self.settings_page.expanded_ai_model_reasoning_providers, &mut hasher);
             }
             SettingsTab::Knowledge => {
-                self.knowledge_selected_collection_id.hash(&mut hasher);
-                self.knowledge_error.is_some().hash(&mut hasher);
-                self.knowledge_import_progress.hash(&mut hasher);
-                self.knowledge_embedding_progress.hash(&mut hasher);
-                self.knowledge_reindex_progress.hash(&mut hasher);
+                self.settings_page.knowledge_selected_collection_id.hash(&mut hasher);
+                self.settings_page.knowledge_error.is_some().hash(&mut hasher);
+                self.settings_page.knowledge_import_progress.hash(&mut hasher);
+                self.settings_page.knowledge_embedding_progress.hash(&mut hasher);
+                self.settings_page.knowledge_reindex_progress.hash(&mut hasher);
             }
             SettingsTab::Keybindings => {
-                format!("{:?}", self.keybinding_scope_filter).hash(&mut hasher);
-                self.keybinding_search_query.trim().hash(&mut hasher);
+                format!("{:?}", self.settings_page.keybinding_scope_filter).hash(&mut hasher);
+                self.settings_page.keybinding_search_query.trim().hash(&mut hasher);
                 settings.keybindings.overrides.len().hash(&mut hasher);
             }
             _ => {}
@@ -357,43 +356,24 @@ impl WorkspaceApp {
     }
 
     fn settings_section_list_item_count(&self) -> usize {
-        SETTINGS_SECTION_HEADER_ITEM_COUNT + self.settings_tab_section_count(self.active_settings_tab)
+        settings_model_section_list_item_count(
+            self.settings_page.active_tab,
+            self.settings_dynamic_section_counts(),
+        )
     }
 
-    fn settings_tab_section_count(&self, tab: SettingsTab) -> usize {
-        match tab {
-            SettingsTab::General => 3,
-            SettingsTab::Portable => 1,
-            SettingsTab::Terminal => self.terminal_settings_section_count(),
-            SettingsTab::Appearance => 3,
-            SettingsTab::Local => 5,
-            SettingsTab::Connections => 4,
-            SettingsTab::Ssh => 1,
-            SettingsTab::Reconnect => 3,
-            SettingsTab::Sftp => 3,
-            SettingsTab::Ide => 5,
-            SettingsTab::Ai => AI_SETTINGS_FIXED_SECTION_COUNT,
-            SettingsTab::Knowledge => self.knowledge_settings_section_count(),
-            SettingsTab::Keybindings => self.keybinding_settings_section_count(),
-            SettingsTab::Help => 3,
+    fn settings_dynamic_section_counts(&self) -> SettingsDynamicSectionCounts {
+        SettingsDynamicSectionCounts {
+            terminal_page: self.settings_page.terminal_page,
+            visible_keybinding_scope_count: self.visible_keybinding_scope_count(),
+            knowledge_has_error: self.settings_page.knowledge_error.is_some(),
+            knowledge_has_selected_collection: self.knowledge_has_selected_collection(),
         }
     }
 
-    fn terminal_settings_section_count(&self) -> usize {
-        let page_cards = match self.terminal_settings_page {
-            TerminalSettingsPage::Display => 2,
-            TerminalSettingsPage::Input => 1,
-            TerminalSettingsPage::CommandBar => 1,
-            TerminalSettingsPage::History => 2,
-            TerminalSettingsPage::Transfer => 1,
-            TerminalSettingsPage::Highlight => 1,
-        };
-        1 + page_cards
-    }
-
-    fn keybinding_settings_section_count(&self) -> usize {
-        let query = self.keybinding_search_query.trim().to_lowercase();
-        let visible_scope_count = [
+    fn visible_keybinding_scope_count(&self) -> usize {
+        let query = self.settings_page.keybinding_search_query.trim().to_lowercase();
+        [
             crate::keybindings::ActionScope::Global,
             crate::keybindings::ActionScope::Terminal,
             crate::keybindings::ActionScope::Split,
@@ -404,7 +384,12 @@ impl WorkspaceApp {
             crate::keybindings::ACTION_DEFINITIONS
                 .iter()
                 .filter(|definition| definition.scope == *scope)
-                .filter(|definition| self.keybinding_scope_filter.matches(definition.scope))
+                .filter(|definition| {
+                    settings_keybinding_scope_matches(
+                        self.settings_page.keybinding_scope_filter,
+                        definition.scope,
+                    )
+                })
                 .any(|definition| {
                     if query.is_empty() {
                         return true;
@@ -413,19 +398,18 @@ impl WorkspaceApp {
                     label.contains(&query) || definition.id.to_lowercase().contains(&query)
                 })
         })
-        .count();
-        1 + visible_scope_count.max(1)
+        .count()
     }
 
-    fn knowledge_settings_section_count(&self) -> usize {
-        let collections = oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
-            .unwrap_or_default();
-        let selected_id = self
+    fn knowledge_has_selected_collection(&self) -> bool {
+        let collections =
+            oxideterm_ai::rag_list_collections(&self.ai_rag_store, None).unwrap_or_default();
+        self.settings_page
             .knowledge_selected_collection_id
             .as_deref()
             .filter(|id| collections.iter().any(|collection| collection.id == *id))
-            .or_else(|| collections.first().map(|collection| collection.id.as_str()));
-        1 + usize::from(self.knowledge_error.is_some()) + usize::from(selected_id.is_some())
+            .or_else(|| collections.first().map(|collection| collection.id.as_str()))
+            .is_some()
     }
 
     fn render_settings_tab_section(
@@ -534,7 +518,7 @@ impl WorkspaceApp {
 
     fn render_settings_nav_item(&self, tab: SettingsTab, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_settings_tab == tab;
+        let active = self.settings_page.active_tab == tab;
         div()
             .h(px(40.0))
             .w_full()
@@ -584,7 +568,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.active_settings_tab = tab;
+                    this.settings_page.set_active_tab(tab);
                     this.close_settings_select();
                     this.focused_settings_input = None;
                     this.settings_slider_drag = None;

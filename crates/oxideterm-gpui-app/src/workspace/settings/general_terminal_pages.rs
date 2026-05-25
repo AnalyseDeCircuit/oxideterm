@@ -246,7 +246,7 @@ impl WorkspaceApp {
             return self.terminal_page_switcher(cx);
         }
 
-        match (self.terminal_settings_page, section_index - 1) {
+        match (self.settings_page.terminal_page, section_index - 1) {
             (TerminalSettingsPage::Display, 0) => self.settings_card(
                 "settings_view.terminal.font",
                 "settings_view.terminal.font_family_hint",
@@ -485,7 +485,7 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let theme = self.tokens.ui;
-        let line_height = settings_input_line_height(input);
+        let line_height = input.textarea_line_height();
         let mut textarea = div()
             .w_full()
             .min_h(px(96.0))
@@ -601,7 +601,7 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let theme = self.tokens.ui;
-        let line_height = settings_input_line_height(input);
+        let line_height = input.textarea_line_height();
         let mut textarea = div()
             .w_full()
             .min_h(px(220.0))

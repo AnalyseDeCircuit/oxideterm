@@ -8,6 +8,23 @@ enum KeybindingToolbarAction {
 const KEYBINDING_SCOPE_FILTER_HEIGHT: f32 = 32.0; // Tauri KeybindingEditorSection scope Button h-8
 const KEYBINDING_SCOPE_FILTER_PADDING_X: f32 = 12.0; // Tauri px-3
 
+fn settings_keybinding_scope_matches(
+    filter: SettingsKeybindingScopeFilter,
+    scope: crate::keybindings::ActionScope,
+) -> bool {
+    match filter {
+        SettingsKeybindingScopeFilter::All => true,
+        SettingsKeybindingScopeFilter::Global => scope == crate::keybindings::ActionScope::Global,
+        SettingsKeybindingScopeFilter::Terminal => {
+            scope == crate::keybindings::ActionScope::Terminal
+        }
+        SettingsKeybindingScopeFilter::Split => scope == crate::keybindings::ActionScope::Split,
+        SettingsKeybindingScopeFilter::Palette => {
+            scope == crate::keybindings::ActionScope::Palette
+        }
+    }
+}
+
 impl KeybindingToolbarAction {
     fn label_key(self) -> &'static str {
         match self {
@@ -43,7 +60,7 @@ impl WorkspaceApp {
         }
 
         let side = crate::keybindings::KeybindingSide::current();
-        let query = self.keybinding_search_query.trim().to_lowercase();
+        let query = self.settings_page.keybinding_search_query.trim().to_lowercase();
         let mut visible_index = 0;
         for scope in [
             crate::keybindings::ActionScope::Global,
@@ -54,7 +71,12 @@ impl WorkspaceApp {
             let definitions = crate::keybindings::ACTION_DEFINITIONS
                 .iter()
                 .filter(|definition| definition.scope == scope)
-                .filter(|definition| self.keybinding_scope_filter.matches(definition.scope))
+                .filter(|definition| {
+                    settings_keybinding_scope_matches(
+                        self.settings_page.keybinding_scope_filter,
+                        definition.scope,
+                    )
+                })
                 .filter(|definition| {
                     if query.is_empty() {
                         return true;
@@ -123,7 +145,7 @@ impl WorkspaceApp {
         let value = if focused {
             self.settings_input_draft.as_str()
         } else {
-            self.keybinding_search_query.as_str()
+            self.settings_page.keybinding_search_query.as_str()
         };
         let target = WorkspaceImeTarget::Settings(SettingsInput::KeybindingSearch);
         let workspace = cx.entity();
@@ -162,7 +184,7 @@ impl WorkspaceApp {
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                     this.focus_settings_input(
                         SettingsInput::KeybindingSearch,
-                        this.keybinding_search_query.clone(),
+                        this.settings_page.keybinding_search_query.clone(),
                         cx,
                     );
                     this.ime_marked_text = None;
@@ -186,16 +208,9 @@ impl WorkspaceApp {
     }
 
     fn keybinding_scope_filter(&self, cx: &mut Context<Self>) -> AnyElement {
-        let filters = [
-            KeybindingScopeFilter::All,
-            KeybindingScopeFilter::Scope(crate::keybindings::ActionScope::Global),
-            KeybindingScopeFilter::Scope(crate::keybindings::ActionScope::Terminal),
-            KeybindingScopeFilter::Scope(crate::keybindings::ActionScope::Split),
-            KeybindingScopeFilter::Scope(crate::keybindings::ActionScope::Palette),
-        ];
         let mut row = div().flex().items_center().gap(px(4.0));
-        for filter in filters {
-            let active = self.keybinding_scope_filter == filter;
+        for filter in SettingsKeybindingScopeFilter::all().iter().copied() {
+            let active = self.settings_page.keybinding_scope_filter == filter;
             row = row.child(self.keybinding_scope_filter_button(filter, active, cx));
         }
         row.into_any_element()
@@ -203,7 +218,7 @@ impl WorkspaceApp {
 
     fn keybinding_scope_filter_button(
         &self,
-        filter: KeybindingScopeFilter,
+        filter: SettingsKeybindingScopeFilter,
         active: bool,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -229,7 +244,7 @@ impl WorkspaceApp {
                 ..ToolbarButtonOptions::default()
             },
             cx.listener(move |this, _event, _window, cx| {
-                this.keybinding_scope_filter = filter;
+                this.settings_page.set_keybinding_scope_filter(filter);
                 cx.stop_propagation();
                 cx.notify();
             }),
@@ -280,7 +295,8 @@ impl WorkspaceApp {
                     KeybindingToolbarAction::Import => this.import_keybindings(window, cx),
                     KeybindingToolbarAction::Export => this.export_keybindings(cx),
                     KeybindingToolbarAction::ResetAll => {
-                        this.keybinding_reset_all_confirm_open = true;
+                        this.settings_page
+                            .set_keybinding_reset_all_confirm_open(true);
                         this.reset_standard_confirm_focus();
                         cx.notify();
                     }
@@ -396,14 +412,14 @@ impl WorkspaceApp {
         let default = definition.default_combo(side);
         let modified = current != *default;
         let recording = self
-            .keybinding_recording_action_id
+            .settings_page.keybinding_recording_action_id
             .as_deref()
             .is_some_and(|id| id == definition.id);
         let action_id = definition.id.to_string();
         let record_action_id = action_id.clone();
         let reset_action_id = action_id.clone();
         let conflicts = if recording {
-            self.keybinding_conflict_action_ids.as_slice()
+            self.settings_page.keybinding_conflict_action_ids.as_slice()
         } else {
             &[]
         };
@@ -478,11 +494,11 @@ impl WorkspaceApp {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(move |this, _event, _window, cx| {
-                                            this.keybinding_recording_action_id =
-                                                Some(record_action_id.clone());
+                                            this
+                                                .settings_page
+                                                .start_keybinding_recording(record_action_id.clone());
                                             this.keybinding_recording_combo = None;
                                             this.keybinding_recording_footer_focus = None;
-                                            this.keybinding_conflict_action_ids.clear();
                                             cx.stop_propagation();
                                             cx.notify();
                                         }),
@@ -782,13 +798,13 @@ impl WorkspaceApp {
             },
             self.standard_confirm_focus(),
             cx.listener(|this, _event, _window, cx| {
-                this.keybinding_reset_all_confirm_open = false;
+                this.settings_page.set_keybinding_reset_all_confirm_open(false);
                 this.clear_standard_confirm_focus();
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, window, cx| {
-                this.keybinding_reset_all_confirm_open = false;
+                this.settings_page.set_keybinding_reset_all_confirm_open(false);
                 this.clear_standard_confirm_focus();
                 this.reset_all_keybindings(window, cx);
                 cx.stop_propagation();

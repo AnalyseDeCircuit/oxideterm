@@ -1,6 +1,6 @@
 impl WorkspaceApp {
     fn add_ai_provider_from_selected_template(&mut self, cx: &mut Context<Self>) {
-        let template = ai_provider_template_by_type(&self.ai_new_provider_type);
+        let template = ai_provider_template_by_type(&self.settings_page.ai_new_provider_type);
         let now_ms = current_time_millis();
         let id = generated_provider_id(template.provider_type, now_ms);
         let label = self.i18n.t(template.label_key);

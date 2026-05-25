@@ -31,14 +31,16 @@ impl WorkspaceApp {
     }
 
     fn schedule_background_cache_poll(&mut self, cx: &mut Context<Self>) {
-        if self.background_cache_poll_scheduled {
+        if self.settings_page.background_cache_poll_scheduled {
             return;
         }
-        self.background_cache_poll_scheduled = true;
+        self.settings_page
+            .set_background_cache_poll_scheduled(true);
         cx.spawn(async move |weak, cx| {
             Timer::after(Duration::from_millis(16)).await;
             let _ = weak.update(cx, |this, cx| {
-                this.background_cache_poll_scheduled = false;
+                this.settings_page
+                    .set_background_cache_poll_scheduled(false);
                 if this.background_image_cache.drain_completed() {
                     cx.notify();
                 }

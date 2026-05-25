@@ -6,7 +6,7 @@ impl WorkspaceApp {
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let settings = self.settings_store.settings();
 
-        let popup = match (self.active_settings_tab, open_select) {
+        let popup = match (self.settings_page.active_tab, open_select) {
             (SettingsTab::General, SettingsSelect::Language) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for language in language_options() {
@@ -142,7 +142,7 @@ impl WorkspaceApp {
                 for theme in themes {
                     let theme_id = theme.id.to_string();
                     let selected = self
-                        .theme_editor
+                        .settings_page.theme_editor
                         .as_ref()
                         .is_some_and(|editor| editor.duplicate_theme == theme_id);
                     popup = popup.child(
@@ -152,7 +152,7 @@ impl WorkspaceApp {
                             false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.close_settings_select();
-                                if let Some(editor) = this.theme_editor.as_mut() {
+                                if let Some(editor) = this.settings_page.theme_editor.as_mut() {
                                     let theme = theme_by_id(&theme_id);
                                     editor.duplicate_theme = theme_id.clone();
                                     editor.duplicate_theme_touched = true;
@@ -598,13 +598,15 @@ impl WorkspaceApp {
                             select_option(
                                 &self.tokens,
                                 self.i18n.t(template.label_key),
-                                self.ai_new_provider_type == template.provider_type,
+                                self.settings_page.ai_new_provider_type == template.provider_type,
                             ),
                             false,
                             false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.close_settings_select();
-                                this.ai_new_provider_type = provider_type.clone();
+                                this
+                                    .settings_page
+                                    .select_ai_provider_type(provider_type.clone());
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
@@ -1080,7 +1082,7 @@ impl WorkspaceApp {
             (SettingsTab::Knowledge, SettingsSelect::KnowledgeDocumentFormat) => {
                 let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
                 for (format, label) in [("markdown", "Markdown"), ("plaintext", "Plain Text")] {
-                    let selected = self.knowledge_new_document_format == format;
+                    let selected = self.settings_page.knowledge_new_document_format == format;
                     popup = popup.child(
                         select_option_action(
                             select_option(&self.tokens, label, selected),
@@ -1088,7 +1090,7 @@ impl WorkspaceApp {
                             false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.close_settings_select();
-                                this.knowledge_new_document_format = format.to_string();
+                                this.settings_page.set_knowledge_document_format(format.to_string());
                                 cx.stop_propagation();
                                 cx.notify();
                             }),

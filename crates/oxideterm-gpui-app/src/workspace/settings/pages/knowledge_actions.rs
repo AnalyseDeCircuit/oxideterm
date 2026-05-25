@@ -1,6 +1,6 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn knowledge_create_collection(&mut self, cx: &mut Context<Self>) {
-        let name = self.knowledge_new_collection_name.trim().to_string();
+        let name = self.settings_page.knowledge_new_collection_name.trim().to_string();
         if name.is_empty() {
             cx.notify();
             return;
@@ -13,20 +13,19 @@ impl WorkspaceApp {
             },
         ) {
             Ok(collection) => {
-                self.knowledge_selected_collection_id = Some(collection.id);
-                self.knowledge_new_collection_name.clear();
+                self.settings_page
+                    .finish_knowledge_collection_create(collection.id);
                 self.settings_input_draft.clear();
-                self.knowledge_error = None;
             }
             Err(error) => {
-                self.knowledge_error = Some(error);
+                self.settings_page.set_knowledge_error(error);
             }
         }
         cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_create_blank_document(&mut self, cx: &mut Context<Self>) {
-        let Some(collection_id) = self.knowledge_selected_collection_id.clone().or_else(|| {
+        let Some(collection_id) = self.settings_page.knowledge_selected_collection_id.clone().or_else(|| {
             oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
                 .ok()
                 .and_then(|collections| collections.first().map(|collection| collection.id.clone()))
@@ -34,7 +33,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let title = self.knowledge_new_document_title.trim().to_string();
+        let title = self.settings_page.knowledge_new_document_title.trim().to_string();
         if title.is_empty() {
             cx.notify();
             return;
@@ -44,17 +43,16 @@ impl WorkspaceApp {
             oxideterm_ai::RagCreateBlankDocumentRequest {
                 collection_id,
                 title,
-                format: self.knowledge_new_document_format.clone(),
+                format: self.settings_page.knowledge_new_document_format.clone(),
             },
         ) {
             Ok(document) => {
-                self.knowledge_new_document_title.clear();
+                self.settings_page.finish_knowledge_document_create();
                 self.settings_input_draft.clear();
-                self.knowledge_error = None;
                 self.knowledge_open_external(document.id, cx);
             }
             Err(error) => {
-                self.knowledge_error = Some(error);
+                self.settings_page.set_knowledge_error(error);
             }
         }
         cx.notify();
@@ -63,15 +61,11 @@ impl WorkspaceApp {
     fn knowledge_delete_collection(&mut self, collection_id: String, cx: &mut Context<Self>) {
         match oxideterm_ai::rag_delete_collection(&self.ai_rag_store, &collection_id) {
             Ok(()) => {
-                if self.knowledge_selected_collection_id.as_deref() == Some(collection_id.as_str())
-                {
-                    self.knowledge_selected_collection_id = None;
-                }
-                self.knowledge_external_edit = None;
-                self.knowledge_error = None;
+                self.settings_page
+                    .clear_deleted_knowledge_collection(&collection_id);
             }
             Err(error) => {
-                self.knowledge_error = Some(error);
+                self.settings_page.set_knowledge_error(error);
             }
         }
         cx.notify();
@@ -81,23 +75,23 @@ impl WorkspaceApp {
         match oxideterm_ai::rag_remove_document(&self.ai_rag_store, &document_id) {
             Ok(()) => {
                 if self
-                    .knowledge_external_edit
+                    .settings_page.knowledge_external_edit
                     .as_ref()
                     .is_some_and(|edit| edit.doc_id == document_id)
                 {
-                    self.knowledge_external_edit = None;
+                    self.settings_page.clear_knowledge_external_edit();
                 }
-                self.knowledge_error = None;
+                self.settings_page.clear_knowledge_error();
             }
             Err(error) => {
-                self.knowledge_error = Some(error);
+                self.settings_page.set_knowledge_error(error);
             }
         }
         cx.notify();
     }
 
     fn knowledge_reindex(&mut self, collection_id: String, cx: &mut Context<Self>) {
-        if self.knowledge_reindex_progress.is_some() {
+        if self.settings_page.knowledge_reindex_progress.is_some() {
             cx.notify();
             return;
         }
@@ -105,10 +99,9 @@ impl WorkspaceApp {
         let cancel_for_task = cancel.clone();
         let store = self.ai_rag_store.clone();
         let (tx, rx) = std::sync::mpsc::channel();
-        self.knowledge_reindex_progress = Some((0, 0));
+        self.settings_page.start_knowledge_reindex();
         self.knowledge_reindex_cancel = Some(cancel);
         self.knowledge_reindex_rx = Some(rx);
-        self.knowledge_error = None;
         self.schedule_knowledge_reindex_poll(cx);
         self.forwarding_runtime.spawn(async move {
             let mut last_emitted = 0usize;
@@ -144,21 +137,21 @@ impl WorkspaceApp {
         while let Ok(delivery) = rx.try_recv() {
             match delivery {
                 KnowledgeReindexDelivery::Progress { current, total } => {
-                    self.knowledge_reindex_progress = Some((current, total));
+                    self.settings_page
+                        .update_knowledge_reindex(current, total);
                 }
                 KnowledgeReindexDelivery::Finished(result) => {
                     keep_rx = false;
-                    self.knowledge_reindex_progress = None;
+                    self.settings_page.finish_knowledge_reindex();
                     self.knowledge_reindex_cancel = None;
                     if let Err(error) = result {
                         let message = format!(
                             "{}: {error}",
                             self.i18n.t("settings_view.knowledge.error_reindex")
                         );
-                        self.knowledge_error = None;
                         self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
                     } else {
-                        self.knowledge_error = None;
+                        self.settings_page.clear_knowledge_error();
                     }
                 }
             }
@@ -193,7 +186,7 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.knowledge_import_progress.is_some() {
+        if self.settings_page.knowledge_import_progress.is_some() {
             return;
         }
         let receiver = cx.prompt_for_paths(PathPromptOptions {
@@ -215,8 +208,7 @@ impl WorkspaceApp {
                 return;
             }
             let _ = weak.update(cx, |this, cx| {
-                this.knowledge_import_progress = Some((0, total));
-                this.knowledge_error = None;
+                this.settings_page.start_knowledge_import(total);
                 cx.notify();
             });
             let mut result = Ok(());
@@ -225,7 +217,7 @@ impl WorkspaceApp {
                 let current = index + 1;
                 let failed = result.is_err();
                 let _ = weak.update(cx, |this, cx| {
-                    this.knowledge_import_progress = Some((current, total));
+                    this.settings_page.update_knowledge_import(current, total);
                     cx.notify();
                 });
                 if failed {
@@ -233,13 +225,12 @@ impl WorkspaceApp {
                 }
             }
             let _ = weak.update(cx, |this, cx| {
-                this.knowledge_import_progress = None;
+                this.settings_page.finish_knowledge_import();
                 if let Err(error) = result {
                     let message = format!("{error_title}: {error}");
-                    this.knowledge_error = None;
                     this.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
                 } else {
-                    this.knowledge_error = None;
+                    this.settings_page.clear_knowledge_error();
                 }
                 cx.notify();
             });
@@ -248,7 +239,7 @@ impl WorkspaceApp {
     }
 
     fn knowledge_generate_embeddings(&mut self, collection_id: String, cx: &mut Context<Self>) {
-        if self.knowledge_embedding_progress.is_some() {
+        if self.settings_page.knowledge_embedding_progress.is_some() {
             return;
         }
         let settings = self.settings_store.settings().clone();
@@ -262,8 +253,7 @@ impl WorkspaceApp {
             let message = self
                 .i18n
                 .t("settings_view.knowledge.error_no_embedding_support");
-            self.knowledge_embedding_config_expanded = true;
-            self.knowledge_error = None;
+            self.settings_page.expand_knowledge_embedding_config();
             self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
             cx.notify();
             return;
@@ -274,8 +264,7 @@ impl WorkspaceApp {
             let message = self
                 .i18n
                 .t("settings_view.knowledge.error_no_embedding_support");
-            self.knowledge_embedding_config_expanded = true;
-            self.knowledge_error = None;
+            self.settings_page.expand_knowledge_embedding_config();
             self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
             cx.notify();
             return;
@@ -284,8 +273,7 @@ impl WorkspaceApp {
             let message = self
                 .i18n
                 .t("settings_view.knowledge.error_no_embedding_model");
-            self.knowledge_embedding_config_expanded = true;
-            self.knowledge_error = None;
+            self.settings_page.expand_knowledge_embedding_config();
             self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
             cx.notify();
             return;
@@ -316,8 +304,7 @@ impl WorkspaceApp {
                     Some(key) if !key.trim().is_empty() => Some(key),
                     _ => {
                         let _ = weak.update(cx, |this, cx| {
-                            this.knowledge_embedding_config_expanded = true;
-                            this.knowledge_error = None;
+                            this.settings_page.expand_knowledge_embedding_config();
                             this.push_ai_settings_toast(
                                 api_key_error,
                                 TerminalNoticeVariant::Error,
@@ -337,7 +324,7 @@ impl WorkspaceApp {
                     Err(error) => {
                         let _ = weak.update(cx, |this, cx| {
                             let message = format!("{error_title}: {error}");
-                            this.knowledge_error = None;
+                            this.settings_page.clear_knowledge_error();
                             this.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
                             cx.notify();
                         });
@@ -349,8 +336,7 @@ impl WorkspaceApp {
             }
             let total = pending.len();
             let _ = weak.update(cx, |this, cx| {
-                this.knowledge_embedding_progress = Some((0, total));
-                this.knowledge_error = None;
+                this.settings_page.start_knowledge_embedding(total);
                 cx.notify();
             });
             let mut processed = 0usize;
@@ -388,23 +374,23 @@ impl WorkspaceApp {
                 }
                 processed += batch.len();
                 let _ = weak.update(cx, |this, cx| {
-                    this.knowledge_embedding_progress = Some((processed, total));
+                    this.settings_page
+                        .update_knowledge_embedding(processed, total);
                     cx.notify();
                 });
             }
             let _ = weak.update(cx, |this, cx| {
-                this.knowledge_embedding_progress = None;
+                this.settings_page.finish_knowledge_embedding();
                 if failed_count > 0 {
                     let detail = partial_template
-                            .replace("{{failed}}", &failed_count.to_string())
-                            .replace("{{total}}", &total.to_string());
-                    this.knowledge_error = None;
+                        .replace("{{failed}}", &failed_count.to_string())
+                        .replace("{{total}}", &total.to_string());
                     this.push_ai_settings_toast(
                         format!("{error_title}: {detail}"),
                         TerminalNoticeVariant::Error,
                     );
                 } else {
-                    this.knowledge_error = None;
+                    this.settings_page.clear_knowledge_error();
                 }
                 cx.notify();
             });
@@ -414,7 +400,7 @@ impl WorkspaceApp {
 
     fn knowledge_open_external(&mut self, document_id: String, cx: &mut Context<Self>) {
         if uuid::Uuid::parse_str(&document_id).is_err() {
-            self.knowledge_error = Some(self.i18n.t("settings_view.knowledge.error_open_external"));
+            self.settings_page.set_knowledge_error(self.i18n.t("settings_view.knowledge.error_open_external"));
             cx.notify();
             return;
         }
@@ -437,7 +423,7 @@ impl WorkspaceApp {
                 })
             });
         let Some(document) = docs else {
-            self.knowledge_error = Some(self.i18n.t("settings_view.knowledge.error_open_external"));
+            self.settings_page.set_knowledge_error(self.i18n.t("settings_view.knowledge.error_open_external"));
             cx.notify();
             return;
         };
@@ -445,7 +431,7 @@ impl WorkspaceApp {
         {
             Ok(content) => content,
             Err(error) => {
-                self.knowledge_error = Some(format!(
+                self.settings_page.set_knowledge_error(format!(
                     "{}: {error}",
                     self.i18n.t("settings_view.knowledge.error_open_external")
                 ));
@@ -461,7 +447,7 @@ impl WorkspaceApp {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("rag-edit");
         if let Err(error) = fs::create_dir_all(&edit_dir) {
-            self.knowledge_error = Some(format!(
+            self.settings_page.set_knowledge_error(format!(
                 "{}: {error}",
                 self.i18n.t("settings_view.knowledge.error_open_external")
             ));
@@ -476,7 +462,7 @@ impl WorkspaceApp {
                 fs::set_permissions(&edit_dir, permissions)
             });
             if let Err(error) = permissions_result {
-                self.knowledge_error = Some(format!(
+                self.settings_page.set_knowledge_error(format!(
                     "{}: {error}",
                     self.i18n.t("settings_view.knowledge.error_open_external")
                 ));
@@ -491,7 +477,7 @@ impl WorkspaceApp {
         };
         let path = edit_dir.join(format!("{}.{}", document.id, extension));
         if let Err(error) = fs::write(&path, content) {
-            self.knowledge_error = Some(format!(
+            self.settings_page.set_knowledge_error(format!(
                 "{}: {error}",
                 self.i18n.t("settings_view.knowledge.error_open_external")
             ));
@@ -506,7 +492,7 @@ impl WorkspaceApp {
                 fs::set_permissions(&path, permissions)
             });
             if let Err(error) = permissions_result {
-                self.knowledge_error = Some(format!(
+                self.settings_page.set_knowledge_error(format!(
                     "{}: {error}",
                     self.i18n.t("settings_view.knowledge.error_open_external")
                 ));
@@ -517,15 +503,15 @@ impl WorkspaceApp {
         let opened = open_path_external(&path).map_err(|error| error.to_string());
         match opened {
             Ok(()) => {
-                self.knowledge_external_edit = Some(KnowledgeExternalEdit {
+                self.settings_page.set_knowledge_external_edit(KnowledgeExternalEdit {
                     doc_id: document.id,
                     path,
                     version: document.version,
                 });
-                self.knowledge_error = None;
+                self.settings_page.clear_knowledge_error();
             }
             Err(error) => {
-                self.knowledge_error = Some(format!(
+                self.settings_page.set_knowledge_error(format!(
                     "{}: {error}",
                     self.i18n.t("settings_view.knowledge.error_open_external")
                 ));
@@ -539,15 +525,15 @@ impl WorkspaceApp {
         notify_no_changes: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(edit) = self.knowledge_external_edit.clone() else {
+        let Some(edit) = self.settings_page.knowledge_external_edit.clone() else {
             return;
         };
         let content = match fs::read_to_string(&edit.path) {
             Ok(content) => content,
             Err(error) => {
                 let _ = fs::remove_file(&edit.path);
-                self.knowledge_external_edit = None;
-                self.knowledge_error = Some(format!(
+                self.settings_page.clear_knowledge_external_edit();
+                self.settings_page.set_knowledge_error(format!(
                     "{}: {error}",
                     self.i18n.t("settings_view.knowledge.error_sync")
                 ));
@@ -558,7 +544,7 @@ impl WorkspaceApp {
         match oxideterm_ai::rag_get_document_content(&self.ai_rag_store, &edit.doc_id) {
             Ok(current) if current == content => {
                 let _ = fs::remove_file(&edit.path);
-                self.knowledge_external_edit = None;
+                self.settings_page.clear_knowledge_external_edit();
                 if notify_no_changes {
                     self.push_ai_settings_toast(
                         self.i18n.t("settings_view.knowledge.doc_no_changes"),
@@ -570,7 +556,7 @@ impl WorkspaceApp {
             }
             Ok(_) => {}
             Err(error) => {
-                self.knowledge_error = Some(format!(
+                self.settings_page.set_knowledge_error(format!(
                     "{}: {error}",
                     self.i18n.t("settings_view.knowledge.error_sync")
                 ));
@@ -586,8 +572,8 @@ impl WorkspaceApp {
         ) {
             Ok(_document) => {
                 let _ = fs::remove_file(&edit.path);
-                self.knowledge_external_edit = None;
-                self.knowledge_error = None;
+                self.settings_page.clear_knowledge_external_edit();
+                self.settings_page.clear_knowledge_error();
                 self.push_ai_settings_toast(
                     self.i18n.t("settings_view.knowledge.doc_updated"),
                     TerminalNoticeVariant::Success,
@@ -595,9 +581,9 @@ impl WorkspaceApp {
             }
             Err(error) => {
                 if error.contains("Version conflict") {
-                    self.knowledge_external_edit = None;
+                    self.settings_page.clear_knowledge_external_edit();
                 }
-                self.knowledge_error = Some(format!(
+                self.settings_page.set_knowledge_error(format!(
                     "{}: {error}",
                     self.i18n.t("settings_view.knowledge.error_sync")
                 ));
@@ -607,7 +593,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn knowledge_confirm_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.knowledge_delete_confirm.take() else {
+        let Some(confirm) = self.settings_page.take_knowledge_delete_confirm() else {
             cx.notify();
             return;
         };

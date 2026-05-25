@@ -1181,7 +1181,7 @@ impl WorkspaceApp {
                 if let Some(section) = args.get("section").and_then(serde_json::Value::as_str)
                     && let Some(tab) = settings_tab_for_ai_section(section)
                 {
-                    self.active_settings_tab = tab;
+                    self.settings_page.set_active_tab(tab);
                 }
                 self.open_settings_tab(window, cx);
                 snapshot

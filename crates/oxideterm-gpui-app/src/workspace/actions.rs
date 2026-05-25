@@ -573,69 +573,79 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.settings_reset_confirm_open {
+        if self.settings_page.settings_reset_confirm_open {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.settings_reset_confirm_open = false;
+                    self.settings_page.set_settings_reset_confirm_open(false);
                     cx.notify();
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
-                    self.settings_reset_confirm_open = false;
+                    self.settings_page.set_settings_reset_confirm_open(false);
                     self.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
                     true
                 }
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.keybinding_reset_all_confirm_open {
+        } else if self.settings_page.keybinding_reset_all_confirm_open {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.keybinding_reset_all_confirm_open = false;
+                    self.settings_page
+                        .set_keybinding_reset_all_confirm_open(false);
                     cx.notify();
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
-                    self.keybinding_reset_all_confirm_open = false;
+                    self.settings_page
+                        .set_keybinding_reset_all_confirm_open(false);
                     self.reset_all_keybindings(window, cx);
                     true
                 }
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.knowledge_create_dialog_open {
+        } else if self.settings_page.knowledge_create_dialog_open {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.knowledge_create_dialog_open = false;
-                    self.knowledge_new_collection_name.clear();
+                    self.settings_page.close_knowledge_create_dialog();
                     cx.notify();
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
-                    if self.knowledge_new_collection_name.trim().is_empty() {
+                    if self
+                        .settings_page
+                        .knowledge_new_collection_name
+                        .trim()
+                        .is_empty()
+                    {
                         // Disabled primary buttons keep focus in the dialog;
                         // restore the shared footer owner after the key guard.
                         self.reset_standard_confirm_focus();
                         cx.notify();
                     } else {
                         self.knowledge_create_collection(cx);
-                        self.knowledge_create_dialog_open = false;
+                        self.settings_page.hide_knowledge_create_dialog();
                     }
                     true
                 }
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.knowledge_new_document_dialog_open {
+        } else if self.settings_page.knowledge_new_document_dialog_open {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.knowledge_new_document_dialog_open = false;
-                    self.knowledge_new_document_title.clear();
+                    self.settings_page.close_knowledge_new_document_dialog();
                     cx.notify();
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
-                    if self.knowledge_new_document_title.trim().is_empty() {
+                    if self
+                        .settings_page
+                        .knowledge_new_document_title
+                        .trim()
+                        .is_empty()
+                    {
                         // Keep disabled-submit behavior aligned with the
                         // shared two-action footer instead of adding a local
                         // key path for this dialog only.
@@ -643,17 +653,17 @@ impl WorkspaceApp {
                         cx.notify();
                     } else {
                         self.knowledge_create_blank_document(cx);
-                        self.knowledge_new_document_dialog_open = false;
+                        self.settings_page.hide_knowledge_new_document_dialog();
                     }
                     true
                 }
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.knowledge_delete_confirm.is_some() {
+        } else if self.settings_page.knowledge_delete_confirm.is_some() {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.knowledge_delete_confirm = None;
+                    self.settings_page.clear_knowledge_delete_confirm();
                     cx.notify();
                     true
                 }
@@ -790,7 +800,7 @@ impl WorkspaceApp {
             }
         }
 
-        let Some(action_id) = self.keybinding_recording_action_id.clone() else {
+        let Some(action_id) = self.settings_page.keybinding_recording_action_id.clone() else {
             return;
         };
         let Some(combo) = crate::keybindings::combo_from_keystroke(&event.keystroke) else {
@@ -810,7 +820,7 @@ impl WorkspaceApp {
 
         self.keybinding_recording_combo = Some(combo);
         self.keybinding_recording_footer_focus = None;
-        self.keybinding_conflict_action_ids = conflicts;
+        self.settings_page.set_keybinding_conflicts(conflicts);
         cx.notify();
     }
 
@@ -839,7 +849,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(action_id) = self.keybinding_recording_action_id.clone() else {
+        let Some(action_id) = self.settings_page.keybinding_recording_action_id.clone() else {
             return;
         };
         let Some(combo) = self.keybinding_recording_combo.clone() else {
@@ -875,10 +885,9 @@ impl WorkspaceApp {
     }
 
     pub(super) fn cancel_keybinding_recording(&mut self, cx: &mut Context<Self>) {
-        self.keybinding_recording_action_id = None;
+        self.settings_page.stop_keybinding_recording();
         self.keybinding_recording_combo = None;
         self.keybinding_recording_footer_focus = None;
-        self.keybinding_conflict_action_ids.clear();
         cx.notify();
     }
 
@@ -910,10 +919,9 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.keybinding_recording_action_id = None;
+        self.settings_page.stop_keybinding_recording();
         self.keybinding_recording_combo = None;
         self.keybinding_recording_footer_focus = None;
-        self.keybinding_conflict_action_ids.clear();
         self.apply_runtime_key_bindings(runtime_bindings, window, cx);
     }
 
@@ -929,10 +937,9 @@ impl WorkspaceApp {
             })
             .collect::<Vec<_>>();
         self.edit_settings(|settings| settings.keybindings.overrides.clear(), cx);
-        self.keybinding_recording_action_id = None;
+        self.settings_page.stop_keybinding_recording();
         self.keybinding_recording_combo = None;
         self.keybinding_recording_footer_focus = None;
-        self.keybinding_conflict_action_ids.clear();
         self.apply_runtime_key_bindings(runtime_bindings, window, cx);
     }
 
@@ -1025,10 +1032,9 @@ impl WorkspaceApp {
                             |settings| settings.keybindings.overrides = next_overrides,
                             cx,
                         );
-                        this.keybinding_recording_action_id = None;
+                        this.settings_page.stop_keybinding_recording();
                         this.keybinding_recording_combo = None;
                         this.keybinding_recording_footer_focus = None;
-                        this.keybinding_conflict_action_ids.clear();
                         this.apply_runtime_key_bindings(runtime_bindings, window, cx);
                         this.push_ai_settings_toast(success, TerminalNoticeVariant::Success);
                     }

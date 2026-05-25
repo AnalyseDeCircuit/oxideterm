@@ -8,7 +8,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let provider_id = provider.id.clone();
-        let models_expanded = self.expanded_ai_provider_models.contains(&provider.id);
+        let models_expanded = self.settings_page.expanded_ai_provider_models.contains(&provider.id);
         let mut body = div().flex().flex_col().gap(px(6.0)).child(
             div()
                 .flex()
@@ -43,7 +43,7 @@ impl WorkspaceApp {
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {
                                     toggle_string_set(
-                                        &mut this.expanded_ai_provider_models,
+                                        &mut this.settings_page.expanded_ai_provider_models,
                                         &provider_id,
                                     );
                                     cx.stop_propagation();
@@ -177,7 +177,7 @@ impl WorkspaceApp {
         else {
             return div().into_any_element();
         };
-        let models_expanded = self.expanded_ai_provider_models.contains(&provider.id);
+        let models_expanded = self.settings_page.expanded_ai_provider_models.contains(&provider.id);
         let visible_model_count = if models_expanded {
             provider.models.len()
         } else {

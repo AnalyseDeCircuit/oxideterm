@@ -1217,22 +1217,6 @@ impl WorkspaceApp {
     }
 }
 
-fn settings_input_is_ai_mcp(input: SettingsInput) -> bool {
-    matches!(
-        input,
-        SettingsInput::AiMcpName
-            | SettingsInput::AiMcpCommand
-            | SettingsInput::AiMcpArgs
-            | SettingsInput::AiMcpUrl
-            | SettingsInput::AiMcpAuthHeaderName
-            | SettingsInput::AiMcpAuthToken
-            | SettingsInput::AiMcpEnvKey(_)
-            | SettingsInput::AiMcpEnvValue(_)
-            | SettingsInput::AiMcpHeaderKey(_)
-            | SettingsInput::AiMcpHeaderValue(_)
-    )
-}
-
 fn ai_mcp_configs(settings: &PersistedSettings) -> Vec<oxideterm_ai::McpServerConfig> {
     settings
         .ai

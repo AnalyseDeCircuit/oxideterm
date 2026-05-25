@@ -7,4 +7,5 @@ version.workspace = true
 [dependencies]
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-theme = { path = "../oxideterm-theme" }
 serde_json.workspace = true

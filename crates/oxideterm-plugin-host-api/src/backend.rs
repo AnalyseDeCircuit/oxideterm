@@ -9,28 +9,104 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use oxideterm_forwarding::ForwardingRegistry;
+use oxideterm_plugin_protocol as plugin_runtime;
 use oxideterm_sftp::SftpTransferManager;
 use oxideterm_ssh::NodeRouter;
 use serde_json::{Value, json};
 
-use super::{
-    NativePluginHostApiSnapshot, constants::*, forwarding::native_plugin_forward_response,
-    sftp::native_plugin_sftp_response, ui_helpers::native_plugin_platform_label,
+use crate::{
+    app::native_plugin_platform_label, forwarding::native_plugin_forward_response,
+    readonly::NativePluginHostApiSnapshot, sftp::native_plugin_sftp_response,
 };
-use crate::workspace::plugin_runtime;
+
+pub const NATIVE_PLUGIN_HTTP_BODY_LIMIT: usize = 10 * 1024 * 1024;
+
+pub const NATIVE_PLUGIN_API_COMMAND_SSH_POOL_STATS: &str = "ssh_get_pool_stats";
+pub const NATIVE_PLUGIN_API_COMMAND_LIST_CONNECTIONS: &str = "list_connections";
+pub const NATIVE_PLUGIN_API_COMMAND_GET_APP_VERSION: &str = "get_app_version";
+pub const NATIVE_PLUGIN_API_COMMAND_GET_SYSTEM_INFO: &str = "get_system_info";
+pub const NATIVE_PLUGIN_API_COMMAND_SFTP_CANCEL_TRANSFER: &str = "sftp_cancel_transfer";
+pub const NATIVE_PLUGIN_API_COMMAND_SFTP_PAUSE_TRANSFER: &str = "sftp_pause_transfer";
+pub const NATIVE_PLUGIN_API_COMMAND_SFTP_RESUME_TRANSFER: &str = "sftp_resume_transfer";
+pub const NATIVE_PLUGIN_API_COMMAND_SFTP_TRANSFER_STATS: &str = "sftp_transfer_stats";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_INIT: &str = "node_sftp_init";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_LIST_DIR: &str = "node_sftp_list_dir";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_STAT: &str = "node_sftp_stat";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_PREVIEW: &str = "node_sftp_preview";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_WRITE: &str = "node_sftp_write";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_DOWNLOAD: &str = "node_sftp_download";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_UPLOAD: &str = "node_sftp_upload";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_MKDIR: &str = "node_sftp_mkdir";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_DELETE: &str = "node_sftp_delete";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_DELETE_RECURSIVE: &str = "node_sftp_delete_recursive";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_RENAME: &str = "node_sftp_rename";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_DOWNLOAD_DIR: &str = "node_sftp_download_dir";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_UPLOAD_DIR: &str = "node_sftp_upload_dir";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_PROBE: &str = "node_sftp_tar_probe";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_UPLOAD: &str = "node_sftp_tar_upload";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_DOWNLOAD: &str = "node_sftp_tar_download";
+pub const NATIVE_PLUGIN_API_COMMAND_LIST_PORT_FORWARDS: &str = "list_port_forwards";
+pub const NATIVE_PLUGIN_API_COMMAND_CREATE_PORT_FORWARD: &str = "create_port_forward";
+pub const NATIVE_PLUGIN_API_COMMAND_STOP_PORT_FORWARD: &str = "stop_port_forward";
+pub const NATIVE_PLUGIN_API_COMMAND_DELETE_PORT_FORWARD: &str = "delete_port_forward";
+pub const NATIVE_PLUGIN_API_COMMAND_RESTART_PORT_FORWARD: &str = "restart_port_forward";
+pub const NATIVE_PLUGIN_API_COMMAND_UPDATE_PORT_FORWARD: &str = "update_port_forward";
+pub const NATIVE_PLUGIN_API_COMMAND_GET_PORT_FORWARD_STATS: &str = "get_port_forward_stats";
+pub const NATIVE_PLUGIN_API_COMMAND_STOP_ALL_FORWARDS: &str = "stop_all_forwards";
+pub const NATIVE_PLUGIN_API_COMMAND_PLUGIN_HTTP_REQUEST: &str = "plugin_http_request";
+
+// Keep the documented api.invoke adapter surface in one place so tests can
+// detect a command that is listed but not dispatched through a native owner.
+pub fn native_plugin_supported_backend_commands() -> &'static [&'static str] {
+    &[
+        NATIVE_PLUGIN_API_COMMAND_SSH_POOL_STATS,
+        NATIVE_PLUGIN_API_COMMAND_LIST_CONNECTIONS,
+        NATIVE_PLUGIN_API_COMMAND_GET_APP_VERSION,
+        NATIVE_PLUGIN_API_COMMAND_GET_SYSTEM_INFO,
+        NATIVE_PLUGIN_API_COMMAND_SFTP_CANCEL_TRANSFER,
+        NATIVE_PLUGIN_API_COMMAND_SFTP_PAUSE_TRANSFER,
+        NATIVE_PLUGIN_API_COMMAND_SFTP_RESUME_TRANSFER,
+        NATIVE_PLUGIN_API_COMMAND_SFTP_TRANSFER_STATS,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_INIT,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_LIST_DIR,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_STAT,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_PREVIEW,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_WRITE,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_DOWNLOAD,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_UPLOAD,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_MKDIR,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_DELETE,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_DELETE_RECURSIVE,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_RENAME,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_DOWNLOAD_DIR,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_UPLOAD_DIR,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_PROBE,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_UPLOAD,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_DOWNLOAD,
+        NATIVE_PLUGIN_API_COMMAND_LIST_PORT_FORWARDS,
+        NATIVE_PLUGIN_API_COMMAND_CREATE_PORT_FORWARD,
+        NATIVE_PLUGIN_API_COMMAND_STOP_PORT_FORWARD,
+        NATIVE_PLUGIN_API_COMMAND_DELETE_PORT_FORWARD,
+        NATIVE_PLUGIN_API_COMMAND_RESTART_PORT_FORWARD,
+        NATIVE_PLUGIN_API_COMMAND_UPDATE_PORT_FORWARD,
+        NATIVE_PLUGIN_API_COMMAND_GET_PORT_FORWARD_STATS,
+        NATIVE_PLUGIN_API_COMMAND_STOP_ALL_FORWARDS,
+        NATIVE_PLUGIN_API_COMMAND_PLUGIN_HTTP_REQUEST,
+    ]
+}
 
 // api.invoke adapters are the narrow bridge from declared plugin commands to
 // native backend services; capability checks stay in the target namespace.
-pub(super) struct NativePluginBackendAdapters<'a> {
-    pub(super) permissions: &'a plugin_runtime::PluginPermissionSet,
-    pub(super) sftp_router: &'a NodeRouter,
-    pub(super) sftp_runtime: &'a Arc<tokio::runtime::Runtime>,
-    pub(super) forwarding_registry: &'a ForwardingRegistry,
-    pub(super) forwarding_runtime: &'a Arc<tokio::runtime::Runtime>,
-    pub(super) transfer_manager: &'a Arc<SftpTransferManager>,
+pub struct NativePluginBackendAdapters<'a> {
+    pub permissions: &'a plugin_runtime::PluginPermissionSet,
+    pub sftp_router: &'a NodeRouter,
+    pub sftp_runtime: &'a Arc<tokio::runtime::Runtime>,
+    pub forwarding_registry: &'a ForwardingRegistry,
+    pub forwarding_runtime: &'a Arc<tokio::runtime::Runtime>,
+    pub transfer_manager: &'a Arc<SftpTransferManager>,
 }
 
-pub(super) fn native_plugin_api_invoke_response(
+pub fn native_plugin_api_invoke_response(
     snapshot: &NativePluginHostApiSnapshot,
     plugin_id: &str,
     call: plugin_runtime::PluginHostCall,

@@ -1,0 +1,504 @@
+// Copyright (C) 2026 AnalyseDeCircuit
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! Pure settings page identity types.
+//!
+//! These enums describe settings navigation, editable fields, selects, and
+//! sliders without depending on GPUI. View crates can map them to anchors and
+//! controls, while app code can use the same model keys for focus and drafts.
+
+const PLUGIN_MANAGER_INPUT_ANCHOR_BASE: u64 = 28_000;
+const PLUGIN_SETTING_INPUT_ANCHOR_BASE: u64 = 29_000;
+const DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT: f32 = 20.0;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingsTab {
+    General,
+    Portable,
+    Terminal,
+    Appearance,
+    Local,
+    Connections,
+    Ssh,
+    Reconnect,
+    Sftp,
+    Ide,
+    Ai,
+    Knowledge,
+    Keybindings,
+    Help,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalSettingsPage {
+    Display,
+    Input,
+    CommandBar,
+    History,
+    Transfer,
+    Highlight,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingsKeybindingScopeFilter {
+    All,
+    Global,
+    Terminal,
+    Split,
+    Palette,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingsSelect {
+    Language,
+    AppearanceTheme,
+    AppearanceDensity,
+    AppearanceAnimation,
+    AppearanceRenderProfile,
+    AppearanceFrostedGlass,
+    AppearanceBackgroundFit,
+    CustomThemeDuplicate,
+    TerminalFontFamily,
+    TerminalEncoding,
+    TerminalCursorStyle,
+    IdeAgentMode,
+    LocalShell,
+    ConnectionIdleTimeout,
+    ReconnectMaxAttempts,
+    ReconnectBaseDelay,
+    ReconnectMaxDelay,
+    AiProviderTemplate,
+    AiContextMaxChars,
+    AiContextVisibleLines,
+    AiGlobalReasoning,
+    AiProfileProvider(usize),
+    AiProfileReasoning(usize),
+    AiProviderReasoning(usize),
+    AiModelReasoning(usize, usize),
+    AiEmbeddingProvider,
+    KnowledgeCollectionScope,
+    KnowledgeDocumentFormat,
+    AiMcpTransport,
+    AiMcpAuthMode,
+    SftpConcurrent,
+    SftpDirectoryParallelism,
+    SftpConflict,
+    HighlightPreset,
+    HighlightRenderMode(usize),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum SettingsInput {
+    TerminalFontSize,
+    TerminalLineHeight,
+    IdeFontSize,
+    IdeLineHeight,
+    AppearanceUiFont,
+    LocalDefaultCwd,
+    LocalGitBashPath,
+    LocalOhMyPoshTheme,
+    ConnectionDefaultUsername,
+    ConnectionDefaultPort,
+    ConnectionNewGroup,
+    SftpSpeedLimitKbps,
+    InBandTransferMaxChunkBytes,
+    InBandTransferMaxFileCount,
+    InBandTransferMaxTotalBytes,
+    TerminalCommandBarFocusHandoff,
+    TerminalCommandSpecsJson,
+    KeybindingSearch,
+    CustomThemeName,
+    CustomThemeTerminalColor(usize),
+    CustomThemeUiColor(usize),
+    HighlightLabel(usize),
+    HighlightPattern(usize),
+    HighlightForeground(usize),
+    HighlightBackground(usize),
+    AiProviderName(usize),
+    AiProviderBaseUrl(usize),
+    AiProviderDefaultModel(usize),
+    AiProviderApiKey(usize),
+    AiProfileName(usize),
+    AiProfileModel(usize),
+    AiSystemPrompt,
+    AiMemoryContent,
+    AiToolUseMaxRounds,
+    AiToolUseMaxCallsPerRound,
+    AiModelContextWindow(usize, usize),
+    AiActiveModelMaxResponseTokens,
+    AiEmbeddingModel,
+    AiMcpName,
+    AiMcpCommand,
+    AiMcpArgs,
+    AiMcpUrl,
+    AiMcpAuthHeaderName,
+    AiMcpAuthToken,
+    AiMcpEnvKey(usize),
+    AiMcpEnvValue(usize),
+    AiMcpHeaderKey(usize),
+    AiMcpHeaderValue(usize),
+    KnowledgeCollectionName,
+    KnowledgeDocumentTitle,
+    CloudSyncEndpoint,
+    CloudSyncNamespace,
+    CloudSyncS3Bucket,
+    CloudSyncS3Region,
+    CloudSyncGitRepository,
+    CloudSyncGitBranch,
+    CloudSyncToken,
+    CloudSyncGitToken,
+    CloudSyncBasicUsername,
+    CloudSyncBasicPassword,
+    CloudSyncAccessKeyId,
+    CloudSyncSecretAccessKey,
+    CloudSyncSessionToken,
+    CloudSyncSyncPassword,
+    CloudSyncAutoUploadInterval,
+    NativePluginInstallUrl,
+    NativePluginInstallChecksum,
+    NativePluginRegistryUrl,
+    PluginSetting(usize),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingsSlider {
+    TerminalFontSize,
+    AppearanceBorderRadius,
+    AppearanceBackgroundOpacity,
+    AppearanceBackgroundBlur,
+}
+
+impl TerminalSettingsPage {
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::Display,
+            Self::Input,
+            Self::CommandBar,
+            Self::History,
+            Self::Transfer,
+            Self::Highlight,
+        ]
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::Display => "settings_view.terminal.page_display",
+            Self::Input => "settings_view.terminal.page_input",
+            Self::CommandBar => "settings_view.terminal.page_commandBar",
+            Self::History => "settings_view.terminal.page_history",
+            Self::Transfer => "settings_view.terminal.page_transfer",
+            Self::Highlight => "settings_view.terminal.page_highlight",
+        }
+    }
+}
+
+impl SettingsKeybindingScopeFilter {
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::All,
+            Self::Global,
+            Self::Terminal,
+            Self::Split,
+            Self::Palette,
+        ]
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::All => "settings_view.keybindings.scope_all",
+            Self::Global => "settings_view.keybindings.scope_global",
+            Self::Terminal => "settings_view.keybindings.scope_terminal",
+            Self::Split => "settings_view.keybindings.scope_split",
+            Self::Palette => "settings_view.keybindings.scope_palette",
+        }
+    }
+}
+
+impl SettingsTab {
+    pub fn groups() -> &'static [&'static [Self]] {
+        &[
+            &[Self::General, Self::Portable],
+            &[Self::Terminal, Self::Appearance, Self::Local],
+            &[Self::Connections, Self::Ssh, Self::Reconnect],
+            &[
+                Self::Sftp,
+                Self::Ide,
+                Self::Ai,
+                Self::Knowledge,
+                Self::Keybindings,
+            ],
+            &[Self::Help],
+        ]
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::General => "settings.general.title",
+            Self::Portable => "settings_view.general.portable_runtime",
+            Self::Terminal => "settings.terminal.title",
+            Self::Appearance => "settings_view.tabs.appearance",
+            Self::Local => "settings_view.tabs.local",
+            Self::Connections => "settings_view.tabs.connections",
+            Self::Ssh => "settings_view.tabs.ssh",
+            Self::Reconnect => "settings_view.tabs.reconnect",
+            Self::Sftp => "settings_view.tabs.sftp",
+            Self::Ide => "settings_view.tabs.ide",
+            Self::Ai => "settings_view.tabs.ai",
+            Self::Knowledge => "settings_view.tabs.knowledge",
+            Self::Keybindings => "settings_view.tabs.keybindings",
+            Self::Help => "settings_view.tabs.help",
+        }
+    }
+
+    pub fn title_key(self) -> &'static str {
+        match self {
+            Self::General => "settings_view.general.title",
+            Self::Portable => "settings_view.general.portable_runtime",
+            Self::Terminal => "settings_view.terminal.title",
+            Self::Appearance => "settings_view.appearance.title",
+            Self::Local => "settings_view.local_terminal.title",
+            Self::Connections => "settings_view.connections.title",
+            Self::Ssh => "settings_view.tabs.ssh",
+            Self::Reconnect => "settings_view.reconnect.title",
+            Self::Sftp => "settings_view.sftp.title",
+            Self::Ide => "settings_view.ide.title",
+            Self::Ai => "settings_view.ai.title",
+            Self::Knowledge => "settings_view.knowledge.title",
+            Self::Keybindings => "settings_view.keybindings.title",
+            Self::Help => "settings_view.help.title",
+        }
+    }
+
+    pub fn description_key(self) -> &'static str {
+        match self {
+            Self::General => "settings_view.general.description",
+            Self::Portable => "settings_view.general.portable_runtime_disabled_hint",
+            Self::Terminal => "settings_view.terminal.description",
+            Self::Appearance => "settings_view.appearance.description",
+            Self::Local => "settings_view.local_terminal.description",
+            Self::Connections => "settings_view.connections.description",
+            Self::Ssh => "ssh.form.subtitle",
+            Self::Reconnect => "settings_view.reconnect.description",
+            Self::Sftp => "settings_view.sftp.description",
+            Self::Ide => "settings_view.ide.description",
+            Self::Ai => "settings_view.ai.description",
+            Self::Knowledge => "settings_view.knowledge.description",
+            Self::Keybindings => "settings_view.keybindings.description",
+            Self::Help => "settings_view.help.description",
+        }
+    }
+
+    pub fn icon(self) -> SettingsTabIcon {
+        match self {
+            Self::General | Self::Appearance => SettingsTabIcon::Monitor,
+            Self::Portable | Self::Sftp => SettingsTabIcon::HardDrive,
+            Self::Local => SettingsTabIcon::Square,
+            Self::Terminal => SettingsTabIcon::Terminal,
+            Self::Connections => SettingsTabIcon::Shield,
+            Self::Ssh => SettingsTabIcon::Key,
+            Self::Reconnect => SettingsTabIcon::WifiOff,
+            Self::Ide => SettingsTabIcon::Code2,
+            Self::Ai => SettingsTabIcon::Sparkles,
+            Self::Knowledge => SettingsTabIcon::BookOpen,
+            Self::Keybindings => SettingsTabIcon::Keyboard,
+            Self::Help => SettingsTabIcon::HelpCircle,
+        }
+    }
+}
+
+impl SettingsInput {
+    pub fn accepts_newline(self) -> bool {
+        // Keep multiline behavior beside the input identity so IME handling and
+        // render controls cannot drift when new settings fields are added.
+        matches!(
+            self,
+            Self::TerminalCommandBarFocusHandoff
+                | Self::TerminalCommandSpecsJson
+                | Self::AiSystemPrompt
+                | Self::AiMemoryContent
+                | Self::AiMcpArgs
+        )
+    }
+
+    pub fn textarea_line_height(self) -> f32 {
+        // These values describe settings text areas in logical pixels; GPUI
+        // converts them to concrete units at the view boundary.
+        match self {
+            Self::TerminalCommandBarFocusHandoff | Self::TerminalCommandSpecsJson => 20.0,
+            Self::AiSystemPrompt | Self::AiMemoryContent => 22.0,
+            Self::AiMcpArgs => 20.0,
+            _ => DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT,
+        }
+    }
+
+    pub fn anchor_key(self) -> u64 {
+        match self {
+            Self::TerminalFontSize => 1,
+            Self::TerminalLineHeight => 2,
+            Self::IdeFontSize => 3,
+            Self::IdeLineHeight => 4,
+            Self::AppearanceUiFont => 5,
+            Self::LocalDefaultCwd => 6,
+            Self::LocalGitBashPath => 7,
+            Self::LocalOhMyPoshTheme => 8,
+            Self::ConnectionDefaultUsername => 9,
+            Self::ConnectionDefaultPort => 10,
+            Self::ConnectionNewGroup => 11,
+            Self::SftpSpeedLimitKbps => 12,
+            Self::InBandTransferMaxChunkBytes => 13,
+            Self::InBandTransferMaxFileCount => 14,
+            Self::InBandTransferMaxTotalBytes => 15,
+            Self::TerminalCommandBarFocusHandoff => 16,
+            Self::TerminalCommandSpecsJson => 17,
+            Self::KeybindingSearch => 18,
+            Self::CustomThemeName => 10_000,
+            Self::CustomThemeTerminalColor(index) => 10_100 + index as u64,
+            Self::CustomThemeUiColor(index) => 10_200 + index as u64,
+            Self::HighlightLabel(index) => 100 + index as u64 * 4,
+            Self::HighlightPattern(index) => 101 + index as u64 * 4,
+            Self::HighlightForeground(index) => 102 + index as u64 * 4,
+            Self::HighlightBackground(index) => 103 + index as u64 * 4,
+            Self::AiProviderName(index) => 20_000 + index as u64 * 4,
+            Self::AiProviderBaseUrl(index) => 20_001 + index as u64 * 4,
+            Self::AiProviderDefaultModel(index) => 20_002 + index as u64 * 4,
+            Self::AiProviderApiKey(index) => 20_003 + index as u64 * 4,
+            Self::AiProfileName(index) => 21_000 + index as u64 * 2,
+            Self::AiProfileModel(index) => 21_001 + index as u64 * 2,
+            Self::AiSystemPrompt => 22_000,
+            Self::AiMemoryContent => 22_001,
+            Self::AiToolUseMaxRounds => 22_002,
+            Self::AiToolUseMaxCallsPerRound => 22_003,
+            Self::AiModelContextWindow(provider_index, model_index) => {
+                23_000 + provider_index as u64 * 1_000 + model_index as u64
+            }
+            Self::AiActiveModelMaxResponseTokens => 24_000,
+            Self::AiEmbeddingModel => 24_001,
+            Self::AiMcpName => 25_000,
+            Self::AiMcpCommand => 25_001,
+            Self::AiMcpArgs => 25_002,
+            Self::AiMcpUrl => 25_003,
+            Self::AiMcpAuthHeaderName => 25_004,
+            Self::AiMcpAuthToken => 25_005,
+            Self::AiMcpEnvKey(index) => 25_100 + index as u64 * 2,
+            Self::AiMcpEnvValue(index) => 25_101 + index as u64 * 2,
+            Self::AiMcpHeaderKey(index) => 25_300 + index as u64 * 2,
+            Self::AiMcpHeaderValue(index) => 25_301 + index as u64 * 2,
+            Self::KnowledgeCollectionName => 26_000,
+            Self::KnowledgeDocumentTitle => 26_001,
+            Self::CloudSyncEndpoint => 27_000,
+            Self::CloudSyncNamespace => 27_001,
+            Self::CloudSyncS3Bucket => 27_002,
+            Self::CloudSyncS3Region => 27_003,
+            Self::CloudSyncGitRepository => 27_004,
+            Self::CloudSyncGitBranch => 27_005,
+            Self::CloudSyncToken => 27_006,
+            Self::CloudSyncGitToken => 27_007,
+            Self::CloudSyncBasicUsername => 27_008,
+            Self::CloudSyncBasicPassword => 27_009,
+            Self::CloudSyncAccessKeyId => 27_010,
+            Self::CloudSyncSecretAccessKey => 27_011,
+            Self::CloudSyncSessionToken => 27_012,
+            Self::CloudSyncSyncPassword => 27_013,
+            Self::CloudSyncAutoUploadInterval => 27_014,
+            Self::NativePluginInstallUrl => PLUGIN_MANAGER_INPUT_ANCHOR_BASE,
+            Self::NativePluginInstallChecksum => PLUGIN_MANAGER_INPUT_ANCHOR_BASE + 1,
+            Self::NativePluginRegistryUrl => PLUGIN_MANAGER_INPUT_ANCHOR_BASE + 2,
+            Self::PluginSetting(index) => PLUGIN_SETTING_INPUT_ANCHOR_BASE + index as u64,
+        }
+    }
+
+    pub fn is_secret(self) -> bool {
+        matches!(
+            self,
+            Self::AiProviderApiKey(_)
+                | Self::AiMcpAuthToken
+                | Self::CloudSyncToken
+                | Self::CloudSyncGitToken
+                | Self::CloudSyncBasicUsername
+                | Self::CloudSyncBasicPassword
+                | Self::CloudSyncAccessKeyId
+                | Self::CloudSyncSecretAccessKey
+                | Self::CloudSyncSessionToken
+                | Self::CloudSyncSyncPassword
+        )
+    }
+
+    pub fn is_ai_mcp(self) -> bool {
+        matches!(
+            self,
+            Self::AiMcpName
+                | Self::AiMcpCommand
+                | Self::AiMcpArgs
+                | Self::AiMcpUrl
+                | Self::AiMcpAuthHeaderName
+                | Self::AiMcpAuthToken
+                | Self::AiMcpEnvKey(_)
+                | Self::AiMcpEnvValue(_)
+                | Self::AiMcpHeaderKey(_)
+                | Self::AiMcpHeaderValue(_)
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingsTabIcon {
+    BookOpen,
+    Code2,
+    HardDrive,
+    HelpCircle,
+    Key,
+    Keyboard,
+    Monitor,
+    Shield,
+    Sparkles,
+    Square,
+    Terminal,
+    WifiOff,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingsBackgroundTabIcon {
+    Activity,
+    ArrowLeftRight,
+    Code2,
+    Folder,
+    FolderInput,
+    ListTree,
+    Monitor,
+    Network,
+    Puzzle,
+    Rocket,
+    Settings,
+    Terminal,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_input_anchor_ranges_do_not_overlap_dynamic_plugin_ranges() {
+        assert!(SettingsInput::NativePluginInstallUrl.anchor_key() < 29_000);
+        assert_eq!(SettingsInput::PluginSetting(0).anchor_key(), 29_000);
+    }
+
+    #[test]
+    fn secret_inputs_are_categorized_in_the_model_layer() {
+        assert!(SettingsInput::AiProviderApiKey(0).is_secret());
+        assert!(SettingsInput::CloudSyncSecretAccessKey.is_secret());
+        assert!(!SettingsInput::TerminalFontSize.is_secret());
+    }
+
+    #[test]
+    fn ai_mcp_inputs_are_categorized_in_the_model_layer() {
+        assert!(SettingsInput::AiMcpEnvValue(0).is_ai_mcp());
+        assert!(!SettingsInput::AiSystemPrompt.is_ai_mcp());
+    }
+
+    #[test]
+    fn multiline_input_metadata_lives_with_settings_input_identity() {
+        assert!(SettingsInput::AiSystemPrompt.accepts_newline());
+        assert!(!SettingsInput::TerminalFontSize.accepts_newline());
+        assert_eq!(SettingsInput::AiMemoryContent.textarea_line_height(), 22.0);
+    }
+}

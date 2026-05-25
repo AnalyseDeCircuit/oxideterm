@@ -13,11 +13,11 @@ impl WorkspaceApp {
             .as_deref()
             == Some(provider.id.as_str());
         let expanded = self
-            .expanded_ai_providers
+            .settings_page.expanded_ai_providers
             .get(&provider.id)
             .copied()
             .unwrap_or(active_provider);
-        let models_expanded = self.expanded_ai_provider_models.contains(&provider.id);
+        let models_expanded = self.settings_page.expanded_ai_provider_models.contains(&provider.id);
         let visible_model_count = if models_expanded {
             provider.models.len()
         } else {
@@ -184,11 +184,11 @@ impl WorkspaceApp {
                         .as_deref()
                         == Some(provider_id.as_str());
                     let expanded = this
-                        .expanded_ai_providers
+                        .settings_page.expanded_ai_providers
                         .get(&provider_id)
                         .copied()
                         .unwrap_or(is_active_provider);
-                    this.expanded_ai_providers
+                    this.settings_page.expanded_ai_providers
                         .insert(provider_id.clone(), !expanded);
                     cx.stop_propagation();
                     cx.notify();

@@ -4,10 +4,10 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.show_ai_enable_confirm {
+        if self.settings_page.show_ai_enable_confirm {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.show_ai_enable_confirm = false;
+                    self.settings_page.set_ai_enable_confirm_open(false);
                     cx.notify();
                     true
                 }
@@ -19,21 +19,21 @@ impl WorkspaceApp {
                         },
                         cx,
                     );
-                    self.show_ai_enable_confirm = false;
+                    self.settings_page.set_ai_enable_confirm_open(false);
                     true
                 }
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.ai_provider_key_remove_confirm.is_some() {
+        } else if self.settings_page.ai_provider_key_remove_confirm.is_some() {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.ai_provider_key_remove_confirm = None;
+                    self.settings_page.clear_ai_provider_key_remove();
                     cx.notify();
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
-                    if let Some((index, provider_id)) = self.ai_provider_key_remove_confirm.take()
+                    if let Some((index, provider_id)) = self.settings_page.take_ai_provider_key_remove()
                     {
                         self.remove_ai_provider_api_key(index, &provider_id, cx);
                     }
@@ -42,15 +42,15 @@ impl WorkspaceApp {
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.ai_provider_remove_confirm.is_some() {
+        } else if self.settings_page.ai_provider_remove_confirm.is_some() {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.ai_provider_remove_confirm = None;
+                    self.settings_page.clear_ai_provider_remove();
                     cx.notify();
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
-                    if let Some((provider_id, _name)) = self.ai_provider_remove_confirm.take() {
+                    if let Some((provider_id, _name)) = self.settings_page.take_ai_provider_remove() {
                         self.remove_ai_provider(&provider_id, cx);
                     }
                     true
@@ -73,7 +73,7 @@ impl WorkspaceApp {
                 cx.listener(|this, _event, _window, cx| {
                     // Tauri SettingsView AI confirm is a Radix Dialog bound to
                     // setShowAiConfirm, so outside click is the Cancel path.
-                    this.show_ai_enable_confirm = false;
+                    this.settings_page.set_ai_enable_confirm_open(false);
                     this.clear_standard_confirm_focus();
                     cx.stop_propagation();
                     cx.notify();
@@ -142,7 +142,7 @@ impl WorkspaceApp {
                                     ConfirmDialogAction::Cancel,
                                     false,
                                     |this, _event, _window, cx| {
-                                        this.show_ai_enable_confirm = false;
+                                        this.settings_page.set_ai_enable_confirm_open(false);
                                         cx.notify();
                                     },
                                     cx,
@@ -162,7 +162,7 @@ impl WorkspaceApp {
                                             },
                                             cx,
                                         );
-                                        this.show_ai_enable_confirm = false;
+                                        this.settings_page.set_ai_enable_confirm_open(false);
                                     },
                                     cx,
                                 ),
@@ -204,7 +204,7 @@ impl WorkspaceApp {
                 cx.listener(|this, _event, _window, cx| {
                     // Tauri provider-key removal uses the shared confirm
                     // dialog; outside close cancels the pending removal.
-                    this.ai_provider_key_remove_confirm = None;
+                    this.settings_page.clear_ai_provider_key_remove();
                     this.clear_standard_confirm_focus();
                     cx.stop_propagation();
                     cx.notify();
@@ -267,7 +267,7 @@ impl WorkspaceApp {
                                     false,
                                     true,
                                     |this, _event, _window, cx| {
-                                        this.ai_provider_key_remove_confirm = None;
+                                        this.settings_page.clear_ai_provider_key_remove();
                                         cx.notify();
                                     },
                                     cx,
@@ -281,7 +281,7 @@ impl WorkspaceApp {
                                     false,
                                     |this, _event, _window, cx| {
                                         if let Some((index, provider_id)) =
-                                            this.ai_provider_key_remove_confirm.take()
+                                            this.settings_page.take_ai_provider_key_remove()
                                         {
                                                 this.remove_ai_provider_api_key(
                                                     index,
@@ -303,7 +303,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let provider_name = self
-            .ai_provider_remove_confirm
+            .settings_page.ai_provider_remove_confirm
             .as_ref()
             .map(|(_, name)| name.as_str())
             .unwrap_or_default();
@@ -317,7 +317,7 @@ impl WorkspaceApp {
                 cx.listener(|this, _event, _window, cx| {
                     // Tauri remove-provider confirm is cancellable via
                     // Dialog onOpenChange(false).
-                    this.ai_provider_remove_confirm = None;
+                    this.settings_page.clear_ai_provider_remove();
                     this.clear_standard_confirm_focus();
                     cx.stop_propagation();
                     cx.notify();
@@ -380,7 +380,7 @@ impl WorkspaceApp {
                                     false,
                                     true,
                                     |this, _event, _window, cx| {
-                                        this.ai_provider_remove_confirm = None;
+                                        this.settings_page.clear_ai_provider_remove();
                                         cx.notify();
                                     },
                                     cx,
@@ -394,7 +394,7 @@ impl WorkspaceApp {
                                     false,
                                     |this, _event, _window, cx| {
                                         if let Some((provider_id, _name)) =
-                                            this.ai_provider_remove_confirm.take()
+                                            this.settings_page.take_ai_provider_remove()
                                         {
                                             this.remove_ai_provider(&provider_id, cx);
                                         }
@@ -422,11 +422,8 @@ impl WorkspaceApp {
         let provider_id = provider_id.to_string();
         self.ai_provider_key_status.remove(&provider_id);
         self.ai_provider_key_status_pending.remove(&provider_id);
-        self.expanded_ai_providers.remove(&provider_id);
-        self.expanded_ai_provider_models.remove(&provider_id);
-        self.expanded_ai_context_providers.remove(&provider_id);
-        self.expanded_ai_model_reasoning_providers
-            .remove(&provider_id);
+        self.settings_page
+            .remove_ai_provider_page_state(&provider_id);
         self.edit_settings(
             |settings| {
                 ai_remove_provider_at_with_scoped_settings(

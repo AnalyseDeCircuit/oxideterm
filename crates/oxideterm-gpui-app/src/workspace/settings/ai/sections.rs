@@ -332,7 +332,7 @@ impl WorkspaceApp {
         providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let expanded = self.ai_provider_settings_expanded;
+        let expanded = self.settings_page.ai_provider_settings_expanded;
         let summary = self.i18n_count(
             "settings_view.ai.provider_settings_summary",
             self.settings_store.settings().ai.providers.len(),
@@ -371,7 +371,7 @@ impl WorkspaceApp {
                 summary,
                 expanded,
                 |this, _event, _window, cx| {
-                    this.ai_provider_settings_expanded = !this.ai_provider_settings_expanded;
+                    this.settings_page.toggle_ai_section(AiSettingsSection::ProviderSettings);
                     cx.stop_propagation();
                     cx.notify();
                 },
@@ -400,14 +400,14 @@ impl WorkspaceApp {
             .as_deref()
             == Some(provider.id.as_str());
         let expanded = self
-            .expanded_ai_providers
+            .settings_page.expanded_ai_providers
             .get(&provider.id)
             .copied()
             .unwrap_or(active_provider);
         if !expanded {
             return 72.0;
         }
-        let models_expanded = self.expanded_ai_provider_models.contains(&provider.id);
+        let models_expanded = self.settings_page.expanded_ai_provider_models.contains(&provider.id);
         let visible_model_count = if models_expanded {
             provider.models.len()
         } else {
@@ -443,14 +443,14 @@ impl WorkspaceApp {
                     .as_deref()
                     == Some(provider.id.as_str());
                 let expanded = self
-                    .expanded_ai_providers
+                    .settings_page.expanded_ai_providers
                     .get(&provider.id)
                     .copied()
                     .unwrap_or(active_provider);
                 ai_provider_card_signature(
                     provider,
                     expanded,
-                    self.expanded_ai_provider_models.contains(&provider.id),
+                    self.settings_page.expanded_ai_provider_models.contains(&provider.id),
                     self.ai_provider_has_key_cached(&provider.id),
                 )
             })
@@ -814,7 +814,7 @@ impl WorkspaceApp {
                 set_ai_tool_use_enabled,
                 cx,
             ))
-            .when(!self.ai_tool_use_expanded, |section| {
+            .when(!self.settings_page.ai_tool_use_expanded, |section| {
                 section.child(
                     div()
                         .ml(px(16.0))
@@ -833,7 +833,7 @@ impl WorkspaceApp {
                         )),
                 )
             })
-            .when(self.ai_tool_use_expanded, |section| {
+            .when(self.settings_page.ai_tool_use_expanded, |section| {
                 section.child(
                     div()
                         .ml(px(16.0))
@@ -1296,7 +1296,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .child(self.ai_model_reasoning_header(cx))
-            .when(self.ai_model_reasoning_expanded, |section| {
+            .when(self.settings_page.ai_model_reasoning_expanded, |section| {
                 if providers_with_models.is_empty() {
                     section.child(
                         div()
@@ -1367,7 +1367,7 @@ impl WorkspaceApp {
                 div()
                     .mt(px(2.0))
                     .child(Self::render_lucide_icon(
-                        if self.ai_model_reasoning_expanded {
+                        if self.settings_page.ai_model_reasoning_expanded {
                             LucideIcon::ChevronDown
                         } else {
                             LucideIcon::ChevronRight
@@ -1379,7 +1379,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    this.ai_model_reasoning_expanded = !this.ai_model_reasoning_expanded;
+                    this.settings_page.toggle_ai_section(AiSettingsSection::ModelReasoning);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -1396,7 +1396,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let provider_id = provider.id.clone();
         let expanded = self
-            .expanded_ai_model_reasoning_providers
+            .settings_page.expanded_ai_model_reasoning_providers
             .contains(&provider_id);
         let override_count = provider
             .models
@@ -1465,15 +1465,9 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            if this
-                                .expanded_ai_model_reasoning_providers
-                                .contains(&provider_id)
-                            {
-                                this.expanded_ai_model_reasoning_providers.remove(&provider_id);
-                            } else {
-                                this.expanded_ai_model_reasoning_providers
-                                    .insert(provider_id.clone());
-                            }
+                            this
+                                .settings_page
+                                .toggle_ai_model_reasoning_provider(provider_id.clone());
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -1640,7 +1634,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .child(self.ai_context_windows_header(cx))
-            .when(self.ai_context_windows_expanded, |section| {
+            .when(self.settings_page.ai_context_windows_expanded, |section| {
                 if providers_with_models.is_empty() {
                     section.child(
                         div()
@@ -1707,7 +1701,7 @@ impl WorkspaceApp {
                 div()
                     .mt(px(2.0))
                     .child(Self::render_lucide_icon(
-                        if self.ai_context_windows_expanded {
+                        if self.settings_page.ai_context_windows_expanded {
                             LucideIcon::ChevronDown
                         } else {
                             LucideIcon::ChevronRight
@@ -1719,7 +1713,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    this.ai_context_windows_expanded = !this.ai_context_windows_expanded;
+                    this.settings_page.toggle_ai_section(AiSettingsSection::ContextWindows);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -1735,7 +1729,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let provider_id = provider.id.clone();
-        let expanded = self.expanded_ai_context_providers.contains(&provider_id);
+        let expanded = self.settings_page.expanded_ai_context_providers.contains(&provider_id);
         let override_count = provider
             .models
             .iter()
@@ -1803,11 +1797,9 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            if this.expanded_ai_context_providers.contains(&provider_id) {
-                                this.expanded_ai_context_providers.remove(&provider_id);
-                            } else {
-                                this.expanded_ai_context_providers.insert(provider_id.clone());
-                            }
+                            this
+                                .settings_page
+                                .toggle_ai_context_provider(provider_id.clone());
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -2090,7 +2082,7 @@ impl WorkspaceApp {
     }
 
     fn ai_tool_expand_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        let expanded = self.ai_tool_use_expanded;
+        let expanded = self.settings_page.ai_tool_use_expanded;
         // Tool-policy expand/collapse is an outline small Button in Tauri.
         // Route it through the same shared primitive as other settings
         // command buttons.
@@ -2111,7 +2103,7 @@ impl WorkspaceApp {
                 ..ToolbarButtonOptions::default()
             },
             cx.listener(|this, _event, _window, cx| {
-                this.ai_tool_use_expanded = !this.ai_tool_use_expanded;
+                this.settings_page.toggle_ai_section(AiSettingsSection::ToolUse);
                 cx.stop_propagation();
                 cx.notify();
             }),

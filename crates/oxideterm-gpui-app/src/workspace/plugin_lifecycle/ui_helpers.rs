@@ -3,9 +3,10 @@
 
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
 
+#[cfg(test)]
+pub(in crate::workspace) use oxideterm_plugin_host_api::app::native_plugin_platform_label;
 pub(in crate::workspace) use oxideterm_plugin_host_api::app::{
-    native_plugin_custom_event_from_args, native_plugin_i18n_translate,
-    native_plugin_layout_snapshot, native_plugin_platform_label, native_plugin_settings_section,
+    native_plugin_custom_event_from_args, native_plugin_layout_snapshot,
     native_plugin_theme_snapshot,
 };
 

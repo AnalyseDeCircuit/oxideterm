@@ -10,17 +10,26 @@ use oxideterm_settings::{
 };
 use oxideterm_settings_model::{
     AI_MODEL_REFRESH_MISSING_API_KEY, AiModelRefreshDelivery, AiProviderModelChipItem,
-    KNOWLEDGE_EMBEDDING_BATCH_SIZE, ai_add_execution_profile, ai_default_execution_profile,
-    ai_delete_execution_profile, ai_duplicate_execution_profile, ai_execution_profile_id,
-    ai_execution_profiles_need_normalization, ai_normalize_execution_profiles,
-    ai_patch_execution_profile, ai_provider_model_chip_rows, ai_provider_views,
-    ai_reasoning_effort_from_profile_value, ai_reasoning_profile_value,
-    ai_set_default_execution_profile, ai_update_provider, current_time_millis,
-    import_knowledge_file, parse_focus_handoff_command_list, plugin_setting_draft_to_value,
-    plugin_setting_input_value, reconnect_attempt_label, reconnect_base_delay_options,
-    reconnect_delay_label, reconnect_max_attempt_options, reconnect_max_delay_options,
-    set_ai_model_max_response_tokens, set_ai_model_reasoning_override,
-    set_ai_provider_reasoning_override, set_ai_user_context_window, toggle_string_set,
+    AiSettingsSection, KNOWLEDGE_EMBEDDING_BATCH_SIZE, KnowledgeDeleteTarget,
+    KnowledgeExternalEdit, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts,
+    SettingsInputDraftApply, TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection,
+    ThemeEditorState, UI_THEME_COLOR_FIELDS, ai_add_execution_profile,
+    ai_default_execution_profile, ai_delete_execution_profile, ai_duplicate_execution_profile,
+    ai_execution_profile_id, ai_execution_profiles_need_normalization,
+    ai_normalize_execution_profiles, ai_patch_execution_profile, ai_provider_model_chip_rows,
+    ai_provider_views, ai_reasoning_effort_from_profile_value, ai_reasoning_profile_value,
+    ai_set_default_execution_profile, ai_update_provider, app_ui_colors_to_colors,
+    apply_persisted_settings_input_draft, current_time_millis, custom_theme_display_name,
+    delete_custom_theme_from_settings, editor_terminal_theme, editor_ui_colors,
+    import_custom_theme, import_knowledge_file, is_custom_theme_id, parse_color_hex,
+    persisted_settings_input_value, plugin_setting_draft_to_value, plugin_setting_input_value,
+    reconnect_attempt_label, reconnect_base_delay_options, reconnect_delay_label,
+    reconnect_max_attempt_options, reconnect_max_delay_options, save_theme_editor_to_settings,
+    set_ai_model_reasoning_override, set_ai_provider_reasoning_override,
+    set_ai_user_context_window,
+    settings_section_list_identity as settings_model_section_list_identity,
+    settings_section_list_item_count as settings_model_section_list_item_count,
+    terminal_theme_to_colors, theme_editor_from_settings, toggle_string_set,
 };
 use oxideterm_theme::BUILT_IN_THEMES;
 
@@ -70,23 +79,6 @@ use oxideterm_gpui_ui::{
         text_input_value_segments, text_input_with_content_align,
     },
 };
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ThemeEditorSection {
-    Terminal,
-    Ui,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct ThemeEditorState {
-    pub(super) edit_theme_id: Option<String>,
-    pub(super) name: String,
-    pub(super) duplicate_theme: String,
-    pub(super) duplicate_theme_touched: bool,
-    pub(super) terminal_colors: Vec<String>,
-    pub(super) ui_colors: Vec<String>,
-    pub(super) active_section: ThemeEditorSection,
-}
 
 include!("settings/surface.rs");
 include!("settings/cards.rs");

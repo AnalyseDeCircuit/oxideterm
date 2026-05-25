@@ -150,8 +150,8 @@ impl WorkspaceApp {
                                 ..ToolbarButtonOptions::default()
                             },
                             cx.listener(move |this, _event, _window, cx| {
-                                this.ai_provider_key_remove_confirm =
-                                    Some((index, provider_id.clone()));
+                                this.settings_page
+                                    .request_ai_provider_key_remove(index, provider_id.clone());
                                 this.reset_standard_confirm_focus();
                                 cx.stop_propagation();
                                 cx.notify();

@@ -3,10 +3,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.knowledge_create_dialog_open {
+        if !self.settings_page.knowledge_create_dialog_open {
             return None;
         }
-        let can_create = !self.knowledge_new_collection_name.trim().is_empty();
+        let can_create = !self.settings_page.knowledge_new_collection_name.trim().is_empty();
         Some(
             dismissible_dialog_backdrop()
                 .on_mouse_down(
@@ -14,8 +14,7 @@ impl WorkspaceApp {
                     cx.listener(|this, _event, _window, cx| {
                         // Tauri DocumentManager uses Dialog onOpenChange for
                         // create collection; outside close matches Cancel.
-                        this.knowledge_create_dialog_open = false;
-                        this.knowledge_new_collection_name.clear();
+                        this.settings_page.close_knowledge_create_dialog();
                         this.clear_standard_confirm_focus();
                         cx.stop_propagation();
                         cx.notify();
@@ -61,7 +60,7 @@ impl WorkspaceApp {
                                         )
                                         .child(self.settings_text_input_control(
                                             SettingsInput::KnowledgeCollectionName,
-                                            self.knowledge_new_collection_name.clone(),
+                                            self.settings_page.knowledge_new_collection_name.clone(),
                                             self.i18n
                                                 .t("settings_view.knowledge.collection_name_placeholder"),
                                             420.0,
@@ -97,8 +96,7 @@ impl WorkspaceApp {
                                         ConfirmDialogAction::Cancel,
                                         false,
                                         |this, _event, _window, cx| {
-                                            this.knowledge_create_dialog_open = false;
-                                            this.knowledge_new_collection_name.clear();
+                                            this.settings_page.close_knowledge_create_dialog();
                                             cx.notify();
                                         },
                                         cx,
@@ -112,7 +110,7 @@ impl WorkspaceApp {
                                         !can_create,
                                         |this, _event, _window, cx| {
                                             this.knowledge_create_collection(cx);
-                                            this.knowledge_create_dialog_open = false;
+                                            this.settings_page.hide_knowledge_create_dialog();
                                         },
                                         cx,
                                     ),
@@ -124,10 +122,10 @@ impl WorkspaceApp {
     }
 
     fn render_knowledge_new_document_dialog(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.knowledge_new_document_dialog_open {
+        if !self.settings_page.knowledge_new_document_dialog_open {
             return None;
         }
-        let can_create = !self.knowledge_new_document_title.trim().is_empty();
+        let can_create = !self.settings_page.knowledge_new_document_title.trim().is_empty();
         Some(
             dismissible_dialog_backdrop()
                 .on_mouse_down(
@@ -135,8 +133,7 @@ impl WorkspaceApp {
                     cx.listener(|this, _event, _window, cx| {
                         // Tauri new-document Dialog closes through
                         // setNewDocDialogOpen(false) on backdrop click.
-                        this.knowledge_new_document_dialog_open = false;
-                        this.knowledge_new_document_title.clear();
+                        this.settings_page.close_knowledge_new_document_dialog();
                         this.clear_standard_confirm_focus();
                         cx.stop_propagation();
                         cx.notify();
@@ -182,7 +179,7 @@ impl WorkspaceApp {
                                         )
                                         .child(self.settings_text_input_control(
                                             SettingsInput::KnowledgeDocumentTitle,
-                                            self.knowledge_new_document_title.clone(),
+                                            self.settings_page.knowledge_new_document_title.clone(),
                                             self.i18n
                                                 .t("settings_view.knowledge.new_document_title_placeholder"),
                                             420.0,
@@ -218,8 +215,7 @@ impl WorkspaceApp {
                                         ConfirmDialogAction::Cancel,
                                         false,
                                         |this, _event, _window, cx| {
-                                            this.knowledge_new_document_dialog_open = false;
-                                            this.knowledge_new_document_title.clear();
+                                            this.settings_page.close_knowledge_new_document_dialog();
                                             cx.notify();
                                         },
                                         cx,
@@ -233,7 +229,7 @@ impl WorkspaceApp {
                                         !can_create,
                                         |this, _event, _window, cx| {
                                             this.knowledge_create_blank_document(cx);
-                                            this.knowledge_new_document_dialog_open = false;
+                                            this.settings_page.hide_knowledge_new_document_dialog();
                                         },
                                         cx,
                                     ),
@@ -245,7 +241,7 @@ impl WorkspaceApp {
     }
 
     fn render_knowledge_delete_confirm_dialog(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let confirm = self.knowledge_delete_confirm.as_ref()?;
+        let confirm = self.settings_page.knowledge_delete_confirm.as_ref()?;
         let message_key = match confirm.target {
             KnowledgeDeleteTarget::Collection => "settings_view.knowledge.delete_collection_confirm",
             KnowledgeDeleteTarget::Document => "settings_view.knowledge.delete_document_confirm",
@@ -261,7 +257,7 @@ impl WorkspaceApp {
                     cx.listener(|this, _event, _window, cx| {
                         // Tauri delete confirm uses onOpenChange(false) to
                         // clear the pending delete target.
-                        this.knowledge_delete_confirm = None;
+                        this.settings_page.clear_knowledge_delete_confirm();
                         this.clear_standard_confirm_focus();
                         cx.stop_propagation();
                         cx.notify();
@@ -292,7 +288,7 @@ impl WorkspaceApp {
                                         ConfirmDialogAction::Cancel,
                                         false,
                                         |this, _event, _window, cx| {
-                                            this.knowledge_delete_confirm = None;
+                                            this.settings_page.clear_knowledge_delete_confirm();
                                             cx.notify();
                                         },
                                         cx,

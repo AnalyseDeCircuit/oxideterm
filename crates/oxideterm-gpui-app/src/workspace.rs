@@ -105,8 +105,7 @@ use oxideterm_settings::{
     TerminalEncoding as SettingsTerminalEncoding, default_settings_path,
 };
 use oxideterm_settings_model::{
-    AiMcpServerDraft, AiModelRefreshDelivery, AiProviderKeyStatusDelivery, KnowledgeDeleteConfirm,
-    KnowledgeDeleteTarget, KnowledgeExternalEdit,
+    AiMcpServerDraft, AiModelRefreshDelivery, AiProviderKeyStatusDelivery, SettingsPageModel,
 };
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
@@ -156,7 +155,6 @@ use self::new_connection::{
 use self::pane_tree::SplitDrag;
 use self::quick_commands::QuickCommandsState;
 use self::session_manager::{AutoRouteModalState, SessionManagerState};
-use self::settings::ThemeEditorState;
 use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
 use self::sidebar::{
     AiCompactionDelivery, AiModelSelectorProbeDelivery, AiPendingChatStream, AiStreamDelivery,
@@ -178,7 +176,7 @@ use crate::{
 };
 use oxideterm_gpui_markdown::{MarkdownBlockLayout, MarkdownDocument};
 use oxideterm_gpui_settings_view::{
-    ActiveSurface, SettingsInput, SettingsSelect, SettingsSlider, SettingsTab, TerminalSettingsPage,
+    ActiveSurface, SettingsInput, SettingsSelect, SettingsSlider, SettingsTab,
 };
 use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId, select_anchor_probe};
 use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
@@ -199,11 +197,9 @@ use virtual_list::{
     sync_tauri_virtual_list_state_by_signatures,
 };
 
-const SETTINGS_SECTION_HEADER_ITEM_COUNT: usize = 1;
 const SETTINGS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 4;
 const SETTINGS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 260.0;
 const SETTINGS_SECTION_LIST_OVERSCAN: usize = 2;
-const AI_SETTINGS_FIXED_SECTION_COUNT: usize = 6;
 const AI_SETTINGS_SECTION_ESTIMATED_HEIGHT: f32 = 360.0;
 const AI_EXECUTION_PROFILE_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const AI_EXECUTION_PROFILE_LIST_ESTIMATED_HEIGHT: f32 = 136.0;
@@ -304,12 +300,6 @@ struct AiChatInitializationError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum KeybindingScopeFilter {
-    All,
-    Scope(crate::keybindings::ActionScope),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AiChatFooterAction {
     Submit,
 }
@@ -330,22 +320,6 @@ const KEYBINDING_RECORDING_FOOTER_ACTIONS: [KeybindingRecordingFooterAction; 2] 
     KeybindingRecordingFooterAction::Confirm,
     KeybindingRecordingFooterAction::Cancel,
 ];
-
-impl KeybindingScopeFilter {
-    fn matches(self, scope: crate::keybindings::ActionScope) -> bool {
-        match self {
-            Self::All => true,
-            Self::Scope(candidate) => candidate == scope,
-        }
-    }
-
-    fn label_key(self) -> &'static str {
-        match self {
-            Self::All => "settings_view.keybindings.scope_all",
-            Self::Scope(scope) => scope.label_key(),
-        }
-    }
-}
 
 enum KnowledgeReindexDelivery {
     Progress { current: usize, total: usize },
@@ -520,7 +494,7 @@ pub(crate) struct WorkspaceApp {
     terminal_cast_seek_dragging: bool,
     command_palette: CommandPaletteState,
     shortcuts_modal: ShortcutsModalState,
-    settings_reset_confirm_open: bool,
+    settings_page: SettingsPageModel,
     quick_commands: QuickCommandsState,
     quick_command_list_state: ListState,
     quick_command_list_cache: RefCell<VirtualListSignatureCache>,
@@ -555,8 +529,6 @@ pub(crate) struct WorkspaceApp {
     active_session_sidebar_focused_node_id: Option<NodeId>,
     active_session_sidebar_list_state: ListState,
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
-    active_settings_tab: SettingsTab,
-    terminal_settings_page: TerminalSettingsPage,
     open_settings_select: Option<SettingsSelect>,
     settings_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     settings_section_list_state: ListState,
@@ -573,15 +545,6 @@ pub(crate) struct WorkspaceApp {
     ai_provider_card_list_cache: RefCell<VirtualListSignatureCache>,
     ai_mcp_server_list_state: ListState,
     ai_mcp_server_list_cache: RefCell<VirtualListSignatureCache>,
-    ai_new_provider_type: String,
-    ai_provider_settings_expanded: bool,
-    ai_tool_use_expanded: bool,
-    ai_context_windows_expanded: bool,
-    ai_model_reasoning_expanded: bool,
-    expanded_ai_providers: HashMap<String, bool>,
-    expanded_ai_provider_models: HashSet<String>,
-    expanded_ai_context_providers: HashSet<String>,
-    expanded_ai_model_reasoning_providers: HashSet<String>,
     ai_model_selector_open: bool,
     ai_model_selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     ai_model_selector_search_focused: bool,
@@ -637,22 +600,9 @@ pub(crate) struct WorkspaceApp {
     ai_mcp_registry: oxideterm_ai::McpRegistry,
     ai_rag_store: Arc<oxideterm_ai::RagStore>,
     ai_mcp_add_dialog: Option<AiMcpServerDraft>,
-    knowledge_selected_collection_id: Option<String>,
-    knowledge_create_dialog_open: bool,
-    knowledge_new_document_dialog_open: bool,
-    knowledge_embedding_config_expanded: bool,
-    knowledge_new_collection_name: String,
-    knowledge_new_document_title: String,
-    knowledge_new_document_format: String,
-    knowledge_import_progress: Option<(usize, usize)>,
-    knowledge_embedding_progress: Option<(usize, usize)>,
-    knowledge_reindex_progress: Option<(usize, usize)>,
     knowledge_reindex_cancel: Option<Arc<AtomicBool>>,
     knowledge_reindex_rx: Option<std::sync::mpsc::Receiver<KnowledgeReindexDelivery>>,
     knowledge_reindex_polling: bool,
-    knowledge_delete_confirm: Option<KnowledgeDeleteConfirm>,
-    knowledge_external_edit: Option<KnowledgeExternalEdit>,
-    knowledge_error: Option<String>,
     ai_compaction_rx: Option<std::sync::mpsc::Receiver<AiCompactionDelivery>>,
     ai_compaction_polling: bool,
     ai_compacting_conversations: HashSet<String>,
@@ -677,9 +627,6 @@ pub(crate) struct WorkspaceApp {
     ai_model_selector_probe_tx: Option<std::sync::mpsc::Sender<AiModelSelectorProbeDelivery>>,
     ai_model_selector_probe_polling: bool,
     ai_model_selector_probe_pending: usize,
-    show_ai_enable_confirm: bool,
-    ai_provider_key_remove_confirm: Option<(usize, String)>,
-    ai_provider_remove_confirm: Option<(String, String)>,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
     text_input_anchors: HashMap<TextInputAnchorId, TextInputAnchor>,
     selectable_text_values: HashMap<u64, String>,
@@ -699,17 +646,8 @@ pub(crate) struct WorkspaceApp {
     settings_input_draft: String,
     settings_slider_drag: Option<SettingsSlider>,
     settings_caret_blink_pause_until: Option<Instant>,
-    keybinding_recording_action_id: Option<String>,
     keybinding_recording_combo: Option<crate::keybindings::KeyCombo>,
     keybinding_recording_footer_focus: Option<KeybindingRecordingFooterAction>,
-    keybinding_conflict_action_ids: Vec<String>,
-    keybinding_search_query: String,
-    keybinding_scope_filter: KeybindingScopeFilter,
-    keybinding_reset_all_confirm_open: bool,
-    theme_editor: Option<ThemeEditorState>,
-    background_blur_preview: Option<i64>,
-    background_blur_commit_generation: u64,
-    background_cache_poll_scheduled: bool,
     new_connection_form: Option<NewConnectionForm>,
     drill_down_parent_node_id: Option<NodeId>,
     editing_saved_connection_id: Option<String>,
@@ -884,9 +822,6 @@ pub(crate) struct WorkspaceApp {
     oxide_import_name_group_list_states: RefCell<HashMap<String, ListState>>,
     oxide_import_name_group_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
     auto_route_modal: AutoRouteModalState,
-    settings_connection_new_group: String,
-    settings_selected_ssh_hosts: HashSet<String>,
-    settings_connection_status: Option<String>,
     local_shells: Vec<ShellInfo>,
     terminal_notice_tx: std::sync::mpsc::Sender<TerminalNotice>,
     terminal_notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,

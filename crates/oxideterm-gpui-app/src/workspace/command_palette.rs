@@ -577,7 +577,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_reset_settings_confirm_from_palette(&mut self, cx: &mut Context<Self>) {
-        self.settings_reset_confirm_open = true;
+        self.settings_page.set_settings_reset_confirm_open(true);
         self.reset_standard_confirm_focus();
         cx.notify();
     }
@@ -607,13 +607,13 @@ impl WorkspaceApp {
             },
             self.standard_confirm_focus(),
             cx.listener(|this, _event, _window, cx| {
-                this.settings_reset_confirm_open = false;
+                this.settings_page.set_settings_reset_confirm_open(false);
                 this.clear_standard_confirm_focus();
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
-                this.settings_reset_confirm_open = false;
+                this.settings_page.set_settings_reset_confirm_open(false);
                 this.clear_standard_confirm_focus();
                 this.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
                 cx.stop_propagation();
