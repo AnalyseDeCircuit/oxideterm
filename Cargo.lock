@@ -7006,6 +7006,18 @@ name = "oxideterm-backend-classification"
 version = "0.1.0"
 
 [[package]]
+name = "oxideterm-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "oxideterm-cloud-sync",
+ "oxideterm-connections",
+ "oxideterm-settings",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "oxideterm-cloud-sync"
 version = "0.1.0"
 dependencies = [

@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/oxideterm-gpui-markdown",
+  "crates/oxideterm-cli",
   "crates/oxideterm-gpui-cloud-sync",
   "crates/oxideterm-gpui-platform",
   "crates/oxideterm-gpui-settings-view",
@@ -61,6 +62,7 @@ argon2 = { version = "0.5", default-features = false, features = ["std"] }
 base64 = "0.22"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
 crossbeam-channel = "0.5"
 dashmap = "6.1"
 dirs = "6"

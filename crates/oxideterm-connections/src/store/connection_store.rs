@@ -1,6 +1,24 @@
 impl ConnectionStore {
     pub fn load(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
+        let mut store = Self::load_without_side_effects(path)?;
+        store.normalize();
+        if store.migrate_legacy_credentials()? {
+            store.save()?;
+        }
+        Ok(store)
+    }
+
+    pub fn load_read_only(path: impl Into<PathBuf>) -> Result<Self> {
+        let path = path.into();
+        let mut store = Self::load_without_side_effects(path)?;
+        // CLI and inspection callers need normalized data without triggering
+        // legacy keychain migration or rewriting the store on disk.
+        store.normalize();
+        Ok(store)
+    }
+
+    fn load_without_side_effects(path: PathBuf) -> Result<Self> {
         let data = if path.exists() {
             let bytes =
                 fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -9,16 +27,11 @@ impl ConnectionStore {
         } else {
             ConnectionStoreData::default()
         };
-        let mut store = Self {
+        Ok(Self {
             path,
             data,
             keychain: ConnectionKeychain::default(),
-        };
-        store.normalize();
-        if store.migrate_legacy_credentials()? {
-            store.save()?;
-        }
-        Ok(store)
+        })
     }
 
     pub fn path(&self) -> &Path {

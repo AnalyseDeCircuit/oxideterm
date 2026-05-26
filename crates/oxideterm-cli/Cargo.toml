@@ -1,0 +1,17 @@
+[package]
+name = "oxideterm-cli"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "oxideterm"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
+oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+serde.workspace = true
+serde_json.workspace = true
