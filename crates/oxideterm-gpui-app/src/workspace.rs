@@ -105,7 +105,8 @@ use oxideterm_settings::{
     TerminalEncoding as SettingsTerminalEncoding, default_settings_path,
 };
 use oxideterm_settings_model::{
-    AiMcpServerDraft, AiModelRefreshDelivery, AiProviderKeyStatusDelivery, SettingsPageModel,
+    AiMcpServerDraft, AiModelRefreshDelivery, AiProviderKeyStatusDelivery, CloudSyncFormDraft,
+    SettingsPageModel,
 };
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
@@ -735,7 +736,7 @@ pub(crate) struct WorkspaceApp {
     connection_pool_body_list_cache: RefCell<VirtualListSignatureCache>,
     cloud_sync_store: oxideterm_cloud_sync::state::CloudSyncStateStore,
     cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService,
-    cloud_sync_form: cloud_sync::CloudSyncFormDraft,
+    cloud_sync_form: CloudSyncFormDraft,
     cloud_sync_section_list_state: ListState,
     cloud_sync_section_list_cache: RefCell<VirtualListSignatureCache>,
     cloud_sync_rollback_backup_list_state: ListState,

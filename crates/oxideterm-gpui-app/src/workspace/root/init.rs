@@ -118,7 +118,7 @@ impl WorkspaceApp {
             oxideterm_cloud_sync::state::default_cloud_sync_state_path(settings_store.path()),
         )?;
         let cloud_sync_form =
-            cloud_sync::CloudSyncFormDraft::from_settings(&cloud_sync_store.state().settings);
+            CloudSyncFormDraft::from_settings(&cloud_sync_store.state().settings);
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);

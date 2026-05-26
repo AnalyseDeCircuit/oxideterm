@@ -773,80 +773,15 @@ impl WorkspaceApp {
         if let Some(value) = self.settings_page.page_input_value(input) {
             return value;
         }
+        if let Some(value) = ai_mcp_draft_input_value(self.ai_mcp_add_dialog.as_ref(), input) {
+            return value;
+        }
+        if let Some(value) = cloud_sync_form_input_value(&self.cloud_sync_form, input) {
+            return value;
+        }
         match input {
             SettingsInput::TerminalCommandSpecsJson => {
                 self.load_terminal_command_specs_editor_value()
-            }
-            SettingsInput::AiMcpName => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .map(|draft| draft.name.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiMcpCommand => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .map(|draft| draft.command.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiMcpArgs => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .map(|draft| draft.args.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiMcpUrl => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .map(|draft| draft.url.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiMcpAuthHeaderName => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .map(|draft| draft.auth_header_name.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiMcpAuthToken => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .map(|draft| draft.auth_token.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiMcpEnvKey(index) => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .and_then(|draft| draft.env.get(index))
-                .map(|(key, _)| key.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiMcpEnvValue(index) => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .and_then(|draft| draft.env.get(index))
-                .map(|(_, value)| value.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiMcpHeaderKey(index) => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .and_then(|draft| draft.headers.get(index))
-                .map(|(key, _)| key.clone())
-                .unwrap_or_default(),
-            SettingsInput::AiMcpHeaderValue(index) => self
-                .ai_mcp_add_dialog
-                .as_ref()
-                .and_then(|draft| draft.headers.get(index))
-                .map(|(_, value)| value.clone())
-                .unwrap_or_default(),
-            SettingsInput::CloudSyncEndpoint => self.cloud_sync_form.endpoint.clone(),
-            SettingsInput::CloudSyncNamespace => self.cloud_sync_form.namespace.clone(),
-            SettingsInput::CloudSyncS3Bucket => self.cloud_sync_form.s3_bucket.clone(),
-            SettingsInput::CloudSyncS3Region => self.cloud_sync_form.s3_region.clone(),
-            SettingsInput::CloudSyncGitRepository => self.cloud_sync_form.git_repository.clone(),
-            SettingsInput::CloudSyncGitBranch => self.cloud_sync_form.git_branch.clone(),
-            SettingsInput::CloudSyncToken => self.cloud_sync_form.token.clone(),
-            SettingsInput::CloudSyncGitToken => self.cloud_sync_form.git_token.clone(),
-            SettingsInput::CloudSyncBasicUsername => self.cloud_sync_form.basic_username.clone(),
-            SettingsInput::CloudSyncBasicPassword => self.cloud_sync_form.basic_password.clone(),
-            SettingsInput::CloudSyncAccessKeyId => self.cloud_sync_form.access_key_id.clone(),
-            SettingsInput::CloudSyncSecretAccessKey => self.cloud_sync_form.secret_access_key.clone(),
-            SettingsInput::CloudSyncSessionToken => self.cloud_sync_form.session_token.clone(),
-            SettingsInput::CloudSyncSyncPassword => self.cloud_sync_form.sync_password.clone(),
-            SettingsInput::CloudSyncAutoUploadInterval => {
-                self.cloud_sync_form.auto_upload_interval_mins.clone()
             }
             SettingsInput::NativePluginInstallUrl => self.plugin_manager_install_url_draft.clone(),
             SettingsInput::NativePluginInstallChecksum => {
@@ -899,157 +834,28 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        if apply_cloud_sync_form_input_draft(
+            &mut self.cloud_sync_form,
+            input,
+            &self.settings_input_draft,
+        ) {
+            cx.notify();
+            return;
+        }
+        if apply_ai_mcp_draft_input(
+            self.ai_mcp_add_dialog.as_mut(),
+            input,
+            &self.settings_input_draft,
+        ) {
+            cx.notify();
+            return;
+        }
 
         match input {
             SettingsInput::TerminalCommandSpecsJson => {
                 cx.notify();
             }
             SettingsInput::AiProviderApiKey(_) => {
-                cx.notify();
-            }
-            SettingsInput::AiMcpName => {
-                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
-                    draft.name = self.settings_input_draft.trim().to_string();
-                }
-                cx.notify();
-            }
-            SettingsInput::AiMcpCommand => {
-                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
-                    draft.command = self.settings_input_draft.trim().to_string();
-                }
-                cx.notify();
-            }
-            SettingsInput::AiMcpArgs => {
-                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
-                    draft.args = self.settings_input_draft.clone();
-                }
-                cx.notify();
-            }
-            SettingsInput::AiMcpUrl => {
-                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
-                    draft.url = self.settings_input_draft.trim().to_string();
-                }
-                cx.notify();
-            }
-            SettingsInput::AiMcpAuthHeaderName => {
-                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
-                    draft.auth_header_name = self.settings_input_draft.trim().to_string();
-                }
-                cx.notify();
-            }
-            SettingsInput::AiMcpAuthToken => {
-                if let Some(draft) = self.ai_mcp_add_dialog.as_mut() {
-                    draft.auth_token = self.settings_input_draft.clone();
-                }
-                cx.notify();
-            }
-            SettingsInput::AiMcpEnvKey(index) => {
-                if let Some((key, _)) = self
-                    .ai_mcp_add_dialog
-                    .as_mut()
-                    .and_then(|draft| draft.env.get_mut(index))
-                {
-                    *key = self.settings_input_draft.trim().to_string();
-                }
-                cx.notify();
-            }
-            SettingsInput::AiMcpEnvValue(index) => {
-                if let Some((_, value)) = self
-                    .ai_mcp_add_dialog
-                    .as_mut()
-                    .and_then(|draft| draft.env.get_mut(index))
-                {
-                    *value = self.settings_input_draft.clone();
-                }
-                cx.notify();
-            }
-            SettingsInput::AiMcpHeaderKey(index) => {
-                if let Some((key, _)) = self
-                    .ai_mcp_add_dialog
-                    .as_mut()
-                    .and_then(|draft| draft.headers.get_mut(index))
-                {
-                    *key = self.settings_input_draft.trim().to_string();
-                }
-                cx.notify();
-            }
-            SettingsInput::AiMcpHeaderValue(index) => {
-                if let Some((_, value)) = self
-                    .ai_mcp_add_dialog
-                    .as_mut()
-                    .and_then(|draft| draft.headers.get_mut(index))
-                {
-                    *value = self.settings_input_draft.clone();
-                }
-                cx.notify();
-            }
-            SettingsInput::CloudSyncEndpoint => {
-                self.cloud_sync_form.endpoint = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::CloudSyncNamespace => {
-                self.cloud_sync_form.namespace = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::CloudSyncS3Bucket => {
-                self.cloud_sync_form.s3_bucket = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::CloudSyncS3Region => {
-                self.cloud_sync_form.s3_region = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::CloudSyncGitRepository => {
-                self.cloud_sync_form.git_repository = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::CloudSyncGitBranch => {
-                self.cloud_sync_form.git_branch = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::CloudSyncToken => {
-                self.cloud_sync_form.token = self.settings_input_draft.clone();
-                self.cloud_sync_form.token_touched = true;
-                cx.notify();
-            }
-            SettingsInput::CloudSyncGitToken => {
-                self.cloud_sync_form.git_token = self.settings_input_draft.clone();
-                self.cloud_sync_form.git_token_touched = true;
-                cx.notify();
-            }
-            SettingsInput::CloudSyncBasicUsername => {
-                self.cloud_sync_form.basic_username = self.settings_input_draft.clone();
-                self.cloud_sync_form.basic_username_touched = true;
-                cx.notify();
-            }
-            SettingsInput::CloudSyncBasicPassword => {
-                self.cloud_sync_form.basic_password = self.settings_input_draft.clone();
-                self.cloud_sync_form.basic_password_touched = true;
-                cx.notify();
-            }
-            SettingsInput::CloudSyncAccessKeyId => {
-                self.cloud_sync_form.access_key_id = self.settings_input_draft.clone();
-                self.cloud_sync_form.access_key_id_touched = true;
-                cx.notify();
-            }
-            SettingsInput::CloudSyncSecretAccessKey => {
-                self.cloud_sync_form.secret_access_key = self.settings_input_draft.clone();
-                self.cloud_sync_form.secret_access_key_touched = true;
-                cx.notify();
-            }
-            SettingsInput::CloudSyncSessionToken => {
-                self.cloud_sync_form.session_token = self.settings_input_draft.clone();
-                self.cloud_sync_form.session_token_touched = true;
-                cx.notify();
-            }
-            SettingsInput::CloudSyncSyncPassword => {
-                self.cloud_sync_form.sync_password = self.settings_input_draft.clone();
-                self.cloud_sync_form.sync_password_touched = true;
-                cx.notify();
-            }
-            SettingsInput::CloudSyncAutoUploadInterval => {
-                self.cloud_sync_form.auto_upload_interval_mins =
-                    self.settings_input_draft.clone();
                 cx.notify();
             }
             SettingsInput::NativePluginInstallUrl => {

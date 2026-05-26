@@ -5,9 +5,11 @@
 //!
 //! This crate owns non-GPUI settings page behavior: AI profile mutations,
 //! provider refresh DTOs, reconnect option models, knowledge import rules,
-//! plugin setting draft conversion, and compact view-model helpers.
+//! cloud sync form drafts, plugin setting draft conversion, and compact
+//! view-model helpers.
 
 pub mod ai;
+pub mod cloud_sync_form;
 pub mod input_draft;
 pub mod knowledge;
 pub mod navigation;
@@ -19,6 +21,7 @@ pub mod theme;
 pub mod types;
 
 pub use ai::*;
+pub use cloud_sync_form::*;
 pub use input_draft::*;
 pub use knowledge::*;
 pub use navigation::*;

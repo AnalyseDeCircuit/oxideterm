@@ -7,17 +7,6 @@ const THEME_EDITOR_BODY_PADDING_Y: f32 = 12.0; // Body py-3.
 const THEME_EDITOR_BODY_GAP: f32 = 16.0; // Tauri space-y-4.
 const THEME_EDITOR_INPUT_HEIGHT: f32 = 32.0; // Tauri Input h-8.
 const THEME_EDITOR_DUPLICATE_WIDTH: f32 = 180.0; // Tauri duplicate select w-[180px].
-const THEME_EDITOR_FIELD_SWATCH_SIZE: f32 = 28.0; // Tauri ColorSwatch w-7 h-7.
-const THEME_EDITOR_HEX_INPUT_WIDTH: f32 = 72.0; // Tauri inline hex input w-[72px].
-const THEME_EDITOR_GRID_COLUMNS: usize = 4; // Tauri grid-cols-4.
-const THEME_EDITOR_CHROME_DOT_SIZE: f32 = 10.0; // Tauri preview dots w-2.5 h-2.5.
-const THEME_EDITOR_STATUS_DOT_SIZE: f32 = 8.0; // Tauri preview status dots w-2 h-2.
-const THEME_EDITOR_PREVIEW_CURSOR_WIDTH: f32 = 8.0; // Tauri cursor w-2.
-const THEME_EDITOR_PREVIEW_CURSOR_HEIGHT: f32 = 16.0; // Tauri cursor h-4.
-const THEME_EDITOR_SWATCH_LABEL_SIZE: f32 = 10.0; // Tauri text-[10px].
-const THEME_EDITOR_SECTION_TITLE_SIZE: f32 = 11.0; // Tauri section heading text-[11px].
-const BACKGROUND_THUMBNAIL_ASPECT_RATIO: f32 = 16.0 / 9.0; // Tauri aspect-video.
-const BACKGROUND_GALLERY_COLUMNS: f32 = 4.0; // Tauri BackgroundImageSection grid-cols-4.
 
 impl WorkspaceApp {
     fn settings_appearance_section(
@@ -245,16 +234,7 @@ impl WorkspaceApp {
         rows: Vec<AnyElement>,
     ) -> AnyElement {
         self.appearance_card_shell(
-            div()
-                .w_full()
-                .flex()
-                .flex_row()
-                .items_center()
-                .justify_between()
-                .gap(px(12.0))
-                .child(self.appearance_card_title(title, None))
-                .when_some(actions, |header, actions| header.child(actions))
-                .into_any_element(),
+            settings_appearance_card_header(&self.tokens, title, None, actions),
             rows,
         )
     }
@@ -265,43 +245,28 @@ impl WorkspaceApp {
         title: String,
         rows: Vec<AnyElement>,
     ) -> AnyElement {
-        self.appearance_card_shell(self.appearance_card_title(title, Some(icon)), rows)
+        self.appearance_card_shell(
+            settings_appearance_card_header(
+                &self.tokens,
+                title,
+                Some(Self::render_lucide_icon(
+                    icon,
+                    16.0,
+                    rgb(self.tokens.ui.text),
+                )),
+                None,
+            ),
+            rows,
+        )
     }
 
     fn appearance_card_shell(&self, header: AnyElement, rows: Vec<AnyElement>) -> AnyElement {
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(self.tokens.metrics.settings_card_padding))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap))
-            .child(header)
-            .children(rows);
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
-    }
-
-    fn appearance_card_title(&self, title: String, icon: Option<LucideIcon>) -> AnyElement {
-        let mut title_el = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(8.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text));
-        if let Some(icon) = icon {
-            title_el = title_el.child(Self::render_lucide_icon(
-                icon,
-                16.0,
-                rgb(self.tokens.ui.text),
-            ));
-        }
-        title_el.child(title.to_uppercase()).into_any_element()
+        settings_appearance_card_shell(
+            &self.tokens,
+            self.settings_background_active(),
+            header,
+            rows,
+        )
     }
 
     fn appearance_action_button(
@@ -341,37 +306,7 @@ impl WorkspaceApp {
     }
 
     fn appearance_row(&self, label_key: &str, hint_key: &str, control: AnyElement) -> AnyElement {
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .gap(px(self.tokens.metrics.settings_row_gap))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t(label_key)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t(hint_key)),
-                    ),
-            )
-            .child(control)
-            .into_any_element()
+        settings_appearance_row(&self.tokens, &self.i18n, label_key, hint_key, control)
     }
 
     fn appearance_checkbox_row(
@@ -474,36 +409,18 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .size(px(28.0))
-                    .rounded(px(settings.appearance.border_radius as f32))
-                    .border_1()
-                    .border_color(rgb(self.tokens.ui.border))
-                    .bg(rgb(self.tokens.ui.bg_secondary)),
-            )
-            .child(self.appearance_slider_control(
+        settings_appearance_radius_control(
+            &self.tokens,
+            settings.appearance.border_radius,
+            self.appearance_slider_control(
                 SettingsSlider::AppearanceBorderRadius,
                 SelectAnchorId::SettingsAppearanceBorderRadiusSlider,
                 0.0,
                 24.0,
                 settings.appearance.border_radius as f32,
                 cx,
-            ))
-            .child(
-                div()
-                    .w(px(48.0))
-                    .text_align(gpui::TextAlign::Right)
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(format!("{}px", settings.appearance.border_radius)),
             )
-            .into_any_element()
+        )
     }
 
     fn appearance_slider_value_control(
@@ -593,69 +510,7 @@ impl WorkspaceApp {
     }
 
     fn appearance_theme_preview(&self, settings: &PersistedSettings) -> AnyElement {
-        let terminal = self.tokens.terminal;
-        div()
-            .w_full()
-            .mt(px(self.tokens.metrics.settings_font_preview_margin_top))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(terminal.background))
-            .p(px(self.tokens.metrics.settings_theme_preview_padding))
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(self.tokens.metrics.settings_theme_preview_dot_gap))
-                    .child(self.preview_dot(terminal.red))
-                    .child(self.preview_dot(terminal.yellow))
-                    .child(self.preview_dot(terminal.green)),
-            )
-            .child(
-                div()
-                    .font_family(
-                        settings
-                            .terminal
-                            .font_family
-                            .terminal_family_name(&settings.terminal.custom_font_family),
-                    )
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .line_height(px(self.tokens.metrics.settings_theme_preview_line_height))
-                    .text_color(rgb(terminal.foreground))
-                    .flex()
-                    .flex_col()
-                    .child("$ echo \"Hello World\"")
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .gap(px(6.0))
-                            .child(div().text_color(rgb(terminal.blue)).child("~"))
-                            .child(div().text_color(rgb(terminal.magenta)).child("git"))
-                            .child(div().text_color(rgb(terminal.blue)).child("status")),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(4.0))
-                            .child(">")
-                            .child(div().w(px(9.0)).h(px(18.0)).bg(rgb(terminal.cursor))),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn preview_dot(&self, color: u32) -> AnyElement {
-        div()
-            .size(px(self.tokens.metrics.settings_theme_preview_dot_size))
-            .rounded_full()
-            .bg(rgb(color))
-            .into_any_element()
+        settings_appearance_theme_preview(&self.tokens, settings)
     }
 
     fn render_theme_editor_modal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -825,33 +680,22 @@ impl WorkspaceApp {
         editor: &ThemeEditorState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .flex()
-            .flex_row()
-            .items_end()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(self.theme_editor_label("settings_view.custom_theme.name"))
-                    .child(self.theme_editor_text_input(
-                        SettingsInput::CustomThemeName,
-                        editor.name.clone(),
-                        self.i18n.t("settings_view.custom_theme.name_placeholder"),
-                        0.0,
-                        false,
-                        true,
-                        cx,
-                    )),
-            )
-            .when(editor.edit_theme_id.is_none(), |row| {
-                row.child(self.theme_editor_duplicate_row(editor, cx))
-            })
-            .into_any_element()
+        settings_theme_editor_name_duplicate_row(
+            self.theme_editor_label("settings_view.custom_theme.name"),
+            self.theme_editor_text_input(
+                SettingsInput::CustomThemeName,
+                editor.name.clone(),
+                self.i18n.t("settings_view.custom_theme.name_placeholder"),
+                0.0,
+                false,
+                true,
+                cx,
+            ),
+            editor
+                .edit_theme_id
+                .is_none()
+                .then(|| self.theme_editor_duplicate_row(editor, cx)),
+        )
     }
 
     fn theme_editor_duplicate_row(
@@ -864,16 +708,11 @@ impl WorkspaceApp {
         } else {
             self.i18n.t("settings_view.custom_theme.select_base")
         };
-        div()
-            .w(px(THEME_EDITOR_DUPLICATE_WIDTH))
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .child(self.theme_editor_label("settings_view.custom_theme.duplicate_from"))
-            .child(self.theme_editor_duplicate_select(value, cx))
-            .into_any_element()
+        settings_theme_editor_duplicate_row(
+            self.theme_editor_label("settings_view.custom_theme.duplicate_from"),
+            self.theme_editor_duplicate_select(value, cx),
+        )
     }
-
     fn theme_editor_duplicate_select(
         &self,
         value: String,
@@ -896,168 +735,13 @@ impl WorkspaceApp {
         terminal: TerminalTheme,
         ui: AppUiColors,
     ) -> AnyElement {
-        div()
-            .rounded(px(self.tokens.radii.sm))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(terminal.background))
-            .overflow_hidden()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .px(px(12.0))
-                    .py(px(6.0))
-                    .bg(rgb(ui.bg_panel))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(self.theme_editor_preview_dot(
-                        terminal.red,
-                        THEME_EDITOR_CHROME_DOT_SIZE,
-                    ))
-                    .child(self.theme_editor_preview_dot(
-                        terminal.yellow,
-                        THEME_EDITOR_CHROME_DOT_SIZE,
-                    ))
-                    .child(self.theme_editor_preview_dot(
-                        terminal.green,
-                        THEME_EDITOR_CHROME_DOT_SIZE,
-                    ))
-                    .child(
-                        div()
-                            .ml(px(8.0))
-                            .text_size(px(THEME_EDITOR_SWATCH_LABEL_SIZE))
-                            .text_color(rgb(ui.text_muted))
-                            .child(format!("Terminal - {}", editor.name)),
-                    ),
-            )
-            .child(
-                div()
-                    .p(px(12.0))
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .line_height(px(20.0))
-                    .text_color(rgb(terminal.foreground))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .flex()
-                            .child(div().text_color(rgb(terminal.green)).child("user@oxide"))
-                            .child(":")
-                            .child(div().text_color(rgb(terminal.blue)).child("~/projects"))
-                            .child("$ ")
-                            .child(div().text_color(rgb(terminal.magenta)).child("git"))
-                            .child(" status"),
-                    )
-                    .child(div().text_color(rgb(terminal.yellow)).child("On branch main"))
-                    .child(
-                        div()
-                            .text_color(rgb(terminal.cyan))
-                            .child("Changes not staged for commit:"),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .child(div().text_color(rgb(terminal.red)).child("  modified: "))
-                            .child("src/main.rs"),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .child(div().text_color(rgb(terminal.green)).child("user@oxide"))
-                            .child(":")
-                            .child(div().text_color(rgb(terminal.blue)).child("~"))
-                            .child("$ ")
-                            .child(
-                                div()
-                                    .w(px(THEME_EDITOR_PREVIEW_CURSOR_WIDTH))
-                                    .h(px(THEME_EDITOR_PREVIEW_CURSOR_HEIGHT))
-                                    .bg(rgb(terminal.cursor)),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .px(px(12.0))
-                    .py(px(6.0))
-                    .border_t_1()
-                    .border_color(rgb(ui.border))
-                    .bg(rgb(ui.bg))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(self.theme_editor_preview_badge(
-                        "Active",
-                        ui.accent,
-                        ui.accent_text,
-                        false,
-                    ))
-                    .child(self.theme_editor_preview_badge(
-                        "Hover",
-                        ui.bg_hover,
-                        ui.text_muted,
-                        false,
-                    ))
-                    .child(self.theme_editor_preview_badge("Panel", ui.bg_panel, ui.text, true))
-                    .child(
-                        div()
-                            .ml_auto()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .child(self.theme_editor_preview_dot(
-                                ui.success,
-                                THEME_EDITOR_STATUS_DOT_SIZE,
-                            ))
-                            .child(self.theme_editor_preview_dot(
-                                ui.warning,
-                                THEME_EDITOR_STATUS_DOT_SIZE,
-                            ))
-                            .child(self.theme_editor_preview_dot(
-                                ui.error,
-                                THEME_EDITOR_STATUS_DOT_SIZE,
-                            ))
-                            .child(self.theme_editor_preview_dot(
-                                ui.info,
-                                THEME_EDITOR_STATUS_DOT_SIZE,
-                            )),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn theme_editor_preview_dot(&self, color: u32, size: f32) -> AnyElement {
-        div()
-            .size(px(size))
-            .rounded_full()
-            .bg(rgb(color))
-            .into_any_element()
-    }
-
-    fn theme_editor_preview_badge(
-        &self,
-        label: &'static str,
-        background: u32,
-        text: u32,
-        bordered: bool,
-    ) -> AnyElement {
-        div()
-            .px(px(6.0))
-            .py(px(2.0))
-            .rounded(px(self.tokens.radii.sm))
-            .text_size(px(9.0))
-            .text_color(rgb(text))
-            .bg(rgb(background))
-            .when(bordered, |badge| {
-                badge.border_1().border_color(rgb(self.tokens.ui.border))
-            })
-            .child(label)
-            .into_any_element()
+        settings_theme_editor_preview(
+            &self.tokens,
+            &editor.name,
+            terminal,
+            ui,
+            settings_mono_font_family(self.settings_store.settings()),
+        )
     }
 
     fn theme_editor_section_tabs(
@@ -1250,12 +934,7 @@ impl WorkspaceApp {
         colors: &[String],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut grid = div()
-            .w_full()
-            .grid()
-            .grid_cols(THEME_EDITOR_GRID_COLUMNS as u16)
-            .gap_x(px(16.0))
-            .gap_y(px(12.0));
+        let mut cells = Vec::new();
         for &index in indexes {
             let Some(field) = UI_THEME_COLOR_FIELDS.get(index) else {
                 continue;
@@ -1264,7 +943,7 @@ impl WorkspaceApp {
                 .get(index)
                 .cloned()
                 .unwrap_or_else(|| "#000000".to_string());
-            grid = grid.child(self.theme_editor_color_cell(
+            cells.push(self.theme_editor_color_cell(
                 field,
                 color,
                 SettingsInput::CustomThemeUiColor(index),
@@ -1272,23 +951,7 @@ impl WorkspaceApp {
             ));
         }
 
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .pb(px(4.0))
-                    .border_b_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
-                    .text_size(px(THEME_EDITOR_SECTION_TITLE_SIZE))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(title_key).to_uppercase()),
-            )
-            .child(grid)
-            .into_any_element()
+        settings_theme_editor_color_section(&self.tokens, self.i18n.t(title_key), cells)
     }
 
     fn theme_editor_color_grid_for_fields(
@@ -1298,12 +961,7 @@ impl WorkspaceApp {
         section: ThemeEditorSection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut grid = div()
-            .w_full()
-            .grid()
-            .grid_cols(THEME_EDITOR_GRID_COLUMNS as u16)
-            .gap_x(px(16.0))
-            .gap_y(px(12.0));
+        let mut cells = Vec::new();
         for (index, field) in fields.iter().enumerate() {
             let color = colors
                 .get(index)
@@ -1313,9 +971,9 @@ impl WorkspaceApp {
                 ThemeEditorSection::Terminal => SettingsInput::CustomThemeTerminalColor(index),
                 ThemeEditorSection::Ui => SettingsInput::CustomThemeUiColor(index),
             };
-            grid = grid.child(self.theme_editor_color_cell(field, color, input, cx));
+            cells.push(self.theme_editor_color_cell(field, color, input, cx));
         }
-        grid.into_any_element()
+        settings_theme_editor_color_grid(cells)
     }
 
     fn theme_editor_color_cell(
@@ -1330,86 +988,51 @@ impl WorkspaceApp {
         let label = self
             .i18n
             .t(&format!("settings_view.custom_theme.colors.{}", field.label_key));
-        div()
-            .min_w(px(0.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .size(px(THEME_EDITOR_FIELD_SWATCH_SIZE))
-                    .rounded(px(self.tokens.radii.sm))
-                    .border_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
-                    .bg(rgb(parsed))
-                    .shadow_sm()
-                    .cursor_pointer()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, window, cx| {
-                            let current = this.current_settings_input_value(input);
-                            this.focus_settings_input(input, current, cx);
-                            this.ime_marked_text = None;
-                            window.focus(&this.focus_handle);
-                            cx.stop_propagation();
-                        }),
-                    ),
+        let swatch = settings_theme_editor_color_swatch(&self.tokens, parsed)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    let current = this.current_settings_input_value(input);
+                    this.focus_settings_input(input, current, cx);
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                }),
             )
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .text_size(px(THEME_EDITOR_SWATCH_LABEL_SIZE))
-                            .line_height(px(12.0))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .truncate()
-                            .child(label),
-                    )
-                    .child(if focused {
-                        self.theme_editor_text_input(
-                            input,
-                            color,
-                            "#RRGGBB".to_string(),
-                            THEME_EDITOR_HEX_INPUT_WIDTH,
-                            true,
-                            false,
-                            cx,
-                        )
-                    } else {
-                        div()
-                            .text_size(px(THEME_EDITOR_SWATCH_LABEL_SIZE))
-                            .line_height(px(12.0))
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_color(rgba((self.tokens.ui.text << 8) | 0xb3))
-                            .cursor(CursorStyle::IBeam)
-                            .hover(|hex| hex.text_color(rgb(self.tokens.ui.accent)))
-                            .child(color)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, window, cx| {
-                                    let current = this.current_settings_input_value(input);
-                                    this.focus_settings_input(input, current, cx);
-                                    this.ime_marked_text = None;
-                                    window.focus(&this.focus_handle);
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .into_any_element()
-                    }),
+            .into_any_element();
+        let value_control = if focused {
+            self.theme_editor_text_input(
+                input,
+                color,
+                "#RRGGBB".to_string(),
+                SETTINGS_THEME_EDITOR_HEX_INPUT_WIDTH,
+                true,
+                false,
+                cx,
+            )
+        } else {
+            settings_theme_editor_color_value(
+                &self.tokens,
+                color,
+                settings_mono_font_family(self.settings_store.settings()),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    let current = this.current_settings_input_value(input);
+                    this.focus_settings_input(input, current, cx);
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                }),
             )
             .into_any_element()
+        };
+        settings_theme_editor_color_cell(&self.tokens, label, swatch, value_control)
     }
 
     fn theme_editor_label(&self, key: &str) -> AnyElement {
-        div()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .child(self.i18n.t(key))
-            .into_any_element()
+        settings_theme_editor_label(&self.tokens, self.i18n.t(key))
     }
 
     fn theme_editor_text_input(
@@ -1430,7 +1053,7 @@ impl WorkspaceApp {
         };
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
-        let mut control = text_input(
+        let control = settings_theme_editor_text_input(
             &self.tokens,
             TextInputView {
                 value: display_value,
@@ -1442,9 +1065,11 @@ impl WorkspaceApp {
                 selected_range: self.ime_selected_range_for_target(target),
                 marked_text: self.marked_text_for_target(target),
             },
+            width,
+            mono,
+            fill,
+            settings_mono_font_family(self.settings_store.settings()),
         )
-        .h(px(THEME_EDITOR_INPUT_HEIGHT))
-        .cursor(CursorStyle::IBeam)
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
@@ -1461,14 +1086,6 @@ impl WorkspaceApp {
                 this.update_ime_selection_drag_from_mouse_move(event, window, cx);
             }),
         );
-        control = if fill {
-            control.w_full()
-        } else {
-            control.w(px(width))
-        };
-        if mono {
-            control = control.font_family(settings_mono_font_family(self.settings_store.settings()));
-        }
         text_input_anchor_probe(
             target.anchor_id(),
             control,
@@ -1637,83 +1254,52 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .w_full()
+        let actions = div()
             .flex()
-            .flex_col()
-            .gap(px(12.0))
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
             .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t("settings_view.terminal.bg_gallery")),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                self.appearance_action_button(
-                                    LucideIcon::Plus,
-                                    self.i18n.t("settings_view.terminal.bg_add"),
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.pick_background_image(cx);
-                                        cx.stop_propagation();
-                                    }),
-                                ),
-                            )
-                            .when(settings.terminal.background_image.is_some(), |actions| {
-                                actions.child(
-                                    div()
-                                        .h(px(self
-                                            .tokens
-                                            .metrics
-                                            .settings_appearance_action_height))
-                                        .px(px(10.0))
-                                        .flex()
-                                        .flex_row()
-                                        .items_center()
-                                        .gap(px(6.0))
-                                        .rounded(px(self.tokens.radii.md))
-                                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .text_color(rgb(self.tokens.ui.error))
-                                        .cursor_pointer()
-                                        .hover(|style| {
-                                            style.bg(rgba((self.tokens.ui.error << 8) | 0x14))
-                                        })
-                                        .child(Self::render_lucide_icon(
-                                            LucideIcon::Trash2,
-                                            14.0,
-                                            rgb(self.tokens.ui.error),
-                                        ))
-                                        .child(self.i18n.t("settings_view.terminal.bg_clear_all"))
-                                        .on_mouse_down(
-                                            MouseButton::Left,
-                                            cx.listener(|this, _event, _window, cx| {
-                                                this.edit_settings(
-                                                    |settings| {
-                                                        settings.terminal.background_image = None;
-                                                    },
-                                                    cx,
-                                                );
-                                            }),
-                                        ),
-                                )
-                            }),
-                    ),
+                self.appearance_action_button(
+                    LucideIcon::Plus,
+                    self.i18n.t("settings_view.terminal.bg_add"),
+                    cx.listener(|this, _event, _window, cx| {
+                        this.pick_background_image(cx);
+                        cx.stop_propagation();
+                    }),
+                ),
             )
-            .child(self.background_thumbnails(settings, cx))
-            .into_any_element()
+            .when(settings.terminal.background_image.is_some(), |actions| {
+                actions.child(
+                    settings_background_clear_all_button(
+                        &self.tokens,
+                        self.i18n.t("settings_view.terminal.bg_clear_all"),
+                        Self::render_lucide_icon(
+                            LucideIcon::Trash2,
+                            14.0,
+                            rgb(self.tokens.ui.error),
+                        ),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.edit_settings(
+                                |settings| {
+                                    settings.terminal.background_image = None;
+                                },
+                                cx,
+                            );
+                        }),
+                    ),
+                )
+            })
+            .into_any_element();
+        settings_background_gallery(
+            &self.tokens,
+            self.i18n.t("settings_view.terminal.bg_gallery"),
+            actions,
+            self.background_thumbnails(settings, cx),
+        )
     }
 
     fn background_thumbnails(
@@ -1722,30 +1308,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(current) = settings.terminal.background_image.as_deref() else {
-            return div()
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("settings_view.terminal.bg_hint"))
-                .into_any_element();
+            return settings_background_empty_hint(
+                &self.tokens,
+                self.i18n.t("settings_view.terminal.bg_hint"),
+            );
         };
 
-        // GPUI's grid row measurement can overestimate an aspect-ratio child
-        // from the full container width. Tauri's `grid-cols-4 gap-2` means each
-        // thumbnail owns one quarter-width slot, so model that slot explicitly
-        // before applying the 16:9 thumbnail ratio.
-        div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .w(relative(1.0 / BACKGROUND_GALLERY_COLUMNS))
-                    .flex_none()
-                    .child(self.background_thumbnail(current, true, cx)),
-            )
-            .into_any_element()
+        settings_background_thumbnails_layout(self.background_thumbnail(current, true, cx))
     }
 
     fn pick_background_image(&mut self, cx: &mut Context<Self>) {
@@ -1787,95 +1356,31 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let image_path = image_path.to_string();
-        let image_source = std::path::PathBuf::from(&image_path);
-        let fallback_label = std::path::Path::new(&image_path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(&image_path)
-            .to_string();
-        let fallback_text_size = self.tokens.metrics.ui_text_xs;
-        let fallback_text_color = self.tokens.ui.text_muted;
         let fallback_icon_color = self.tokens.ui.text_muted;
-        let fallback_bg = self.tokens.ui.bg_sunken;
-        let image = gpui::img(image_source)
-            .w_full()
-            .h_full()
-            .object_fit(ObjectFit::Cover)
-            .with_fallback(move || {
-                div()
-                    .w_full()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.0))
-                    .bg(rgb(fallback_bg))
-                    .child(WorkspaceApp::render_lucide_icon(
-                        LucideIcon::Image,
-                        20.0,
-                        rgb(fallback_icon_color),
-                    ))
-                    .child(
-                        div()
-                            .max_w_full()
-                            .px(px(8.0))
-                            .text_size(px(fallback_text_size))
-                            .text_color(rgb(fallback_text_color))
-                            .truncate()
-                            .child(fallback_label.clone()),
-                    )
-                    .into_any_element()
-            });
-
-        let mut thumbnail = div()
-            .relative()
-            .w_full()
-            .rounded(px(self.tokens.radii.md))
-            .overflow_hidden()
-            .border_2()
-            .border_color(rgb(if active {
-                self.tokens.ui.accent
-            } else {
-                self.tokens.ui.border
-            }))
-            .cursor_pointer()
-            // Tauri applies rounded overflow on the thumbnail wrapper and leaves
-            // the `<img className="w-full h-full object-cover">` itself square;
-            // doing the same keeps the crop aligned with the border box in GPUI.
-            .child(image);
-        thumbnail.style().aspect_ratio = Some(BACKGROUND_THUMBNAIL_ASPECT_RATIO);
-        thumbnail
-            .when(active, |thumb| {
-                thumb.child(
-                    div()
-                        .absolute()
-                        .top(px(8.0))
-                        .left(px(8.0))
-                        .rounded(px(self.tokens.radii.sm))
-                        .bg(rgb(self.tokens.ui.accent))
-                        .px(px(self.tokens.metrics.settings_background_badge_padding_x))
-                        .py(px(self.tokens.metrics.settings_background_badge_padding_y))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.accent_text))
-                        .child(self.i18n.t("settings_view.terminal.bg_active")),
+        let thumbnail = settings_background_thumbnail_frame(
+            &self.tokens,
+            &image_path,
+            active,
+            self.i18n.t("settings_view.terminal.bg_active"),
+            move || {
+                WorkspaceApp::render_lucide_icon(
+                    LucideIcon::Image,
+                    20.0,
+                    rgb(fallback_icon_color),
                 )
-            })
+            },
+        );
+        thumbnail
             .child(
-                div()
-                    .absolute()
-                    .top(px(6.0))
-                    .right(px(6.0))
-                    .p(px(3.0))
-                    .rounded(px(self.tokens.radii.sm))
-                    .bg(rgba(0x00000099))
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(Self::render_lucide_icon(
+                settings_background_thumbnail_remove_button(
+                    &self.tokens,
+                    Self::render_lucide_icon(
                         LucideIcon::X,
                         12.0,
                         rgb(self.tokens.ui.text),
-                    ))
-                    .on_mouse_down(
+                    ),
+                )
+                .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
                             this.edit_settings(
@@ -1908,7 +1413,7 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut grid = div().w_full().grid().grid_cols(3).gap(px(10.0));
+        let mut pills = Vec::new();
         for (key, label_key, icon) in background_tab_options() {
             let enabled = settings
                 .terminal
@@ -1916,7 +1421,7 @@ impl WorkspaceApp {
                 .iter()
                 .any(|tab| tab == key);
             let key = (*key).to_string();
-            grid = grid.child(
+            pills.push(
                 self.background_tab_pill(
                     &key,
                     *label_key,
@@ -1928,36 +1433,17 @@ impl WorkspaceApp {
                         cx.listener(move |this, _event, _window, cx| {
                             this.toggle_background_tab(&key, cx);
                         }),
-                    ),
+                    )
+                    .into_any_element(),
             );
         }
 
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t("settings_view.terminal.bg_tabs")),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("settings_view.terminal.bg_tabs_hint")),
-                    ),
-            )
-            .child(grid)
-            .into_any_element()
+        settings_background_tabs_section(
+            &self.tokens,
+            self.i18n.t("settings_view.terminal.bg_tabs"),
+            self.i18n.t("settings_view.terminal.bg_tabs_hint"),
+            pills,
+        )
     }
 
     fn background_tab_pill(
@@ -1967,43 +1453,21 @@ impl WorkspaceApp {
         icon: LucideIcon,
         enabled: bool,
     ) -> Div {
-        div()
-            .h(px(40.0))
-            .min_w(px(0.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(10.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(if enabled {
-                self.tokens.ui.accent
-            } else {
-                self.tokens.ui.border
-            }))
-            .bg(if enabled {
-                rgba((self.tokens.ui.accent << 8) | 0x1a)
-            } else {
-                rgba(0x00000000)
-            })
-            .px(px(14.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .text_color(rgb(if enabled {
-                self.tokens.ui.accent
-            } else {
-                self.tokens.ui.text_muted
-            }))
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(
+        let color = if enabled {
+            self.tokens.ui.accent
+        } else {
+            self.tokens.ui.text_muted
+        };
+        settings_background_tab_pill(
+            &self.tokens,
+            self.i18n.t(label_key),
+            Self::render_lucide_icon(
                 icon,
                 self.tokens.metrics.settings_background_tab_icon_size,
-                rgb(if enabled {
-                    self.tokens.ui.accent
-                } else {
-                    self.tokens.ui.text_muted
-                }),
-            ))
-            .child(div().truncate().child(self.i18n.t(label_key)))
+                rgb(color),
+            ),
+            enabled,
+        )
     }
 
     fn toggle_background_tab(&mut self, key: &str, cx: &mut Context<Self>) {

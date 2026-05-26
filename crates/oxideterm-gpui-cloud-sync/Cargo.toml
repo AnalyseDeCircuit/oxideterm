@@ -1,0 +1,21 @@
+[package]
+name = "oxideterm-gpui-cloud-sync"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+chrono.workspace = true
+gpui.workspace = true
+oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
+oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-settings-model = { path = "../oxideterm-settings-model" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+serde_json.workspace = true
+uuid.workspace = true

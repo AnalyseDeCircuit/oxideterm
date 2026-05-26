@@ -13,37 +13,6 @@ const AI_MCP_CARD_ICON_BUTTON: f32 = 28.0; // Tauri h-7 w-7 p-0.
 const AI_MCP_ACTION_ICON: f32 = 14.0; // Tauri w-3.5 h-3.5.
 const AI_MCP_STATUS_ICON: f32 = 12.0; // Tauri status icons w-3 h-3.
 
-fn ai_mcp_server_signature(
-    config: &oxideterm_ai::McpServerConfig,
-    snapshot: Option<&oxideterm_ai::McpServerStateSnapshot>,
-) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    // Do not hash auth_token. The visible card is driven by public config,
-    // status, endpoint, error text, and tool names.
-    config.id.hash(&mut hasher);
-    config.name.hash(&mut hasher);
-    format!("{:?}", config.transport).hash(&mut hasher);
-    config.url.hash(&mut hasher);
-    config.command.hash(&mut hasher);
-    config.args.hash(&mut hasher);
-    config.env.len().hash(&mut hasher);
-    config.auth_header_name.hash(&mut hasher);
-    config.auth_header_mode.map(|mode| format!("{mode:?}")).hash(&mut hasher);
-    config.headers.len().hash(&mut hasher);
-    config.enabled.hash(&mut hasher);
-    config.retry_on_disconnect.hash(&mut hasher);
-    if let Some(snapshot) = snapshot {
-        snapshot.status.hash(&mut hasher);
-        snapshot.endpoint_url.hash(&mut hasher);
-        snapshot.error.hash(&mut hasher);
-        snapshot
-            .tools
-            .iter()
-            .for_each(|tool| tool.name.hash(&mut hasher));
-    }
-    hasher.finish()
-}
-
 impl WorkspaceApp {
     fn ai_mcp_servers_section(
         &self,
@@ -1215,68 +1184,4 @@ impl WorkspaceApp {
         self.close_settings_select();
         self.clear_standard_confirm_focus();
     }
-}
-
-fn ai_mcp_configs(settings: &PersistedSettings) -> Vec<oxideterm_ai::McpServerConfig> {
-    settings
-        .ai
-        .mcp_servers
-        .iter()
-        .filter_map(|value| serde_json::from_value(value.clone()).ok())
-        .collect()
-}
-
-fn ai_mcp_draft_valid(draft: &AiMcpServerDraft, settings: &PersistedSettings) -> bool {
-    let name = draft.name.trim();
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
-        && !ai_mcp_configs(settings)
-            .iter()
-            .any(|server| server.name == name)
-}
-
-fn ai_mcp_transport_label(transport: oxideterm_ai::McpTransport) -> String {
-    match transport {
-        oxideterm_ai::McpTransport::Stdio => "stdio",
-        oxideterm_ai::McpTransport::StreamableHttp | oxideterm_ai::McpTransport::Sse => {
-            "Streamable HTTP"
-        }
-        oxideterm_ai::McpTransport::LegacySse => "Legacy SSE",
-    }
-    .to_string()
-}
-
-fn ai_mcp_transport_value(transport: oxideterm_ai::McpTransport) -> &'static str {
-    match transport {
-        oxideterm_ai::McpTransport::Stdio => "stdio",
-        oxideterm_ai::McpTransport::StreamableHttp | oxideterm_ai::McpTransport::Sse => {
-            "streamable-http"
-        }
-        oxideterm_ai::McpTransport::LegacySse => "legacy-sse",
-    }
-}
-
-fn ai_mcp_auth_mode_value(mode: oxideterm_ai::McpAuthHeaderMode) -> &'static str {
-    match mode {
-        oxideterm_ai::McpAuthHeaderMode::Bearer => "bearer",
-        oxideterm_ai::McpAuthHeaderMode::Raw => "raw",
-        oxideterm_ai::McpAuthHeaderMode::None => "none",
-    }
-}
-
-fn ai_mcp_clean_record(entries: &[(String, String)]) -> Option<serde_json::Value> {
-    let mut map = serde_json::Map::new();
-    for (key, value) in entries {
-        let key = key.trim();
-        if !key.is_empty() {
-            map.insert(key.to_string(), serde_json::json!(value));
-        }
-    }
-    (!map.is_empty()).then(|| serde_json::Value::Object(map))
-}
-
-fn ai_mcp_split_args(args: &str) -> Vec<String> {
-    args.split_whitespace().map(str::to_string).collect()
 }

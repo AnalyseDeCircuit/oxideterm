@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 gpui.workspace = true
+oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }

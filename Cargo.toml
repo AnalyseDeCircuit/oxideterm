@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/oxideterm-gpui-markdown",
+  "crates/oxideterm-gpui-cloud-sync",
   "crates/oxideterm-gpui-platform",
   "crates/oxideterm-gpui-settings-view",
   "crates/oxideterm-gpui-terminal",

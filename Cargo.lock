@@ -7162,6 +7162,7 @@ dependencies = [
  "oxideterm-connection-monitor",
  "oxideterm-connections",
  "oxideterm-forwarding",
+ "oxideterm-gpui-cloud-sync",
  "oxideterm-gpui-ide",
  "oxideterm-gpui-markdown",
  "oxideterm-gpui-platform",
@@ -7206,6 +7207,26 @@ dependencies = [
  "x11-dl",
  "zeroize",
  "zip",
+]
+
+[[package]]
+name = "oxideterm-gpui-cloud-sync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "gpui",
+ "oxideterm-cloud-sync",
+ "oxideterm-connections",
+ "oxideterm-forwarding",
+ "oxideterm-gpui-settings-view",
+ "oxideterm-gpui-ui",
+ "oxideterm-settings",
+ "oxideterm-settings-model",
+ "oxideterm-theme",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -7264,6 +7285,7 @@ name = "oxideterm-gpui-settings-view"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "oxideterm-ai",
  "oxideterm-gpui-platform",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
@@ -7464,6 +7486,7 @@ name = "oxideterm-settings-model"
 version = "0.1.0"
 dependencies = [
  "oxideterm-ai",
+ "oxideterm-cloud-sync",
  "oxideterm-settings",
  "oxideterm-theme",
  "serde_json",

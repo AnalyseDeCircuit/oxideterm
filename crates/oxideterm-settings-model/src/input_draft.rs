@@ -480,6 +480,67 @@ impl From<Option<()>> for SettingsInputDraftApply {
     }
 }
 
+/// Splits a settings multiline input into visual lines with UTF-16 ranges.
+///
+/// GPUI IME selections are tracked in UTF-16 code units to match browser input
+/// semantics, so the model layer owns this conversion instead of each view.
+pub fn settings_multiline_line_ranges(value: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    let mut ranges = Vec::new();
+    let mut utf16_start = 0usize;
+    let mut utf16_offset = 0usize;
+    let mut byte_start = 0usize;
+
+    for (byte_index, ch) in value.char_indices() {
+        if ch == '\n' {
+            ranges.push((
+                utf16_start..utf16_offset,
+                value[byte_start..byte_index].to_string(),
+            ));
+            utf16_offset += ch.len_utf16();
+            utf16_start = utf16_offset;
+            byte_start = byte_index + ch.len_utf8();
+        } else {
+            utf16_offset += ch.len_utf16();
+        }
+    }
+
+    ranges.push((utf16_start..utf16_offset, value[byte_start..].to_string()));
+    ranges
+}
+
+/// Maps a global UTF-16 selection into a single rendered settings text line.
+///
+/// The returned caret offset is separated from the selection range because an
+/// empty browser selection renders as a caret, while a non-empty range renders
+/// highlighted segments.
+pub fn settings_multiline_line_selection(
+    selection: Option<&std::ops::Range<usize>>,
+    line_range: &std::ops::Range<usize>,
+) -> (Option<std::ops::Range<usize>>, Option<usize>) {
+    let Some(selection) = selection else {
+        return (None, None);
+    };
+
+    if selection.start == selection.end {
+        let caret = selection.start;
+        if caret >= line_range.start && caret <= line_range.end {
+            return (None, Some(caret.saturating_sub(line_range.start)));
+        }
+        return (None, None);
+    }
+
+    let start = selection.start.max(line_range.start);
+    let end = selection.end.min(line_range.end);
+    if start < end {
+        (
+            Some(start.saturating_sub(line_range.start)..end.saturating_sub(line_range.start)),
+            None,
+        )
+    } else {
+        (None, None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,5 +587,22 @@ mod tests {
             persisted_settings_input_value(&settings, SettingsInput::IdeLineHeight).as_deref(),
             Some("1.5")
         );
+    }
+
+    #[test]
+    fn multiline_textarea_ranges_keep_trailing_empty_line() {
+        let ranges = settings_multiline_line_ranges("vim\n");
+
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0], (0..3, "vim".to_string()));
+        assert_eq!(ranges[1], (4..4, String::new()));
+    }
+
+    #[test]
+    fn multiline_textarea_selection_maps_global_caret_to_line_offset() {
+        let caret = 5..5;
+        let (_selection, caret_offset) = settings_multiline_line_selection(Some(&caret), &(4..8));
+
+        assert_eq!(caret_offset, Some(1));
     }
 }
