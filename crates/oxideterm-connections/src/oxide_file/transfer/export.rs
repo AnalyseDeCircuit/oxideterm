@@ -311,6 +311,7 @@ fn export_auth(
 
 fn export_forward(forward: &OxideForwardRecord) -> EncryptedForward {
     EncryptedForward {
+        id: forward.id.clone(),
         forward_type: forward.forward_type.clone(),
         bind_address: forward.bind_address.clone(),
         bind_port: forward.bind_port,
@@ -334,7 +335,12 @@ fn read_and_embed_key(path: &str) -> Result<Option<Zeroizing<String>>, OxideFile
             "Key file exceeds 1MB limit".to_string(),
         ));
     }
-    Ok(Some(Zeroizing::new(BASE64.encode(fs::read(path)?))))
+    // Embedded private keys are serialized into the encrypted .oxide payload;
+    // wipe the raw file bytes after producing the encoded in-memory copy.
+    let mut key_bytes = fs::read(path)?;
+    let encoded = Zeroizing::new(BASE64.encode(&key_bytes));
+    key_bytes.zeroize();
+    Ok(Some(encoded))
 }
 
 fn count_quick_commands_for_export(snapshot_json: Option<&str>) -> Option<(usize, usize)> {

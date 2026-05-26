@@ -199,7 +199,7 @@ async fn openai_stream_request(
     request
         .send()
         .await
-        .with_context(|| format!("failed to connect to AI provider at {url}"))
+        .map_err(|error| anyhow!("failed to connect to AI provider: {}", error.without_url()))
 }
 
 async fn stream_openai_response(

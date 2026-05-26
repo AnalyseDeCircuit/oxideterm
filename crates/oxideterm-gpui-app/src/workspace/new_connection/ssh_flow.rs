@@ -506,21 +506,24 @@ impl WorkspaceApp {
         }
 
         let auth = match form.auth_tab {
-            SshAuthTab::Password => AuthMethod::password(form.password.clone()),
+            SshAuthTab::Password => {
+                // UI inputs own plain String drafts; crossing into SSH auth moves a
+                // zeroizing clone so backend tasks never retain a normal String password.
+                AuthMethod::password_secret(zeroizing_secret_clone(&form.password))
+            }
             SshAuthTab::Agent => AuthMethod::Agent,
-            SshAuthTab::DefaultKey => AuthMethod::key(
-                "",
-                (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
-            ),
+            SshAuthTab::DefaultKey => {
+                AuthMethod::key_secret("", zeroizing_non_empty_secret(&form.passphrase))
+            }
             SshAuthTab::SshKey => {
                 if form.key_path.trim().is_empty() {
                     form.error = Some(self.i18n.t("ssh.form.key_path_required"));
                     cx.notify();
                     return None;
                 }
-                AuthMethod::key(
+                AuthMethod::key_secret(
                     form.key_path.trim().to_string(),
-                    (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
+                    zeroizing_non_empty_secret(&form.passphrase),
                 )
             }
             SshAuthTab::Certificate => {
@@ -529,10 +532,10 @@ impl WorkspaceApp {
                     cx.notify();
                     return None;
                 }
-                AuthMethod::certificate(
+                AuthMethod::certificate_secret(
                     form.key_path.trim().to_string(),
                     form.cert_path.trim().to_string(),
-                    (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
+                    zeroizing_non_empty_secret(&form.passphrase),
                 )
             }
             SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
@@ -1020,21 +1023,28 @@ fn resolve_default_key_for_tree_auth(auth: &mut AuthMethod) -> Result<(), String
 
 fn auth_method_from_proxy_hop(hop: &NewConnectionProxyHop) -> AuthMethod {
     match hop.auth_tab {
-        SshAuthTab::Password => AuthMethod::password(hop.password.clone()),
-        SshAuthTab::DefaultKey => AuthMethod::key(
-            "",
-            (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
-        ),
-        SshAuthTab::SshKey => AuthMethod::key(
+        SshAuthTab::Password => AuthMethod::password_secret(zeroizing_secret_clone(&hop.password)),
+        SshAuthTab::DefaultKey => {
+            AuthMethod::key_secret("", zeroizing_non_empty_secret(&hop.passphrase))
+        }
+        SshAuthTab::SshKey => AuthMethod::key_secret(
             hop.key_path.trim().to_string(),
-            (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
+            zeroizing_non_empty_secret(&hop.passphrase),
         ),
-        SshAuthTab::Certificate => AuthMethod::certificate(
+        SshAuthTab::Certificate => AuthMethod::certificate_secret(
             hop.key_path.trim().to_string(),
             hop.cert_path.trim().to_string(),
-            (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
+            zeroizing_non_empty_secret(&hop.passphrase),
         ),
         SshAuthTab::Agent => AuthMethod::Agent,
         SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
     }
+}
+
+fn zeroizing_secret_clone(value: &str) -> zeroize::Zeroizing<String> {
+    zeroize::Zeroizing::new(value.to_string())
+}
+
+fn zeroizing_non_empty_secret(value: &str) -> Option<zeroize::Zeroizing<String>> {
+    (!value.is_empty()).then(|| zeroizing_secret_clone(value))
 }

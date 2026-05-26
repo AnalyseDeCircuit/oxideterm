@@ -1,4 +1,7 @@
-use std::io::{Cursor, Read};
+use std::{
+    fmt,
+    io::{Cursor, Read},
+};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -114,7 +117,7 @@ pub struct OxideMetadata {
     pub portable_secret_count: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EncryptedPayload {
     pub version: u32,
     pub connections: Vec<EncryptedConnection>,
@@ -129,14 +132,42 @@ pub struct EncryptedPayload {
     pub checksum: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl fmt::Debug for EncryptedPayload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Debug output is often copied into bug reports; keep encrypted import
+        // DTOs structural and avoid dumping user/plugin payloads.
+        f.debug_struct("EncryptedPayload")
+            .field("version", &self.version)
+            .field("connections_len", &self.connections.len())
+            .field("has_app_settings_json", &self.app_settings_json.is_some())
+            .field(
+                "has_quick_commands_json",
+                &self.quick_commands_json.is_some(),
+            )
+            .field("plugin_settings_len", &self.plugin_settings.len())
+            .field("portable_secrets_len", &self.portable_secrets.len())
+            .field("checksum", &self.checksum)
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncryptedPluginSetting {
     pub storage_key: String,
     pub serialized_value: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl fmt::Debug for EncryptedPluginSetting {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EncryptedPluginSetting")
+            .field("storage_key", &self.storage_key)
+            .field("serialized_value", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncryptedPortableSecret {
     pub kind: String,
@@ -144,7 +175,17 @@ pub struct EncryptedPortableSecret {
     pub secret: Zeroizing<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl fmt::Debug for EncryptedPortableSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EncryptedPortableSecret")
+            .field("kind", &self.kind)
+            .field("id", &self.id)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EncryptedConnection {
     pub name: String,
     pub group: Option<String>,
@@ -161,8 +202,28 @@ pub struct EncryptedConnection {
     pub forwards: Vec<EncryptedForward>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl fmt::Debug for EncryptedConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EncryptedConnection")
+            .field("name", &self.name)
+            .field("group", &self.group)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth", &self.auth)
+            .field("color", &self.color)
+            .field("tags", &self.tags)
+            .field("options", &self.options)
+            .field("proxy_chain_len", &self.proxy_chain.len())
+            .field("forwards_len", &self.forwards.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EncryptedForward {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub forward_type: String,
     pub bind_address: String,
     pub bind_port: u16,
@@ -172,7 +233,22 @@ pub struct EncryptedForward {
     pub auto_start: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl fmt::Debug for EncryptedForward {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EncryptedForward")
+            .field("id", &self.id)
+            .field("forward_type", &self.forward_type)
+            .field("bind_address", &self.bind_address)
+            .field("bind_port", &self.bind_port)
+            .field("target_host", &self.target_host)
+            .field("target_port", &self.target_port)
+            .field("description", &self.description)
+            .field("auto_start", &self.auto_start)
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EncryptedProxyHop {
     pub host: String,
     pub port: u16,
@@ -180,7 +256,18 @@ pub struct EncryptedProxyHop {
     pub auth: EncryptedAuth,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl fmt::Debug for EncryptedProxyHop {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EncryptedProxyHop")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth", &self.auth)
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EncryptedAuth {
     Password {
@@ -202,6 +289,47 @@ pub enum EncryptedAuth {
         embedded_cert: Option<Zeroizing<String>>,
     },
     Agent,
+}
+
+impl fmt::Debug for EncryptedAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Auth material may be decrypted in memory during .oxide import/export,
+        // so Debug must describe shape only and never include secret values.
+        match self {
+            Self::Password { .. } => f
+                .debug_struct("Password")
+                .field("password", &"<redacted>")
+                .finish(),
+            Self::Key {
+                key_path,
+                passphrase,
+                embedded_key,
+            } => f
+                .debug_struct("Key")
+                .field("key_path", key_path)
+                .field("passphrase", &passphrase.as_ref().map(|_| "<redacted>"))
+                .field("embedded_key", &embedded_key.as_ref().map(|_| "<redacted>"))
+                .finish(),
+            Self::Certificate {
+                key_path,
+                cert_path,
+                passphrase,
+                embedded_key,
+                embedded_cert,
+            } => f
+                .debug_struct("Certificate")
+                .field("key_path", key_path)
+                .field("cert_path", cert_path)
+                .field("passphrase", &passphrase.as_ref().map(|_| "<redacted>"))
+                .field("embedded_key", &embedded_key.as_ref().map(|_| "<redacted>"))
+                .field(
+                    "embedded_cert",
+                    &embedded_cert.as_ref().map(|_| "<redacted>"),
+                )
+                .finish(),
+            Self::Agent => f.write_str("Agent"),
+        }
+    }
 }
 
 #[derive(Debug)]

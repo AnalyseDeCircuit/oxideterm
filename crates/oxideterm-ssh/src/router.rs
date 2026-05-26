@@ -6,6 +6,7 @@ use oxideterm_sftp::{SftpError, SftpSession};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
+    fmt,
     sync::{Arc, mpsc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -107,12 +108,23 @@ impl NodeOrigin {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalEndpoint {
     pub ws_port: u16,
     pub ws_token: String,
     pub session_id: String,
+}
+
+impl fmt::Debug for TerminalEndpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TerminalEndpoint")
+            .field("ws_port", &self.ws_port)
+            .field("ws_token", &"[redacted token]")
+            .field("session_id", &self.session_id)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -152,7 +164,7 @@ pub struct ResolvedConnection {
     pub sftp_session_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum NodeStateEvent {
     ConnectionStatusChanged {
@@ -179,6 +191,61 @@ pub enum NodeStateEvent {
         ws_port: u16,
         ws_token: String,
     },
+}
+
+impl fmt::Debug for NodeStateEvent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConnectionStatusChanged {
+                connection_id,
+                status,
+                affected_children,
+                timestamp,
+            } => formatter
+                .debug_struct("ConnectionStatusChanged")
+                .field("connection_id", connection_id)
+                .field("status", status)
+                .field("affected_children", affected_children)
+                .field("timestamp", timestamp)
+                .finish(),
+            Self::ConnectionStateChanged {
+                node_id,
+                generation,
+                state,
+                reason,
+            } => formatter
+                .debug_struct("ConnectionStateChanged")
+                .field("node_id", node_id)
+                .field("generation", generation)
+                .field("state", state)
+                .field("reason", reason)
+                .finish(),
+            Self::SftpReady {
+                node_id,
+                generation,
+                ready,
+                cwd,
+            } => formatter
+                .debug_struct("SftpReady")
+                .field("node_id", node_id)
+                .field("generation", generation)
+                .field("ready", ready)
+                .field("cwd", cwd)
+                .finish(),
+            Self::TerminalEndpointChanged {
+                node_id,
+                generation,
+                ws_port,
+                ws_token: _,
+            } => formatter
+                .debug_struct("TerminalEndpointChanged")
+                .field("node_id", node_id)
+                .field("generation", generation)
+                .field("ws_port", ws_port)
+                .field("ws_token", &"[redacted token]")
+                .finish(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

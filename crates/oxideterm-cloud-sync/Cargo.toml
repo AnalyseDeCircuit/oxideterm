@@ -20,3 +20,4 @@ sha2.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 whoami.workspace = true
+zeroize.workspace = true

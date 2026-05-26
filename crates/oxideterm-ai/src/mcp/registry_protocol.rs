@@ -173,8 +173,8 @@ impl McpRegistry {
             self.http.get(&url).headers(headers).send(),
         )
         .await
-        .map_err(|_| McpError::Timeout(url.clone()))?
-        .map_err(|error| McpError::Message(error.to_string()))?;
+        .map_err(|_| McpError::Timeout(config.name.clone()))?
+        .map_err(|error| McpError::Message(error.without_url().to_string()))?;
         if !response.status().is_success() {
             return Err(McpError::HttpStatus(
                 response.status(),
@@ -224,7 +224,7 @@ impl McpRegistry {
                 .json(&request)
                 .send()
                 .await
-                .map_err(|error| McpError::Message(error.to_string()))?;
+                .map_err(|error| McpError::Message(error.without_url().to_string()))?;
             if !response.status().is_success() {
                 return Err(McpError::HttpStatus(
                     response.status(),

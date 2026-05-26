@@ -19,5 +19,6 @@ pub use oxide_snapshot::{
     OXIDE_SETTINGS_VERSION, export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
 };
 pub use store::{
-    SETTINGS_FILENAME, SettingsLoadResult, SettingsSaveResult, SettingsStore, default_settings_path,
+    SETTINGS_FILENAME, SettingsLoadResult, SettingsSaveResult, SettingsStore,
+    default_settings_path, save_settings_to_path,
 };

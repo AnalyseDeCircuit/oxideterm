@@ -15,6 +15,7 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 use crate::{
     BackendType, CloudSyncSettings, OXIDE_CONTENT_TYPE, StructuredSectionRevisions,
@@ -793,26 +794,23 @@ impl CloudSyncBackend {
     ) -> Result<HeaderMap> {
         let mut headers = HeaderMap::new();
         if backend_uses_token(&config.backend_type, &config.auth_mode) {
-            if let Some(token) = secrets.token.as_deref() {
-                insert_header(
-                    &mut headers,
-                    AUTHORIZATION.as_str(),
-                    &format!("Bearer {token}"),
-                )?;
+            if let Some(token) = secrets.token.as_ref().map(|token| token.as_str()) {
+                insert_bearer_auth_header(&mut headers, token)?;
             }
         }
         if backend_uses_basic(&config.backend_type, &config.auth_mode)
             && let (Some(username), Some(password)) = (
-                secrets.basic_username.as_deref(),
-                secrets.basic_password.as_deref(),
+                secrets
+                    .basic_username
+                    .as_ref()
+                    .map(|username| username.as_str()),
+                secrets
+                    .basic_password
+                    .as_ref()
+                    .map(|password| password.as_str()),
             )
         {
-            let encoded = BASE64.encode(format!("{username}:{password}"));
-            insert_header(
-                &mut headers,
-                AUTHORIZATION.as_str(),
-                &format!("Basic {encoded}"),
-            )?;
+            insert_basic_auth_header(&mut headers, username, password)?;
         }
         Ok(headers)
     }
@@ -1111,7 +1109,13 @@ impl CloudSyncBackend {
         sha: Option<&str>,
         message: &str,
     ) -> Result<Value> {
-        if secrets.git_token.as_deref().unwrap_or_default().is_empty() {
+        if secrets
+            .git_token
+            .as_ref()
+            .map(|token| token.as_str())
+            .unwrap_or_default()
+            .is_empty()
+        {
             bail!("missing_backend_token: Git access token is not configured");
         }
         let mut body = json!({
@@ -1384,6 +1388,9 @@ pub(super) async fn execute_cloud_request(request: RequestBuilder) -> Result<Res
 }
 
 fn normalize_network_error(error: reqwest::Error) -> anyhow::Error {
+    // Remote endpoints can be user-provided and may contain credential-bearing
+    // query strings; strip URLs before surfacing reqwest transport errors.
+    let error = error.without_url();
     if error.is_connect() || error.is_timeout() || error.is_request() {
         anyhow::anyhow!("network_request_failed: {}", error)
     } else {
@@ -1427,15 +1434,12 @@ fn insert_header(headers: &mut HeaderMap, name: &str, value: &str) -> Result<()>
 fn dropbox_headers(secrets: &CloudSyncSecrets) -> Result<HeaderMap> {
     let token = secrets
         .token
-        .as_deref()
+        .as_ref()
+        .map(|token| token.as_str())
         .filter(|token| !token.is_empty())
         .context("missing_backend_token: Dropbox access token is not configured")?;
     let mut headers = HeaderMap::new();
-    insert_header(
-        &mut headers,
-        AUTHORIZATION.as_str(),
-        &format!("Bearer {token}"),
-    )?;
+    insert_bearer_auth_header(&mut headers, token)?;
     Ok(headers)
 }
 
@@ -1448,16 +1452,29 @@ fn git_headers(secrets: &CloudSyncSecrets, accept: &str) -> Result<HeaderMap> {
     insert_header(&mut headers, ACCEPT.as_str(), accept)?;
     if let Some(token) = secrets
         .git_token
-        .as_deref()
+        .as_ref()
+        .map(|token| token.as_str())
         .filter(|token| !token.is_empty())
     {
-        insert_header(
-            &mut headers,
-            AUTHORIZATION.as_str(),
-            &format!("Bearer {token}"),
-        )?;
+        insert_bearer_auth_header(&mut headers, token)?;
     }
     Ok(headers)
+}
+
+fn insert_bearer_auth_header(headers: &mut HeaderMap, token: &str) -> Result<()> {
+    // Authorization headers must be copied into reqwest's HeaderMap, but the
+    // formatted bearer string should not remain in a plain temporary String.
+    let value = Zeroizing::new(format!("Bearer {token}"));
+    insert_header(headers, AUTHORIZATION.as_str(), value.as_str())
+}
+
+fn insert_basic_auth_header(headers: &mut HeaderMap, username: &str, password: &str) -> Result<()> {
+    // Basic auth material briefly combines username and password before base64
+    // encoding; keep both staging strings zeroized after HeaderMap takes a copy.
+    let credentials = Zeroizing::new(format!("{username}:{password}"));
+    let encoded = Zeroizing::new(BASE64.encode(credentials.as_bytes()));
+    let value = Zeroizing::new(format!("Basic {}", encoded.as_str()));
+    insert_header(headers, AUTHORIZATION.as_str(), value.as_str())
 }
 
 fn trim_trailing_slash(value: &str) -> String {

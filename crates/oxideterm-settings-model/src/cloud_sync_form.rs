@@ -6,11 +6,13 @@
 //! The GPUI app owns dialogs and async jobs. This module owns the editable form
 //! model and the mapping between `SettingsInput` identities and draft fields.
 
+use std::fmt;
+
 use oxideterm_cloud_sync::{AuthMode, BackendType, CloudSyncSettings, ConflictStrategy};
 
 use crate::SettingsInput;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CloudSyncFormDraft {
     pub backend_type: BackendType,
     pub auth_mode: AuthMode,
@@ -39,6 +41,50 @@ pub struct CloudSyncFormDraft {
     pub secret_access_key_touched: bool,
     pub session_token_touched: bool,
     pub sync_password_touched: bool,
+}
+
+impl fmt::Debug for CloudSyncFormDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Form drafts keep editable secret text in UI-owned Strings; Debug must
+        // describe state without exposing credentials copied from input fields.
+        formatter
+            .debug_struct("CloudSyncFormDraft")
+            .field("backend_type", &self.backend_type)
+            .field("auth_mode", &self.auth_mode)
+            .field("endpoint", &self.endpoint)
+            .field("namespace", &self.namespace)
+            .field("s3_bucket", &self.s3_bucket)
+            .field("s3_region", &self.s3_region)
+            .field("git_repository", &self.git_repository)
+            .field("git_branch", &self.git_branch)
+            .field("auto_upload_enabled", &self.auto_upload_enabled)
+            .field("auto_upload_interval_mins", &self.auto_upload_interval_mins)
+            .field("default_conflict_strategy", &self.default_conflict_strategy)
+            .field("token", &redacted_if_present(&self.token))
+            .field("git_token", &redacted_if_present(&self.git_token))
+            .field("basic_username", &redacted_if_present(&self.basic_username))
+            .field("basic_password", &redacted_if_present(&self.basic_password))
+            .field("access_key_id", &redacted_if_present(&self.access_key_id))
+            .field(
+                "secret_access_key",
+                &redacted_if_present(&self.secret_access_key),
+            )
+            .field("session_token", &redacted_if_present(&self.session_token))
+            .field("sync_password", &redacted_if_present(&self.sync_password))
+            .field("token_touched", &self.token_touched)
+            .field("git_token_touched", &self.git_token_touched)
+            .field("basic_username_touched", &self.basic_username_touched)
+            .field("basic_password_touched", &self.basic_password_touched)
+            .field("access_key_id_touched", &self.access_key_id_touched)
+            .field("secret_access_key_touched", &self.secret_access_key_touched)
+            .field("session_token_touched", &self.session_token_touched)
+            .field("sync_password_touched", &self.sync_password_touched)
+            .finish()
+    }
+}
+
+fn redacted_if_present(value: &str) -> Option<&'static str> {
+    (!value.is_empty()).then_some("<redacted>")
 }
 
 impl CloudSyncFormDraft {
@@ -173,5 +219,26 @@ mod tests {
             Some("token")
         );
         assert!(draft.token_touched);
+    }
+
+    #[test]
+    fn cloud_sync_form_debug_redacts_secret_values() {
+        let mut draft = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
+        draft.token = "token-secret".to_string();
+        draft.git_token = "git-secret".to_string();
+        draft.basic_password = "basic-secret".to_string();
+        draft.secret_access_key = "s3-secret".to_string();
+        draft.session_token = "session-secret".to_string();
+        draft.sync_password = "sync-secret".to_string();
+
+        let debug = format!("{draft:?}");
+
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("token-secret"));
+        assert!(!debug.contains("git-secret"));
+        assert!(!debug.contains("basic-secret"));
+        assert!(!debug.contains("s3-secret"));
+        assert!(!debug.contains("session-secret"));
+        assert!(!debug.contains("sync-secret"));
     }
 }

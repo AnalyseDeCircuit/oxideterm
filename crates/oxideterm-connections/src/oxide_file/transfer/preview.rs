@@ -4,7 +4,24 @@ pub fn preview_oxide_import(
     password: &str,
     strategy: ImportConflictStrategy,
 ) -> Result<ImportPreview, OxideFileError> {
-    preview_oxide_import_inner(store, bytes, password, strategy, None)
+    preview_oxide_import_with_options(
+        store,
+        bytes,
+        password,
+        OxideImportOptions {
+            conflict_strategy: strategy,
+            ..OxideImportOptions::default()
+        },
+    )
+}
+
+pub fn preview_oxide_import_with_options(
+    store: &ConnectionStore,
+    bytes: &[u8],
+    password: &str,
+    options: OxideImportOptions,
+) -> Result<ImportPreview, OxideFileError> {
+    preview_oxide_import_inner(store, bytes, password, options, None)
 }
 
 pub fn preview_oxide_import_with_progress<F>(
@@ -17,14 +34,23 @@ pub fn preview_oxide_import_with_progress<F>(
 where
     F: FnMut(&str, usize, usize),
 {
-    preview_oxide_import_inner(store, bytes, password, strategy, Some(&mut on_progress))
+    preview_oxide_import_inner(
+        store,
+        bytes,
+        password,
+        OxideImportOptions {
+            conflict_strategy: strategy,
+            ..OxideImportOptions::default()
+        },
+        Some(&mut on_progress),
+    )
 }
 
 fn preview_oxide_import_inner(
     store: &ConnectionStore,
     bytes: &[u8],
     password: &str,
-    strategy: ImportConflictStrategy,
+    options: OxideImportOptions,
     mut on_progress: Option<&mut dyn FnMut(&str, usize, usize)>,
 ) -> Result<ImportPreview, OxideFileError> {
     const PREVIEW_IMPORT_TOTAL_STEPS: usize = 8;
@@ -40,28 +66,40 @@ fn preview_oxide_import_inner(
         current_step += 1;
         report_progress(stage, current_step);
     })?;
+    let EncryptedPayload {
+        mut connections,
+        app_settings_json,
+        quick_commands_json,
+        plugin_settings,
+        portable_secrets,
+        ..
+    } = payload;
+    connections = filter_selected_connections(connections, options.selected_names.as_ref());
+    let _forward_selection =
+        filter_selected_forward_ids(&mut connections, options.selected_forward_ids.as_ref());
+    if !options.import_forwards {
+        for connection in &mut connections {
+            connection.forwards.clear();
+        }
+    }
     current_step += 1;
     report_progress("collecting_existing", current_step);
-    let plans = plan_import(store, &payload.connections, strategy);
+    let plans = plan_import(store, &connections, options.conflict_strategy);
     current_step += 1;
     report_progress("building_preview", current_step);
     let mut preview = ImportPreview {
-        total_connections: payload.connections.len(),
-        has_embedded_keys: payload.connections.iter().any(connection_has_embedded_key),
-        total_forwards: payload
-            .connections
-            .iter()
-            .map(|conn| conn.forwards.len())
-            .sum(),
-        plugin_settings_count: payload.plugin_settings.len(),
-        portable_secret_count: payload.portable_secrets.len(),
-        plugin_settings_by_plugin: plugin_settings_by_plugin(&payload.plugin_settings),
+        total_connections: connections.len(),
+        has_embedded_keys: connections.iter().any(connection_has_embedded_key),
+        total_forwards: connections.iter().map(|conn| conn.forwards.len()).sum(),
+        plugin_settings_count: plugin_settings.len(),
+        portable_secret_count: portable_secrets.len(),
+        plugin_settings_by_plugin: plugin_settings_by_plugin(&plugin_settings),
         ..ImportPreview::default()
     };
     let (has_quick_commands, commands, categories) =
-        count_quick_commands(payload.quick_commands_json.as_deref());
-    preview.has_app_settings = payload.app_settings_json.is_some();
-    if let Some(snapshot) = payload.app_settings_json.as_deref() {
+        count_quick_commands(quick_commands_json.as_deref());
+    preview.has_app_settings = app_settings_json.is_some();
+    if let Some(snapshot) = app_settings_json.as_deref() {
         let app_settings = preview_app_settings(snapshot);
         preview.app_settings_format = app_settings.format;
         preview.app_settings_keys = app_settings.keys;
@@ -80,8 +118,7 @@ fn preview_oxide_import_inner(
     preview.has_quick_commands = has_quick_commands;
     preview.quick_commands_count = commands;
     preview.quick_command_categories_count = categories;
-    preview.forward_details = payload
-        .connections
+    preview.forward_details = connections
         .iter()
         .flat_map(|conn| {
             conn.forwards.iter().map(|forward| ForwardDetail {
@@ -92,7 +129,7 @@ fn preview_oxide_import_inner(
         })
         .collect();
 
-    for (conn, action) in payload.connections.iter().zip(plans) {
+    for (conn, action) in connections.iter().zip(plans) {
         let record_has_embedded_keys = connection_has_embedded_key(conn);
         let reason_code = preview_reason_code(&action).to_string();
         match action {

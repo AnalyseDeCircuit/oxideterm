@@ -156,7 +156,10 @@ pub fn compute_checksum(payload: &EncryptedPayload) -> Result<String, OxideFileE
     hasher.update(payload.version.to_le_bytes());
     hasher.update((payload.connections.len() as u64).to_le_bytes());
     for conn in &payload.connections {
-        hasher.update(rmp_serde::to_vec_named(conn)?);
+        // Serialized connections may include decrypted auth material; wipe the
+        // checksum staging buffer after it is absorbed by SHA-256.
+        let encoded = Zeroizing::new(rmp_serde::to_vec_named(conn)?);
+        hasher.update(encoded.as_slice());
     }
 
     match &payload.app_settings_json {
@@ -169,12 +172,14 @@ pub fn compute_checksum(payload: &EncryptedPayload) -> Result<String, OxideFileE
 
     hasher.update((payload.plugin_settings.len() as u64).to_le_bytes());
     for plugin_setting in &payload.plugin_settings {
-        hasher.update(rmp_serde::to_vec_named(plugin_setting)?);
+        let encoded = Zeroizing::new(rmp_serde::to_vec_named(plugin_setting)?);
+        hasher.update(encoded.as_slice());
     }
 
     hasher.update((payload.portable_secrets.len() as u64).to_le_bytes());
     for portable_secret in &payload.portable_secrets {
-        hasher.update(rmp_serde::to_vec_named(portable_secret)?);
+        let encoded = Zeroizing::new(rmp_serde::to_vec_named(portable_secret)?);
+        hasher.update(encoded.as_slice());
     }
 
     Ok(format!("sha256:{:x}", hasher.finalize()))
@@ -183,7 +188,10 @@ pub fn compute_checksum(payload: &EncryptedPayload) -> Result<String, OxideFileE
 fn compute_legacy_checksum(payload: &EncryptedPayload) -> Result<String, OxideFileError> {
     let mut hasher = Sha256::new();
     for conn in &payload.connections {
-        hasher.update(rmp_serde::to_vec_named(conn)?);
+        // Legacy payloads still serialize auth data for checksum compatibility;
+        // keep the temporary serialized form zeroized.
+        let encoded = Zeroizing::new(rmp_serde::to_vec_named(conn)?);
+        hasher.update(encoded.as_slice());
     }
     Ok(format!("sha256:{:x}", hasher.finalize()))
 }

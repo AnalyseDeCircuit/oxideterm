@@ -33,7 +33,12 @@ pub(crate) async fn stream_anthropic_completion(
         .json(&body)
         .send()
         .await
-        .with_context(|| format!("failed to connect to Anthropic provider at {url}"))?;
+        .map_err(|error| {
+            anyhow!(
+                "failed to connect to Anthropic provider: {}",
+                error.without_url()
+            )
+        })?;
     if !response.status().is_success() {
         let status = response.status().as_u16();
         let error_text = response.text().await.unwrap_or_default();

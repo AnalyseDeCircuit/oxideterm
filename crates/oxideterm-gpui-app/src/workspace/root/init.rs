@@ -122,6 +122,10 @@ impl WorkspaceApp {
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
+        let settings_store_last_modified =
+            crate::workspace::settings::settings_store_modified_time(settings_store.path());
+        let connection_store_last_modified =
+            crate::workspace::settings::settings_store_modified_time(connection_store.path());
         let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
@@ -670,6 +674,8 @@ impl WorkspaceApp {
             background_image_cache,
             settings_store,
             connection_store,
+            settings_store_last_modified,
+            connection_store_last_modified,
             plugin_registry,
             plugin_runtime_host: Arc::new(tokio::sync::Mutex::new(
                 plugin_runtime::NativePluginRuntimeHost::default(),
@@ -873,6 +879,7 @@ impl WorkspaceApp {
                             workspace.poll_launcher_worker_results(cx);
                             workspace.poll_graphics_worker_results(window, cx);
                             workspace.poll_connection_monitor_updates(cx);
+                            workspace.poll_external_settings_store_changes(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_start_sftp_remote_load(cx);
                             workspace.poll_forwarding_worker_results(cx);

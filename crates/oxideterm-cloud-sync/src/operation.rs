@@ -16,6 +16,7 @@ use oxideterm_connections::{
 };
 use oxideterm_forwarding::{ForwardingRegistry, SavedForwardsSyncSnapshot};
 use oxideterm_settings::{SettingsStore, export_oxide_settings_snapshot_json};
+use zeroize::Zeroizing;
 
 use crate::{
     CloudSyncSettings, ConflictStrategy, RawSyncScope, STRUCTURED_MANIFEST_CONTENT_TYPE,
@@ -190,7 +191,8 @@ impl CloudSyncOperationService {
         if requires_password
             && secrets
                 .sync_password
-                .as_deref()
+                .as_ref()
+                .map(|password| password.as_str())
                 .unwrap_or_default()
                 .is_empty()
         {
@@ -246,7 +248,10 @@ impl CloudSyncOperationService {
                 &revision,
                 &uploaded_at,
                 &options.device_id,
-                secrets.sync_password.as_deref(),
+                secrets
+                    .sync_password
+                    .as_ref()
+                    .map(|password| password.as_str()),
                 progress,
                 total,
             )
@@ -376,7 +381,17 @@ impl CloudSyncOperationService {
         let sync_password = if needs_password {
             let secrets =
                 get_action_secrets(settings, secret_provider, true, SecretReadMode::Prompt)?;
-            Some(required_sync_password(secrets.sync_password.as_deref())?.to_string())
+            // Keep the structured preview password in a zeroizing owner while it
+            // is reused across per-section decryptions.
+            Some(Zeroizing::new(
+                required_sync_password(
+                    secrets
+                        .sync_password
+                        .as_ref()
+                        .map(|password| password.as_str()),
+                )?
+                .to_string(),
+            ))
         } else {
             None
         };
@@ -420,7 +435,7 @@ impl CloudSyncOperationService {
             let object = self
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
-            if let Some(password) = sync_password.as_deref() {
+            if let Some(password) = sync_password.as_ref().map(|password| password.as_str()) {
                 let import_preview = preview_oxide_import_with_progress(
                     connection_store,
                     &object.bytes,
@@ -477,7 +492,7 @@ impl CloudSyncOperationService {
             let object = self
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
-            if let Some(password) = sync_password.as_deref() {
+            if let Some(password) = sync_password.as_ref().map(|password| password.as_str()) {
                 let import_preview = preview_oxide_import_with_progress(
                     connection_store,
                     &object.bytes,
@@ -541,7 +556,8 @@ impl CloudSyncOperationService {
         let secrets = get_action_secrets(settings, secret_provider, true, SecretReadMode::Prompt)?;
         let password = secrets
             .sync_password
-            .as_deref()
+            .as_ref()
+            .map(|password| password.as_str())
             .filter(|password| !password.is_empty())
             .context("missing_sync_password: cloud sync password is required")?;
         let remote = self
@@ -657,6 +673,7 @@ impl CloudSyncOperationService {
                     password,
                     OxideImportOptions {
                         selected_names: Some(Vec::new()),
+                        selected_forward_ids: None,
                         conflict_strategy: ImportConflictStrategy::Replace,
                         import_forwards: false,
                         import_portable_secrets: false,
@@ -694,6 +711,7 @@ impl CloudSyncOperationService {
                     password,
                     OxideImportOptions {
                         selected_names: Some(Vec::new()),
+                        selected_forward_ids: None,
                         conflict_strategy: ImportConflictStrategy::Replace,
                         import_forwards: false,
                         import_portable_secrets: false,

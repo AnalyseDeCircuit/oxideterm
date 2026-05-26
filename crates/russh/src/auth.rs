@@ -13,6 +13,7 @@
 // limitations under the License.
 //
 
+use std::fmt;
 use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -21,6 +22,7 @@ use std::sync::Arc;
 use ssh_key::{Certificate, HashAlg, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
+use zeroize::Zeroizing;
 
 use crate::helpers::NameList;
 use crate::keys::PrivateKeyWithHashAlg;
@@ -194,12 +196,11 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
     }
 }
 
-#[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum Method {
     None,
     Password {
-        password: String,
+        password: Zeroizing<String>,
     },
     PublicKey {
         key: PrivateKeyWithHashAlg,
@@ -222,6 +223,42 @@ pub enum Method {
         submethods: String,
     },
     // Hostbased,
+}
+
+impl fmt::Debug for Method {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => f.write_str("None"),
+            Self::Password { .. } => f
+                .debug_struct("Password")
+                .field("password", &"<redacted>")
+                .finish(),
+            Self::PublicKey { key } => f
+                .debug_struct("PublicKey")
+                .field("algorithm", &key.algorithm())
+                .field("key", &"<redacted>")
+                .finish(),
+            Self::OpenSshCertificate { cert, .. } => f
+                .debug_struct("OpenSshCertificate")
+                .field("key", &"<redacted>")
+                .field("cert", cert)
+                .finish(),
+            Self::FuturePublicKey { key, hash_alg } => f
+                .debug_struct("FuturePublicKey")
+                .field("key", key)
+                .field("hash_alg", hash_alg)
+                .finish(),
+            Self::FutureCertificate { cert, hash_alg } => f
+                .debug_struct("FutureCertificate")
+                .field("cert", cert)
+                .field("hash_alg", hash_alg)
+                .finish(),
+            Self::KeyboardInteractive { submethods } => f
+                .debug_struct("KeyboardInteractive")
+                .field("submethods", submethods)
+                .finish(),
+        }
+    }
 }
 
 #[doc(hidden)]

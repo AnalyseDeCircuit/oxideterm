@@ -159,6 +159,22 @@ impl ConnectionStore {
         Ok(deleted)
     }
 
+    pub fn rename_connection(&mut self, id: &str, name: String) -> Result<bool> {
+        let Some(connection) = self
+            .data
+            .connections
+            .iter_mut()
+            .find(|connection| connection.id == id)
+        else {
+            return Ok(false);
+        };
+        connection.name = non_empty(name.trim(), "Connection name")?.to_string();
+        connection.updated_at = Some(Utc::now());
+        self.normalize();
+        self.save()?;
+        Ok(true)
+    }
+
     pub fn ensure_group(&mut self, name: String) -> Result<()> {
         let name = validate_group_name(&name)?;
         if !self.data.groups.contains(&name) {
@@ -181,6 +197,29 @@ impl ConnectionStore {
             }
         }
         self.save()
+    }
+
+    pub fn rename_group(&mut self, old_name: &str, new_name: String) -> Result<usize> {
+        let new_name = validate_group_name(&new_name)?;
+        let mut updated = 0;
+        for group in &mut self.data.groups {
+            if group == old_name {
+                *group = new_name.clone();
+                updated += 1;
+            }
+        }
+        for connection in &mut self.data.connections {
+            if connection.group.as_deref() == Some(old_name) {
+                connection.group = Some(new_name.clone());
+                connection.updated_at = Some(Utc::now());
+                updated += 1;
+            }
+        }
+        if updated > 0 {
+            self.normalize();
+            self.save()?;
+        }
+        Ok(updated)
     }
 
     pub fn move_to_group(&mut self, ids: &[String], group: Option<&str>) -> Result<usize> {

@@ -773,6 +773,8 @@ pub(crate) struct WorkspaceApp {
     background_image_cache: BackgroundImageRenderCache,
     settings_store: SettingsStore,
     connection_store: ConnectionStore,
+    settings_store_last_modified: Option<SystemTime>,
+    connection_store_last_modified: Option<SystemTime>,
     plugin_registry: plugin_host::NativePluginRegistry,
     plugin_runtime_host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
     native_plugin_confirm_tx: std::sync::mpsc::Sender<plugin_lifecycle::NativePluginConfirmRequest>,

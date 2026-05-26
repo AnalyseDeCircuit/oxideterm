@@ -15,6 +15,8 @@ const AI_KEYCHAIN_TOUCH_ID_REASON: &str = "OxideTerm needs to access your AI API
 mod mac_keychain {
     use std::process::Command;
 
+    use zeroize::{Zeroize, Zeroizing};
+
     pub fn store(service: &str, account: &str, password: &str) -> Result<(), String> {
         let _ = Command::new("security")
             .args(["delete-generic-password", "-s", service, "-a", account])
@@ -42,16 +44,22 @@ mod mac_keychain {
         }
     }
 
-    pub fn get(service: &str, account: &str) -> Result<String, String> {
-        let output = Command::new("security")
+    pub fn get(service: &str, account: &str) -> Result<Zeroizing<String>, String> {
+        let mut output = Command::new("security")
             .args(["find-generic-password", "-s", service, "-a", account, "-w"])
             .output()
             .map_err(|error| format!("security CLI: {error}"))?;
 
         if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout)
-                .trim_end_matches('\n')
-                .to_string())
+            // `security -w` writes the secret into stdout; move it into a
+            // zeroizing String and wipe the process output buffer immediately.
+            let secret = Zeroizing::new(
+                String::from_utf8_lossy(&output.stdout)
+                    .trim_end_matches('\n')
+                    .to_string(),
+            );
+            output.stdout.zeroize();
+            Ok(secret)
         } else {
             Err("not found".to_string())
         }
@@ -270,7 +278,7 @@ impl AiProviderKeyStore {
     ) -> Result<Option<Zeroizing<String>>> {
         let account = self.account(provider_id);
         if let Ok(secret) = mac_keychain::get(&self.service, &account) {
-            return Ok(Some(Zeroizing::new(secret)));
+            return Ok(Some(secret));
         }
 
         match self.entry(provider_id)?.get_password() {
@@ -278,8 +286,9 @@ impl AiProviderKeyStore {
                 // Older native builds used keyring's default macOS ACL. After
                 // the explicit biometric gate succeeds, migrate to Tauri's
                 // `security -A` storage so future reads avoid binary ACL prompts.
-                let _ = mac_keychain::store(&self.service, &account, &secret);
-                Ok(Some(Zeroizing::new(secret)))
+                let secret = Zeroizing::new(secret);
+                let _ = mac_keychain::store(&self.service, &account, secret.as_str());
+                Ok(Some(secret))
             }
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(error)

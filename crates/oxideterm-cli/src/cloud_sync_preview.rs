@@ -10,7 +10,7 @@ use oxideterm_cloud_sync::{
 use serde::Serialize;
 
 use crate::{
-    args::{CloudSyncDiffArgs, CloudSyncDiffCategory, JsonArgs},
+    args::{CloudSyncDiffArgs, CloudSyncDiffCategory, CloudSyncDiffFormat, JsonArgs},
     error::{CliError, CliResult},
     output::{self, OutputFormat},
     paths::default_cloud_sync_path,
@@ -18,27 +18,27 @@ use crate::{
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CloudSyncPreviewResponse {
-    path: String,
-    scope: SyncScope,
-    local: RevisionSummary,
-    baseline: RevisionSummary,
-    remote: RemoteSummary,
-    dirty: DirtySummary,
+pub(crate) struct CloudSyncPreviewResponse {
+    pub(crate) path: String,
+    pub(crate) scope: SyncScope,
+    pub(crate) local: RevisionSummary,
+    pub(crate) baseline: RevisionSummary,
+    pub(crate) remote: RemoteSummary,
+    pub(crate) dirty: DirtySummary,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CloudSyncDiffResponse {
-    path: String,
-    has_dirty: bool,
-    remote_revision: Option<String>,
-    sections: Vec<SectionDiff>,
+pub(crate) struct CloudSyncDiffResponse {
+    pub(crate) path: String,
+    pub(crate) has_dirty: bool,
+    pub(crate) remote_revision: Option<String>,
+    pub(crate) sections: Vec<SectionDiff>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RevisionSummary {
+pub(crate) struct RevisionSummary {
     connections: Option<String>,
     forwards: Option<String>,
     app_settings_count: usize,
@@ -47,7 +47,7 @@ struct RevisionSummary {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RemoteSummary {
+pub(crate) struct RemoteSummary {
     exists: bool,
     revision: Option<String>,
     updated_at: Option<String>,
@@ -58,7 +58,7 @@ struct RemoteSummary {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DirtySummary {
+pub(crate) struct DirtySummary {
     has_dirty: bool,
     connections: bool,
     forwards: bool,
@@ -68,14 +68,14 @@ struct DirtySummary {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SectionDiff {
-    category: &'static str,
-    id: String,
-    in_scope: bool,
-    dirty: bool,
-    local_revision: Option<String>,
-    baseline_revision: Option<String>,
-    remote_revision: Option<String>,
+pub(crate) struct SectionDiff {
+    pub(crate) category: &'static str,
+    pub(crate) id: String,
+    pub(crate) in_scope: bool,
+    pub(crate) dirty: bool,
+    pub(crate) local_revision: Option<String>,
+    pub(crate) baseline_revision: Option<String>,
+    pub(crate) remote_revision: Option<String>,
 }
 
 pub fn preview(args: JsonArgs) -> CliResult<()> {
@@ -98,10 +98,16 @@ pub fn diff(args: CloudSyncDiffArgs) -> CliResult<()> {
     let filter = DiffFilter::from_args(&args);
     let response = diff_response(path.display().to_string(), &state, &filter);
 
-    match output::format_from_flag(args.json) {
+    let json_output = args.json || args.format == Some(CloudSyncDiffFormat::Json);
+    match output::format_from_flag(json_output) {
         OutputFormat::Json => output::write_json(&response),
         OutputFormat::Text => {
-            output::write_text(format_diff_text(&response));
+            let text = if args.format == Some(CloudSyncDiffFormat::Table) {
+                format_diff_table(&response)
+            } else {
+                format_diff_text(&response)
+            };
+            output::write_text(text);
             Ok(())
         }
     }
@@ -133,7 +139,10 @@ pub(crate) fn load_persisted_state(path: &Path, json: bool) -> CliResult<CloudSy
     }
 }
 
-fn preview_response(path: String, state: &CloudSyncPersistedState) -> CloudSyncPreviewResponse {
+pub(crate) fn preview_response(
+    path: String,
+    state: &CloudSyncPersistedState,
+) -> CloudSyncPreviewResponse {
     let local_metadata = local_metadata(state);
     let scope = resolved_scope(state, &local_metadata);
     let baseline = state.last_synced_structured_state.as_ref();
@@ -153,13 +162,13 @@ fn preview_response(path: String, state: &CloudSyncPersistedState) -> CloudSyncP
     }
 }
 
-struct DiffFilter {
+pub(crate) struct DiffFilter {
     dirty_only: bool,
     category: Option<CloudSyncDiffCategory>,
 }
 
 impl DiffFilter {
-    fn from_args(args: &CloudSyncDiffArgs) -> Self {
+    pub(crate) fn from_args(args: &CloudSyncDiffArgs) -> Self {
         Self {
             dirty_only: args.dirty_only,
             category: args.category,
@@ -167,7 +176,7 @@ impl DiffFilter {
     }
 }
 
-fn diff_response(
+pub(crate) fn diff_response(
     path: String,
     state: &CloudSyncPersistedState,
     filter: &DiffFilter,
@@ -467,6 +476,61 @@ fn format_diff_text(response: &CloudSyncDiffResponse) -> String {
         .join("\n")
 }
 
+fn format_diff_table(response: &CloudSyncDiffResponse) -> String {
+    if response.sections.is_empty() {
+        return "No cloud sync sections".to_string();
+    }
+
+    let headers = [
+        "CATEGORY", "ID", "SCOPE", "DIRTY", "LOCAL", "BASELINE", "REMOTE",
+    ];
+    let mut rows = vec![headers.map(str::to_string)];
+    rows.extend(response.sections.iter().map(|section| {
+        [
+            section.category.to_string(),
+            section.id.clone(),
+            section.in_scope.to_string(),
+            section.dirty.to_string(),
+            section.local_revision.as_deref().unwrap_or("-").to_string(),
+            section
+                .baseline_revision
+                .as_deref()
+                .unwrap_or("-")
+                .to_string(),
+            section
+                .remote_revision
+                .as_deref()
+                .unwrap_or("-")
+                .to_string(),
+        ]
+    }));
+
+    let widths = column_widths(&rows);
+    rows.into_iter()
+        .map(|row| format_table_row(&row, &widths))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn column_widths(rows: &[[String; 7]]) -> [usize; 7] {
+    let mut widths = [0; 7];
+    for row in rows {
+        for (index, value) in row.iter().enumerate() {
+            widths[index] = widths[index].max(value.len());
+        }
+    }
+    widths
+}
+
+fn format_table_row(row: &[String; 7], widths: &[usize; 7]) -> String {
+    // Keep table formatting dependency-free and deterministic for shell output.
+    row.iter()
+        .enumerate()
+        .map(|(index, value)| format!("{value:<width$}", width = widths[index]))
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -562,5 +626,29 @@ mod tests {
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, "appearance");
+    }
+
+    #[test]
+    fn diff_table_includes_headers_and_rows() {
+        let response = CloudSyncDiffResponse {
+            path: "cloud_sync.json".to_string(),
+            has_dirty: true,
+            remote_revision: None,
+            sections: vec![SectionDiff {
+                category: "connections",
+                id: "connections".to_string(),
+                in_scope: true,
+                dirty: true,
+                local_revision: Some("local".to_string()),
+                baseline_revision: None,
+                remote_revision: Some("remote".to_string()),
+            }],
+        };
+
+        let table = format_diff_table(&response);
+
+        assert!(table.contains("CATEGORY"));
+        assert!(table.contains("connections"));
+        assert!(table.contains("remote"));
     }
 }

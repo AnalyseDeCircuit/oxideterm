@@ -67,8 +67,14 @@ fn apply_oxide_import_with_options_inner(
     } = payload;
     current_step += 1;
     report_progress("filtering_selection", current_step);
-    let selected_connections =
+    let mut selected_connections =
         filter_selected_connections(connections, options.selected_names.as_ref());
+    let total_available_forwards = selected_connections
+        .iter()
+        .map(|connection| connection.forwards.len())
+        .sum::<usize>();
+    let forward_filter = options.selected_forward_ids.as_ref();
+    let forward_selection = filter_selected_forward_ids(&mut selected_connections, forward_filter);
     let total_selected_forwards = selected_connections
         .iter()
         .map(|connection| connection.forwards.len())
@@ -87,6 +93,13 @@ fn apply_oxide_import_with_options_inner(
         },
         ..ImportResultEnvelope::default()
     };
+    result.skipped_forwards += forward_selection.skipped;
+    result.errors.extend(
+        forward_selection
+            .missing
+            .into_iter()
+            .map(|id| format!("Forward id not found in .oxide payload: {id}")),
+    );
     let mut connections_to_save = Vec::new();
 
     current_step += 1;
@@ -157,6 +170,8 @@ fn apply_oxide_import_with_options_inner(
     report_progress("saving_config", current_step);
     if !options.import_forwards {
         result.skipped_forwards = total_selected_forwards;
+    } else if forward_filter.is_some() {
+        result.skipped_forwards = total_available_forwards.saturating_sub(total_selected_forwards);
     }
 
     if options.import_portable_secrets {
@@ -172,6 +187,51 @@ fn apply_oxide_import_with_options_inner(
     }
 
     Ok(result)
+}
+
+#[derive(Debug, Default)]
+struct ForwardSelectionResult {
+    skipped: usize,
+    missing: Vec<String>,
+}
+
+fn filter_selected_forward_ids(
+    connections: &mut [EncryptedConnection],
+    selected_forward_ids: Option<&Vec<String>>,
+) -> ForwardSelectionResult {
+    let Some(selected_forward_ids) = selected_forward_ids else {
+        return ForwardSelectionResult::default();
+    };
+    let requested = selected_forward_ids
+        .iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    if requested.is_empty() {
+        return ForwardSelectionResult::default();
+    }
+
+    let mut matched = HashSet::new();
+    let mut skipped = 0usize;
+    for connection in connections {
+        connection.forwards.retain(|forward| {
+            let keep = forward
+                .id
+                .as_ref()
+                .is_some_and(|id| requested.contains(id));
+            if keep {
+                if let Some(id) = &forward.id {
+                    matched.insert(id.clone());
+                }
+            } else {
+                skipped += 1;
+            }
+            keep
+        });
+    }
+    let missing = requested.difference(&matched).cloned().collect::<Vec<_>>();
+    ForwardSelectionResult { skipped, missing }
 }
 
 fn encrypted_connection_to_saved(
@@ -218,6 +278,7 @@ fn import_forwards(
     forwards
         .into_iter()
         .map(|forward| OxideForwardRecord {
+            id: forward.id,
             connection_id: connection_id.to_string(),
             forward_type: forward.forward_type,
             bind_address: forward.bind_address,

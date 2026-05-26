@@ -1124,14 +1124,15 @@ impl WorkspaceApp {
         if should_store_auth_token {
             let registry = self.ai_mcp_registry.clone();
             let runtime = self.forwarding_runtime.clone();
-            let token = draft.auth_token.clone();
             let mut restore_draft = draft.clone();
+            // Move the UI token draft into a zeroizing owner before it crosses
+            // into the blocking keychain task. The restore copy is zeroized on
+            // success and retained only when the form must be shown again.
+            let token = zeroize::Zeroizing::new(std::mem::take(&mut draft.auth_token));
             cx.spawn(async move |weak, cx| {
                 let id_for_store = id.clone();
                 let result = runtime
-                    .spawn_blocking(move || {
-                        registry.store_auth_token(&id_for_store, zeroize::Zeroizing::new(token))
-                    })
+                    .spawn_blocking(move || registry.store_auth_token(&id_for_store, token))
                     .await
                     .map_err(|error| error.to_string())
                     .and_then(|result| result.map_err(|error| error.to_string()));

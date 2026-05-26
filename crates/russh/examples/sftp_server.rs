@@ -44,7 +44,10 @@ impl russh::server::Handler for SshSession {
     type Error = anyhow::Error;
 
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
-        info!("credentials: {user}, {password}");
+        // This example accepts any password, but logs must not print credential
+        // material because examples are often copied into real test harnesses.
+        let _ = password;
+        info!("password authentication accepted for {user}");
         Ok(Auth::Accept)
     }
 

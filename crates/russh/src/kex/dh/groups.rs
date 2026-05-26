@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::ops::Deref;
 
 use crate::keys::ssh_key::rand_core::OsRng;
@@ -260,13 +260,28 @@ pub const DH_GROUP18: DhGroup = DhGroup {
     generator: DhGroupUInt::new(&[2]),
 };
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone)]
 pub(crate) struct DH {
     prime_num: BigUint,
     generator: BigUint,
     private_key: BigUint,
     public_key: BigUint,
     shared_secret: BigUint,
+}
+
+impl Debug for DH {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // DH private exponents and computed shared secrets are key material.
+        // Keep public parameters visible for diagnostics without exposing them.
+        formatter
+            .debug_struct("DH")
+            .field("prime_num", &format!("<{} bits>", self.prime_num.bits()))
+            .field("generator", &self.generator)
+            .field("private_key", &"<redacted>")
+            .field("public_key", &self.public_key)
+            .field("shared_secret", &"<redacted>")
+            .finish()
+    }
 }
 
 impl DH {

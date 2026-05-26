@@ -21,10 +21,9 @@ pub(crate) async fn stream_gemini_completion(
 ) -> Result<()> {
     let api_key = api_key_required_ref(&config.provider_type, config.api_key.as_ref())?;
     let url = format!(
-        "{}/models/{}:streamGenerateContent?alt=sse&key={}",
+        "{}/models/{}:streamGenerateContent",
         config.base_url.trim().trim_end_matches('/'),
-        url_encode_component(&config.model),
-        url_encode_component(api_key.as_str())
+        url_encode_component(&config.model)
     );
     let client = reqwest::Client::builder()
         .timeout(CHAT_STREAM_TIMEOUT)
@@ -33,11 +32,19 @@ pub(crate) async fn stream_gemini_completion(
     let body = gemini_chat_body(&config, &messages);
     let response = client
         .post(&url)
+        // Gemini requires the API key as a query parameter. Let reqwest attach
+        // it to the request and strip URLs from transport errors below.
+        .query(&[("alt", "sse"), ("key", api_key.as_str())])
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&body)
         .send()
         .await
-        .context("failed to connect to Gemini provider")?;
+        .map_err(|error| {
+            anyhow!(
+                "failed to connect to Gemini provider: {}",
+                error.without_url()
+            )
+        })?;
     if !response.status().is_success() {
         let status = response.status().as_u16();
         let error_text = response.text().await.unwrap_or_default();

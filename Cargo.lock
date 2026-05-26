@@ -7009,12 +7009,18 @@ version = "0.1.0"
 name = "oxideterm-cli"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
+ "oxideterm-ai",
  "oxideterm-cloud-sync",
  "oxideterm-connections",
+ "oxideterm-forwarding",
+ "oxideterm-quick-commands",
  "oxideterm-settings",
  "serde",
  "serde_json",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -7036,6 +7042,7 @@ dependencies = [
  "thiserror 2.0.18",
  "uuid",
  "whoami",
+ "zeroize",
 ]
 
 [[package]]
@@ -7476,6 +7483,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-quick-commands"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "oxideterm-render-policy"
 version = "0.1.0"
 dependencies = [
@@ -7657,6 +7672,7 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

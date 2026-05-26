@@ -155,6 +155,10 @@ pub fn native_plugin_sync_import_oxide_args(
     let options = NativePluginOxideImportOptions {
         oxide_options: OxideImportOptions {
             selected_names: native_plugin_optional_string_array_arg(args, "selectedNames")?,
+            selected_forward_ids: native_plugin_optional_string_array_arg(
+                args,
+                "selectedForwardIds",
+            )?,
             conflict_strategy,
             import_forwards: native_plugin_bool_arg(args, "importForwards").unwrap_or(true),
             import_portable_secrets: native_plugin_bool_arg(args, "importPortableSecrets")

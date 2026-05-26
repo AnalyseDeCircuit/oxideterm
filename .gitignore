@@ -26,8 +26,10 @@ target/
 .env.local
 /docs/local
 /docs/tauri
+!/docs/tauri/
+!/docs/tauri/native-cli-parity-gap-checklist.md
 .codex-private/
-tauri版本代码/*
 .deps
-docs/native-editor-ide-plan.md
-docs/native-cloud-sync-plan.md
+docs/tauri/*
+AGENTS.md
+tasks/*

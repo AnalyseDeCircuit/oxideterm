@@ -9,9 +9,15 @@ name = "oxideterm"
 path = "src/main.rs"
 
 [dependencies]
+chrono.workspace = true
 clap.workspace = true
+oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
 oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
+zeroize.workspace = true

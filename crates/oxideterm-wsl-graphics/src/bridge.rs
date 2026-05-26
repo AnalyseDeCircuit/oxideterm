@@ -12,6 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::http::{Response, StatusCode};
+use zeroize::Zeroizing;
 
 use crate::WslGraphicsError;
 
@@ -28,12 +29,12 @@ pub fn generate_token() -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-pub fn extract_token(uri: &str) -> Option<String> {
+pub fn extract_token(uri: &str) -> Option<Zeroizing<String>> {
     uri.split('?').nth(1)?.split('&').find_map(|pair| {
         let mut kv = pair.splitn(2, '=');
         let key = kv.next()?;
         let value = kv.next()?;
-        (key == "token").then(|| value.to_string())
+        (key == "token").then(|| Zeroizing::new(value.to_string()))
     })
 }
 
@@ -45,7 +46,9 @@ async fn start_proxy_impl(
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let ws_port = listener.local_addr()?.port();
 
-    let expected_token = token.clone();
+    // The returned token is needed by the caller to build the one-shot noVNC
+    // URL; keep the bridge-side comparison copy zeroized after the task exits.
+    let expected_token = Zeroizing::new(token.clone());
     let handle = tokio::spawn(async move {
         match listener.accept().await {
             Ok((stream, addr)) => {
@@ -73,7 +76,7 @@ async fn start_proxy_impl(
 async fn proxy_connection(
     tcp_stream: TcpStream,
     vnc_addr: &str,
-    expected_token: String,
+    expected_token: Zeroizing<String>,
 ) -> Result<(), WslGraphicsError> {
     let ws_stream = tokio_tungstenite::accept_hdr_async(
         tcp_stream,
@@ -90,7 +93,10 @@ async fn proxy_connection(
                 .unwrap_or(false);
 
             if !token_valid {
-                tracing::warn!("Graphics proxy: invalid token from {}", uri);
+                tracing::warn!(
+                    "Graphics proxy: invalid token for path {}",
+                    req.uri().path()
+                );
                 return Err(Response::builder()
                     .status(StatusCode::FORBIDDEN)
                     .body(Some("Invalid token".to_string()))
@@ -168,10 +174,17 @@ mod tests {
 
     #[test]
     fn extract_token_matches_tauri_query_semantics() {
-        assert_eq!(extract_token("/?token=abc123"), Some("abc123".to_string()));
         assert_eq!(
-            extract_token("/path?foo=bar&token=xyz&baz=1"),
-            Some("xyz".to_string())
+            extract_token("/?token=abc123")
+                .as_ref()
+                .map(|token| token.as_str()),
+            Some("abc123")
+        );
+        assert_eq!(
+            extract_token("/path?foo=bar&token=xyz&baz=1")
+                .as_ref()
+                .map(|token| token.as_str()),
+            Some("xyz")
         );
         assert_eq!(extract_token("/no-query"), None);
         assert_eq!(extract_token("/?other=val"), None);

@@ -80,6 +80,22 @@ pub fn default_settings_path() -> PathBuf {
     PathBuf::from(SETTINGS_FILENAME)
 }
 
+pub fn save_settings_to_path(
+    path: &Path,
+    settings: PersistedSettings,
+) -> Result<SettingsSaveResult> {
+    // Non-GPUI writers share the same sanitize-and-envelope path as SettingsStore::save.
+    let sanitized = sanitize_settings_value(settings.to_value())?;
+    let updated_at = now_ms();
+    write_envelope(path, &sanitized.settings, updated_at)?;
+    Ok(SettingsSaveResult {
+        settings: sanitized.settings,
+        version: SETTINGS_SCHEMA_VERSION,
+        updated_at,
+        validation_warnings: sanitized.validation_warnings,
+    })
+}
+
 fn read_envelope(path: &Path) -> Result<Option<(Value, u64)>> {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
@@ -125,6 +141,16 @@ fn write_envelope(path: &Path, settings: &PersistedSettings, updated_at: u64) ->
 }
 
 impl SettingsStore {
+    pub fn from_read_only(path: impl Into<PathBuf>, settings: PersistedSettings) -> Self {
+        // CLI previews need the same in-memory shape as SettingsStore without triggering
+        // migrations or envelope rewrites in the user's settings directory.
+        Self {
+            path: path.into(),
+            settings,
+            updated_at: 0,
+        }
+    }
+
     pub fn load_default() -> Result<Self> {
         Self::load_from_path(default_settings_path(), None)
     }
@@ -159,17 +185,10 @@ impl SettingsStore {
     }
 
     pub fn save(&mut self) -> Result<SettingsSaveResult> {
-        let sanitized = sanitize_settings_value(self.settings.to_value())?;
-        let updated_at = now_ms();
-        write_envelope(&self.path, &sanitized.settings, updated_at)?;
-        self.settings = sanitized.settings.clone();
-        self.updated_at = updated_at;
-        Ok(SettingsSaveResult {
-            settings: sanitized.settings,
-            version: SETTINGS_SCHEMA_VERSION,
-            updated_at,
-            validation_warnings: sanitized.validation_warnings,
-        })
+        let saved = save_settings_to_path(&self.path, self.settings.clone())?;
+        self.settings = saved.settings.clone();
+        self.updated_at = saved.updated_at;
+        Ok(saved)
     }
 
     pub fn replace_and_save(&mut self, settings: PersistedSettings) -> Result<SettingsSaveResult> {

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
@@ -44,12 +44,31 @@ pub struct ResolvedAiEmbeddingProvider {
     pub reason: AiEmbeddingProviderReason,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum AiChatEmbeddingApiKeyDecision {
     UseKey(Zeroizing<String>),
     NoKey,
     LoadProviderKey(String),
     Skip,
+}
+
+impl fmt::Debug for AiChatEmbeddingApiKeyDecision {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Embedding key decisions are useful in tests/logs, but the loaded key
+        // branch must never expose the provider secret.
+        match self {
+            Self::UseKey(_) => formatter
+                .debug_tuple("UseKey")
+                .field(&"<redacted>")
+                .finish(),
+            Self::NoKey => formatter.write_str("NoKey"),
+            Self::LoadProviderKey(provider_id) => formatter
+                .debug_tuple("LoadProviderKey")
+                .field(provider_id)
+                .finish(),
+            Self::Skip => formatter.write_str("Skip"),
+        }
+    }
 }
 
 pub fn ai_provider_supports_embeddings(provider: &AiProviderView) -> bool {
@@ -263,10 +282,12 @@ async fn embed_openai_compatible(
     if let Some(api_key) = api_key.as_ref().filter(|key| !key.is_empty()) {
         request = request.bearer_auth(api_key.as_str());
     }
-    let response = request
-        .send()
-        .await
-        .with_context(|| format!("failed to connect to embedding provider at {url}"))?;
+    let response = request.send().await.map_err(|error| {
+        anyhow!(
+            "failed to connect to embedding provider: {}",
+            error.without_url()
+        )
+    })?;
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
@@ -294,10 +315,12 @@ async fn embed_ollama(
     if let Some(api_key) = api_key.as_ref().filter(|key| !key.is_empty()) {
         request = request.bearer_auth(api_key.as_str());
     }
-    let response = request
-        .send()
-        .await
-        .with_context(|| format!("failed to connect to Ollama embedding endpoint at {url}"))?;
+    let response = request.send().await.map_err(|error| {
+        anyhow!(
+            "failed to connect to Ollama embedding endpoint: {}",
+            error.without_url()
+        )
+    })?;
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {

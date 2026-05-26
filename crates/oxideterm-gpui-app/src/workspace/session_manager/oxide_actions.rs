@@ -402,7 +402,9 @@ impl WorkspaceApp {
         cx.notify();
 
         let store = self.connection_store.clone();
-        let password = dialog.password.clone();
+        // Dialog input is a UI String draft; worker-owned copies are zeroized
+        // when the import preview thread exits.
+        let password = zeroize::Zeroizing::new(dialog.password.clone());
         let conflict_strategy = dialog.conflict_strategy;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -441,10 +443,13 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let password = dialog.password.clone();
+        // Dialog input is a UI String draft; worker-owned copies are zeroized
+        // when the import thread exits.
+        let password = zeroize::Zeroizing::new(dialog.password.clone());
         let options = OxideClientStateImportOptions {
             oxide_options: OxideImportOptions {
                 selected_names: Some(dialog.selected_names.iter().cloned().collect()),
+                selected_forward_ids: None,
                 conflict_strategy: dialog.conflict_strategy,
                 import_forwards: dialog.import_forwards,
                 import_portable_secrets: dialog.import_portable_secrets,
@@ -870,7 +875,9 @@ impl WorkspaceApp {
             .oxide_export_connection_ids(dialog)
             .into_iter()
             .collect::<Vec<_>>();
-        let password = dialog.password.clone();
+        // Dialog input is a UI String draft; worker-owned copies are zeroized
+        // when the export thread exits.
+        let password = zeroize::Zeroizing::new(dialog.password.clone());
         let preflight = self.oxide_export_preflight(dialog);
         if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
             dialog.busy = true;
@@ -1093,6 +1100,7 @@ impl WorkspaceApp {
                     (selected_ids.contains(&owner_id)
                         && dialog.selected_forward_ids.contains(&forward.id))
                     .then(|| OxideForwardRecord {
+                        id: Some(forward.id),
                         connection_id: owner_id,
                         forward_type: match forward.forward_type {
                             ForwardType::Local => "local".to_string(),
@@ -1343,10 +1351,7 @@ impl WorkspaceApp {
                 continue;
             }
 
-            match self
-                .ai_key_store
-                .store_provider_key(&secret.id, zeroize::Zeroizing::new(secret.secret.to_string()))
-            {
+            match self.ai_key_store.store_provider_key(&secret.id, secret.secret) {
                 Ok(()) => imported += 1,
                 Err(error) => envelope.errors.push(format!(
                     "Failed to import portable secret '{}': {error}",

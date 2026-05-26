@@ -18,7 +18,9 @@ use oxideterm_cloud_sync::{
         LegacyPreview, UploadOptions, UploadOutcome,
     },
     progress::{CloudSyncProgress, CloudSyncProgressSink, CloudSyncProgressStage},
-    secrets::{CloudSyncKeychainSecretProvider, SecretReadMode, get_action_secrets},
+    secrets::{
+        CloudSyncKeychainSecretProvider, CloudSyncSecretValue, SecretReadMode, get_action_secrets,
+    },
     state::{CloudSyncRollbackBackup, CloudSyncRollbackBackupMetadata},
 };
 use oxideterm_connections::{
@@ -299,7 +301,7 @@ pub async fn deliver_cloud_sync_apply_preview(
             &forwarding_registry,
             &settings_store,
             source_revision,
-            sync_password.as_deref(),
+            sync_password.as_ref().map(|password| password.as_str()),
         ) {
             Ok(Some(backup)) => {
                 let _ = tx.send(CloudSyncDelivery::RollbackBackupCreated(backup));
@@ -341,7 +343,7 @@ pub async fn deliver_cloud_sync_apply_preview(
                 preview,
                 selection.structured_selection(),
                 selection.conflict_strategy.clone(),
-                sync_password.as_deref(),
+                sync_password.as_ref().map(|password| password.as_str()),
                 Some(&mut apply_progress),
             )
             .map(|outcome| {
@@ -359,7 +361,7 @@ pub async fn deliver_cloud_sync_apply_preview(
                     &mut connection_store,
                     &settings,
                     &preview,
-                    sync_password.as_deref(),
+                    sync_password.as_ref().map(|password| password.as_str()),
                     selection.effective_import_connections(&summary),
                     selection.selected_connection_names_for_import(&summary),
                     selection.import_forwards,
@@ -394,7 +396,7 @@ fn read_apply_sync_password(
     provider: &mut CloudSyncKeychainSecretProvider,
     preview: &CloudSyncPendingPreview,
     create_rollback_backup: bool,
-) -> Option<Option<String>> {
+) -> Option<Option<CloudSyncSecretValue>> {
     let apply_requires_password = match preview {
         CloudSyncPendingPreview::Structured(preview) => {
             !preview.app_settings_entries.is_empty() || !preview.plugin_settings_entries.is_empty()
@@ -530,6 +532,7 @@ fn create_cloud_sync_rollback_backup(
             selected_ids
                 .contains(&owner_id)
                 .then(|| OxideForwardRecord {
+                    id: Some(forward.id),
                     connection_id: owner_id,
                     forward_type: match forward.forward_type {
                         ForwardType::Local => "local".to_string(),

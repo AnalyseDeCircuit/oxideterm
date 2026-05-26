@@ -69,6 +69,7 @@ mod tests {
                     r#"{"commands":[{"id":"1"}],"categories":[{}]}"#.to_string(),
                 ),
                 forwards: vec![OxideForwardRecord {
+                    id: Some("forward-1".to_string()),
                     connection_id: "conn-1".to_string(),
                     forward_type: "local".to_string(),
                     bind_address: "127.0.0.1".to_string(),
@@ -373,6 +374,7 @@ mod tests {
             OxideExportOptions {
                 forwards: vec![
                     OxideForwardRecord {
+                        id: Some("forward-prod".to_string()),
                         connection_id: "conn-1".to_string(),
                         forward_type: "local".to_string(),
                         bind_address: "127.0.0.1".to_string(),
@@ -383,6 +385,7 @@ mod tests {
                         auto_start: true,
                     },
                     OxideForwardRecord {
+                        id: Some("forward-staging".to_string()),
                         connection_id: "conn-2".to_string(),
                         forward_type: "remote".to_string(),
                         bind_address: "127.0.0.1".to_string(),
@@ -468,6 +471,7 @@ mod tests {
             "secret!",
             OxideExportOptions {
                 forwards: vec![OxideForwardRecord {
+                    id: Some("forward-1".to_string()),
                     connection_id: "conn-1".to_string(),
                     forward_type: "local".to_string(),
                     bind_address: "127.0.0.1".to_string(),

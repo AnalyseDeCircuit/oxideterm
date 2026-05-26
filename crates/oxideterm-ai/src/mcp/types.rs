@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -60,7 +61,7 @@ pub enum McpAuthHeaderMode {
     None,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfig {
     pub id: String,
@@ -82,6 +83,33 @@ pub struct McpServerConfig {
     pub retry_on_disconnect: bool,
     #[serde(default)]
     pub auth_token: Option<String>,
+}
+
+impl fmt::Debug for McpServerConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("McpServerConfig")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("transport", &self.transport)
+            .field("url", &self.url)
+            .field("command", &self.command)
+            .field("args", &redact_sensitive_args(&self.args))
+            .field("env", &redacted_map_debug(&self.env))
+            .field("auth_header_name", &self.auth_header_name)
+            .field("auth_header_mode", &self.auth_header_mode)
+            .field("headers", &redacted_map_debug(&self.headers))
+            .field("enabled", &self.enabled)
+            .field("retry_on_disconnect", &self.retry_on_disconnect)
+            .field("auth_token", &self.auth_token.as_ref().map(|_| "[redacted token]"))
+            .finish()
+    }
+}
+
+fn redacted_map_debug(map: &HashMap<String, String>) -> HashMap<&str, &'static str> {
+    map.keys()
+        .map(|key| (key.as_str(), "[redacted]"))
+        .collect::<HashMap<_, _>>()
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

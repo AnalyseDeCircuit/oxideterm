@@ -89,6 +89,14 @@ use oxideterm_gpui_ui::{
     },
 };
 
+pub(in crate::workspace) fn settings_store_modified_time(
+    path: &std::path::Path,
+) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+}
+
 include!("settings/surface.rs");
 include!("settings/cards.rs");
 include!("settings/controls.rs");

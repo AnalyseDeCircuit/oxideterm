@@ -11,7 +11,7 @@ use serde_json::Value;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use uuid::Uuid;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     AuthType, CONFIG_VERSION, ConnectionOptions, ConnectionStore, SavedAuth, SavedConnection,
@@ -30,6 +30,8 @@ const EMBEDDED_KEY_MAX_BYTES: u64 = 1_048_576;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OxideForwardRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub connection_id: String,
     pub forward_type: String,
     pub bind_address: String,
@@ -54,6 +56,7 @@ pub struct OxideExportOptions {
 #[derive(Debug, Clone)]
 pub struct OxideImportOptions {
     pub selected_names: Option<Vec<String>>,
+    pub selected_forward_ids: Option<Vec<String>>,
     pub conflict_strategy: ImportConflictStrategy,
     pub import_forwards: bool,
     pub import_portable_secrets: bool,
@@ -63,6 +66,7 @@ impl Default for OxideImportOptions {
     fn default() -> Self {
         Self {
             selected_names: None,
+            selected_forward_ids: None,
             conflict_strategy: ImportConflictStrategy::Rename,
             import_forwards: true,
             import_portable_secrets: false,

@@ -645,6 +645,7 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings().clone();
         self.apply_loaded_settings_to_runtime(&settings, cx);
         let _ = self.settings_store.save();
+        self.settings_store_last_modified = settings_store_modified_time(self.settings_store.path());
         self.emit_native_plugin_settings_events(&previous_settings, &settings, cx);
         self.sync_tab_titles(cx);
         cx.notify();
@@ -661,6 +662,9 @@ impl WorkspaceApp {
         let settings = next_settings.settings().clone();
         self.settings_store = next_settings;
         self.connection_store = next_connections;
+        self.settings_store_last_modified = settings_store_modified_time(self.settings_store.path());
+        self.connection_store_last_modified =
+            settings_store_modified_time(self.connection_store.path());
         // External sync mutates persisted stores outside the GPUI controls.
         // Re-apply the same runtime side effects used by edit_settings instead
         // of relying on stale in-memory settings or browser-style stores.
@@ -670,6 +674,24 @@ impl WorkspaceApp {
         self.sync_tab_titles(cx);
         cx.notify();
         Ok(())
+    }
+
+    pub(super) fn poll_external_settings_store_changes(&mut self, cx: &mut Context<Self>) {
+        let settings_modified = settings_store_modified_time(self.settings_store.path());
+        let connections_modified = settings_store_modified_time(self.connection_store.path());
+        let settings_changed = settings_modified != self.settings_store_last_modified;
+        let connections_changed = connections_modified != self.connection_store_last_modified;
+        if !settings_changed && !connections_changed {
+            return;
+        }
+
+        // CLI writes and external tools mutate the same persisted stores as Tauri's
+        // browser settingsStore. Reload through the cloud-sync path so terminal,
+        // IDE, SFTP, theme, plugin, and sidebar runtime side effects stay aligned.
+        if self.reload_after_external_sync(cx).is_err() {
+            self.settings_store_last_modified = settings_modified;
+            self.connection_store_last_modified = connections_modified;
+        }
     }
 
     fn apply_loaded_settings_to_runtime(

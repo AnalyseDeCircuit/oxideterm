@@ -10,6 +10,7 @@ use reqwest::{
 };
 use serde_json::Value;
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
 use super::{
     CloudSyncBackend, RemoteMetadata, RemoteObject, RemoteSnapshotUpload, RemoteWriteResult,
@@ -240,7 +241,8 @@ fn validate_s3_config(config: &CloudSyncSettings, secrets: &CloudSyncSecrets) ->
     }
     if secrets
         .access_key_id
-        .as_deref()
+        .as_ref()
+        .map(|access_key_id| access_key_id.as_str())
         .unwrap_or_default()
         .is_empty()
     {
@@ -248,7 +250,8 @@ fn validate_s3_config(config: &CloudSyncSettings, secrets: &CloudSyncSecrets) ->
     }
     if secrets
         .secret_access_key
-        .as_deref()
+        .as_ref()
+        .map(|secret_access_key| secret_access_key.as_str())
         .unwrap_or_default()
         .is_empty()
     {
@@ -307,11 +310,13 @@ fn s3_signed_headers(
 ) -> Result<HeaderMap> {
     let access_key_id = secrets
         .access_key_id
-        .as_deref()
+        .as_ref()
+        .map(|access_key_id| access_key_id.as_str())
         .context("missing_s3_access_key_id: S3 access key ID is not configured")?;
     let secret_access_key = secrets
         .secret_access_key
-        .as_deref()
+        .as_ref()
+        .map(|secret_access_key| secret_access_key.as_str())
         .context("missing_s3_secret_access_key: S3 secret access key is not configured")?;
     let payload_hash = digest_hex(body);
     let now = Utc::now();
@@ -321,7 +326,8 @@ fn s3_signed_headers(
     insert_header(&mut headers, "x-amz-date", &amz_date)?;
     if let Some(session_token) = secrets
         .session_token
-        .as_deref()
+        .as_ref()
+        .map(|session_token| session_token.as_str())
         .filter(|token| !token.is_empty())
     {
         insert_header(&mut headers, "x-amz-security-token", session_token)?;
@@ -371,7 +377,7 @@ fn s3_signed_headers(
     ]
     .join("\n");
     let signing_key = s3_signature_key(secret_access_key, &date_stamp, region)?;
-    let signature = hmac_sha256_hex(&signing_key, string_to_sign.as_bytes())?;
+    let signature = hmac_sha256_hex(signing_key.as_slice(), string_to_sign.as_bytes())?;
     insert_header(
         &mut headers,
         AUTHORIZATION.as_str(),
@@ -382,24 +388,29 @@ fn s3_signed_headers(
     Ok(headers)
 }
 
-fn s3_signature_key(secret_access_key: &str, date_stamp: &str, region: &str) -> Result<Vec<u8>> {
-    let date_key = hmac_sha256(
-        format!("AWS4{secret_access_key}").as_bytes(),
-        date_stamp.as_bytes(),
-    )?;
-    let region_key = hmac_sha256(&date_key, region.as_bytes())?;
-    let service_key = hmac_sha256(&region_key, b"s3")?;
-    hmac_sha256(&service_key, b"aws4_request")
+fn s3_signature_key(
+    secret_access_key: &str,
+    date_stamp: &str,
+    region: &str,
+) -> Result<Zeroizing<Vec<u8>>> {
+    // AWS v4 derives several HMAC keys from the secret access key; each
+    // intermediate key stays in a zeroizing buffer until the next step copies it.
+    let signing_secret = Zeroizing::new(format!("AWS4{secret_access_key}"));
+    let date_key = hmac_sha256(signing_secret.as_bytes(), date_stamp.as_bytes())?;
+    let region_key = hmac_sha256(date_key.as_slice(), region.as_bytes())?;
+    let service_key = hmac_sha256(region_key.as_slice(), b"s3")?;
+    hmac_sha256(service_key.as_slice(), b"aws4_request")
 }
 
-fn hmac_sha256(key: &[u8], message: &[u8]) -> Result<Vec<u8>> {
+fn hmac_sha256(key: &[u8], message: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
     let mut mac = HmacSha256::new_from_slice(key)?;
     mac.update(message);
-    Ok(mac.finalize().into_bytes().to_vec())
+    Ok(Zeroizing::new(mac.finalize().into_bytes().to_vec()))
 }
 
 fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> Result<String> {
-    Ok(bytes_hex(&hmac_sha256(key, message)?))
+    let digest = hmac_sha256(key, message)?;
+    Ok(bytes_hex(digest.as_slice()))
 }
 
 fn bytes_hex(bytes: &[u8]) -> String {

@@ -5,6 +5,7 @@
 
 use std::{
     collections::{HashSet, hash_map::DefaultHasher},
+    fmt,
     hash::{Hash, Hasher},
 };
 
@@ -866,6 +867,26 @@ mod tests {
     }
 
     #[test]
+    fn ai_mcp_draft_debug_redacts_secret_values() {
+        let draft = AiMcpServerDraft {
+            args: "--api-key=arg-secret --token next-secret".to_string(),
+            env: vec![("API_KEY".to_string(), "env-secret".to_string())],
+            auth_token: "auth-secret".to_string(),
+            headers: vec![("Authorization".to_string(), "header-secret".to_string())],
+            ..AiMcpServerDraft::default()
+        };
+
+        let debug = format!("{draft:?}");
+
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("arg-secret"));
+        assert!(!debug.contains("next-secret"));
+        assert!(!debug.contains("env-secret"));
+        assert!(!debug.contains("auth-secret"));
+        assert!(!debug.contains("header-secret"));
+    }
+
+    #[test]
     fn ai_mcp_draft_input_adapter_trims_identity_fields_only() {
         let mut draft = AiMcpServerDraft {
             env: vec![(String::new(), String::new())],
@@ -992,7 +1013,7 @@ mod tests {
 
 pub const AI_MODEL_REFRESH_MISSING_API_KEY: &str = "__missing_api_key__";
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AiMcpServerDraft {
     pub name: String,
     pub transport: McpTransport,
@@ -1006,6 +1027,78 @@ pub struct AiMcpServerDraft {
     pub headers: Vec<(String, String)>,
     pub retry_on_disconnect: bool,
     pub show_auth_token: bool,
+}
+
+impl fmt::Debug for AiMcpServerDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // MCP drafts may hold auth tokens plus env/header/argument values
+        // commonly used for API keys. Keep Debug structural so diagnostics
+        // cannot leak them.
+        formatter
+            .debug_struct("AiMcpServerDraft")
+            .field("name", &self.name)
+            .field("transport", &self.transport)
+            .field("command", &self.command)
+            .field("args", &redacted_args_debug(&self.args))
+            .field("env", &redacted_pairs_debug(&self.env))
+            .field("url", &self.url)
+            .field("auth_header_name", &self.auth_header_name)
+            .field("auth_header_mode", &self.auth_header_mode)
+            .field("auth_token", &redacted_if_present(&self.auth_token))
+            .field("headers", &redacted_pairs_debug(&self.headers))
+            .field("retry_on_disconnect", &self.retry_on_disconnect)
+            .field("show_auth_token", &self.show_auth_token)
+            .finish()
+    }
+}
+
+fn redacted_pairs_debug(values: &[(String, String)]) -> Vec<(&str, &'static str)> {
+    values
+        .iter()
+        .map(|(key, _)| (key.as_str(), "<redacted>"))
+        .collect()
+}
+
+fn redacted_args_debug(args: &str) -> Vec<String> {
+    let mut redact_next = false;
+    args.split_whitespace()
+        .map(|arg| {
+            if redact_next {
+                redact_next = false;
+                return "<redacted>".to_string();
+            }
+
+            if let Some((name, _value)) = arg.split_once('=') {
+                if is_sensitive_arg_name(name) {
+                    return format!("{name}=<redacted>");
+                }
+            }
+
+            if is_sensitive_arg_name(arg) {
+                redact_next = true;
+            }
+            arg.to_string()
+        })
+        .collect()
+}
+
+fn is_sensitive_arg_name(arg: &str) -> bool {
+    let normalized = arg
+        .trim_start_matches('-')
+        .replace('_', "-")
+        .to_ascii_lowercase();
+    normalized == "key"
+        || normalized.ends_with("-key")
+        || normalized.contains("api-key")
+        || normalized.contains("apikey")
+        || normalized.contains("token")
+        || normalized.contains("password")
+        || normalized.contains("passphrase")
+        || normalized.contains("secret")
+}
+
+fn redacted_if_present(value: &str) -> Option<&'static str> {
+    (!value.is_empty()).then_some("<redacted>")
 }
 
 impl Default for AiMcpServerDraft {

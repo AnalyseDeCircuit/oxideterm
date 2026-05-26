@@ -111,6 +111,7 @@ pub fn cloud_sync_legacy_import_options(
     CloudSyncLegacyImportOptions {
         oxide_options: OxideImportOptions {
             selected_names: selection.selected_connection_names_for_import(summary),
+            selected_forward_ids: None,
             conflict_strategy: import_strategy_from_cloud_settings(
                 selection.conflict_strategy.clone(),
             ),

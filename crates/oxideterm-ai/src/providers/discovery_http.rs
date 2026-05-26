@@ -29,9 +29,14 @@ pub(crate) async fn fetch_provider_models_payload(
         }
         "gemini" => {
             let api_key = api_key_required_ref(provider_type, api_key)?;
-            let body =
-                send_text(client.get(gemini_models_url(&provider.base_url, api_key.as_str())?))
-                    .await?;
+            // Keep the API key out of our own URL strings; reqwest owns the
+            // query parameter only for the outgoing request.
+            let body = send_text(
+                client
+                    .get(gemini_models_url(&provider.base_url)?)
+                    .query(&[("key", api_key.as_str())]),
+            )
+            .await?;
             parse_provider_json(&body, "Gemini model list")
         }
         "ollama" => {
@@ -63,7 +68,10 @@ pub(crate) async fn fetch_provider_models_payload(
 }
 
 async fn send_text(request: reqwest::RequestBuilder) -> Result<String> {
-    let response = request.send().await?;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| anyhow!("model refresh request failed: {}", error.without_url()))?;
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
@@ -99,7 +107,10 @@ async fn fetch_openai_compatible_json(
             request = request.bearer_auth(api_key.as_str());
         }
         let has_fallback = index + 1 < candidates.len();
-        let response = request.send().await?;
+        let response = request
+            .send()
+            .await
+            .map_err(|error| anyhow!("{context} request failed: {}", error.without_url()))?;
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         if !status.is_success() {
@@ -177,15 +188,12 @@ fn provider_models_url(provider_type: &str, base_url: &str) -> Result<String> {
     Ok(format!("{base_url}/{suffix}"))
 }
 
-fn gemini_models_url(base_url: &str, api_key: &str) -> Result<String> {
+fn gemini_models_url(base_url: &str) -> Result<String> {
     let base_url = base_url.trim().trim_end_matches('/');
     if base_url.is_empty() {
         return Err(anyhow!("provider base URL is empty"));
     }
-    Ok(format!(
-        "{base_url}/v1beta/models?key={}",
-        url_encode_component(api_key)
-    ))
+    Ok(format!("{base_url}/v1beta/models"))
 }
 
 pub(crate) fn url_encode_component(value: &str) -> String {

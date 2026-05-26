@@ -7,7 +7,7 @@ use oxideterm_connections::{AuthType, ConnectionInfo, ConnectionStore, ProxyHopI
 use serde::Serialize;
 
 use crate::{
-    args::JsonArgs,
+    args::ConnectionsValidateArgs,
     error::{CliResult, runtime_error},
     output::{self, OutputFormat},
     paths::default_connections_path,
@@ -15,39 +15,48 @@ use crate::{
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ConnectionsValidationResponse {
+pub(crate) struct ConnectionsValidationResponse {
     path: String,
     ok: bool,
+    strict: bool,
     checked_count: usize,
     issue_count: usize,
+    error_count: usize,
+    warning_count: usize,
     issues: Vec<ConnectionValidationIssue>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ConnectionValidationIssue {
-    severity: &'static str,
-    code: &'static str,
-    connection_id: Option<String>,
-    connection_name: Option<String>,
-    message: String,
+pub(crate) struct ConnectionValidationIssue {
+    pub(crate) severity: &'static str,
+    pub(crate) code: &'static str,
+    pub(crate) connection_id: Option<String>,
+    pub(crate) connection_name: Option<String>,
+    pub(crate) message: String,
 }
 
-pub fn run(args: JsonArgs) -> CliResult<()> {
+pub fn run(args: ConnectionsValidateArgs) -> CliResult<i32> {
     let store = load_connection_store(args.json)?;
     let connections = store.connection_infos();
     // Validation is intentionally structural only: no network probes, keychain reads, or writes.
     let issues = validate_connection_infos(&connections, store.groups());
+    let error_count = count_issues(&issues, "error");
+    let warning_count = count_issues(&issues, "warning");
+    let ok = validation_ok(error_count, warning_count, args.strict);
     let response = ConnectionsValidationResponse {
         path: store.path().display().to_string(),
-        ok: issues.iter().all(|issue| issue.severity != "error"),
+        ok,
+        strict: args.strict,
         checked_count: connections.len(),
         issue_count: issues.len(),
+        error_count,
+        warning_count,
         issues,
     };
 
     match output::format_from_flag(args.json) {
-        OutputFormat::Json => output::write_json(&response),
+        OutputFormat::Json => output::write_json_with_ok(&response, response.ok),
         OutputFormat::Text => {
             if response.issues.is_empty() {
                 output::write_text("Connections validation passed");
@@ -58,7 +67,9 @@ pub fn run(args: JsonArgs) -> CliResult<()> {
             }
             Ok(())
         }
-    }
+    }?;
+
+    Ok(if response.ok { 0 } else { 1 })
 }
 
 fn load_connection_store(json: bool) -> CliResult<ConnectionStore> {
@@ -66,7 +77,7 @@ fn load_connection_store(json: bool) -> CliResult<ConnectionStore> {
         .map_err(|error| runtime_error(error, json))
 }
 
-fn validate_connection_infos(
+pub(crate) fn validate_connection_infos(
     connections: &[ConnectionInfo],
     groups: &[String],
 ) -> Vec<ConnectionValidationIssue> {
@@ -159,6 +170,18 @@ fn validate_connection_infos(
     }
 
     issues
+}
+
+pub(crate) fn count_issues(issues: &[ConnectionValidationIssue], severity: &str) -> usize {
+    issues
+        .iter()
+        .filter(|issue| issue.severity == severity)
+        .count()
+}
+
+pub(crate) fn validation_ok(error_count: usize, warning_count: usize, strict: bool) -> bool {
+    // Strict mode is for scripts: warnings become a failing validation result.
+    error_count == 0 && (!strict || warning_count == 0)
 }
 
 fn validate_required_field(
@@ -354,5 +377,12 @@ mod tests {
 
         assert!(issues.iter().any(|issue| issue.code == "duplicate_name"));
         assert!(issues.iter().any(|issue| issue.code == "missing_key_path"));
+    }
+
+    #[test]
+    fn strict_validation_fails_on_warnings() {
+        assert!(validation_ok(0, 1, false));
+        assert!(!validation_ok(0, 1, true));
+        assert!(!validation_ok(1, 0, false));
     }
 }

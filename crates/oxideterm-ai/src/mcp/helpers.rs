@@ -86,11 +86,13 @@ fn build_http_headers(
         let header = HeaderName::from_bytes(auth_header_name.as_bytes()).map_err(|_| {
             McpError::Message(format!("Invalid MCP auth header name: {auth_header_name}"))
         })?;
-        let value = match config.auth_header_mode.unwrap_or(McpAuthHeaderMode::Bearer) {
+        // HeaderMap owns the bytes needed for the outgoing request, but the
+        // temporary formatted auth value should still be wiped after parsing.
+        let value = Zeroizing::new(match config.auth_header_mode.unwrap_or(McpAuthHeaderMode::Bearer) {
             McpAuthHeaderMode::Bearer => format!("Bearer {token}"),
             McpAuthHeaderMode::Raw => token.to_string(),
             McpAuthHeaderMode::None => String::new(),
-        };
+        });
         headers.insert(
             header,
             value.parse().map_err(|_| {

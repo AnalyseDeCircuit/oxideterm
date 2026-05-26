@@ -20,6 +20,7 @@ pub mod progress;
 pub mod secrets;
 pub mod service;
 pub mod state;
+pub mod state_transitions;
 
 pub const CLOUD_SYNC_PLUGIN_ID: &str = "com.oxideterm.cloud-sync";
 

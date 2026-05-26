@@ -37,6 +37,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
+use std::fmt;
 use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -133,7 +134,6 @@ enum Reply {
     },
 }
 
-#[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum Msg {
     Authenticate {
@@ -214,6 +214,117 @@ pub enum Msg {
     NoMoreSessions {
         want_reply: bool,
     },
+}
+
+impl fmt::Debug for Msg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Client messages can be dumped while diagnosing auth flows; redact
+        // keyboard-interactive answers because they often contain passwords.
+        match self {
+            Self::Authenticate { user, method } => f
+                .debug_struct("Authenticate")
+                .field("user", user)
+                .field("method", method)
+                .finish(),
+            Self::AuthInfoResponse { .. } => f
+                .debug_struct("AuthInfoResponse")
+                .field("responses", &"<redacted>")
+                .finish(),
+            Self::Signed { data } => f.debug_struct("Signed").field("data", data).finish(),
+            Self::ChannelOpenSession { channel_ref } => f
+                .debug_struct("ChannelOpenSession")
+                .field("channel_ref", channel_ref)
+                .finish(),
+            Self::ChannelOpenX11 {
+                originator_address,
+                originator_port,
+                channel_ref,
+            } => f
+                .debug_struct("ChannelOpenX11")
+                .field("originator_address", originator_address)
+                .field("originator_port", originator_port)
+                .field("channel_ref", channel_ref)
+                .finish(),
+            Self::ChannelOpenDirectTcpIp {
+                host_to_connect,
+                port_to_connect,
+                originator_address,
+                originator_port,
+                channel_ref,
+            } => f
+                .debug_struct("ChannelOpenDirectTcpIp")
+                .field("host_to_connect", host_to_connect)
+                .field("port_to_connect", port_to_connect)
+                .field("originator_address", originator_address)
+                .field("originator_port", originator_port)
+                .field("channel_ref", channel_ref)
+                .finish(),
+            Self::ChannelOpenDirectStreamLocal {
+                socket_path,
+                channel_ref,
+            } => f
+                .debug_struct("ChannelOpenDirectStreamLocal")
+                .field("socket_path", socket_path)
+                .field("channel_ref", channel_ref)
+                .finish(),
+            Self::TcpIpForward { address, port, .. } => f
+                .debug_struct("TcpIpForward")
+                .field("reply_channel", &"<sender>")
+                .field("address", address)
+                .field("port", port)
+                .finish(),
+            Self::CancelTcpIpForward { address, port, .. } => f
+                .debug_struct("CancelTcpIpForward")
+                .field("reply_channel", &"<sender>")
+                .field("address", address)
+                .field("port", port)
+                .finish(),
+            Self::StreamLocalForward { socket_path, .. } => f
+                .debug_struct("StreamLocalForward")
+                .field("reply_channel", &"<sender>")
+                .field("socket_path", socket_path)
+                .finish(),
+            Self::CancelStreamLocalForward { socket_path, .. } => f
+                .debug_struct("CancelStreamLocalForward")
+                .field("reply_channel", &"<sender>")
+                .field("socket_path", socket_path)
+                .finish(),
+            Self::Close { id } => f.debug_struct("Close").field("id", id).finish(),
+            Self::Disconnect {
+                reason,
+                description,
+                language_tag,
+            } => f
+                .debug_struct("Disconnect")
+                .field("reason", reason)
+                .field("description", description)
+                .field("language_tag", language_tag)
+                .finish(),
+            Self::Channel(id, msg) => f.debug_tuple("Channel").field(id).field(msg).finish(),
+            Self::Rekey => f.write_str("Rekey"),
+            Self::AwaitExtensionInfo { extension_name, .. } => f
+                .debug_struct("AwaitExtensionInfo")
+                .field("extension_name", extension_name)
+                .field("reply_channel", &"<sender>")
+                .finish(),
+            Self::GetServerSigAlgs { .. } => f
+                .debug_struct("GetServerSigAlgs")
+                .field("reply_channel", &"<sender>")
+                .finish(),
+            Self::Keepalive { want_reply } => f
+                .debug_struct("Keepalive")
+                .field("want_reply", want_reply)
+                .finish(),
+            Self::Ping { .. } => f
+                .debug_struct("Ping")
+                .field("reply_channel", &"<sender>")
+                .finish(),
+            Self::NoMoreSessions { want_reply } => f
+                .debug_struct("NoMoreSessions")
+                .field("want_reply", want_reply)
+                .finish(),
+        }
+    }
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -306,7 +417,9 @@ impl<H: Handler> Handle<H> {
             .send(Msg::Authenticate {
                 user,
                 method: auth::Method::Password {
-                    password: password.into(),
+                    // The password has to cross the async auth queue; wrap the
+                    // owned copy so it is wiped when the queued method drops.
+                    password: zeroize::Zeroizing::new(password.into()),
                 },
             })
             .await

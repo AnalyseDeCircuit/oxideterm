@@ -79,7 +79,7 @@ pub fn plugin_settings_revision_map(
     let entries = load_plugin_settings(settings_path)?;
     let mut grouped = BTreeMap::<String, Vec<EncryptedPluginSetting>>::new();
     for entry in entries {
-        let Some(plugin_id) = parse_plugin_setting_storage_key(&entry.storage_key) else {
+        let Some(plugin_id) = plugin_id_from_setting_storage_key(&entry.storage_key) else {
             continue;
         };
         grouped.entry(plugin_id).or_default().push(entry);
@@ -98,7 +98,7 @@ pub fn plugin_settings_revision_map(
     Ok(revisions)
 }
 
-fn parse_plugin_setting_storage_key(storage_key: &str) -> Option<String> {
+pub fn plugin_id_from_setting_storage_key(storage_key: &str) -> Option<String> {
     const PREFIX: &str = "oxide-plugin-";
     const SEPARATOR: &str = "-setting-";
     let remainder = storage_key.strip_prefix(PREFIX)?;

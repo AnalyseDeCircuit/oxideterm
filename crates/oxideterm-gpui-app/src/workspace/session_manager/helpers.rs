@@ -311,10 +311,10 @@ fn proxy_hop_draft_from_form(hop: &super::new_connection::NewConnectionProxyHop)
         username: hop.username.clone(),
         auth: ConnectionAuthDraft {
             kind: auth_draft_kind(hop.auth_tab),
-            password: SecretString::from(hop.password.clone()),
+            password: secret_from_ui_draft(&hop.password),
             key_path: hop.key_path.clone(),
             cert_path: hop.cert_path.clone(),
-            passphrase: SecretString::from(hop.passphrase.clone()),
+            passphrase: secret_from_ui_draft(&hop.passphrase),
             save_password: true,
             ..ConnectionAuthDraft::default()
         },
@@ -325,14 +325,20 @@ fn proxy_hop_draft_from_form(hop: &super::new_connection::NewConnectionProxyHop)
 fn auth_draft_from_form(form: &NewConnectionForm) -> ConnectionAuthDraft {
     ConnectionAuthDraft {
         kind: auth_draft_kind(form.auth_tab),
-        password: SecretString::from(form.password.clone()),
+        password: secret_from_ui_draft(&form.password),
         password_keychain_id: form.saved_password_keychain_id.clone(),
         password_loaded: form.password_loaded,
         save_password: form.save_password,
         key_path: form.key_path.clone(),
         cert_path: form.cert_path.clone(),
-        passphrase: SecretString::from(form.passphrase.clone()),
+        passphrase: secret_from_ui_draft(&form.passphrase),
     }
+}
+
+fn secret_from_ui_draft(value: &str) -> SecretString {
+    // GPUI text inputs require plain String drafts. At the persistence boundary,
+    // clone into SecretString's Zeroizing owner before any store/keychain logic sees it.
+    SecretString::from(zeroize::Zeroizing::new(value.to_string()))
 }
 
 fn auth_draft_kind(tab: SshAuthTab) -> ConnectionAuthDraftKind {

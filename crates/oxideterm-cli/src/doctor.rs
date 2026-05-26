@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::{
-    args::OutputArgs,
+    args::DoctorArgs,
     cloud_sync_preview,
     error::CliResult,
     output::{self, OutputFormat},
@@ -19,24 +19,25 @@ use crate::{
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DoctorResponse {
-    ok: bool,
-    paths: CliPaths,
-    summary: DoctorSummary,
-    checks: Vec<DoctorCheck>,
+pub(crate) struct DoctorResponse {
+    pub(crate) ok: bool,
+    pub(crate) strict: bool,
+    pub(crate) paths: CliPaths,
+    pub(crate) summary: DoctorSummary,
+    pub(crate) checks: Vec<DoctorCheck>,
 }
 
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DoctorSummary {
-    error_count: usize,
-    warning_count: usize,
-    info_count: usize,
+pub(crate) struct DoctorSummary {
+    pub(crate) error_count: usize,
+    pub(crate) warning_count: usize,
+    pub(crate) info_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DoctorCheck {
+pub(crate) struct DoctorCheck {
     name: &'static str,
     severity: DoctorSeverity,
     ok: bool,
@@ -53,23 +54,29 @@ enum DoctorSeverity {
     Error,
 }
 
-pub fn run(args: OutputArgs) -> CliResult<()> {
-    let paths = paths::cli_paths();
-    let checks = doctor_checks(args.json);
-    let summary = summarize_checks(&checks);
-    let response = DoctorResponse {
-        ok: summary.error_count == 0,
-        paths,
-        summary,
-        checks,
-    };
-
+pub fn run(args: DoctorArgs) -> CliResult<i32> {
+    let response = build_doctor_response(args.strict, args.json);
     match output::format_from_flag(args.json) {
-        OutputFormat::Json => output::write_json(&response),
+        OutputFormat::Json => output::write_json_with_ok(&response, response.ok),
         OutputFormat::Text => {
             output::write_text(format_doctor_text(&response));
             Ok(())
         }
+    }?;
+
+    Ok(if response.ok { 0 } else { 1 })
+}
+
+pub(crate) fn build_doctor_response(strict: bool, json: bool) -> DoctorResponse {
+    let paths = paths::cli_paths();
+    let checks = doctor_checks(json);
+    let summary = summarize_checks(&checks);
+    DoctorResponse {
+        ok: doctor_ok(&summary, strict),
+        strict,
+        paths,
+        summary,
+        checks,
     }
 }
 
@@ -266,10 +273,16 @@ fn summarize_checks(checks: &[DoctorCheck]) -> DoctorSummary {
     summary
 }
 
+pub(crate) fn doctor_ok(summary: &DoctorSummary, strict: bool) -> bool {
+    // Strict mode promotes warnings to failures so CI can catch degraded local state.
+    summary.error_count == 0 && (!strict || summary.warning_count == 0)
+}
+
 fn format_doctor_text(response: &DoctorResponse) -> String {
     let mut lines = vec![format!(
-        "ok: {} errors={} warnings={} info={}",
+        "ok: {} strict={} errors={} warnings={} info={}",
         response.ok,
+        response.strict,
         response.summary.error_count,
         response.summary.warning_count,
         response.summary.info_count
@@ -343,5 +356,17 @@ mod tests {
 
         assert_eq!(summary.warning_count, 1);
         assert_eq!(summary.error_count, 1);
+    }
+
+    #[test]
+    fn strict_doctor_fails_on_warnings() {
+        let summary = DoctorSummary {
+            error_count: 0,
+            warning_count: 1,
+            info_count: 0,
+        };
+
+        assert!(doctor_ok(&summary, false));
+        assert!(!doctor_ok(&summary, true));
     }
 }

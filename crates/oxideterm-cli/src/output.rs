@@ -21,9 +21,13 @@ pub fn format_from_flag(json: bool) -> OutputFormat {
 }
 
 pub fn write_json<T: Serialize>(value: &T) -> CliResult<()> {
+    write_json_with_ok(value, true)
+}
+
+pub fn write_json_with_ok<T: Serialize>(value: &T, ok: bool) -> CliResult<()> {
     // Scripts get a stable envelope, even when individual command payloads grow.
     let envelope = json!({
-        "ok": true,
+        "ok": ok,
         "data": value,
     });
     let text = serde_json::to_string_pretty(&envelope)

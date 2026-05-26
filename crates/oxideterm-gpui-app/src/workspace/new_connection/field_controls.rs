@@ -383,6 +383,10 @@ impl WorkspaceApp {
                     form.password_loading = false;
                     match result {
                         Ok(password) => {
+                            // Replacing an editable password draft should wipe
+                            // the previous buffer before the newly loaded value
+                            // is exposed for user editing.
+                            zeroize::Zeroize::zeroize(&mut form.password);
                             form.password = password.expose_secret().to_string();
                             form.password_loaded = true;
                             form.password_visible = true;

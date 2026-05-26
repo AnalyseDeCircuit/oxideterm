@@ -297,7 +297,7 @@ impl Default for SessionManagerState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(super) struct OxideImportDialogState {
     pub(super) file_path: Option<PathBuf>,
     pub(super) file_data: Option<Vec<u8>>,
@@ -364,7 +364,44 @@ impl Default for OxideImportDialogState {
     }
 }
 
-#[derive(Clone, Debug)]
+impl std::fmt::Debug for OxideImportDialogState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OxideImportDialogState")
+            .field("file_path", &self.file_path)
+            .field("file_data", &self.file_data.as_ref().map(|data| data.len()))
+            .field("metadata_summary", &self.metadata_summary)
+            .field("metadata", &self.metadata)
+            .field("password", &"[redacted secret]")
+            .field("conflict_strategy", &self.conflict_strategy)
+            .field("preview", &self.preview)
+            .field("selected_names", &self.selected_names)
+            .field("import_app_settings", &self.import_app_settings)
+            .field(
+                "selected_app_settings_sections",
+                &self.selected_app_settings_sections,
+            )
+            .field(
+                "expanded_app_settings_sections",
+                &self.expanded_app_settings_sections,
+            )
+            .field("import_quick_commands", &self.import_quick_commands)
+            .field("import_plugin_settings", &self.import_plugin_settings)
+            .field("selected_plugin_ids", &self.selected_plugin_ids)
+            .field("import_forwards", &self.import_forwards)
+            .field("import_portable_secrets", &self.import_portable_secrets)
+            .field("busy", &self.busy)
+            .field("operation_generation", &self.operation_generation)
+            .field("progress_stage", &self.progress_stage)
+            .field("focused_footer_action", &self.focused_footer_action)
+            .field("error", &self.error)
+            .field("result_summary", &self.result_summary)
+            .field("result", &self.result)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct OxideExportDialogState {
     pub(super) selected_ids: HashSet<String>,
     pub(super) available_forwards: Vec<PersistedForward>,
@@ -423,6 +460,44 @@ impl Default for OxideExportDialogState {
             error: None,
             result_summary: None,
         }
+    }
+}
+
+impl std::fmt::Debug for OxideExportDialogState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OxideExportDialogState")
+            .field("selected_ids", &self.selected_ids)
+            .field("available_forwards", &self.available_forwards)
+            .field("selected_forward_ids", &self.selected_forward_ids)
+            .field("include_app_settings", &self.include_app_settings)
+            .field(
+                "selected_app_settings_sections",
+                &self.selected_app_settings_sections,
+            )
+            .field(
+                "include_local_terminal_env_vars",
+                &self.include_local_terminal_env_vars,
+            )
+            .field("include_quick_commands", &self.include_quick_commands)
+            .field("include_plugin_settings", &self.include_plugin_settings)
+            .field("plugin_groups", &self.plugin_groups)
+            .field("selected_plugin_ids", &self.selected_plugin_ids)
+            .field("include_forwards", &self.include_forwards)
+            .field("include_portable_secrets", &self.include_portable_secrets)
+            .field("embed_keys", &self.embed_keys)
+            .field("password", &"[redacted secret]")
+            .field("confirm_password", &"[redacted secret]")
+            .field("description", &self.description)
+            .field("busy", &self.busy)
+            .field("operation_generation", &self.operation_generation)
+            .field("progress_stage", &self.progress_stage)
+            .field("focused_footer_action", &self.focused_footer_action)
+            .field("last_export_timestamp", &self.last_export_timestamp)
+            .field("preflight", &self.preflight)
+            .field("error", &self.error)
+            .field("result_summary", &self.result_summary)
+            .finish()
     }
 }
 
