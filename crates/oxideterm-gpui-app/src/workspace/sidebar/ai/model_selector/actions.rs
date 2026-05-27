@@ -1,8 +1,15 @@
 impl WorkspaceApp {
-    fn toggle_ai_model_selector(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let next_open = !self.ai_model_selector_open;
+    fn toggle_ai_model_selector(
+        &mut self,
+        scope: AiModelSelectorScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let next_open = !(self.ai_model_selector_open
+            && self.ai_model_selector_scope == Some(scope));
         self.close_ai_sidebar_popovers();
         self.ai_model_selector_open = next_open;
+        self.ai_model_selector_scope = next_open.then_some(scope);
         if self.ai_model_selector_open {
             let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
             if let Some(provider) = active_provider_view(
@@ -18,6 +25,8 @@ impl WorkspaceApp {
             }
             self.ai_model_selector_search_focused = true;
             self.ai_model_selector_highlighted_model = None;
+            self.ai_chat_input_focused = false;
+            self.ai_inline_panel.prompt_focused = false;
             self.refresh_ai_model_selector_provider_statuses(cx);
             window.focus(&self.focus_handle);
         } else {

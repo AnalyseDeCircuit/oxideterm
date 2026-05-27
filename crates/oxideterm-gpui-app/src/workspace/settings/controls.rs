@@ -29,6 +29,32 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Help, SettingsSelect::UpdateChannel) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for channel in [
+                    UpdateChannel::Stable,
+                    UpdateChannel::Beta,
+                    UpdateChannel::GpuiPreview,
+                ] {
+                    let label = update_channel_label(channel, &self.i18n);
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, label, channel == settings.general.update_channel),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    |settings| settings.general.update_channel = channel,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             (SettingsTab::Appearance, SettingsSelect::AppearanceTheme) => {
                 let mut popup = select_panel_overlay_popup_with_max_height(
                     &self.tokens,

@@ -147,7 +147,8 @@ impl WorkspaceApp {
             return false;
         }
 
-        let terminal_panel_open = self.search.visible || self.ai_sidebar_visible();
+        let terminal_panel_open =
+            self.search.visible || self.ai_inline_panel.open || self.ai_sidebar_visible();
         if !crate::keybindings::action_allowed_by_terminal_behavior(
             definition,
             &combo,
@@ -209,7 +210,7 @@ impl WorkspaceApp {
             "terminal.search" => self.open_search(window, cx),
             "terminal.paste" => self.paste(cx),
             "terminal.aiPanel" => {
-                let _ = self.toggle_ai_sidebar(cx);
+                self.toggle_terminal_ai_inline_panel(window, cx);
             }
             "terminal.recording" => self.toggle_active_terminal_recording(cx),
             "terminal.closePanel" => self.close_terminal_panel(window, cx),
@@ -236,6 +237,10 @@ impl WorkspaceApp {
             self.close_search(window, cx);
             return;
         }
+        if self.ai_inline_panel.open {
+            self.close_terminal_ai_inline_panel(window, cx);
+            return;
+        }
         if self.ai_sidebar_visible() {
             self.settings_store
                 .settings_mut()
@@ -248,7 +253,10 @@ impl WorkspaceApp {
         }
     }
 
-    fn close_terminal_command_overlays(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::workspace) fn close_terminal_command_overlays(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if self.dismiss_terminal_broadcast_menu() {
             cx.notify();
             return true;
@@ -404,6 +412,10 @@ impl WorkspaceApp {
         }
 
         if self.handle_terminal_command_overlay_escape(event, cx) {
+            return;
+        }
+
+        if self.handle_ai_inline_panel_key(event, window, cx) {
             return;
         }
 

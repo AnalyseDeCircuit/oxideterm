@@ -260,6 +260,9 @@ impl WorkspaceApp {
                             .bottom_0()
                             .child(pane),
                     )
+                    .when(active && self.ai_inline_panel.open, |pane_frame| {
+                        pane_frame.child(self.render_terminal_ai_inline_panel(cx))
+                    })
                     .into_any_element()
             }
             PaneNode::Group {

@@ -156,6 +156,7 @@ use self::new_connection::{
 use self::pane_tree::SplitDrag;
 use self::quick_commands::QuickCommandsState;
 use self::session_manager::{AutoRouteModalState, SessionManagerState};
+use self::sidebar::AiInlinePanelState;
 use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
 use self::sidebar::{
     AiCompactionDelivery, AiModelSelectorProbeDelivery, AiPendingChatStream, AiStreamDelivery,
@@ -444,6 +445,12 @@ struct ShortcutsModalState {
     scroll_handle: UniformListScrollHandle,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AiModelSelectorScope {
+    Sidebar,
+    TerminalInline,
+}
+
 #[derive(Clone, Debug)]
 struct TabDragState {
     tab_id: TabId,
@@ -547,6 +554,7 @@ pub(crate) struct WorkspaceApp {
     ai_mcp_server_list_state: ListState,
     ai_mcp_server_list_cache: RefCell<VirtualListSignatureCache>,
     ai_model_selector_open: bool,
+    ai_model_selector_scope: Option<AiModelSelectorScope>,
     ai_model_selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     ai_model_selector_search_focused: bool,
     ai_model_selector_search_query: String,
@@ -561,6 +569,7 @@ pub(crate) struct WorkspaceApp {
     ai_context_token_cache: RefCell<AiContextTokenBreakdownCache>,
     ai_chat_store: Option<oxideterm_ai::AiChatPersistenceStore>,
     ai_chat_initialization_error: Option<AiChatInitializationError>,
+    ai_inline_panel: AiInlinePanelState,
     ai_runtime_epoch: String,
     ai_command_record_sequence: u64,
     ai_command_records: VecDeque<AiRuntimeCommandRecord>,

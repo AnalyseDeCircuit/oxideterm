@@ -45,6 +45,7 @@ fn readonly_value_trigger_spec() -> SelectTriggerChromeSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SelectAnchorId {
     SettingsLanguage,
+    SettingsUpdateChannel,
     SettingsAppearanceTheme,
     SettingsAppearanceDensity,
     SettingsAppearanceBorderRadiusSlider,
@@ -87,6 +88,7 @@ pub enum SelectAnchorId {
     AiConversationList,
     AiChatMenu,
     AiModelSelector,
+    AiInlineModelSelector,
     AiProfileSelector,
     AiSafetyMenu,
     AiContextPopover,
@@ -104,6 +106,7 @@ impl SelectAnchorId {
         matches!(
             self,
             Self::SettingsLanguage
+                | Self::SettingsUpdateChannel
                 | Self::SettingsAppearanceTheme
                 | Self::SettingsAppearanceDensity
                 | Self::SettingsAppearanceAnimation
@@ -640,6 +643,7 @@ mod tests {
 
         assert!(!SelectAnchorId::SettingsTerminalFontSizeSlider.is_settings_select_trigger());
         assert!(!SelectAnchorId::AiModelSelector.is_settings_select_trigger());
+        assert!(!SelectAnchorId::AiInlineModelSelector.is_settings_select_trigger());
         assert!(!SelectAnchorId::NewConnectionGroup.is_settings_select_trigger());
     }
 }

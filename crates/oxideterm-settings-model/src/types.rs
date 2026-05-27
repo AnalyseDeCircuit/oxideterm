@@ -51,6 +51,7 @@ pub enum SettingsKeybindingScopeFilter {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SettingsSelect {
     Language,
+    UpdateChannel,
     AppearanceTheme,
     AppearanceDensity,
     AppearanceAnimation,

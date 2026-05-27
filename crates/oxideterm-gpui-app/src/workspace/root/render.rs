@@ -226,6 +226,9 @@ impl Render for WorkspaceApp {
                 } else if this.handle_terminal_command_overlay_escape(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_ai_inline_panel_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_transient_workspace_overlay_escape(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -474,7 +477,7 @@ impl Render for WorkspaceApp {
                 this.open_shortcuts_modal(cx);
             }))
             .on_action(cx.listener(|this, _: &TerminalAiPanel, _window, cx| {
-                let _ = this.toggle_ai_sidebar(cx);
+                this.toggle_terminal_ai_inline_panel(_window, cx);
             }))
             .on_action(cx.listener(|this, _: &TerminalRecording, _window, cx| {
                 this.toggle_active_terminal_recording(cx);

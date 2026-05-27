@@ -116,6 +116,30 @@
       "icon_folder": "Folder",
       "icon_docker": "Docker",
       "icon_zap": "Custom"
+    },
+    "ai": {
+      "title": "OxideSens",
+      "api_key_required": "APIキーが必要です",
+      "api_key_hint": "この機能を使用するには、設定→AIでAPIキーを設定してください。",
+      "context": "コンテキスト:",
+      "context_selection": "選択",
+      "context_visible": "表示",
+      "context_none": "なし",
+      "tokens_estimate": "約{{count}}トークン",
+      "prompt_placeholder": "コマンドについてAIに質問...",
+      "inline_placeholder": "AIにコマンドを依頼...",
+      "selection_placeholder": "選択内容について質問...",
+      "to_send": "送信",
+      "to_insert": "挿入",
+      "to_run": "実行",
+      "generating": "生成中...",
+      "regenerate": "再試行",
+      "send_shortcut": "送信",
+      "close_shortcut": "閉じる",
+      "copy": "コピー",
+      "copied": "コピーしました",
+      "insert": "挿入",
+      "execute": "実行"
     }
   },
   "search": {

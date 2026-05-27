@@ -22,7 +22,11 @@ impl WorkspaceApp {
             .border_t_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
             .bg(rgb(self.tokens.ui.bg))
-            .child(self.render_ai_model_selector(cx))
+            .child(self.render_ai_model_selector(
+                AiModelSelectorScope::Sidebar,
+                SelectAnchorId::AiModelSelector,
+                cx,
+            ))
             .when_some(self.render_ai_profile_indicator(cx), |bar, indicator| {
                 bar.child(indicator)
             })

@@ -55,6 +55,16 @@ pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 pub type TerminalInputInterceptor =
     Arc<dyn Fn(&[u8]) -> TerminalInputInterceptorResult + Send + Sync>;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerminalCursorAnchor {
+    pub x: f32,
+    pub y: f32,
+    pub line_height: f32,
+    pub char_width: f32,
+    pub container_width: f32,
+    pub container_height: f32,
+}
+
 pub enum TerminalInputInterceptorResult {
     Continue(Vec<u8>),
     Suppress,
@@ -1027,6 +1037,23 @@ impl TerminalPane {
         self.bounds
             .map(|bounds| bounds.origin)
             .unwrap_or_else(|| gpui::point(px(0.0), px(0.0)))
+    }
+
+    pub fn cursor_anchor(&self) -> Option<TerminalCursorAnchor> {
+        let bounds = self.bounds?;
+        let cursor_bounds = ime_cursor_bounds_for_snapshot(&self.snapshot, &self.metrics)?;
+        // The app layer owns overlays such as inline AI chat, but only the
+        // terminal pane knows the bidi-aware cursor visual column and measured
+        // cell metrics. Expose pane-local facts rather than making workspace
+        // code duplicate terminal layout math.
+        Some(TerminalCursorAnchor {
+            x: f32::from(cursor_bounds.origin.x) + TERMINAL_CONTENT_PADDING,
+            y: f32::from(cursor_bounds.origin.y) + TERMINAL_CONTENT_PADDING,
+            line_height: self.metrics.line_height_f32(),
+            char_width: self.metrics.cell_width_f32(),
+            container_width: f32::from(bounds.size.width),
+            container_height: f32::from(bounds.size.height),
+        })
     }
 }
 
