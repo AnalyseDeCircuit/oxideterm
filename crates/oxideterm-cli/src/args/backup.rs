@@ -31,6 +31,8 @@ pub enum BackupAction {
     Verify(BackupInspectArgs),
     #[command(about = "Restore settings, connections, or cloud-sync metadata from a backup")]
     Restore(BackupRestoreArgs),
+    #[command(about = "Diff current state against a backup restore plan")]
+    Diff(BackupDiffArgs),
 }
 
 #[derive(Debug, Args)]
@@ -67,6 +69,16 @@ pub struct BackupRestoreArgs {
     pub section: Option<BackupInspectSection>,
     #[command(flatten)]
     pub write: WriteArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct BackupDiffArgs {
+    #[arg(help = "Backup file path, file name, or backup id")]
+    pub query: String,
+    #[arg(long, value_enum, help = "Diff only one backup section")]
+    pub section: Option<BackupInspectSection>,
+    #[arg(long, help = "Print machine-readable JSON output")]
+    pub json: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

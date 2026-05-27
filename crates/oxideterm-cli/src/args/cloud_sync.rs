@@ -3,7 +3,7 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 
-use super::{JsonArgs, WriteArgs};
+use super::{CliOutputFormat, JsonArgs, WriteArgs};
 
 #[derive(Debug, Args)]
 #[command(
@@ -43,6 +43,8 @@ pub enum CloudSyncAction {
     Backups(JsonArgs),
     #[command(about = "Inspect or update cloud-sync secrets")]
     Secrets(CloudSyncSecretsCommand),
+    #[command(about = "Configure cloud-sync backends with backend-specific validation")]
+    Backend(CloudSyncBackendCommand),
 }
 
 #[derive(Debug, Args)]
@@ -91,6 +93,30 @@ pub enum CloudSyncBackendArg {
     Dropbox,
     S3,
     Git,
+}
+
+#[derive(Debug, Args)]
+pub struct CloudSyncBackendCommand {
+    #[command(subcommand)]
+    pub action: CloudSyncBackendAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CloudSyncBackendAction {
+    Webdav(CloudSyncBackendConfigureCommand),
+    S3(CloudSyncBackendConfigureCommand),
+    Git(CloudSyncBackendConfigureCommand),
+}
+
+#[derive(Debug, Args)]
+pub struct CloudSyncBackendConfigureCommand {
+    #[command(subcommand)]
+    pub action: CloudSyncBackendConfigureAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CloudSyncBackendConfigureAction {
+    Configure(CloudSyncConfigureArgs),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -160,6 +186,8 @@ pub struct CloudSyncHistoryArgs {
     pub failed_only: bool,
     #[arg(long, help = "Print machine-readable JSON output")]
     pub json: bool,
+    #[arg(long, value_enum, help = "Output format: text, table, or json")]
+    pub format: Option<CliOutputFormat>,
 }
 
 #[derive(Debug, Args)]

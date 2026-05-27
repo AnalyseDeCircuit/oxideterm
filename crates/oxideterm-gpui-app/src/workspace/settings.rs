@@ -10,12 +10,13 @@ use oxideterm_settings::{
 use oxideterm_settings_model::{
     AI_MODEL_REFRESH_MISSING_API_KEY, AiMcpServerDraft, AiModelRefreshDelivery,
     AiProviderModelChipItem, AiProviderModelPanel, AiSettingsSection, AiToolPolicyGroup,
-    KNOWLEDGE_EMBEDDING_BATCH_SIZE, KnowledgeDeleteTarget, KnowledgeExternalEdit,
-    SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts, SettingsInputDraftApply,
-    TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection, ThemeEditorState,
-    UI_THEME_COLOR_FIELDS, ai_add_execution_profile, ai_context_max_chars_label_key,
-    ai_context_visible_lines_label_key, ai_default_execution_profile, ai_delete_execution_profile,
-    ai_duplicate_execution_profile, ai_execution_profile_id, ai_execution_profile_signature,
+    CliCompanionStatus, KNOWLEDGE_EMBEDDING_BATCH_SIZE, KnowledgeDeleteTarget,
+    KnowledgeExternalEdit, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts,
+    SettingsInputDraftApply, TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection,
+    ThemeEditorState, UI_THEME_COLOR_FIELDS, ai_add_execution_profile,
+    ai_context_max_chars_label_key, ai_context_visible_lines_label_key,
+    ai_default_execution_profile, ai_delete_execution_profile, ai_duplicate_execution_profile,
+    ai_execution_profile_id, ai_execution_profile_signature,
     ai_execution_profiles_need_normalization, ai_mcp_auth_mode_value, ai_mcp_clean_record,
     ai_mcp_configs, ai_mcp_draft_input_value, ai_mcp_draft_valid, ai_mcp_server_signature,
     ai_mcp_split_args, ai_mcp_transport_label, ai_mcp_transport_value,
@@ -98,6 +99,7 @@ pub(in crate::workspace) fn settings_store_modified_time(
 }
 
 include!("settings/surface.rs");
+include!("settings/cli_companion.rs");
 include!("settings/cards.rs");
 include!("settings/controls.rs");
 include!("settings/terminal_display.rs");

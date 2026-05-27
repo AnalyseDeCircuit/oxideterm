@@ -3,12 +3,16 @@
 
 use clap::Args;
 
+use super::CliOutputFormat;
+
 #[derive(Debug, Args)]
 pub struct DoctorArgs {
     #[arg(long, help = "Treat warnings as failures")]
     pub strict: bool,
     #[arg(long, help = "Print machine-readable JSON output")]
     pub json: bool,
+    #[arg(long, value_enum, help = "Output format: text, table, or json")]
+    pub format: Option<CliOutputFormat>,
 }
 
 #[derive(Debug, Args)]
@@ -21,4 +25,6 @@ pub struct ReportArgs {
     pub bundle: Option<String>,
     #[arg(long, help = "Print machine-readable JSON output")]
     pub json: bool,
+    #[arg(long, value_enum, help = "Output format: text, table, or json")]
+    pub format: Option<CliOutputFormat>,
 }

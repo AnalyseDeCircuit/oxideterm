@@ -72,6 +72,7 @@ mod tests {
             no_backup,
             backup_before_write: false,
             json: true,
+            format: None,
         }
     }
 

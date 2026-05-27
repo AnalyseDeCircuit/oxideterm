@@ -3,6 +3,7 @@
 
 mod args;
 mod backup;
+mod batch;
 mod cloud_sync;
 mod cloud_sync_preview;
 mod cloud_sync_secrets;
@@ -14,11 +15,16 @@ mod connections_validate;
 mod diagnose;
 mod doctor;
 mod error;
+mod errors;
+mod forwards;
 mod json_query;
 mod output;
 mod oxide;
 mod paths;
+mod plugins;
+mod quick_commands;
 mod report;
+mod secrets;
 mod settings;
 mod write_guard;
 
@@ -31,7 +37,8 @@ use crate::{
 };
 
 fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    cli.normalize_output_format();
     let result = run(cli);
     match result {
         Ok(0) => {}
@@ -50,9 +57,14 @@ fn main() {
 
 fn run(cli: Cli) -> CliResult<i32> {
     // Keep dispatch thin: command modules own domain-specific loading and output mapping.
+    paths::set_cli_path_context(cli.config_dir, cli.profile);
     match cli.command {
         Command::Settings(command) => settings::run(command),
         Command::Connections(command) => connections::run(command),
+        Command::Forwards(command) => forwards::run(command),
+        Command::QuickCommands(command) => quick_commands::run(command),
+        Command::Plugins(command) => plugins::run(command),
+        Command::Secrets(command) => secrets::run(command),
         Command::Oxide(command) => oxide::run(command),
         Command::CloudSync(command) => {
             cloud_sync::run(command)?;
@@ -71,10 +83,9 @@ fn run(cli: Cli) -> CliResult<i32> {
             backup::run(command)?;
             Ok(0)
         }
+        Command::Batch(command) => batch::run(command),
         Command::Report(args) => report::run(args),
-        Command::Completion(args) => {
-            completion::run(args);
-            Ok(0)
-        }
+        Command::Completion(args) => completion::run(args).map(|_| 0),
+        Command::Errors(args) => errors::run(args),
     }
 }

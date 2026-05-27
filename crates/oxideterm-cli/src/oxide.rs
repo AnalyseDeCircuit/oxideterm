@@ -13,8 +13,7 @@ use oxideterm_connections::{
 };
 use oxideterm_forwarding::{ForwardType, OwnedForwardImportRecord, SavedForwardStore};
 use oxideterm_settings::{
-    default_settings_path, export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
-    save_settings_to_path,
+    export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot, save_settings_to_path,
 };
 use serde::Serialize;
 
@@ -25,7 +24,7 @@ use crate::{
     },
     error::{CliError, CliResult, runtime_error},
     output::{self, OutputFormat},
-    paths::{default_connections_path, default_forwards_path},
+    paths::{default_connections_path, default_forwards_path, default_settings_path},
     settings, write_guard,
 };
 
@@ -83,6 +82,7 @@ pub(crate) fn run(command: OxideCommand) -> CliResult<i32> {
     match command.action {
         OxideAction::Validate(args) => validate(args),
         OxideAction::PreviewImport(args) => preview_import(args),
+        OxideAction::Diff(args) => preview_import(args),
         OxideAction::Import(args) => import(args),
         OxideAction::Export(args) => export(args),
     }

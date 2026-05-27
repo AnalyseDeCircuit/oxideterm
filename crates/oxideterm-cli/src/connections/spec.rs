@@ -1,15 +1,20 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::{fs, io::Read};
+
 use oxideterm_connections::{
     SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop, SecretString,
 };
 use serde::Deserialize;
-use std::fs;
+use zeroize::Zeroizing;
 
-use crate::error::{CliError, CliResult};
+use crate::{
+    args::{ConnectionAuthArg, ConnectionDirectArgs},
+    error::{CliError, CliResult},
+};
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ConnectionSpec {
     name: Option<String>,
@@ -31,19 +36,19 @@ pub(super) struct ConnectionSpec {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ConnectionAuthSpec {
     Password {
-        password: Option<String>,
+        password: Option<SecretString>,
         password_env: Option<String>,
         save_password: Option<bool>,
     },
     Key {
         key_path: String,
-        passphrase: Option<String>,
+        passphrase: Option<SecretString>,
         passphrase_env: Option<String>,
     },
     Certificate {
         key_path: String,
         cert_path: String,
-        passphrase: Option<String>,
+        passphrase: Option<SecretString>,
         passphrase_env: Option<String>,
     },
     Agent,
@@ -76,6 +81,29 @@ pub(super) fn read_connection_spec(path: &str, json: bool) -> CliResult<Connecti
             json,
         )
     })
+}
+
+pub(super) fn connection_spec_from_direct_args(
+    args: ConnectionDirectArgs,
+    json: bool,
+) -> CliResult<Option<ConnectionSpec>> {
+    if !args.has_values() {
+        return Ok(None);
+    }
+    let auth = direct_auth_spec(&args, json)?;
+    Ok(Some(ConnectionSpec {
+        name: args.name,
+        host: args.host,
+        port: args.port,
+        username: args.username,
+        group: args.group.map(Some),
+        color: args.color.map(Some),
+        tags: (!args.tags.is_empty()).then_some(args.tags),
+        auth,
+        proxy_chain: None,
+        agent_forwarding: args.agent_forwarding,
+        post_connect_command: args.post_connect_command.map(Some),
+    }))
 }
 
 pub(super) fn connection_request_from_spec(
@@ -240,8 +268,104 @@ fn saved_proxy_hop_from_spec(spec: ConnectionProxyHopSpec, json: bool) -> CliRes
     })
 }
 
+fn direct_auth_spec(
+    args: &ConnectionDirectArgs,
+    json: bool,
+) -> CliResult<Option<ConnectionAuthSpec>> {
+    Ok(match args.auth {
+        Some(ConnectionAuthArg::Agent) => Some(ConnectionAuthSpec::Agent),
+        Some(ConnectionAuthArg::Password) => Some(ConnectionAuthSpec::Password {
+            password: read_direct_secret(
+                args.password_stdin,
+                args.password_env.as_deref(),
+                "password",
+                json,
+            )?,
+            password_env: None,
+            save_password: args.save_password,
+        }),
+        Some(ConnectionAuthArg::Key) => Some(ConnectionAuthSpec::Key {
+            key_path: required_direct_value(args.key_path.as_ref(), "key-path", json)?,
+            passphrase: read_direct_secret(
+                args.passphrase_stdin,
+                args.passphrase_env.as_deref(),
+                "passphrase",
+                json,
+            )?,
+            passphrase_env: None,
+        }),
+        Some(ConnectionAuthArg::Certificate) => Some(ConnectionAuthSpec::Certificate {
+            key_path: required_direct_value(args.key_path.as_ref(), "key-path", json)?,
+            cert_path: required_direct_value(args.cert_path.as_ref(), "cert-path", json)?,
+            passphrase: read_direct_secret(
+                args.passphrase_stdin,
+                args.passphrase_env.as_deref(),
+                "passphrase",
+                json,
+            )?,
+            passphrase_env: None,
+        }),
+        None => None,
+    })
+}
+
+fn required_direct_value(value: Option<&String>, field: &str, json: bool) -> CliResult<String> {
+    value
+        .cloned()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            CliError::new(
+                "connection_direct_args_invalid",
+                format!("--{field} is required for the selected connection auth type"),
+                json,
+            )
+        })
+}
+
+fn read_direct_secret(
+    stdin: bool,
+    env_var: Option<&str>,
+    field: &str,
+    json: bool,
+) -> CliResult<Option<SecretString>> {
+    if stdin && env_var.is_some() {
+        return Err(CliError::new(
+            "connection_direct_args_invalid",
+            format!("--{field}-stdin and --{field}-env are mutually exclusive"),
+            json,
+        ));
+    }
+    if stdin {
+        let mut value = Zeroizing::new(String::new());
+        std::io::stdin()
+            .read_to_string(&mut value)
+            .map_err(|error| {
+                CliError::new(
+                    "connection_secret_read_failed",
+                    format!("failed to read {field} from stdin: {error}"),
+                    json,
+                )
+            })?;
+        while value.ends_with('\n') || value.ends_with('\r') {
+            value.pop();
+        }
+        return Ok(Some(SecretString::from(value)));
+    }
+    if let Some(env_var) = env_var {
+        let value = std::env::var(env_var).map_err(|error| {
+            CliError::new(
+                "connection_spec_secret_missing",
+                format!("failed to read {field} from env var {env_var}: {error}"),
+                json,
+            )
+        })?;
+        return Ok(Some(SecretString::from(Zeroizing::new(value))));
+    }
+    Ok(None)
+}
+
 fn secret_from_value_or_env(
-    value: Option<String>,
+    value: Option<SecretString>,
     env_var: Option<String>,
     field: &str,
     json: bool,
@@ -254,7 +378,7 @@ fn secret_from_value_or_env(
         ));
     }
     if let Some(value) = value {
-        return Ok(Some(SecretString::from(value)));
+        return Ok(Some(value));
     }
     if let Some(env_var) = env_var {
         let value = std::env::var(&env_var).map_err(|error| {
@@ -264,11 +388,33 @@ fn secret_from_value_or_env(
                 json,
             )
         })?;
-        return Ok(Some(SecretString::from(value)));
+        return Ok(Some(SecretString::from(Zeroizing::new(value))));
     }
     Ok(None)
 }
 
 fn default_connection_port() -> u16 {
     22
+}
+
+impl ConnectionDirectArgs {
+    fn has_values(&self) -> bool {
+        self.name.is_some()
+            || self.host.is_some()
+            || self.username.is_some()
+            || self.port.is_some()
+            || self.group.is_some()
+            || self.color.is_some()
+            || !self.tags.is_empty()
+            || self.auth.is_some()
+            || self.password_stdin
+            || self.password_env.is_some()
+            || self.save_password.is_some()
+            || self.key_path.is_some()
+            || self.cert_path.is_some()
+            || self.passphrase_stdin
+            || self.passphrase_env.is_some()
+            || self.agent_forwarding.is_some()
+            || self.post_connect_command.is_some()
+    }
 }

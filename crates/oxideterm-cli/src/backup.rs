@@ -8,7 +8,7 @@ mod restore;
 mod verify;
 
 use crate::{
-    args::{BackupAction, BackupCommand},
+    args::{BackupAction, BackupCommand, BackupRestoreArgs, WriteArgs},
     error::CliResult,
 };
 
@@ -22,5 +22,18 @@ pub fn run(command: BackupCommand) -> CliResult<()> {
         BackupAction::Inspect(args) => list::inspect(args),
         BackupAction::Verify(args) => verify::verify(args),
         BackupAction::Restore(args) => restore::restore(args).map(|_| ()),
+        BackupAction::Diff(args) => restore::restore(BackupRestoreArgs {
+            query: args.query,
+            section: args.section,
+            write: WriteArgs {
+                dry_run: true,
+                yes: false,
+                no_backup: false,
+                backup_before_write: false,
+                json: args.json,
+                format: None,
+            },
+        })
+        .map(|_| ()),
     }
 }

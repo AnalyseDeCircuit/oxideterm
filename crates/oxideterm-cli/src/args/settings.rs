@@ -39,6 +39,8 @@ pub enum SettingsAction {
     Import(SettingsImportArgs),
     #[command(about = "Export settings as an .oxide-compatible snapshot")]
     Export(SettingsExportArgs),
+    #[command(about = "Diff current settings against a settings snapshot")]
+    Diff(SettingsDiffArgs),
 }
 
 #[derive(Debug, Args)]
@@ -100,6 +102,19 @@ pub struct SettingsExportArgs {
         help = "Include local terminal environment variables in the export"
     )]
     pub include_local_terminal_env_vars: bool,
+    #[arg(long, help = "Print machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct SettingsDiffArgs {
+    #[arg(help = "Path to a settings snapshot JSON file")]
+    pub path: String,
+    #[arg(
+        long = "section",
+        help = "Section id to diff; repeat to select multiple sections"
+    )]
+    pub sections: Vec<String>,
     #[arg(long, help = "Print machine-readable JSON output")]
     pub json: bool,
 }

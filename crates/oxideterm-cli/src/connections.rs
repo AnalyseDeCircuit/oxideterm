@@ -28,7 +28,7 @@ mod spec;
 #[cfg(test)]
 mod tests;
 
-use spec::{connection_request_from_spec, read_connection_spec};
+use spec::{connection_request_from_spec, connection_spec_from_direct_args, read_connection_spec};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,6 +105,7 @@ pub fn run(command: ConnectionsCommand) -> CliResult<i32> {
             export_connections(args)?;
             Ok(0)
         }
+        ConnectionsAction::Diff(args) => diff_connections_snapshot(args),
         ConnectionsAction::Validate(args) => connections_validate::run(args),
         ConnectionsAction::Create(args) => create_connection(args),
         ConnectionsAction::Edit(args) => edit_connection(args),
@@ -118,7 +119,7 @@ pub fn run(command: ConnectionsCommand) -> CliResult<i32> {
 }
 
 fn create_connection(args: ConnectionCreateArgs) -> CliResult<i32> {
-    let spec = read_connection_spec(&args.spec_path, args.write.json)?;
+    let spec = read_connection_input(args.spec_path, args.direct, args.write.json)?;
     let request = connection_request_from_spec(spec, None, args.write.json)?;
     let connection_name = request.name.clone();
     let change = ConnectionsChange {
@@ -136,7 +137,7 @@ fn create_connection(args: ConnectionCreateArgs) -> CliResult<i32> {
 }
 
 fn edit_connection(args: ConnectionEditArgs) -> CliResult<i32> {
-    let spec = read_connection_spec(&args.spec_path, args.write.json)?;
+    let spec = read_connection_input(args.spec_path, args.direct, args.write.json)?;
     let store = load_connection_store(args.write.json)?;
     let Some(connection) = find_connection(&store.connection_infos(), &args.query) else {
         return Err(CliError::new(
@@ -212,6 +213,31 @@ fn edit_connection(args: ConnectionEditArgs) -> CliResult<i32> {
     })
 }
 
+fn read_connection_input(
+    spec_path: Option<String>,
+    direct: crate::args::ConnectionDirectArgs,
+    json: bool,
+) -> CliResult<spec::ConnectionSpec> {
+    let file_spec = match spec_path {
+        Some(path) => Some(read_connection_spec(&path, json)?),
+        None => None,
+    };
+    let direct_spec = connection_spec_from_direct_args(direct, json)?;
+    match (file_spec, direct_spec) {
+        (Some(_), Some(_)) => Err(CliError::new(
+            "connection_input_conflict",
+            "use either --spec or direct connection parameters, not both",
+            json,
+        )),
+        (Some(spec), None) | (None, Some(spec)) => Ok(spec),
+        (None, None) => Err(CliError::new(
+            "connection_input_missing",
+            "provide --spec or direct connection parameters such as --name --host --user",
+            json,
+        )),
+    }
+}
+
 fn delete_connection(query: String, write: WriteArgs) -> CliResult<i32> {
     let store = load_connection_store(write.json)?;
     let Some(connection) = find_connection(&store.connection_infos(), &query) else {
@@ -266,7 +292,7 @@ fn run_group_command(command: ConnectionsGroupCommand) -> CliResult<i32> {
     }
 }
 
-fn apply_connections_snapshot(
+pub(crate) fn apply_connections_snapshot(
     path: String,
     strategy: ConnectionsApplyStrategy,
     write: WriteArgs,
@@ -555,6 +581,26 @@ fn export_connections(args: ConnectionsExportArgs) -> CliResult<()> {
             Ok(())
         }
     }
+}
+
+fn diff_connections_snapshot(args: crate::args::ConnectionsDiffArgs) -> CliResult<i32> {
+    let snapshot = read_connections_snapshot(&args.path, args.json)?;
+    let response = ConnectionsWriteResponse {
+        path: default_connections_path().display().to_string(),
+        applied: false,
+        dry_run: true,
+        backup_path: None,
+        backup_size_bytes: None,
+        changes: connections_snapshot_changes(&snapshot),
+    };
+    match output::format_from_flag(args.json) {
+        OutputFormat::Json => output::write_json(&response),
+        OutputFormat::Text => {
+            output::write_text(format_connections_write_text(&response));
+            Ok(())
+        }
+    }?;
+    Ok(0)
 }
 
 fn export_raw_safe_connections(

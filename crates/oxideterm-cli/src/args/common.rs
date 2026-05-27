@@ -1,7 +1,15 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use clap::Args;
+use clap::{Args, ValueEnum};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum CliOutputFormat {
+    Text,
+    Table,
+    Json,
+}
 
 #[derive(Clone, Debug, Args)]
 pub struct WriteArgs {
@@ -19,16 +27,22 @@ pub struct WriteArgs {
     pub backup_before_write: bool,
     #[arg(long, help = "Print machine-readable JSON output")]
     pub json: bool,
+    #[arg(long, value_enum, help = "Output format: text, table, or json")]
+    pub format: Option<CliOutputFormat>,
 }
 
 #[derive(Debug, Args)]
 pub struct JsonArgs {
     #[arg(long, help = "Print machine-readable JSON output")]
     pub json: bool,
+    #[arg(long, value_enum, help = "Output format: text, table, or json")]
+    pub format: Option<CliOutputFormat>,
 }
 
 #[derive(Debug, Args)]
 pub struct OutputArgs {
     #[arg(long, help = "Print machine-readable JSON output")]
     pub json: bool,
+    #[arg(long, value_enum, help = "Output format: text, table, or json")]
+    pub format: Option<CliOutputFormat>,
 }

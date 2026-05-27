@@ -29,11 +29,13 @@ pub enum ConnectionsAction {
     Search(ConnectionSearchArgs),
     #[command(about = "Export connections without credential values")]
     Export(ConnectionsExportArgs),
+    #[command(about = "Diff current connections against a saved-connections snapshot")]
+    Diff(ConnectionsDiffArgs),
     #[command(about = "Validate saved connections")]
     Validate(ConnectionsValidateArgs),
-    #[command(about = "Create a connection from a JSON spec")]
+    #[command(about = "Create a connection from a JSON spec or direct parameters")]
     Create(ConnectionCreateArgs),
-    #[command(about = "Edit a connection from a JSON spec")]
+    #[command(about = "Edit a connection from a JSON spec or direct parameters")]
     Edit(ConnectionEditArgs),
     #[command(about = "Delete a saved connection")]
     Delete(ConnectionDeleteArgs),
@@ -71,7 +73,9 @@ pub struct ConnectionCreateArgs {
         value_name = "PATH",
         help = "Path to a connection JSON spec"
     )]
-    pub spec_path: String,
+    pub spec_path: Option<String>,
+    #[command(flatten)]
+    pub direct: ConnectionDirectArgs,
     #[command(flatten)]
     pub write: WriteArgs,
 }
@@ -85,9 +89,77 @@ pub struct ConnectionEditArgs {
         value_name = "PATH",
         help = "Path to a connection JSON spec"
     )]
-    pub spec_path: String,
+    pub spec_path: Option<String>,
+    #[command(flatten)]
+    pub direct: ConnectionDirectArgs,
     #[command(flatten)]
     pub write: WriteArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct ConnectionDirectArgs {
+    #[arg(long, help = "Connection display name")]
+    pub name: Option<String>,
+    #[arg(long, help = "SSH host name or address")]
+    pub host: Option<String>,
+    #[arg(long = "user", alias = "username", help = "SSH username")]
+    pub username: Option<String>,
+    #[arg(long, help = "SSH port")]
+    pub port: Option<u16>,
+    #[arg(long, help = "Connection group")]
+    pub group: Option<String>,
+    #[arg(long, help = "Connection color")]
+    pub color: Option<String>,
+    #[arg(long = "tag", help = "Connection tag; repeat to set multiple tags")]
+    pub tags: Vec<String>,
+    #[arg(long, value_enum, help = "Authentication type")]
+    pub auth: Option<ConnectionAuthArg>,
+    #[arg(
+        long,
+        conflicts_with = "password_env",
+        help = "Read password from stdin"
+    )]
+    pub password_stdin: bool,
+    #[arg(
+        long = "password-env",
+        value_name = "VAR",
+        help = "Read password from environment variable"
+    )]
+    pub password_env: Option<String>,
+    #[arg(
+        long,
+        help = "Persist the provided password through the connection store"
+    )]
+    pub save_password: Option<bool>,
+    #[arg(long, help = "Private key path for key or certificate auth")]
+    pub key_path: Option<String>,
+    #[arg(long, help = "Certificate path for certificate auth")]
+    pub cert_path: Option<String>,
+    #[arg(
+        long,
+        conflicts_with = "passphrase_env",
+        help = "Read key passphrase from stdin"
+    )]
+    pub passphrase_stdin: bool,
+    #[arg(
+        long = "passphrase-env",
+        value_name = "VAR",
+        help = "Read key passphrase from environment variable"
+    )]
+    pub passphrase_env: Option<String>,
+    #[arg(long, help = "Enable or disable SSH agent forwarding")]
+    pub agent_forwarding: Option<bool>,
+    #[arg(long, help = "Command to run after connecting")]
+    pub post_connect_command: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum ConnectionAuthArg {
+    Agent,
+    Password,
+    Key,
+    Certificate,
 }
 
 #[derive(Debug, Args)]
@@ -164,6 +236,14 @@ pub struct ConnectionsGroupRenameArgs {
 pub struct ConnectionsExportArgs {
     #[arg(long, value_enum, default_value_t = ConnectionsExportFormat::Sync, help = "Export format")]
     pub format: ConnectionsExportFormat,
+    #[arg(long, help = "Print machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ConnectionsDiffArgs {
+    #[arg(help = "Path to a saved-connections snapshot JSON file")]
+    pub path: String,
     #[arg(long, help = "Print machine-readable JSON output")]
     pub json: bool,
 }

@@ -112,7 +112,7 @@
       "portable_migration_import": "导入便携包",
       "cli_companion": "CLI 伴侣工具",
       "cli_tool": "CLI 工具",
-      "cli_tool_hint": "安装 oxt CLI 以从终端管理连接",
+      "cli_tool_hint": "安装 oxideterm CLI 以从终端管理连接",
       "cli_installed": "已安装",
       "cli_not_installed": "未安装",
       "cli_install": "安装",
@@ -120,7 +120,10 @@
       "cli_reinstall": "重新安装",
       "cli_reinstall_hint": "已安装的 CLI 与 OxideTerm {{version}} 随附的 CLI 不一致。请重新安装随附的 CLI，以避免协议不匹配。",
       "cli_uninstall": "卸载",
-      "cli_not_bundled": "此构建不包含 CLI 二进制文件"
+      "cli_not_bundled": "此构建不包含 CLI 二进制文件",
+      "cli_checking": "正在检查...",
+      "cli_status_error": "状态错误",
+      "cli_uninstalled": "已卸载"
     },
     "terminal": {
       "title": "终端设置",

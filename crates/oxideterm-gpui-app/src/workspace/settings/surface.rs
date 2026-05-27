@@ -295,6 +295,11 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings();
 
         match self.settings_page.active_tab {
+            SettingsTab::General => {
+                self.settings_page.cli_companion_loading.hash(&mut hasher);
+                self.settings_page.cli_companion_error.is_some().hash(&mut hasher);
+                self.settings_page.cli_companion_status.hash(&mut hasher);
+            }
             SettingsTab::Terminal => {
                 format!("{:?}", self.settings_page.terminal_page).hash(&mut hasher);
                 settings
@@ -573,6 +578,9 @@ impl WorkspaceApp {
                     this.focused_settings_input = None;
                     this.settings_slider_drag = None;
                     this.clear_ime_selection();
+                    if tab == SettingsTab::General {
+                        this.refresh_cli_companion_status(cx);
+                    }
                     cx.stop_propagation();
                     cx.notify();
                 }),

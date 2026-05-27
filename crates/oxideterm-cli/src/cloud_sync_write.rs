@@ -17,7 +17,7 @@ use oxideterm_cloud_sync::{
     },
 };
 use oxideterm_connections::ConnectionStore;
-use oxideterm_forwarding::ForwardingRegistry;
+use oxideterm_forwarding::{ForwardingRegistry, SavedForwardStore};
 use oxideterm_settings::SettingsStore;
 use serde::Serialize;
 use zeroize::Zeroizing;
@@ -31,7 +31,7 @@ use crate::{
     error::{CliError, CliResult, runtime_error},
     output::{self, OutputFormat},
     oxide,
-    paths::{default_cloud_sync_path, default_connections_path},
+    paths::{default_cloud_sync_path, default_connections_path, default_forwards_path},
     settings, write_guard,
 };
 
@@ -89,7 +89,7 @@ fn run_push(write: WriteArgs, force: bool) -> CliResult<()> {
     let json = write.json;
     let mut state_store = load_state_store(json)?;
     let connection_store = load_connection_store(json)?;
-    let forwarding_registry = ForwardingRegistry::new();
+    let forwarding_registry = load_forwarding_registry(json)?;
     let settings_store = load_settings_store(json)?;
     let local = build_local_snapshot(
         &connection_store,
@@ -198,7 +198,7 @@ fn run_pull(
     let json = write.json;
     let mut state_store = load_state_store(json)?;
     let mut connection_store = load_connection_store(json)?;
-    let forwarding_registry = ForwardingRegistry::new();
+    let forwarding_registry = load_forwarding_registry(json)?;
     let mut settings_store = load_settings_store(json)?;
     let mut provider =
         CloudSyncKeychainSecretProvider::new(state_store.state().secret_hints.clone());
@@ -538,6 +538,12 @@ fn load_connection_store(json: bool) -> CliResult<ConnectionStore> {
     ConnectionStore::load(default_connections_path()).map_err(|error| runtime_error(error, json))
 }
 
+fn load_forwarding_registry(json: bool) -> CliResult<ForwardingRegistry> {
+    let store = SavedForwardStore::load(default_forwards_path())
+        .map_err(|error| runtime_error(error, json))?;
+    Ok(ForwardingRegistry::new_with_store(store))
+}
+
 fn load_settings_store(json: bool) -> CliResult<SettingsStore> {
     let read_only = settings::load_settings_read_only(json)?;
     Ok(SettingsStore::from_read_only(
@@ -582,6 +588,7 @@ mod tests {
             no_backup: false,
             backup_before_write: false,
             json: true,
+            format: None,
         });
 
         assert!(write.dry_run);

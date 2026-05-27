@@ -654,6 +654,9 @@ impl WorkspaceApp {
         }
         self.persist_sidebar_settings();
         self.reveal_active_tab(window);
+        if self.settings_page.active_tab == SettingsTab::General {
+            self.refresh_cli_companion_status(cx);
+        }
         cx.notify();
     }
 }

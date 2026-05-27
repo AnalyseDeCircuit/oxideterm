@@ -25,6 +25,15 @@ impl ForwardingRegistry {
         Self::default()
     }
 
+    pub fn new_with_store(saved_store: SavedForwardStore) -> Self {
+        Self {
+            managers: Arc::new(DashMap::new()),
+            port_profilers: Arc::new(DashMap::new()),
+            event_tx: None,
+            saved_store: Some(Arc::new(saved_store)),
+        }
+    }
+
     pub fn new_with_event_sender(event_tx: Sender<ForwardEvent>) -> Self {
         Self {
             managers: Arc::new(DashMap::new()),

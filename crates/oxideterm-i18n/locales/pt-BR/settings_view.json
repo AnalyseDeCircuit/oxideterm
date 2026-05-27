@@ -112,7 +112,7 @@
       "portable_migration_import": "Importar pacote portátil",
       "cli_companion": "CLI Companion",
       "cli_tool": "Ferramenta CLI",
-      "cli_tool_hint": "Instale a CLI oxt para gerenciar conexões pelo terminal",
+      "cli_tool_hint": "Instale a CLI oxideterm para gerenciar conexões pelo terminal",
       "cli_installed": "Instalado",
       "cli_not_installed": "Não instalado",
       "cli_install": "Instalar",
@@ -120,7 +120,10 @@
       "cli_reinstall": "Reinstalar",
       "cli_reinstall_hint": "A CLI instalada é diferente da CLI incluída no OxideTerm {{version}}. Reinstale a CLI incluída para evitar incompatibilidades de protocolo.",
       "cli_uninstall": "Desinstalar",
-      "cli_not_bundled": "O binário CLI não está incluído nesta compilação"
+      "cli_not_bundled": "O binário CLI não está incluído nesta compilação",
+      "cli_checking": "Verificando...",
+      "cli_status_error": "Erro de status",
+      "cli_uninstalled": "Desinstalado"
     },
     "terminal": {
       "title": "Configurações do terminal",
