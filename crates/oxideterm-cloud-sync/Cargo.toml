@@ -4,6 +4,10 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = ["runtime"]
+runtime = ["oxideterm-forwarding/runtime"]
+
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true
@@ -11,7 +15,7 @@ chrono.workspace = true
 hmac = "0.12"
 keyring.workspace = true
 oxideterm-connections = { path = "../oxideterm-connections" }
-oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-forwarding = { path = "../oxideterm-forwarding", default-features = false }
 oxideterm-settings = { path = "../oxideterm-settings" }
 reqwest.workspace = true
 serde.workspace = true

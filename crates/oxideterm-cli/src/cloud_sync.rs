@@ -14,8 +14,9 @@ use serde::Serialize;
 
 use crate::{
     args::{
-        CloudSyncAction, CloudSyncAuthModeArg, CloudSyncBackendArg, CloudSyncCommand,
-        CloudSyncConfigureArgs, CloudSyncConflictStrategy, CloudSyncHistoryArgs, JsonArgs,
+        CloudSyncAction, CloudSyncAuthModeArg, CloudSyncBackendAction, CloudSyncBackendArg,
+        CloudSyncBackendConfigureAction, CloudSyncCommand, CloudSyncConfigureArgs,
+        CloudSyncConflictStrategy, CloudSyncHistoryArgs, JsonArgs,
     },
     cloud_sync_preview, cloud_sync_secrets, cloud_sync_state, cloud_sync_write,
     error::{CliResult, runtime_error},
@@ -92,6 +93,23 @@ pub fn run(command: CloudSyncCommand) -> CliResult<()> {
         CloudSyncAction::History(args) => history(args),
         CloudSyncAction::Backups(args) => backups(args),
         CloudSyncAction::Secrets(command) => cloud_sync_secrets::run(command),
+        CloudSyncAction::Backend(command) => match command.action {
+            CloudSyncBackendAction::Webdav(command) => match command.action {
+                CloudSyncBackendConfigureAction::Configure(args) => {
+                    configure_backend(CloudSyncBackendArg::Webdav, args)
+                }
+            },
+            CloudSyncBackendAction::S3(command) => match command.action {
+                CloudSyncBackendConfigureAction::Configure(args) => {
+                    configure_backend(CloudSyncBackendArg::S3, args)
+                }
+            },
+            CloudSyncBackendAction::Git(command) => match command.action {
+                CloudSyncBackendConfigureAction::Configure(args) => {
+                    configure_backend(CloudSyncBackendArg::Git, args)
+                }
+            },
+        },
     }
 }
 
@@ -134,6 +152,51 @@ fn configure(args: CloudSyncConfigureArgs) -> CliResult<()> {
             output::write_text(format_configure_text(&response));
             Ok(())
         }
+    }
+}
+
+fn configure_backend(
+    backend: CloudSyncBackendArg,
+    mut args: CloudSyncConfigureArgs,
+) -> CliResult<()> {
+    args.backend = Some(backend);
+    validate_backend_configure_args(backend, &args)?;
+    configure(args)
+}
+
+fn validate_backend_configure_args(
+    backend: CloudSyncBackendArg,
+    args: &CloudSyncConfigureArgs,
+) -> CliResult<()> {
+    match backend {
+        CloudSyncBackendArg::Webdav => require_non_empty(
+            args.endpoint.as_deref(),
+            "--endpoint is required for WebDAV backend configuration",
+            args.write.json,
+        ),
+        CloudSyncBackendArg::S3 => require_non_empty(
+            args.s3_bucket.as_deref(),
+            "--s3-bucket is required for S3 backend configuration",
+            args.write.json,
+        ),
+        CloudSyncBackendArg::Git => require_non_empty(
+            args.git_repository.as_deref(),
+            "--git-repository is required for Git backend configuration",
+            args.write.json,
+        ),
+        CloudSyncBackendArg::HttpJson | CloudSyncBackendArg::Dropbox => Ok(()),
+    }
+}
+
+fn require_non_empty(value: Option<&str>, message: &str, json: bool) -> CliResult<()> {
+    if value.is_some_and(|value| !value.trim().is_empty()) {
+        Ok(())
+    } else {
+        Err(crate::error::CliError::new(
+            "cloud_sync_backend_config_invalid",
+            message,
+            json,
+        ))
     }
 }
 

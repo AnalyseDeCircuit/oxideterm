@@ -24,6 +24,8 @@ pub enum OxideAction {
     #[command(name = "preview-import")]
     #[command(about = "Preview importing a portable .oxide bundle")]
     PreviewImport(OxidePreviewImportArgs),
+    #[command(about = "Diff a portable .oxide bundle against local state")]
+    Diff(OxidePreviewImportArgs),
     #[command(about = "Import a portable .oxide bundle")]
     Import(OxideImportArgs),
     #[command(about = "Export portable .oxide bundle")]

@@ -10,9 +10,7 @@ use oxideterm_cloud_sync::{
 use oxideterm_connections::{
     ConnectionStore, SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
 };
-use oxideterm_settings::{
-    PersistedSettings, default_settings_path, merge_oxide_settings_snapshot, save_settings_to_path,
-};
+use oxideterm_settings::{PersistedSettings, merge_oxide_settings_snapshot, save_settings_to_path};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -22,7 +20,7 @@ use crate::{
     cloud_sync_preview,
     error::{CliError, CliResult, runtime_error},
     output::{self, OutputFormat},
-    paths::{default_cloud_sync_path, default_connections_path},
+    paths::{default_cloud_sync_path, default_connections_path, default_settings_path},
     settings,
     write_guard::{self, WriteGuardPlan},
 };
@@ -466,6 +464,7 @@ mod tests {
             no_backup: false,
             backup_before_write: false,
             json: true,
+            format: None,
         }
     }
 

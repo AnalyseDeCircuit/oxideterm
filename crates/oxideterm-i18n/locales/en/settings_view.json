@@ -112,7 +112,7 @@
       "portable_migration_import": "Import Portable Bundle",
       "cli_companion": "CLI Companion",
       "cli_tool": "CLI Tool",
-      "cli_tool_hint": "Install the oxt CLI to manage connections from your terminal",
+      "cli_tool_hint": "Install the oxideterm CLI to manage connections from your terminal",
       "cli_installed": "Installed",
       "cli_not_installed": "Not installed",
       "cli_reinstall_required": "Reinstall required",
@@ -120,7 +120,10 @@
       "cli_reinstall": "Reinstall",
       "cli_uninstall": "Uninstall",
       "cli_not_bundled": "CLI binary is not included in this build",
-      "cli_reinstall_hint": "The installed CLI differs from the bundled CLI for OxideTerm {{version}}. Reinstall the bundled CLI to avoid protocol mismatches."
+      "cli_reinstall_hint": "The installed CLI differs from the bundled CLI for OxideTerm {{version}}. Reinstall the bundled CLI to avoid protocol mismatches.",
+      "cli_checking": "Checking...",
+      "cli_status_error": "Status error",
+      "cli_uninstalled": "Uninstalled"
     },
     "terminal": {
       "title": "Terminal Settings",

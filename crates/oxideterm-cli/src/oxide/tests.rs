@@ -11,6 +11,7 @@ fn import_defaults_to_dry_run_without_yes() {
         no_backup: false,
         backup_before_write: false,
         json: true,
+        format: None,
     });
 
     assert!(write.dry_run);

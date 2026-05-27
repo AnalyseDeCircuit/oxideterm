@@ -49,6 +49,7 @@ members = [
   "crates/oxideterm-workspace",
   "crates/russh",
 ]
+default-members = ["crates/oxideterm-gpui-app"]
 resolver = "2"
 
 [workspace.package]
@@ -63,7 +64,7 @@ argon2 = { version = "0.5", default-features = false, features = ["std"] }
 base64 = "0.22"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "env"] }
 clap_complete = "4.5"
 crossbeam-channel = "0.5"
 dashmap = "6.1"

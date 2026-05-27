@@ -5,8 +5,8 @@ use std::{collections::HashSet, fs, io::ErrorKind, path::Path};
 
 use oxideterm_settings::{
     ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS, PersistedSettings,
-    default_settings_path, export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
-    sanitize_settings_value, save_settings_to_path,
+    export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot, sanitize_settings_value,
+    save_settings_to_path,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -19,6 +19,7 @@ use crate::{
     error::{CliError, CliResult},
     json_query,
     output::{self, OutputFormat},
+    paths::default_settings_path,
     write_guard::{self, WriteGuardPlan},
 };
 
@@ -163,6 +164,7 @@ pub fn run(command: SettingsCommand) -> CliResult<i32> {
             export_settings(args)?;
             Ok(0)
         }
+        SettingsAction::Diff(args) => diff_settings_snapshot(args),
     }
 }
 
@@ -207,7 +209,7 @@ fn apply_settings_edit(
     )
 }
 
-fn apply_settings_snapshot(
+pub(crate) fn apply_settings_snapshot(
     snapshot_path: String,
     sections: Option<HashSet<String>>,
     write: crate::args::WriteArgs,
@@ -368,6 +370,42 @@ fn export_settings(args: SettingsExportArgs) -> CliResult<()> {
             Ok(())
         }
     }
+}
+
+fn diff_settings_snapshot(args: crate::args::SettingsDiffArgs) -> CliResult<i32> {
+    let current = load_settings_read_only(args.json)?;
+    let snapshot_json = fs::read_to_string(&args.path).map_err(|error| {
+        CliError::new(
+            "settings_diff_read_failed",
+            format!("failed to read settings snapshot {}: {error}", args.path),
+            args.json,
+        )
+    })?;
+    let sections = selected_sections(&args.sections);
+    let merged =
+        merge_oxide_settings_snapshot(&current.settings, &snapshot_json, sections.as_ref())
+            .map_err(|error| CliError::new("settings_diff_failed", error.to_string(), args.json))?;
+    let before = current.settings.to_value();
+    let after = merged.to_value();
+    let mut changes = Vec::new();
+    collect_value_changes("", &before, &after, &mut changes);
+    let response = SettingsWriteResponse {
+        path: current.path,
+        applied: false,
+        dry_run: true,
+        backup_path: None,
+        backup_size_bytes: None,
+        changes,
+        warnings: Vec::new(),
+    };
+    match output::format_from_flag(args.json) {
+        OutputFormat::Json => output::write_json(&response),
+        OutputFormat::Text => {
+            output::write_text(format_settings_write_text(&response));
+            Ok(())
+        }
+    }?;
+    Ok(0)
 }
 
 pub(crate) fn load_settings_read_only(json: bool) -> CliResult<ReadOnlySettings> {

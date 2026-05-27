@@ -4,17 +4,27 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = ["runtime"]
+runtime = [
+  "dep:dashmap",
+  "dep:oxideterm-backend-classification",
+  "dep:oxideterm-ssh",
+  "dep:tokio",
+  "dep:tracing",
+]
+
 [dependencies]
 chrono.workspace = true
-dashmap.workspace = true
-oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
-oxideterm-ssh = { path = "../oxideterm-ssh" }
+dashmap = { workspace = true, optional = true }
+oxideterm-backend-classification = { path = "../oxideterm-backend-classification", optional = true }
+oxideterm-ssh = { path = "../oxideterm-ssh", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
-tracing.workspace = true
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 uuid.workspace = true
 
 [dev-dependencies]

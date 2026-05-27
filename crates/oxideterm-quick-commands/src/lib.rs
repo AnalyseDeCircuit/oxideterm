@@ -15,5 +15,5 @@ pub use model::{
 };
 pub use store::{
     apply_snapshot_json, default_quick_command_categories, default_quick_commands,
-    export_snapshot_json, quick_commands_path,
+    export_snapshot_json, load_snapshot, quick_commands_path, save_snapshot,
 };

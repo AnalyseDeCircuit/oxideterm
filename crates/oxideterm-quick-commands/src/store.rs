@@ -38,6 +38,16 @@ pub fn export_snapshot_json(settings_path: &Path) -> Result<String, String> {
     serde_json::to_string_pretty(&snapshot).map_err(|error| error.to_string())
 }
 
+pub fn load_snapshot(settings_path: &Path) -> Result<QuickCommandsSnapshot, String> {
+    let path = quick_commands_path(settings_path);
+    load_snapshot_from_path(&path).map(|snapshot| snapshot.unwrap_or_else(default_snapshot))
+}
+
+pub fn save_snapshot(settings_path: &Path, snapshot: &QuickCommandsSnapshot) -> Result<(), String> {
+    let path = quick_commands_path(settings_path);
+    save_snapshot_to_path(&path, snapshot)
+}
+
 pub fn apply_snapshot_json(
     settings_path: &Path,
     snapshot_json: &str,

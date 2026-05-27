@@ -80,16 +80,49 @@ impl WorkspaceApp {
                 ])
             }
             2 => {
-                let cli_path = std::env::var_os("HOME")
-                    .map(|home| {
-                        std::path::PathBuf::from(home)
-                            .join(".local")
-                            .join("bin")
-                            .join("oxt")
-                            .display()
-                            .to_string()
-                    })
-                    .unwrap_or_else(|| "~/.local/bin/oxt".to_string());
+                let cli_status = self.settings_page.cli_companion_status.as_ref();
+                let cli_loading = self.settings_page.cli_companion_loading;
+                let cli_installed = cli_status.is_some_and(|status| status.installed);
+                let cli_bundled = cli_status.is_some_and(|status| status.bundled);
+                let cli_needs_reinstall = cli_status.is_some_and(|status| status.needs_reinstall);
+                let cli_path = cli_status
+                    .and_then(|status| status.install_path.clone())
+                    .unwrap_or_else(|| cli_install_path().display().to_string());
+                let (badge_label, badge_color) =
+                    if self.settings_page.cli_companion_error.is_some() {
+                        (
+                            self.i18n.t("settings_view.general.cli_status_error"),
+                            self.tokens.ui.error,
+                        )
+                    } else if cli_loading {
+                        (
+                            self.i18n.t("settings_view.general.cli_checking"),
+                            self.tokens.ui.warning,
+                        )
+                    } else if cli_installed && cli_needs_reinstall {
+                        (
+                            self.i18n.t("settings_view.general.cli_reinstall_required"),
+                            self.tokens.ui.warning,
+                        )
+                    } else if cli_installed {
+                        (
+                            self.i18n.t("settings_view.general.cli_installed"),
+                            self.tokens.ui.success,
+                        )
+                    } else {
+                        (
+                            self.i18n.t("settings_view.general.cli_not_installed"),
+                            self.tokens.ui.text_muted,
+                        )
+                    };
+                let reinstall_hint = cli_status
+                    .filter(|status| status.installed && status.needs_reinstall)
+                    .map(|status| {
+                        self.i18n_with(
+                            "settings_view.general.cli_reinstall_hint",
+                            &[("version", status.app_version.clone())],
+                        )
+                    });
                 self.plain_settings_card(vec![
                     self.card_title("settings_view.general.cli_companion"),
                     div()
@@ -142,12 +175,9 @@ impl WorkspaceApp {
                                                     self.settings_store.settings(),
                                                 ))
                                                 .text_color(rgb(self.tokens.ui.text))
-                                                .child("oxide"),
+                                                .child(CLI_COMPANION_COMMAND_NAME),
                                         )
-                                        .child(self.text_badge(
-                                            self.i18n.t("settings_view.general.cli_installed"),
-                                            self.tokens.ui.success,
-                                        )),
+                                        .child(self.text_badge(badge_label, badge_color)),
                                 )
                                 .child(
                                     div()
@@ -160,14 +190,72 @@ impl WorkspaceApp {
                                         .text_color(rgb(self.tokens.ui.text_muted))
                                         .truncate()
                                         .child(cli_path),
-                                ),
+                                )
+                                .when_some(reinstall_hint, |column, hint| {
+                                    column.child(
+                                        div()
+                                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                                            .text_color(rgb(self.tokens.ui.warning))
+                                            .child(hint),
+                                    )
+                                })
+                                .when_some(
+                                    self.settings_page.cli_companion_error.clone(),
+                                    |column, error| {
+                                        column.child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                                .text_color(rgb(self.tokens.ui.error))
+                                                .child(error),
+                                        )
+                                    },
+                                )
+                                .when(!cli_loading && cli_status.is_some() && !cli_bundled, |column| {
+                                    column.child(
+                                        div()
+                                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                                            .text_color(rgb(self.tokens.ui.text_muted))
+                                            .child(
+                                                self.i18n
+                                                    .t("settings_view.general.cli_not_bundled"),
+                                            ),
+                                    )
+                                }),
                         )
-                        .child(
-                            self.outline_button(
+                        .when(cli_bundled && (!cli_installed || cli_needs_reinstall), |row| {
+                            row.child(self.cli_companion_action_button(
+                                if cli_needs_reinstall {
+                                    self.i18n.t("settings_view.general.cli_reinstall")
+                                } else {
+                                    self.i18n.t("settings_view.general.cli_install")
+                                },
+                                LucideIcon::Download,
+                                ButtonVariant::Outline,
+                                cli_loading,
+                                |this, _event, _window, cx| this.install_cli_companion(cx),
+                                cx,
+                            ))
+                        })
+                        .when(cli_installed, |row| {
+                            row.child(self.cli_companion_action_button(
                                 self.i18n.t("settings_view.general.cli_uninstall"),
-                                ButtonSize::Sm,
-                            ),
-                        )
+                                LucideIcon::Trash2,
+                                ButtonVariant::Ghost,
+                                cli_loading,
+                                |this, _event, _window, cx| this.uninstall_cli_companion(cx),
+                                cx,
+                            ))
+                        })
+                        .when(!cli_loading && self.settings_page.cli_companion_error.is_some(), |row| {
+                            row.child(self.cli_companion_action_button(
+                                self.i18n.t("settings_view.help.retry"),
+                                LucideIcon::RefreshCw,
+                                ButtonVariant::Ghost,
+                                false,
+                                |this, _event, _window, cx| this.refresh_cli_companion_status(cx),
+                                cx,
+                            ))
+                        })
                         .into_any_element(),
                 ])
             }

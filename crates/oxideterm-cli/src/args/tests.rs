@@ -6,6 +6,21 @@ use clap::Parser;
 use super::*;
 
 #[test]
+fn parses_global_config_dir_and_profile() {
+    let cli = Cli::parse_from([
+        "oxideterm",
+        "--config-dir",
+        "/tmp/oxide",
+        "--profile",
+        "ci",
+        "paths",
+    ]);
+
+    assert_eq!(cli.config_dir.unwrap().to_string_lossy(), "/tmp/oxide");
+    assert_eq!(cli.profile.as_deref(), Some("ci"));
+}
+
+#[test]
 fn parses_connections_show_json() {
     let cli = Cli::parse_from(["oxideterm", "connections", "show", "prod", "--json"]);
     match cli.command {
@@ -182,7 +197,7 @@ fn parses_connections_create_and_edit_specs() {
     match create.command {
         Command::Connections(command) => match command.action {
             ConnectionsAction::Create(args) => {
-                assert_eq!(args.spec_path, "connection.json");
+                assert_eq!(args.spec_path.as_deref(), Some("connection.json"));
                 assert!(args.write.dry_run);
                 assert!(args.write.json);
             }
@@ -205,7 +220,7 @@ fn parses_connections_create_and_edit_specs() {
         Command::Connections(command) => match command.action {
             ConnectionsAction::Edit(args) => {
                 assert_eq!(args.query, "prod");
-                assert_eq!(args.spec_path, "patch.json");
+                assert_eq!(args.spec_path.as_deref(), Some("patch.json"));
                 assert!(args.write.yes);
                 assert!(args.write.json);
             }
@@ -809,8 +824,161 @@ fn parses_completion_shell() {
     let cli = Cli::parse_from(["oxideterm", "completion", "zsh"]);
     match cli.command {
         Command::Completion(args) => {
-            assert_eq!(args.shell, CompletionShell::Zsh);
+            assert_eq!(args.shell, Some(CompletionShell::Zsh));
         }
         _ => panic!("expected completion command"),
+    }
+}
+
+#[test]
+fn parses_completion_install() {
+    let cli = Cli::parse_from(["oxideterm", "completion", "install", "zsh", "--force"]);
+    match cli.command {
+        Command::Completion(args) => match args.action {
+            Some(CompletionAction::Install(args)) => {
+                assert_eq!(args.shell, CompletionShell::Zsh);
+                assert!(args.force);
+            }
+            _ => panic!("expected completion install command"),
+        },
+        _ => panic!("expected completion command"),
+    }
+}
+
+#[test]
+fn parses_connections_direct_create() {
+    let cli = Cli::parse_from([
+        "oxideterm",
+        "connections",
+        "create",
+        "--name",
+        "prod",
+        "--host",
+        "prod.example.com",
+        "--user",
+        "deploy",
+        "--port",
+        "2222",
+        "--auth",
+        "agent",
+        "--dry-run",
+    ]);
+    match cli.command {
+        Command::Connections(command) => match command.action {
+            ConnectionsAction::Create(args) => {
+                assert_eq!(args.direct.name.as_deref(), Some("prod"));
+                assert_eq!(args.direct.host.as_deref(), Some("prod.example.com"));
+                assert_eq!(args.direct.username.as_deref(), Some("deploy"));
+                assert_eq!(args.direct.port, Some(2222));
+                assert_eq!(args.direct.auth, Some(ConnectionAuthArg::Agent));
+            }
+            _ => panic!("expected connections create command"),
+        },
+        _ => panic!("expected connections command"),
+    }
+}
+
+#[test]
+fn parses_forwards_quick_commands_plugins_and_secrets() {
+    let forward = Cli::parse_from([
+        "oxideterm",
+        "forwards",
+        "create",
+        "--type",
+        "local",
+        "--bind-port",
+        "8080",
+        "--target-host",
+        "localhost",
+        "--target-port",
+        "80",
+    ]);
+    assert!(matches!(
+        forward.command,
+        Command::Forwards(ForwardsCommand {
+            action: ForwardsAction::Create(_)
+        })
+    ));
+
+    let quick = Cli::parse_from([
+        "oxideterm",
+        "quick-commands",
+        "create",
+        "--name",
+        "Uptime",
+        "--command",
+        "uptime",
+    ]);
+    assert!(matches!(
+        quick.command,
+        Command::QuickCommands(QuickCommandsCommand {
+            action: QuickCommandsAction::Create(_)
+        })
+    ));
+
+    let plugin = Cli::parse_from([
+        "oxideterm",
+        "plugins",
+        "settings",
+        "set",
+        "oxide-plugin-demo-setting-token",
+        "--value-json",
+        "\"configured\"",
+    ]);
+    assert!(matches!(
+        plugin.command,
+        Command::Plugins(PluginsCommand {
+            action: PluginsAction::Settings(_)
+        })
+    ));
+
+    let secret = Cli::parse_from([
+        "oxideterm",
+        "secrets",
+        "set",
+        "--scope",
+        "ai",
+        "--id",
+        "provider-1",
+        "--env",
+        "OXIDE_AI_KEY",
+    ]);
+    assert!(matches!(
+        secret.command,
+        Command::Secrets(SecretsCommand {
+            action: SecretsAction::Set(_)
+        })
+    ));
+}
+
+#[test]
+fn parses_cloud_sync_backend_configure() {
+    let cli = Cli::parse_from([
+        "oxideterm",
+        "cloud-sync",
+        "backend",
+        "s3",
+        "configure",
+        "--s3-bucket",
+        "oxideterm",
+        "--s3-region",
+        "us-east-1",
+        "--dry-run",
+    ]);
+    match cli.command {
+        Command::CloudSync(command) => match command.action {
+            CloudSyncAction::Backend(command) => match command.action {
+                CloudSyncBackendAction::S3(command) => match command.action {
+                    CloudSyncBackendConfigureAction::Configure(args) => {
+                        assert_eq!(args.s3_bucket.as_deref(), Some("oxideterm"));
+                        assert_eq!(args.s3_region.as_deref(), Some("us-east-1"));
+                        assert!(args.write.dry_run);
+                    }
+                },
+                _ => panic!("expected s3 backend"),
+            },
+            _ => panic!("expected cloud-sync backend"),
+        },
+        _ => panic!("expected cloud-sync command"),
     }
 }

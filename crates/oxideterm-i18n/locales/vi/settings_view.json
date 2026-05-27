@@ -112,7 +112,7 @@
       "portable_migration_import": "Nhập gói di động",
       "cli_companion": "Công cụ CLI",
       "cli_tool": "Công cụ CLI",
-      "cli_tool_hint": "Cài đặt oxt CLI để quản lý kết nối từ terminal",
+      "cli_tool_hint": "Cài đặt oxideterm CLI để quản lý kết nối từ terminal",
       "cli_installed": "Đã cài đặt",
       "cli_not_installed": "Chưa cài đặt",
       "cli_install": "Cài đặt",
@@ -120,7 +120,10 @@
       "cli_reinstall": "Cài đặt lại",
       "cli_reinstall_hint": "CLI đã cài đặt khác với CLI đi kèm OxideTerm {{version}}. Hãy cài đặt lại CLI đi kèm để tránh không khớp giao thức.",
       "cli_uninstall": "Gỡ cài đặt",
-      "cli_not_bundled": "Tệp nhị phân CLI không có trong bản dựng này"
+      "cli_not_bundled": "Tệp nhị phân CLI không có trong bản dựng này",
+      "cli_checking": "Đang kiểm tra...",
+      "cli_status_error": "Lỗi trạng thái",
+      "cli_uninstalled": "Đã gỡ cài đặt"
     },
     "terminal": {
       "title": "Cài đặt Terminal",

@@ -72,6 +72,19 @@ Remote node-agent artifacts can be built with:
 That script expects the Linux musl targets used by the agent release artifacts to
 be installed in the active Rust toolchain.
 
+The headless CLI is intentionally built outside the native app run path and then
+staged as a bundle resource:
+
+```sh
+./scripts/build-cli.sh
+./scripts/build-cli.sh aarch64-apple-darwin
+```
+
+The script writes release artifacts under
+`crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/`. This mirrors the
+Tauri resource model: `cargo run -p oxideterm-gpui-app --bin oxideterm-native`
+runs the app, while CLI packaging is an explicit release step.
+
 ## Repository Layout
 
 - `crates/oxideterm-gpui-app` - native GPUI application entry point and workspace
