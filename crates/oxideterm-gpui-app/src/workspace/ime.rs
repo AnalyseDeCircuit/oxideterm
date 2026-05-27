@@ -19,7 +19,7 @@ use super::sftp::SftpInput;
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::{
     tauri_ui_font_family,
-    text_input::{TextInputAnchor, TextInputAnchorId},
+    text_input::{TextInputAnchor, TextInputAnchorId, text_input_secret_mask},
 };
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
@@ -983,7 +983,7 @@ impl WorkspaceApp {
         relative_x: Pixels,
         window: &mut Window,
     ) -> usize {
-        let display = "•".repeat(text.chars().count());
+        let display = text_input_secret_mask(text);
         if display.is_empty() {
             return 0;
         }
@@ -1023,7 +1023,8 @@ impl WorkspaceApp {
                     | NewConnectionField::JumpPassword
                     | NewConnectionField::JumpPassphrase
             ) | WorkspaceImeTarget::KeyboardInteractive(_)
-        )
+        ) || matches!(target, WorkspaceImeTarget::Settings(input) if input.is_secret())
+            || matches!(target, WorkspaceImeTarget::SessionManager(input) if input.is_secret())
     }
 
     fn text_for_ime_target(&self, target: WorkspaceImeTarget) -> Option<String> {

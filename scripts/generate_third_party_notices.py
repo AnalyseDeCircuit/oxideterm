@@ -26,6 +26,10 @@ PERMISSIVE_LICENSES = {
     "MIT-0",
 }
 
+VENDORED_WORKSPACE_PACKAGES = {
+    "russh",
+}
+
 
 @dataclass(frozen=True)
 class CrateNotice:
@@ -33,6 +37,14 @@ class CrateNotice:
     version: str
     source: str
     licenses: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BundledAssetNotice:
+    name: str
+    license_name: str
+    license_file: str
+    file_count: int
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,6 +71,29 @@ def cargo_deny_license_data(cwd: Path) -> dict[str, dict[str, list[str]]]:
         stderr=subprocess.PIPE,
     )
     return json.loads(completed.stdout)
+
+
+def workspace_package_names(cwd: Path) -> set[str]:
+    # `cargo deny list` includes local workspace packages. Third-party notices
+    # should describe external/vendor obligations, not OxideTerm's own GPL
+    # crates. Keep vendored workspace packages such as our patched russh fork:
+    # those are local paths, but still third-party attribution obligations.
+    completed = subprocess.run(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        cwd=cwd,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    metadata = json.loads(completed.stdout)
+    workspace_members = set(metadata.get("workspace_members") or [])
+    return {
+        package.get("name", "")
+        for package in metadata.get("packages", [])
+        if package.get("id") in workspace_members and package.get("name")
+        and package.get("name") not in VENDORED_WORKSPACE_PACKAGES
+    }
 
 
 def parse_cargo_deny_key(key: str) -> tuple[str, str, str]:
@@ -96,10 +131,46 @@ def crate_table(crates: list[CrateNotice]) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+def bundled_asset_notices(cwd: Path) -> list[BundledAssetNotice]:
+    # The native app embeds decompressed TTF terminal font subsets for
+    # GPUI/font-kit. Keep asset notices here so binary distributions do not
+    # silently omit font attribution.
+    fonts_dir = cwd / "crates" / "oxideterm-gpui-app" / "resources" / "fonts"
+    candidates = [
+        ("JetBrains Mono Subset", "SIL Open Font License 1.1", fonts_dir / "JetBrainsMono" / "OFL.txt", fonts_dir / "JetBrainsMono"),
+        ("Meslo Nerd Font Subset", "Apache License 2.0", fonts_dir / "Meslo" / "LICENSE.txt", fonts_dir / "Meslo"),
+        ("Maple Mono NF CN Subset", "SIL Open Font License 1.1", fonts_dir / "MapleMono" / "LICENSE.txt", fonts_dir / "MapleMono"),
+    ]
+    notices = []
+    for name, license_name, license_file, asset_dir in candidates:
+        if not license_file.exists() or not asset_dir.exists():
+            continue
+        notices.append(
+            BundledAssetNotice(
+                name=name,
+                license_name=license_name,
+                license_file=license_file.relative_to(cwd).as_posix(),
+                file_count=len(list(asset_dir.glob("*.ttf"))),
+            )
+        )
+    return notices
+
+
+def bundled_asset_table(assets: list[BundledAssetNotice]) -> str:
+    lines = ["| Asset | Files | License | License File |", "|---|---:|---|---|"]
+    for asset in assets:
+        lines.append(
+            f"| {table_cell(asset.name)} | {asset.file_count} | "
+            f"{table_cell(asset.license_name)} | {table_cell(asset.license_file)} |"
+        )
+    return "\n".join(lines) + "\n\n"
+
+
 def build_notices(args: argparse.Namespace) -> tuple[str, int, int]:
     cwd = Path(args.cwd).resolve()
     data = cargo_deny_license_data(cwd)
-    exclude_names = set(args.exclude_name)
+    bundled_assets = bundled_asset_notices(cwd)
+    exclude_names = set(args.exclude_name) | workspace_package_names(cwd)
     exclude_prefixes = list(args.exclude_prefix)
 
     crates: list[CrateNotice] = []
@@ -164,6 +235,9 @@ def build_notices(args: argparse.Namespace) -> tuple[str, int, int]:
 
     output += "## Crates\n\n"
     output += crate_table(crates)
+    if bundled_assets:
+        output += "## Bundled Fonts / Assets\n\n"
+        output += bundled_asset_table(bundled_assets)
     output += "## Notes\n\n"
     output += "- Multi-license policy: where a crate offers multiple licenses, OxideTerm uses the most permissive compatible option available.\n"
     output += "- License data is generated from crate metadata through cargo-deny and may include multiple licenses per crate.\n"

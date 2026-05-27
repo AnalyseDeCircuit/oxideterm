@@ -1,13 +1,13 @@
-# Third-Party Notices (Native / Rust Workspace)
+# Third-Party Notices
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-05-27T09:25:30.782013Z
+Generated: 2026-05-27T13:47:19.425679Z
 
 ## Summary
 
-- MIT: 1035
-- Apache-2.0: 779
+- MIT: 1037
+- Apache-2.0: 780
 - Apache-2.0 WITH LLVM-exception: 71
 - Zlib: 40
 - BSD-3-Clause: 21
@@ -340,6 +340,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | form_urlencoded | 1.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | freetype-sys | 0.20.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | fs-set-times | 0.20.3 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| fs2 | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | fs_extra | 1.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | fsevent-sys | 4.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | funty | 2.0.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -551,6 +552,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | mime | 0.3.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | mime_guess | 2.0.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | minimal-lexical | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| minisign-verify | 0.2.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | miniz_oxide | 0.8.9 | MIT, Zlib, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | mint | 0.5.9 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | mio | 1.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -1240,6 +1242,14 @@ This section is a review prompt for binary distribution; it does not replace leg
 | zvariant | 5.10.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zvariant_derive | 5.10.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zvariant_utils | 3.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+
+## Bundled Fonts / Assets
+
+| Asset | Files | License | License File |
+|---|---:|---|---|
+| JetBrains Mono Subset | 4 | SIL Open Font License 1.1 | crates/oxideterm-gpui-app/resources/fonts/JetBrainsMono/OFL.txt |
+| Meslo Nerd Font Subset | 4 | Apache License 2.0 | crates/oxideterm-gpui-app/resources/fonts/Meslo/LICENSE.txt |
+| Maple Mono NF CN Subset | 4 | SIL Open Font License 1.1 | crates/oxideterm-gpui-app/resources/fonts/MapleMono/LICENSE.txt |
 
 ## Notes
 

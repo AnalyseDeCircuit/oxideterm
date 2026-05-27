@@ -33,6 +33,7 @@ pub fn persisted_settings_input_value(
     input: SettingsInput,
 ) -> Option<String> {
     let value = match input {
+        SettingsInput::TerminalCustomFontFamily => settings.terminal.custom_font_family.clone(),
         SettingsInput::TerminalFontSize => settings.terminal.font_size.to_string(),
         SettingsInput::TerminalLineHeight => compact_decimal(settings.terminal.line_height),
         SettingsInput::IdeFontSize => settings
@@ -204,6 +205,10 @@ pub fn apply_persisted_settings_input_draft(
     draft: &str,
 ) -> SettingsInputDraftApply {
     match input {
+        SettingsInput::TerminalCustomFontFamily => {
+            settings.terminal.custom_font_family = draft.trim().to_string();
+            SettingsInputDraftApply::Applied
+        }
         SettingsInput::TerminalFontSize => parse_i64(draft)
             .map(|value| settings.terminal.font_size = value.clamp(8, 32))
             .into(),
@@ -559,6 +564,25 @@ mod tests {
         );
 
         assert_eq!(settings.terminal.font_size, 32);
+    }
+
+    #[test]
+    fn terminal_custom_font_draft_updates_custom_font_family() {
+        let mut settings = PersistedSettings::default();
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalCustomFontFamily,
+                "  'Sarasa Fixed SC', monospace  ",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+
+        assert_eq!(
+            settings.terminal.custom_font_family,
+            "'Sarasa Fixed SC', monospace"
+        );
     }
 
     #[test]

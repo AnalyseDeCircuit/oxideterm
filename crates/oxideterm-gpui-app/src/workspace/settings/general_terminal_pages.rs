@@ -6,6 +6,7 @@ enum TerminalCommandSpecsAction {
 }
 
 const SETTINGS_TERMINAL_TEXTAREA_LINE_GAP: f32 = 2.0; // Existing GPUI visual gap between rendered textarea rows.
+const SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH: f32 = 300.0; // Tauri TerminalTab custom font input w-[300px].
 
 impl WorkspaceApp {
     fn settings_general_section(&self, section_index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -274,18 +275,30 @@ impl WorkspaceApp {
         }
 
         match (self.settings_page.terminal_page, section_index - 1) {
-            (TerminalSettingsPage::Display, 0) => self.settings_card(
-                "settings_view.terminal.font",
-                "settings_view.terminal.font_family_hint",
-                vec![
-                    self.select_setting_row(
-                        "settings_view.terminal.font_family",
-                        "settings_view.terminal.font_family_hint",
-                        SettingsSelect::TerminalFontFamily,
-                        font_family_label(settings.terminal.font_family),
-                        self.tokens.metrics.settings_select_width,
+            (TerminalSettingsPage::Display, 0) => {
+                let mut rows = vec![self.select_setting_row(
+                    "settings_view.terminal.font_family",
+                    "settings_view.terminal.font_family_hint",
+                    SettingsSelect::TerminalFontFamily,
+                    font_family_label(settings.terminal.font_family),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                )];
+                if settings.terminal.font_family == oxideterm_settings::FontFamily::Custom {
+                    rows.push(self.setting_row(
+                        "settings_view.terminal.custom_font_stack",
+                        "settings_view.terminal.custom_font_stack_hint",
+                        self.settings_text_input_control(
+                            SettingsInput::TerminalCustomFontFamily,
+                            settings.terminal.custom_font_family.clone(),
+                            "'Sarasa Fixed SC', 'Fira Code', monospace".to_string(),
+                            SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
+                            cx,
+                        ),
                         cx,
-                    ),
+                    ));
+                }
+                rows.extend([
                     self.terminal_preview(settings),
                     self.card_separator(),
                     self.font_size_row(settings, cx),
@@ -314,8 +327,13 @@ impl WorkspaceApp {
                         set_show_fps_overlay,
                         cx,
                     ),
-                ],
-            ),
+                ]);
+                self.settings_card(
+                    "settings_view.terminal.font",
+                    "settings_view.terminal.font_family_hint",
+                    rows,
+                )
+            }
             (TerminalSettingsPage::Display, 1) => self.settings_card(
                 "settings_view.terminal.cursor",
                 "settings_view.terminal.cursor_style_hint",

@@ -147,12 +147,12 @@ pub fn text_input_with_content_align(
     } else if empty {
         String::new()
     } else if view.secret {
-        "•".repeat(view.value.chars().count())
+        text_input_secret_mask(view.value)
     } else {
         view.value.to_string()
     };
     let marked_display = if view.secret {
-        "•".repeat(marked.chars().count())
+        text_input_secret_mask(marked)
     } else {
         marked.to_string()
     };
@@ -164,7 +164,8 @@ pub fn text_input_with_content_align(
         })
     } else {
         None
-    };
+    }
+    .map(|range| text_input_visual_range(view.value, view.secret, range));
     let selection_range = input_range.clone().filter(|range| range.start < range.end);
     let caret_offset = input_range
         .as_ref()
@@ -353,4 +354,58 @@ fn byte_index_for_utf16(value: &str, offset: usize) -> usize {
         utf16_count += ch.len_utf16();
     }
     value.len()
+}
+
+pub fn text_input_secret_mask(value: &str) -> String {
+    "•".repeat(value.chars().count())
+}
+
+/// Convert an IME UTF-16 range from the real input value into the range used by
+/// the rendered text. Password fields draw one bullet per scalar value, so the
+/// raw range cannot be applied directly to the masked display string.
+pub fn text_input_visual_range(raw_value: &str, secret: bool, range: Range<usize>) -> Range<usize> {
+    if secret {
+        secret_mask_offset_for_utf16(raw_value, range.start)
+            ..secret_mask_offset_for_utf16(raw_value, range.end)
+    } else {
+        range
+    }
+}
+
+fn secret_mask_offset_for_utf16(raw_value: &str, offset: usize) -> usize {
+    let mut utf16_offset = 0;
+    let mut mask_offset = 0;
+    for ch in raw_value.chars() {
+        if utf16_offset >= offset {
+            return mask_offset;
+        }
+        let next_utf16_offset = utf16_offset + ch.len_utf16();
+        if offset < next_utf16_offset {
+            return mask_offset;
+        }
+        utf16_offset = next_utf16_offset;
+        mask_offset += 1;
+    }
+    mask_offset
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{text_input_secret_mask, text_input_visual_range};
+
+    #[test]
+    fn secret_mask_uses_one_visible_glyph_per_scalar() {
+        assert_eq!(text_input_secret_mask("ab"), "••");
+        assert_eq!(text_input_secret_mask("a🔒b"), "•••");
+    }
+
+    #[test]
+    fn secret_visual_range_maps_utf16_offsets_to_mask_offsets() {
+        let value = "a🔒b";
+
+        assert_eq!(text_input_visual_range(value, true, 0..4), 0..3);
+        assert_eq!(text_input_visual_range(value, true, 1..3), 1..2);
+        assert_eq!(text_input_visual_range(value, true, 3..3), 2..2);
+        assert_eq!(text_input_visual_range(value, false, 1..3), 1..3);
+    }
 }

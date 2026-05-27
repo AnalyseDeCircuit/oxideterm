@@ -138,19 +138,23 @@ pub enum FontFamily {
     Custom,
 }
 
+pub const JETBRAINS_MONO_SUBSET_FAMILY: &str = "JetBrainsMono Nerd Font Mono";
+pub const MESLO_SUBSET_FAMILY: &str = "MesloLGLDZ Nerd Font Mono";
+pub const MAPLE_MONO_SUBSET_FAMILY: &str = "Maple Mono NF CN";
+
 impl FontFamily {
     pub fn terminal_family_name(self, custom: &str) -> String {
         if self == Self::Custom && !custom.trim().is_empty() {
             return custom.trim().to_string();
         }
         match self {
-            Self::Jetbrains => "JetBrainsMono Nerd Font".to_string(),
-            Self::Meslo => "MesloLGS Nerd Font Mono".to_string(),
-            Self::Maple => "Maple Mono NF CN".to_string(),
+            Self::Jetbrains => JETBRAINS_MONO_SUBSET_FAMILY.to_string(),
+            Self::Meslo => MESLO_SUBSET_FAMILY.to_string(),
+            Self::Maple => MAPLE_MONO_SUBSET_FAMILY.to_string(),
             Self::Cascadia => "Cascadia Code".to_string(),
             Self::Consolas => "Consolas".to_string(),
             Self::Menlo => "Menlo".to_string(),
-            Self::Custom => "JetBrainsMono Nerd Font".to_string(),
+            Self::Custom => JETBRAINS_MONO_SUBSET_FAMILY.to_string(),
         }
     }
 }

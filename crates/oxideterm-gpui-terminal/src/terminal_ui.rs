@@ -15,7 +15,7 @@ pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
 pub(crate) const DEFAULT_COLS: usize = 120;
 pub(crate) const DEFAULT_ROWS: usize = 40;
 pub(crate) const DEFAULT_SCROLLBACK_LINES: usize = 1000;
-pub const TERMINAL_FONT: &str = "JetBrainsMono Nerd Font";
+pub const TERMINAL_FONT: &str = oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY;
 pub(crate) const TERMINAL_FONT_SIZE: f32 = 14.0;
 pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
 pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
@@ -512,11 +512,14 @@ pub(crate) fn terminal_font_with_family(family: &str) -> Font {
         family: SharedString::from(family.to_string()),
         features: terminal_font_features(),
         fallbacks: Some(FontFallbacks::from_fonts(vec![
-            "JetBrainsMono Nerd Font Mono".to_string(),
+            oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY.to_string(),
+            "JetBrainsMono Nerd Font".to_string(),
             "JetBrains Mono NF (Subset)".to_string(),
             "JetBrains Mono".to_string(),
             "JetBrainsMonoNL Nerd Font Mono".to_string(),
+            oxideterm_settings::MESLO_SUBSET_FAMILY.to_string(),
             "MesloLGS Nerd Font Mono".to_string(),
+            oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY.to_string(),
             "Maple Mono NF CN".to_string(),
             "Symbols Nerd Font Mono".to_string(),
             "Symbols Nerd Font".to_string(),

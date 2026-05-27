@@ -1,9 +1,12 @@
 mod assets;
+mod bundled_fonts;
 mod keybindings;
 mod platform;
 mod workspace;
 
-use gpui::{App, AppContext, Application, Bounds, actions, px, size};
+use std::time::Duration;
+
+use gpui::{App, AppContext, Application, Bounds, Timer, actions, px, size};
 use gpui_component::Root;
 use oxideterm_i18n::I18n;
 use oxideterm_settings::SettingsStore;
@@ -89,12 +92,44 @@ fn main() {
     Application::new()
         .with_assets(NativeAssets)
         .run(|cx: &mut App| {
-            oxideterm_code_editor::init(cx);
-            cx.activate(true);
-            cx.on_action(quit);
             let startup_settings = SettingsStore::load_default()
                 .map(|store| store.settings().clone())
                 .unwrap_or_default();
+            if let Err(error) =
+                bundled_fonts::load_terminal_font_open_critical(&startup_settings, &cx.text_system())
+            {
+                eprintln!(
+                    "failed to load selected bundled terminal font; falling back to system fonts: {error}"
+                );
+            }
+            let cjk_fallback_text_system = cx.text_system().clone();
+            let foreground = cx.foreground_executor();
+            foreground
+                .spawn(async move {
+                    // Mirrors Tauri's delayed CJK fallback warmup: keep window
+                    // and terminal startup responsive, then register Maple
+                    // Regular only.
+                    Timer::after(Duration::from_millis(500)).await;
+                    if let Err(error) = bundled_fonts::load_terminal_cjk_fallback_regular(
+                        &cjk_fallback_text_system,
+                    ) {
+                        eprintln!(
+                            "failed to load bundled CJK terminal fallback; falling back to system fonts: {error}"
+                        );
+                    }
+                    Timer::after(Duration::from_millis(5_000)).await;
+                    if let Err(error) =
+                        bundled_fonts::load_terminal_cjk_secondary_faces(&cjk_fallback_text_system)
+                    {
+                        eprintln!(
+                            "failed to load secondary bundled CJK terminal fonts; falling back to system fonts: {error}"
+                        );
+                    }
+                })
+                .detach();
+            oxideterm_code_editor::init(cx);
+            cx.activate(true);
+            cx.on_action(quit);
             cx.bind_keys(platform::app_key_bindings(&startup_settings));
             cx.set_menus(platform::app_menus(&I18n::default()));
 

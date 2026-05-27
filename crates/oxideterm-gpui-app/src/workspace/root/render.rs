@@ -746,7 +746,9 @@ impl Render for WorkspaceApp {
                                     cx.stop_propagation();
                                 }),
                             )
-                            .child(self.render_terminal_quick_commands_popover(cx)),
+                            .child(overlay_content_boundary(
+                                div().child(self.render_terminal_quick_commands_popover(cx)),
+                            )),
                     )
                 },
             )

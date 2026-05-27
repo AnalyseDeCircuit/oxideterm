@@ -116,18 +116,58 @@ impl WorkspaceApp {
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.render_session_text_input_with_options(target, value, placeholder, false, cx)
+    }
+
+    fn render_session_text_input_with_options(
+        &self,
+        target: SessionManagerInput,
+        value: &str,
+        placeholder: String,
+        secret: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let workspace = cx.entity();
         let active = self.session_manager.focused_input == Some(target);
         let has_background = self
             .terminal_background_preferences("session_manager")
             .is_some();
-        let text = if value.is_empty() {
+        let marked = self
+            .marked_text_for_target(WorkspaceImeTarget::SessionManager(target))
+            .unwrap_or_default();
+        let visually_empty = value.is_empty() && marked.is_empty();
+        let text = if value.is_empty() && marked.is_empty() {
             placeholder
+        } else if value.is_empty() {
+            String::new()
+        } else if secret {
+            text_input_secret_mask(value)
         } else {
             value.to_string()
         };
+        let marked_text = if secret {
+            text_input_secret_mask(marked)
+        } else {
+            marked.to_string()
+        };
         let input_target = WorkspaceImeTarget::SessionManager(target);
+        let input_range = if active && !value.is_empty() && marked.is_empty() {
+            self.ime_selected_range_for_target(input_target)
+        } else {
+            None
+        }
+        // Session-manager password fields keep the real value in IME state but
+        // paint masked bullets, so selection/caret offsets need the shared
+        // visual-range conversion before rendering.
+        .map(|range| text_input_visual_range(value, secret, range));
+        let selection_range = input_range.clone().filter(|range| range.start < range.end);
+        let caret_offset = input_range
+            .as_ref()
+            .filter(|range| range.start == range.end)
+            .map(|range| range.start);
+        let shows_selection = selection_range.is_some();
+        let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
         text_input_anchor_probe(
             input_target.anchor_id(),
             div()
@@ -146,7 +186,7 @@ impl WorkspaceApp {
                 })
                 .bg(theme_input_bg(theme.bg, has_background))
                 .text_size(px(self.tokens.metrics.ui_text_sm))
-                .text_color(if value.is_empty() {
+                .text_color(if visually_empty {
                     rgb(theme.text_muted)
                 } else {
                     rgb(theme.text)
@@ -171,24 +211,37 @@ impl WorkspaceApp {
                         .flex()
                         .items_center()
                         .overflow_hidden()
-                        .when(active && value.is_empty(), |input| {
+                        .when(active && visually_empty, |input| {
                             input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
                         })
-                        .child(div().truncate().child(text))
-                        .when_some(
-                            self.marked_text_for_target(input_target),
-                            |input, marked| {
-                                input.child(
-                                    div()
-                                        .underline()
-                                        .text_color(rgb(theme.text))
-                                        .child(marked.to_string()),
-                                )
+                        .child(text_input_value_segments(
+                            &self.tokens,
+                            &text,
+                            visually_empty,
+                            selection_range,
+                            caret_offset,
+                            self.new_connection_caret_visible,
+                        ))
+                        .when(active && !marked_text.is_empty(), |input| {
+                            input.child(
+                                div()
+                                    .underline()
+                                    .text_color(rgb(theme.text))
+                                    .child(marked_text),
+                            )
+                        })
+                        .when(
+                            active
+                                && !visually_empty
+                                && !shows_selection
+                                && !shows_positioned_caret,
+                            |input| {
+                                input.child(text_caret(
+                                    &self.tokens,
+                                    self.new_connection_caret_visible,
+                                ))
                             },
                         )
-                        .when(active && !value.is_empty(), |input| {
-                            input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
-                        }),
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -223,11 +276,6 @@ impl WorkspaceApp {
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let masked = if value.is_empty() {
-            String::new()
-        } else {
-            "•".repeat(value.chars().count())
-        };
-        self.render_session_text_input(target, &masked, placeholder, cx)
+        self.render_session_text_input_with_options(target, value, placeholder, true, cx)
     }
 }

@@ -480,6 +480,7 @@ impl WorkspaceApp {
             sidebar = sidebar.child(
                 div()
                     .group("quick-command-category")
+                    .cursor_pointer()
                     .rounded(px(self.tokens.radii.md))
                     .px(px(8.0))
                     .py(px(6.0))
@@ -497,6 +498,21 @@ impl WorkspaceApp {
                         rgb(theme.text_muted)
                     })
                     .hover(move |style| style.bg(rgb(theme.bg_hover)).text_color(rgb(theme.text)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener({
+                            let category_id = category_id.clone();
+                            move |this, _event, _window, cx| {
+                                this.quick_commands.active_category = category_id.clone();
+                                this.quick_commands.command_editor = None;
+                                this.quick_commands.category_editor = None;
+                                this.quick_commands.focused_input = None;
+                                this.quick_commands.highlighted_command = None;
+                                cx.stop_propagation();
+                                cx.notify();
+                            }
+                        }),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -504,22 +520,6 @@ impl WorkspaceApp {
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .cursor_pointer()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener({
-                                    let category_id = category_id.clone();
-                                    move |this, _event, _window, cx| {
-                                        this.quick_commands.active_category = category_id.clone();
-                                        this.quick_commands.command_editor = None;
-                                        this.quick_commands.category_editor = None;
-                                        this.quick_commands.focused_input = None;
-                                        this.quick_commands.highlighted_command = None;
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }
-                                }),
-                            )
                             .child(Self::render_lucide_icon(
                                 quick_command_lucide_icon(category.icon),
                                 14.0,

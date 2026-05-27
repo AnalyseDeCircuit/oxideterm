@@ -7355,6 +7355,7 @@ dependencies = [
  "gpui",
  "image",
  "oxideterm-render-policy",
+ "oxideterm-settings",
  "oxideterm-ssh",
  "oxideterm-terminal",
  "oxideterm-terminal-recording",

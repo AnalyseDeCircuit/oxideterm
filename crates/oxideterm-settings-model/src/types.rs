@@ -89,6 +89,7 @@ pub enum SettingsSelect {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SettingsInput {
+    TerminalCustomFontFamily,
     TerminalFontSize,
     TerminalLineHeight,
     IdeFontSize,
@@ -336,6 +337,7 @@ impl SettingsInput {
 
     pub fn anchor_key(self) -> u64 {
         match self {
+            Self::TerminalCustomFontFamily => 19,
             Self::TerminalFontSize => 1,
             Self::TerminalLineHeight => 2,
             Self::IdeFontSize => 3,

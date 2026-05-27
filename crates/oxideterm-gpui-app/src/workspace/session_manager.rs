@@ -39,7 +39,10 @@ use oxideterm_gpui_ui::{
     modal_body, modal_container, modal_footer, modal_overlay,
     surface::{color_for_background, color_for_background_or_alpha},
     tauri_table_checkbox_cell, tauri_table_header, tauri_table_row, tauri_table_spacer_cell,
-    text_input::{text_caret, text_input_anchor_probe},
+    text_input::{
+        text_caret, text_input_anchor_probe, text_input_secret_mask, text_input_value_segments,
+        text_input_visual_range,
+    },
 };
 use oxideterm_settings::{
     ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS,
@@ -135,6 +138,15 @@ impl SessionManagerInput {
             Self::OxideExportConfirmPassword => 7,
             Self::OxideExportDescription => 8,
         }
+    }
+
+    pub(super) fn is_secret(self) -> bool {
+        matches!(
+            self,
+            Self::OxideImportPassword
+                | Self::OxideExportPassword
+                | Self::OxideExportConfirmPassword
+        )
     }
 }
 

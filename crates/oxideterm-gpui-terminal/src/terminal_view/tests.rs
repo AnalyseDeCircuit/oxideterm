@@ -321,10 +321,16 @@ fn terminal_theme_defaults_match_current_terminal_palette() {
 #[test]
 fn terminal_font_uses_real_nerd_font_family_and_fallbacks() {
     let font = terminal_font();
-    assert_eq!(font.family.as_ref(), "JetBrainsMono Nerd Font");
+    assert_eq!(
+        font.family.as_ref(),
+        oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY
+    );
     assert_eq!(font.features, FontFeatures::disable_ligatures());
     let fallbacks = font.fallbacks.as_ref().unwrap().fallback_list();
-    assert!(fallbacks.contains(&"JetBrainsMono Nerd Font Mono".to_string()));
+    assert!(fallbacks.contains(&oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY.to_string()));
+    assert!(fallbacks.contains(&oxideterm_settings::MESLO_SUBSET_FAMILY.to_string()));
+    assert!(fallbacks.contains(&oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY.to_string()));
+    assert!(fallbacks.contains(&"JetBrainsMono Nerd Font".to_string()));
     assert!(fallbacks.contains(&"JetBrains Mono".to_string()));
     assert!(fallbacks.contains(&"MesloLGS Nerd Font Mono".to_string()));
     assert!(fallbacks.contains(&"Maple Mono NF CN".to_string()));

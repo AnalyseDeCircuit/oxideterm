@@ -128,19 +128,35 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let padding = self.tokens.metrics.settings_content_padding;
         let gap = self.tokens.metrics.settings_page_gap;
+        let outer_max_width = self.plugin_manager_content_outer_max_width();
+        let mut content = div()
+            .w_full()
+            .min_w(px(0.0))
+            .max_w(px(outer_max_width))
+            .px(px(padding))
+            .pb(px(gap));
+        if index == 0 {
+            content = content.pt(px(padding));
+        }
+        if index + 1 == PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT {
+            content = content.pb(px(padding));
+        }
         div()
             .w_full()
-            .max_w(px(self.tokens.metrics.settings_content_max_width))
-            .mx_auto()
-            .px(px(padding))
-            .pb(px(gap))
-            .when(index == 0, |item| item.pt(px(padding)))
-            .when(
-                index + 1 == PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT,
-                |item| item.pb(px(padding)),
-            )
-            .child(self.render_plugin_manager_section(index, cx))
+            .min_w(px(0.0))
+            .flex()
+            .justify_center()
+            .child(content.child(self.render_plugin_manager_section(index, cx)))
             .into_any_element()
+    }
+
+    fn plugin_manager_content_outer_max_width(&self) -> f32 {
+        // Tauri PluginManagerView uses `max-w-4xl mx-auto p-10`: the content box
+        // is capped at 4xl and padding lives outside that width. GPUI list rows
+        // need an explicit centered wrapper, otherwise max-width rows can stick
+        // to the left edge in wide/fullscreen windows.
+        self.tokens.metrics.settings_content_max_width
+            + self.tokens.metrics.settings_content_padding * 2.0
     }
 
     fn render_plugin_manager_section(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {

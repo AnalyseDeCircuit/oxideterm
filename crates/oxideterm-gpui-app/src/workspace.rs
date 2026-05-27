@@ -76,7 +76,7 @@ use oxideterm_gpui_terminal::{
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,
-    modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
+    modal::{overlay_content_boundary, popover_backdrop, set_tauri_backdrop_blur_allowed},
     toast::{ToastVariant, ToastView},
     toaster::toaster,
     tooltip::tooltip_content,
@@ -161,7 +161,6 @@ use self::sidebar::{
     AiCompactionDelivery, AiModelSelectorProbeDelivery, AiPendingChatStream, AiStreamDelivery,
 };
 use self::terminal_cast::TerminalCastPlayerState;
-use crate::assets::LucideIcon;
 use crate::{
     CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Find, FindNext,
     FindPrev, FontDecrease, FontIncrease, FontReset, GoToTab1, GoToTab2, GoToTab3, GoToTab4,
@@ -175,6 +174,7 @@ use crate::{
     SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese, TerminalAiPanel, TerminalRecording,
     ToggleSidebar, ZenMode,
 };
+use crate::{assets::LucideIcon, bundled_fonts};
 use oxideterm_gpui_markdown::{MarkdownBlockLayout, MarkdownDocument};
 use oxideterm_gpui_settings_view::{
     ActiveSurface, SettingsInput, SettingsSelect, SettingsSlider, SettingsTab,

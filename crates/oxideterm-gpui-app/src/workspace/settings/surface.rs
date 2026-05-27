@@ -729,6 +729,13 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
+        if let Err(error) =
+            bundled_fonts::load_terminal_font_open_critical(settings, &cx.text_system())
+        {
+            eprintln!(
+                "failed to load selected bundled terminal font; falling back to system fonts: {error}"
+            );
+        }
         self.i18n
             .set_locale(locale_from_settings(settings.general.language));
         self.tokens = tokens_from_settings(&settings);

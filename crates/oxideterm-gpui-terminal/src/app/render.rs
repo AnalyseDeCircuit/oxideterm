@@ -197,7 +197,7 @@ impl TerminalPane {
             .border_color(rgba(0xffffff33))
             .bg(rgba(0x0d0f12dd))
             .text_size(px(10.0))
-            .font_family(SharedString::from("JetBrainsMono Nerd Font"))
+            .font_family(SharedString::from(self.preferences.font_family.clone()))
             .line_height(px(20.0))
             .child(
                 div()
@@ -329,7 +329,7 @@ impl TerminalPane {
             .flex()
             .flex_col()
             .gap(px(2.0))
-            .font_family(SharedString::from("JetBrainsMono Nerd Font"))
+            .font_family(SharedString::from(self.preferences.font_family.clone()))
             .text_size(px(12.0))
             .text_color(rgb(0x9ca3af));
 

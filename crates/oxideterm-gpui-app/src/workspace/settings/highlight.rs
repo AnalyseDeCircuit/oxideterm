@@ -244,7 +244,9 @@ impl WorkspaceApp {
                             .child(
                                 div()
                                     .truncate()
-                                    .font_family("JetBrainsMono Nerd Font")
+                                    .font_family(settings_mono_font_family(
+                                        self.settings_store.settings(),
+                                    ))
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(self.tokens.ui.text_muted))
                                     .child(summarize_highlight_pattern(&rule.pattern)),
@@ -566,7 +568,9 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(4.0))
-            .font_family("JetBrainsMono Nerd Font")
+            .font_family(settings_mono_font_family(
+                self.settings_store.settings(),
+            ))
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .line_height(px(24.0))
             .text_color(rgb(0xe2e8f0));
