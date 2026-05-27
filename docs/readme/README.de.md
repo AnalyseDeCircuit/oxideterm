@@ -59,6 +59,7 @@ Es ist keine Electron-App, keine Tauri-App, kein Web-Terminal und kein gehostete
 | SSH keepalive | JavaScript Timer | Rust async task |
 | Plugins | ESM im Browser-Sandbox | wasmtime WASM + typed Rust host API |
 | CLI | Desktop-App muss laufen | Eigenständiges Binary |
+| Release-Artefaktgröße | Meist ca. 150–200 MB Installer | Aktuell macOS arm64: ca. 50–60 MB komprimiertes Portable/DMG; rohes Release-Binary ca. 132 MB |
 
 ## Funktionsübersicht
 

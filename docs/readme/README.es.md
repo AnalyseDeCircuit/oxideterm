@@ -59,6 +59,7 @@ No es Electron, Tauri, un terminal web ni un servicio hospedado. No hay Chromium
 | SSH keepalive | Timer JavaScript | Tarea async Rust |
 | Plugins | ESM en sandbox browser | WASM wasmtime + typed Rust host API |
 | CLI | Requiere app desktop | Binario standalone |
+| Tamaño del artefacto | Instaladores de ~150–200 MB normalmente | macOS arm64 actual: portable/DMG comprimido de ~50–60 MB; binario release sin comprimir de ~132 MB |
 
 ## Funciones
 

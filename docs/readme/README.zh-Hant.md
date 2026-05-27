@@ -59,6 +59,7 @@ OxideTerm Native 是一個**純 Rust 原生桌面 SSH 工作區**。Tauri 版本
 | SSH keepalive | JavaScript timer | Rust async task |
 | 外掛執行環境 | 瀏覽器沙箱中的 ESM | wasmtime WASM + typed Rust host API |
 | CLI | 依賴桌面應用運行 | 獨立二進位，直接連結 crate |
+| 發佈包體積 | 通常約 150–200 MB 安裝包 | 目前 macOS arm64：壓縮 portable/DMG 約 50–60 MB；裸 release 二進位約 132 MB |
 
 ## 功能概覽
 

@@ -67,7 +67,7 @@ OxideTerm started there too (the Tauri version). The native branch removes the b
 | **AI context** | Serialized through IPC into a handler | Built directly from in-process workspace state |
 | **Plugin runtime** | ESM in browser sandbox | WASM in wasmtime with typed Rust host API |
 | **CLI** | Requires the desktop app running | Standalone binary, direct crate linkage |
-| **Binary size** | ~150 MB (WebView runtime included) | ~50–80 MB |
+| **Release artifact size** | Usually ~150–200 MB installers | Current macOS arm64: ~50–60 MB compressed portable/DMG; raw release binary is ~132 MB |
 
 ---
 

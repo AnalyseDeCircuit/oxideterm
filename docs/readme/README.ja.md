@@ -59,6 +59,7 @@ Electron、Tauri、Web terminal、hosted service ではありません。Chromiu
 | SSH keepalive | JavaScript timer | Rust async task |
 | Plugin runtime | browser sandbox の ESM | wasmtime WASM + typed Rust host API |
 | CLI | desktop app の起動が必要 | standalone binary |
+| 配布アーティファクトサイズ | 通常 ~150–200 MB の installer | 現在の macOS arm64: 圧縮 portable/DMG は約 50–60 MB、未圧縮 release binary は約 132 MB |
 
 ## 機能概要
 

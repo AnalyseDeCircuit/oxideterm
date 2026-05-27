@@ -59,6 +59,7 @@ Nó không phải Electron, Tauri, web terminal hay hosted service. Không Chrom
 | SSH keepalive | JavaScript timer | Rust async task |
 | Plugin runtime | ESM trong browser sandbox | WASM wasmtime + typed Rust host API |
 | CLI | Cần desktop app chạy | Standalone binary |
+| Kích thước artifact | Trình cài đặt thường ~150–200 MB | macOS arm64 hiện tại: portable/DMG nén ~50–60 MB; release binary thô ~132 MB |
 
 ## Tính năng
 
