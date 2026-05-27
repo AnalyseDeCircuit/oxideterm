@@ -4,6 +4,16 @@ Copyright (c) 2026 OxideTerm contributors.
 This project includes code, assets, or protocol implementations from the
 following projects:
 
+Generated dependency notices are maintained separately:
+
+- THIRD_PARTY_NOTICES.md covers the native Rust workspace.
+- agent/THIRD_PARTY_NOTICES.md covers the standalone remote agent.
+
+Regenerate them with:
+
+- python3 scripts/generate_third_party_notices.py --cwd . --output THIRD_PARTY_NOTICES.md --title "Third-Party Notices (Native / Rust Workspace)" --exclude-prefix oxideterm-
+- python3 scripts/generate_third_party_notices.py --cwd agent --output THIRD_PARTY_NOTICES.md --title "Third-Party Notices (OxideTerm Agent)" --exclude-name oxideterm-agent
+
 Alacritty
 Copyright 2016-2025 The Alacritty Project Contributors.
 Licensed under the Apache License, Version 2.0.
