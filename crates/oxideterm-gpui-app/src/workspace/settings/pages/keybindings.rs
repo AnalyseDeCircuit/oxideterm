@@ -7,6 +7,11 @@ enum KeybindingToolbarAction {
 
 const KEYBINDING_SCOPE_FILTER_HEIGHT: f32 = 32.0; // Tauri KeybindingEditorSection scope Button h-8
 const KEYBINDING_SCOPE_FILTER_PADDING_X: f32 = 12.0; // Tauri px-3
+const KEYBINDING_BG_ACTIVE_ELEVATED_ALPHA: u32 = 0x73; // Tauri [data-bg-active] --color-theme-bg-elevated: 45%.
+const KEYBINDING_BG_ACTIVE_BORDER_ALPHA: u32 = 0xbf; // Tauri [data-bg-active] --color-theme-border: 75%.
+const KEYBINDING_HEADER_BG_ALPHA: u32 = 0x80; // Tauri bg-theme-bg-elevated/50.
+const KEYBINDING_ROW_DIVIDER_ALPHA: u32 = 0x4d; // Tauri divide-theme-border/30.
+const KEYBINDING_KBD_BORDER_ALPHA: u32 = 0x80; // Tauri border-theme-border/50.
 
 fn settings_keybinding_scope_matches(
     filter: SettingsKeybindingScopeFilter,
@@ -48,6 +53,44 @@ impl KeybindingToolbarAction {
 }
 
 impl WorkspaceApp {
+    fn keybinding_surface_border(&self) -> gpui::Rgba {
+        oxideterm_gpui_ui::color_for_background(
+            self.tokens.ui.border,
+            self.settings_background_active(),
+            KEYBINDING_BG_ACTIVE_BORDER_ALPHA,
+        )
+    }
+
+    fn keybinding_row_divider(&self) -> gpui::Rgba {
+        // Tauri composes divide-theme-border/30 with the [data-bg-active]
+        // border variable, so the slash opacity must scale after the 75% mix.
+        oxideterm_gpui_ui::color_with_background_scaled_alpha(
+            self.tokens.ui.border,
+            self.settings_background_active(),
+            KEYBINDING_ROW_DIVIDER_ALPHA,
+            KEYBINDING_BG_ACTIVE_BORDER_ALPHA,
+        )
+    }
+
+    fn keybinding_header_background(&self) -> gpui::Rgba {
+        // Source: KeybindingEditorSection `bg-theme-bg-elevated/50`, whose
+        // theme variable becomes 45% opaque under [data-bg-active].
+        oxideterm_gpui_ui::color_with_background_scaled_alpha(
+            self.tokens.ui.bg_elevated,
+            self.settings_background_active(),
+            KEYBINDING_HEADER_BG_ALPHA,
+            KEYBINDING_BG_ACTIVE_ELEVATED_ALPHA,
+        )
+    }
+
+    fn keybinding_hover_background(&self) -> gpui::Rgba {
+        oxideterm_gpui_ui::color_for_background(
+            self.tokens.ui.bg_hover,
+            self.settings_background_active(),
+            0x80,
+        )
+    }
+
     fn settings_keybindings_section(
         &self,
         section_index: usize,
@@ -335,13 +378,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let mut table = div()
+        let table_surface = div()
             .w_full()
             .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_card))
+            .border_color(self.keybinding_surface_border())
             .overflow_hidden()
             .child(
                 div()
@@ -354,9 +396,9 @@ impl WorkspaceApp {
                     // GPUI can leave child paint visible at the mask edge, so
                     // round the header explicitly to preserve the browser clip.
                     .rounded_t(px(self.tokens.radii.lg))
-                    .bg(rgba((theme.bg_panel << 8) | 0x80))
+                    .bg(self.keybinding_header_background())
                     .border_b_1()
-                    .border_color(rgb(theme.border))
+                    .border_color(self.keybinding_surface_border())
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
@@ -385,6 +427,8 @@ impl WorkspaceApp {
                             )),
                     ),
             );
+
+        let mut table = self.settings_card_surface(table_surface, theme.bg_card);
 
         for (index, definition) in definitions.iter().enumerate() {
             table = table.child(self.keybinding_action_row(
@@ -437,7 +481,8 @@ impl WorkspaceApp {
             // Avoid a final border inside the rounded bottom because GPUI's
             // rounded overflow can otherwise expose the line outside the mask.
             .when(!is_last, |row| {
-                row.border_b_1().border_color(rgb(theme.border))
+                row.border_b_1()
+                    .border_color(self.keybinding_row_divider())
             })
             .when(is_last, |row| row.rounded_b(px(self.tokens.radii.lg)))
             .when(recording, |row| row.bg(rgba((theme.accent << 8) | 0x0d)))
@@ -485,7 +530,7 @@ impl WorkspaceApp {
                                     .px(px(8.0))
                                     .py(px(4.0))
                                     .cursor_pointer()
-                                    .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
+                                    .hover(|style| style.bg(self.keybinding_hover_background()))
                                     .child(self.keybinding_kbd_badge(
                                         &crate::keybindings::format_combo(&current),
                                         false,
@@ -510,7 +555,7 @@ impl WorkspaceApp {
                                     14.0,
                                     rgb(self.tokens.ui.text_muted),
                                     IconButtonOptions {
-                                        hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                                        hover_background: Some(self.keybinding_hover_background()),
                                         // KeybindingEditorSection renders this
                                         // as a compact icon Button. Use the
                                         // shared icon guard instead of a local
@@ -638,12 +683,17 @@ impl WorkspaceApp {
             .border_color(if accent {
                 rgba((self.tokens.ui.accent << 8) | 0x4d)
             } else {
-                rgba((self.tokens.ui.border << 8) | 0x80)
+                oxideterm_gpui_ui::color_with_background_scaled_alpha(
+                    self.tokens.ui.border,
+                    self.settings_background_active(),
+                    KEYBINDING_KBD_BORDER_ALPHA,
+                    KEYBINDING_BG_ACTIVE_BORDER_ALPHA,
+                )
             })
             .bg(if accent {
                 rgba((self.tokens.ui.accent << 8) | 0x33)
             } else {
-                rgb(self.tokens.ui.bg)
+                self.settings_panel_background(self.tokens.ui.bg)
             })
             .px(px(8.0))
             .py(px(2.0))

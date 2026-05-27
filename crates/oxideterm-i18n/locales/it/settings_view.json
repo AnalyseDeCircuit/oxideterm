@@ -852,6 +852,8 @@
       "channel_stable": "Stabile",
       "channel_beta": "Beta",
       "channel_gpui_preview": "GPUI Preview",
+      "gpui_preview_title": "GPUI Preview è una linea native separata",
+      "gpui_preview_hint": "Questo canale installa la preview Rust-native/GPUI per i test di migrazione. Può differire dall’app Tauri nel comportamento UI, nel flusso di aggiornamento e nel lavoro di parity non ancora completato. Rimani su Stable o Beta salvo tu voglia testare intenzionalmente la preview native.",
       "memory_diagnostics_title": "Memory Diagnostics",
       "memory_diagnostics_hint": "Break down process memory, WebView estimates, terminal buffers, viewer caches, AI/tool output, and GPU surfaces. Sampling runs only while this panel is open.",
       "memory_recording": "Recording",

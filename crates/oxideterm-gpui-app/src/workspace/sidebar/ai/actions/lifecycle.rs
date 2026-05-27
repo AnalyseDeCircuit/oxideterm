@@ -32,12 +32,22 @@ impl WorkspaceApp {
         // searchable input owner. Closing it must clear popup state, keyboard
         // focus origin, highlighted option, and any marked text together so Esc,
         // outside click, Tab, footer navigation, and row activation do not drift.
+        let restore_terminal_inline_prompt =
+            self.ai_model_selector_scope == Some(AiModelSelectorScope::TerminalInline)
+                && self.ai_inline_panel.open;
         self.ai_model_selector_open = false;
+        self.ai_model_selector_scope = None;
         self.ai_model_selector_focus_origin = None;
         self.ai_model_selector_search_focused = false;
         self.ai_model_selector_search_query.clear();
         self.ai_model_selector_highlighted_model = None;
         self.ime_marked_text = None;
+        if restore_terminal_inline_prompt {
+            // Tauri's inline command bar returns focus to its prompt after a
+            // nested model picker closes; otherwise the next typed key appears
+            // to vanish into the terminal surface.
+            self.ai_inline_panel.prompt_focused = true;
+        }
     }
 
     fn cancel_ai_chat_stream(&mut self, cx: &mut Context<Self>) {

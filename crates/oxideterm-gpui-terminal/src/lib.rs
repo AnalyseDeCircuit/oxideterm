@@ -6,7 +6,8 @@ mod terminal_view;
 mod trzsz_worker;
 
 pub use app::{
-    SharedTerminalSession, TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalPane,
+    SharedTerminalSession, TerminalCursorAnchor, TerminalInputInterceptor,
+    TerminalInputInterceptorResult, TerminalPane,
 };
 pub use background_cache::BackgroundImageRenderCache;
 pub use command_facts::{

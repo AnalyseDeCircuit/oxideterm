@@ -41,6 +41,7 @@ pub(super) enum WorkspaceImeTarget {
     Launcher(LauncherInput),
     Graphics(GraphicsInput),
     AiModelSelectorSearch,
+    AiInlinePrompt,
     AiChatInput,
     AiMessageEdit,
     Sftp(SftpInput),
@@ -86,8 +87,9 @@ impl WorkspaceImeTarget {
             Self::Launcher(input) => 1_850 + input.anchor_key(),
             Self::Graphics(input) => 1_875 + input.anchor_key(),
             Self::AiModelSelectorSearch => 1_895,
-            Self::AiChatInput => 1_896,
-            Self::AiMessageEdit => 1_897,
+            Self::AiInlinePrompt => 1_896,
+            Self::AiChatInput => 1_897,
+            Self::AiMessageEdit => 1_898,
             Self::Sftp(input) => 1_900 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
@@ -480,11 +482,15 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Sftp(input));
         }
 
-        if self.ai_sidebar_visible()
+        if (self.ai_sidebar_visible() || self.ai_inline_panel.open)
             && self.ai_model_selector_open
             && self.ai_model_selector_search_focused
         {
             return Some(WorkspaceImeTarget::AiModelSelectorSearch);
+        }
+
+        if self.ai_inline_panel.open && self.ai_inline_panel.prompt_focused {
+            return Some(WorkspaceImeTarget::AiInlinePrompt);
         }
 
         if self.ai_sidebar_visible() && self.ai_chat_input_focused {
@@ -1122,6 +1128,10 @@ impl WorkspaceApp {
             WorkspaceImeTarget::AiModelSelectorSearch => self
                 .ai_model_selector_search_focused
                 .then(|| self.ai_model_selector_search_query.clone()),
+            WorkspaceImeTarget::AiInlinePrompt => self
+                .ai_inline_panel
+                .prompt_focused
+                .then(|| self.ai_inline_panel.prompt.clone()),
             WorkspaceImeTarget::AiChatInput => self
                 .ai_chat_input_focused
                 .then(|| self.ai_chat_draft.clone()),
@@ -1830,6 +1840,14 @@ impl WorkspaceApp {
                     // Radix-style active item so keyboard focus cannot point at
                     // a filtered-out model.
                     self.ai_model_selector_highlighted_model = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::AiInlinePrompt => {
+                if self.ai_inline_panel.prompt_focused {
+                    replace_utf16(&mut self.ai_inline_panel.prompt, replacement_range, text);
+                    self.ai_inline_panel.error = None;
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

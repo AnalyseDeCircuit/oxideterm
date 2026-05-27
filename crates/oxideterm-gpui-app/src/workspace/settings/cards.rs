@@ -477,6 +477,7 @@ impl WorkspaceApp {
                     | SelectAnchorId::AiConversationList
                     | SelectAnchorId::AiChatMenu
                     | SelectAnchorId::AiModelSelector
+                    | SelectAnchorId::AiInlineModelSelector
                     | SelectAnchorId::AiProfileSelector
                     | SelectAnchorId::AiSafetyMenu
                     | SelectAnchorId::AiContextPopover
@@ -631,6 +632,7 @@ impl WorkspaceApp {
         if self.ai_model_selector_search_focused || self.ai_model_selector_open {
             self.ai_model_selector_search_focused = false;
             self.ai_model_selector_open = false;
+            self.ai_model_selector_scope = None;
             self.ime_marked_text = None;
             changed = true;
         }
@@ -1081,6 +1083,7 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             | SelectAnchorId::AiConversationList
             | SelectAnchorId::AiChatMenu
             | SelectAnchorId::AiModelSelector
+            | SelectAnchorId::AiInlineModelSelector
             | SelectAnchorId::AiProfileSelector
             | SelectAnchorId::AiSafetyMenu
             | SelectAnchorId::AiContextPopover

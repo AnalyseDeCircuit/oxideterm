@@ -5,7 +5,7 @@ use gpui::{
 };
 use oxideterm_settings::{
     FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
-    PersistedSettings, create_default_highlight_rule, reindex_highlight_rules,
+    PersistedSettings, UpdateChannel, create_default_highlight_rule, reindex_highlight_rules,
 };
 use oxideterm_settings_model::{
     AI_MODEL_REFRESH_MISSING_API_KEY, AiMcpServerDraft, AiModelRefreshDelivery,

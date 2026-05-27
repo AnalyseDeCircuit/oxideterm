@@ -852,6 +852,8 @@
       "channel_stable": "穩定版",
       "channel_beta": "Beta",
       "channel_gpui_preview": "GPUI Preview",
+      "gpui_preview_title": "GPUI Preview 是獨立的 native 應用線",
+      "gpui_preview_hint": "此通道會安裝 Rust-native/GPUI 預覽版，用於遷移測試。它可能在介面行為、更新流程和未完成 parity 上不同於目前 Tauri 應用。除非你明確想測試 native preview，否則請留在穩定版或 Beta。",
       "memory_diagnostics_title": "内存诊断",
       "memory_diagnostics_hint": "拆分查看进程内存、WebView 估算、终端缓冲、查看器缓存、AI/工具输出和 GPU surface。仅在此面板打开时采样。",
       "memory_recording": "采样中",

@@ -26,6 +26,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
     fn anchor_id(self) -> SelectAnchorId {
         match self {
             Self::Language => SelectAnchorId::SettingsLanguage,
+            Self::UpdateChannel => SelectAnchorId::SettingsUpdateChannel,
             Self::AppearanceTheme => SelectAnchorId::SettingsAppearanceTheme,
             Self::AppearanceDensity => SelectAnchorId::SettingsAppearanceDensity,
             Self::AppearanceAnimation => SelectAnchorId::SettingsAppearanceAnimation,

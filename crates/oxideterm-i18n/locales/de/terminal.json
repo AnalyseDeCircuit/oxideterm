@@ -116,6 +116,30 @@
       "icon_folder": "Folder",
       "icon_docker": "Docker",
       "icon_zap": "Custom"
+    },
+    "ai": {
+      "title": "OxideSens",
+      "api_key_required": "API-Schlüssel erforderlich",
+      "api_key_hint": "Konfigurieren Sie Ihren API-Schlüssel unter Einstellungen → KI, um diese Funktion zu nutzen.",
+      "context": "Kontext:",
+      "context_selection": "Auswahl",
+      "context_visible": "Sichtbar",
+      "context_none": "Keiner",
+      "tokens_estimate": "~{{count}} Token",
+      "prompt_placeholder": "Fragen Sie die KI nach Hilfe bei Befehlen...",
+      "inline_placeholder": "AI nach einem Befehl fragen...",
+      "selection_placeholder": "Frage zur Auswahl...",
+      "to_send": "senden",
+      "to_insert": "einfügen",
+      "to_run": "ausführen",
+      "generating": "Generiere...",
+      "regenerate": "Wiederholen",
+      "send_shortcut": "zum Senden",
+      "close_shortcut": "zum Schließen",
+      "copy": "Kopieren",
+      "copied": "Kopiert",
+      "insert": "Einfügen",
+      "execute": "Ausführen"
     }
   },
   "search": {

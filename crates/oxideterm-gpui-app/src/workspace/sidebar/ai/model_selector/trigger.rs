@@ -1,5 +1,10 @@
 impl WorkspaceApp {
-    fn render_ai_model_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_ai_model_selector(
+        &self,
+        scope: AiModelSelectorScope,
+        anchor_id: SelectAnchorId,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
         let enabled_providers = providers
             .iter()
@@ -32,13 +37,15 @@ impl WorkspaceApp {
         );
         let active_model = self.settings_store.settings().ai.active_model.as_deref();
         let display = model_selector_display_name(active_provider, active_model);
+        let selector_open =
+            self.ai_model_selector_open && self.ai_model_selector_scope == Some(scope);
         let ready = active_provider
             .map(|provider| {
                 self.ai_model_selector_has_key(provider)
                     && self.ai_model_selector_provider_is_online(provider)
             })
             .unwrap_or(false);
-        let chevron = if self.ai_model_selector_open {
+        let chevron = if selector_open {
             LucideIcon::ChevronDown
         } else {
             LucideIcon::ChevronRight
@@ -47,19 +54,19 @@ impl WorkspaceApp {
             &self.tokens,
             model_selector_truncated_label(&display),
             ready,
-            self.ai_model_selector_open,
+            selector_open,
             browser_behavior::browser_focus_visible(
-                self.ai_model_selector_open,
+                selector_open,
                 self.ai_model_selector_focus_origin,
             ),
             Self::render_lucide_icon(chevron, 12.0, rgb(self.tokens.ui.text_muted)),
         )
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(|this, _event, window, cx| {
+            cx.listener(move |this, _event, window, cx| {
                 this.ai_model_selector_focus_origin =
                     Some(browser_behavior::BrowserFocusOrigin::Pointer);
-                this.toggle_ai_model_selector(window, cx);
+                this.toggle_ai_model_selector(scope, window, cx);
                 cx.stop_propagation();
             }),
         );
@@ -67,7 +74,7 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         ai_model_selector_root()
             .child(select_anchor_probe(
-                SelectAnchorId::AiModelSelector,
+                anchor_id,
                 trigger,
                 move |anchor, _window, cx| {
                     let _ = workspace.update(cx, |this, cx| {

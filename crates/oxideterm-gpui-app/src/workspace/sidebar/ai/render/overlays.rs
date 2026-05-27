@@ -93,7 +93,9 @@ impl WorkspaceApp {
             );
             let top = f32::from(anchor.bounds.bottom()) + AI_FLOATING_GAP / 2.0;
             (Corner::TopLeft, left, top, self.render_ai_chat_menu(cx))
-        } else if self.ai_model_selector_open {
+        } else if self.ai_model_selector_open
+            && self.ai_model_selector_scope == Some(AiModelSelectorScope::Sidebar)
+        {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiModelSelector)?;
             (
                 Corner::BottomLeft,
@@ -185,7 +187,8 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn has_ai_sidebar_floating_overlay(&self) -> bool {
         self.ai_conversation_list_open
             || self.ai_chat_menu_open
-            || self.ai_model_selector_open
+            || (self.ai_model_selector_open
+                && self.ai_model_selector_scope == Some(AiModelSelectorScope::Sidebar))
             || self.ai_profile_selector_open
             || self.ai_safety_menu_open
             || self.ai_context_popover_open

@@ -116,6 +116,30 @@
       "icon_folder": "Folder",
       "icon_docker": "Docker",
       "icon_zap": "Custom"
+    },
+    "ai": {
+      "title": "OxideSens",
+      "api_key_required": "Cần API Key",
+      "api_key_hint": "Cấu hình API key của bạn trong Cài đặt → AI để sử dụng tính năng này.",
+      "context": "Ngữ cảnh:",
+      "context_selection": "Đã chọn",
+      "context_visible": "Hiện tại",
+      "context_none": "Không có",
+      "tokens_estimate": "~{{count}} token",
+      "prompt_placeholder": "Hỏi AI để được trợ giúp với lệnh...",
+      "inline_placeholder": "Yêu cầu AI lệnh...",
+      "selection_placeholder": "Hỏi về vùng chọn...",
+      "to_send": "gửi",
+      "to_insert": "chèn",
+      "to_run": "chạy",
+      "generating": "Đang tạo...",
+      "regenerate": "Thử lại",
+      "send_shortcut": "để gửi",
+      "close_shortcut": "để đóng",
+      "copy": "Sao chép",
+      "copied": "Đã sao chép",
+      "insert": "Chèn",
+      "execute": "Thực thi"
     }
   },
   "search": {

@@ -7,6 +7,8 @@ use gpui::{
 };
 use oxideterm_theme::UiMetrics;
 
+const OXIDETERM_APP_ID: &str = "com.analysecircuit.OxideTerm";
+
 pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
     let metrics = UiMetrics::tauri_default();
     WindowOptions {
@@ -28,6 +30,9 @@ pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
             px(metrics.window_min_width),
             px(metrics.window_min_height),
         )),
+        // Linux compositors use app_id to associate runtime windows with the
+        // desktop file and package icon generated from the bundle metadata.
+        app_id: Some(OXIDETERM_APP_ID.to_string()),
         ..Default::default()
     }
 }

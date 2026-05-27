@@ -1,3 +1,4 @@
+mod app_icon;
 mod assets;
 mod bundled_fonts;
 mod keybindings;
@@ -92,6 +93,8 @@ fn main() {
     Application::new()
         .with_assets(NativeAssets)
         .run(|cx: &mut App| {
+            app_icon::install_runtime_app_icon();
+
             let startup_settings = SettingsStore::load_default()
                 .map(|store| store.settings().clone())
                 .unwrap_or_default();

@@ -41,7 +41,7 @@ pub fn settings_tab_section_count(
         SettingsTab::Keybindings => {
             keybinding_settings_section_count(dynamic.visible_keybinding_scope_count)
         }
-        SettingsTab::Help => 6,
+        SettingsTab::Help => 5,
     }
 }
 
@@ -108,5 +108,17 @@ mod tests {
             terminal_settings_section_count(TerminalSettingsPage::Input),
             2
         );
+    }
+
+    #[test]
+    fn help_page_count_omits_shortcuts_and_memory_diagnostics_sections() {
+        let dynamic = SettingsDynamicSectionCounts {
+            terminal_page: TerminalSettingsPage::Display,
+            visible_keybinding_scope_count: 0,
+            knowledge_has_error: false,
+            knowledge_has_selected_collection: false,
+        };
+
+        assert_eq!(settings_tab_section_count(SettingsTab::Help, dynamic), 5);
     }
 }

@@ -852,6 +852,8 @@
       "channel_stable": "Ổn định",
       "channel_beta": "Beta",
       "channel_gpui_preview": "GPUI Preview",
+      "gpui_preview_title": "GPUI Preview là một nhánh ứng dụng native riêng",
+      "gpui_preview_hint": "Kênh này cài đặt bản preview Rust-native/GPUI để kiểm thử quá trình migration. Nó có thể khác ứng dụng Tauri về hành vi UI, luồng cập nhật và các phần parity chưa hoàn tất. Hãy ở Stable hoặc Beta trừ khi bạn chủ động muốn thử native preview.",
       "memory_diagnostics_title": "Memory Diagnostics",
       "memory_diagnostics_hint": "Break down process memory, WebView estimates, terminal buffers, viewer caches, AI/tool output, and GPU surfaces. Sampling runs only while this panel is open.",
       "memory_recording": "Recording",
