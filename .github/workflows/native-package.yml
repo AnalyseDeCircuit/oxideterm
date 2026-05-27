@@ -1,0 +1,139 @@
+name: Native Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional artifact version override, for example 0.1.0-preview.1'
+        required: false
+        type: string
+      upload_release:
+        description: 'Upload artifacts to the current tag release'
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'native-v*'
+      - 'gpui-v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: native-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - label: macos-x64
+            os: macos-13
+            target: x86_64-apple-darwin
+          - label: linux-x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - label: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - label: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - label: windows-arm64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          key: native-package-${{ matrix.target }}
+          cache-on-failure: false
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libasound2-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer1.0-dev \
+            libgtk-3-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libssl-dev \
+            libsoup-3.0-dev \
+            libwebkit2gtk-4.1-dev \
+            libx11-dev \
+            libxcb-cursor-dev \
+            libxcb-icccm4-dev \
+            libxcb-image0-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xinerama0-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            mesa-vulkan-drivers \
+            patchelf \
+            pkg-config
+
+      - name: Validate manual release input
+        if: github.ref_type != 'tag' && inputs.upload_release && inputs.version == ''
+        run: python -c "import sys; print('Manual release upload requires the version input.', file=sys.stderr); sys.exit(1)"
+
+      - name: Package native app
+        env:
+          OXIDETERM_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+        run: python scripts/package_native.py ${{ matrix.target }}
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OxideTerm-${{ matrix.label }}
+          path: |
+            dist/*.app.zip
+            dist/*.dmg
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/') || inputs.upload_release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.app.zip
+            dist/*.dmg
+            dist/*.tar.gz
+            dist/*.zip
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('native-v{0}', inputs.version) }}
+          name: OxideTerm Native ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+          prerelease: true

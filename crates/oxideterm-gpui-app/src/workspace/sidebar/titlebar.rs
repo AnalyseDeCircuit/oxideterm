@@ -1,8 +1,11 @@
 impl WorkspaceApp {
     pub(super) fn render_title_bar(&self) -> AnyElement {
         let theme = self.tokens.ui;
-        let titlebar_bg = titlebar_background(theme.bg_panel, theme.bg_active, theme.accent);
-        let titlebar_border = mix_rgb(titlebar_bg, theme.border, 0.65);
+        // Tauri does not draw a separate accent-tinted top strip; its transparent
+        // macOS chrome sits over the app root background. Native still needs this
+        // drag area for traffic lights, so keep it visually merged with theme.bg.
+        let titlebar_bg = theme.bg;
+        let titlebar_border = theme.border;
         let text_color = readable_color(titlebar_bg, theme.text_muted, theme.text);
 
         div()

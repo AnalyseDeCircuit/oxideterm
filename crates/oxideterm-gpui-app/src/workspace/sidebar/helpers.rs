@@ -1,8 +1,3 @@
-fn titlebar_background(panel: u32, active: u32, accent: u32) -> u32 {
-    let base = mix_rgb(panel, active, 0.42);
-    mix_rgb(base, accent, 0.08)
-}
-
 fn active_session_readiness(readiness: &NodeReadiness) -> ActiveSessionReadiness {
     match readiness {
         NodeReadiness::Ready => ActiveSessionReadiness::Ready,

@@ -101,6 +101,12 @@ impl Render for WorkspaceApp {
         );
         let toast_layer = self.render_workspace_toasts();
         let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
+        let titlebar_visible = !window.is_fullscreen();
+        let effective_titlebar_height = if titlebar_visible {
+            self.tokens.metrics.titlebar_height
+        } else {
+            0.0
+        };
 
         div()
             .id("workspace-root")
@@ -576,7 +582,7 @@ impl Render for WorkspaceApp {
             .on_action(cx.listener(|this, _: &GoToTab9, window, cx| {
                 this.go_to_tab(8, window, cx);
             }))
-            .child(self.render_title_bar())
+            .when(titlebar_visible, |root| root.child(self.render_title_bar()))
             .child(
                 div()
                     .flex_1()
@@ -708,9 +714,7 @@ impl Render for WorkspaceApp {
                         actions::TerminalBroadcastMenuPlacement::Bottom(62.0)
                     } else {
                         actions::TerminalBroadcastMenuPlacement::Top(
-                            self.tokens.metrics.titlebar_height
-                                + self.tokens.metrics.tabbar_height
-                                + 6.0,
+                            effective_titlebar_height + self.tokens.metrics.tabbar_height + 6.0,
                         )
                     };
                     root.child(

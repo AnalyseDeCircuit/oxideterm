@@ -1,309 +1,330 @@
-# OxideTerm Native
+<h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Local-first SSH workspace: terminal, SFTP, port forwarding, lightweight editing, cloud sync, portable exports, and BYOK AI around one remote node.</strong>
+  <em>If you want a local-first SSH workspace without Electron, WebView, telemetry, or subscriptions — star OxideTerm so more SSH users can find it.</em>
+</p>
+
+<p align="center">
+  <strong>Local-first SSH workspace: shell, SFTP, port forwarding, trzsz, remote editing, and BYOK AI around one remote node.</strong>
   <br>
-  <strong>Rust-native desktop app. GPUI shell. Pure Rust SSH. No Webview. No telemetry. BYOK-first.</strong>
+  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust — all the way down.</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License">
-  <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024">
+  <img src="https://img.shields.io/badge/rust-2024%20edition-orange" alt="Rust 2024">
   <img src="https://img.shields.io/badge/ui-GPUI-green" alt="GPUI">
 </p>
 
-OxideTerm Native is the Rust/GPUI desktop implementation of OxideTerm. It is
-built for users who want SSH, local shells, remote files, tunnels, diagnostics,
-portable configuration, and AI assistance in one local-first workspace instead
-of a collection of unrelated terminal tabs and helper tools.
+<p align="center">
+  <sub>Native Rust rewrite of <a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> — GPU-rendered, zero-WebView, using <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a> (Zed's rendering framework)</sub>
+</p>
 
-The native app keeps OxideTerm's core product model: a remote host is treated as
-a workspace node. Terminals, SFTP, forwards, reconnect state, quick commands,
-settings, sync state, and AI context attach to that node rather than drifting
-across separate tools.
+<p align="center">
+  <a href="README.md">English</a> | <a href="docs/readme/README.zh-Hans.md">简体中文</a> | <a href="docs/readme/README.zh-Hant.md">繁體中文</a> | <a href="docs/readme/README.ja.md">日本語</a> | <a href="docs/readme/README.ko.md">한국어</a> | <a href="docs/readme/README.fr.md">Français</a> | <a href="docs/readme/README.de.md">Deutsch</a> | <a href="docs/readme/README.es.md">Español</a> | <a href="docs/readme/README.it.md">Italiano</a> | <a href="docs/readme/README.pt-BR.md">Português</a> | <a href="docs/readme/README.vi.md">Tiếng Việt</a>
+</p>
 
-## Why OxideTerm?
+---
+
+## Why OxideTerm Native?
 
 | If you care about... | OxideTerm Native gives you... |
 |---|---|
-| SSH as a workspace | One node can own terminal panes, SFTP browsing, forwards, reconnect state, previews, diagnostics, and AI context. |
-| Local and remote together | Local PTY sessions and SSH sessions live in the same workspace model. |
-| BYOK AI | Configure OpenAI-compatible providers, local Ollama-style endpoints, reasoning settings, MCP, and knowledge context without an OxideTerm account. |
-| Remote file work | Browse, preview, transfer, and edit remote files over the same SSH connection model. |
-| Port forwarding | Manage local, remote, and dynamic forwards with persisted rules and reconnect-aware restore behavior. |
-| Portable state | Export encrypted `.oxide` bundles with connections, forwards, settings, plugin settings, quick commands, and selected portable secrets. |
-| Scriptable administration | Use the standalone `oxideterm` CLI for settings, connections, backups, cloud sync, reports, secrets, and imports. |
-| Local-first security | Store secrets in the OS keychain or encrypted portable payloads; diagnostics and AI context must redact secret values. |
+| SSH workspace, not just a shell | **Remote-node workspace**: one node with terminal, SFTP, port forwarding, trzsz, mini IDE, monitoring, and AI context around it |
+| Local shells in the same workflow | **Hybrid engine**: local PTY (zsh/bash/fish/pwsh/WSL2) and remote SSH live side by side |
+| No cloud account for SSH workflows | **Local-first core**: SSH, SFTP, forwarding, local shell, and config work without signup |
+| BYOK AI instead of platform credits | **OxideSens**: bring your own OpenAI/Anthropic/Gemini/Ollama endpoint with MCP and RAG support |
+| No WebView at all | **Pure GPUI**: GPU-backed immediate-mode rendering in Rust — not a WebView wrapper |
+| No JSON serialization on the hot path | **In-process data plane**: terminal bytes flow as Rust struct mutations, zero serialization, zero WebSocket overhead |
+| No OpenSSL baggage | **russh (ring)**: pure Rust SSH compiled against `ring` — zero OpenSSL/libssh2 dependency |
+| Reconnect stability | **Grace Period reconnect**: probes old connection 30 s before killing it — TUI apps survive network hiccups |
+| Remote file work | **Built-in SFTP + native IDE**: browse, preview, transfer, and edit remote files in the same workspace |
+| Credential safety | **Encrypted at rest**: passwords and API keys in OS keychain; `.oxide` bundles use ChaCha20-Poly1305 + Argon2id |
 
 ## What It Is / Is Not
 
-OxideTerm Native is a desktop SSH workspace and management surface. It is meant
-to keep terminal work, remote files, forwarding, configuration, and support
-diagnostics close to the machine where you work.
+OxideTerm Native is a **pure-Rust native desktop SSH workspace**. The full feature set of the Tauri version — terminal, SFTP, forwarding, editing, AI, cloud sync, plugins, and CLI — is reimplemented in Rust with a GPUI UI layer and zero browser runtime.
 
-It is not a hosted terminal service, a cloud AI platform, a browser extension, or
-a subscription workflow. Cloud sync is opt-in and controlled by your own backend
-configuration.
+It is not an Electron app, a Tauri app, a web-based terminal, or a hosted service. There is no Chromium, no WebView, no JavaScript, no CSS. Every UI surface is drawn by GPUI directly onto a GPU surface.
+
+---
+
+## What's Different
+
+Most SSH workspace tools in this space ship a browser runtime inside a desktop wrapper. Terminal bytes flow through JavaScript, reconnect logic lives in the frontend, and the "native" Rust backend spends most of its time serializing events for the WebView. The result is 150–200 MB installs, 300+ MB idle RAM, and a WebView2 dependency on Windows just to open a terminal tab.
+
+OxideTerm started there too (the Tauri version). The native branch removes the browser entirely:
+
+| Aspect | WebView-based (incl. Tauri) | Native (this branch) |
+|---|---|---|
+| **Rendering** | Chromium/Safari/WebKit2GTK + CSS layout | GPUI — GPU surface, immediate mode, pure Rust |
+| **Terminal data flow** | WebSocket → JS event loop → xterm.js | Rust input → `TerminalState` mutation → GPUI render |
+| **IPC overhead** | JSON-RPC serialization on every command | In-process function calls |
+| **SSH keepalive** | JavaScript timer, throttled by browser | Rust async task |
+| **Reconnect** | Orchestrated across the WS bridge | Single in-process pipeline |
+| **AI context** | Serialized through IPC into a handler | Built directly from in-process workspace state |
+| **Plugin runtime** | ESM in browser sandbox | WASM in wasmtime with typed Rust host API |
+| **CLI** | Requires the desktop app running | Standalone binary, direct crate linkage |
+| **Binary size** | ~150 MB (WebView runtime included) | ~50–80 MB |
+
+---
 
 ## Feature Overview
 
-| Area | Current native scope |
+| Category | Features |
 |---|---|
-| Terminal | Local shell sessions, SSH sessions, tabs, split-oriented workspace state, terminal search, rendering policy, recording support, graphics, and command helpers. |
-| SSH lifecycle | Saved connections, host-key decisions, jump-host/topology work, reconnect state, connection monitoring, and shared node ownership. |
-| SFTP and files | Remote browsing, transfer state, previews, local-file surfaces, remote editing, and optional Linux node-agent flows. |
-| Port forwarding | Saved forwards, active forwarding runtime, validation, export/import, CLI CRUD, and reconnect-aware operation state. |
-| AI workspace | Provider settings, provider keys, reasoning and context controls, MCP, knowledge/RAG, tool policy, chat state, and redacted support paths. |
-| Settings | Native settings pages, persisted settings model, import/export, validation, profile/config-dir isolation, and settings view-model crates. |
-| Cloud sync | State, preview, history, backups, backend configuration, push/pull/apply/resolve commands, secret hints, and redacted diagnostics. |
-| Portable `.oxide` | Validate, preview, import, export, conflict strategies, app settings, connection data, forwards, quick commands, plugin settings, and portable secrets. |
-| Plugins | Manifest, protocol, registry, host API boundary, settings management, enable/disable state, and native plugin host work. |
-| CLI | Headless management for settings, connections, forwards, quick commands, plugins, secrets, cloud sync, backups, reports, errors, and shell completions. |
-| i18n | Native i18n loader and translated UI surfaces, with source-product checks for labels and fallback text during UI work. |
+| **Terminal** | Local PTY (zsh/bash/fish/pwsh/WSL2), SSH remote, split panes, shell integration, command marks, recording/playback (asciicast v2), trzsz in-band file transfer, Sixel/Kitty graphics, rendering policy (Boost/Normal/Idle) |
+| **SSH & Auth** | Connection pool, multi-hop ProxyJump (unlimited hops), Grace Period reconnect, host-key TOFU, SSH Agent forwarding. Auth: password, public key (RSA/Ed25519/ECDSA), SSH Agent, certificate, keyboard-interactive 2FA |
+| **SFTP** | Dual-pane browser, transfer queue (concurrent, speed-limited), adaptive chunking, progress + ETA, text/binary/image/archive preview, bookmarks, atomic writes |
+| **IDE** | SFTP-backed remote file tree, multi-tab editor, dirty tracking, conflict resolution, snapshot/restore, local + remote filesystem abstraction |
+| **Port Forwarding** | Local (-L), Remote (-R), Dynamic SOCKS5 (-D), saved rules, reconnect-aware restore, death reporting, idle timeout, remote port detection |
+| **AI (OxideSens)** | OpenAI, Anthropic, Gemini, Ollama/OpenAI-compatible; MCP (stdio + SSE); RAG with BM25 + HNSW vector index, CJK bigram tokenizer; chat history, tool policy, command approval |
+| **Cloud Sync** | Push/pull/apply/resolve, S3/WebDAV/Git backends, structured manifest, conflict strategies, rollback backups, redacted diagnostics |
+| **Portable `.oxide`** | Encrypted export/import (ChaCha20-Poly1305 + Argon2id), connections, forwards, settings, quick commands, plugin settings, portable secrets |
+| **Plugins** | Manifest, protocol, registry, WASM sandbox (wasmtime), native host API, per-plugin settings, enable/disable, custom tab surfaces |
+| **CLI** | 17 top-level commands — settings, connections, forwards, quick-commands, plugins, portable, secrets, oxide, cloud-sync, paths, diagnose, doctor, backup, batch, report, completion, errors |
+| **i18n** | Native i18n loader with source-product parity checks |
+
+---
+
+## Under the Hood
+
+### Architecture — Single-Process, Zero-Bridge
+
+The Tauri version separates terminal data from control commands into two planes bridged by WebSocket and JSON-RPC. The native version collapses both planes into a single Rust process:
+
+```
+┌─────────────────────────────────────────────────┐
+│               GPUI Render Loop                  │
+│   WorkspaceApp  ·  Tab surfaces  ·  GPUI views  │
+└──────────────────────┬──────────────────────────┘
+                       │  in-process Arc<> / async
+┌──────────────────────▼──────────────────────────┐
+│             Domain Crates (Rust async)           │
+│  NodeRouter → SshConnectionRegistry             │
+│  TerminalState ← SSH PTY channel (russh)        │
+│  SftpSession · ForwardManager · IdeWorkspace    │
+│  AiProvider · CloudSyncService · PluginHost     │
+└─────────────────────────────────────────────────┘
+```
+
+There is no serialization boundary between the UI and the SSH/terminal backend. Terminal bytes mutate `TerminalState` directly — no JSON, no WebSocket, no Base64, no xterm.js parse pass. GPUI reads the state and emits GPU draw calls.
+
+### 🔩 Pure Rust SSH — russh (ring)
+
+Same russh stack as the Tauri version, now linked directly into the desktop app binary:
+
+- **Zero C/OpenSSL dependencies** — full crypto in Rust via `ring`
+- Full SSH2: key exchange, channels, SFTP subsystem, port forwarding
+- ChaCha20-Poly1305 and AES-GCM, Ed25519/RSA/ECDSA keys
+- SSH Agent: Unix (`SSH_AUTH_SOCK`) and Windows (`\\.\pipe\openssh-ssh-agent`)
+- Custom `AgentSigner` for russh `Signer` trait compatibility across `.await` bounds
+- Multi-hop proxy chains with per-hop independent auth
+
+### 🔄 Smart Reconnect with Grace Period
+
+Identical reconnect semantics to the Tauri version, reimplemented entirely in Rust without a JavaScript orchestrator:
+
+1. **Detect** SSH keepalive timeout (Rust async task, no JS timer throttling)
+2. **Snapshot** terminal panes, SFTP transfers, forwards, IDE files — all in-process
+3. **Grace Period** (30 s): probe old SSH connection via keepalive; TUI apps survive on network switch
+4. New SSH connection → restore forwards → resume transfers → reopen IDE files
+
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+
+### 🛡️ SSH Connection Pool
+
+`SshConnectionRegistry` backed by `DashMap` — same architecture as Tauri, without the WebSocket lifecycle bridge:
+
+- **One connection, many consumers**: terminal panes, SFTP, port forwards, and IDE share one physical SSH connection
+- **State machine per connection**: `connecting → active → idle → link_down → reconnecting`
+- **Node-first addressing**: everything is resolved by `nodeId` → `connectionId` by `NodeRouter`
+- **NodeRuntimeStore**: serializable snapshot of all nodes, persisted to `session_tree.json` on every topology change, restored on startup
+- **Cascade propagation**: jump host failure → downstream nodes automatically marked `link_down`
+
+### 🤖 OxideSens AI
+
+Same BYOK-first AI as Tauri, with all context building done in-process:
+
+- **Providers**: OpenAI, Anthropic (Claude), Google Gemini, Ollama/any OpenAI-compatible endpoint
+- **MCP**: stdio + SSE transports, full tool discovery and invocation
+- **RAG**: BM25 full-text + HNSW vector index, Reciprocal Rank Fusion, CJK bigram tokenizer
+- **Context boundary**: AI context is built from in-process workspace state; credentials are redacted before any provider call
+- **API keys**: stored in OS keychain; never logged or serialized into IPC frames (there are no IPC frames)
+
+### 🎨 GPUI Desktop Shell
+
+The entire UI is written in Rust using GPUI (Zed's GPU-backed UI framework):
+
+- **No CSS, no DOM, no JavaScript** in the rendering pipeline
+- **17 workspace tab types**: `LocalTerminal`, `SshTerminal`, `Sftp`, `Ide`, `Forwards`, `SessionManager`, `CloudSync`, `Settings`, `PluginManager`, `Topology`, `ConnectionPool`, `ConnectionMonitor`, `NotificationCenter`, `FileManager`, `Launcher`, `Graphics`, custom `Plugin` tabs
+- **Split pane system**: binary pane tree, draggable dividers, up to 4 panes per terminal tab
+- **Command palette**, global key bindings, sidebar panels — all GPUI primitives
+- **Immediate-mode rendering**: UI reflects Rust state changes without a serialization round-trip
+
+### 🔀 Port Forwarding — Lock-Free I/O
+
+Identical semantics to Tauri, implemented as standalone Rust crate:
+
+- Local (-L), Remote (-R), Dynamic SOCKS5 (-D)
+- Message-passing architecture: SSH Channel owned by single `ssh_io` task — no `Arc<Mutex<Channel>>`
+- Auto-restore on reconnect, death reporting, idle timeout
+
+### 📦 trzsz — In-Band File Transfer
+
+Same in-band protocol as Tauri, integrated directly with native file dialogs:
+
+- Upload/download through the existing terminal stream — no extra ports or agents
+- Works through ProxyJump chains
+- Native file pickers (no browser memory constraints)
+- Bidirectional, directory support, configurable limits
+
+### 🔐 .oxide Encrypted Export
+
+Same cryptography as Tauri:
+
+- **ChaCha20-Poly1305 AEAD** authenticated encryption
+- **Argon2id KDF**: 256 MB memory cost, 4 iterations — GPU brute-force resistant
+- Covers: connections, forwards, settings, quick commands, plugin settings, portable secrets
+
+---
 
 ## Quick Start
 
-### Requirements
-
-- Rust toolchain with Edition 2024 support.
-- macOS, Windows, or Linux desktop environment capable of running GPUI.
-- Platform build tools:
-  - macOS: Xcode Command Line Tools.
-  - Windows: Visual Studio C++ Build Tools.
-  - Linux: standard build toolchain plus desktop/media libraries required by the
-    GPUI and preview stack.
-
-### Run the App
-
-The workspace default member is the GPUI app:
+**Requirements:** Rust toolchain (Edition 2024), desktop environment capable of running GPUI.
 
 ```sh
+# Run the app
 cargo run
+
+# If the renderer fails on your machine, try the compatibility profile
+OXIDETERM_RENDER_PROFILE=compatibility cargo run
 ```
 
-You can also call the app binary explicitly:
-
 ```sh
-cargo run -p oxideterm-gpui-app --bin oxideterm-native
-```
-
-If the renderer cannot open a window on a specific machine, retry with the
-compatibility render profile:
-
-```sh
-OXIDETERM_RENDER_PROFILE=compatibility cargo run -p oxideterm-gpui-app --bin oxideterm-native
-```
-
-### Build the CLI Companion
-
-The CLI is packaged as a separate binary. Normal app development should not
-compile the CLI on every `cargo run`.
-
-```sh
+# Build the headless CLI companion
 ./scripts/build-cli.sh
-./scripts/build-cli.sh aarch64-apple-darwin
-```
 
-Packaged CLI artifacts are staged under:
-
-```text
-crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/oxideterm
-```
-
-The native settings UI can inspect, install, uninstall, and refresh that bundled
-CLI. Unix installs use a symlink in `~/.local/bin`; Windows installs copy the
-binary into the user-local OxideTerm bin directory.
-
-### Build the Remote Agent
-
-The optional Linux node-agent is built separately from the desktop app:
-
-```sh
+# Build the optional Linux remote agent
 ./scripts/build-agent.sh
 ```
 
-The script stages artifacts under `crates/oxideterm-gpui-app/resources/agents`
-for bundling with the native app.
+CLI artifacts land in `crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/oxideterm`.
 
-## Headless CLI
+---
 
-Use `oxideterm-cli` when you need automation, CI checks, support diagnostics, or
-configuration changes without launching the GPUI app.
+## CLI
+
+The headless `oxideterm` CLI works without launching the app — useful for automation, CI, and diagnostics.
 
 ```sh
 cargo run -p oxideterm-cli -- doctor --strict
 cargo run -p oxideterm-cli -- settings validate --strict --json
 cargo run -p oxideterm-cli -- connections search prod
 cargo run -p oxideterm-cli -- forwards list --format json
-cargo run -p oxideterm-cli -- quick-commands list --format table
 cargo run -p oxideterm-cli -- cloud-sync push --dry-run --json
-cargo run -p oxideterm-cli -- backup restore ./backup.json --section settings --dry-run --json
 cargo run -p oxideterm-cli -- oxide export ./profile.oxide --connection prod --password-stdin
+cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 cargo run -p oxideterm-cli -- completion install zsh --force
+
+# Path/profile isolation for CI or fixture testing
+cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 ```
 
-Global path controls are available for automation:
+---
 
-```sh
-cargo run -p oxideterm-cli -- --config-dir ./fixture-config --profile ci doctor --strict
-OXIDETERM_CONFIG_DIR=./fixture-config cargo run -p oxideterm-cli -- report --format json
-```
+## Tech Stack
 
-Write commands default toward dry-run or explicit confirmation where state could
-be changed. Machine-readable errors are available through:
+| Layer | Technology | Notes |
+|---|---|---|
+| **UI framework** | GPUI (Zed) | GPU-backed immediate mode, pure Rust |
+| **Runtime** | Tokio + DashMap | Full async, lock-free concurrent maps |
+| **SSH** | russh (`ring`) | Pure Rust, zero C deps, SSH Agent |
+| **Local PTY** | portable-pty | Feature-gated, ConPTY on Windows |
+| **Terminal emulation** | alacritty_terminal | VT100–VT500, Sixel, Kitty graphics |
+| **Editor** | tree-sitter (syntax), custom buffer | Multi-language, SFTP-backed |
+| **Encryption** | ChaCha20-Poly1305 + Argon2id | AEAD + memory-hard KDF (256 MB) |
+| **Plugin sandbox** | wasmtime | WASM isolation with native host API |
+| **AI streaming** | SSE (OpenAI/Anthropic/Gemini) | In-process, no IPC boundary |
+| **RAG** | BM25 + HNSW vector index | CJK bigram tokenizer, RRF fusion |
+| **i18n** | oxideterm-i18n (custom) | Native loader, parity checks |
 
-```sh
-cargo run -p oxideterm-cli -- errors --json
-```
-
-## Under the Hood
-
-### Node-First Workspace Model
-
-The native app models a remote target as a node. Terminal panes, SFTP surfaces,
-forwards, IDE state, transfer state, reconnect snapshots, and diagnostics should
-resolve through node ownership instead of assuming that a terminal tab is the
-owner of workspace state.
-
-### Pure Rust SSH
-
-OxideTerm uses the workspace `russh` stack for SSH behavior. The native codebase
-keeps SSH transport, SFTP, forwarding, reconnect, known-host decisions, and
-connection monitoring in dedicated crates rather than burying that logic inside
-the GPUI app shell.
-
-### GPUI Desktop Shell
-
-The native shell is written in Rust with GPUI. Shared controls, typography,
-overlays, text inputs, buttons, settings presentation helpers, cloud-sync view
-models, markdown rendering, terminal UI, editor UI, and IDE surfaces are split
-into focused crates so product features are not trapped inside one app file.
-
-### Portable Configuration
-
-Portable `.oxide` bundles are encrypted, authenticated exports for moving
-workspace state between machines. Native import/export paths cover saved
-connections, forwards, quick commands, selected app settings, plugin settings,
-and portable secrets where supported.
-
-### Cloud Sync
-
-Cloud sync is implemented as reusable sync state and operation crates plus GPUI
-presentation adapters. The CLI can preview, configure, push, pull, apply,
-resolve, inspect history, manage secret hints, and produce redacted support
-reports without duplicating the sync engine inside command handlers.
-
-### AI and Knowledge
-
-OxideSens-style AI features are local configuration surfaces around your chosen
-providers. Provider keys and tool context must be treated as sensitive data:
-secrets are stored through keychain-backed flows, and content sent to providers
-must be redacted before crossing the AI boundary.
-
-## Architecture
-
-The workspace is split by responsibility:
-
-| Crate or path | Responsibility |
-|---|---|
-| `crates/oxideterm-gpui-app` | App entry point, GPUI workspace shell, dialogs, window actions, and UI event bridges. |
-| `crates/oxideterm-gpui-ui` | Shared native UI primitives, tokens, controls, overlays, and typography. |
-| `crates/oxideterm-gpui-terminal` / `crates/oxideterm-terminal*` | Terminal UI, parser/encoding/unicode/graphics support, recording, and terminal data flow. |
-| `crates/oxideterm-ssh` | SSH transport, node IDs, connection ownership, reconnect data, and host lifecycle primitives. |
-| `crates/oxideterm-sftp` | SFTP models, transfer state, preview integration, and remote file operations. |
-| `crates/oxideterm-forwarding` | Saved forwards, runtime forwarding operations, validation, and persisted forward records. |
-| `crates/oxideterm-connections` | Saved connections, groups, SSH config import, `.oxide` connection payloads, and connection validation. |
-| `crates/oxideterm-quick-commands` | Quick command persistence, import/export, and CLI-facing snapshots. |
-| `crates/oxideterm-settings*` | Persisted settings, settings model, validation, settings snapshots, and view-model ownership. |
-| `crates/oxideterm-cloud-sync*` | Cloud-sync state, operation service, preview models, selection, and GPUI presentation adapters. |
-| `crates/oxideterm-ai` | AI providers, key storage, MCP, RAG/Knowledge, tool policy, chat state, and context handling. |
-| `crates/oxideterm-plugin-*` | Plugin manifest, protocol, registry, host API types, settings, and runtime boundary work. |
-| `crates/oxideterm-cli` | Headless management CLI with path/profile isolation, write guards, reports, backups, and shell completion. |
-| `agent/` | Optional Linux node-agent source used by remote-resource and IDE flows. |
+---
 
 ## Development
 
-Run focused checks while iterating, then broaden when the change crosses crate
-boundaries.
-
 ```sh
-cargo fmt --all --check
-cargo check -p oxideterm-gpui-app --tests
-cargo check -p oxideterm-cli --tests
+cargo check --workspace
+cargo check -p oxideterm-gpui-app
+cargo test --workspace
 cargo test -p oxideterm-cli -- --test-threads=1
+cargo fmt --all --check
 ```
 
-Useful crate-level checks:
+Prefer scoped crate checks while iterating. Broaden to `--workspace` when a change crosses crate boundaries.
 
-```sh
-cargo test -p oxideterm-settings
-cargo test -p oxideterm-connections
-cargo check -p oxideterm-forwarding --no-default-features
-cargo check -p oxideterm-forwarding --features runtime
-```
-
-Avoid running `cargo fmt` alone as a foreground verification step. Prefer
-`cargo fmt --all --check`, or run formatting together with the next check when
-you intentionally apply formatting changes.
-
-## Repository Layout
-
-```text
-.
-├── agent/                 # Optional remote Linux node-agent source
-├── crates/                # Rust workspace crates
-├── docs/                  # Native plans, invariants, product notes, and references
-├── scripts/               # Build and verification helpers
-├── tasks/                 # Local task notes and lessons
-├── Cargo.toml             # Workspace definition
-└── README.md
-```
+---
 
 ## Security
 
-| Concern | Native rule |
+| Concern | Implementation |
 |---|---|
-| Passwords and keys | Store through OS keychain or encrypted portable payloads where applicable. |
-| Secret memory | Use `zeroize` / `Zeroizing` for owned sensitive Rust values. |
-| Diagnostics | Print paths, counts, flags, hashes, and hints; never print secret values. |
-| AI context | Redact sensitive content before sending context to any provider. |
-| `.oxide` exports | Use authenticated encryption and explicit password handling. |
-| CLI writes | Use dry-run plans, `--yes`, rollback backups, or write guards for state-changing commands. |
+| **Passwords & keys** | OS keychain (macOS Keychain / Windows Credential Manager / libsecret) |
+| **Secret memory** | `zeroize` / `Zeroizing` on all owned sensitive Rust values |
+| **Diagnostics** | Paths, counts, flags, hints only — never raw secret values |
+| **AI context** | Credentials, keys, and terminal buffers redacted before any provider call |
+| **`.oxide` export** | ChaCha20-Poly1305 + Argon2id (256 MB memory, 4 iterations) |
+| **CLI writes** | Dry-run plans, `--yes` guards, rollback backups for state-changing commands |
+| **Host keys** | TOFU with `~/.ssh/known_hosts`, rejects unexpected changes |
+| **Plugin sandbox** | WASM isolation via wasmtime, capability-based host API |
 
-## Contributor Notes
+---
 
-When a feature already exists in the older OxideTerm app, keep the native
-behavior, labels, interaction states, and user-visible workflow aligned with that
-product unless a deliberate native replacement is documented. Detailed source
-maps and porting notes belong in `docs/`; this README should stay focused on the
-product, setup, architecture, and contribution entry points.
+## Roadmap
 
-## Build Philosophy
+- [x] SSH Agent forwarding
+- [x] Grace Period reconnect
+- [x] GPUI desktop shell
+- [x] In-process terminal data flow (no WebSocket)
+- [x] SFTP, port forwarding, IDE, AI, cloud sync, plugins, CLI
+- [ ] Full ProxyCommand support
+- [ ] Audit logging
+- [ ] Packaged release builds
 
-New crates must own real responsibilities. Do not create a crate that only holds
-a large `lib.rs`, re-exports moved modules, or serves as a line-count hiding
-place. Split by domain capability: protocol DTOs, validation, persistence,
-settings view models, cloud-sync operations, host API dispatch, registry parsing,
-and presentational builders belong in the crate that owns that job.
+---
 
-The GPUI app crate should stay focused on context sampling, dialogs, window
-behavior, GPUI actions, and UI event bridges.
+## Provider Neutrality
 
-## Support and Maintenance
+OxideTerm is BYOK-first and provider-neutral.
 
-OxideTerm is maintained on a best-effort basis. Reproducible bug reports,
-security-sensitive issues, UI or behavior gaps, translation fixes, and focused
-pull requests are the most useful contributions.
+Provider integrations exist to help users connect the tools they already trust. They are not a leaderboard, a billboard, or a reward system for whoever asks most warmly.
 
-When reporting issues, prefer a redacted CLI report:
+Compatibility, maintainability, security, and real user value decide what gets documented. Visibility follows usefulness, not enthusiasm.
+
+---
+
+## Contributing
+
+When a feature already exists in the Tauri version, keep native behavior, labels, interaction states, and workflows aligned with that product unless a deliberate replacement is documented. Parity notes live in `docs/`.
+
+New crates must own a real domain responsibility — not just re-export modules. Split by capability: DTOs, validation, persistence, view models, protocol adapters, and presentational builders belong in the crate that owns that job.
+
+Bug reports are most useful with a redacted CLI bundle:
 
 ```sh
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 ```
 
+---
+
 ## License
 
-OxideTerm is licensed under `GPL-3.0-only`. Third-party notices and dependency
-attribution are recorded in `NOTICE`.
+**GPL-3.0-only**. Third-party notices and dependency attribution are recorded in `NOTICE`.
+
+---
+
+## Acknowledgments
+
+[russh](https://github.com/warp-tech/russh) · [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) · [alacritty_terminal](https://github.com/alacritty/alacritty) · [portable-pty](https://github.com/wez/wezterm/tree/main/pty) · [wasmtime](https://wasmtime.dev/) · [tree-sitter](https://tree-sitter.github.io/)
