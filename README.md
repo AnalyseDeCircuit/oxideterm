@@ -1,181 +1,307 @@
-# OxideTerm
+# OxideTerm Native
 
-OxideTerm is a modern SSH terminal client and remote workspace application for
-people who live between local shells, remote servers, files, tunnels, and AI
-assistance.
+<p align="center">
+  <strong>Local-first SSH workspace: terminal, SFTP, port forwarding, lightweight editing, cloud sync, portable exports, and BYOK AI around one remote node.</strong>
+  <br>
+  <strong>Rust-native desktop app. GPUI shell. Pure Rust SSH. No Webview. No telemetry. BYOK-first.</strong>
+</p>
 
-It combines a fast terminal workspace with saved SSH targets, session topology,
-SFTP file operations, port forwarding, remote editing, Knowledge/RAG search, MCP
-servers, and an AI assistant that can understand terminal and workspace context.
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
+  <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License">
+  <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024">
+  <img src="https://img.shields.io/badge/ui-GPUI-green" alt="GPUI">
+</p>
 
-## What It Does
+OxideTerm Native is the Rust/GPUI desktop implementation of OxideTerm. It is
+built for users who want SSH, local shells, remote files, tunnels, diagnostics,
+portable configuration, and AI assistance in one local-first workspace instead
+of a collection of unrelated terminal tabs and helper tools.
 
-- Work in local and SSH terminal sessions with tabs, split panes, search,
-  shell-aware actions, recording playback, and terminal graphics support.
-- Manage SSH targets, jump-host topology, reconnect state, host-key decisions,
-  and long-lived remote sessions without tying connection lifetime to a single
-  terminal pane.
-- Browse and transfer remote files through SFTP, including resumable transfers,
-  directory transfers, conflict handling, and background transfer state.
-- Create local, remote, and dynamic port forwards, keep saved forwarding rules,
-  and restore forwarding state across reconnect flows.
-- Open remote workspaces with editor and IDE surfaces that can use SFTP/exec
-  fallback paths or a lightweight remote agent when available.
-- Use OxideSens, the built-in AI assistant, with provider configuration,
-  context-window handling, memory, reasoning-effort controls, tool approvals,
-  MCP servers, and Knowledge/RAG retrieval.
-- Configure the app through native settings surfaces covering terminal,
-  appearance, connections, SSH, reconnect, SFTP, IDE, AI, Knowledge, MCP,
-  keybindings, portable mode, and help/about sections.
+The native app keeps OxideTerm's core product model: a remote host is treated as
+a workspace node. Terminals, SFTP, forwards, reconnect state, quick commands,
+settings, sync state, and AI context attach to that node rather than drifting
+across separate tools.
 
-## Native Status
+## Why OxideTerm?
 
-This repository is the Rust/GPUI native implementation of OxideTerm. The checked
-in Tauri application under `tauri版本代码/` remains the source of truth for product
-behavior and visual structure while native parity is migrated feature by
-feature.
+| If you care about... | OxideTerm Native gives you... |
+|---|---|
+| SSH as a workspace | One node can own terminal panes, SFTP browsing, forwards, reconnect state, previews, diagnostics, and AI context. |
+| Local and remote together | Local PTY sessions and SSH sessions live in the same workspace model. |
+| BYOK AI | Configure OpenAI-compatible providers, local Ollama-style endpoints, reasoning settings, MCP, and knowledge context without an OxideTerm account. |
+| Remote file work | Browse, preview, transfer, and edit remote files over the same SSH connection model. |
+| Port forwarding | Manage local, remote, and dynamic forwards with persisted rules and reconnect-aware restore behavior. |
+| Portable state | Export encrypted `.oxide` bundles with connections, forwards, settings, plugin settings, quick commands, and selected portable secrets. |
+| Scriptable administration | Use the standalone `oxideterm` CLI for settings, connections, backups, cloud sync, reports, secrets, and imports. |
+| Local-first security | Store secrets in the OS keychain or encrypted portable payloads; diagnostics and AI context must redact secret values. |
 
-The native app currently includes the major workspace foundations:
+## What It Is / Is Not
 
-- GPUI product shell and terminal surface.
-- Local terminal, SSH, SFTP, forwarding, reconnect, topology, settings, AI,
-  MCP, Knowledge/RAG, editor, IDE, preview, launcher, local file, notification,
-  and workspace crates.
-- Shared Rust settings schema, migrations, i18n catalogs, provider key storage,
-  remote node-agent plumbing, and parity documentation.
+OxideTerm Native is a desktop SSH workspace and management surface. It is meant
+to keep terminal work, remote files, forwarding, configuration, and support
+diagnostics close to the machine where you work.
 
-Some areas are still being verified against the Tauri implementation. Use the
-parity maps in `docs/` for exact status rather than assuming every listed
-surface is complete product parity.
+It is not a hosted terminal service, a cloud AI platform, a browser extension, or
+a subscription workflow. Cloud sync is opt-in and controlled by your own backend
+configuration.
 
-## Run Native
+## Feature Overview
 
-Use a Rust toolchain with Edition 2024 support.
+| Area | Current native scope |
+|---|---|
+| Terminal | Local shell sessions, SSH sessions, tabs, split-oriented workspace state, terminal search, rendering policy, recording support, graphics, and command helpers. |
+| SSH lifecycle | Saved connections, host-key decisions, jump-host/topology work, reconnect state, connection monitoring, and shared node ownership. |
+| SFTP and files | Remote browsing, transfer state, previews, local-file surfaces, remote editing, and optional Linux node-agent flows. |
+| Port forwarding | Saved forwards, active forwarding runtime, validation, export/import, CLI CRUD, and reconnect-aware operation state. |
+| AI workspace | Provider settings, provider keys, reasoning and context controls, MCP, knowledge/RAG, tool policy, chat state, and redacted support paths. |
+| Settings | Native settings pages, persisted settings model, import/export, validation, profile/config-dir isolation, and settings view-model crates. |
+| Cloud sync | State, preview, history, backups, backend configuration, push/pull/apply/resolve commands, secret hints, and redacted diagnostics. |
+| Portable `.oxide` | Validate, preview, import, export, conflict strategies, app settings, connection data, forwards, quick commands, plugin settings, and portable secrets. |
+| Plugins | Manifest, protocol, registry, host API boundary, settings management, enable/disable state, and native plugin host work. |
+| CLI | Headless management for settings, connections, forwards, quick commands, plugins, secrets, cloud sync, backups, reports, errors, and shell completions. |
+| i18n | Native i18n loader and translated UI surfaces, with source-product checks for labels and fallback text during UI work. |
+
+## Quick Start
+
+### Requirements
+
+- Rust toolchain with Edition 2024 support.
+- macOS, Windows, or Linux desktop environment capable of running GPUI.
+- Platform build tools:
+  - macOS: Xcode Command Line Tools.
+  - Windows: Visual Studio C++ Build Tools.
+  - Linux: standard build toolchain plus desktop/media libraries required by the
+    GPUI and preview stack.
+
+### Run the App
+
+The workspace default member is the GPUI app:
+
+```sh
+cargo run
+```
+
+You can also call the app binary explicitly:
 
 ```sh
 cargo run -p oxideterm-gpui-app --bin oxideterm-native
 ```
 
-If the GPU-backed GPUI renderer cannot open a window on a machine, retry with
-the compatibility render profile:
+If the renderer cannot open a window on a specific machine, retry with the
+compatibility render profile:
 
 ```sh
 OXIDETERM_RENDER_PROFILE=compatibility cargo run -p oxideterm-gpui-app --bin oxideterm-native
 ```
 
-Remote node-agent artifacts can be built with:
+### Build the CLI Companion
 
-```sh
-./scripts/build-agent.sh
-```
-
-That script expects the Linux musl targets used by the agent release artifacts to
-be installed in the active Rust toolchain.
-
-The headless CLI is intentionally built outside the native app run path and then
-staged as a bundle resource:
+The CLI is packaged as a separate binary. Normal app development should not
+compile the CLI on every `cargo run`.
 
 ```sh
 ./scripts/build-cli.sh
 ./scripts/build-cli.sh aarch64-apple-darwin
 ```
 
-The script writes release artifacts under
-`crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/`. This mirrors the
-Tauri resource model: `cargo run -p oxideterm-gpui-app --bin oxideterm-native`
-runs the app, while CLI packaging is an explicit release step.
+Packaged CLI artifacts are staged under:
+
+```text
+crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/oxideterm
+```
+
+The native settings UI can inspect, install, uninstall, and refresh that bundled
+CLI. Unix installs use a symlink in `~/.local/bin`; Windows installs copy the
+binary into the user-local OxideTerm bin directory.
+
+### Build the Remote Agent
+
+The optional Linux node-agent is built separately from the desktop app:
+
+```sh
+./scripts/build-agent.sh
+```
+
+The script stages artifacts under `crates/oxideterm-gpui-app/resources/agents`
+for bundling with the native app.
+
+## Headless CLI
+
+Use `oxideterm-cli` when you need automation, CI checks, support diagnostics, or
+configuration changes without launching the GPUI app.
+
+```sh
+cargo run -p oxideterm-cli -- doctor --strict
+cargo run -p oxideterm-cli -- settings validate --strict --json
+cargo run -p oxideterm-cli -- connections search prod
+cargo run -p oxideterm-cli -- forwards list --format json
+cargo run -p oxideterm-cli -- quick-commands list --format table
+cargo run -p oxideterm-cli -- cloud-sync push --dry-run --json
+cargo run -p oxideterm-cli -- backup restore ./backup.json --section settings --dry-run --json
+cargo run -p oxideterm-cli -- oxide export ./profile.oxide --connection prod --password-stdin
+cargo run -p oxideterm-cli -- completion install zsh --force
+```
+
+Global path controls are available for automation:
+
+```sh
+cargo run -p oxideterm-cli -- --config-dir ./fixture-config --profile ci doctor --strict
+OXIDETERM_CONFIG_DIR=./fixture-config cargo run -p oxideterm-cli -- report --format json
+```
+
+Write commands default toward dry-run or explicit confirmation where state could
+be changed. Machine-readable errors are available through:
+
+```sh
+cargo run -p oxideterm-cli -- errors --json
+```
+
+## Under the Hood
+
+### Node-First Workspace Model
+
+The native app models a remote target as a node. Terminal panes, SFTP surfaces,
+forwards, IDE state, transfer state, reconnect snapshots, and diagnostics should
+resolve through node ownership instead of assuming that a terminal tab is the
+owner of workspace state.
+
+### Pure Rust SSH
+
+OxideTerm uses the workspace `russh` stack for SSH behavior. The native codebase
+keeps SSH transport, SFTP, forwarding, reconnect, known-host decisions, and
+connection monitoring in dedicated crates rather than burying that logic inside
+the GPUI app shell.
+
+### GPUI Desktop Shell
+
+The native shell is written in Rust with GPUI. Shared controls, typography,
+overlays, text inputs, buttons, settings presentation helpers, cloud-sync view
+models, markdown rendering, terminal UI, editor UI, and IDE surfaces are split
+into focused crates so product features are not trapped inside one app file.
+
+### Portable Configuration
+
+Portable `.oxide` bundles are encrypted, authenticated exports for moving
+workspace state between machines. Native import/export paths cover saved
+connections, forwards, quick commands, selected app settings, plugin settings,
+and portable secrets where supported.
+
+### Cloud Sync
+
+Cloud sync is implemented as reusable sync state and operation crates plus GPUI
+presentation adapters. The CLI can preview, configure, push, pull, apply,
+resolve, inspect history, manage secret hints, and produce redacted support
+reports without duplicating the sync engine inside command handlers.
+
+### AI and Knowledge
+
+OxideSens-style AI features are local configuration surfaces around your chosen
+providers. Provider keys and tool context must be treated as sensitive data:
+secrets are stored through keychain-backed flows, and content sent to providers
+must be redacted before crossing the AI boundary.
+
+## Architecture
+
+The workspace is split by responsibility:
+
+| Crate or path | Responsibility |
+|---|---|
+| `crates/oxideterm-gpui-app` | App entry point, GPUI workspace shell, dialogs, window actions, and UI event bridges. |
+| `crates/oxideterm-gpui-ui` | Shared native UI primitives, tokens, controls, overlays, and typography. |
+| `crates/oxideterm-gpui-terminal` / `crates/oxideterm-terminal*` | Terminal UI, parser/encoding/unicode/graphics support, recording, and terminal data flow. |
+| `crates/oxideterm-ssh` | SSH transport, node IDs, connection ownership, reconnect data, and host lifecycle primitives. |
+| `crates/oxideterm-sftp` | SFTP models, transfer state, preview integration, and remote file operations. |
+| `crates/oxideterm-forwarding` | Saved forwards, runtime forwarding operations, validation, and persisted forward records. |
+| `crates/oxideterm-connections` | Saved connections, groups, SSH config import, `.oxide` connection payloads, and connection validation. |
+| `crates/oxideterm-quick-commands` | Quick command persistence, import/export, and CLI-facing snapshots. |
+| `crates/oxideterm-settings*` | Persisted settings, settings model, validation, settings snapshots, and view-model ownership. |
+| `crates/oxideterm-cloud-sync*` | Cloud-sync state, operation service, preview models, selection, and GPUI presentation adapters. |
+| `crates/oxideterm-ai` | AI providers, key storage, MCP, RAG/Knowledge, tool policy, chat state, and context handling. |
+| `crates/oxideterm-plugin-*` | Plugin manifest, protocol, registry, host API types, settings, and runtime boundary work. |
+| `crates/oxideterm-cli` | Headless management CLI with path/profile isolation, write guards, reports, backups, and shell completion. |
+| `agent/` | Optional Linux node-agent source used by remote-resource and IDE flows. |
+
+## Development
+
+Run focused checks while iterating, then broaden when the change crosses crate
+boundaries.
+
+```sh
+cargo fmt --all --check
+cargo check -p oxideterm-gpui-app --tests
+cargo check -p oxideterm-cli --tests
+cargo test -p oxideterm-cli -- --test-threads=1
+```
+
+Useful crate-level checks:
+
+```sh
+cargo test -p oxideterm-settings
+cargo test -p oxideterm-connections
+cargo check -p oxideterm-forwarding --no-default-features
+cargo check -p oxideterm-forwarding --features runtime
+```
+
+Avoid running `cargo fmt` alone as a foreground verification step. Prefer
+`cargo fmt --all --check`, or run formatting together with the next check when
+you intentionally apply formatting changes.
 
 ## Repository Layout
 
-- `crates/oxideterm-gpui-app` - native GPUI application entry point and workspace
-  shell. The app binary is `oxideterm-native`.
-- `crates/oxideterm-gpui-ui` - shared native UI primitives, tokens, overlays,
-  form controls, and reusable visual building blocks.
-- `crates/oxideterm-gpui-terminal` and `crates/oxideterm-terminal` - terminal UI,
-  PTY/session ownership, shell integration, search, graphics, and terminal data
-  flow.
-- `crates/oxideterm-ssh`, `crates/oxideterm-sftp`, and
-  `crates/oxideterm-forwarding` - remote connection, file transfer, reconnect,
-  and forwarding backends.
-- `crates/oxideterm-ai` - provider adapters, chat state, tool definitions and
-  policy, MCP runtime, Knowledge/RAG store, embeddings, memory, and context
-  handling.
-- `crates/oxideterm-settings` and `crates/oxideterm-i18n` - persisted settings
-  schema, migrations, sanitization, and locale catalogs.
-- `agent/` - remote node-agent source used by native remote-resource execution.
-- `docs/` - source maps, parity plans, and system invariants for native
-  migration work.
-- `tauri版本代码/` - reference Tauri implementation used for parity auditing and
-  source-driven native migration.
-
-## Development Checks
-
-Common checks for native app work:
-
-```sh
-cargo fmt --check
-cargo check -p oxideterm-gpui-app
-cargo test -p oxideterm-ai
-cargo test -p oxideterm-settings
+```text
+.
+├── agent/                 # Optional remote Linux node-agent source
+├── crates/                # Rust workspace crates
+├── docs/                  # Native plans, invariants, product notes, and references
+├── scripts/               # Build and verification helpers
+├── tasks/                 # Local task notes and lessons
+├── Cargo.toml             # Workspace definition
+└── README.md
 ```
 
-Backend changes should also run the relevant package tests. For example, SSH,
-SFTP, forwarding, terminal rendering, settings, AI, and i18n changes should be
-validated against their owning crates instead of relying only on the app check.
+## Security
 
-## Tauri Reference
+| Concern | Native rule |
+|---|---|
+| Passwords and keys | Store through OS keychain or encrypted portable payloads where applicable. |
+| Secret memory | Use `zeroize` / `Zeroizing` for owned sensitive Rust values. |
+| Diagnostics | Print paths, counts, flags, hashes, and hints; never print secret values. |
+| AI context | Redact sensitive content before sending context to any provider. |
+| `.oxide` exports | Use authenticated encryption and explicit password handling. |
+| CLI writes | Use dry-run plans, `--yes`, rollback backups, or write guards for state-changing commands. |
 
-The Tauri reference product metadata is:
+## Contributor Notes
 
-- Product name: `OxideTerm`
-- Tauri version: `1.4.0-beta.6`
-- Tauri identifier: `com.oxideterm.app`
-- Tauri description: `A modern SSH terminal client built with Rust and Tauri`
-- Tauri bundled resources: remote Linux agent artifacts and `cli-bin`
+When a feature already exists in the older OxideTerm app, keep the native
+behavior, labels, interaction states, and user-visible workflow aligned with that
+product unless a deliberate native replacement is documented. Detailed source
+maps and porting notes belong in `docs/`; this README should stay focused on the
+product, setup, architecture, and contribution entry points.
 
-When native behavior is unclear, start from these Tauri sources:
+## Build Philosophy
 
-- `tauri版本代码/src/App.tsx` - product-level providers, startup effects, modals,
-  event bridges, plugin initialization, update UI, command palette, shortcuts,
-  and global overlays.
-- `tauri版本代码/src/components/layout/AppLayout.tsx` and
-  `tauri版本代码/src/components/layout/Sidebar.tsx` - workspace shell, sidebar,
-  tab layout, activity panels, and responsive structure.
-- `tauri版本代码/src/store/*` - source stores for settings, tabs, session tree,
-  local terminal, AI chat, RAG, MCP, transfers, plugins, notifications,
-  reconnect, and command palette behavior.
-- `tauri版本代码/src/components/settings/*` - settings UI, MCP server management,
-  Knowledge document management, provider settings, embedding settings, and
-  shared form behavior.
-- `tauri版本代码/src/components/terminal/*` - terminal pane layout, command bar,
-  search, recording controls, paste confirmation, split panes, cast playback,
-  and AI inline panel.
-- `tauri版本代码/src/components/sftp/*`,
-  `tauri版本代码/src/components/forwards/*`,
-  `tauri版本代码/src/components/sessionManager/*`, and
-  `tauri版本代码/src/components/ide/*` - remote workspace feature surfaces.
-- `tauri版本代码/src-tauri/src/*` - backend command semantics, runtime ownership,
-  event payloads, persistence, node routing, transfer behavior, and security
-  boundaries.
+New crates must own real responsibilities. Do not create a crate that only holds
+a large `lib.rs`, re-exports moved modules, or serves as a line-count hiding
+place. Split by domain capability: protocol DTOs, validation, persistence,
+settings view models, cloud-sync operations, host API dispatch, registry parsing,
+and presentational builders belong in the crate that owns that job.
 
-## Migration Rules
+The GPUI app crate should stay focused on context sampling, dialogs, window
+behavior, GPUI actions, and UI event bridges.
 
-- Tauri remains the source of truth for behavior and visual structure until the
-  native implementation has an explicit documented replacement.
-- Translate UI from Tauri into GPUI through shared OxideTerm primitives. Do not
-  redraw forms, menus, settings pages, or overlays by taste.
-- Keep semantic tokens and named constants for colors, radii, spacing, sizes,
-  and reusable control metrics.
-- Keep feature behavior source-driven. If native must diverge from Tauri, record
-  the reason in the relevant parity document.
-- Keep user-facing strings in the i18n catalogs. Native currently maintains
-  `en`, `zh-CN`, `zh-TW`, `de`, `es-ES`, `fr-FR`, `it`, `ja`, `ko`, `pt-BR`,
-  and `vi`.
-- Preserve clean source ownership. New native implementation code should be
-  written for OxideTerm's architecture and documented dependency boundaries.
+## Support and Maintenance
 
-The most important project-wide guardrails live in
-`docs/SYSTEM_INVARIANTS.md`.
+OxideTerm is maintained on a best-effort basis. Reproducible bug reports,
+security-sensitive issues, UI or behavior gaps, translation fixes, and focused
+pull requests are the most useful contributions.
+
+When reporting issues, prefer a redacted CLI report:
+
+```sh
+cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
+```
 
 ## License
 

@@ -165,6 +165,8 @@ fn cli_companion_install() -> Result<(), String> {
         .map_err(|error| format!("failed to link {}: {error}", target.display()))?;
 
     #[cfg(windows)]
+    // Windows follows the Tauri implementation: install a real copied binary,
+    // because creating user-visible symlinks can require elevated privileges.
     std::fs::copy(&bundle_path, &target)
         .map(|_| ())
         .map_err(|error| format!("failed to copy {}: {error}", target.display()))?;
@@ -341,30 +343,58 @@ fn host_target_triple() -> &'static str {
 mod cli_companion_tests {
     use super::{cli_path_present, installed_cli_matches_bundle};
 
+    fn temp_test_dir(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-cli-companion-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
     #[test]
     fn identical_cli_files_match_bundled_copy() {
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let installed_path = temp_dir.path().join("installed-oxideterm");
-        let bundled_path = temp_dir.path().join("bundled-oxideterm");
+        let temp_dir = temp_test_dir("identical");
+        let installed_path = temp_dir.join("installed-oxideterm");
+        let bundled_path = temp_dir.join("bundled-oxideterm");
 
         std::fs::write(&installed_path, b"same-cli-binary").unwrap();
         std::fs::write(&bundled_path, b"same-cli-binary").unwrap();
 
         assert!(installed_cli_matches_bundle(&installed_path, &bundled_path).unwrap());
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn different_cli_files_require_reinstall() {
+        let temp_dir = temp_test_dir("different");
+        let installed_path = temp_dir.join("installed-oxideterm");
+        let bundled_path = temp_dir.join("bundled-oxideterm");
+
+        std::fs::write(&installed_path, b"old-cli-binary").unwrap();
+        std::fs::write(&bundled_path, b"new-cli-binary").unwrap();
+
+        assert!(!installed_cli_matches_bundle(&installed_path, &bundled_path).unwrap());
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[cfg(unix)]
     #[test]
     fn broken_symlink_is_installed_but_requires_reinstall() {
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let bundled_path = temp_dir.path().join("bundled-oxideterm");
-        let broken_target = temp_dir.path().join("missing-oxideterm");
-        let install_path = temp_dir.path().join("oxideterm");
+        let temp_dir = temp_test_dir("broken-link");
+        let bundled_path = temp_dir.join("bundled-oxideterm");
+        let broken_target = temp_dir.join("missing-oxideterm");
+        let install_path = temp_dir.join("oxideterm");
 
         std::fs::write(&bundled_path, b"bundled-cli-binary").unwrap();
         std::os::unix::fs::symlink(&broken_target, &install_path).unwrap();
 
         assert!(cli_path_present(&install_path));
         assert!(!installed_cli_matches_bundle(&install_path, &bundled_path).unwrap());
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }

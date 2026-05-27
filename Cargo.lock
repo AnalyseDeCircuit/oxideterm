@@ -7229,7 +7229,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sysinfo 0.33.1",
- "tempfile",
  "tokio",
  "uuid",
  "walkdir",

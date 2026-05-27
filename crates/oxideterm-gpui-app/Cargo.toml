@@ -66,9 +66,6 @@ wry.workspace = true
 zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }
 zeroize.workspace = true
 
-[dev-dependencies]
-tempfile = "3.23"
-
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"] }
