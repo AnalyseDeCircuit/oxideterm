@@ -4,16 +4,29 @@ pub(in crate::workspace) enum NativeUpdateUiState {
     Checking,
     UpToDate,
     Available(oxideterm_update::NativeUpdatePackage),
-    Downloading,
+    Downloading(Option<oxideterm_update::ResumableUpdateStatus>),
+    Verifying(Option<oxideterm_update::ResumableUpdateStatus>),
     Downloaded(oxideterm_update::NativeUpdateDownload),
+    Installing(Option<oxideterm_update::NativeInstallPlan>),
+    InstallFinished(oxideterm_update::NativeInstallOutcome),
     Error(String),
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::workspace) enum NativeUpdateDelivery {
+    Progress(oxideterm_update::DownloadProgress),
+    Finished(Result<oxideterm_update::NativeUpdateDownload, String>),
+    InstallFinished(Result<oxideterm_update::NativeInstallOutcome, String>),
 }
 
 impl WorkspaceApp {
     fn check_native_update(&mut self, cx: &mut Context<Self>) {
         if matches!(
             self.native_update_state,
-            NativeUpdateUiState::Checking | NativeUpdateUiState::Downloading
+                NativeUpdateUiState::Checking
+                | NativeUpdateUiState::Downloading(_)
+                | NativeUpdateUiState::Verifying(_)
+                | NativeUpdateUiState::Installing(_)
         ) {
             return;
         }
@@ -58,59 +71,219 @@ impl WorkspaceApp {
     fn download_native_update(&mut self, cx: &mut Context<Self>) {
         let package = match &self.native_update_state {
             NativeUpdateUiState::Available(package) => package.clone(),
-            NativeUpdateUiState::Downloaded(download) => {
-                let path = download.path.clone();
-                self.open_native_update_download(&path, cx);
-                return;
-            }
             _ => return,
         };
 
-        self.native_update_state = NativeUpdateUiState::Downloading;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.native_update_rx = Some(rx);
+        self.native_update_cancel = Some(cancel.clone());
+        self.native_update_state = NativeUpdateUiState::Downloading(None);
+        self.schedule_native_update_delivery_poll(cx);
+
         let directory = self.native_update_download_directory();
         let runtime = self.forwarding_runtime.clone();
 
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn(async move {
+        cx.spawn(async move |_weak, _cx| {
+            runtime.spawn(async move {
+                let result = async {
                     let client = oxideterm_update::NativeUpdateClient::new()?;
-                    // The native updater deliberately downloads and opens the
-                    // package instead of self-replacing the running binary.
-                    // That keeps the GPUI preview lane compatible with Tauri
-                    // manifests while avoiding platform-specific installer
-                    // side effects inside the app process.
+                    // Match Tauri's resumable updater cache contract:
+                    // package.part + state.json, Range resume, retry status,
+                    // and minisign verification before the package is opened.
                     client
-                        .download_package(package, &directory, |_| {})
+                        .download_resumable_package(package, &directory, cancel, |progress| {
+                            let _ = tx.send(NativeUpdateDelivery::Progress(progress));
+                        })
                         .await
-                })
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(download) => {
-                        let path = download.path.clone();
-                        this.native_update_state = NativeUpdateUiState::Downloaded(download);
-                        this.open_native_update_download(&path, cx);
-                    }
-                    Err(error) => {
-                        this.native_update_state = NativeUpdateUiState::Error(error.clone());
-                        this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
-                    }
                 }
-                cx.notify();
+                .await
+                .map_err(|error: oxideterm_update::NativeUpdateError| error.to_string());
+                let _ = tx.send(NativeUpdateDelivery::Finished(result));
             });
         })
         .detach();
         cx.notify();
     }
 
-    fn open_native_update_download(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
-        if let Err(error) = open_path_external(path) {
-            self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error);
+    fn install_native_update(&mut self, cx: &mut Context<Self>) {
+        let download = match &self.native_update_state {
+            NativeUpdateUiState::Downloaded(download) => download.clone(),
+            _ => return,
+        };
+
+        let is_portable = self
+            .portable_status_snapshot
+            .as_ref()
+            .map(|status| status.is_portable)
+            .unwrap_or_else(|| oxideterm_portable_runtime::is_portable_mode().unwrap_or(false));
+        let context = match oxideterm_update::NativeInstallContext::current(is_portable) {
+            Ok(context) => context,
+            Err(error) => {
+                self.native_update_state = NativeUpdateUiState::Error(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
+        let plan = oxideterm_update::plan_native_install(&download.path, &context);
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.native_update_rx = Some(rx);
+        self.native_update_cancel = None;
+        self.native_update_state = NativeUpdateUiState::Installing(Some(plan.clone()));
+        self.schedule_native_update_delivery_poll(cx);
+
+        let runtime = self.forwarding_runtime.clone();
+        cx.spawn(async move |_weak, _cx| {
+            runtime.spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    // Installation is intentionally delegated to the updater
+                    // crate so GPUI keeps only UI-state orchestration here.
+                    oxideterm_update::execute_install_plan(&plan)
+                })
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+                let _ = tx.send(NativeUpdateDelivery::InstallFinished(result));
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn cancel_native_update(&mut self, cx: &mut Context<Self>) {
+        if let Some(cancel) = self.native_update_cancel.as_ref() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.native_update_state = NativeUpdateUiState::Idle;
+        self.native_update_cancel = None;
+        cx.notify();
+    }
+
+    fn schedule_native_update_delivery_poll(&mut self, cx: &mut Context<Self>) {
+        if self.native_update_polling {
+            return;
+        }
+        self.native_update_polling = true;
+        cx.spawn(async move |weak, cx| {
+            loop {
+                Timer::after(std::time::Duration::from_millis(100)).await;
+                let keep_polling = weak
+                    .update(cx, |this, cx| {
+                        this.poll_native_update_delivery(cx);
+                        this.native_update_polling
+                    })
+                    .unwrap_or(false);
+                if !keep_polling {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn poll_native_update_delivery(&mut self, cx: &mut Context<Self>) {
+        let Some(rx) = self.native_update_rx.as_ref() else {
+            self.native_update_polling = false;
+            return;
+        };
+
+        let mut deliveries = Vec::new();
+        let mut disconnected = false;
+        loop {
+            match rx.try_recv() {
+                Ok(delivery) => deliveries.push(delivery),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
+        }
+
+        for delivery in deliveries {
+            self.handle_native_update_delivery(delivery, cx);
+        }
+        if disconnected {
+            self.native_update_rx = None;
+            self.native_update_polling = false;
+            self.native_update_cancel = None;
         }
         cx.notify();
+    }
+
+    fn handle_native_update_delivery(
+        &mut self,
+        delivery: NativeUpdateDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        match delivery {
+            NativeUpdateDelivery::Progress(progress) => {
+                self.native_update_state = match progress.status.stage {
+                    oxideterm_update::NativeUpdateStage::Downloading => {
+                        NativeUpdateUiState::Downloading(Some(progress.status))
+                    }
+                    oxideterm_update::NativeUpdateStage::Verifying => {
+                        NativeUpdateUiState::Verifying(Some(progress.status))
+                    }
+                    oxideterm_update::NativeUpdateStage::Ready => {
+                        NativeUpdateUiState::Verifying(Some(progress.status))
+                    }
+                    oxideterm_update::NativeUpdateStage::Error => NativeUpdateUiState::Error(
+                        progress
+                            .status
+                            .error_message
+                            .unwrap_or_else(|| self.i18n.t("settings_view.help.update_error")),
+                    ),
+                    oxideterm_update::NativeUpdateStage::Cancelled => NativeUpdateUiState::Idle,
+                };
+            }
+            NativeUpdateDelivery::Finished(Ok(download)) => {
+                self.native_update_state = NativeUpdateUiState::Downloaded(download);
+                self.native_update_cancel = None;
+            }
+            NativeUpdateDelivery::Finished(Err(error)) => {
+                if error.contains("update cancelled") {
+                    self.native_update_state = NativeUpdateUiState::Idle;
+                } else {
+                    self.native_update_state = NativeUpdateUiState::Error(error.clone());
+                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                }
+                self.native_update_cancel = None;
+            }
+            NativeUpdateDelivery::InstallFinished(Ok(outcome)) => {
+                let is_success =
+                    outcome.status != oxideterm_update::NativeInstallStatus::ManualActionRequired;
+                let should_quit_app = outcome.should_quit_app;
+                self.native_update_state = NativeUpdateUiState::InstallFinished(outcome.clone());
+                self.native_update_rx = None;
+                let variant = if is_success {
+                    TerminalNoticeVariant::Success
+                } else {
+                    TerminalNoticeVariant::Warning
+                };
+                self.push_ai_settings_toast(outcome.message, variant);
+                if should_quit_app {
+                    self.schedule_native_update_quit(cx);
+                }
+            }
+            NativeUpdateDelivery::InstallFinished(Err(error)) => {
+                self.native_update_state = NativeUpdateUiState::Error(error.clone());
+                self.native_update_rx = None;
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+            }
+        }
+    }
+
+    fn schedule_native_update_quit(&mut self, cx: &mut Context<Self>) {
+        // Tauri's updater exits after platform installers that need the current
+        // process out of the way. Delay one frame so the final toast/state can
+        // render before GPUI begins app shutdown.
+        cx.spawn(async move |_weak, cx| {
+            Timer::after(std::time::Duration::from_millis(750)).await;
+            cx.update(|cx| cx.quit()).ok();
+        })
+        .detach();
     }
 
     fn native_update_download_directory(&self) -> std::path::PathBuf {
