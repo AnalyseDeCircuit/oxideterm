@@ -11,8 +11,11 @@
 
 mod channel;
 mod download;
+mod install;
+mod integrity;
 mod manifest;
 mod platform;
+mod state;
 mod version;
 
 pub use channel::{
@@ -23,6 +26,14 @@ pub use download::{
     DownloadProgress, NativeUpdateClient, NativeUpdateDownload, NativeUpdateError,
     NativeUpdateRequest, NativeUpdateStatus,
 };
+pub use install::{
+    InstallActionKind, InstallPackageKind, InstallStrategy, NativeInstallContext,
+    NativeInstallOutcome, NativeInstallPlan, NativeInstallStatus, execute_install_plan,
+    plan_native_install,
+};
 pub use manifest::{NativeUpdateAsset, NativeUpdateManifest, NativeUpdatePackage};
 pub use platform::{PlatformTarget, current_platform_target};
+pub use state::{
+    NativeUpdateStage, PersistedUpdateState, ResumableUpdateStatus, TauriUpdaterEvent,
+};
 pub use version::{VersionOrdering, compare_versions, is_update_newer};

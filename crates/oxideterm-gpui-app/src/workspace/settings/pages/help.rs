@@ -296,7 +296,11 @@ impl WorkspaceApp {
                     false,
                 ),
                 NativeUpdateUiState::Available(package) => (
-                    format!("{} v{}", self.i18n.t("settings_view.help.update_available"), package.version),
+                    format!(
+                        "{} v{}",
+                        self.i18n.t("settings_view.help.update_available"),
+                        package.version
+                    ),
                     package
                         .body
                         .clone()
@@ -305,12 +309,25 @@ impl WorkspaceApp {
                     LucideIcon::Download,
                     false,
                 ),
-                NativeUpdateUiState::Downloading => (
+                NativeUpdateUiState::Downloading(status) => (
                     self.i18n.t("settings_view.help.downloading"),
-                    self.i18n.t("settings_view.help.native_update_hint"),
-                    self.i18n.t("settings_view.help.downloading"),
-                    LucideIcon::Download,
-                    true,
+                    status
+                        .as_ref()
+                        .map(native_update_progress_hint)
+                        .unwrap_or_else(|| self.i18n.t("settings_view.help.native_update_hint")),
+                    self.i18n.t("settings_view.help.cancel"),
+                    LucideIcon::X,
+                    false,
+                ),
+                NativeUpdateUiState::Verifying(status) => (
+                    self.i18n.t("settings_view.help.verifying"),
+                    status
+                        .as_ref()
+                        .map(native_update_progress_hint)
+                        .unwrap_or_else(|| self.i18n.t("settings_view.help.native_update_hint")),
+                    self.i18n.t("settings_view.help.cancel"),
+                    LucideIcon::X,
+                    false,
                 ),
                 NativeUpdateUiState::Downloaded(download) => (
                     self.i18n.t("settings_view.help.update_downloaded"),
@@ -318,10 +335,42 @@ impl WorkspaceApp {
                         "settings_view.help.update_downloaded_hint",
                         &[("path", download.path.display().to_string())],
                     ),
-                    self.i18n.t("settings_view.help.open_downloaded_update"),
-                    LucideIcon::FolderOpen,
+                    self.i18n.t("settings_view.help.install_update"),
+                    LucideIcon::Download,
                     false,
                 ),
+                NativeUpdateUiState::Installing(plan) => (
+                    self.i18n.t("settings_view.help.installing"),
+                    plan.as_ref().map(|plan| plan.summary.clone()).unwrap_or_else(|| {
+                        self.i18n.t("settings_view.help.native_update_hint")
+                    }),
+                    self.i18n.t("settings_view.help.installing"),
+                    LucideIcon::Download,
+                    true,
+                ),
+                NativeUpdateUiState::InstallFinished(outcome) => {
+                    let (title_key, hint_key) = match outcome.status {
+                        oxideterm_update::NativeInstallStatus::ManualActionRequired => (
+                            "settings_view.help.update_downloaded",
+                            "settings_view.help.portable_update_manual_hint",
+                        ),
+                        oxideterm_update::NativeInstallStatus::InstallerLaunched => (
+                            "settings_view.help.installer_launched",
+                            "settings_view.help.installer_launched_hint",
+                        ),
+                        oxideterm_update::NativeInstallStatus::ReplacementScheduled => (
+                            "settings_view.help.replacement_scheduled",
+                            "settings_view.help.replacement_scheduled_hint",
+                        ),
+                    };
+                    (
+                        self.i18n.t(title_key),
+                        self.i18n.t(hint_key),
+                        self.i18n.t("settings_view.help.check_update"),
+                        LucideIcon::RefreshCw,
+                        false,
+                    )
+                }
                 NativeUpdateUiState::Error(error) => (
                     self.i18n.t("settings_view.help.update_error"),
                     error.clone(),
@@ -352,7 +401,11 @@ impl WorkspaceApp {
                     .child(Self::render_lucide_icon(
                         LucideIcon::Shield,
                         14.0,
-                        rgb(if is_portable { self.tokens.ui.warning } else { self.tokens.ui.accent }),
+                        rgb(if is_portable {
+                            self.tokens.ui.warning
+                        } else {
+                            self.tokens.ui.accent
+                        }),
                     ))
                     .child(title),
             )
@@ -371,8 +424,19 @@ impl WorkspaceApp {
                     }
                     if is_portable {
                         this.open_help_url(HELP_RELEASES_URL, cx);
-                    } else if matches!(this.native_update_state, NativeUpdateUiState::Available(_) | NativeUpdateUiState::Downloaded(_)) {
+                    } else if matches!(
+                        this.native_update_state,
+                        NativeUpdateUiState::Downloading(_) | NativeUpdateUiState::Verifying(_)
+                    ) {
+                        this.cancel_native_update(cx);
+                    } else if matches!(
+                        this.native_update_state,
+                        NativeUpdateUiState::Available(_)
+                    ) {
                         this.download_native_update(cx);
+                    } else if matches!(this.native_update_state, NativeUpdateUiState::Downloaded(_))
+                    {
+                        this.install_native_update(cx);
                     } else {
                         this.check_native_update(cx);
                     }
@@ -584,4 +648,35 @@ impl WorkspaceApp {
         }
         .to_string()
     }
+}
+
+fn native_update_progress_hint(status: &oxideterm_update::ResumableUpdateStatus) -> String {
+    let downloaded = native_update_format_bytes(status.downloaded_bytes);
+    match status.total_bytes {
+        Some(total) if total > 0 => {
+            let percent = (status.downloaded_bytes.saturating_mul(100) / total).min(100);
+            format!(
+                "{} / {} · {}% · attempt {}",
+                downloaded,
+                native_update_format_bytes(total),
+                percent,
+                status.attempt
+            )
+        }
+        _ => format!("{} · attempt {}", downloaded, status.attempt),
+    }
+}
+
+fn native_update_format_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64;
+    for unit in ["KB", "MB", "GB"] {
+        value /= 1024.0;
+        if value < 1024.0 {
+            return format!("{value:.1} {unit}");
+        }
+    }
+    format!("{:.1} TB", value / 1024.0)
 }
