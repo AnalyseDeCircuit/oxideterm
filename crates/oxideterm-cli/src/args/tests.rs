@@ -803,3 +803,14 @@ fn parses_report() {
         _ => panic!("expected report command"),
     }
 }
+
+#[test]
+fn parses_completion_shell() {
+    let cli = Cli::parse_from(["oxideterm", "completion", "zsh"]);
+    match cli.command {
+        Command::Completion(args) => {
+            assert_eq!(args.shell, CompletionShell::Zsh);
+        }
+        _ => panic!("expected completion command"),
+    }
+}

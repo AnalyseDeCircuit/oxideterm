@@ -8,6 +8,7 @@ mod cloud_sync_preview;
 mod cloud_sync_secrets;
 mod cloud_sync_state;
 mod cloud_sync_write;
+mod completion;
 mod connections;
 mod connections_validate;
 mod diagnose;
@@ -71,5 +72,9 @@ fn run(cli: Cli) -> CliResult<i32> {
             Ok(0)
         }
         Command::Report(args) => report::run(args),
+        Command::Completion(args) => {
+            completion::run(args);
+            Ok(0)
+        }
     }
 }

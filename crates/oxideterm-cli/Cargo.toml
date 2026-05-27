@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 chrono.workspace = true
 clap.workspace = true
+clap_complete.workspace = true
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
 oxideterm-connections = { path = "../oxideterm-connections" }
