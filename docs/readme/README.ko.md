@@ -59,6 +59,7 @@ Electron, Tauri, web terminal, hosted service가 아닙니다. Chromium, WebView
 | SSH keepalive | JavaScript timer | Rust async task |
 | Plugin runtime | ESM in browser sandbox | wasmtime WASM + typed Rust host API |
 | CLI | desktop app 필요 | standalone binary |
+| 배포 아티팩트 크기 | 보통 약 150–200 MB 설치 파일 | 현재 macOS arm64: 압축 portable/DMG 약 50–60 MB, 원본 release binary 약 132 MB |
 
 ## Feature Overview
 
