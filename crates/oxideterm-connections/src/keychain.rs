@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use keyring::Entry;
+use oxideterm_portable_runtime::keystore::{self as portable_keystore, PortableKeystoreError};
 #[cfg(test)]
 use std::{
     collections::HashMap,
@@ -38,6 +39,16 @@ impl ConnectionKeychain {
             return Ok(());
         }
 
+        if portable_keychain_enabled()? {
+            let account = self.account(id);
+            return portable_keystore::store_secret(
+                &self.service,
+                &account,
+                secret.expose_secret(),
+            )
+            .with_context(|| format!("failed to store password in portable keystore for {id}"));
+        }
+
         let entry = self.entry(id)?;
         entry
             .set_password(secret.expose_secret())
@@ -53,6 +64,19 @@ impl ConnectionKeychain {
                 .get(id)
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("Password not saved for this connection"));
+        }
+
+        if portable_keychain_enabled()? {
+            let account = self.account(id);
+            return match portable_keystore::get_secret(&self.service, &account) {
+                Ok(secret) => Ok(SecretString::from(secret)),
+                Err(PortableKeystoreError::NotFound(_)) => {
+                    bail!("Password not saved for this connection")
+                }
+                Err(error) => Err(error).with_context(|| {
+                    format!("failed to load password from portable keystore for {id}")
+                }),
+            };
         }
 
         let entry = self.entry(id)?;
@@ -74,6 +98,13 @@ impl ConnectionKeychain {
             return Ok(());
         }
 
+        if portable_keychain_enabled()? {
+            let account = self.account(id);
+            return portable_keystore::delete_secret(&self.service, &account).with_context(|| {
+                format!("failed to delete password from portable keystore for {id}")
+            });
+        }
+
         let entry = self.entry(id)?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -82,9 +113,18 @@ impl ConnectionKeychain {
         }
     }
 
+    fn account(&self, id: &str) -> String {
+        format!("{}@{}", whoami::username(), id)
+    }
+
     fn entry(&self, id: &str) -> Result<Entry> {
-        let account = format!("{}@{}", whoami::username(), id);
+        let account = self.account(id);
         Entry::new(&self.service, &account)
             .with_context(|| format!("failed to open OS keychain entry {} for {id}", self.service))
     }
+}
+
+fn portable_keychain_enabled() -> Result<bool> {
+    oxideterm_portable_runtime::is_portable_mode()
+        .context("failed to determine OxideTerm portable mode")
 }

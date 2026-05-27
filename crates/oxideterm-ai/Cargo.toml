@@ -12,6 +12,7 @@ instant-distance = { version = "0.6.1", features = ["with-serde"] }
 keyring.workspace = true
 eventsource-stream = "0.2.3"
 futures-util.workspace = true
+oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 parking_lot.workspace = true
 redb = "2.1"
 regex.workspace = true

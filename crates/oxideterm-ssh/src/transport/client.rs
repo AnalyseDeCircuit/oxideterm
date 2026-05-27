@@ -69,9 +69,15 @@ impl SshTransportClient {
                 let _ = registry.mark_state(&connection_id, ConnectionState::Active);
             }
             Err(error) => {
-                connection.clear_physical().await;
-                let _ =
-                    registry.mark_state(&connection_id, ConnectionState::Error(error.to_string()));
+                if ssh_channel_error_is_transport_lost(&error.to_string()) {
+                    let _ = registry
+                        .mark_transport_lost_cascade(&connection_id, "channel open failed")
+                        .await;
+                } else {
+                    connection.clear_physical().await;
+                    let _ = registry
+                        .mark_state(&connection_id, ConnectionState::Error(error.to_string()));
+                }
                 registry.release(&connection_id, &consumer);
             }
         }
@@ -431,6 +437,12 @@ impl SshTransportClient {
         let deferred_pty = self.config.cols == 0 || self.config.rows == 0;
         let initial_cols = self.config.cols.clamp(1, 500);
         let initial_rows = self.config.rows.clamp(1, 200);
+        let transport_lost_registry = registry_release
+            .as_ref()
+            .map(|(registry, _, _)| registry.clone());
+        let transport_lost_connection_id = ssh_connection
+            .as_ref()
+            .map(|connection| connection.connection_id().to_string());
 
         if !deferred_pty {
             channel
@@ -456,6 +468,17 @@ impl SshTransportClient {
 
         tokio::spawn(async move {
             let mut output_batcher = SshOutputBatcher::new();
+            let mark_transport_lost = |detail: String| {
+                let registry = transport_lost_registry.clone();
+                let connection_id = transport_lost_connection_id.clone();
+                async move {
+                    if let (Some(registry), Some(connection_id)) = (registry, connection_id) {
+                        let _ = registry
+                            .mark_transport_lost_cascade(&connection_id, detail)
+                            .await;
+                    }
+                }
+            };
             if deferred_pty {
                 let (pty_cols, pty_rows) = tokio::select! {
                     command = command_rx.recv() => {
@@ -507,6 +530,10 @@ impl SshTransportClient {
                     )
                     .await
                 {
+                    if ssh_channel_error_is_transport_lost(&error.to_string()) {
+                        mark_transport_lost(format!("deferred PTY request failed: {error}"))
+                            .await;
+                    }
                     let _ = output_tx
                         .send(format!("\r\nFailed to request PTY: {error}\r\n").into_bytes())
                         .await;
@@ -516,6 +543,10 @@ impl SshTransportClient {
                     let _ = channel.agent_forward(true).await;
                 }
                 if let Err(error) = channel.request_shell(false).await {
+                    if ssh_channel_error_is_transport_lost(&error.to_string()) {
+                        mark_transport_lost(format!("deferred shell request failed: {error}"))
+                            .await;
+                    }
                     let _ = output_tx
                         .send(format!("\r\nFailed to request shell: {error}\r\n").into_bytes())
                         .await;
@@ -542,7 +573,11 @@ impl SshTransportClient {
                         match command {
                             SshTransportCommand::Data(data) => {
                                 output_batcher.note_interaction();
-                                if channel.data(data.as_slice()).await.is_err() {
+                                if let Err(error) = channel.data(data.as_slice()).await {
+                                    mark_transport_lost(format!(
+                                        "terminal input write failed: {error}"
+                                    ))
+                                    .await;
                                     break;
                                 }
                             }

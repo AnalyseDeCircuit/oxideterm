@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use keyring::Entry;
+use oxideterm_portable_runtime::keystore::{self as portable_keystore, PortableKeystoreError};
 use zeroize::Zeroizing;
 
 use crate::{AuthMode, BackendType, CLOUD_SYNC_PLUGIN_ID, secret_keys};
@@ -136,12 +137,20 @@ impl CloudSyncKeychainSecretProvider {
     pub fn store_secret(&mut self, key: &str, value: Option<&str>) -> Result<()> {
         if let Some(value) = value.filter(|value| !value.is_empty()) {
             self.store_current_secret(key, value)?;
-            self.delete_legacy_secret(key)?;
+            if !portable_keychain_enabled()
+                .with_context(|| "failed to determine OxideTerm portable mode")?
+            {
+                self.delete_legacy_secret(key)?;
+            }
             self.hints.insert(key.to_string(), true);
             clear_session_cached_secret(&self.cache_key(key));
         } else {
             self.delete_current_secret(key)?;
-            self.delete_legacy_secret(key)?;
+            if !portable_keychain_enabled()
+                .with_context(|| "failed to determine OxideTerm portable mode")?
+            {
+                self.delete_legacy_secret(key)?;
+            }
             self.hints.insert(key.to_string(), false);
             clear_session_cached_secret(&self.cache_key(key));
         }
@@ -166,6 +175,14 @@ impl CloudSyncKeychainSecretProvider {
 
     fn store_current_secret(&self, key: &str, value: &str) -> Result<()> {
         let account = self.account(key);
+        if portable_keychain_enabled()
+            .with_context(|| "failed to determine OxideTerm portable mode")?
+        {
+            return portable_keystore::store_secret(&self.service, &account, value).with_context(
+                || format!("failed to store cloud sync secret {key} in portable keystore"),
+            );
+        }
+
         #[cfg(target_os = "macos")]
         {
             mac_keychain::store(&self.service, &account, value).map_err(|error| {
@@ -187,6 +204,19 @@ impl CloudSyncKeychainSecretProvider {
         key: &str,
     ) -> Result<Option<CloudSyncSecretValue>, CloudSyncSecretError> {
         let account = self.account(key);
+        if portable_keychain_enabled()
+            .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?
+        {
+            // Portable secrets are available only after the vault is unlocked;
+            // prompt-capable callers can surface this as a bootstrap action.
+            return match portable_keystore::get_secret(&self.service, &account) {
+                Ok(value) => Ok(Some(value)),
+                Err(PortableKeystoreError::NotFound(_)) => Ok(None),
+                Err(PortableKeystoreError::Locked) => Err(CloudSyncSecretError::UnlockRequired),
+                Err(error) => Err(CloudSyncSecretError::AccessFailed(error.to_string())),
+            };
+        }
+
         #[cfg(target_os = "macos")]
         {
             if let Ok(value) = mac_keychain::get(&self.service, &account) {
@@ -227,6 +257,14 @@ impl CloudSyncKeychainSecretProvider {
 
     fn delete_current_secret(&self, key: &str) -> Result<()> {
         let account = self.account(key);
+        if portable_keychain_enabled()
+            .with_context(|| "failed to determine OxideTerm portable mode")?
+        {
+            return portable_keystore::delete_secret(&self.service, &account).with_context(|| {
+                format!("failed to delete cloud sync secret {key} from portable keystore")
+            });
+        }
+
         #[cfg(target_os = "macos")]
         {
             mac_keychain::delete(&self.service, &account);
@@ -271,6 +309,14 @@ impl CloudSyncSecretProvider for CloudSyncKeychainSecretProvider {
             self.hints.insert(key.to_string(), true);
             set_session_cached_secret(cache_key, Some(value.clone()));
             return Ok(Some(value));
+        }
+
+        if portable_keychain_enabled()
+            .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?
+        {
+            self.hints.insert(key.to_string(), false);
+            set_session_cached_secret(cache_key, None);
+            return Ok(None);
         }
 
         if let Some(value) = self.get_legacy_secret(key)? {
@@ -319,6 +365,15 @@ impl CloudSyncSecretProvider for CloudSyncKeychainSecretProvider {
                 self.hints.insert(key.to_string(), true);
                 set_session_cached_secret(cache_key, Some(value.clone()));
                 values.insert(key.to_string(), Some(value));
+                continue;
+            }
+
+            if portable_keychain_enabled()
+                .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?
+            {
+                self.hints.insert(key.to_string(), false);
+                set_session_cached_secret(cache_key, None);
+                values.insert(key.to_string(), None);
                 continue;
             }
 
@@ -373,6 +428,10 @@ fn plugin_secret_account_id(key: &str) -> String {
         key.len(),
         key
     )
+}
+
+fn portable_keychain_enabled() -> Result<bool, oxideterm_portable_runtime::PortableError> {
+    oxideterm_portable_runtime::is_portable_mode()
 }
 
 #[derive(Clone, Default, Eq, PartialEq)]

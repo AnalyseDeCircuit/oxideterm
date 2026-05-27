@@ -86,6 +86,8 @@
     "edit_properties": {
       "title": "Modifica connessione",
       "description": "Modifica le proprietà della connessione.",
+      "duplicate_title": "Duplica connessione",
+      "duplicate_description": "Usa questa connessione come modello, quindi salvala come nuovo host.",
       "name": "Nome",
       "host": "Host",
       "port": "Porta",

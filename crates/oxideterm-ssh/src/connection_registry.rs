@@ -769,6 +769,32 @@ impl SshConnectionRegistry {
         changed
     }
 
+    pub async fn mark_transport_lost_cascade(
+        &self,
+        root_connection_id: &str,
+        reason: impl AsRef<str>,
+    ) -> Vec<ConnectionInfo> {
+        let reason = reason.as_ref();
+        let changed = self.mark_link_down_cascade(root_connection_id);
+        for info in &changed {
+            if let Some(handle) = self.get(&info.connection_id) {
+                // A transport-level failure means the pooled handle can no
+                // longer be trusted by SFTP, forwarding, or terminal recovery.
+                // Clear it before reconnect code decides whether it can reuse
+                // an existing physical connection.
+                handle.clear_physical().await;
+            }
+        }
+        if let Some(emitter) = self.node_event_emitter.read().clone() {
+            let _ = emitter.emit_state_from_connection(
+                root_connection_id,
+                &ConnectionState::LinkDown,
+                reason,
+            );
+        }
+        changed
+    }
+
     pub async fn probe_active_connections(&self, timeout: Duration) -> Vec<ConnectionInfo> {
         let connection_ids = self
             .list()
@@ -782,7 +808,10 @@ impl SshConnectionRegistry {
                 self.probe_active_connection(&connection_id, timeout).await,
                 ProbeConnectionStatus::Dead
             ) {
-                changed.extend(self.mark_link_down_cascade(&connection_id));
+                changed.extend(
+                    self.mark_transport_lost_cascade(&connection_id, "keepalive probe failed")
+                        .await,
+                );
             }
         }
         changed
@@ -1691,6 +1720,57 @@ mod tests {
         assert_eq!(root.state(), ConnectionState::LinkDown);
         assert_eq!(child.state(), ConnectionState::LinkDown);
         assert_eq!(unrelated.state(), ConnectionState::Active);
+    }
+
+    #[tokio::test]
+    async fn transport_lost_cascade_clears_stale_physical_slots() {
+        let registry = SshConnectionRegistry::default();
+        let root = registry.acquire(
+            SshConfig::password("jump", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("root".into()),
+        );
+        let child = registry.acquire(
+            SshConfig::password("target", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("child".into()),
+        );
+        let unrelated = registry.acquire(
+            SshConfig::password("other", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("other".into()),
+        );
+        registry.mark_state(root.connection_id(), ConnectionState::Active);
+        registry.mark_state(child.connection_id(), ConnectionState::Active);
+        registry.mark_state(unrelated.connection_id(), ConnectionState::Active);
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(root.connection_id().to_string()),
+        );
+        root.set_physical(Arc::new(String::from("root-transport")));
+        child.set_physical(Arc::new(String::from("child-transport")));
+        unrelated.set_physical(Arc::new(String::from("unrelated-transport")));
+
+        let changed = registry
+            .mark_transport_lost_cascade(root.connection_id(), "terminal input write failed")
+            .await;
+        let changed_ids = changed
+            .iter()
+            .map(|info| info.connection_id.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(changed_ids.contains(&root.connection_id()));
+        assert!(changed_ids.contains(&child.connection_id()));
+        assert!(!changed_ids.contains(&unrelated.connection_id()));
+        assert_eq!(root.state(), ConnectionState::LinkDown);
+        assert_eq!(child.state(), ConnectionState::LinkDown);
+        assert_eq!(unrelated.state(), ConnectionState::Active);
+        assert!(root.physical::<String>().is_none());
+        assert!(child.physical::<String>().is_none());
+        assert_eq!(
+            unrelated
+                .physical::<String>()
+                .as_deref()
+                .map(String::as_str),
+            Some("unrelated-transport")
+        );
     }
 
     #[test]

@@ -21,11 +21,12 @@ pub(in crate::workspace) enum NewConnectionFormMode {
     NewConnection,
     SavedConnectionPrompt,
     EditProperties,
+    DuplicateTemplate,
 }
 
 impl NewConnectionFormMode {
     pub(in crate::workspace) fn submits_saved_connection_properties(self) -> bool {
-        self == Self::EditProperties
+        matches!(self, Self::EditProperties | Self::DuplicateTemplate)
     }
 
     pub(in crate::workspace) fn stores_connection_on_connect(self) -> bool {
@@ -35,10 +36,13 @@ impl NewConnectionFormMode {
 
 pub(in crate::workspace) fn new_connection_form_mode(
     editing_saved_connection_id: Option<&str>,
+    duplicating_saved_connection_id: Option<&str>,
     prompt_action: Option<SavedConnectionPromptAction>,
 ) -> NewConnectionFormMode {
     if prompt_action.is_some() {
         NewConnectionFormMode::SavedConnectionPrompt
+    } else if duplicating_saved_connection_id.is_some() {
+        NewConnectionFormMode::DuplicateTemplate
     } else if editing_saved_connection_id.is_some() {
         NewConnectionFormMode::EditProperties
     } else {
@@ -636,21 +640,30 @@ mod tests {
     #[test]
     fn form_mode_keeps_prompt_edit_and_new_submission_paths_distinct() {
         assert_eq!(
-            new_connection_form_mode(None, None),
+            new_connection_form_mode(None, None, None),
             NewConnectionFormMode::NewConnection
         );
         assert_eq!(
-            new_connection_form_mode(Some("conn-1"), None),
+            new_connection_form_mode(Some("conn-1"), None, None),
             NewConnectionFormMode::EditProperties
         );
         assert_eq!(
-            new_connection_form_mode(Some("conn-1"), Some(SavedConnectionPromptAction::Connect)),
+            new_connection_form_mode(None, Some("conn-1"), None),
+            NewConnectionFormMode::DuplicateTemplate
+        );
+        assert_eq!(
+            new_connection_form_mode(
+                Some("conn-1"),
+                Some("conn-2"),
+                Some(SavedConnectionPromptAction::Connect)
+            ),
             NewConnectionFormMode::SavedConnectionPrompt
         );
 
         assert!(NewConnectionFormMode::NewConnection.stores_connection_on_connect());
         assert!(!NewConnectionFormMode::SavedConnectionPrompt.stores_connection_on_connect());
         assert!(NewConnectionFormMode::EditProperties.submits_saved_connection_properties());
+        assert!(NewConnectionFormMode::DuplicateTemplate.submits_saved_connection_properties());
         assert!(
             !NewConnectionFormMode::SavedConnectionPrompt.submits_saved_connection_properties()
         );

@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use keyring::Entry;
+use oxideterm_portable_runtime::keystore::{self as portable_keystore, PortableKeystoreError};
 use parking_lot::RwLock;
 use zeroize::Zeroizing;
 
@@ -164,6 +165,15 @@ impl AiProviderKeyStore {
             return Ok(secrets);
         }
 
+        if portable_keychain_enabled()? {
+            for provider_id in missing {
+                if let Some(secret) = self.get_provider_key(&provider_id)? {
+                    secrets.push((provider_id, secret));
+                }
+            }
+            return Ok(secrets);
+        }
+
         #[cfg(target_os = "macos")]
         {
             if crate::touch_id::is_biometric_available() {
@@ -222,6 +232,14 @@ impl AiProviderKeyStore {
         if self.cache.read().contains_key(provider_id) {
             return true;
         }
+        match portable_keychain_enabled() {
+            Ok(true) => {
+                return portable_keystore::secret_exists(&self.service, &self.account(provider_id))
+                    .unwrap_or(false);
+            }
+            Ok(false) => {}
+            Err(_) => return false,
+        }
         #[cfg(target_os = "macos")]
         {
             if mac_keychain::exists(&self.service, &self.account(provider_id)) {
@@ -235,6 +253,14 @@ impl AiProviderKeyStore {
 
     pub fn delete_provider_key(&self, provider_id: &str) -> Result<()> {
         self.cache.write().remove(provider_id);
+        if portable_keychain_enabled()? {
+            return portable_keystore::delete_secret(&self.service, &self.account(provider_id))
+                .with_context(|| {
+                    format!(
+                        "failed to delete AI provider key from portable keystore for {provider_id}"
+                    )
+                });
+        }
         #[cfg(target_os = "macos")]
         {
             mac_keychain::delete(&self.service, &self.account(provider_id));
@@ -247,6 +273,10 @@ impl AiProviderKeyStore {
     }
 
     fn load_provider_key_from_os(&self, provider_id: &str) -> Result<Option<Zeroizing<String>>> {
+        if portable_keychain_enabled()? {
+            return self.load_provider_key_from_portable(provider_id);
+        }
+
         #[cfg(target_os = "macos")]
         {
             if crate::touch_id::is_biometric_available() {
@@ -268,6 +298,21 @@ impl AiProviderKeyStore {
                 Err(error) => Err(error)
                     .with_context(|| format!("failed to load AI provider key for {provider_id}")),
             }
+        }
+    }
+
+    fn load_provider_key_from_portable(
+        &self,
+        provider_id: &str,
+    ) -> Result<Option<Zeroizing<String>>> {
+        // Portable mode must not touch the host OS keychain. Secrets live in
+        // the unlocked portable vault so a copied app directory remains usable.
+        match portable_keystore::get_secret(&self.service, &self.account(provider_id)) {
+            Ok(secret) => Ok(Some(secret)),
+            Err(PortableKeystoreError::NotFound(_)) => Ok(None),
+            Err(error) => Err(error).with_context(|| {
+                format!("failed to load AI provider key from portable keystore for {provider_id}")
+            }),
         }
     }
 
@@ -297,6 +342,17 @@ impl AiProviderKeyStore {
     }
 
     fn store_provider_key_to_os(&self, provider_id: &str, api_key: &str) -> Result<()> {
+        if portable_keychain_enabled()? {
+            return portable_keystore::store_secret(
+                &self.service,
+                &self.account(provider_id),
+                api_key,
+            )
+            .with_context(|| {
+                format!("failed to save AI provider key to portable keystore for {provider_id}")
+            });
+        }
+
         #[cfg(target_os = "macos")]
         {
             mac_keychain::store(&self.service, &self.account(provider_id), api_key)
@@ -425,6 +481,11 @@ fn platform_credential_exists(entry: &Entry) -> Option<bool> {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn platform_credential_exists(_entry: &Entry) -> Option<bool> {
     None
+}
+
+fn portable_keychain_enabled() -> Result<bool> {
+    oxideterm_portable_runtime::is_portable_mode()
+        .context("failed to determine OxideTerm portable mode")
 }
 
 #[cfg(test)]

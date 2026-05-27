@@ -7,7 +7,10 @@ fn oxide_import_connection_preview_signature(name: &String) -> u64 {
 }
 
 impl WorkspaceApp {
-    fn render_oxide_import_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::workspace) fn render_oxide_import_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let Some(dialog) = self.session_manager.oxide_import_dialog.as_ref() else {
             return div().into_any_element();

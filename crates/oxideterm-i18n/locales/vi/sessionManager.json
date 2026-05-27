@@ -86,6 +86,8 @@
     "edit_properties": {
       "title": "Sửa kết nối",
       "description": "Thay đổi thuộc tính kết nối.",
+      "duplicate_title": "Nhân bản kết nối",
+      "duplicate_description": "Dùng kết nối này làm mẫu rồi lưu thành máy chủ mới.",
       "name": "Tên",
       "host": "Máy chủ",
       "port": "Cổng",

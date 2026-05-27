@@ -81,6 +81,23 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_template_name_uses_unique_tauri_copy_suffix() {
+        let name = duplicate_connection_template_name(
+            "Prod Copy",
+            ["Prod", "Prod Copy", "Prod Copy 2"].into_iter(),
+        );
+
+        assert_eq!(name, "Prod Copy 3");
+    }
+
+    #[test]
+    fn duplicate_template_name_falls_back_for_empty_source() {
+        let name = duplicate_connection_template_name("", ["Connection Copy"].into_iter());
+
+        assert_eq!(name, "Connection Copy 2");
+    }
+
+    #[test]
     fn edit_properties_same_key_empty_passphrase_submits_no_new_secret() {
         let existing = SavedAuth::Key {
             key_path: "/tmp/id_ed25519".to_string(),

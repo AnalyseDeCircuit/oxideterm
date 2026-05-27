@@ -18,6 +18,7 @@ pub use oxide_snapshot::{
     ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS, OXIDE_SETTINGS_FORMAT,
     OXIDE_SETTINGS_VERSION, export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
 };
+pub use oxideterm_portable_runtime as portable_runtime;
 pub use store::{
     SETTINGS_FILENAME, SettingsLoadResult, SettingsSaveResult, SettingsStore,
     default_settings_path, save_settings_to_path,

@@ -51,15 +51,46 @@ struct OxideClientStateSnapshot {
 }
 
 impl WorkspaceApp {
-    fn open_oxide_import_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn open_oxide_import_dialog(&mut self, cx: &mut Context<Self>) {
         self.session_manager.oxide_import_dialog = Some(OxideImportDialogState::default());
         self.session_manager.focused_input = None;
         self.session_manager.status = None;
         cx.notify();
     }
 
-    fn open_oxide_export_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn open_oxide_import_portable_migration_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let dialog = OxideImportDialogState {
+            import_portable_secrets: true,
+            ..OxideImportDialogState::default()
+        };
+        self.session_manager.oxide_import_dialog = Some(dialog);
+        self.session_manager.focused_input = None;
+        self.session_manager.status = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_oxide_export_dialog(&mut self, cx: &mut Context<Self>) {
+        self.open_oxide_export_dialog_with_portable_mode(false, cx);
+    }
+
+    pub(in crate::workspace) fn open_oxide_export_portable_migration_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_oxide_export_dialog_with_portable_mode(true, cx);
+    }
+
+    fn open_oxide_export_dialog_with_portable_mode(
+        &mut self,
+        portable_migration: bool,
+        cx: &mut Context<Self>,
+    ) {
         let mut dialog = OxideExportDialogState::default();
+        dialog.include_portable_secrets = portable_migration;
+        dialog.embed_keys = portable_migration;
         dialog.available_forwards = self.exportable_saved_forwards();
         dialog.last_export_timestamp = load_oxide_last_export_timestamp(self.settings_store.path());
         dialog.selected_forward_ids = dialog
@@ -807,7 +838,10 @@ impl WorkspaceApp {
             || dialog.include_portable_secrets
     }
 
-    fn oxide_export_portable_secret_count(&self, dialog: &OxideExportDialogState) -> usize {
+    pub(in crate::workspace) fn oxide_export_portable_secret_count(
+        &self,
+        dialog: &OxideExportDialogState,
+    ) -> usize {
         if !dialog.include_portable_secrets {
             return 0;
         }

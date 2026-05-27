@@ -454,7 +454,8 @@ pub fn language_options() -> [Language; 11] {
 pub fn cycle_update_channel(settings: &mut PersistedSettings) {
     settings.general.update_channel = match settings.general.update_channel {
         UpdateChannel::Stable => UpdateChannel::Beta,
-        UpdateChannel::Beta => UpdateChannel::Stable,
+        UpdateChannel::Beta => UpdateChannel::GpuiPreview,
+        UpdateChannel::GpuiPreview => UpdateChannel::Stable,
     };
 }
 
@@ -498,6 +499,7 @@ pub fn update_channel_label(channel: UpdateChannel, i18n: &I18n) -> String {
     match channel {
         UpdateChannel::Stable => i18n.t("settings_view.help.channel_stable"),
         UpdateChannel::Beta => i18n.t("settings_view.help.channel_beta"),
+        UpdateChannel::GpuiPreview => i18n.t("settings_view.help.channel_gpui_preview"),
     }
 }
 

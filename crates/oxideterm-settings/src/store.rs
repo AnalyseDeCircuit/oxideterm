@@ -63,6 +63,10 @@ fn now_ms() -> u64 {
 }
 
 pub fn default_settings_path() -> PathBuf {
+    if let Ok(Some(data_dir)) = oxideterm_portable_runtime::portable_data_dir() {
+        return data_dir.join(SETTINGS_FILENAME);
+    }
+
     if cfg!(windows) {
         if let Some(config_home) = std::env::var_os("APPDATA") {
             return PathBuf::from(config_home)

@@ -74,6 +74,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let saved_connection_form_uses_unloaded_secret =
+            self.saved_connection_form_uses_unloaded_secret();
         let Some(form) = self.new_connection_form.as_mut() else {
             return false;
         };
@@ -119,8 +121,7 @@ impl WorkspaceApp {
             }
         }
 
-        let password_locked = self.editing_saved_connection_id.is_some()
-            && self.saved_connection_prompt_action.is_none()
+        let password_locked = saved_connection_form_uses_unloaded_secret
             && form.focused_field == NewConnectionField::Password
             && !form.password_loaded;
         if password_locked && !matches!(key, "escape" | "enter" | "tab") {
@@ -241,14 +242,15 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn paste_into_new_connection_field(&mut self, cx: &mut Context<Self>) {
+        let saved_connection_form_uses_unloaded_secret =
+            self.saved_connection_form_uses_unloaded_secret();
         let Some(form) = self.new_connection_form.as_mut() else {
             return;
         };
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
-        if self.editing_saved_connection_id.is_some()
-            && self.saved_connection_prompt_action.is_none()
+        if saved_connection_form_uses_unloaded_secret
             && form.focused_field == NewConnectionField::Password
             && !form.password_loaded
         {

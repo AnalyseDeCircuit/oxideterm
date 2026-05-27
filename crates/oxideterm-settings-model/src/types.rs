@@ -154,6 +154,9 @@ pub enum SettingsInput {
     CloudSyncSessionToken,
     CloudSyncSyncPassword,
     CloudSyncAutoUploadInterval,
+    PortableCurrentPassword,
+    PortableNewPassword,
+    PortableConfirmPassword,
     NativePluginInstallUrl,
     NativePluginInstallChecksum,
     NativePluginRegistryUrl,
@@ -400,6 +403,9 @@ impl SettingsInput {
             Self::CloudSyncSessionToken => 27_012,
             Self::CloudSyncSyncPassword => 27_013,
             Self::CloudSyncAutoUploadInterval => 27_014,
+            Self::PortableCurrentPassword => 28_000,
+            Self::PortableNewPassword => 28_001,
+            Self::PortableConfirmPassword => 28_002,
             Self::NativePluginInstallUrl => PLUGIN_MANAGER_INPUT_ANCHOR_BASE,
             Self::NativePluginInstallChecksum => PLUGIN_MANAGER_INPUT_ANCHOR_BASE + 1,
             Self::NativePluginRegistryUrl => PLUGIN_MANAGER_INPUT_ANCHOR_BASE + 2,
@@ -420,6 +426,9 @@ impl SettingsInput {
                 | Self::CloudSyncSecretAccessKey
                 | Self::CloudSyncSessionToken
                 | Self::CloudSyncSyncPassword
+                | Self::PortableCurrentPassword
+                | Self::PortableNewPassword
+                | Self::PortableConfirmPassword
         )
     }
 
@@ -486,6 +495,9 @@ mod tests {
     fn secret_inputs_are_categorized_in_the_model_layer() {
         assert!(SettingsInput::AiProviderApiKey(0).is_secret());
         assert!(SettingsInput::CloudSyncSecretAccessKey.is_secret());
+        assert!(SettingsInput::PortableCurrentPassword.is_secret());
+        assert!(SettingsInput::PortableNewPassword.is_secret());
+        assert!(SettingsInput::PortableConfirmPassword.is_secret());
         assert!(!SettingsInput::TerminalFontSize.is_secret());
     }
 

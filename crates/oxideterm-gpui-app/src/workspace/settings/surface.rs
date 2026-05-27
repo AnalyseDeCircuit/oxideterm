@@ -66,6 +66,15 @@ impl WorkspaceApp {
             .when_some(self.render_theme_editor_modal(cx), |surface, modal| {
                 surface.child(modal)
             })
+            .when_some(self.render_portable_password_change_dialog(cx), |surface, modal| {
+                surface.child(modal)
+            })
+            .when_some(self.session_manager.oxide_import_dialog.as_ref(), |surface, _| {
+                surface.child(self.render_oxide_import_dialog(cx))
+            })
+            .when_some(self.session_manager.oxide_export_dialog.as_ref(), |surface, _| {
+                surface.child(self.render_oxide_export_dialog(cx))
+            })
             .into_any_element()
     }
 
@@ -321,6 +330,16 @@ impl WorkspaceApp {
                 self.connection_store.connections().len().hash(&mut hasher);
                 self.settings_connection_groups_signature().hash(&mut hasher);
                 self.settings_page.settings_connection_status.is_some().hash(&mut hasher);
+            }
+            SettingsTab::Portable => {
+                self.portable_settings_refresh_pending.hash(&mut hasher);
+                self.portable_status_error.is_some().hash(&mut hasher);
+                self.portable_exportable_secret_count.hash(&mut hasher);
+                if let Some(status) = self.portable_status_snapshot.as_ref() {
+                    status.is_portable.hash(&mut hasher);
+                    format!("{:?}", status.status).hash(&mut hasher);
+                    status.is_unlocked.hash(&mut hasher);
+                }
             }
             SettingsTab::Ai => {
                 settings.ai.enabled.hash(&mut hasher);
@@ -580,6 +599,9 @@ impl WorkspaceApp {
                     this.clear_ime_selection();
                     if tab == SettingsTab::General {
                         this.refresh_cli_companion_status(cx);
+                    }
+                    if tab == SettingsTab::Portable {
+                        this.refresh_portable_settings_snapshot(true, cx);
                     }
                     cx.stop_propagation();
                     cx.notify();

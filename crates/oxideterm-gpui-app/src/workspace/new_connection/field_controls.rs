@@ -355,6 +355,9 @@ impl WorkspaceApp {
     }
 
     fn toggle_edit_saved_password_visibility(&mut self, cx: &mut Context<Self>) {
+        let source_connection_id = self
+            .saved_connection_form_source_id()
+            .map(|connection_id| connection_id.to_string());
         let Some(form) = self.new_connection_form.as_mut() else {
             return;
         };
@@ -368,7 +371,7 @@ impl WorkspaceApp {
             return;
         }
 
-        let Some(connection_id) = self.editing_saved_connection_id.clone() else {
+        let Some(connection_id) = source_connection_id else {
             return;
         };
         form.password_loading = true;

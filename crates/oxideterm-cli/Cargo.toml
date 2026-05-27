@@ -16,6 +16,7 @@ oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync", default-features = false }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding", default-features = false }
+oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 serde.workspace = true

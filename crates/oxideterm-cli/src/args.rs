@@ -14,6 +14,7 @@ mod diagnostics;
 mod forwards;
 mod oxide;
 mod plugins;
+mod portable;
 mod quick_commands;
 mod secrets;
 mod settings;
@@ -30,6 +31,7 @@ pub use diagnostics::*;
 pub use forwards::*;
 pub use oxide::*;
 pub use plugins::*;
+pub use portable::*;
 pub use quick_commands::*;
 pub use secrets::*;
 pub use settings::*;
@@ -43,7 +45,7 @@ pub use settings::*;
     long_about = "OxideTerm headless management CLI for settings, saved connections, portable .oxide bundles, cloud sync, backups, and support diagnostics."
 )]
 #[command(
-    after_help = "Examples:\n  oxideterm doctor --strict\n  oxideterm settings validate --strict --json\n  oxideterm connections search prod\n  oxideterm backup create --output ./oxideterm-backup.json --json\n  oxideterm oxide export ./profile.oxide --connection prod --password-stdin\n  oxideterm cloud-sync push --dry-run --json\n  oxideterm completion zsh > ~/.zfunc/_oxideterm"
+    after_help = "Examples:\n  oxideterm doctor --strict\n  oxideterm settings validate --strict --json\n  oxideterm connections search prod\n  oxideterm backup create --output ./oxideterm-backup.json --json\n  oxideterm oxide export ./profile.oxide --connection prod --password-stdin\n  oxideterm cloud-sync push --dry-run --json\n  oxideterm portable status --json\n  oxideterm completion zsh > ~/.zfunc/_oxideterm"
 )]
 pub struct Cli {
     #[arg(
@@ -138,6 +140,7 @@ fn normalize_command_output_format(command: &mut Command) {
                 PluginSettingsAction::Get(_) => {}
             },
         },
+        Command::Portable(_) => {}
         Command::Secrets(_) => {}
         Command::CloudSync(command) => match &mut command.action {
             CloudSyncAction::Status(args)
@@ -226,6 +229,8 @@ pub enum Command {
     QuickCommands(QuickCommandsCommand),
     #[command(about = "Inspect and manage plugins and plugin settings")]
     Plugins(PluginsCommand),
+    #[command(about = "Inspect and unlock the portable runtime")]
+    Portable(PortableCommand),
     #[command(about = "Inspect and manage keychain-backed secrets")]
     Secrets(SecretsCommand),
     #[command(about = "Validate, import, and export portable .oxide bundles")]

@@ -77,10 +77,9 @@ use oxideterm_gpui_ui::{
         dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop,
     },
     select::{
-        OverlayAnchor, SelectAnchorId, readonly_value_trigger, select_anchor_probe, select_label,
-        select_option, select_option_action, select_overlay_popup,
-        select_panel_overlay_popup_with_max_height, select_separator,
-        select_trigger_with_focus_visible,
+        OverlayAnchor, SelectAnchorId, select_anchor_probe, select_label, select_option,
+        select_option_action, select_overlay_popup, select_panel_overlay_popup_with_max_height,
+        select_separator, select_trigger_with_focus_visible,
     },
     separator::{SeparatorOrientation, separator},
     slider::{SliderView, slider},
@@ -89,6 +88,16 @@ use oxideterm_gpui_ui::{
         text_input_value_segments, text_input_with_content_align,
     },
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum PortableSettingsDialog {
+    ChangePassword,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum PortableSettingsAction {
+    ChangePassword,
+}
 
 pub(in crate::workspace) fn settings_store_modified_time(
     path: &std::path::Path,
@@ -106,6 +115,8 @@ include!("settings/terminal_display.rs");
 include!("settings/highlight.rs");
 include!("settings/terminal_controls.rs");
 include!("settings/local_terminal.rs");
+include!("settings/portable_runtime.rs");
+include!("settings/update.rs");
 include!("settings/general_terminal_pages.rs");
 include!("settings/appearance.rs");
 include!("settings/connections_page.rs");

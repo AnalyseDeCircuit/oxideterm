@@ -38,6 +38,7 @@ oxideterm-plugin-host-api = { path = "../oxideterm-plugin-host-api" }
 oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
 oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
 oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }
+oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-preview = { path = "../oxideterm-preview" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }
@@ -48,6 +49,7 @@ oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-topology = { path = "../oxideterm-topology" }
+oxideterm-update = { path = "../oxideterm-update" }
 oxideterm-webview = { path = "../oxideterm-webview" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 oxideterm-wsl-graphics = { path = "../oxideterm-wsl-graphics" }

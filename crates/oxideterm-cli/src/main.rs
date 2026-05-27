@@ -22,6 +22,7 @@ mod output;
 mod oxide;
 mod paths;
 mod plugins;
+mod portable;
 mod quick_commands;
 mod report;
 mod secrets;
@@ -64,6 +65,7 @@ fn run(cli: Cli) -> CliResult<i32> {
         Command::Forwards(command) => forwards::run(command),
         Command::QuickCommands(command) => quick_commands::run(command),
         Command::Plugins(command) => plugins::run(command),
+        Command::Portable(command) => portable::run(command),
         Command::Secrets(command) => secrets::run(command),
         Command::Oxide(command) => oxide::run(command),
         Command::CloudSync(command) => {

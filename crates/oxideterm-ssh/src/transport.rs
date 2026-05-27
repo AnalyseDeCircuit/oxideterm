@@ -141,6 +141,22 @@ pub enum SshTransportCommand {
     Close,
 }
 
+fn ssh_channel_error_is_transport_lost(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    [
+        "connection is closed",
+        "connection closed",
+        "connection reset",
+        "reset by peer",
+        "broken pipe",
+        "not connected",
+        "disconnected",
+        "eof",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+}
+
 pub trait SshForwardStream: AsyncRead + AsyncWrite + Unpin + Send {}
 
 impl<T> SshForwardStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -315,3 +331,22 @@ include!("transport/client.rs");
 include!("transport/handler.rs");
 include!("transport/auth.rs");
 include!("transport/paths.rs");
+
+#[cfg(test)]
+mod transport_lost_tests {
+    use super::ssh_channel_error_is_transport_lost;
+
+    #[test]
+    fn channel_error_classifier_matches_idle_closed_transport() {
+        assert!(ssh_channel_error_is_transport_lost(
+            "SSH channel error: Connection is closed"
+        ));
+        assert!(ssh_channel_error_is_transport_lost(
+            "write failed: broken pipe"
+        ));
+        assert!(ssh_channel_error_is_transport_lost("client disconnected"));
+        assert!(!ssh_channel_error_is_transport_lost(
+            "server refused PTY allocation"
+        ));
+    }
+}

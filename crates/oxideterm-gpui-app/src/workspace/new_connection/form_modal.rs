@@ -12,9 +12,11 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let mode = new_connection_form_mode(
             self.editing_saved_connection_id.as_deref(),
+            self.duplicating_saved_connection_id.as_deref(),
             self.saved_connection_prompt_action,
         );
         let prompt_mode = mode == super::form_state::NewConnectionFormMode::SavedConnectionPrompt;
+        let duplicate_mode = mode == super::form_state::NewConnectionFormMode::DuplicateTemplate;
         let edit_properties_mode = mode.submits_saved_connection_properties();
         let drill_down_mode = self.drill_down_parent_node_id.is_some();
         let modal_max_height = f32::from(window.viewport_size().height)
@@ -25,6 +27,8 @@ impl WorkspaceApp {
             self.i18n
                 .t("sessionManager.connect_prompt.title")
                 .replace("{{name}}", &form.name)
+        } else if duplicate_mode {
+            self.i18n.t("sessionManager.edit_properties.duplicate_title")
         } else if edit_properties_mode {
             self.i18n.t("sessionManager.edit_properties.title")
         } else {
@@ -44,6 +48,9 @@ impl WorkspaceApp {
                 .replace("</host>", "")
         } else if prompt_mode {
             format!("{}@{}:{}", form.username, form.host, form.port)
+        } else if duplicate_mode {
+            self.i18n
+                .t("sessionManager.edit_properties.duplicate_description")
         } else if edit_properties_mode {
             self.i18n.t("sessionManager.edit_properties.description")
         } else {
@@ -626,7 +633,7 @@ impl WorkspaceApp {
                             cx,
                         ))
                         .when(
-                            self.editing_saved_connection_id.is_none()
+                            !edit_properties_mode
                                 && self.saved_connection_prompt_action.is_none()
                                 && !drill_down_mode,
                             |footer| {
@@ -654,13 +661,13 @@ impl WorkspaceApp {
                                 } else {
                                     self.i18n.t("ssh.drill_down.connect")
                                 }
-                            } else if self.editing_saved_connection_id.is_some() {
+                            } else if edit_properties_mode {
                                 self.i18n.t("sessionManager.edit_properties.save")
                             } else {
                                 self.i18n.t("ssh.form.connect")
                             },
                             true,
-                            if self.editing_saved_connection_id.is_some()
+                            if edit_properties_mode
                                 && self.saved_connection_prompt_action.is_none()
                             {
                                 ConnectionButtonAction::Save

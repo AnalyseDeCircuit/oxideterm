@@ -715,8 +715,8 @@ impl WorkspaceApp {
                 has_background,
                 cx.listener({
                     let id = conn.id.clone();
-                    move |this, _event, _window, cx| {
-                        this.duplicate_connection(&id, cx);
+                    move |this, _event, window, cx| {
+                        this.duplicate_connection(&id, window, cx);
                     }
                 }),
                 cx,
@@ -872,8 +872,8 @@ impl WorkspaceApp {
                 has_background,
                 cx.listener({
                     let id = conn.id.clone();
-                    move |this, _event, _window, cx| {
-                        this.duplicate_connection(&id, cx);
+                    move |this, _event, window, cx| {
+                        this.duplicate_connection(&id, window, cx);
                     }
                 }),
                 cx,

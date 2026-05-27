@@ -1,5 +1,8 @@
 impl WorkspaceApp {
-    fn render_oxide_export_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::workspace) fn render_oxide_export_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let Some(dialog) = self.session_manager.oxide_export_dialog.as_ref() else {
             return div().into_any_element();

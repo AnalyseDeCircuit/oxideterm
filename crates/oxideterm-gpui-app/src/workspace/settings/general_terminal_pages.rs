@@ -263,67 +263,6 @@ impl WorkspaceApp {
         }
     }
 
-    fn settings_portable_section(
-        &self,
-        section_index: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        match section_index {
-            0 => self.settings_card(
-                "settings_view.general.portable_runtime",
-                "settings_view.general.portable_runtime_disabled_hint",
-                vec![
-                    self.value_row(
-                        "settings_view.general.portable_root_dir",
-                        "settings_view.general.portable_runtime_hint",
-                        self.i18n
-                            .t("settings_view.general.portable_instance_lock_unavailable"),
-                        cx,
-                    ),
-                    self.value_row(
-                        "settings_view.general.portable_activation",
-                        "settings_view.general.portable_runtime_hint",
-                        self.i18n.t("settings_view.general.portable_activation_disabled"),
-                        cx,
-                    ),
-                    self.value_row(
-                        "settings_view.general.portable_config_path",
-                        "settings_view.general.portable_runtime_hint",
-                        self.i18n
-                            .t("settings_view.general.portable_instance_lock_unavailable"),
-                        cx,
-                    ),
-                    self.value_row(
-                        "settings_view.general.portable_biometric",
-                        "settings_view.general.portable_runtime_hint",
-                        self.i18n
-                            .t("settings_view.general.portable_biometric_unsupported"),
-                        cx,
-                    ),
-                    self.value_row(
-                        "settings_view.general.portable_change_password",
-                        "settings_view.general.portable_runtime_hint",
-                        self.i18n.t("common.disabled"),
-                        cx,
-                    ),
-                    self.value_row(
-                        "settings_view.general.cli_tool",
-                        "settings_view.general.cli_tool_hint",
-                        self.i18n.t("settings_view.general.cli_not_installed"),
-                        cx,
-                    ),
-                    self.value_row(
-                        "settings_view.general.cli_install",
-                        "settings_view.general.cli_reinstall_hint",
-                        self.i18n.t("settings_view.general.cli_not_bundled"),
-                        cx,
-                    ),
-                ],
-            ),
-            _ => div().into_any_element(),
-        }
-    }
-
     fn settings_terminal_section(
         &self,
         section_index: usize,

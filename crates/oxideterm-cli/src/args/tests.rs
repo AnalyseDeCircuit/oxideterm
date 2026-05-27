@@ -952,6 +952,48 @@ fn parses_forwards_quick_commands_plugins_and_secrets() {
 }
 
 #[test]
+fn parses_portable_runtime_commands() {
+    let status = Cli::parse_from(["oxideterm", "portable", "status", "--json"]);
+    assert!(matches!(
+        status.command,
+        Command::Portable(PortableCommand {
+            action: PortableAction::Status(PortableStatusArgs { json: true })
+        })
+    ));
+
+    let setup = Cli::parse_from(["oxideterm", "portable", "setup", "--password-stdin"]);
+    assert!(matches!(
+        setup.command,
+        Command::Portable(PortableCommand {
+            action: PortableAction::Setup(PortablePasswordArgs {
+                password_stdin: true,
+                ..
+            })
+        })
+    ));
+
+    let change = Cli::parse_from([
+        "oxideterm",
+        "portable",
+        "change-password",
+        "--current-password-env",
+        "OLD",
+        "--new-password-env",
+        "NEW",
+    ]);
+    assert!(matches!(
+        change.command,
+        Command::Portable(PortableCommand {
+            action: PortableAction::ChangePassword(PortableChangePasswordArgs {
+                current_password_env: Some(_),
+                new_password_env: Some(_),
+                ..
+            })
+        })
+    ));
+}
+
+#[test]
 fn parses_cloud_sync_backend_configure() {
     let cli = Cli::parse_from([
         "oxideterm",

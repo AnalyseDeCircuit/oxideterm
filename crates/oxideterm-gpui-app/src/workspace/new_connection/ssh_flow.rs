@@ -90,6 +90,17 @@ impl SshPromptHandler for NativeSshPromptHandler {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn saved_connection_form_source_id(&self) -> Option<&str> {
+        self.editing_saved_connection_id
+            .as_deref()
+            .or(self.duplicating_saved_connection_id.as_deref())
+    }
+
+    pub(in crate::workspace) fn saved_connection_form_uses_unloaded_secret(&self) -> bool {
+        self.saved_connection_form_source_id().is_some()
+            && self.saved_connection_prompt_action.is_none()
+    }
+
     pub(in crate::workspace) fn open_new_connection_form(
         &mut self,
         window: &mut Window,
@@ -108,6 +119,7 @@ impl WorkspaceApp {
         });
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
         self.new_connection_caret_visible = true;
@@ -149,6 +161,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form);
         self.drill_down_parent_node_id = Some(parent_node_id);
         self.editing_saved_connection_id = None;
+        self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
         self.new_connection_caret_visible = true;
@@ -165,6 +178,7 @@ impl WorkspaceApp {
         self.new_connection_form = None;
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
         self.host_key_challenge = None;
@@ -184,6 +198,7 @@ impl WorkspaceApp {
         }
         match new_connection_form_mode(
             self.editing_saved_connection_id.as_deref(),
+            self.duplicating_saved_connection_id.as_deref(),
             self.saved_connection_prompt_action,
         ) {
             NewConnectionFormMode::SavedConnectionPrompt => {
@@ -191,6 +206,9 @@ impl WorkspaceApp {
             }
             NewConnectionFormMode::EditProperties => {
                 self.save_editing_connection(window, cx);
+            }
+            NewConnectionFormMode::DuplicateTemplate => {
+                self.save_duplicate_connection_template(window, cx);
             }
             NewConnectionFormMode::NewConnection => {
                 self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
@@ -306,6 +324,7 @@ impl WorkspaceApp {
         self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
+        self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = Some(action);
         self.close_new_connection_select();
         self.new_connection_caret_visible = true;
@@ -327,6 +346,7 @@ impl WorkspaceApp {
         self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
+        self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
         self.new_connection_caret_visible = true;
@@ -391,9 +411,58 @@ impl WorkspaceApp {
                     Ok(_) => {
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
+                        self.duplicating_saved_connection_id = None;
                         self.close_new_connection_select();
                         self.session_manager.status =
                             Some(self.i18n.t("sessionManager.edit_properties.save"));
+                        self.queue_cloud_sync_dirty_refresh(cx);
+                        self.focus_active_pane(window, cx);
+                    }
+                    Err(error) => {
+                        if let Some(form) = self.new_connection_form.as_mut() {
+                            form.error = Some(error.to_string());
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.error = Some(error.to_string());
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn save_duplicate_connection_template(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(source_id) = self.duplicating_saved_connection_id.clone() else {
+            return;
+        };
+        let Some(form) = self.new_connection_form.as_ref() else {
+            return;
+        };
+        let source_connection = self.connection_store.get(&source_id).cloned();
+        let source_auth = source_connection
+            .as_ref()
+            .map(|connection| connection.auth.clone());
+        match save_request_from_form_with_existing_auth(form, None, source_auth.as_ref()) {
+            Ok(mut request) => {
+                if form.proxy_hops.is_empty()
+                    && let Some(connection) = source_connection.as_ref()
+                {
+                    // The modal edits the target connection fields only. If the
+                    // proxy chain was not expanded into editable rows, keep the
+                    // source chain just like Tauri's duplicate draft does.
+                    request.proxy_chain = connection.proxy_chain.clone();
+                }
+                match self.connection_store.upsert(request) {
+                    Ok(_) => {
+                        self.new_connection_form = None;
+                        self.editing_saved_connection_id = None;
+                        self.duplicating_saved_connection_id = None;
+                        self.close_new_connection_select();
+                        self.session_manager.status =
+                            Some(self.i18n.t("sessionManager.toast.connection_duplicated"));
                         self.queue_cloud_sync_dirty_refresh(cx);
                         self.focus_active_pane(window, cx);
                     }
@@ -787,6 +856,7 @@ impl WorkspaceApp {
             SshConnectionIntent::Connect => {
                 let mode = new_connection_form_mode(
                     self.editing_saved_connection_id.as_deref(),
+                    self.duplicating_saved_connection_id.as_deref(),
                     self.saved_connection_prompt_action,
                 );
                 let saved_connection_id = if mode.stores_connection_on_connect()
@@ -827,6 +897,7 @@ impl WorkspaceApp {
                     None
                 };
                 self.new_connection_form = None;
+                self.duplicating_saved_connection_id = None;
                 self.host_key_challenge = None;
                 self.close_new_connection_select();
                 if config
@@ -871,6 +942,7 @@ impl WorkspaceApp {
                 if self.saved_connection_prompt_action.is_some() {
                     self.new_connection_form = None;
                     self.editing_saved_connection_id = None;
+                    self.duplicating_saved_connection_id = None;
                     self.saved_connection_prompt_action = None;
                     self.close_new_connection_select();
                 }
@@ -911,6 +983,7 @@ impl WorkspaceApp {
                 self.active_ssh_node_id = Some(child_id.clone());
                 self.new_connection_form = None;
                 self.drill_down_parent_node_id = None;
+                self.duplicating_saved_connection_id = None;
                 self.close_new_connection_select();
                 self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
                 self.ensure_node_connection_started(&child_id);

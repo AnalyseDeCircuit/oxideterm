@@ -86,6 +86,8 @@
     "edit_properties": {
       "title": "編輯連線",
       "description": "修改連線屬性。",
+      "duplicate_title": "複製連線",
+      "duplicate_description": "以目前連線作為範本，修改後儲存為新主機。",
       "name": "名稱",
       "host": "主機",
       "port": "連接埠",

@@ -10,7 +10,7 @@ impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             language: Language::ZhCn,
-            update_channel: UpdateChannel::Beta,
+            update_channel: UpdateChannel::GpuiPreview,
             extra: ExtraFields::new(),
         }
     }
@@ -244,4 +244,3 @@ impl Default for TerminalSettings {
         }
     }
 }
-

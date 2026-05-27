@@ -28,6 +28,8 @@ members = [
   "crates/oxideterm-ide-fs",
   "crates/oxideterm-forwarding",
   "crates/oxideterm-preview",
+  "crates/oxideterm-portable-runtime",
+  "crates/oxideterm-update",
   "crates/oxideterm-i18n",
   "crates/oxideterm-launcher",
   "crates/oxideterm-local-files",
@@ -71,6 +73,7 @@ dashmap = "6.1"
 dirs = "6"
 encoding_rs = "0.8"
 futures-util = "0.3"
+fs2 = "0.4"
 gpui = "=0.2.2"
 gpui-component = { version = "=0.5.1", default-features = false }
 icy_sixel = "0.5.0"

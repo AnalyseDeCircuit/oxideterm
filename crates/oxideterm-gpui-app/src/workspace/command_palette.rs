@@ -693,6 +693,7 @@ impl WorkspaceApp {
         });
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
         self.new_connection_caret_visible = true;
@@ -716,6 +717,7 @@ impl WorkspaceApp {
                     );
                     self.drill_down_parent_node_id = None;
                     self.editing_saved_connection_id = None;
+                    self.duplicating_saved_connection_id = None;
                     self.saved_connection_prompt_action = None;
                     self.close_new_connection_select();
                     self.new_connection_caret_visible = true;

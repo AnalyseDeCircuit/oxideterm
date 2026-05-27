@@ -291,17 +291,32 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    #[allow(dead_code)]
-    fn duplicate_connection(&mut self, id: &str, cx: &mut Context<Self>) {
-        match self.connection_store.duplicate(id) {
-            Ok(Some(_)) => {
-                self.session_manager.status =
-                    Some(self.i18n.t("sessionManager.toast.connection_duplicated"));
-                self.queue_cloud_sync_dirty_refresh(cx);
-            }
-            Ok(None) => {}
-            Err(error) => self.session_manager.status = Some(error.to_string()),
-        }
+    fn duplicate_connection(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(conn) = self.connection_store.get(id).cloned() else {
+            return;
+        };
+        let mut form = form_from_saved_connection(&conn, None);
+        form.name = duplicate_connection_template_name(
+            &conn.name,
+            self.connection_store
+                .connections()
+                .iter()
+                .map(|connection| connection.name.as_str()),
+        );
+        form.focused_field = NewConnectionField::Name;
+        form.field_focused = true;
+
+        self.prepare_modal_interaction_boundary();
+        self.new_connection_form = Some(form);
+        self.drill_down_parent_node_id = None;
+        self.editing_saved_connection_id = None;
+        self.duplicating_saved_connection_id = Some(id.to_string());
+        self.saved_connection_prompt_action = None;
+        self.close_session_row_menus();
+        self.close_new_connection_select();
+        self.new_connection_caret_visible = true;
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle);
         cx.notify();
     }
 

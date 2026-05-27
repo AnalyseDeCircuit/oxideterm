@@ -77,6 +77,15 @@ actions!(
 );
 
 fn main() {
+    // Match Tauri's startup ordering: portable detection and instance locking
+    // happen before any settings or connection stores choose their data path.
+    if let Err(error) = oxideterm_portable_runtime::initialize_portable_runtime()
+        .and_then(|_| oxideterm_portable_runtime::acquire_portable_instance_lock())
+    {
+        eprintln!("failed to initialize OxideTerm portable runtime: {error}");
+        std::process::exit(1);
+    }
+
     Application::new()
         .with_assets(NativeAssets)
         .run(|cx: &mut App| {

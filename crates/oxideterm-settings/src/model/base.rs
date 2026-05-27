@@ -69,11 +69,12 @@ impl Language {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum UpdateChannel {
     Stable,
-    #[default]
     Beta,
+    #[default]
+    GpuiPreview,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

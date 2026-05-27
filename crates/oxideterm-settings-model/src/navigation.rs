@@ -41,7 +41,7 @@ pub fn settings_tab_section_count(
         SettingsTab::Keybindings => {
             keybinding_settings_section_count(dynamic.visible_keybinding_scope_count)
         }
-        SettingsTab::Help => 3,
+        SettingsTab::Help => 6,
     }
 }
 

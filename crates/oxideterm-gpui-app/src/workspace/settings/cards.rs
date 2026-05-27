@@ -21,14 +21,6 @@ impl WorkspaceApp {
         )
     }
 
-    fn settings_value_display(&self, value: String) -> Div {
-        // Fixed settings values borrow Select chrome in Tauri, but they are not
-        // popup triggers. Keep them on the read-only primitive instead of the
-        // interactive settings_select_trigger path.
-        readonly_value_trigger(&self.tokens, value)
-            .w(px(self.tokens.metrics.settings_select_width))
-    }
-
     fn settings_select_control(
         &self,
         select_id: SettingsSelect,
@@ -469,21 +461,6 @@ impl WorkspaceApp {
         tabs.into_any_element()
     }
 
-    fn value_row(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        value: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.setting_row(
-            label_key,
-            hint_key,
-            self.settings_value_display(value).into_any_element(),
-            cx,
-        )
-    }
-
     pub(in crate::workspace) fn update_select_anchor(
         &mut self,
         anchor: OverlayAnchor,
@@ -744,6 +721,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.close_settings_select();
+        if let Some(previous_input) = self.focused_settings_input.filter(|previous| *previous != input)
+        {
+            self.clear_settings_input_draft(previous_input);
+        }
         self.focused_settings_input = Some(input);
         self.clear_ime_selection();
         self.settings_input_draft = current_value;
@@ -790,6 +771,9 @@ impl WorkspaceApp {
             SettingsInput::NativePluginRegistryUrl => {
                 self.plugin_manager_registry_url_draft.clone()
             }
+            SettingsInput::PortableCurrentPassword => self.portable_current_password.clone(),
+            SettingsInput::PortableNewPassword => self.portable_new_password.clone(),
+            SettingsInput::PortableConfirmPassword => self.portable_confirm_password.clone(),
             SettingsInput::PluginSetting(index) => self
                 .plugin_registry
                 .contributions()
@@ -871,6 +855,21 @@ impl WorkspaceApp {
             SettingsInput::NativePluginRegistryUrl => {
                 self.plugin_manager_registry_url_draft =
                     self.settings_input_draft.trim().to_string();
+                cx.notify();
+            }
+            SettingsInput::PortableCurrentPassword => {
+                zeroize::Zeroize::zeroize(&mut self.portable_current_password);
+                self.portable_current_password = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::PortableNewPassword => {
+                zeroize::Zeroize::zeroize(&mut self.portable_new_password);
+                self.portable_new_password = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::PortableConfirmPassword => {
+                zeroize::Zeroize::zeroize(&mut self.portable_confirm_password);
+                self.portable_confirm_password = self.settings_input_draft.clone();
                 cx.notify();
             }
             SettingsInput::PluginSetting(index) => {

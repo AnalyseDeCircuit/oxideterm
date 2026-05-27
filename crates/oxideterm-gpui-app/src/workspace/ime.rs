@@ -945,8 +945,7 @@ impl WorkspaceApp {
 
     fn new_connection_field_accepts_ime(&self, field: NewConnectionField) -> bool {
         if field == NewConnectionField::Password
-            && self.editing_saved_connection_id.is_some()
-            && self.saved_connection_prompt_action.is_none()
+            && self.saved_connection_form_uses_unloaded_secret()
             && self
                 .new_connection_form
                 .as_ref()
