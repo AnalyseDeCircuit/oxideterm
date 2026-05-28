@@ -1029,6 +1029,14 @@ impl WorkspaceApp {
         if self.has_ai_sidebar_floating_overlay() {
             self.close_ai_sidebar_popovers();
             changed = true;
+        } else if self.ai_model_selector_open
+            && self.ai_model_selector_scope == Some(AiModelSelectorScope::TerminalInline)
+        {
+            // The terminal inline model selector is painted inside the pane
+            // instead of the sidebar popover portal, so include it in the same
+            // transient-dismiss path used by wheel/outside-pointer behavior.
+            self.close_ai_model_selector();
+            changed = true;
         }
         if self.workspace_tooltip.is_some() || self.workspace_tooltip_pending.is_some() {
             self.workspace_tooltip = None;

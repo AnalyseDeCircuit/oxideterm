@@ -164,6 +164,7 @@ impl WorkspaceApp {
                 ssh_config_hosts_loading: false,
                 error: None,
             },
+            onboarding: OnboardingState::from_settings(&settings),
             shortcuts_modal: ShortcutsModalState {
                 open: false,
                 query: String::new(),

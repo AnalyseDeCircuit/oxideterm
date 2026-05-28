@@ -193,6 +193,7 @@ fn build_saved_connection_from_sync_payload(
         proxy_chain,
         options: ConnectionOptions {
             agent_forwarding: payload.agent_forwarding,
+            post_connect_command: payload.post_connect_command.clone(),
             ..Default::default()
         },
         created_at: parse_connection_sync_timestamp(&payload.created_at, "connection created_at")?,
@@ -204,7 +205,7 @@ fn build_saved_connection_from_sync_payload(
         updated_at: Some(record_updated_at),
         color: payload.color.clone(),
         tags: payload.tags.clone(),
-        post_connect_command: payload.post_connect_command.clone(),
+        post_connect_command: None,
     })
 }
 

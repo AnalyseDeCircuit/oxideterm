@@ -189,6 +189,9 @@ impl Render for WorkspaceApp {
                 } else if this.handle_session_manager_basic_dialog_footer_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.onboarding.open && this.handle_onboarding_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if !this.command_palette.open
                     && this.settings_page.keybinding_recording_action_id.is_none()
                     && crate::keybindings::keystroke_matches_action(
@@ -764,6 +767,9 @@ impl Render for WorkspaceApp {
             })
             .when(self.command_palette.open, |root| {
                 root.child(self.render_command_palette(cx))
+            })
+            .when(self.onboarding.open, |root| {
+                root.child(self.render_onboarding_modal(window, cx))
             })
             .when(self.shortcuts_modal.open, |root| {
                 root.child(self.render_shortcuts_modal(cx))

@@ -306,7 +306,7 @@ pub(super) fn form_from_saved_connection(
         group: group_label_for_form(conn.group.as_deref()),
         color: conn.color.clone().unwrap_or_default(),
         tags: conn.tags.clone(),
-        post_connect_command: conn.post_connect_command.clone().unwrap_or_default(),
+        post_connect_command: conn.post_connect_command().unwrap_or_default().to_string(),
         agent_forwarding: conn.options.agent_forwarding,
         save_connection: true,
         error,
@@ -411,7 +411,7 @@ pub(super) fn ssh_config_from_saved_connection(
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
         agent_forwarding: conn.options.agent_forwarding,
         strict_host_key_checking: true,
-        post_connect_command: conn.post_connect_command.clone(),
+        post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         ..SshConfig::default()
     })
 }

@@ -84,6 +84,7 @@ enum PaletteAction {
     ThemeNext(bool),
     CursorStyle(SettingsCursorStyle),
     ToggleFps,
+    ShowWelcome,
     RuntimePluginCommand {
         plugin_id: String,
         command: String,
@@ -478,6 +479,7 @@ impl WorkspaceApp {
                     cx,
                 );
             }
+            PaletteAction::ShowWelcome => self.open_onboarding_from_palette(cx),
             PaletteAction::RuntimePluginCommand { plugin_id, command } => {
                 self.dispatch_native_plugin_command(plugin_id, command, cx);
             }
@@ -2436,13 +2438,22 @@ fn command_palette_specs() -> Vec<CommandSpec> {
 }
 
 fn help_palette_specs() -> Vec<CommandSpec> {
-    vec![CommandSpec {
-        id: "cmd:show_shortcuts",
-        label_key: "command_palette.cmd_show_shortcuts".into(),
-        icon: LucideIcon::Keyboard,
-        shortcut_action: Some("app.showShortcuts"),
-        action: PaletteAction::Keybinding("app.showShortcuts"),
-    }]
+    vec![
+        CommandSpec {
+            id: "cmd:show_shortcuts",
+            label_key: "command_palette.cmd_show_shortcuts".into(),
+            icon: LucideIcon::Keyboard,
+            shortcut_action: Some("app.showShortcuts"),
+            action: PaletteAction::Keybinding("app.showShortcuts"),
+        },
+        CommandSpec {
+            id: "cmd:show_welcome",
+            label_key: "command_palette.cmd_show_welcome".into(),
+            icon: LucideIcon::Home,
+            shortcut_action: None,
+            action: PaletteAction::ShowWelcome,
+        },
+    ]
 }
 
 fn shortcut_reference_rows() -> Vec<(

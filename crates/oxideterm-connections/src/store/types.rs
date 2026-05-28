@@ -91,6 +91,8 @@ pub struct ConnectionOptions {
     pub term_type: Option<String>,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_connect_command: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -173,6 +175,12 @@ impl SavedConnection {
         self.last_used_at = Some(now);
         self.updated_at = Some(now);
     }
+
+    pub fn post_connect_command(&self) -> Option<&str> {
+        self.post_connect_command
+            .as_deref()
+            .or(self.options.post_connect_command.as_deref())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -214,7 +222,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             color: conn.color.clone(),
             tags: conn.tags.clone(),
             agent_forwarding: conn.options.agent_forwarding,
-            post_connect_command: conn.post_connect_command.clone(),
+            post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         }
     }
 }
@@ -244,6 +252,8 @@ pub struct ConnectionStoreData {
     #[serde(default)]
     pub groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connection_tombstones: Vec<DeletedConnectionTombstone>,
 }
 
@@ -253,6 +263,7 @@ impl Default for ConnectionStoreData {
             version: CONFIG_VERSION,
             connections: Vec::new(),
             groups: Vec::new(),
+            recent: Vec::new(),
             connection_tombstones: Vec::new(),
         }
     }
@@ -330,6 +341,7 @@ impl SavedConnectionsConflictStrategy {
 pub struct ConnectionStore {
     path: PathBuf,
     data: ConnectionStoreData,
+    storage_format: ConnectionStoreStorageFormat,
     keychain: ConnectionKeychain,
 }
 

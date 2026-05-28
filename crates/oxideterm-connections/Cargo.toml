@@ -16,6 +16,9 @@ rmp-serde.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 keyring.workspace = true
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSError", "NSString"] }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 russh = { path = "../russh" }
 sha2.workspace = true

@@ -12,6 +12,7 @@ mod launcher;
 mod local_terminal_background;
 mod new_connection;
 mod notification_center;
+mod onboarding;
 mod pane_tree;
 mod plugin_host;
 mod plugin_lifecycle;
@@ -101,8 +102,8 @@ use oxideterm_render_policy::{
 };
 use oxideterm_settings::{
     AI_SIDEBAR_MAX_WIDTH, AI_SIDEBAR_MIN_WIDTH, BackgroundFit, CursorStyle as SettingsCursorStyle,
-    FrostedGlassMode, HighlightRuleRenderMode, Language, PersistedSettings, SettingsStore,
-    TerminalEncoding as SettingsTerminalEncoding, default_settings_path,
+    FontFamily, FrostedGlassMode, HighlightRuleRenderMode, Language, PersistedSettings,
+    SettingsStore, TerminalEncoding as SettingsTerminalEncoding, default_settings_path,
 };
 use oxideterm_settings_model::{
     AiMcpServerDraft, AiModelRefreshDelivery, AiProviderKeyStatusDelivery, CloudSyncFormDraft,
@@ -153,6 +154,7 @@ use self::new_connection::{
     NewConnectionForm, NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab,
     SshConnectionWorkerResult,
 };
+use self::onboarding::OnboardingState;
 use self::pane_tree::SplitDrag;
 use self::quick_commands::QuickCommandsState;
 use self::session_manager::{AutoRouteModalState, SessionManagerState};
@@ -501,6 +503,7 @@ pub(crate) struct WorkspaceApp {
     terminal_cast_player: Option<TerminalCastPlayerState>,
     terminal_cast_seek_dragging: bool,
     command_palette: CommandPaletteState,
+    onboarding: OnboardingState,
     shortcuts_modal: ShortcutsModalState,
     settings_page: SettingsPageModel,
     quick_commands: QuickCommandsState,

@@ -177,7 +177,7 @@ pub(super) fn connection_request_from_spec(
                 .unwrap_or(false)
         }),
         post_connect_command: spec.post_connect_command.unwrap_or_else(|| {
-            existing.and_then(|connection| connection.post_connect_command.clone())
+            existing.and_then(|connection| connection.post_connect_command().map(ToOwned::to_owned))
         }),
     })
 }

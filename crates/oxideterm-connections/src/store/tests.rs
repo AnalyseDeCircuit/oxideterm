@@ -178,6 +178,99 @@ mod tests {
     }
 
     #[test]
+    fn encrypted_tauri_connections_payload_round_trips() {
+        let mut data = ConnectionStoreData::default();
+        data.groups.push("Work".to_string());
+        data.recent.push("conn-1".to_string());
+        data.connections.push(SavedConnection {
+            id: "conn-1".to_string(),
+            version: CONFIG_VERSION,
+            name: "Work Host".to_string(),
+            group: Some("Work".to_string()),
+            host: "work.example.com".to_string(),
+            port: 22,
+            username: "me".to_string(),
+            auth: SavedAuth::Agent,
+            proxy_chain: Vec::new(),
+            options: ConnectionOptions {
+                post_connect_command: Some("uptime".to_string()),
+                ..ConnectionOptions::default()
+            },
+            created_at: "2026-01-01T00:00:00Z".parse().unwrap(),
+            last_used_at: None,
+            updated_at: None,
+            color: None,
+            tags: Vec::new(),
+            post_connect_command: None,
+        });
+
+        let key = [7u8; CONFIG_ENCRYPTION_KEY_LEN];
+        let bytes = encode_encrypted_connection_store_data_for_tests(&data, &key);
+        let raw = String::from_utf8(bytes.clone()).unwrap();
+        assert!(raw.contains("\"format\": \"oxideterm.config.encrypted\""));
+        assert!(!raw.contains("Work Host"));
+
+        let loaded = decode_connection_store_data_for_tests(&bytes, &key).unwrap();
+        assert_eq!(loaded.format, ConnectionStoreStorageFormat::Encrypted);
+        assert_eq!(loaded.data.connections.len(), 1);
+        assert_eq!(loaded.data.groups, vec!["Work"]);
+        assert_eq!(loaded.data.recent, vec!["conn-1"]);
+        assert_eq!(
+            loaded.data.connections[0]
+                .options
+                .post_connect_command
+                .as_deref(),
+            Some("uptime")
+        );
+    }
+
+    #[test]
+    fn plaintext_load_preserves_recent_and_moves_post_connect_command_to_tauri_options() {
+        let path = temp_store_path("tauri-options-command");
+        fs::write(
+            &path,
+            r##"{
+              "version": 1,
+              "connections": [
+                {
+                  "id": "conn-1",
+                  "version": 1,
+                  "name": "Home",
+                  "host": "192.168.1.2",
+                  "port": 22,
+                  "username": "me",
+                  "auth": { "type": "agent" },
+                  "options": {},
+                  "created_at": "2026-01-01T00:00:00Z",
+                  "post_connect_command": "echo ready"
+                }
+              ],
+              "groups": [],
+              "recent": ["conn-1"]
+            }"##,
+        )
+        .unwrap();
+
+        let store = ConnectionStore::load(&path).unwrap();
+
+        assert_eq!(store.data.recent, vec!["conn-1"]);
+        assert_eq!(
+            store.get("conn-1").unwrap().options.post_connect_command.as_deref(),
+            Some("echo ready")
+        );
+        store.save().unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+        let saved_json: serde_json::Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved_json["recent"], serde_json::json!(["conn-1"]));
+        let saved_connection = &saved_json["connections"][0];
+        assert!(saved_connection.get("post_connect_command").is_none());
+        assert_eq!(
+            saved_connection["options"]["post_connect_command"],
+            serde_json::json!("echo ready")
+        );
+    }
+
+    #[test]
     fn edit_preserves_tauri_connection_options_and_marks_used() {
         let path = temp_store_path("preserve-options");
         fs::write(

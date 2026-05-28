@@ -485,6 +485,7 @@ fn write_connection_secret(
             ));
         }
     };
+    let post_connect_command = connection.post_connect_command().map(ToOwned::to_owned);
     store
         .upsert(SaveConnectionRequest {
             id: Some(connection.id),
@@ -498,7 +499,7 @@ fn write_connection_secret(
             color: connection.color,
             tags: connection.tags,
             agent_forwarding: connection.options.agent_forwarding,
-            post_connect_command: connection.post_connect_command,
+            post_connect_command,
         })
         .map_err(|error| runtime_error(error, json))?;
     Ok(())

@@ -19,17 +19,21 @@ impl ConnectionStore {
     }
 
     fn load_without_side_effects(path: PathBuf) -> Result<Self> {
-        let data = if path.exists() {
+        let loaded = if path.exists() {
             let bytes =
                 fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
-            serde_json::from_slice(&bytes)
+            decode_connection_store_data(&bytes)
                 .with_context(|| format!("failed to parse {}", path.display()))?
         } else {
-            ConnectionStoreData::default()
+            LoadedConnectionStoreData {
+                data: ConnectionStoreData::default(),
+                format: ConnectionStoreStorageFormat::Missing,
+            }
         };
         Ok(Self {
             path,
-            data,
+            data: loaded.data,
+            storage_format: loaded.format,
             keychain: ConnectionKeychain::default(),
         })
     }
@@ -63,7 +67,7 @@ impl ConnectionStore {
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
-        let data = serde_json::to_vec_pretty(&self.data)?;
+        let data = encode_connection_store_data(&self.data, self.storage_format)?;
         fs::write(&self.path, data)
             .with_context(|| format!("failed to write {}", self.path.display()))
     }
@@ -90,6 +94,13 @@ impl ConnectionStore {
         let auth = self.materialize_auth(request.auth, existing_auth.as_ref())?;
         let proxy_chain = self.materialize_proxy_chain(request.proxy_chain)?;
         let next_keychain_ids = collect_keychain_ids_for_parts(&auth, &proxy_chain);
+        let post_connect_command = request.post_connect_command.and_then(|command| {
+            let command = command.trim().to_string();
+            (!command.is_empty()).then_some(command)
+        });
+        // Tauri stores this command under options; the top-level field remains
+        // readable for old native plaintext stores but is no longer emitted.
+        options.post_connect_command = post_connect_command.clone();
         let connection = SavedConnection {
             id: id.clone(),
             version: existing
@@ -113,12 +124,7 @@ impl ConnectionStore {
             updated_at: Some(now),
             color: request.color,
             tags: request.tags,
-            post_connect_command: request
-                .post_connect_command
-                .and_then(|command| {
-                    let command = command.trim().to_string();
-                    (!command.is_empty()).then_some(command)
-                }),
+            post_connect_command: None,
         };
         if let Some(index) = self.data.connections.iter().position(|conn| conn.id == id) {
             self.data.connections[index] = connection;
@@ -266,6 +272,9 @@ impl ConnectionStore {
             return Ok(false);
         };
         conn.touch();
+        self.data.recent.retain(|recent_id| recent_id != id);
+        self.data.recent.insert(0, id.to_string());
+        self.data.recent.truncate(10);
         self.save()?;
         Ok(true)
     }
@@ -750,7 +759,12 @@ impl ConnectionStore {
     }
 
     fn normalize(&mut self) {
-        self.data.connection_tombstones = active_connection_tombstones(&self.data.connection_tombstones);
+        self.data.connection_tombstones =
+            active_connection_tombstones(&self.data.connection_tombstones);
+        self.data
+            .recent
+            .retain(|recent_id| self.data.connections.iter().any(|conn| &conn.id == recent_id));
+        self.data.recent.dedup();
         self.data
             .groups
             .sort_by(|left, right| left.to_lowercase().cmp(&right.to_lowercase()));
@@ -764,6 +778,13 @@ impl ConnectionStore {
         for group in implicit_groups {
             if !self.data.groups.contains(&group) {
                 self.data.groups.push(group);
+            }
+        }
+        for conn in &mut self.data.connections {
+            if conn.options.post_connect_command.is_none() {
+                conn.options.post_connect_command = conn.post_connect_command.take();
+            } else {
+                conn.post_connect_command = None;
             }
         }
         self.data
@@ -787,6 +808,7 @@ impl ConnectionStore {
             .connections
             .iter()
             .position(|connection| connection.id == id)?;
+        self.data.recent.retain(|recent_id| recent_id != id);
         Some(self.data.connections.remove(position))
     }
 

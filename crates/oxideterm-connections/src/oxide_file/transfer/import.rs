@@ -408,10 +408,14 @@ fn merge_saved_connection(
     if imported_has_proxy_chain {
         existing.proxy_chain = imported.proxy_chain;
     }
+    let legacy_post_connect_command = imported.post_connect_command;
     existing.options = merge_options(existing.options, imported.options, imported_has_proxy_chain);
+    if existing.options.post_connect_command.is_none() {
+        existing.options.post_connect_command = legacy_post_connect_command;
+    }
     existing.color = imported.color.or(existing.color);
     existing.tags = merge_tags(existing.tags, imported.tags);
-    existing.post_connect_command = imported.post_connect_command.or(existing.post_connect_command);
+    existing.post_connect_command = None;
     existing
 }
 
@@ -444,6 +448,7 @@ fn merge_options(
         existing.term_type = imported.term_type;
     }
     existing.agent_forwarding |= imported.agent_forwarding;
+    existing.post_connect_command = imported.post_connect_command.or(existing.post_connect_command);
     if imported_has_proxy_chain {
         existing.jump_host = None;
     }

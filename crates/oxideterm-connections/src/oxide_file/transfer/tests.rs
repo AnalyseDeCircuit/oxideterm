@@ -38,6 +38,7 @@ mod tests {
                 jump_host: None,
                 term_type: Some("xterm-256color".to_string()),
                 agent_forwarding: true,
+                post_connect_command: None,
             },
             created_at: Utc::now(),
             last_used_at: None,

@@ -20,6 +20,13 @@ use crate::{
 
 pub const SETTINGS_FILENAME: &str = "settings.json";
 const MAX_SETTINGS_FILE_BYTES: u64 = 2 * 1024 * 1024;
+const BOOTSTRAP_FILENAME: &str = "bootstrap.json";
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct BootstrapConfig {
+    #[serde(default)]
+    data_dir: Option<String>,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,21 +74,35 @@ pub fn default_settings_path() -> PathBuf {
         return data_dir.join(SETTINGS_FILENAME);
     }
 
+    if let Some(data_dir) = bootstrap_data_dir() {
+        return data_dir.join(SETTINGS_FILENAME);
+    }
+
+    default_settings_dir().join(SETTINGS_FILENAME)
+}
+
+fn default_settings_dir() -> PathBuf {
     if cfg!(windows) {
         if let Some(config_home) = std::env::var_os("APPDATA") {
-            return PathBuf::from(config_home)
-                .join("OxideTerm")
-                .join(SETTINGS_FILENAME);
+            return PathBuf::from(config_home).join("OxideTerm");
         }
     }
 
     if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home)
-            .join(".oxideterm")
-            .join(SETTINGS_FILENAME);
+        return PathBuf::from(home).join(".oxideterm");
     }
 
-    PathBuf::from(SETTINGS_FILENAME)
+    PathBuf::from(".")
+}
+
+fn bootstrap_data_dir() -> Option<PathBuf> {
+    let path = default_settings_dir().join(BOOTSTRAP_FILENAME);
+    let contents = fs::read_to_string(path).ok()?;
+    let bootstrap: BootstrapConfig = serde_json::from_str(&contents).ok()?;
+    let data_dir = PathBuf::from(bootstrap.data_dir?);
+    // Tauri ignores relative bootstrap paths; native must do the same so both
+    // frontends resolve to one effective data directory.
+    data_dir.is_absolute().then_some(data_dir)
 }
 
 pub fn save_settings_to_path(

@@ -630,9 +630,24 @@ impl WorkspaceApp {
             changed = true;
         }
         if self.ai_model_selector_search_focused || self.ai_model_selector_open {
+            // The AI model selector can live either in the sidebar portal or
+            // inside the terminal inline panel. A generic outside blur should
+            // release the searchable select without restoring inline focus.
             self.ai_model_selector_search_focused = false;
             self.ai_model_selector_open = false;
             self.ai_model_selector_scope = None;
+            self.ai_model_selector_focus_origin = None;
+            self.ai_model_selector_search_query.clear();
+            self.ai_model_selector_highlighted_model = None;
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if self.ai_inline_panel.prompt_focused {
+            // The inline AI prompt is rendered inside the terminal pane rather
+            // than as a normal form control, so it must explicitly join the
+            // shared blur path or it remains the active IME target after an
+            // outside click.
+            self.ai_inline_panel.prompt_focused = false;
             self.ime_marked_text = None;
             changed = true;
         }
