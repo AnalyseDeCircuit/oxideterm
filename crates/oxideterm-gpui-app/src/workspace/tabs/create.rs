@@ -81,17 +81,6 @@ impl WorkspaceApp {
         Ok(session_id)
     }
 
-    pub(super) fn create_ssh_terminal_tab(
-        &mut self,
-        config: SshConfig,
-        title: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<()> {
-        let node_id = self.materialize_ssh_root_node(config.clone(), title.clone(), None);
-        self.queue_ssh_terminal_tab_for_node(node_id, config, title, None, window, cx)
-    }
-
     pub(super) fn open_or_create_saved_ssh_terminal_tab(
         &mut self,
         saved_connection_id: String,
@@ -107,16 +96,19 @@ impl WorkspaceApp {
                 .and_then(|node| node.terminal_ids.first().copied())
             && self.focus_terminal_session(session_id, window, cx)
         {
+            let _ = self.connection_store.mark_used(&saved_connection_id);
             return Ok(());
         }
         if let Some(node_id) = self.saved_ssh_nodes.get(&saved_connection_id).cloned()
             && let Some(node) = self.ssh_nodes.get(&node_id).cloned()
         {
-            self.queue_ssh_terminal_tab_for_node(
+            self.queue_ssh_terminal_tab_for_node_with_mark_used(
                 node_id,
                 node.config,
                 title,
-                Some(saved_connection_id),
+                Some(saved_connection_id.clone()),
+                Some(saved_connection_id.clone()),
+                None,
                 window,
                 cx,
             )?;
@@ -139,11 +131,13 @@ impl WorkspaceApp {
                 .map(|snapshot| snapshot.config)
                 .ok_or_else(|| anyhow::anyhow!("target node was not materialized"))?;
             let target_node_id = expansion.target_node_id;
-            self.queue_ssh_terminal_tab_for_node(
+            self.queue_ssh_terminal_tab_for_node_with_mark_used(
                 target_node_id,
                 target_config,
                 title,
-                Some(saved_connection_id),
+                Some(saved_connection_id.clone()),
+                Some(saved_connection_id.clone()),
+                None,
                 window,
                 cx,
             )?;
@@ -158,17 +152,20 @@ impl WorkspaceApp {
                     .and_then(|node| node.terminal_ids.first().copied())
                     && self.focus_terminal_session(session_id, window, cx)
                 {
+                    let _ = self.connection_store.mark_used(&saved_connection_id);
                     return Ok(());
                 }
                 if let Some(node) = self.ssh_nodes.get(&existing_node_id).cloned() {
                     // Tauri's saved direct-open path reuses an existing root
                     // node by host/port/user without rewriting the node origin
                     // to the saved connection. Keep the same tree owner here.
-                    self.queue_ssh_terminal_tab_for_node(
+                    self.queue_ssh_terminal_tab_for_node_with_mark_used(
                         existing_node_id,
                         node.config,
                         node.title,
                         node.saved_connection_id,
+                        Some(saved_connection_id.clone()),
+                        None,
                         window,
                         cx,
                     )?;
@@ -180,15 +177,52 @@ impl WorkspaceApp {
                 title.clone(),
                 Some(saved_connection_id.clone()),
             );
-            self.queue_ssh_terminal_tab_for_node(
+            self.queue_ssh_terminal_tab_for_node_with_mark_used(
                 node_id,
                 config,
                 title,
-                Some(saved_connection_id),
+                Some(saved_connection_id.clone()),
+                Some(saved_connection_id.clone()),
+                None,
                 window,
                 cx,
             )
         }
+    }
+
+    pub(super) fn try_reuse_active_saved_connection_terminal(
+        &mut self,
+        saved_connection_id: &str,
+        connection: &oxideterm_connections::SavedConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session_id) = self.ssh_nodes.iter().find_map(|(node_id, node)| {
+            // Match Tauri connectToSaved: a saved connection with missing
+            // credentials may still focus an already-active root node with the
+            // same endpoint, but it must not create a new terminal.
+            let matching_root = self
+                .node_runtime_store
+                .snapshot(node_id)
+                .is_some_and(|snapshot| {
+                    snapshot.depth == 0
+                        && snapshot.config.host == connection.host
+                        && snapshot.config.port == connection.port
+                        && snapshot.config.username == connection.username
+                });
+            (matching_root
+                && node.readiness == NodeReadiness::Ready
+                && !node.terminal_ids.is_empty())
+            .then_some(node.terminal_ids[0])
+        }) else {
+            return false;
+        };
+
+        if !self.focus_terminal_session(session_id, window, cx) {
+            return false;
+        }
+        let _ = self.connection_store.mark_used(saved_connection_id);
+        true
     }
 
     fn existing_direct_root_node_for_saved_config(&self, config: &SshConfig) -> Option<NodeId> {
@@ -204,7 +238,7 @@ impl WorkspaceApp {
             .map(|node| NodeId::new(node.id))
     }
 
-    fn materialize_ssh_root_node(
+    pub(in crate::workspace) fn materialize_ssh_root_node(
         &mut self,
         config: SshConfig,
         title: String,
@@ -501,6 +535,48 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
+        self.queue_ssh_terminal_tab_for_node_with_mark_used(
+            node_id,
+            config,
+            title,
+            saved_connection_id,
+            None,
+            None,
+            window,
+            cx,
+        )
+    }
+
+    fn save_connection_after_terminal_open(
+        &mut self,
+        request: SaveConnectionRequest,
+        cx: &mut Context<Self>,
+    ) {
+        // Tauri opens the terminal first and treats save failures as a toast,
+        // not as a failed SSH connection attempt.
+        if let Err(error) = self.connection_store.upsert(request) {
+            self.push_command_palette_toast(
+                self.i18n.t("modals.new_connection.save_failed"),
+                Some(error.to_string()),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        }
+        self.queue_cloud_sync_dirty_refresh(cx);
+    }
+
+    pub(in crate::workspace) fn queue_ssh_terminal_tab_for_node_with_mark_used(
+        &mut self,
+        node_id: NodeId,
+        config: SshConfig,
+        title: String,
+        saved_connection_id: Option<String>,
+        mark_used_connection_id: Option<String>,
+        save_after_open: Option<SaveConnectionRequest>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
         self.ssh_nodes
             .entry(node_id.clone())
             .or_insert_with(|| WorkspaceSshNode {
@@ -519,17 +595,45 @@ impl WorkspaceApp {
                 window,
                 cx,
             )?;
+            if let Some(request) = save_after_open {
+                self.save_connection_after_terminal_open(request, cx);
+            }
+            if let Some(connection_id) = mark_used_connection_id.as_deref() {
+                let _ = self.connection_store.mark_used(connection_id);
+            }
             return Ok(());
         }
-        if !self
+        if let Some(existing) = self
             .pending_ssh_terminal_opens
             .iter()
-            .any(|pending| pending.node_id == node_id)
+            .find(|pending| pending.node_id == node_id)
         {
+            // Keep the first terminal-open request, but preserve the saved
+            // connection side effects when a later action joins an already
+            // pending node connection.
+            if (existing.mark_used_connection_id.is_none() && mark_used_connection_id.is_some())
+                || (existing.save_after_open.is_none() && save_after_open.is_some())
+            {
+                if let Some(existing) = self
+                    .pending_ssh_terminal_opens
+                    .iter_mut()
+                    .find(|pending| pending.node_id == node_id)
+                {
+                    if existing.mark_used_connection_id.is_none() {
+                        existing.mark_used_connection_id = mark_used_connection_id;
+                    }
+                    if existing.save_after_open.is_none() {
+                        existing.save_after_open = save_after_open;
+                    }
+                }
+            }
+        } else {
             self.pending_ssh_terminal_opens
                 .push_back(PendingSshTerminalOpen {
                     node_id: node_id.clone(),
                     saved_connection_id,
+                    mark_used_connection_id,
+                    save_after_open,
                     title,
                 });
         }
@@ -565,6 +669,13 @@ impl WorkspaceApp {
                 )
                 .is_ok()
             {
+                let mark_used_connection_id = request.mark_used_connection_id.clone();
+                if let Some(save_request) = request.save_after_open {
+                    self.save_connection_after_terminal_open(save_request, cx);
+                }
+                if let Some(connection_id) = mark_used_connection_id.as_deref() {
+                    let _ = self.connection_store.mark_used(connection_id);
+                }
                 opened = true;
             }
         }

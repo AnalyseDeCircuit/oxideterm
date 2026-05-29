@@ -210,12 +210,6 @@ impl WorkspaceApp {
                     .t("tabbar.confirm_close_other_desc")
                     .replace("{{count}}", &tab_ids.len().to_string()),
             ),
-            TabCloseConfirm::All { tab_ids } => (
-                "tabbar.confirm_close_all_title",
-                self.i18n
-                    .t("tabbar.confirm_close_all_desc")
-                    .replace("{{count}}", &tab_ids.len().to_string()),
-            ),
         };
         confirm_dialog_with_focus(
             &self.tokens,

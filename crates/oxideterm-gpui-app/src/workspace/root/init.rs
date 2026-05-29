@@ -463,6 +463,7 @@ impl WorkspaceApp {
             new_connection_select_focus_origin: None,
             new_connection_caret_visible: true,
             host_key_challenge: None,
+            active_proxy_connect_run: None,
             keyboard_interactive_challenge: None,
             ssh_worker_tx,
             ssh_worker_rx,
@@ -893,7 +894,7 @@ impl WorkspaceApp {
                     .update_window(window_handle, |_, window, cx| {
                         weak.update(cx, |workspace, cx| {
                             workspace.poll_ssh_worker_results(window, cx);
-                            workspace.poll_node_events(cx);
+                            workspace.poll_node_events(window, cx);
                             workspace.poll_reconnect_worker_results(window, cx);
                             workspace.poll_sftp_worker_results(cx);
                             workspace.poll_launcher_worker_results(cx);

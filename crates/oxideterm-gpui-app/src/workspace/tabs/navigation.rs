@@ -469,7 +469,7 @@ impl WorkspaceApp {
         self.close_tab_at_index(index, window, cx);
     }
 
-    fn close_tab_by_id(&mut self, tab_id: TabId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_tab_by_id(&mut self, tab_id: TabId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
             return;
         };
@@ -555,28 +555,6 @@ impl WorkspaceApp {
         self.close_other_tabs_or_active_pane(window, cx);
     }
 
-    pub(super) fn request_close_all_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_ids = self.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
-        if tab_ids.is_empty() {
-            return;
-        }
-        if self.tab_close_ids_include_ssh_terminal(&tab_ids) {
-            self.tab_close_confirm = Some(TabCloseConfirm::All { tab_ids });
-            self.reset_standard_confirm_focus();
-            cx.notify();
-            return;
-        }
-        if self.tab_close_ids_include_local_foreground_child_process(&tab_ids, cx) {
-            self.tab_close_confirm = Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
-            self.reset_standard_confirm_focus();
-            cx.notify();
-            return;
-        }
-        for tab_id in tab_ids {
-            self.close_tab_by_id(tab_id, window, cx);
-        }
-    }
-
     fn tab_close_ids_include_ssh_terminal(&self, tab_ids: &[TabId]) -> bool {
         tab_ids.iter().any(|tab_id| {
             self.tabs
@@ -639,7 +617,7 @@ impl WorkspaceApp {
             TabCloseConfirm::LocalChildProcess { tab_id } => {
                 self.close_tab_by_id(tab_id, window, cx);
             }
-            TabCloseConfirm::Other { tab_ids } | TabCloseConfirm::All { tab_ids } => {
+            TabCloseConfirm::Other { tab_ids } => {
                 if self.tab_close_ids_include_local_foreground_child_process(&tab_ids, cx) {
                     self.tab_close_confirm =
                         Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });

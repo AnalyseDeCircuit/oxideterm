@@ -227,6 +227,10 @@ impl NodeRouter {
         Ok(event)
     }
 
+    pub fn remove_runtime_subtree(&self, node_id: &NodeId) -> Vec<NodeId> {
+        self.runtime.remove_subtree(node_id)
+    }
+
     pub fn bind_terminal_session(
         &self,
         node_id: &NodeId,

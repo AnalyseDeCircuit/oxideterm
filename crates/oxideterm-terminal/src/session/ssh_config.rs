@@ -8,6 +8,8 @@ pub struct SshSessionConfig {
     post_connect_command: Option<String>,
 }
 
+const POST_CONNECT_COMMAND_MAX_BYTES: usize = 8192;
+
 impl SshSessionConfig {
     pub fn new(host: impl Into<String>, port: u16, username: impl Into<String>) -> Self {
         Self {
@@ -77,6 +79,10 @@ impl SshSessionConfig {
     pub fn post_connect_command(&self) -> Option<&str> {
         self.post_connect_command.as_deref()
     }
+
+    pub fn post_connect_input(&self) -> Result<Option<Vec<u8>>, String> {
+        normalize_post_connect_command(self.post_connect_command.as_deref())
+    }
 }
 
 impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
@@ -90,6 +96,57 @@ impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
             trzsz_policy: None,
             defer_pty_until_resize: false,
         }
+    }
+}
+
+fn normalize_post_connect_command(command: Option<&str>) -> Result<Option<Vec<u8>>, String> {
+    let Some(command) = command.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    // Tauri sends each logical line as an Enter key. Normalize all newline
+    // variants to carriage returns before the SSH PTY receives the payload.
+    let mut normalized = command.replace("\r\n", "\n").replace('\r', "\n");
+    normalized = normalized.replace('\n', "\r");
+    if !normalized.ends_with('\r') {
+        normalized.push('\r');
+    }
+
+    let bytes = normalized.into_bytes();
+    if bytes.len() > POST_CONNECT_COMMAND_MAX_BYTES {
+        return Err(format!(
+            "Post-connect command is too long (max {} bytes)",
+            POST_CONNECT_COMMAND_MAX_BYTES
+        ));
+    }
+
+    Ok(Some(bytes))
+}
+
+#[cfg(test)]
+mod ssh_config_tests {
+    use super::normalize_post_connect_command;
+
+    #[test]
+    fn post_connect_command_trims_and_adds_enter_like_tauri() {
+        assert_eq!(
+            normalize_post_connect_command(Some("  cd /srv/app  ")).unwrap(),
+            Some(b"cd /srv/app\r".to_vec())
+        );
+    }
+
+    #[test]
+    fn post_connect_command_converts_multiline_to_enter_keys_like_tauri() {
+        assert_eq!(
+            normalize_post_connect_command(Some("cd /srv/app\nls")).unwrap(),
+            Some(b"cd /srv/app\rls\r".to_vec())
+        );
+    }
+
+    #[test]
+    fn post_connect_command_ignores_blank_values_like_tauri() {
+        assert_eq!(normalize_post_connect_command(Some("   ")).unwrap(), None);
+        assert_eq!(normalize_post_connect_command(None).unwrap(), None);
     }
 }
 

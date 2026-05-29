@@ -323,6 +323,8 @@ impl WorkspaceApp {
         match section {
             SidebarSection::Sessions => self.i18n.t("sidebar.panels.sessions"),
             SidebarSection::Connections => self.i18n.t("sidebar.panels.open_session_manager"),
+            SidebarSection::Sftp => self.i18n.t("sidebar.panels.sftp"),
+            SidebarSection::Forwards => self.i18n.t("forwards.table.title"),
             SidebarSection::Terminal => self.i18n.t("sidebar.panels.connection_pool"),
             SidebarSection::Activity => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Network => self.i18n.t("sidebar.panels.connection_matrix"),

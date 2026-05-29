@@ -73,6 +73,8 @@ enum PaletteAction {
     OpenPluginManager,
     OpenCloudSync,
     ReloadWindow,
+    CloseTab,
+    CloseOtherTabs,
     CloseAllTabs,
     DisconnectAll,
     ReconnectAll,
@@ -456,6 +458,8 @@ impl WorkspaceApp {
             PaletteAction::OpenPluginManager => self.open_plugin_manager_tab(window, cx),
             PaletteAction::OpenCloudSync => self.open_cloud_sync_tab(window, cx),
             PaletteAction::ReloadWindow => self.reload_window_from_palette(cx),
+            PaletteAction::CloseTab => self.close_active_tab_from_palette(window, cx),
+            PaletteAction::CloseOtherTabs => self.close_other_tabs_from_palette(window, cx),
             PaletteAction::CloseAllTabs => self.close_all_tabs_from_palette(window, cx),
             PaletteAction::DisconnectAll => self.disconnect_all_ssh_nodes_from_palette(window, cx),
             PaletteAction::ReconnectAll => self.reconnect_all_link_down_nodes_from_palette(cx),
@@ -554,16 +558,12 @@ impl WorkspaceApp {
 
     pub(super) fn run_connection_health_check_from_palette(&mut self, cx: &mut Context<Self>) {
         let summaries = self.ssh_registry.list_connection_summaries();
-        let total = summaries.len();
-        let healthy = summaries
-            .iter()
-            .filter(|summary| {
-                matches!(
-                    summary.state,
-                    ConnectionPoolEntryState::Active | ConnectionPoolEntryState::Idle
-                )
-            })
-            .count();
+        let lifecycles = self
+            .terminal_endpoint_sessions
+            .values()
+            .map(|endpoint_session| endpoint_session.session.lock().lifecycle())
+            .collect::<Vec<_>>();
+        let (healthy, total) = command_palette_health_counts_from_lifecycles(lifecycles.iter());
         self.connection_monitor.pool_stats = Some(self.ssh_registry.monitor_stats());
         self.connection_monitor.pool_summaries = summaries;
         self.push_command_palette_toast(
@@ -639,8 +639,37 @@ impl WorkspaceApp {
         cx.restart();
     }
 
+    fn close_active_tab_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Tauri command-palette close actions call appStore.closeTab directly;
+        // confirmations live in TabBar/global shortcut handlers, not here.
+        if let Some(tab_id) = self.active_tab_id {
+            self.close_tab_by_id(tab_id, window, cx);
+        }
+    }
+
+    fn close_other_tabs_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(active_tab_id) = self.active_tab_id else {
+            return;
+        };
+        // Tauri splits command-palette behavior from the global keybinding:
+        // the shortcut closes an active split pane in terminal tabs, while the
+        // palette command directly closes all tabs except the active tab.
+        let tab_ids = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.id != active_tab_id)
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        for tab_id in tab_ids {
+            self.close_tab_by_id(tab_id, window, cx);
+        }
+    }
+
     fn close_all_tabs_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.request_close_all_tabs(window, cx);
+        let tab_ids = self.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
+        for tab_id in tab_ids {
+            self.close_tab_by_id(tab_id, window, cx);
+        }
     }
 
     fn open_saved_connection_from_palette(
@@ -655,6 +684,9 @@ impl WorkspaceApp {
         let Some(config) =
             super::session_manager::ssh_config_from_saved_connection(&self.connection_store, &conn)
         else {
+            if self.try_reuse_active_saved_connection_terminal(&connection_id, &conn, window, cx) {
+                return;
+            }
             self.open_saved_connection_prompt(
                 &connection_id,
                 SavedConnectionPromptAction::Connect,
@@ -667,7 +699,6 @@ impl WorkspaceApp {
             );
             return;
         };
-        let _ = self.connection_store.mark_used(&connection_id);
         let _ = self.open_or_create_saved_ssh_terminal_tab(
             connection_id,
             config,
@@ -2076,6 +2107,24 @@ fn is_quick_connect_alias_query(query: &str) -> bool {
             .any(|ch| ch.is_whitespace() || ch == '@' || ch == ':')
 }
 
+fn command_palette_health_counts_from_lifecycles<'a>(
+    lifecycles: impl IntoIterator<Item = &'a TerminalLifecycle>,
+) -> (usize, usize) {
+    let mut total = 0usize;
+    let mut healthy = 0usize;
+    for lifecycle in lifecycles {
+        total = total.saturating_add(1);
+        // Tauri command palette counts QuickHealthCheck::Healthy values from
+        // getAllHealthStatus(), whose keys are active terminal session ids.
+        // Native has no separate HealthTracker owner, so Running terminal
+        // endpoint sessions are the closest equivalent public health signal.
+        if lifecycle.is_running() {
+            healthy = healthy.saturating_add(1);
+        }
+    }
+    (healthy, total)
+}
+
 fn command_palette_connection_label(name: &str, username: &str, host: &str) -> String {
     if name.is_empty() {
         format!("{username}@{host}")
@@ -2193,12 +2242,13 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             "palette.aiSidebar",
             LucideIcon::PanelLeft,
         ),
-        keybinding_command(
-            "cmd:close_tab",
-            "command_palette.cmd_close_tab",
-            "app.closeTab",
-            LucideIcon::X,
-        ),
+        CommandSpec {
+            id: "cmd:close_tab",
+            label_key: "command_palette.cmd_close_tab".into(),
+            icon: LucideIcon::X,
+            shortcut_action: Some("app.closeTab"),
+            action: PaletteAction::CloseTab,
+        },
         keybinding_command(
             "cmd:split_horizontal",
             "command_palette.cmd_split_horizontal",
@@ -2229,12 +2279,13 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             "app.prevTab",
             LucideIcon::ChevronLeft,
         ),
-        keybinding_command(
-            "cmd:close_other_tabs",
-            "command_palette.cmd_close_other_tabs",
-            "app.closeOtherTabs",
-            LucideIcon::Layers,
-        ),
+        CommandSpec {
+            id: "cmd:close_other_tabs",
+            label_key: "command_palette.cmd_close_other_tabs".into(),
+            icon: LucideIcon::Layers,
+            shortcut_action: Some("app.closeOtherTabs"),
+            action: PaletteAction::CloseOtherTabs,
+        },
         CommandSpec {
             id: "cmd:close_all_tabs",
             label_key: "command_palette.cmd_close_all_tabs".into(),
@@ -2333,21 +2384,21 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             label_key: "command_palette.cmd_sidebar_sftp".into(),
             icon: LucideIcon::HardDrive,
             shortcut_action: None,
-            action: PaletteAction::Sidebar(SidebarSection::Terminal),
+            action: PaletteAction::Sidebar(SidebarSection::Sftp),
         },
         CommandSpec {
             id: "cmd:sidebar_forwards",
             label_key: "command_palette.cmd_sidebar_forwards".into(),
             icon: LucideIcon::ArrowLeftRight,
             shortcut_action: None,
-            action: PaletteAction::Sidebar(SidebarSection::Activity),
+            action: PaletteAction::Sidebar(SidebarSection::Forwards),
         },
         CommandSpec {
             id: "cmd:sidebar_connections",
             label_key: "command_palette.cmd_sidebar_connections".into(),
-            icon: LucideIcon::Network,
+            icon: LucideIcon::Server,
             shortcut_action: None,
-            action: PaletteAction::Sidebar(SidebarSection::Network),
+            action: PaletteAction::Sidebar(SidebarSection::Connections),
         },
         CommandSpec {
             id: "cmd:sidebar_ai",
@@ -2596,6 +2647,88 @@ mod tests {
             command_palette_specs()
                 .iter()
                 .any(|spec| spec.id == "cmd:reload_window")
+        );
+    }
+
+    #[test]
+    fn sidebar_connections_command_targets_saved_connections_panel() {
+        let spec = command_palette_specs()
+            .into_iter()
+            .find(|spec| spec.id == "cmd:sidebar_connections")
+            .expect("sidebar connections command");
+
+        assert!(matches!(
+            spec.action,
+            PaletteAction::Sidebar(SidebarSection::Connections)
+        ));
+    }
+
+    #[test]
+    fn sidebar_file_and_forward_commands_keep_tauri_section_keys() {
+        let specs = command_palette_specs();
+        let sftp = specs
+            .iter()
+            .find(|spec| spec.id == "cmd:sidebar_sftp")
+            .expect("sidebar sftp command");
+        let forwards = specs
+            .iter()
+            .find(|spec| spec.id == "cmd:sidebar_forwards")
+            .expect("sidebar forwards command");
+
+        assert!(matches!(
+            sftp.action,
+            PaletteAction::Sidebar(SidebarSection::Sftp)
+        ));
+        assert!(matches!(
+            forwards.action,
+            PaletteAction::Sidebar(SidebarSection::Forwards)
+        ));
+    }
+
+    #[test]
+    fn close_other_tabs_palette_command_does_not_reuse_terminal_shortcut_action() {
+        let spec = command_palette_specs()
+            .into_iter()
+            .find(|spec| spec.id == "cmd:close_other_tabs")
+            .expect("close other tabs command");
+
+        assert_eq!(spec.shortcut_action, Some("app.closeOtherTabs"));
+        assert!(matches!(spec.action, PaletteAction::CloseOtherTabs));
+    }
+
+    #[test]
+    fn close_tab_palette_command_does_not_reuse_terminal_shortcut_action() {
+        let spec = command_palette_specs()
+            .into_iter()
+            .find(|spec| spec.id == "cmd:close_tab")
+            .expect("close tab command");
+
+        assert_eq!(spec.shortcut_action, Some("app.closeTab"));
+        assert!(matches!(spec.action, PaletteAction::CloseTab));
+    }
+
+    #[test]
+    fn close_all_tabs_palette_command_closes_directly_like_tauri() {
+        let spec = command_palette_specs()
+            .into_iter()
+            .find(|spec| spec.id == "cmd:close_all_tabs")
+            .expect("close all tabs command");
+
+        assert_eq!(spec.shortcut_action, None);
+        assert!(matches!(spec.action, PaletteAction::CloseAllTabs));
+    }
+
+    #[test]
+    fn command_palette_health_check_counts_terminal_sessions_like_tauri() {
+        let lifecycles = [
+            TerminalLifecycle::Running,
+            TerminalLifecycle::Exited(Some(0)),
+            TerminalLifecycle::Closed,
+        ];
+
+        assert_eq!(
+            command_palette_health_counts_from_lifecycles(lifecycles.iter()),
+            (1, 3)
         );
     }
 }

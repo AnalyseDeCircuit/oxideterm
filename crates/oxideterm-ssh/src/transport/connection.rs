@@ -132,6 +132,38 @@ impl SshConnectionHandle {
         Ok(Box::new(stream))
     }
 
+    pub async fn preflight_host_key_via_direct_tcpip(
+        &self,
+        host: &str,
+        port: u16,
+        timeout_secs: u64,
+    ) -> HostKeyStatus {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return HostKeyStatus::Error {
+                message: "no active parent SSH connection is available for host-key preflight"
+                    .to_string(),
+            };
+        };
+        if pooled.is_closed().await {
+            return HostKeyStatus::Error {
+                message: "parent SSH connection is closed and cannot preflight child host key"
+                    .to_string(),
+            };
+        }
+
+        let handle = pooled.target.lock().await;
+        // Tauri `preflightTreeNode` verifies a child host key through the
+        // already-connected parent node. Keep the stream type inside the SSH
+        // crate so GPUI can request node-scoped preflight without depending on
+        // russh internals.
+        match open_direct_tcpip_stream_with_origin(&handle, host, port, "127.0.0.1", 0).await {
+            Ok(stream) => check_host_key_via_stream(host, port, stream, timeout_secs).await,
+            Err(error) => HostKeyStatus::Error {
+                message: error.to_string(),
+            },
+        }
+    }
+
     pub async fn request_remote_tcpip_forward(
         &self,
         bind_address: &str,

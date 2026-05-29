@@ -221,7 +221,13 @@ impl WorkspaceApp {
             "split.closePane" => self.close_active_pane(window, cx),
             "split.navLeft" => self.focus_adjacent_pane(false, window, cx),
             "split.navRight" => self.focus_adjacent_pane(true, window, cx),
-            "palette.eventLog" => self.open_notification_center_tab(window, cx),
+            "palette.eventLog" => {
+                // Tauri switches the Activity panel to the event log before
+                // opening it, so the palette shortcut must not land on
+                // Notifications when the previous activity view was different.
+                self.notification_center.active_view = WorkspaceActivityView::EventLog;
+                self.open_notification_center_tab(window, cx);
+            }
             "palette.aiSidebar" => {
                 let _ = self.toggle_ai_sidebar(cx);
             }

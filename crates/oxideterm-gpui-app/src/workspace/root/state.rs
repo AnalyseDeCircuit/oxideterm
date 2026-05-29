@@ -11,6 +11,8 @@ struct WorkspaceSshNode {
 struct PendingSshTerminalOpen {
     node_id: NodeId,
     saved_connection_id: Option<String>,
+    mark_used_connection_id: Option<String>,
+    save_after_open: Option<SaveConnectionRequest>,
     title: String,
 }
 
