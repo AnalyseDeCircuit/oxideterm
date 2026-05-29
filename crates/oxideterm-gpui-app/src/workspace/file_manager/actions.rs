@@ -174,7 +174,8 @@ impl WorkspaceApp {
                 "+" | "=" => {
                     if matches!(self.file_manager.preview, Some(LocalPreview::Image { .. })) {
                         self.file_manager.preview_image_zoom =
-                            (self.file_manager.preview_image_zoom + 0.25).min(4.0);
+                            (self.file_manager.preview_image_zoom + 0.25)
+                                .min(FILE_MANAGER_PREVIEW_MAX_ZOOM);
                         cx.notify();
                         return true;
                     }
@@ -182,7 +183,8 @@ impl WorkspaceApp {
                 "-" => {
                     if matches!(self.file_manager.preview, Some(LocalPreview::Image { .. })) {
                         self.file_manager.preview_image_zoom =
-                            (self.file_manager.preview_image_zoom - 0.25).max(0.25);
+                            (self.file_manager.preview_image_zoom - 0.25)
+                                .max(FILE_MANAGER_PREVIEW_MIN_ZOOM);
                         cx.notify();
                         return true;
                     }
@@ -340,14 +342,10 @@ impl WorkspaceApp {
         match entry.file_type {
             LocalFileType::Directory => self.set_file_manager_path(entry.path),
             LocalFileType::File | LocalFileType::Symlink => {
-                if let Err(error) = open_path_external(&entry.path) {
-                    self.push_file_manager_toast(
-                        self.i18n.t("fileManager.error"),
-                        Some(error),
-                        TerminalNoticeVariant::Error,
-                    );
-                    cx.notify();
-                }
+                // Tauri's FileList treats both Enter and double-click on files
+                // as Quick Look. External open remains an explicit context-menu
+                // action, so the default list action stays non-destructive.
+                self.open_file_manager_preview(entry, cx);
             }
         }
     }

@@ -111,14 +111,10 @@ impl WorkspaceApp {
             .map(|range| range.start);
         let shows_selection = selection_range.is_some();
         let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
-        let target_label = self
-            .active_tab()
-            .map(|tab| match tab.kind {
-                TabKind::LocalTerminal => self.i18n.t("terminal.command_bar.local_shell"),
-                TabKind::SshTerminal => tab.title.clone(),
-                _ => tab.title.clone(),
-            })
-            .unwrap_or_else(|| self.i18n.t("terminal.command_bar.remote_shell"));
+        // The visible chip and completion providers share Tauri's target-label
+        // inference so local shells that are currently inside SSH show the
+        // remote identity consistently in both places.
+        let target_label = self.terminal_command_active_target_label(cx);
         let active_pane_id = self.active_pane_id();
         let is_local_terminal = self
             .active_tab()

@@ -307,28 +307,67 @@ impl WorkspaceApp {
                                     .map(|file| file.path.clone())
                             })
                             .collect::<Vec<_>>();
-                        let count = targets.len();
-                        let toast = SftpMutationToast {
-                            success_title: self.i18n.t("sftp.toast.deleted"),
-                            success_description: Some(sftp_i18n_count(
-                                self.i18n.t("sftp.toast.deleted_count"),
-                                count,
-                            )),
-                            error_title: self.i18n.t("sftp.toast.delete_failed"),
+                        let Some(tab_id) = self.active_tab_id else {
+                            self.close_sftp_dialog();
+                            return;
                         };
-                        self.spawn_remote_sftp_mutation(
-                            move |sftp| {
-                                Box::pin(async move {
-                                    for path in targets {
-                                        sftp.delete_recursive(&path)
-                                            .await
-                                            .map_err(|error| error.to_string())?;
-                                    }
-                                    Ok(())
-                                })
-                            },
-                            Some(toast),
-                        );
+                        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+                            self.close_sftp_dialog();
+                            return;
+                        };
+                        let router = self.node_router.clone();
+                        let tx = self.sftp_worker_tx.clone();
+                        let runtime = self.forwarding_runtime.clone();
+                        let success_title = self.i18n.t("sftp.toast.deleted");
+                        let success_template = self.i18n.t("sftp.toast.deleted_count");
+                        let error_title = self.i18n.t("sftp.toast.delete_failed");
+                        runtime.spawn(async move {
+                            let result = async {
+                                let sftp = router
+                                    .acquire_transfer_sftp(&node_id)
+                                    .await
+                                    .map_err(|error| error.to_string())?;
+                                let mut deleted = 0_u64;
+                                for path in targets {
+                                    // Tauri nodeSftpDeleteRecursive returns the
+                                    // recursive item count; keep the success
+                                    // toast tied to the same backend count.
+                                    deleted = deleted
+                                        .saturating_add(sftp.delete_recursive(&path).await.map_err(
+                                            |error| error.to_string(),
+                                        )?);
+                                }
+                                Ok(deleted)
+                            }
+                            .await;
+                            let (result, toast) = match result {
+                                Ok(deleted) => (
+                                    Ok(()),
+                                    Some(SftpMutationToast {
+                                        success_title,
+                                        success_description: Some(sftp_i18n_count(
+                                            success_template,
+                                            deleted.try_into().unwrap_or(usize::MAX),
+                                        )),
+                                        error_title,
+                                    }),
+                                ),
+                                Err(error) => (
+                                    Err(error),
+                                    Some(SftpMutationToast {
+                                        success_title,
+                                        success_description: None,
+                                        error_title,
+                                    }),
+                                ),
+                            };
+                            let _ = tx.send(SftpWorkerResult::RemoteMutationComplete {
+                                result,
+                                refresh_remote: true,
+                                refresh_local: false,
+                                toast,
+                            });
+                        });
                     }
                 }
                 self.clear_sftp_selection(pane);

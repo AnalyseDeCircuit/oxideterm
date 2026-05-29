@@ -262,13 +262,54 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn delete_selected_connections(&mut self, cx: &mut Context<Self>) {
+    fn request_delete_connection(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(conn) = self.connection_info_by_id(id) else {
+            return;
+        };
+        // Tauri snapshots the row payload before opening useConfirm; native
+        // keeps the same target stable while the dialog is open.
+        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Single {
+            id: conn.id,
+            name: conn.name,
+        });
+        self.close_session_row_menus();
+        cx.notify();
+    }
+
+    fn request_delete_selected_connections(&mut self, cx: &mut Context<Self>) {
         let ids = self
             .session_manager
             .selected_ids
             .iter()
             .cloned()
             .collect::<Vec<_>>();
+        if ids.is_empty() {
+            return;
+        }
+        // Batch delete follows Tauri's confirm closure and freezes the selected
+        // ids at the time the destructive action is requested.
+        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Batch { ids });
+        self.session_manager.show_batch_move = false;
+        self.close_session_row_menus();
+        cx.notify();
+    }
+
+    fn cancel_session_manager_delete(&mut self, cx: &mut Context<Self>) {
+        self.session_manager.delete_confirm = None;
+        cx.notify();
+    }
+
+    fn confirm_session_manager_delete(&mut self, cx: &mut Context<Self>) {
+        let Some(confirm) = self.session_manager.delete_confirm.take() else {
+            return;
+        };
+        match confirm {
+            SessionManagerDeleteConfirm::Single { id, .. } => self.delete_connection(&id, cx),
+            SessionManagerDeleteConfirm::Batch { ids } => self.delete_connections_by_id(ids, cx),
+        }
+    }
+
+    fn delete_connections_by_id(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
         let mut deleted = 0;
         for id in ids {
             if self.connection_store.delete(&id).unwrap_or(false) {

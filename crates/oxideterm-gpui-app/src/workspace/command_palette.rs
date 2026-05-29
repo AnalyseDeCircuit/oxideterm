@@ -72,6 +72,7 @@ enum PaletteAction {
     OpenTopology,
     OpenPluginManager,
     OpenCloudSync,
+    ReloadWindow,
     CloseAllTabs,
     DisconnectAll,
     ReconnectAll,
@@ -454,6 +455,7 @@ impl WorkspaceApp {
             PaletteAction::OpenTopology => self.open_topology_tab(window, cx),
             PaletteAction::OpenPluginManager => self.open_plugin_manager_tab(window, cx),
             PaletteAction::OpenCloudSync => self.open_cloud_sync_tab(window, cx),
+            PaletteAction::ReloadWindow => self.reload_window_from_palette(cx),
             PaletteAction::CloseAllTabs => self.close_all_tabs_from_palette(window, cx),
             PaletteAction::DisconnectAll => self.disconnect_all_ssh_nodes_from_palette(window, cx),
             PaletteAction::ReconnectAll => self.reconnect_all_link_down_nodes_from_palette(cx),
@@ -631,14 +633,14 @@ impl WorkspaceApp {
         let _ = self.settings_store.save();
     }
 
+    fn reload_window_from_palette(&mut self, cx: &mut Context<Self>) {
+        // Tauri's window.location.reload() recreates volatile tabs and runtime
+        // ids. In GPUI the closest application-level equivalent is restart().
+        cx.restart();
+    }
+
     fn close_all_tabs_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        while self.active_tab_id.is_some() {
-            let before = self.tabs.len();
-            self.close_active_tab(window, cx);
-            if self.tabs.len() == before {
-                break;
-            }
-        }
+        self.request_close_all_tabs(window, cx);
     }
 
     fn open_saved_connection_from_palette(
@@ -877,6 +879,9 @@ impl WorkspaceApp {
                 disabled: false,
             });
         }
+        if !is_quick_connect_alias_query(query) {
+            return None;
+        }
         let alias = query.to_string();
         let matched_alias = self
             .command_palette
@@ -885,7 +890,7 @@ impl WorkspaceApp {
             .any(|host| host.alias.eq_ignore_ascii_case(&alias));
         if matched_alias {
             return Some(PaletteItem {
-                id: format!("quick-connect-alias:{alias}"),
+                id: format!("quick_connect_alias:{alias}"),
                 label: self.quick_connect_label(&alias),
                 section: PaletteSection::QuickConnect,
                 icon: LucideIcon::Zap,
@@ -979,22 +984,26 @@ impl WorkspaceApp {
         self.connection_store
             .connections()
             .iter()
-            .map(|conn| PaletteItem {
-                id: format!("connection:{}", conn.id),
-                label: conn.name.clone(),
-                section: PaletteSection::Connections,
-                icon: LucideIcon::Server,
-                detail: Some(format!("{}@{}:{}", conn.username, conn.host, conn.port)),
-                shortcut: None,
-                value: format!(
-                    "{} {} {} {}",
-                    conn.name,
-                    conn.host,
-                    conn.username,
-                    conn.group.as_deref().unwrap_or_default()
-                ),
-                action: PaletteAction::OpenSavedConnection(conn.id.clone()),
-                disabled: false,
+            .map(|conn| {
+                let label =
+                    command_palette_connection_label(&conn.name, &conn.username, &conn.host);
+                let detail = command_palette_connection_detail(
+                    &conn.name,
+                    &conn.username,
+                    &conn.host,
+                    conn.port,
+                );
+                PaletteItem {
+                    id: format!("conn:{}", conn.id),
+                    label: label.clone(),
+                    section: PaletteSection::Connections,
+                    icon: LucideIcon::Server,
+                    detail: Some(detail.clone()),
+                    shortcut: None,
+                    value: format!("{label} {detail}"),
+                    action: PaletteAction::OpenSavedConnection(conn.id.clone()),
+                    disabled: false,
+                }
             })
             .collect()
     }
@@ -2060,6 +2069,29 @@ fn parse_user_host_port(query: &str) -> Option<(String, String, u16)> {
     Some((username.to_string(), host.to_string(), port))
 }
 
+fn is_quick_connect_alias_query(query: &str) -> bool {
+    !query.is_empty()
+        && !query
+            .chars()
+            .any(|ch| ch.is_whitespace() || ch == '@' || ch == ':')
+}
+
+fn command_palette_connection_label(name: &str, username: &str, host: &str) -> String {
+    if name.is_empty() {
+        format!("{username}@{host}")
+    } else {
+        name.to_string()
+    }
+}
+
+fn command_palette_connection_detail(name: &str, username: &str, host: &str, port: u16) -> String {
+    if name.is_empty() {
+        format!(":{port}")
+    } else {
+        format!("{username}@{host}:{port}")
+    }
+}
+
 fn section_label_key(section: PaletteSection) -> &'static str {
     match section {
         PaletteSection::QuickConnect => "command_palette.quick_connect",
@@ -2434,6 +2466,13 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             shortcut_action: None,
             action: PaletteAction::ResetSettings,
         },
+        CommandSpec {
+            id: "cmd:reload_window",
+            label_key: "command_palette.cmd_reload_window".into(),
+            icon: LucideIcon::RefreshCw,
+            shortcut_action: None,
+            action: PaletteAction::ReloadWindow,
+        },
     ]
 }
 
@@ -2501,4 +2540,62 @@ fn shortcut_reference_rows() -> Vec<(
             ],
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quick_connect_host_parser_matches_tauri_shape() {
+        assert_eq!(
+            parse_user_host_port("root@example.com"),
+            Some(("root".to_string(), "example.com".to_string(), 22))
+        );
+        assert_eq!(
+            parse_user_host_port("root@example.com:2200"),
+            Some(("root".to_string(), "example.com".to_string(), 2200))
+        );
+        assert!(parse_user_host_port("example.com").is_none());
+        assert!(parse_user_host_port("root@example.com:abc").is_none());
+    }
+
+    #[test]
+    fn quick_connect_alias_query_rejects_tauri_excluded_characters() {
+        assert!(is_quick_connect_alias_query("prod-db"));
+        assert!(!is_quick_connect_alias_query(""));
+        assert!(!is_quick_connect_alias_query("prod db"));
+        assert!(!is_quick_connect_alias_query("user@host"));
+        assert!(!is_quick_connect_alias_query("host:2222"));
+    }
+
+    #[test]
+    fn saved_connection_palette_fields_match_tauri_fallbacks() {
+        assert_eq!(
+            command_palette_connection_label("Production", "root", "example.com"),
+            "Production"
+        );
+        assert_eq!(
+            command_palette_connection_detail("Production", "root", "example.com", 2222),
+            "root@example.com:2222"
+        );
+
+        assert_eq!(
+            command_palette_connection_label("", "root", "example.com"),
+            "root@example.com"
+        );
+        assert_eq!(
+            command_palette_connection_detail("", "root", "example.com", 2222),
+            ":2222"
+        );
+    }
+
+    #[test]
+    fn command_palette_specs_include_tauri_reload_window_command() {
+        assert!(
+            command_palette_specs()
+                .iter()
+                .any(|spec| spec.id == "cmd:reload_window")
+        );
+    }
 }

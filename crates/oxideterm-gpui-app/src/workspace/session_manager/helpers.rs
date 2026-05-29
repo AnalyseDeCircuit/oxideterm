@@ -154,6 +154,16 @@ fn selected_count_label(i18n: &I18n, count: usize) -> String {
         .replace("{{count}}", &count.to_string())
 }
 
+fn confirm_delete_connection_label(i18n: &I18n, name: &str) -> String {
+    i18n.t("sessionManager.actions.confirm_delete")
+        .replace("{{name}}", name)
+}
+
+fn confirm_batch_delete_label(i18n: &I18n, count: usize) -> String {
+    i18n.t("sessionManager.actions.confirm_batch_delete")
+        .replace("{{count}}", &count.to_string())
+}
+
 fn connections_deleted_label(i18n: &I18n, count: usize) -> String {
     i18n.t("sessionManager.toast.connections_deleted")
         .replace("{{count}}", &count.to_string())

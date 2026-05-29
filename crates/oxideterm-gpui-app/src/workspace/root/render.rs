@@ -147,6 +147,9 @@ impl Render for WorkspaceApp {
                     }
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_tab_close_confirm_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -402,10 +405,10 @@ impl Render for WorkspaceApp {
                 this.open_launcher_tab(window, cx);
             }))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
-                this.close_active_tab(window, cx);
+                this.request_close_active_tab(window, cx);
             }))
             .on_action(cx.listener(|this, _: &CloseOtherTabs, window, cx| {
-                this.close_other_tabs_or_active_pane(window, cx);
+                this.request_close_other_tabs_or_active_pane(window, cx);
             }))
             .on_action(cx.listener(|this, _: &NewConnection, window, cx| {
                 this.open_new_connection_form(window, cx);
@@ -671,6 +674,9 @@ impl Render for WorkspaceApp {
             })
             .when(self.cloud_sync_confirm.is_some(), |root| {
                 root.child(self.render_cloud_sync_confirm_dialog(cx))
+            })
+            .when(self.tab_close_confirm.is_some(), |root| {
+                root.child(self.render_tab_close_confirm_dialog(cx))
             })
             .when_some(self.render_native_plugin_confirm_dialog(cx), |root, dialog| {
                 root.child(dialog)

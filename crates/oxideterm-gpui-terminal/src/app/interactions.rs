@@ -166,11 +166,23 @@ impl TerminalPane {
         self.snapshot_text()
     }
 
+    pub fn ai_buffer_snapshot(&self) -> String {
+        // Match Tauri's terminal registry buffer getter for AI tools: this
+        // includes recent scrollback instead of only the visible viewport.
+        self.terminal.lock().buffer_text()
+    }
+
     pub fn ai_screen_snapshot(&self) -> oxideterm_terminal::TerminalSnapshot {
         // AI tool observation mirrors Tauri's terminal registry screen reader:
         // expose a read-only viewport snapshot without letting GPUI types leak
         // into the orchestrator tool payload.
         self.snapshot.clone()
+    }
+
+    pub fn ai_screen_is_alternate_buffer(&self) -> bool {
+        // Tauri's readScreen reports whether xterm is currently using the
+        // alternate buffer, which is important for TUI-oriented AI actions.
+        self.terminal.lock().mode().contains(TermMode::ALT_SCREEN)
     }
 
     fn copy_text(&self) -> String {

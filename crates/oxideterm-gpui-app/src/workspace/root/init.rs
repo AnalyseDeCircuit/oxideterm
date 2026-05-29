@@ -135,6 +135,7 @@ impl WorkspaceApp {
             tab_navigation_replaying: false,
             tab_navigation_observed_tab: None,
             tab_drag: None,
+            tab_close_confirm: None,
             panes: HashMap::new(),
             tab_scroll_x: 0.0,
             next_tab_id: 1,

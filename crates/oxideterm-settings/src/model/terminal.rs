@@ -10,7 +10,7 @@ impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             language: Language::ZhCn,
-            update_channel: UpdateChannel::GpuiPreview,
+            update_channel: UpdateChannel::default(),
             extra: ExtraFields::new(),
         }
     }
@@ -59,8 +59,26 @@ impl Default for TerminalCommandBarSettings {
             quick_commands_confirm_before_run: false,
             quick_commands_show_toast: true,
             focus_handoff_commands: [
-                "vim", "nvim", "vi", "nano", "emacs", "less", "more", "top", "htop", "btop",
-                "yazi", "ranger", "lf", "lazygit", "tmux", "screen", "ssh", "python", "node",
+                "btop",
+                "emacs",
+                "fzf",
+                "htop",
+                "lazydocker",
+                "lazygit",
+                "less",
+                "man",
+                "micro",
+                "nano",
+                "nvim",
+                "ranger",
+                "screen",
+                "ssh",
+                "tig",
+                "tmux",
+                "top",
+                "vi",
+                "vim",
+                "yazi",
             ]
             .into_iter()
             .map(str::to_string)

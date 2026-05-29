@@ -41,6 +41,27 @@ fn object_mut<'a>(value: &'a mut Value, key: &str) -> Option<&'a mut Map<String,
     value.get_mut(key).and_then(Value::as_object_mut)
 }
 
+fn normalize_sftp_speed_limit_key(settings: &mut Value, raw: &Value) {
+    let Some(sftp) = object_mut(settings, "sftp") else {
+        return;
+    };
+    let Some(value) = sftp.remove("speedLimitKbps") else {
+        return;
+    };
+
+    if raw
+        .get("sftp")
+        .and_then(|settings| settings.get("speedLimitKBps"))
+        .is_some()
+    {
+        return;
+    }
+
+    // Keep the Tauri spelling canonical while still accepting older native
+    // files that used serde's plain camelCase acronym handling.
+    sftp.insert("speedLimitKBps".to_string(), value);
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -359,6 +380,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     if let Some(object) = settings.as_object_mut() {
         object.insert("version".to_string(), json!(SETTINGS_SCHEMA_VERSION));
     }
+    normalize_sftp_speed_limit_key(&mut settings, &raw);
     migrate_ai_providers(&mut settings, &mut migration_warnings);
 
     if saved_version < SETTINGS_SCHEMA_VERSION
@@ -643,6 +665,34 @@ mod tests {
             sanitized.settings.ai.active_model.as_deref(),
             Some("gpt-4o-mini")
         );
+    }
+
+    #[test]
+    fn accepts_legacy_native_sftp_speed_limit_key() {
+        let sanitized = sanitize_settings_value(json!({
+            "sftp": {
+                "speedLimitEnabled": true,
+                "speedLimitKbps": 2048
+            }
+        }))
+        .expect("sanitize settings");
+
+        assert!(sanitized.settings.sftp.speed_limit_enabled);
+        assert_eq!(sanitized.settings.sftp.speed_limit_kbps, 2048);
+        assert!(!sanitized.settings.sftp.extra.contains_key("speedLimitKbps"));
+    }
+
+    #[test]
+    fn tauri_sftp_speed_limit_key_wins_over_legacy_alias() {
+        let sanitized = sanitize_settings_value(json!({
+            "sftp": {
+                "speedLimitKBps": 4096,
+                "speedLimitKbps": 2048
+            }
+        }))
+        .expect("sanitize settings");
+
+        assert_eq!(sanitized.settings.sftp.speed_limit_kbps, 4096);
     }
 
     #[test]

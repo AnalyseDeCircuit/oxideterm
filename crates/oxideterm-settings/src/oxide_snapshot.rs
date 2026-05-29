@@ -52,7 +52,6 @@ const TERMINAL_APPEARANCE_KEYS: &[&str] = &[
 const TERMINAL_BEHAVIOR_KEYS: &[&str] = &[
     "scrollback",
     "renderer",
-    "terminalEncoding",
     "adaptiveRenderer",
     "showFpsOverlay",
     "pasteProtection",
@@ -63,11 +62,8 @@ const TERMINAL_BEHAVIOR_KEYS: &[&str] = &[
     "selectionRequiresShift",
     "autosuggest",
     "commandBar",
-    "commandMarks",
     "highlightRules",
     "inBandTransfer",
-    "graphics",
-    "unicode",
 ];
 const APPEARANCE_KEYS: &[&str] = &[
     "sidebarCollapsedDefault",
@@ -76,7 +72,6 @@ const APPEARANCE_KEYS: &[&str] = &[
     "uiFontFamily",
     "animationSpeed",
     "frostedGlass",
-    "renderProfile",
 ];
 const CONNECTION_DEFAULT_KEYS: &[&str] = &["username", "port"];
 const RECONNECT_KEYS: &[&str] = &["enabled", "maxAttempts", "baseDelayMs", "maxDelayMs"];
@@ -106,14 +101,12 @@ const AI_KEYS: &[&str] = &[
     "mcpServers",
     "embeddingConfig",
     "agentRoles",
-    "executionProfiles",
 ];
 const SFTP_KEYS: &[&str] = &[
     "maxConcurrentTransfers",
     "directoryParallelism",
     "speedLimitEnabled",
     "speedLimitKBps",
-    "speedLimitKbps",
     "conflictAction",
 ];
 const IDE_KEYS: &[&str] = &[
@@ -268,7 +261,7 @@ fn copy_section(
         }
         "ai" => copy_object_keys(source, target, &["ai"], AI_KEYS),
         "fileAndEditor" => {
-            copy_object_keys(source, target, &["sftp"], SFTP_KEYS);
+            copy_sftp_keys(source, target);
             copy_object_keys(source, target, &["ide"], IDE_KEYS);
         }
         "localTerminal" => {
@@ -279,6 +272,24 @@ fn copy_section(
         }
         _ => {}
     }
+}
+
+fn copy_sftp_keys(source: &Value, target: &mut Value) {
+    copy_object_keys(source, target, &["sftp"], SFTP_KEYS);
+
+    let Some(source_obj) = get_path(source, &["sftp"]).and_then(Value::as_object) else {
+        return;
+    };
+    let Some(value) = source_obj
+        .get("speedLimitKBps")
+        .or_else(|| source_obj.get("speedLimitKbps"))
+    else {
+        return;
+    };
+
+    // Older native settings may still contain serde's plain camelCase acronym.
+    // Sectioned snapshots stay on Tauri's KBps spelling.
+    ensure_object_path(target, &["sftp"]).insert("speedLimitKBps".to_string(), value.clone());
 }
 
 fn copy_object_keys(source: &Value, target: &mut Value, path: &[&str], keys: &[&str]) {
@@ -373,6 +384,21 @@ mod tests {
         assert!(!section_ids.contains(&"localTerminal"));
         assert!(parsed["settings"].get("ai").is_none());
         assert!(parsed["settings"].get("localTerminal").is_none());
+        assert!(
+            parsed["settings"]["terminal"]
+                .get("terminalEncoding")
+                .is_none()
+        );
+        assert!(parsed["settings"]["terminal"].get("commandMarks").is_none());
+        assert!(parsed["settings"]["terminal"].get("graphics").is_none());
+        assert!(parsed["settings"]["terminal"].get("unicode").is_none());
+        assert!(
+            parsed["settings"]["appearance"]
+                .get("renderProfile")
+                .is_none()
+        );
+        assert!(parsed["settings"]["sftp"].get("speedLimitKBps").is_some());
+        assert!(parsed["settings"]["sftp"].get("speedLimitKbps").is_none());
     }
 
     #[test]
@@ -401,6 +427,7 @@ mod tests {
 
         assert_eq!(section_ids, vec!["ai", "localTerminal"]);
         assert!(parsed["settings"].get("ai").is_some());
+        assert!(parsed["settings"]["ai"].get("executionProfiles").is_none());
         assert_eq!(
             parsed["settings"]["localTerminal"]["defaultCwd"].as_str(),
             Some("/tmp")
@@ -418,5 +445,28 @@ mod tests {
             parsed_with_env["settings"]["localTerminal"]["customEnvVars"]["FOO"].as_str(),
             Some("bar")
         );
+    }
+
+    #[test]
+    fn merge_sectioned_snapshot_accepts_tauri_sftp_speed_limit_key() {
+        let current = PersistedSettings::default();
+        let snapshot = json!({
+            "format": OXIDE_SETTINGS_FORMAT,
+            "version": OXIDE_SETTINGS_VERSION,
+            "sectionIds": ["fileAndEditor"],
+            "settings": {
+                "sftp": {
+                    "speedLimitEnabled": true,
+                    "speedLimitKBps": 4096
+                }
+            }
+        });
+
+        let merged =
+            merge_oxide_settings_snapshot(&current, &snapshot.to_string(), None).expect("merge");
+
+        assert!(merged.sftp.speed_limit_enabled);
+        assert_eq!(merged.sftp.speed_limit_kbps, 4096);
+        assert!(!merged.sftp.extra.contains_key("speedLimitKBps"));
     }
 }

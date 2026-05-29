@@ -99,6 +99,11 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::clear_buffer(self);
     }
 
+    fn buffer_text(&self) -> String {
+        let term = self.term.lock();
+        terminal_buffer_text_from_term(&term, self.size.cols)
+    }
+
     fn command_output_text(&self, mark: &TerminalCommandMark) -> String {
         let term = self.term.lock();
         command_output_text_from_term(&term, mark)

@@ -277,7 +277,10 @@ mod tests {
         APP_LANG_KEY, CUSTOM_THEMES_KEY, KEYBINDINGS_KEY, LAUNCHER_ENABLED_KEY,
         LEGACY_FOCUSED_NODE_KEY, LEGACY_TREE_EXPANDED_KEY, LEGACY_UI_STATE_KEY,
         NEW_CONNECTION_SAVE_KEY, RenderProfile, SETTINGS_STORAGE_KEY,
-        model::{ConflictAction, FontFamily, IdeAgentMode, Language, RendererType},
+        model::{
+            ConflictAction, FontFamily, IdeAgentMode, Language, RendererType, UpdateChannel,
+            default_update_channel_for_version, is_gpui_preview_version, is_prerelease_version,
+        },
     };
 
     #[test]
@@ -285,6 +288,35 @@ mod tests {
         let settings = PersistedSettings::default();
         assert_eq!(settings.version, SETTINGS_SCHEMA_VERSION);
         assert_eq!(settings.general.language, Language::ZhCn);
+        assert_eq!(
+            settings.general.update_channel,
+            default_update_channel_for_version(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            settings.terminal.command_bar.focus_handoff_commands,
+            [
+                "btop",
+                "emacs",
+                "fzf",
+                "htop",
+                "lazydocker",
+                "lazygit",
+                "less",
+                "man",
+                "micro",
+                "nano",
+                "nvim",
+                "ranger",
+                "screen",
+                "ssh",
+                "tig",
+                "tmux",
+                "top",
+                "vi",
+                "vim",
+                "yazi"
+            ]
+        );
         assert_eq!(settings.terminal.theme, "default");
         assert_eq!(settings.terminal.font_family, FontFamily::Jetbrains);
         assert_eq!(settings.terminal.font_size, 14);
@@ -311,6 +343,27 @@ mod tests {
     }
 
     #[test]
+    fn default_update_channel_matches_tauri_version_rules() {
+        assert!(!is_prerelease_version("1.4.2"));
+        assert!(is_prerelease_version("1.4.2-beta.0"));
+        assert!(is_prerelease_version("1.4.2-preview.1"));
+        assert!(is_gpui_preview_version("1.4.2-gpui-preview.0"));
+        assert!(is_gpui_preview_version("1.4.2-native-preview.0"));
+        assert_eq!(
+            default_update_channel_for_version("1.4.2"),
+            UpdateChannel::Stable
+        );
+        assert_eq!(
+            default_update_channel_for_version("1.4.2-beta.0"),
+            UpdateChannel::Beta
+        );
+        assert_eq!(
+            default_update_channel_for_version("1.4.2-gpui-preview.0"),
+            UpdateChannel::GpuiPreview
+        );
+    }
+
+    #[test]
     fn enums_serialize_to_tauri_strings() {
         let settings = PersistedSettings::default();
         let value = settings.to_value();
@@ -324,6 +377,8 @@ mod tests {
         assert_eq!(value["appearance"]["uiDensity"], "comfortable");
         assert_eq!(value["appearance"]["renderProfile"], "auto");
         assert_eq!(value["sftp"]["conflictAction"], "ask");
+        assert_eq!(value["sftp"]["speedLimitKBps"], 0);
+        assert!(value["sftp"].get("speedLimitKbps").is_none());
         assert_eq!(value["ide"]["agentMode"], "ask");
         assert_eq!(value["reconnect"]["baseDelayMs"], 1000);
         assert_eq!(value["reconnect"]["maxDelayMs"], 15_000);

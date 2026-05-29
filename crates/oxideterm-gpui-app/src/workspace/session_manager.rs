@@ -23,13 +23,13 @@ use oxideterm_connections::{
 };
 use oxideterm_forwarding::{ForwardType, OwnedForwardImportRecord, PersistedForward};
 use oxideterm_gpui_ui::{
-    IconBadgeMetrics, TauriTableCellOptions, TauriTableCellStyle, TauriTableColors,
-    TauriTableMetrics,
+    ConfirmDialogVariant, ConfirmDialogView, IconBadgeMetrics, TauriTableCellOptions,
+    TauriTableCellStyle, TauriTableColors, TauriTableMetrics,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
         ToolbarButtonIconPosition, ToolbarButtonOptions,
     },
-    checkbox,
+    checkbox, confirm_dialog,
     context_menu::{
         ContextMenuActionableStyle, ContextMenuItemKind, context_menu_content,
         context_menu_event_boundary, context_menu_item_row,
@@ -184,6 +184,12 @@ pub(super) enum SessionTransferAction {
     ExportOxide,
 }
 
+#[derive(Clone, Debug)]
+pub(super) enum SessionManagerDeleteConfirm {
+    Single { id: String, name: String },
+    Batch { ids: Vec<String> },
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct OxideImportResultView {
     pub(super) imported: usize,
@@ -266,6 +272,7 @@ pub(super) struct SessionManagerState {
     pub(super) ssh_config_hosts: Vec<SshConfigHost>,
     pub(super) selected_import_aliases: HashSet<String>,
     pub(super) show_batch_move: bool,
+    pub(super) delete_confirm: Option<SessionManagerDeleteConfirm>,
     pub(super) oxide_import_dialog: Option<OxideImportDialogState>,
     pub(super) oxide_export_dialog: Option<OxideExportDialogState>,
     pub(super) status: Option<String>,
@@ -300,6 +307,7 @@ impl Default for SessionManagerState {
             ssh_config_hosts: Vec::new(),
             selected_import_aliases: HashSet::new(),
             show_batch_move: false,
+            delete_confirm: None,
             oxide_import_dialog: None,
             oxide_export_dialog: None,
             status: None,

@@ -755,6 +755,7 @@ fn ai_terminal_input_payload(args: &serde_json::Value) -> String {
 
 fn ai_terminal_screen_snapshot_json(
     snapshot: &oxideterm_terminal::TerminalSnapshot,
+    is_alternate_buffer: bool,
 ) -> serde_json::Value {
     // Keep the payload shape close to Tauri's readScreen result while avoiding
     // renderer-only fields that are not useful to an AI tool.
@@ -764,10 +765,11 @@ fn ai_terminal_screen_snapshot_json(
             .iter()
             .map(|row| row.text().trim_end().to_string())
             .collect::<Vec<_>>(),
-        "cursorX": snapshot.cursor_col,
-        "cursorY": snapshot.cursor_row,
+        "cursorX": snapshot.cursor_col + 1,
+        "cursorY": snapshot.cursor_row + 1,
         "rows": snapshot.rows,
         "cols": snapshot.cols,
+        "isAlternateBuffer": is_alternate_buffer,
         "scrollbackLines": snapshot.scrollback_lines,
         "displayOffset": snapshot.display_offset,
     })
@@ -1290,6 +1292,27 @@ mod tests {
         );
         assert_eq!(readiness.get("writerReady"), Some(&serde_json::json!(true)));
         assert!(readiness.get("renderBufferReady").is_some());
+    }
+
+    #[test]
+    fn terminal_screen_payload_uses_tauri_cursor_and_buffer_shape() {
+        let snapshot = oxideterm_terminal::TerminalSnapshot {
+            cols: 80,
+            rows: 24,
+            cursor_col: 2,
+            cursor_row: 3,
+            cursor_shape: oxideterm_terminal::TerminalCursorShape::Block,
+            display_offset: 0,
+            scrollback_lines: 10,
+            lines: Vec::new(),
+            images: Vec::new(),
+        };
+
+        let screen = ai_terminal_screen_snapshot_json(&snapshot, true);
+
+        assert_eq!(screen.get("cursorX"), Some(&serde_json::json!(3)));
+        assert_eq!(screen.get("cursorY"), Some(&serde_json::json!(4)));
+        assert_eq!(screen.get("isAlternateBuffer"), Some(&serde_json::json!(true)));
     }
 
     #[test]

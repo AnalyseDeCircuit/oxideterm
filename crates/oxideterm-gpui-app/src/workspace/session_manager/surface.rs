@@ -136,6 +136,9 @@ impl WorkspaceApp {
             .when(self.session_manager.show_import, |surface| {
                 surface.child(self.render_ssh_config_import_dialog(cx))
             })
+            .when_some(self.session_manager.delete_confirm.as_ref(), |surface, _| {
+                surface.child(self.render_session_manager_delete_confirm(cx))
+            })
             .when_some(self.session_manager.oxide_import_dialog.as_ref(), |surface, _| {
                 surface.child(self.render_oxide_import_dialog(cx))
             })
@@ -177,6 +180,42 @@ impl WorkspaceApp {
                 },
             )
             .into_any_element()
+    }
+
+    fn render_session_manager_delete_confirm(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(confirm) = self.session_manager.delete_confirm.as_ref() else {
+            return div().into_any_element();
+        };
+        let (title, confirm_label) = match confirm {
+            SessionManagerDeleteConfirm::Single { name, .. } => (
+                confirm_delete_connection_label(&self.i18n, name),
+                self.i18n.t("sessionManager.actions.delete"),
+            ),
+            SessionManagerDeleteConfirm::Batch { ids } => (
+                confirm_batch_delete_label(&self.i18n, ids.len()),
+                self.i18n.t("common.actions.confirm"),
+            ),
+        };
+        confirm_dialog(
+            &self.tokens,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Danger,
+                title: div().child(title).into_any_element(),
+                description: None,
+                cancel_label: div()
+                    .child(self.i18n.t("common.actions.cancel"))
+                    .into_any_element(),
+                confirm_label: div().child(confirm_label).into_any_element(),
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.cancel_session_manager_delete(cx);
+                cx.stop_propagation();
+            }),
+            cx.listener(|this, _event, _window, cx| {
+                this.confirm_session_manager_delete(cx);
+                cx.stop_propagation();
+            }),
+        )
     }
 
     pub(super) fn handle_session_manager_key(

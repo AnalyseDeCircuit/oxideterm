@@ -298,6 +298,10 @@ impl TerminalSession {
         self.backend.clear_buffer();
     }
 
+    pub fn buffer_text(&self) -> String {
+        self.backend.buffer_text()
+    }
+
     pub fn command_output_text(&self, mark: &TerminalCommandMark) -> String {
         self.backend.command_output_text(mark)
     }

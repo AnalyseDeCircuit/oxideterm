@@ -68,13 +68,54 @@ impl Language {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub fn is_prerelease_version(version: &str) -> bool {
+    version_contains_prerelease_tag(version, &["alpha", "beta", "rc", "pre", "preview"])
+}
+
+pub fn is_gpui_preview_version(version: &str) -> bool {
+    version_contains_prerelease_tag(
+        version,
+        &["gpui-preview", "native-preview", "rustnative-preview"],
+    )
+}
+
+pub fn default_update_channel_for_version(version: &str) -> UpdateChannel {
+    if is_gpui_preview_version(version) {
+        UpdateChannel::GpuiPreview
+    } else if is_prerelease_version(version) {
+        UpdateChannel::Beta
+    } else {
+        UpdateChannel::Stable
+    }
+}
+
+fn version_contains_prerelease_tag(version: &str, tags: &[&str]) -> bool {
+    let Some((_, prerelease)) = version.split_once('-') else {
+        return false;
+    };
+    let prerelease = prerelease.to_ascii_lowercase();
+    tags.iter().any(|tag| {
+        prerelease == *tag
+            || prerelease
+                .strip_prefix(tag)
+                .is_some_and(|suffix| suffix.starts_with('.') || suffix.starts_with('-'))
+    })
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UpdateChannel {
     Stable,
     Beta,
-    #[default]
     GpuiPreview,
+}
+
+impl Default for UpdateChannel {
+    fn default() -> Self {
+        // Match Tauri's settingsStore default channel selection so a stable
+        // native build does not accidentally poll the GPUI preview endpoint.
+        default_update_channel_for_version(env!("CARGO_PKG_VERSION"))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

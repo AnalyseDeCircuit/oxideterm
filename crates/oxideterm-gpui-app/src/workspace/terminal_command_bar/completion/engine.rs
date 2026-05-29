@@ -107,6 +107,15 @@ impl WorkspaceApp {
             })
     }
 
+    pub(in crate::workspace) fn terminal_command_active_target_label(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> String {
+        // Rendered command-bar chrome uses the same inferred target label as
+        // completion providers without exposing the full private context model.
+        self.terminal_command_context(cx).target_label
+    }
+
     fn terminal_command_context(&self, cx: &mut Context<Self>) -> TerminalCommandContext {
         let tab = self.active_tab();
         let pane_id = self.active_pane_id();

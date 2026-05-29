@@ -323,9 +323,10 @@ impl WorkspaceApp {
                 let (terminal_buffer, terminal_screen, accepts_input, terminal_running) = {
                     let pane = pane.read(cx);
                     let screen = pane.ai_screen_snapshot();
+                    let is_alternate_buffer = pane.ai_screen_is_alternate_buffer();
                     (
-                        pane.visible_text_snapshot(),
-                        ai_terminal_screen_snapshot_json(&screen),
+                        pane.ai_buffer_snapshot(),
+                        ai_terminal_screen_snapshot_json(&screen, is_alternate_buffer),
                         pane.ai_accepts_input(),
                         pane.lifecycle().is_running(),
                     )
@@ -1149,7 +1150,7 @@ impl WorkspaceApp {
                 )
                 .with_target(target);
         }
-        let before = pane.read(cx).visible_text_snapshot();
+        let before = pane.read(cx).ai_buffer_snapshot();
         pane.update(cx, |pane, cx| {
             pane.begin_command_mark(command, TerminalCommandMarkDetectionSource::Ai, cx);
             pane.send_command_line(command, cx);
@@ -1168,7 +1169,7 @@ impl WorkspaceApp {
                 )
                 .with_target(target);
         }
-        let after = pane.read(cx).visible_text_snapshot();
+        let after = pane.read(cx).ai_buffer_snapshot();
         let output = terminal_delta_output(&before, &after);
         snapshot
             .ok(
@@ -1316,7 +1317,7 @@ impl WorkspaceApp {
             let _ = sender.send(result);
             return;
         }
-        let before = pane.read(cx).visible_text_snapshot();
+        let before = pane.read(cx).ai_buffer_snapshot();
         pane.update(cx, |pane, cx| {
             pane.begin_command_mark(&command, TerminalCommandMarkDetectionSource::Ai, cx);
             pane.send_command_line(&command, cx);
@@ -1349,7 +1350,7 @@ impl WorkspaceApp {
             let mut changed_at = std::time::Instant::now();
             for _ in 0..300 {
                 Timer::after(Duration::from_millis(100)).await;
-                let current = weak.update(cx, |_this, cx| pane.read(cx).visible_text_snapshot());
+                let current = weak.update(cx, |_this, cx| pane.read(cx).ai_buffer_snapshot());
                 let current = match current {
                     Ok(current) => current,
                     Err(_) => break,

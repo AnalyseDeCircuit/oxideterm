@@ -250,7 +250,11 @@ impl WorkspaceApp {
                                         16.0,
                                         rgb(theme.accent),
                                     ))
-                                    .child(format!("已安装 {plugin_count} 个插件")),
+                                    .child(
+                                        self.i18n
+                                            .t("plugin.footer")
+                                            .replace("{{count}}", &plugin_count.to_string()),
+                                    ),
                             )
                             .child(div().child("·"))
                             .child(
@@ -266,7 +270,11 @@ impl WorkspaceApp {
                                             0xff,
                                         ),
                                     ))
-                                    .child(format!("{active_count} 个活跃")),
+                                    .child(
+                                        self.i18n
+                                            .t("plugin.active_count")
+                                            .replace("{{count}}", &active_count.to_string()),
+                                    ),
                             ),
                     )
                     .child(
@@ -276,7 +284,7 @@ impl WorkspaceApp {
                             .gap(px(8.0))
                             .child(self.render_native_plugin_action_button(
                                 LucideIcon::Plus,
-                                "新建插件",
+                                self.i18n.t("plugin.create_plugin"),
                                 NativePluginManagerActionButtonTone::Accent,
                                 false,
                                 |_event, _window, cx| {
@@ -285,7 +293,7 @@ impl WorkspaceApp {
                             ))
                             .child(self.render_native_plugin_action_button(
                                 LucideIcon::FolderOpen,
-                                "打开目录",
+                                self.i18n.t("plugin.open_plugins_dir"),
                                 NativePluginManagerActionButtonTone::Muted,
                                 false,
                                 cx.listener(|this, _event, _window, cx| {
@@ -301,7 +309,7 @@ impl WorkspaceApp {
                             ))
                             .child(self.render_native_plugin_action_button(
                                 LucideIcon::RefreshCw,
-                                "刷新",
+                                self.i18n.t("plugin.refresh"),
                                 NativePluginManagerActionButtonTone::Muted,
                                 false,
                                 cx.listener(|this, _event, _window, cx| {
@@ -311,7 +319,7 @@ impl WorkspaceApp {
                                         );
                                     this.plugin_manager_operation_status =
                                         NativePluginManagerOperationStatus::Success(
-                                            "插件列表已刷新。".to_string(),
+                                            this.i18n.t("plugin.refresh"),
                                         );
                                     cx.notify();
                                 }),
@@ -355,19 +363,22 @@ impl WorkspaceApp {
             .child(self.render_native_plugin_tab_button(
                 NativePluginManagerTab::Installed,
                 LucideIcon::Puzzle,
-                "已安装",
+                self.i18n.t("plugin.tab_installed"),
                 Some(plugin_count.to_string()),
                 has_background,
                 cx,
             ))
-            .child(self.render_native_plugin_tab_button(
-                NativePluginManagerTab::Browse,
-                LucideIcon::Network,
-                "浏览",
-                (update_count > 0).then(|| format!("{update_count} 更新")),
-                has_background,
-                cx,
-            ))
+            .child(
+                self.render_native_plugin_tab_button(
+                    NativePluginManagerTab::Browse,
+                    LucideIcon::Network,
+                    self.i18n.t("plugin.tab_browse"),
+                    (update_count > 0)
+                        .then(|| format!("{update_count} {}", self.i18n.t("plugin.updates"))),
+                    has_background,
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 
@@ -375,7 +386,7 @@ impl WorkspaceApp {
         &self,
         tab: NativePluginManagerTab,
         icon: LucideIcon,
-        label: &'static str,
+        label: String,
         badge: Option<String>,
         has_background: bool,
         cx: &mut Context<Self>,
@@ -495,7 +506,7 @@ impl WorkspaceApp {
                                 .text_size(px(self.tokens.metrics.ui_text_base))
                                 .font_weight(gpui::FontWeight::MEDIUM)
                                 .text_color(rgb(theme.text))
-                                .child("已安装插件"),
+                                .child(self.i18n.t("plugin.empty_title")),
                         )
                         .child(
                             div()
@@ -504,7 +515,7 @@ impl WorkspaceApp {
                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .line_height(px(20.0))
                                 .text_color(rgb(theme.text_muted))
-                                .child("将插件文件夹放入 ~/.oxideterm/plugins/ 即可开始使用。"),
+                                .child(self.i18n.t("plugin.empty_description")),
                         ),
                 )
                 .into_any_element();
@@ -516,7 +527,7 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text))
-                    .child("已安装插件"),
+                    .child(self.i18n.t("plugin.empty_title")),
             )
             .children(
                 diagnostics
@@ -569,7 +580,7 @@ impl WorkspaceApp {
             .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
             .line_height(px(18.0))
             .text_color(rgb(theme.text_muted))
-            .child("第三方插件由其各自的开发者提供。OxideTerm 仅作为运行时宿主，不对第三方插件的内容、功能或合法性进行审核、背书或承担任何责任。请仅从您信任的来源安装插件。")
+            .child(self.i18n.t("plugin.url_disclaimer"))
             .into_any_element()
     }
 
@@ -601,21 +612,21 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text))
-                            .child("从 URL 安装"),
+                            .child(self.i18n.t("plugin.url_install_title")),
                     )
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .line_height(px(18.0))
                             .text_color(rgb(theme.text_muted))
-                            .child("粘贴插件 ZIP 包或 GitHub 仓库的链接以直接安装。"),
+                            .child(self.i18n.t("plugin.url_install_desc")),
                     )
                     .child(
                         div()
                             .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
                             .line_height(px(18.0))
                             .text_color(rgb(theme.text_muted))
-                            .child("支持通过 #tag 或 #branch 锁定 GitHub 仓库的具体版本"),
+                            .child(self.i18n.t("plugin.url_version_hint")),
                     ),
             )
             .child(
@@ -627,18 +638,24 @@ impl WorkspaceApp {
                     .child(self.render_native_plugin_manager_icon_input(
                         LucideIcon::Download,
                         SettingsInput::NativePluginInstallUrl,
-                        "https://example.com/plugin.zip",
+                        self.i18n.t("plugin.url_placeholder"),
                         cx,
                     ))
                     .child(self.render_native_plugin_manager_button(
                         LucideIcon::Download,
-                        "安装",
+                        self.i18n.t("plugin.install"),
                         busy || self.plugin_manager_install_url_draft.trim().is_empty(),
                         cx.listener(|this, _event, _window, cx| {
                             let download_url = this.plugin_manager_install_url_draft.clone();
-                            let checksum =
-                                normalized_optional_string(&this.plugin_manager_install_checksum_draft);
-                            this.start_native_plugin_package_install(download_url, checksum, false, cx);
+                            let checksum = normalized_optional_string(
+                                &this.plugin_manager_install_checksum_draft,
+                            );
+                            this.start_native_plugin_package_install(
+                                download_url,
+                                checksum,
+                                false,
+                                cx,
+                            );
                         }),
                     )),
             )
@@ -652,12 +669,12 @@ impl WorkspaceApp {
                             .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text_muted))
-                            .child("可选 SHA-256 校验值"),
+                            .child(self.i18n.t("plugin.url_checksum_label")),
                     )
                     .child(self.render_native_plugin_manager_labeled_input(
-                        "",
+                        String::new(),
                         SettingsInput::NativePluginInstallChecksum,
-                        "sha256:... 或原始十六进制摘要",
+                        self.i18n.t("plugin.url_checksum_placeholder"),
                         520.0,
                         cx,
                     ))
@@ -666,81 +683,79 @@ impl WorkspaceApp {
                             .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
                             .line_height(px(18.0))
                             .text_color(rgb(theme.text_muted))
-                            .child("如果作者提供了校验值，可粘贴到这里验证下载内容。安装完成后会显示已安装包的实际 SHA-256，方便手动比对。"),
+                            .child(self.i18n.t("plugin.url_checksum_hint")),
                     ),
             )
-            .when_some(self.plugin_manager_pending_overwrite.as_ref(), |panel, pending| {
-                let confirm_download_url = pending.download_url.clone();
-                let confirm_checksum = pending.checksum.clone();
-                panel.child(
-                    div()
-                        .w_full()
-                        .rounded(px(self.tokens.radii.md))
-                        .border_1()
-                        .border_color(rgb(theme.warning))
-                        .bg(rgb(theme.bg_card))
-                        .p(px(10.0))
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap(px(10.0))
-                        .child(
-                            div()
-                                .min_w(px(0.0))
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .line_height(px(18.0))
-                                .text_color(rgb(theme.warning))
-                                .child(format!(
-                                    "插件 {} 已存在，需要确认后覆盖安装。",
-                                    pending.plugin_id
-                                )),
-                        )
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .flex()
-                                .gap(px(8.0))
-                                .child(self.render_native_plugin_manager_text_button(
-                                    "取消",
-                                    false,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.plugin_manager_pending_overwrite = None;
-                                        this.plugin_manager_operation_status =
-                                            NativePluginManagerOperationStatus::Idle;
-                                        cx.notify();
-                                    }),
-                                ))
-                                .child(self.render_native_plugin_manager_text_button(
-                                    "覆盖安装",
-                                    busy,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        this.start_native_plugin_package_install(
-                                            confirm_download_url.clone(),
-                                            confirm_checksum.clone(),
-                                            true,
-                                            cx,
-                                        );
-                                    }),
-                                )),
-                        ),
-                )
-            })
-            .child(self.render_native_plugin_registry_fetch_row(cx))
-            .when(
-                !self.plugin_manager_available_updates.is_empty(),
-                |panel| {
+            .when_some(
+                self.plugin_manager_pending_overwrite.as_ref(),
+                |panel, pending| {
+                    let confirm_download_url = pending.download_url.clone();
+                    let confirm_checksum = pending.checksum.clone();
                     panel.child(
                         div()
                             .w_full()
+                            .rounded(px(self.tokens.radii.md))
+                            .border_1()
+                            .border_color(rgb(theme.warning))
+                            .bg(rgb(theme.bg_card))
+                            .p(px(10.0))
                             .flex()
-                            .flex_col()
-                            .gap(px(8.0))
-                            .children(self.plugin_manager_available_updates.iter().map(|entry| {
-                                self.render_native_plugin_update_row(entry, cx)
-                            })),
+                            .items_center()
+                            .justify_between()
+                            .gap(px(10.0))
+                            .child(
+                                div()
+                                    .min_w(px(0.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .line_height(px(18.0))
+                                    .text_color(rgb(theme.warning))
+                                    .child(
+                                        self.i18n
+                                            .t("plugin.url_conflict_desc")
+                                            .replace("{{pluginId}}", &pending.plugin_id),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .flex()
+                                    .gap(px(8.0))
+                                    .child(self.render_native_plugin_manager_text_button(
+                                        self.i18n.t("common.actions.cancel"),
+                                        false,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.plugin_manager_pending_overwrite = None;
+                                            this.plugin_manager_operation_status =
+                                                NativePluginManagerOperationStatus::Idle;
+                                            cx.notify();
+                                        }),
+                                    ))
+                                    .child(self.render_native_plugin_manager_text_button(
+                                        self.i18n.t("plugin.url_conflict_confirm"),
+                                        busy,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            this.start_native_plugin_package_install(
+                                                confirm_download_url.clone(),
+                                                confirm_checksum.clone(),
+                                                true,
+                                                cx,
+                                            );
+                                        }),
+                                    )),
+                            ),
                     )
                 },
             )
+            .child(self.render_native_plugin_registry_fetch_row(cx))
+            .when(!self.plugin_manager_available_updates.is_empty(), |panel| {
+                panel.child(
+                    div().w_full().flex().flex_col().gap(px(8.0)).children(
+                        self.plugin_manager_available_updates
+                            .iter()
+                            .map(|entry| self.render_native_plugin_update_row(entry, cx)),
+                    ),
+                )
+            })
             .child(self.render_native_plugin_manager_status())
             .into_any_element()
     }
@@ -765,12 +780,12 @@ impl WorkspaceApp {
             .child(self.render_native_plugin_manager_icon_input(
                 LucideIcon::Search,
                 SettingsInput::NativePluginRegistryUrl,
-                "https://example.com/registry.json",
+                "https://example.com/registry.json".to_string(),
                 cx,
             ))
             .child(self.render_native_plugin_manager_button(
                 LucideIcon::RefreshCw,
-                "刷新",
+                self.i18n.t("plugin.refresh"),
                 busy || self.plugin_manager_registry_url_draft.trim().is_empty(),
                 cx.listener(|this, _event, _window, cx| {
                     this.start_native_plugin_update_check(cx);
@@ -782,7 +797,7 @@ impl WorkspaceApp {
     fn render_native_plugin_action_button(
         &self,
         icon: LucideIcon,
-        label: &'static str,
+        label: String,
         tone: NativePluginManagerActionButtonTone,
         disabled: bool,
         listener: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static,
@@ -870,9 +885,9 @@ impl WorkspaceApp {
 
     fn render_native_plugin_manager_labeled_input(
         &self,
-        label: &'static str,
+        label: String,
         input: SettingsInput,
-        placeholder: &'static str,
+        placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -899,7 +914,7 @@ impl WorkspaceApp {
         &self,
         icon: LucideIcon,
         input: SettingsInput,
-        placeholder: &'static str,
+        placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -921,7 +936,7 @@ impl WorkspaceApp {
     fn render_native_plugin_manager_text_input(
         &self,
         input: SettingsInput,
-        placeholder: &'static str,
+        placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -942,7 +957,7 @@ impl WorkspaceApp {
                 &self.tokens,
                 TextInputView {
                     value: &display_value,
-                    placeholder: placeholder.to_string(),
+                    placeholder,
                     focused,
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
@@ -982,7 +997,7 @@ impl WorkspaceApp {
     fn render_native_plugin_manager_button(
         &self,
         icon: LucideIcon,
-        label: &'static str,
+        label: String,
         disabled: bool,
         listener: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
@@ -1022,7 +1037,7 @@ impl WorkspaceApp {
 
     fn render_native_plugin_manager_text_button(
         &self,
-        label: &'static str,
+        label: String,
         disabled: bool,
         listener: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
@@ -1110,7 +1125,7 @@ impl WorkspaceApp {
             )
             .child(self.render_native_plugin_manager_button(
                 LucideIcon::Download,
-                "更新",
+                self.i18n.t("plugin.update"),
                 busy,
                 cx.listener(move |this, _event, _window, cx| {
                     this.start_native_plugin_package_install(
@@ -1130,7 +1145,7 @@ impl WorkspaceApp {
             NativePluginManagerOperationStatus::Idle => (
                 LucideIcon::ShieldCheck,
                 theme.text_muted,
-                "安装包会在 staging 目录验证后再替换现有插件。".to_string(),
+                self.i18n.t("plugin.url_disclaimer"),
             ),
             NativePluginManagerOperationStatus::Busy(message) => {
                 (LucideIcon::RefreshCw, theme.warning, message.clone())
@@ -1165,13 +1180,13 @@ impl WorkspaceApp {
         let download_url = download_url.trim().to_string();
         if download_url.is_empty() {
             self.plugin_manager_operation_status =
-                NativePluginManagerOperationStatus::Error("请输入插件包 URL。".to_string());
+                NativePluginManagerOperationStatus::Error(self.i18n.t("plugin.url_invalid"));
             cx.notify();
             return;
         }
         if self.plugin_manager_delivery_rx.is_some() {
             self.plugin_manager_operation_status =
-                NativePluginManagerOperationStatus::Busy("已有插件管理任务正在运行。".to_string());
+                NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.installing"));
             cx.notify();
             return;
         }
@@ -1180,7 +1195,7 @@ impl WorkspaceApp {
         let (tx, rx) = mpsc::channel();
         self.plugin_manager_delivery_rx = Some(rx);
         self.plugin_manager_operation_status =
-            NativePluginManagerOperationStatus::Busy("正在下载并验证插件包...".to_string());
+            NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.installing"));
         if overwrite {
             self.plugin_manager_pending_overwrite = None;
         }
@@ -1207,13 +1222,13 @@ impl WorkspaceApp {
         let registry_url = self.plugin_manager_registry_url_draft.trim().to_string();
         if registry_url.is_empty() {
             self.plugin_manager_operation_status =
-                NativePluginManagerOperationStatus::Error("请输入 registry URL。".to_string());
+                NativePluginManagerOperationStatus::Error(self.i18n.t("plugin.registry_error"));
             cx.notify();
             return;
         }
         if self.plugin_manager_delivery_rx.is_some() {
             self.plugin_manager_operation_status =
-                NativePluginManagerOperationStatus::Busy("已有插件管理任务正在运行。".to_string());
+                NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.loading_registry"));
             cx.notify();
             return;
         }
@@ -1230,7 +1245,7 @@ impl WorkspaceApp {
         let (tx, rx) = mpsc::channel();
         self.plugin_manager_delivery_rx = Some(rx);
         self.plugin_manager_operation_status =
-            NativePluginManagerOperationStatus::Busy("正在读取 registry index...".to_string());
+            NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.loading_registry"));
         self.schedule_native_plugin_manager_delivery_poll(cx);
         self.forwarding_runtime.spawn(async move {
             let result =
@@ -1311,7 +1326,8 @@ impl WorkspaceApp {
                     self.plugin_manager_available_updates = updates;
                     self.plugin_manager_operation_status =
                         NativePluginManagerOperationStatus::Success(format!(
-                            "发现 {update_count} 个可用更新。"
+                            "{update_count} {}",
+                            self.i18n.t("plugin.updates")
                         ));
                 }
                 Err(error) => {
@@ -1337,17 +1353,11 @@ impl WorkspaceApp {
                 self.plugin_manager_available_updates
                     .retain(|entry| entry.id != installed_id);
                 self.plugin_manager_pending_overwrite = None;
-                self.plugin_manager_operation_status =
-                    NativePluginManagerOperationStatus::Success(format!(
-                        "{} v{} 已{}。",
-                        result.manifest.name,
-                        result.manifest.version,
-                        if result.replaced_existing {
-                            "覆盖安装"
-                        } else {
-                            "安装"
-                        }
-                    ));
+                self.plugin_manager_operation_status = NativePluginManagerOperationStatus::Success(
+                    self.i18n
+                        .t("plugin.url_install_success")
+                        .replace("{{name}}", &result.manifest.name),
+                );
             }
             Err(error) => {
                 if let Some(plugin_id) = native_plugin_conflict_id(&error) {
@@ -1361,7 +1371,7 @@ impl WorkspaceApp {
                     });
                     self.plugin_manager_operation_status =
                         NativePluginManagerOperationStatus::Error(
-                            "插件已存在，请确认是否覆盖安装。".to_string(),
+                            self.i18n.t("plugin.url_conflict_title"),
                         );
                 } else {
                     self.plugin_manager_operation_status =

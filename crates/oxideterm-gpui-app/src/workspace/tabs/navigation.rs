@@ -438,6 +438,26 @@ impl WorkspaceApp {
         self.close_tab_at_index(index, window, cx);
     }
 
+    pub(super) fn request_close_active_tab(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.active_tab_index() else {
+            return;
+        };
+        let tab_id = self.tabs[index].id;
+        if self.tabs[index].kind == TabKind::SshTerminal {
+            // Tauri confirms user-initiated SSH terminal tab closes while
+            // still allowing backend/session cleanup paths to close directly.
+            self.tab_close_confirm = Some(TabCloseConfirm::Single { tab_id });
+            self.reset_standard_confirm_focus();
+            cx.notify();
+            return;
+        }
+        self.close_tab_at_index(index, window, cx);
+    }
+
     fn close_tab_by_id(&mut self, tab_id: TabId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
             return;
@@ -475,6 +495,99 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         for tab_id in tab_ids {
             self.close_tab_by_id(tab_id, window, cx);
+        }
+    }
+
+    pub(super) fn request_close_other_tabs_or_active_pane(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(active_tab_id) = self.active_tab_id else {
+            return;
+        };
+        if self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal))
+        {
+            if self
+                .active_tab()
+                .and_then(|tab| tab.root_pane.as_ref())
+                .is_some_and(|root| root.pane_count() > 1)
+            {
+                self.close_active_pane(window, cx);
+            }
+            return;
+        }
+
+        let tab_ids = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.id != active_tab_id)
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        if tab_ids.is_empty() {
+            return;
+        }
+        if self.tab_close_ids_include_ssh_terminal(&tab_ids) {
+            self.tab_close_confirm = Some(TabCloseConfirm::Other { tab_ids });
+            self.reset_standard_confirm_focus();
+            cx.notify();
+            return;
+        }
+        for tab_id in tab_ids {
+            self.close_tab_by_id(tab_id, window, cx);
+        }
+    }
+
+    pub(super) fn request_close_all_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab_ids = self.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
+        if tab_ids.is_empty() {
+            return;
+        }
+        if self.tab_close_ids_include_ssh_terminal(&tab_ids) {
+            self.tab_close_confirm = Some(TabCloseConfirm::All { tab_ids });
+            self.reset_standard_confirm_focus();
+            cx.notify();
+            return;
+        }
+        for tab_id in tab_ids {
+            self.close_tab_by_id(tab_id, window, cx);
+        }
+    }
+
+    fn tab_close_ids_include_ssh_terminal(&self, tab_ids: &[TabId]) -> bool {
+        tab_ids.iter().any(|tab_id| {
+            self.tabs
+                .iter()
+                .any(|tab| tab.id == *tab_id && tab.kind == TabKind::SshTerminal)
+        })
+    }
+
+    pub(super) fn cancel_tab_close_confirm(&mut self, cx: &mut Context<Self>) {
+        self.tab_close_confirm = None;
+        self.clear_standard_confirm_focus();
+        cx.notify();
+    }
+
+    pub(super) fn confirm_tab_close_confirm(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(confirm) = self.tab_close_confirm.take() else {
+            return;
+        };
+        self.clear_standard_confirm_focus();
+        match confirm {
+            TabCloseConfirm::Single { tab_id } => {
+                self.close_tab_by_id(tab_id, window, cx);
+            }
+            TabCloseConfirm::Other { tab_ids } | TabCloseConfirm::All { tab_ids } => {
+                for tab_id in tab_ids {
+                    self.close_tab_by_id(tab_id, window, cx);
+                }
+            }
         }
     }
 

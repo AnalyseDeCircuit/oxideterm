@@ -35,6 +35,7 @@ pub struct SftpSettings {
     pub max_concurrent_transfers: i64,
     pub directory_parallelism: i64,
     pub speed_limit_enabled: bool,
+    #[serde(rename = "speedLimitKBps", alias = "speedLimitKbps")]
     pub speed_limit_kbps: i64,
     pub conflict_action: ConflictAction,
     #[serde(flatten)]

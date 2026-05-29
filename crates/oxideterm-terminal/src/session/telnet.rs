@@ -676,6 +676,11 @@ impl TerminalSessionBackend for TelnetSession {
         command_output_text_from_term(&term, mark)
     }
 
+    fn buffer_text(&self) -> String {
+        let term = self.term.lock();
+        terminal_buffer_text_from_term(&term, self.resize.cols)
+    }
+
     fn snapshot(&self) -> TerminalSnapshot {
         let term = self.term.lock();
         snapshot_from_term(

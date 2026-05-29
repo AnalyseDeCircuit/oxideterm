@@ -72,6 +72,9 @@ pub trait TerminalSessionBackend: Send {
     fn scroll_to_display_offset(&mut self, offset: usize);
     fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch>;
     fn clear_buffer(&mut self);
+    fn buffer_text(&self) -> String {
+        String::new()
+    }
     fn command_output_text(&self, _mark: &TerminalCommandMark) -> String {
         String::new()
     }

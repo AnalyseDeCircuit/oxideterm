@@ -350,7 +350,10 @@ impl WorkspaceApp {
     }
 
     fn render_file_manager_preview_image(&self, path: &str, fallback_label: String) -> AnyElement {
-        let zoom = self.file_manager.preview_image_zoom.clamp(0.25, 4.0);
+        let zoom = self
+            .file_manager
+            .preview_image_zoom
+            .clamp(FILE_MANAGER_PREVIEW_MIN_ZOOM, FILE_MANAGER_PREVIEW_MAX_ZOOM);
         let height = 560.0 * zoom;
         let rotation = self.file_manager.preview_image_rotation.rem_euclid(360);
         let image = if rotation == 0 {

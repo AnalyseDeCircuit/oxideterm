@@ -38,6 +38,29 @@ use crate::{
 
 const MAX_COMMAND_OUTPUT_LINES: usize = 400;
 const MAX_COMMAND_OUTPUT_CHARS: usize = 24_000;
+const MAX_AI_TERMINAL_BUFFER_LINES: usize = 500;
+
+// AI terminal tools mirror the Tauri registry getter: expose the most recent
+// physical buffer rows, including scrollback, rather than only the viewport.
+fn terminal_buffer_text_from_term<T: EventListener>(term: &Term<T>, max_cols: usize) -> String {
+    let grid = term.grid();
+    let top_line = -(term.total_lines().saturating_sub(term.screen_lines()) as i32);
+    let bottom_line = term.screen_lines() as i32;
+    let line_count = (bottom_line - top_line).max(0) as usize;
+    let kept_lines = line_count.min(MAX_AI_TERMINAL_BUFFER_LINES);
+    let start_line = bottom_line - kept_lines as i32;
+    let mut lines = Vec::with_capacity(kept_lines);
+
+    for line in start_line..bottom_line {
+        let row = &grid[Line(line)];
+        let mut text = String::new();
+        let mut cell_map = Vec::new();
+        append_grid_line_text(row[..].iter(), line, max_cols, &mut text, &mut cell_map);
+        lines.push(text.trim_end().to_string());
+    }
+
+    lines.join("\n")
+}
 
 fn command_output_text_from_term<T: EventListener>(
     term: &Term<T>,
@@ -114,3 +137,66 @@ include!("session/local_backend.rs");
 include!("session/ssh_config.rs");
 include!("session/ssh_pty.rs");
 include!("session/telnet.rs");
+
+#[cfg(test)]
+mod tests {
+    use alacritty_terminal::{
+        event::VoidListener,
+        vte::ansi::{Processor, StdSyncHandler},
+    };
+
+    use super::*;
+
+    #[test]
+    fn ai_terminal_buffer_text_includes_scrollback_rows() {
+        let size = TerminalSize {
+            cols: 12,
+            rows: 3,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut config = Config::default();
+        config.scrolling_history = 16;
+        let mut term = Term::new(config, &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+
+        // More rows than the viewport proves AI tools receive buffer context,
+        // not just the currently visible screen.
+        for index in 0..6 {
+            let line = format!("line-{index}\r\n");
+            parser.advance(&mut term, line.as_bytes());
+        }
+
+        let buffer = terminal_buffer_text_from_term(&term, size.cols);
+
+        assert!(buffer.lines().count() > size.rows);
+        assert!(buffer.contains("line-0"));
+    }
+
+    #[test]
+    fn ai_terminal_buffer_text_keeps_tauri_line_limit() {
+        let size = TerminalSize {
+            cols: 16,
+            rows: 5,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut config = Config::default();
+        config.scrolling_history = 600;
+        let mut term = Term::new(config, &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+
+        // Tauri's registry getter caps AI terminal context to the last 500
+        // physical buffer rows to avoid copying unbounded scrollback.
+        for index in 0..520 {
+            let line = format!("row-{index:03}\r\n");
+            parser.advance(&mut term, line.as_bytes());
+        }
+
+        let buffer = terminal_buffer_text_from_term(&term, size.cols);
+
+        assert_eq!(buffer.split('\n').count(), MAX_AI_TERMINAL_BUFFER_LINES);
+        assert!(!buffer.contains("row-000"));
+        assert!(buffer.contains("row-519"));
+    }
+}

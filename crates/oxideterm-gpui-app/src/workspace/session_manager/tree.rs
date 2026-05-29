@@ -101,7 +101,7 @@ impl WorkspaceApp {
                                     self.i18n.t("sessionManager.batch.delete"),
                                     ButtonVariant::Outline,
                                     cx.listener(|this, _event, _window, cx| {
-                                        this.delete_selected_connections(cx);
+                                        this.request_delete_selected_connections(cx);
                                         cx.stop_propagation();
                                     }),
                                 ),

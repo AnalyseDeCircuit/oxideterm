@@ -173,7 +173,7 @@ impl WorkspaceApp {
                                     MouseButton::Left,
                                     cx.listener(move |this, _event, window, cx| {
                                         this.set_active_tab(tab_id, window, cx);
-                                        this.close_active_tab(window, cx);
+                                        this.request_close_active_tab(window, cx);
                                         cx.stop_propagation();
                                     }),
                                 ),
@@ -189,6 +189,53 @@ impl WorkspaceApp {
                 bar.child(actions)
             });
         bar.into_any_element()
+    }
+
+    pub(super) fn render_tab_close_confirm_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(confirm) = self.tab_close_confirm.as_ref() else {
+            return div().into_any_element();
+        };
+        let (title_key, description) = match confirm {
+            TabCloseConfirm::Single { .. } => (
+                "tabbar.confirm_close_terminal_title",
+                self.i18n.t("tabbar.confirm_close_terminal_desc"),
+            ),
+            TabCloseConfirm::Other { tab_ids } => (
+                "tabbar.confirm_close_other_title",
+                self.i18n
+                    .t("tabbar.confirm_close_other_desc")
+                    .replace("{{count}}", &tab_ids.len().to_string()),
+            ),
+            TabCloseConfirm::All { tab_ids } => (
+                "tabbar.confirm_close_all_title",
+                self.i18n
+                    .t("tabbar.confirm_close_all_desc")
+                    .replace("{{count}}", &tab_ids.len().to_string()),
+            ),
+        };
+        confirm_dialog_with_focus(
+            &self.tokens,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Danger,
+                title: div().child(self.i18n.t(title_key)).into_any_element(),
+                description: Some(div().child(description).into_any_element()),
+                cancel_label: div()
+                    .child(self.i18n.t("common.actions.cancel"))
+                    .into_any_element(),
+                confirm_label: div()
+                    .child(self.i18n.t("common.actions.confirm"))
+                    .into_any_element(),
+            },
+            self.standard_confirm_focus(),
+            cx.listener(|this, _event, _window, cx| {
+                this.cancel_tab_close_confirm(cx);
+                cx.stop_propagation();
+            }),
+            cx.listener(|this, _event, window, cx| {
+                this.confirm_tab_close_confirm(window, cx);
+                cx.stop_propagation();
+            }),
+        )
     }
 
     fn reconnect_node_id_for_tab(&self, tab: &Tab) -> Option<NodeId> {

@@ -745,7 +745,7 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, _window, cx| {
-                        this.delete_connection(&id, cx);
+                        this.request_delete_connection(&id, cx);
                     }
                 }),
                 cx,
@@ -903,7 +903,7 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = conn.id.clone();
                     move |this, _event, _window, cx| {
-                        this.delete_connection(&id, cx);
+                        this.request_delete_connection(&id, cx);
                     }
                 }),
                 cx,

@@ -619,11 +619,6 @@ impl IdeSurface {
         };
         let tokens = &self.tokens;
         let can_delete = confirm.unsaved_tab_count == 0 && !confirm.deleting;
-        let item_kind = if confirm.is_directory {
-            "folder"
-        } else {
-            "file"
-        };
         let affected = confirm.affected_tab_count;
         let unsaved = confirm.unsaved_tab_count;
         let mut details = div().flex().flex_col().gap_2();
@@ -631,19 +626,25 @@ impl IdeSurface {
             details = details.child(
                 div()
                     .text_color(rgb(TAILWIND_AMBER_400))
-                    .child("This will permanently delete all contents inside the folder."),
+                    .child(self.labels.delete_folder_warning.clone()),
             );
         }
         if affected > 0 && unsaved == 0 {
-            details = details.child(format!("{affected} open tab(s) will be closed."));
+            details = details.child(
+                self.labels
+                    .delete_will_close_tabs
+                    .replace("{{count}}", &affected.to_string()),
+            );
         }
         if unsaved > 0 {
             details = details.child(
                 div()
                     .text_color(rgb(TAILWIND_RED_400))
-                    .child(format!(
-                        "Cannot delete: {unsaved} file(s) have unsaved changes."
-                    )),
+                    .child(
+                        self.labels
+                            .delete_has_unsaved
+                            .replace("{{count}}", &unsaved.to_string()),
+                    ),
             );
         }
 
@@ -656,12 +657,12 @@ impl IdeSurface {
                             .items_center()
                             .gap_2()
                             .child(self.icon("lucide/alert-triangle.svg", 20.0, TAILWIND_RED_500))
-                            .child(dialog_title(tokens, "Confirm Delete".to_string())),
+                            .child(dialog_title(
+                                tokens,
+                                self.labels.delete_confirm_title.clone(),
+                            )),
                     )
-                    .child(dialog_description(
-                        tokens,
-                        format!("Delete {} \"{}\"?", item_kind, confirm.name),
-                    )),
+                    .child(dialog_description(tokens, confirm.name.clone())),
             )
             .child(details)
             .child(
@@ -688,9 +689,9 @@ impl IdeSurface {
                         button_with(
                             tokens,
                             if confirm.deleting {
-                                "Deleting...".to_string()
+                                self.labels.delete_deleting.clone()
                             } else {
-                                self.labels.context_delete.clone()
+                                self.labels.delete_confirm.clone()
                             },
                             ButtonOptions {
                                 variant: ButtonVariant::Destructive,

@@ -464,6 +464,13 @@ struct TabDragState {
     drop_target_index: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum TabCloseConfirm {
+    Single { tab_id: TabId },
+    Other { tab_ids: Vec<TabId> },
+    All { tab_ids: Vec<TabId> },
+}
+
 #[derive(Clone)]
 pub(super) struct SelectableTextFragmentState {
     pub group_id: u64,
@@ -483,6 +490,7 @@ pub(crate) struct WorkspaceApp {
     tab_navigation_replaying: bool,
     tab_navigation_observed_tab: Option<TabId>,
     tab_drag: Option<TabDragState>,
+    tab_close_confirm: Option<TabCloseConfirm>,
     panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
     tab_scroll_x: f32,
     next_tab_id: u64,

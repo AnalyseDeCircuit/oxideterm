@@ -1,6 +1,8 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use oxideterm_gpui_ui::text_input::text_input_anchor_probe;
+use regex::Regex;
+use std::sync::OnceLock;
 
 #[derive(Clone, Copy)]
 pub(super) enum TerminalBroadcastMenuPlacement {
@@ -183,8 +185,8 @@ impl WorkspaceApp {
                 let _ = self.create_local_terminal_tab(window, cx);
             }
             "app.shellLauncher" => self.open_launcher_tab(window, cx),
-            "app.closeTab" => self.close_active_tab(window, cx),
-            "app.closeOtherTabs" => self.close_other_tabs_or_active_pane(window, cx),
+            "app.closeTab" => self.request_close_active_tab(window, cx),
+            "app.closeOtherTabs" => self.request_close_other_tabs_or_active_pane(window, cx),
             "app.newConnection" => self.open_new_connection_form(window, cx),
             "app.settings" => self.open_settings(window, cx),
             "app.toggleSidebar" => self.toggle_sidebar(cx),
@@ -354,6 +356,10 @@ impl WorkspaceApp {
         let modifiers = event.keystroke.modifiers;
 
         if self.handle_native_plugin_confirm_key(event, cx) {
+            return;
+        }
+
+        if self.handle_tab_close_confirm_key(event, window, cx) {
             return;
         }
 
@@ -688,6 +694,29 @@ impl WorkspaceApp {
             }
         } else {
             false
+        }
+    }
+
+    pub(super) fn handle_tab_close_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.tab_close_confirm.is_none() {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.cancel_tab_close_confirm(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                self.confirm_tab_close_confirm(window, cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
         }
     }
 
@@ -1363,13 +1392,6 @@ impl WorkspaceApp {
     pub(super) fn discard_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
         if let Some(pane) = self.active_pane() {
             let _ = pane.update(cx, |pane, cx| pane.discard_recording(cx));
-            let _ = self.terminal_notice_tx.send(TerminalNotice {
-                title: self.i18n.t("terminal.recording.discarded"),
-                description: None,
-                status_text: None,
-                progress: None,
-                variant: TerminalNoticeVariant::Warning,
-            });
         }
         cx.notify();
     }
@@ -1389,7 +1411,11 @@ impl WorkspaceApp {
         let Some(content) = content else {
             return;
         };
-        self.prompt_save_terminal_recording(session_label, content, cx);
+        self.prompt_save_terminal_recording(
+            terminal_recording_default_name_label(&session_label),
+            content,
+            cx,
+        );
         cx.notify();
     }
 
@@ -1882,40 +1908,79 @@ mod terminal_command_bar_behavior_tests {
         );
         assert_eq!(terminal_command_executable("A=1 B=2").as_deref(), None);
     }
+
+    #[test]
+    fn quick_command_risk_patterns_match_tauri_regex_boundaries() {
+        assert_eq!(classify_command_risk("rm -rf /tmp/example"), Some("high"));
+        assert_eq!(classify_command_risk("mkfs.ext4 /dev/sdb"), Some("high"));
+        assert_eq!(
+            classify_command_risk("sudo systemctl status nginx"),
+            Some("medium")
+        );
+        assert_eq!(classify_command_risk("echo shutdowns"), None);
+        assert_eq!(classify_command_risk("docker image rm unused"), None);
+    }
+
+    #[test]
+    fn terminal_recording_default_name_label_matches_tauri_prefix() {
+        assert_eq!(
+            terminal_recording_default_name_label("1234567890abcdef"),
+            "12345678"
+        );
+        assert_eq!(terminal_recording_default_name_label("1234"), "1234");
+    }
 }
 
 pub(super) fn classify_command_risk(command: &str) -> Option<&'static str> {
-    let lower = command.to_lowercase();
-    let high_risk = [
-        "kubectl delete",
-        "systemctl stop",
-        "systemctl restart",
-        "systemctl disable",
-        "systemctl kill",
-        "docker rm",
-        "docker rmi",
-        "docker system prune",
-        "docker container prune",
-        "docker volume prune",
-        "docker network prune",
-        "shutdown",
-        "reboot",
-        "halt",
-        "poweroff",
-        "mkfs",
-        "chmod -r",
-        "chown -r",
-    ];
-    if (lower.contains("rm -rf") || lower.contains("rm -fr"))
-        || lower.contains("kill -9")
-        || lower.contains("killall -9")
-        || lower.contains("dd ") && lower.contains("of=")
-        || high_risk.iter().any(|pattern| lower.contains(pattern))
-    {
+    if command_matches_patterns(command, high_risk_command_patterns()) {
         return Some("high");
     }
-    if lower.split_whitespace().any(|token| token == "sudo") || lower.contains("chmod 777") {
+    if command_matches_patterns(command, medium_risk_command_patterns()) {
         return Some("medium");
     }
     None
+}
+
+fn terminal_recording_default_name_label(session_label: &str) -> String {
+    // Tauri uses sessionId.slice(0, 8) in the suggested asciicast file name.
+    session_label.chars().take(8).collect()
+}
+
+fn command_matches_patterns(command: &str, patterns: &[Regex]) -> bool {
+    patterns.iter().any(|pattern| pattern.is_match(command))
+}
+
+fn high_risk_command_patterns() -> &'static [Regex] {
+    // Keep these patterns in semantic lockstep with Tauri's
+    // lib/terminal/completion/risk.ts classifier.
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        [
+            r"(?i)\brm\s+-(?:[^\s]*r[^\s]*f|[^\s]*f[^\s]*r)\b",
+            r"(?i)\bkubectl\s+delete\b",
+            r"(?i)\bsystemctl\s+(?:stop|restart|disable|kill)\b",
+            r"(?i)\bdocker\s+(?:rm|rmi|system\s+prune|container\s+prune|volume\s+prune|network\s+prune)\b",
+            r"(?i)\b(?:shutdown|reboot|halt|poweroff)\b",
+            r"(?i)\bkill(?:all)?\s+-9\b",
+            r"(?i)\bmkfs(?:\.[^\s]+)?\b",
+            r"(?i)\bdd\s+.*\bof=",
+            r"(?i)\bchmod\s+-R\b",
+            r"(?i)\bchown\s+-R\b",
+        ]
+        .into_iter()
+        .map(|pattern| Regex::new(pattern).expect("quick command risk pattern must compile"))
+        .collect()
+    })
+}
+
+fn medium_risk_command_patterns() -> &'static [Regex] {
+    // Keep these patterns in semantic lockstep with Tauri's
+    // lib/terminal/completion/risk.ts classifier.
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        [r"(?i)\bsudo\b", r"(?i)\bchmod\s+(?:-R\s+)?777\b"]
+            .into_iter()
+            .map(|pattern| Regex::new(pattern).expect("quick command risk pattern must compile"))
+            .collect()
+    })
 }

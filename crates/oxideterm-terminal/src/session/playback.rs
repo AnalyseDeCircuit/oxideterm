@@ -305,6 +305,11 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
         clear_terminal_buffer(&mut term);
     }
 
+    fn buffer_text(&self) -> String {
+        let term = self.term.lock();
+        terminal_buffer_text_from_term(&term, self.size.cols)
+    }
+
     fn snapshot(&self) -> TerminalSnapshot {
         let term = self.term.lock();
         snapshot_from_term(&term, self.size, &self.graphics)
