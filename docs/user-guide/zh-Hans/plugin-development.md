@@ -4,26 +4,572 @@
 
 ## 目录
 
-1. [Native 插件模型](#native-插件模型)
-2. [Native 插件与 Tauri 插件的区别](#native-插件与-tauri-插件的区别)
-3. [插件目录](#插件目录)
-4. [最小清单插件](#最小清单插件)
-5. [进程运行时插件](#进程运行时插件)
-6. [协议帧](#协议帧)
-7. [运行时注册](#运行时注册)
-8. [声明式 Native 界面](#声明式-native-界面)
-9. [宿主 API 调用](#宿主-api-调用)
-10. [权限与能力](#权限与能力)
-11. [设置、存储与凭据](#设置存储与凭据)
-12. [终端、SFTP、转发、IDE 与 AI](#终端sftp转发ide-与-ai)
-13. [打包与安装](#打包与安装)
-14. [接口参考](#接口参考)
-15. [宿主 API 参考](#宿主-api-参考)
-16. [事件参考](#事件参考)
-17. [调试](#调试)
-18. [迁移说明](#迁移说明)
+1. [写出一个可运行插件](#写出一个可运行插件)
+2. [运行时通信过程](#运行时通信过程)
+3. [在插件代码里调用宿主](#在插件代码里调用宿主)
+4. [界面与事件写法](#界面与事件写法)
+5. [常见失败检查](#常见失败检查)
+6. [Native 插件模型](#native-插件模型)
+7. [Native 插件与 Tauri 插件的区别](#native-插件与-tauri-插件的区别)
+8. [插件目录](#插件目录)
+9. [最小清单插件](#最小清单插件)
+10. [进程运行时插件](#进程运行时插件)
+11. [协议帧](#协议帧)
+12. [运行时注册](#运行时注册)
+13. [声明式 Native 界面](#声明式-native-界面)
+14. [宿主 API 调用](#宿主-api-调用)
+15. [权限与能力](#权限与能力)
+16. [设置、存储与凭据](#设置存储与凭据)
+17. [终端、SFTP、转发、IDE 与 AI](#终端sftp转发ide-与-ai)
+18. [打包与安装](#打包与安装)
+19. [接口参考](#接口参考)
+20. [宿主 API 参考](#宿主-api-参考)
+21. [事件参考](#事件参考)
+22. [调试](#调试)
+23. [迁移说明](#迁移说明)
 
 ---
+
+## 写出一个可运行插件
+
+先从进程插件开始。进程运行时最容易调试，因为所有消息都是 stdin/stdout 上的一行一个 JSON 对象。
+
+在用户插件目录里创建这个目录：
+
+```text
+hello-native/
+  plugin.json
+  bin/
+    hello.js
+```
+
+进程入口必须是插件目录内的真实可执行文件。macOS/Linux 上需要给脚本加可执行权限：
+
+```sh
+chmod +x hello-native/bin/hello.js
+```
+
+使用这个清单：
+
+```json
+{
+  "id": "com.example.hello-native",
+  "name": "Hello Native",
+  "version": "0.1.0",
+  "description": "Minimal native process plugin.",
+  "runtime": {
+    "kind": "process",
+    "entry": "bin/hello.js"
+  },
+  "contributes": {
+    "sidebarPanels": [
+      {
+        "id": "hello-panel",
+        "title": "Hello",
+        "icon": "panel-left",
+        "position": "top"
+      }
+    ],
+    "settings": [
+      {
+        "id": "message",
+        "type": "string",
+        "default": "Hello from a native plugin",
+        "title": "Message"
+      }
+    ],
+    "apiCommands": [
+      "get_app_version"
+    ]
+  }
+}
+```
+
+使用这个进程入口：
+
+```js
+#!/usr/bin/env node
+
+const readline = require("node:readline");
+
+const pluginId = "com.example.hello-native";
+let nextHostRequest = 1;
+const pendingHostCalls = new Map();
+
+// Keep stdout reserved for protocol frames.
+function writeFrame(payload, requestId = null) {
+  process.stdout.write(JSON.stringify({
+    protocolVersion: 1,
+    requestId,
+    payload
+  }) + "\n");
+}
+
+function respondOk(requestId, value) {
+  writeFrame({
+    requestId,
+    result: {
+      status: "ok",
+      value
+    }
+  }, requestId);
+}
+
+function respondError(requestId, code, message) {
+  writeFrame({
+    requestId,
+    result: {
+      status: "error",
+      error: {
+        code,
+        message,
+        recoverable: false
+      }
+    }
+  }, requestId);
+}
+
+function registerPanel() {
+  writeFrame({
+    type: "registerContribution",
+    registration: {
+      registrationId: "hello-panel-view",
+      pluginId,
+      kind: "sidebar-panel",
+      metadata: {
+        panelId: "hello-panel",
+        schema: {
+          kind: "form",
+          title: "Hello Native",
+          sections: [
+            {
+              id: "main",
+              controls: [
+                {
+                  kind: "markdown",
+                  text: "This panel was registered by a native process plugin."
+                },
+                {
+                  kind: "button",
+                  id: "refresh",
+                  label: "Refresh"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  });
+}
+
+// Returnable host calls are matched by requestId.
+function callHost(namespace, method, args = {}) {
+  const requestId = `host-${nextHostRequest++}`;
+  writeFrame({
+    type: "callHostApi",
+    requestId,
+    namespace,
+    method,
+    args
+  });
+  return new Promise((resolve, reject) => {
+    pendingHostCalls.set(requestId, { resolve, reject });
+  });
+}
+
+// Host-call responses arrive on stdin like normal host requests.
+function handleHostResponse(payload) {
+  const pending = pendingHostCalls.get(payload.requestId);
+  if (!pending) {
+    return false;
+  }
+  pendingHostCalls.delete(payload.requestId);
+  if (payload.result.status === "ok") {
+    pending.resolve(payload.result.value);
+  } else {
+    pending.reject(new Error(payload.result.error.message));
+  }
+  return true;
+}
+
+// Host requests and host-call responses share the same input stream.
+async function handleRequest(envelope) {
+  const request = envelope.payload;
+  if (handleHostResponse(request)) {
+    return;
+  }
+
+  const requestId = request.requestId;
+  switch (request.kind.type) {
+    case "activate":
+      registerPanel();
+      writeFrame({
+        type: "runtimeReady"
+      });
+      respondOk(requestId, { activated: true });
+      break;
+    case "sendEvent":
+      respondOk(requestId, { received: request.kind.event.name });
+      break;
+    case "health":
+      respondOk(requestId, { ok: true });
+      break;
+    case "deactivate":
+    case "kill":
+      respondOk(requestId, { stopped: true });
+      process.exit(0);
+      break;
+    case "dispatchCommand":
+      try {
+        const version = await callHost("api", "invoke", {
+          command: "get_app_version",
+          args: {}
+        });
+        respondOk(requestId, { version });
+      } catch (error) {
+        respondError(requestId, "command_failed", error.message);
+      }
+      break;
+    default:
+      respondError(requestId, "unsupported_request", `Unsupported request ${request.kind.type}`);
+  }
+}
+
+readline.createInterface({
+  input: process.stdin,
+  crlfDelay: Infinity
+}).on("line", (line) => {
+  if (!line.trim()) {
+    return;
+  }
+  handleRequest(JSON.parse(line)).catch((error) => {
+    process.stderr.write(`Plugin error: ${error.stack || error.message}\n`);
+  });
+});
+```
+
+这个例子展示了最重要的约定：
+
+- `stdout` 只能写协议帧，一行一个 JSON 对象。
+- `stderr` 才能写给人看的诊断文本。
+- 插件必须用相同的 `requestId` 回答激活请求。
+- 运行时界面不是 React，而是通过 `sidebar-panel` 或 `tab` 注册的声明式结构。
+- 需要返回值的宿主调用用出站 `callHostApi` 帧发送；宿主会把结果写回插件的 stdin。
+
+## 运行时通信过程
+
+进程运行时只有一条按行分隔的通信通道。
+
+```mermaid
+sequenceDiagram
+    participant Host as OxideTerm 宿主
+    participant Plugin as 插件进程
+    Host->>Plugin: stdin 写入 activate 请求
+    Plugin-->>Host: stdout 写出 registerContribution sidebar-panel
+    Plugin-->>Host: stdout 写出 runtimeReady
+    Plugin-->>Host: stdout 写出 activate ok 响应
+    Host->>Plugin: stdin 写入 sendEvent / dispatchCommand / health
+    Plugin-->>Host: stdout 写出相同 requestId 的响应
+```
+
+宿主发给插件的激活请求。这里缩短了 `manifest` 对象；真实请求会携带解析后的 `plugin.json`：
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "activate:com.example.hello-native",
+  "payload": {
+    "requestId": "activate:com.example.hello-native",
+    "kind": {
+      "type": "activate",
+      "manifest": {
+        "id": "com.example.hello-native",
+        "name": "Hello Native",
+        "version": "0.1.0"
+      },
+      "permissions": {
+        "capabilities": [],
+        "allowedHostApis": [
+          "api.invoke",
+          "app.getVersion",
+          "settings.get"
+        ]
+      }
+    },
+    "timeoutMs": 5000
+  }
+}
+```
+
+插件回给宿主的激活响应：
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "activate:com.example.hello-native",
+  "payload": {
+    "requestId": "activate:com.example.hello-native",
+    "result": {
+      "status": "ok",
+      "value": {
+        "activated": true
+      }
+    }
+  }
+}
+```
+
+错误响应：
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "activate:com.example.hello-native",
+  "payload": {
+    "requestId": "activate:com.example.hello-native",
+    "result": {
+      "status": "error",
+      "error": {
+        "code": "invalid_config",
+        "message": "Missing required plugin setting",
+        "recoverable": false
+      }
+    }
+  }
+}
+```
+
+插件发给宿主的 Host API 调用：
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": null,
+  "payload": {
+    "type": "callHostApi",
+    "requestId": "host-1",
+    "namespace": "app",
+    "method": "getVersion",
+    "args": {}
+  }
+}
+```
+
+宿主写回插件的 Host API 响应：
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "host-1",
+  "payload": {
+    "requestId": "host-1",
+    "result": {
+      "status": "ok",
+      "value": "0.1.0"
+    }
+  }
+}
+```
+
+进程桥会在消息进入工作区之前拒绝无效帧。常见拒绝原因包括 `protocolVersion` 不支持、响应缺少 `requestId`、响应 id 不匹配、注册信息不属于当前插件，以及 stdout 输出了非 JSON 文本。
+
+## 在插件代码里调用宿主
+
+宿主调用不是全局 JavaScript 函数，而是协议消息。一次调用必须同时满足两个条件：
+
+- Host API 名称在插件权限集中被允许，可以是 `terminal.getActiveTarget` 这样的精确名称，也可以是 `terminal.*` 这样的命名空间通配。
+- 对 `api.invoke` 来说，`args.command` 还必须出现在 `contributes.apiCommands` 里。
+
+读取插件设置：
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-2",
+  "namespace": "settings",
+  "method": "get",
+  "args": {
+    "key": "message"
+  }
+}
+```
+
+读取活跃终端目标：
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-3",
+  "namespace": "terminal",
+  "method": "getActiveTarget",
+  "args": {}
+}
+```
+
+向活跃终端写入文本：
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-4",
+  "namespace": "terminal",
+  "method": "writeToActive",
+  "args": {
+    "text": "pwd\n"
+  }
+}
+```
+
+通过 SFTP 读取远程文件：
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-5",
+  "namespace": "sftp",
+  "method": "readFile",
+  "args": {
+    "nodeId": "node-1",
+    "path": "/etc/hostname"
+  }
+}
+```
+
+这个 SFTP 调用还需要 `filesystem.read` 能力。写入类操作需要 `filesystem.write`。端口转发变更需要 `network.forward`。
+
+导入 `.oxide` 包：
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-6",
+  "namespace": "sync",
+  "method": "importOxide",
+  "args": {
+    "fileData": [1, 2, 3],
+    "password": "user-entered-password",
+    "conflictStrategy": "rename",
+    "importAppSettings": true,
+    "importPluginSettings": true
+  }
+}
+```
+
+不要记录或回显密码、凭据值、终端缓冲区、连接配置、原始导入/导出载荷。
+
+## 界面与事件写法
+
+注册标签页视图：
+
+```json
+{
+  "type": "registerContribution",
+  "registration": {
+    "registrationId": "hello-tab-view",
+    "pluginId": "com.example.hello-native",
+    "kind": "tab",
+    "metadata": {
+      "tabId": "hello-tab",
+      "schema": {
+        "kind": "form",
+        "title": "Hello",
+        "controls": [
+          {
+            "kind": "markdown",
+            "text": "This tab is rendered by OxideTerm, not by plugin HTML."
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+通过 `event-subscription` 注册订阅：
+
+```json
+{
+  "type": "registerContribution",
+  "registration": {
+    "registrationId": "watch-active-node",
+    "pluginId": "com.example.hello-native",
+    "kind": "event-subscription",
+    "metadata": {
+      "namespace": "sessions",
+      "method": "onNodeStateChange",
+      "nodeId": "node-1"
+    }
+  }
+}
+```
+
+事件触发时，宿主会给进程发送普通的 `sendEvent` 请求：
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "event:sessions.nodeStateChanged",
+  "payload": {
+    "requestId": "event:sessions.nodeStateChanged",
+    "kind": {
+      "type": "sendEvent",
+      "event": {
+        "name": "sessions.nodeStateChanged",
+        "payload": {
+          "nodeId": "node-1"
+        }
+      }
+    }
+  }
+}
+```
+
+插件仍然必须响应：
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "event:sessions.nodeStateChanged",
+  "payload": {
+    "requestId": "event:sessions.nodeStateChanged",
+    "result": {
+      "status": "ok",
+      "value": {
+        "handled": true
+      }
+    }
+  }
+}
+```
+
+自定义插件事件使用 `events.emit` 和 `events.on`。事件会按插件 id 作用域隔离，因此一个插件不能抢占任意全局事件名。
+
+## 常见失败检查
+
+如果插件没有激活：
+
+- 检查 `runtime.entry` 是否指向插件目录内存在的可执行文件。
+- 检查进程是否只向 stdout 输出 JSON Lines。
+- 检查激活响应是否同时包含 envelope `requestId` 和 payload `requestId`。
+- 检查 `protocolVersion` 是否为 `1`。
+- 检查 stderr 里的插件诊断信息。
+
+如果界面没有出现：
+
+- `contributes.tabs` 或 `contributes.sidebarPanels` 必须声明界面 id。
+- 运行时注册必须使用相同的 `tabId` 或 `panelId`。
+- `registration.pluginId` 必须匹配清单 `id`。
+- `metadata.schema.kind` 应该是 `form`。
+- `button`、`text`、`password`、`number`、`checkbox`、`select` 等可交互控件需要稳定的 `id`。
+
+如果 Host API 调用失败：
+
+- 确认调用出现在 `allowedHostApis` 中。
+- 确认方法名和参数名与下方参考表一致。
+- 对 `api.invoke`，确认命令出现在 `contributes.apiCommands` 中。
+- 对 SFTP 或端口转发，确认具备对应能力。
+- 对凭据和密码，确认插件没有通过日志或界面文本发送敏感值。
 
 ## Native 插件模型
 
@@ -181,7 +727,11 @@ flowchart TB
     "requestId": "activate-1",
     "kind": {
       "type": "activate",
-      "manifest": {},
+      "manifest": {
+        "id": "com.example.runtime",
+        "name": "Example Runtime",
+        "version": "0.1.0"
+      },
       "permissions": {
         "capabilities": [],
         "allowedHostApis": []
@@ -358,6 +908,8 @@ Native 使用显式能力门。当前共享能力名称包括：
 | `filesystem.read` | 通过已批准宿主 API 读取文件元数据或内容 |
 | `filesystem.write` | 通过已批准宿主 API 修改文件 |
 | `network.forward` | 创建或管理转发/网络桥接行为 |
+
+运行时会在 `activate` 请求里收到最终生效的权限集。插件应把该请求当作准确信息来源：清单可以声明插件意图，但 Host API 调用仍然必须出现在 `permissions.allowedHostApis` 中，带能力门的调用还必须具备对应能力。
 
 AI 工具元数据还可以声明 `terminal.observe`、`terminal.send`、`state.list`、`settings.read`、`settings.write` 和 `plugin.invoke` 等语义能力。这些声明用于描述工具行为，服务于宿主和模型侧展示；它们不会绕过运行时权限检查。
 

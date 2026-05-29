@@ -4,26 +4,572 @@ This guide describes the OxideTerm Native plugin model. It is intentionally diff
 
 ## Contents
 
-1. [Native Plugin Model](#native-plugin-model)
-2. [Native Versus Tauri Plugins](#native-versus-tauri-plugins)
-3. [Plugin Directory](#plugin-directory)
-4. [Minimal Manifest-Only Plugin](#minimal-manifest-only-plugin)
-5. [Process Runtime Plugin](#process-runtime-plugin)
-6. [Protocol Frames](#protocol-frames)
-7. [Runtime Registrations](#runtime-registrations)
-8. [Declarative Native UI](#declarative-native-ui)
-9. [Host API Calls](#host-api-calls)
-10. [Permissions And Capabilities](#permissions-and-capabilities)
-11. [Settings, Storage, And Secrets](#settings-storage-and-secrets)
-12. [Terminal, SFTP, Forwarding, IDE, And AI](#terminal-sftp-forwarding-ide-and-ai)
-13. [Packaging And Installation](#packaging-and-installation)
-14. [Interface Reference](#interface-reference)
-15. [Host API Reference](#host-api-reference)
-16. [Events Reference](#events-reference)
-17. [Debugging](#debugging)
-18. [Migration Notes](#migration-notes)
+1. [Build A Running Plugin](#build-a-running-plugin)
+2. [Runtime Conversation](#runtime-conversation)
+3. [Host Calls In Plugin Code](#host-calls-in-plugin-code)
+4. [UI And Event Recipes](#ui-and-event-recipes)
+5. [Common Failure Checks](#common-failure-checks)
+6. [Native Plugin Model](#native-plugin-model)
+7. [Native Versus Tauri Plugins](#native-versus-tauri-plugins)
+8. [Plugin Directory](#plugin-directory)
+9. [Minimal Manifest-Only Plugin](#minimal-manifest-only-plugin)
+10. [Process Runtime Plugin](#process-runtime-plugin)
+11. [Protocol Frames](#protocol-frames)
+12. [Runtime Registrations](#runtime-registrations)
+13. [Declarative Native UI](#declarative-native-ui)
+14. [Host API Calls](#host-api-calls)
+15. [Permissions And Capabilities](#permissions-and-capabilities)
+16. [Settings, Storage, And Secrets](#settings-storage-and-secrets)
+17. [Terminal, SFTP, Forwarding, IDE, And AI](#terminal-sftp-forwarding-ide-and-ai)
+18. [Packaging And Installation](#packaging-and-installation)
+19. [Interface Reference](#interface-reference)
+20. [Host API Reference](#host-api-reference)
+21. [Events Reference](#events-reference)
+22. [Debugging](#debugging)
+23. [Migration Notes](#migration-notes)
 
 ---
+
+## Build A Running Plugin
+
+Start with a process plugin. It is the easiest runtime to debug because every message is visible as JSON Lines over stdio.
+
+Create this directory inside the user plugin directory:
+
+```text
+hello-native/
+  plugin.json
+  bin/
+    hello.js
+```
+
+The process entry must be a real executable inside the plugin directory. On macOS/Linux, give the script an executable bit:
+
+```sh
+chmod +x hello-native/bin/hello.js
+```
+
+Use this manifest:
+
+```json
+{
+  "id": "com.example.hello-native",
+  "name": "Hello Native",
+  "version": "0.1.0",
+  "description": "Minimal native process plugin.",
+  "runtime": {
+    "kind": "process",
+    "entry": "bin/hello.js"
+  },
+  "contributes": {
+    "sidebarPanels": [
+      {
+        "id": "hello-panel",
+        "title": "Hello",
+        "icon": "panel-left",
+        "position": "top"
+      }
+    ],
+    "settings": [
+      {
+        "id": "message",
+        "type": "string",
+        "default": "Hello from a native plugin",
+        "title": "Message"
+      }
+    ],
+    "apiCommands": [
+      "get_app_version"
+    ]
+  }
+}
+```
+
+Use this process runner:
+
+```js
+#!/usr/bin/env node
+
+const readline = require("node:readline");
+
+const pluginId = "com.example.hello-native";
+let nextHostRequest = 1;
+const pendingHostCalls = new Map();
+
+// Keep stdout reserved for protocol frames.
+function writeFrame(payload, requestId = null) {
+  process.stdout.write(JSON.stringify({
+    protocolVersion: 1,
+    requestId,
+    payload
+  }) + "\n");
+}
+
+function respondOk(requestId, value) {
+  writeFrame({
+    requestId,
+    result: {
+      status: "ok",
+      value
+    }
+  }, requestId);
+}
+
+function respondError(requestId, code, message) {
+  writeFrame({
+    requestId,
+    result: {
+      status: "error",
+      error: {
+        code,
+        message,
+        recoverable: false
+      }
+    }
+  }, requestId);
+}
+
+function registerPanel() {
+  writeFrame({
+    type: "registerContribution",
+    registration: {
+      registrationId: "hello-panel-view",
+      pluginId,
+      kind: "sidebar-panel",
+      metadata: {
+        panelId: "hello-panel",
+        schema: {
+          kind: "form",
+          title: "Hello Native",
+          sections: [
+            {
+              id: "main",
+              controls: [
+                {
+                  kind: "markdown",
+                  text: "This panel was registered by a native process plugin."
+                },
+                {
+                  kind: "button",
+                  id: "refresh",
+                  label: "Refresh"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  });
+}
+
+// Returnable host calls are matched by requestId.
+function callHost(namespace, method, args = {}) {
+  const requestId = `host-${nextHostRequest++}`;
+  writeFrame({
+    type: "callHostApi",
+    requestId,
+    namespace,
+    method,
+    args
+  });
+  return new Promise((resolve, reject) => {
+    pendingHostCalls.set(requestId, { resolve, reject });
+  });
+}
+
+// Host-call responses arrive on stdin like normal host requests.
+function handleHostResponse(payload) {
+  const pending = pendingHostCalls.get(payload.requestId);
+  if (!pending) {
+    return false;
+  }
+  pendingHostCalls.delete(payload.requestId);
+  if (payload.result.status === "ok") {
+    pending.resolve(payload.result.value);
+  } else {
+    pending.reject(new Error(payload.result.error.message));
+  }
+  return true;
+}
+
+// Host requests and host-call responses share the same input stream.
+async function handleRequest(envelope) {
+  const request = envelope.payload;
+  if (handleHostResponse(request)) {
+    return;
+  }
+
+  const requestId = request.requestId;
+  switch (request.kind.type) {
+    case "activate":
+      registerPanel();
+      writeFrame({
+        type: "runtimeReady"
+      });
+      respondOk(requestId, { activated: true });
+      break;
+    case "sendEvent":
+      respondOk(requestId, { received: request.kind.event.name });
+      break;
+    case "health":
+      respondOk(requestId, { ok: true });
+      break;
+    case "deactivate":
+    case "kill":
+      respondOk(requestId, { stopped: true });
+      process.exit(0);
+      break;
+    case "dispatchCommand":
+      try {
+        const version = await callHost("api", "invoke", {
+          command: "get_app_version",
+          args: {}
+        });
+        respondOk(requestId, { version });
+      } catch (error) {
+        respondError(requestId, "command_failed", error.message);
+      }
+      break;
+    default:
+      respondError(requestId, "unsupported_request", `Unsupported request ${request.kind.type}`);
+  }
+}
+
+readline.createInterface({
+  input: process.stdin,
+  crlfDelay: Infinity
+}).on("line", (line) => {
+  if (!line.trim()) {
+    return;
+  }
+  handleRequest(JSON.parse(line)).catch((error) => {
+    process.stderr.write(`Plugin error: ${error.stack || error.message}\n`);
+  });
+});
+```
+
+This example demonstrates the important contract:
+
+- `stdout` is reserved for protocol frames, one JSON object per line.
+- `stderr` is for human diagnostics.
+- The plugin must answer the activation request with the same `requestId`.
+- Runtime UI is not React. It is a declarative schema registered through a `sidebar-panel` or `tab` contribution.
+- A returnable host call is sent as an outbound `callHostApi` frame; the host writes the response back on stdin.
+
+## Runtime Conversation
+
+The process runtime has one line-oriented conversation.
+
+```mermaid
+sequenceDiagram
+    participant Host as OxideTerm Host
+    participant Plugin as Plugin Process
+    Host->>Plugin: activate request on stdin
+    Plugin-->>Host: registerContribution sidebar-panel on stdout
+    Plugin-->>Host: runtimeReady on stdout
+    Plugin-->>Host: activate ok response on stdout
+    Host->>Plugin: sendEvent / dispatchCommand / health on stdin
+    Plugin-->>Host: response with the same requestId on stdout
+```
+
+Activation request from host to plugin. The `manifest` object is shortened here; the real request carries the parsed `plugin.json`:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "activate:com.example.hello-native",
+  "payload": {
+    "requestId": "activate:com.example.hello-native",
+    "kind": {
+      "type": "activate",
+      "manifest": {
+        "id": "com.example.hello-native",
+        "name": "Hello Native",
+        "version": "0.1.0"
+      },
+      "permissions": {
+        "capabilities": [],
+        "allowedHostApis": [
+          "api.invoke",
+          "app.getVersion",
+          "settings.get"
+        ]
+      }
+    },
+    "timeoutMs": 5000
+  }
+}
+```
+
+Activation response from plugin to host:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "activate:com.example.hello-native",
+  "payload": {
+    "requestId": "activate:com.example.hello-native",
+    "result": {
+      "status": "ok",
+      "value": {
+        "activated": true
+      }
+    }
+  }
+}
+```
+
+Error response:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "activate:com.example.hello-native",
+  "payload": {
+    "requestId": "activate:com.example.hello-native",
+    "result": {
+      "status": "error",
+      "error": {
+        "code": "invalid_config",
+        "message": "Missing required plugin setting",
+        "recoverable": false
+      }
+    }
+  }
+}
+```
+
+Host-call request from plugin to host:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": null,
+  "payload": {
+    "type": "callHostApi",
+    "requestId": "host-1",
+    "namespace": "app",
+    "method": "getVersion",
+    "args": {}
+  }
+}
+```
+
+Host-call response from host to plugin:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "host-1",
+  "payload": {
+    "requestId": "host-1",
+    "result": {
+      "status": "ok",
+      "value": "0.1.0"
+    }
+  }
+}
+```
+
+The process bridge rejects malformed frames before they reach the workspace. Common rejection causes are unsupported `protocolVersion`, missing `requestId` on responses, mismatched response ids, invalid registration ownership, and stdout text that is not JSON.
+
+## Host Calls In Plugin Code
+
+Host calls are not global JavaScript functions. They are protocol messages. A call is accepted only when both checks pass:
+
+- The host API name is allowed by the plugin permission set, either exactly such as `terminal.getActiveTarget` or by namespace wildcard such as `terminal.*`.
+- For `api.invoke`, `args.command` is also listed in `contributes.apiCommands`.
+
+Read a plugin setting:
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-2",
+  "namespace": "settings",
+  "method": "get",
+  "args": {
+    "key": "message"
+  }
+}
+```
+
+Read the active terminal target:
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-3",
+  "namespace": "terminal",
+  "method": "getActiveTarget",
+  "args": {}
+}
+```
+
+Write text to the active terminal:
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-4",
+  "namespace": "terminal",
+  "method": "writeToActive",
+  "args": {
+    "text": "pwd\n"
+  }
+}
+```
+
+Read a remote file through SFTP:
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-5",
+  "namespace": "sftp",
+  "method": "readFile",
+  "args": {
+    "nodeId": "node-1",
+    "path": "/etc/hostname"
+  }
+}
+```
+
+That SFTP call also requires the `filesystem.read` capability. Write operations require `filesystem.write`. Port forwarding mutations require `network.forward`.
+
+Import an `.oxide` bundle:
+
+```json
+{
+  "type": "callHostApi",
+  "requestId": "host-6",
+  "namespace": "sync",
+  "method": "importOxide",
+  "args": {
+    "fileData": [1, 2, 3],
+    "password": "user-entered-password",
+    "conflictStrategy": "rename",
+    "importAppSettings": true,
+    "importPluginSettings": true
+  }
+}
+```
+
+Do not log or echo passwords, secret values, terminal buffers, connection config, or raw import/export payloads.
+
+## UI And Event Recipes
+
+Register a tab view:
+
+```json
+{
+  "type": "registerContribution",
+  "registration": {
+    "registrationId": "hello-tab-view",
+    "pluginId": "com.example.hello-native",
+    "kind": "tab",
+    "metadata": {
+      "tabId": "hello-tab",
+      "schema": {
+        "kind": "form",
+        "title": "Hello",
+        "controls": [
+          {
+            "kind": "markdown",
+            "text": "This tab is rendered by OxideTerm, not by plugin HTML."
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Subscribe to terminal/session events by registering `event-subscription`:
+
+```json
+{
+  "type": "registerContribution",
+  "registration": {
+    "registrationId": "watch-active-node",
+    "pluginId": "com.example.hello-native",
+    "kind": "event-subscription",
+    "metadata": {
+      "namespace": "sessions",
+      "method": "onNodeStateChange",
+      "nodeId": "node-1"
+    }
+  }
+}
+```
+
+When the event fires, the host sends a normal `sendEvent` request to the process:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "event:sessions.nodeStateChanged",
+  "payload": {
+    "requestId": "event:sessions.nodeStateChanged",
+    "kind": {
+      "type": "sendEvent",
+      "event": {
+        "name": "sessions.nodeStateChanged",
+        "payload": {
+          "nodeId": "node-1"
+        }
+      }
+    }
+  }
+}
+```
+
+The plugin must still respond:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "event:sessions.nodeStateChanged",
+  "payload": {
+    "requestId": "event:sessions.nodeStateChanged",
+    "result": {
+      "status": "ok",
+      "value": {
+        "handled": true
+      }
+    }
+  }
+}
+```
+
+Custom plugin events use `events.emit` and `events.on`. They are scoped by plugin id, so one plugin cannot take ownership of arbitrary global event names.
+
+## Common Failure Checks
+
+If the plugin never activates:
+
+- Check that `runtime.entry` points to an existing executable file inside the plugin directory.
+- Check that the process prints only JSON Lines to stdout.
+- Check that the activation response has both envelope `requestId` and payload `requestId`.
+- Check that `protocolVersion` is `1`.
+- Check stderr for plugin diagnostics.
+
+If UI does not appear:
+
+- `contributes.tabs` or `contributes.sidebarPanels` must declare the surface id.
+- Runtime registration must use the same `tabId` or `panelId`.
+- `registration.pluginId` must match the manifest `id`.
+- `metadata.schema.kind` should be `form`.
+- Interactive controls such as `button`, `text`, `password`, `number`, `checkbox`, and `select` need stable `id` values.
+
+If a Host API call fails:
+
+- Confirm the call is in `allowedHostApis`.
+- Confirm the method name and argument names match the reference tables below.
+- For `api.invoke`, confirm the command is listed in `contributes.apiCommands`.
+- For SFTP or forwarding, confirm the required capability is present.
+- For secrets and passwords, confirm the plugin is not trying to send secret values through logs or UI text.
 
 ## Native Plugin Model
 
@@ -181,7 +727,11 @@ The host wraps every request and response in an envelope:
     "requestId": "activate-1",
     "kind": {
       "type": "activate",
-      "manifest": {},
+      "manifest": {
+        "id": "com.example.runtime",
+        "name": "Example Runtime",
+        "version": "0.1.0"
+      },
       "permissions": {
         "capabilities": [],
         "allowedHostApis": []
@@ -358,6 +908,8 @@ Native uses explicit capability gates. Current shared capability names include:
 | `filesystem.read` | Read file metadata/content through approved host APIs |
 | `filesystem.write` | Mutate files through approved host APIs |
 | `network.forward` | Create or manage forwarding/network bridge behavior |
+
+The runtime receives the effective permission set in the `activate` request. Treat that request as the source of truth: a manifest can declare plugin intent, but a Host API call still has to be present in `permissions.allowedHostApis`, and capability-gated calls still need the matching capability.
 
 AI tool metadata can also declare semantic capabilities such as `terminal.observe`, `terminal.send`, `state.list`, `settings.read`, `settings.write`, and `plugin.invoke`. Those declarations describe tool behavior for the host and model-facing surfaces; they do not bypass runtime permission checks.
 
