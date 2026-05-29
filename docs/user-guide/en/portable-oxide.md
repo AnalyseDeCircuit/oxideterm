@@ -2,19 +2,20 @@
 
 `.oxide` bundles are encrypted portable exports for moving OxideTerm data between machines or profiles. They can include connections, forwards, app settings, quick commands, plugin settings, and optionally portable secrets.
 
-## Validate and Preview
+Use the desktop app for normal import and export flows so you can review what will change before applying it.
 
-Always validate and preview before importing:
+## Preview Before Import
 
-```sh
-oxideterm oxide validate ./profile.oxide
-oxideterm oxide preview-import ./profile.oxide --password-stdin --json
-oxideterm oxide diff ./profile.oxide --strategy merge --password-env OXIDE_PASSWORD
-```
+Open the portable import surface, choose the `.oxide` file, and preview its contents before importing. Check:
 
-Prefer stdin or environment variables for bundle passwords. Do not put passwords directly in shell history.
+- Which connections, forwards, settings, quick commands, and plugin settings are included.
+- Whether portable secrets are present.
+- Which records conflict with the current profile.
+- Which conflict strategy will be used.
 
-## Import
+Do not import a bundle until the preview matches what you expect.
+
+## Import Strategies
 
 Choose a conflict strategy:
 
@@ -23,41 +24,29 @@ Choose a conflict strategy:
 - `replace`: replace local records.
 - `merge`: merge compatible records.
 
-Example:
-
-```sh
-oxideterm oxide import ./profile.oxide \
-  --strategy merge \
-  --import-portable-secrets \
-  --password-env OXIDE_PASSWORD \
-  --dry-run
-```
-
-Repeat with `--yes` after reviewing the plan.
+Use the smallest strategy that matches the task. For example, prefer `skip` or `rename` when inspecting a bundle from another machine; use `replace` only when you intentionally want the bundle to override local records.
 
 ## Export
 
-Export a selected profile:
+Use the export surface to choose what should be included in a bundle. Add a clear description so the receiving machine can identify the bundle later.
 
-```sh
-oxideterm oxide export ./profile.oxide \
-  --connection prod \
-  --forward web \
-  --description "Production workspace" \
-  --password-env OXIDE_PASSWORD \
-  --json
-```
-
-Use `--include-portable-secrets` only when the recipient machine needs encrypted portable secrets. Use `--embed-keys` only when you intentionally want private key files inside the encrypted bundle.
+Use portable secrets only when the recipient machine needs encrypted secret material. Embed private key files only when that is intentional and the bundle password is strong.
 
 ## Portable Runtime
 
-The portable runtime keystore protects portable secrets:
+The portable runtime keystore protects portable secrets after import. Set it up through the app's portable runtime or secret storage surface. If the keystore is locked, unlock it before relying on imported portable secrets.
+
+Only reset the portable runtime when you intentionally want to remove the local portable keystore.
+
+## CLI Companion
+
+Use the CLI companion for automation, CI validation, or scripted migration:
 
 ```sh
+oxideterm oxide validate ./profile.oxide
+oxideterm oxide preview-import ./profile.oxide --password-stdin --json
+oxideterm oxide diff ./profile.oxide --strategy merge --password-env OXIDE_PASSWORD
 oxideterm portable status --json
-printf '%s' "$PORTABLE_PASSWORD" | oxideterm portable setup --password-stdin
-oxideterm portable unlock --password-env OXIDETERM_PORTABLE_PASSWORD
 ```
 
-Use `portable reset --yes` only when you intentionally want to delete the local portable keystore.
+Prefer stdin or environment variables for bundle passwords. Do not put passwords directly in shell history.

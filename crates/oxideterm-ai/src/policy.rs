@@ -81,20 +81,14 @@ pub fn resolve_ai_policy_decision(
     safety_mode: AiPolicySafetyMode,
     profile_id: Option<String>,
 ) -> AiPolicyDecision {
-    let risk = if crate::is_mcp_tool_name(tool_name)
-        || matches!(tool_name, "list_mcp_resources" | "read_mcp_resource")
-    {
-        AiActionRisk::Read
-    } else if is_orchestrator_tool_name(tool_name) {
+    let risk = if is_orchestrator_tool_name(tool_name) {
         orchestrator_risk_for_tool(tool_name, args)
     } else {
+        // Tauri's core orchestrator policy treats every non-orchestrator tool
+        // name as write-risk, even when another subsystem knows about it.
         AiActionRisk::Write
     };
-    let matched_policy_key = if crate::is_mcp_tool_name(tool_name)
-        || matches!(tool_name, "list_mcp_resources" | "read_mcp_resource")
-    {
-        tool_name.to_string()
-    } else if is_orchestrator_tool_name(tool_name) {
+    let matched_policy_key = if is_orchestrator_tool_name(tool_name) {
         orchestrator_approval_key_for_tool(tool_name, args)
     } else {
         tool_name.to_string()

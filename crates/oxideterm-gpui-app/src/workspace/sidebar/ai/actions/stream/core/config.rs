@@ -47,14 +47,9 @@ impl WorkspaceApp {
         );
         let tool_use_enabled = applied_profile.tool_policy.enabled;
         let tools = if tool_use_enabled {
-            let mut tools = oxideterm_ai::orchestrator_tool_definitions();
-            tools.extend(self.ai_mcp_registry.tool_definitions());
-            // Manifest-only plugin tools are visible as model metadata in Phase
-            // 2, but execution is still rejected until the Phase 3 runtime bridge
-            // can dispatch plugin RPC safely.
-            tools.extend(self.plugin_registry.contributions().ai_tool_definitions());
-            tools.retain(|tool| !applied_profile.tool_policy.disabled_tools.contains(&tool.name));
-            tools
+            // Tauri's chat orchestrator exposes only ORCHESTRATOR_TOOL_DEFS;
+            // disabled tools are still defined and are denied by policy.
+            oxideterm_ai::orchestrator_tool_definitions()
         } else {
             Vec::new()
         };

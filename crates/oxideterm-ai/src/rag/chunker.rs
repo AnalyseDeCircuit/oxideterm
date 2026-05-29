@@ -203,14 +203,12 @@ fn make_chunk(doc_id: &str, content: &str, section_path: Option<&str>, offset: u
 /// CJK-aware token estimate matching frontend `estimateTokens()`.
 pub fn estimate_tokens(text: &str) -> usize {
     let mut cjk = 0usize;
-    let mut other = 0usize;
     for ch in text.chars() {
         if is_cjk(ch) {
             cjk += 1;
-        } else {
-            other += 1;
         }
     }
+    let other = text.encode_utf16().count().saturating_sub(cjk);
     let raw = (cjk as f64 * 1.5 + other as f64 * 0.25) * 1.15;
     raw.ceil() as usize
 }
@@ -365,6 +363,12 @@ mod tests {
         let est = estimate_tokens(en);
         assert!(est > 20);
         assert!(est < 50);
+    }
+
+    #[test]
+    fn test_estimate_tokens_uses_utf16_length_like_frontend() {
+        assert_eq!(estimate_tokens("😀"), 1);
+        assert_eq!(estimate_tokens("😀😀😀😀"), 3);
     }
 
     #[test]

@@ -83,7 +83,7 @@ use oxideterm_gpui_ui::{
     tooltip::tooltip_content,
 };
 use oxideterm_i18n::{I18n, Locale};
-use oxideterm_ide_fs::{NodeAgentIdeFileSystem, NodeAgentRpcError};
+use oxideterm_ide_fs::NodeAgentIdeFileSystem;
 use oxideterm_notification_center::{
     ActivityView as WorkspaceActivityView, EventCategory as WorkspaceEventCategory,
     EventCategoryFilter as WorkspaceEventCategoryFilter, EventLogEntry as WorkspaceEventLogEntry,

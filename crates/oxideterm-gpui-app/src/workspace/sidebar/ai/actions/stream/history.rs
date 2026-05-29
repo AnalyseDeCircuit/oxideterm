@@ -1,11 +1,7 @@
 fn ai_message_estimated_tokens(message: &AiChatMessage) -> usize {
+    // Tauri's chat token budget only counts message.content here; tool-call
+    // details are accounted separately in the context indicator.
     ai_estimated_tokens(&message.content)
-        + message.context.as_deref().map(ai_estimated_tokens).unwrap_or(0)
-        + message
-            .thinking_content
-            .as_deref()
-            .map(ai_estimated_tokens)
-            .unwrap_or(0)
 }
 
 fn ai_tool_definitions_estimated_tokens(tools: &[oxideterm_ai::AiToolDefinition]) -> usize {
@@ -36,11 +32,10 @@ fn normalize_ai_stream_history_for_provider(history: &mut Vec<AiChatMessage>) {
     for mut message in history.drain(..) {
         match message.role {
             AiChatRole::System if is_ai_compaction_anchor(&message) => {
-                let summary = message.content.trim();
-                if summary.is_empty() {
+                if message.content.trim().is_empty() {
                     continue;
                 }
-                message.content = format!("Previous conversation summary:\n{summary}");
+                message.content = format!("Previous conversation summary:\n{}", message.content);
                 message.metadata = None;
                 message.tool_calls.clear();
                 message.tool_call_id = None;
@@ -116,18 +111,15 @@ fn finalize_streaming_ai_messages_on_cancel(
                 "ok": false,
                 "summary": "Generation was stopped.",
                 "output": "Generation was stopped.",
-                "data": serde_json::Value::Null,
                 "error": {
                     "code": "generation_stopped",
                     "message": "Generation was stopped.",
                     "recoverable": true,
                 },
-                "targets": [],
                 "meta": {
                     "toolName": name,
                     "durationMs": 0,
                     "verified": false,
-                    "capability": serde_json::Value::Null,
                     "truncated": false,
                 }
             });
@@ -227,12 +219,12 @@ fn ai_estimated_tokens(text: &str) -> usize {
             )
         })
         .count();
-    let non_cjk_count = text.chars().count().saturating_sub(cjk_count);
-    ((cjk_count as f32 * 1.5 + non_cjk_count as f32 * 0.25) * 1.15).ceil() as usize
+    let non_cjk_count = text.encode_utf16().count().saturating_sub(cjk_count);
+    ((cjk_count as f64 * 1.5 + non_cjk_count as f64 * 0.25) * 1.15).ceil() as usize
 }
 
 fn ai_response_reserve(context_window: usize) -> usize {
-    (((context_window as f32) * 0.15).floor() as usize).min(4096)
+    (((context_window as f64) * 0.15).floor() as usize).min(4096)
 }
 
 const AI_HISTORY_BUDGET_RATIO: f32 = 0.7;
@@ -368,15 +360,6 @@ fn trim_ai_stream_history_to_budget(
         .filter(|message| message.role == AiChatRole::System)
         .map(ai_message_estimated_tokens)
         .sum::<usize>();
-    let budget = ((context_window as f32) * AI_HISTORY_BUDGET_RATIO)
-        .floor() as usize;
-    let budget = budget
-        .saturating_sub(response_reserve)
-        .saturating_sub(system_tokens);
-    if budget == 0 {
-        return 0;
-    }
-
     let regular_indices = history
         .iter()
         .enumerate()
@@ -391,6 +374,24 @@ fn trim_ai_stream_history_to_budget(
     let total_regular = regular_indices.len();
     if total_regular <= 1 {
         return 0;
+    }
+    let budget = ((context_window as f32) * AI_HISTORY_BUDGET_RATIO)
+        .floor() as usize;
+    let budget = budget
+        .saturating_sub(response_reserve)
+        .saturating_sub(system_tokens);
+    if budget == 0 {
+        // Tauri keeps the most recent history message even when fixed prompt
+        // overhead leaves no budget for accumulated conversation history.
+        let keep_index = regular_indices[total_regular - 1];
+        *history = history
+            .drain(..)
+            .enumerate()
+            .filter_map(|(index, message)| {
+                (message.role == AiChatRole::System || index == keep_index).then_some(message)
+            })
+            .collect();
+        return total_regular.saturating_sub(1);
     }
 
     let mut kept_indices = std::collections::HashSet::<usize>::new();
@@ -458,7 +459,7 @@ fn ai_orchestrator_system_prompt(tool_use_enabled: bool) -> String {
         ]
         .join("\n")
     } else {
-        "TOOL CALLING IS CURRENTLY DISABLED. Do not emit tool calls or JSON tool schemas. If a task requires a tool, explain what you cannot access.".to_string()
+        "TOOL CALLING IS CURRENTLY DISABLED. DO NOT use the tool_code or JSON schema format. If you need a tool, explain to the user why you cannot access it.".to_string()
     };
     [
         "## OxideSens Runtime Rules",

@@ -1,75 +1,58 @@
 # 连接与端口转发
 
+日常 SSH 工作优先使用“会话”、“连接池”、“连接监控”和转发页面。CLI 伴侣工具只用于无界面校验、导出和可重复配置。
+
 ## 保存连接
 
 保存连接用于复用 SSH 配置，包括 name、host、user、port、group、tags、color、认证方式和可选连接后命令。
 
-列出和查看连接：
+从连接管理器或“会话”视图创建和编辑保存连接。添加新主机时，填写配置，选择认证方式，保存，然后从“会话”打开连接。如果连接失败，编辑同一个保存连接，不要创建一堆标签相近的重复条目。
 
-```sh
-oxideterm connections list
-oxideterm connections show prod --json
-oxideterm connections search prod
-```
+分组、颜色和标签用于导航。不要把密码、令牌或环境凭据写进名称、分组、标签、备注或连接后命令标签里。
 
-用直接参数创建连接：
+## 连接运行时
 
-```sh
-oxideterm connections create \
-  --name prod \
-  --host example.internal \
-  --user deploy \
-  --port 22 \
-  --group production \
-  --auth agent \
-  --dry-run
-```
+保存配置和在线运行时节点不是同一个东西：
 
-检查计划后，再重复执行并加 `--yes`。
+- 保存配置：OxideTerm 应该使用的主机和连接设置。
+- SSH 节点：某个主机当前在线或正在重连的运行时状态。
+- 终端会话：附着到 SSH 节点的可见 shell。
+- SFTP 会话：附着到 SSH 节点的文件浏览或传输页面。
 
-## 分组
+当终端像是卡住、SFTP 读不了目录或重连行为不清楚时，优先看连接池和连接监控。从应用状态里重连运行时；不要为了重连而删除并重建保存连接。
 
-分组用于让连接列表更好读：
+## 连接流程
 
-```sh
-oxideterm connections groups
-oxideterm connections group add production --yes
-oxideterm connections group rename production prod --yes
-```
+典型流程：
 
-分组只用于人工导航，不要用来存 secret。
+1. 打开“会话”。
+2. 选择一个保存连接，或创建新连接。
+3. 打开连接。
+4. 等 SSH 节点和终端标签页变为在线。
+5. 需要时，从同一个已连接节点打开 SFTP、IDE 或转发。
+
+对不稳定主机做测试时，保持连接监控可见。它会显示节点是已连接、正在连接、已失效还是不可用。
+
+## 端口转发
+
+使用转发页面创建和管理本地、远端和动态转发。
+
+转发类型：
+
+- Local：本地端口通过 SSH 连接到远端目标。
+- Remote：远端端口反连到本地目标。
+- Dynamic：SOCKS 风格隧道。
+
+把转发附着到所属连接上，这样生命周期才清楚。只有当转发应随连接打开而启动时才启用自动启动。测试新转发时，同时确认转发行和所属连接都是健康的。
 
 ## 校验与导出
 
-导入、CI 检查或生成支持报告前，先跑校验：
+使用应用检查可见连接和转发状态。CI、可审查导出或支持流程再使用 CLI 伴侣工具：
 
 ```sh
 oxideterm connections validate --strict
 oxideterm connections export --format raw-safe --json
-```
-
-`raw-safe` 输出适合审查和自动化，不包含凭据值。
-
-## 端口转发
-
-转发规则可以独立于 `.oxide` 包管理：
-
-```sh
-oxideterm forwards list
-oxideterm forwards create \
-  --type local \
-  --bind-port 8080 \
-  --target-host localhost \
-  --target-port 80 \
-  --connection prod \
-  --dry-run
 oxideterm forwards validate --json
 ```
 
-转发类型：
-
-- `local`：本地端口转到远端目标。
-- `remote`：远端端口转到本地目标。
-- `dynamic`：SOCKS 风格动态转发。
-
-只有当规则应该随所属连接自动启动时，才使用 `--auto-start`。
+`raw-safe` 输出用于审查和自动化，不包含凭据值。

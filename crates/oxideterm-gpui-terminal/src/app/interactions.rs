@@ -166,6 +166,13 @@ impl TerminalPane {
         self.snapshot_text()
     }
 
+    pub fn ai_screen_snapshot(&self) -> oxideterm_terminal::TerminalSnapshot {
+        // AI tool observation mirrors Tauri's terminal registry screen reader:
+        // expose a read-only viewport snapshot without letting GPUI types leak
+        // into the orchestrator tool payload.
+        self.snapshot.clone()
+    }
+
     fn copy_text(&self) -> String {
         self.selected_text()
             .filter(|text| !text.is_empty())

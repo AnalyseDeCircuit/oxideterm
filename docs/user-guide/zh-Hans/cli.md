@@ -1,6 +1,6 @@
-# CLI Companion
+# CLI 伴侣工具
 
-`oxideterm` CLI 用于无头检查、自动化、CI 校验、迁移和恢复。它不应该打印 secret 值；涉及凭据的命令只输出 hint 或状态。
+`oxideterm` CLI 用于无界面检查、自动化、CI 校验、迁移和恢复。它不应该打印凭据值；涉及凭据的命令只输出提示或状态。
 
 ## 全局选项
 
@@ -10,7 +10,7 @@ oxideterm --profile <name> <command>
 OXIDETERM_CONFIG_DIR=<path> oxideterm <command>
 ```
 
-脚本使用 `--json` 或 `--format json`。CI 中如果 warning 也应该失败，使用 `doctor --strict` 或命令自己的 `--strict`。
+脚本使用 `--json` 或 `--format json`。CI 中如果警告也应该失败，使用 `doctor --strict` 或命令自己的 `--strict`。
 
 多数写命令共享同一组安全选项：
 
@@ -27,7 +27,7 @@ oxideterm doctor --strict
 oxideterm report --json
 ```
 
-准备 issue 或支持信息时使用 `report --bundle <path>`。分享前应先检查 bundle 内容。
+准备问题报告或支持信息时使用 `report --bundle <path>`。分享前应先检查支持包内容。
 
 ## 设置
 
@@ -53,7 +53,7 @@ oxideterm connections validate --strict
 oxideterm connections export --format raw-safe --json
 ```
 
-密码或 passphrase 输入优先使用 `--password-stdin`、`--password-env`、`--passphrase-stdin` 或 `--passphrase-env`。不要把 secret 值直接写进 shell 参数。
+密码或密钥口令输入优先使用 `--password-stdin`、`--password-env`、`--passphrase-stdin` 或 `--passphrase-env`。不要把凭据值直接写进 shell 参数。
 
 ## 备份与恢复
 
@@ -63,7 +63,7 @@ oxideterm backup inspect ./oxideterm-backup.json --summary
 oxideterm backup restore ./oxideterm-backup.json --section settings --dry-run --json
 ```
 
-restore 命令应先用 dry-run 检查计划，再用 `--yes` 确认真执行。
+恢复命令应先用 `--dry-run` 检查计划，再用 `--yes` 确认真执行。
 
 ## 云同步
 
@@ -77,7 +77,7 @@ oxideterm cloud-sync apply --from remote --strategy merge --dry-run
 oxideterm cloud-sync secrets status --json
 ```
 
-secret 命令只能输出 hint 或状态。写入 secret 时使用 stdin 或环境变量。
+凭据命令只能输出提示或状态。写入凭据时使用标准输入或环境变量。
 
 ## Batch Plans
 
@@ -88,7 +88,7 @@ oxideterm batch apply ./plan.json --dry-run
 oxideterm batch apply ./plan.json --yes --json
 ```
 
-当设置、连接 snapshot 和 cloud-sync 配置需要一起审查时，使用 batch mode。
+当设置、连接快照和云同步配置需要一起审查时，使用批处理模式。
 
 ## Shell Completion
 

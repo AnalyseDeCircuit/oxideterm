@@ -412,7 +412,15 @@ impl WorkspaceApp {
             .and_then(|value| value.get("targets"))
             .and_then(serde_json::Value::as_array)
             .and_then(|targets| targets.first());
-        let target_refs = target.and_then(|value| value.get("refs"));
+        let target_refs = target
+            .and_then(|value| value.get("refs"))
+            .or_else(|| {
+                // Tauri tool result targets keep refs under metadata; retain
+                // the old native fallback while reading the canonical shape.
+                target
+                    .and_then(|value| value.get("metadata"))
+                    .and_then(|metadata| metadata.get("refs"))
+            });
         let target_id = meta
             .and_then(|value| value.get("targetId"))
             .and_then(serde_json::Value::as_str)

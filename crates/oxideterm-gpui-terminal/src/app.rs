@@ -522,6 +522,13 @@ impl TerminalPane {
         self.send_user_protocol_bytes(bytes, cx);
     }
 
+    pub fn ai_accepts_input(&self) -> bool {
+        // AI terminal tools mirror Tauri's readiness gate before reporting a
+        // successful send, instead of letting a closed/non-interactive pane
+        // silently drop input.
+        self.terminal_accepts_input()
+    }
+
     pub fn set_plugin_input_interceptor(&mut self, interceptor: Option<TerminalInputInterceptor>) {
         self.plugin_input_interceptor = interceptor;
     }

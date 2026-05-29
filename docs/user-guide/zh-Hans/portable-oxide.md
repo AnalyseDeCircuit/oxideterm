@@ -1,20 +1,21 @@
-# Portable `.oxide` 包
+# 便携 `.oxide` 包
 
-`.oxide` 是加密的便携导入导出包，用于在机器或 profile 之间迁移 OxideTerm 数据。它可以包含连接、转发、应用设置、快捷命令、插件设置，以及可选的 portable secrets。
+`.oxide` 是加密的便携导入导出包，用于在机器或配置档之间迁移 OxideTerm 数据。它可以包含连接、转发、应用设置、快捷命令、插件设置，以及可选的便携凭据。
 
-## 校验与预览
+普通导入导出优先使用桌面应用，这样可以在应用里预览变更后再执行。
 
-导入前一定先校验和预览：
+## 导入前预览
 
-```sh
-oxideterm oxide validate ./profile.oxide
-oxideterm oxide preview-import ./profile.oxide --password-stdin --json
-oxideterm oxide diff ./profile.oxide --strategy merge --password-env OXIDE_PASSWORD
-```
+打开便携导入页面，选择 `.oxide` 文件，先预览内容再导入。重点检查：
 
-bundle 密码优先通过 stdin 或环境变量提供。不要把密码直接写进 shell history。
+- 包里包含哪些连接、转发、设置、快捷命令和插件设置。
+- 是否包含便携凭据。
+- 哪些记录会和当前配置档冲突。
+- 将使用哪种冲突策略。
 
-## 导入
+预览结果不符合预期前，不要导入便携包。
+
+## 导入策略
 
 选择冲突策略：
 
@@ -23,41 +24,29 @@ bundle 密码优先通过 stdin 或环境变量提供。不要把密码直接写
 - `replace`：替换本地记录。
 - `merge`：合并兼容记录。
 
-示例：
-
-```sh
-oxideterm oxide import ./profile.oxide \
-  --strategy merge \
-  --import-portable-secrets \
-  --password-env OXIDE_PASSWORD \
-  --dry-run
-```
-
-检查计划后，再加 `--yes`。
+使用能满足任务的最小策略。例如，只是查看另一台机器的包时优先使用 `skip` 或 `rename`；只有明确要让包覆盖本地记录时才用 `replace`。
 
 ## 导出
 
-导出选定 profile：
+在导出页面选择要包含的内容。添加清晰描述，方便目标机器之后识别这个便携包。
+
+只有目标机器需要加密凭据材料时，才包含便携凭据。只有明确需要把私钥文件放进加密包时，才嵌入私钥，并确保便携包密码足够强。
+
+## 便携运行时
+
+便携运行时密钥库用于保护导入后的便携凭据。通过应用里的便携运行时或凭据存储页面设置它。如果密钥库处于锁定状态，先解锁再依赖导入的便携凭据。
+
+只有明确要删除本地便携密钥库时，才重置便携运行时。
+
+## CLI 伴侣工具
+
+自动化、CI 校验或脚本化迁移使用 CLI 伴侣工具：
 
 ```sh
-oxideterm oxide export ./profile.oxide \
-  --connection prod \
-  --forward web \
-  --description "Production workspace" \
-  --password-env OXIDE_PASSWORD \
-  --json
-```
-
-只有目标机器需要加密 portable secrets 时，才使用 `--include-portable-secrets`。只有明确希望把私钥文件放进加密包时，才使用 `--embed-keys`。
-
-## Portable Runtime
-
-portable runtime keystore 用于保护 portable secrets：
-
-```sh
+oxideterm oxide validate ./profile.oxide
+oxideterm oxide preview-import ./profile.oxide --password-stdin --json
+oxideterm oxide diff ./profile.oxide --strategy merge --password-env OXIDE_PASSWORD
 oxideterm portable status --json
-printf '%s' "$PORTABLE_PASSWORD" | oxideterm portable setup --password-stdin
-oxideterm portable unlock --password-env OXIDETERM_PORTABLE_PASSWORD
 ```
 
-只有明确要删除本地 portable keystore 时，才使用 `portable reset --yes`。
+便携包密码优先通过标准输入或环境变量提供。不要把密码直接写进 shell 历史。

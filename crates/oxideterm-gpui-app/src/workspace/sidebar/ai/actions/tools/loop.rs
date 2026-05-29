@@ -16,14 +16,9 @@ async fn run_ai_chat_tool_loop(
             oxideterm_settings::MIN_AI_TOOL_MAX_ROUNDS,
             oxideterm_settings::MAX_AI_TOOL_MAX_ROUNDS,
         ) as usize;
-    let max_calls_per_round = config
-        .tool_policy
-        .max_calls_per_round
-        .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND)
-        .clamp(
-            oxideterm_settings::MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
-            oxideterm_settings::MAX_AI_TOOL_MAX_CALLS_PER_ROUND,
-        ) as usize;
+    // Tauri's chat tool loop uses a fixed execution guard of 8 calls per
+    // round, independent of the persisted settings summary.
+    let max_calls_per_round = oxideterm_settings::DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND as usize;
     let mut assistant_content = String::new();
     let mut assistant_thinking = String::new();
     let response_reserve = config
@@ -33,6 +28,11 @@ async fn run_ai_chat_tool_loop(
         .unwrap_or_else(|| ai_response_reserve(snapshot.ai_context_window));
     let transcript_lookup_prompt =
         ai_find_prompt_transcript_lookup_reference(&history).map(ai_build_transcript_lookup_prompt_reference);
+    let available_tool_names = config
+        .tools
+        .iter()
+        .map(|tool| tool.name.clone())
+        .collect::<std::collections::HashSet<_>>();
     let mut transcript_lookup_prompt_injected = history
         .iter()
         .any(|message| message.id == "transcript-lookup-reference");
@@ -414,7 +414,7 @@ async fn run_ai_chat_tool_loop(
                     transcript_ref: None,
                     summary_ref: None,
                     branches: None,
-            suggestions: Vec::new(),
+                    suggestions: Vec::new(),
                 });
                 history.push(AiChatMessage {
                     id: format!("{synthetic_round_id}-tool-result"),
@@ -437,7 +437,7 @@ async fn run_ai_chat_tool_loop(
                     transcript_ref: None,
                     summary_ref: None,
                     branches: None,
-            suggestions: Vec::new(),
+                    suggestions: Vec::new(),
                 });
                 hard_deny_retry_count = retry_attempt;
                 continue;
@@ -630,22 +630,20 @@ async fn run_ai_chat_tool_loop(
 
         let mut round_results = Vec::new();
         for call in completed_calls {
-            let Some(args) = parse_ai_tool_args(&call.arguments) else {
-                let executed = rejected_ai_tool_result(
-                    call.id.clone(),
-                    call.name.clone(),
-                    "invalid_json_arguments",
-                    "Invalid JSON arguments",
-                );
+            if !available_tool_names.contains(&call.name) {
+                // Tauri rejects unavailable tool names before argument parsing
+                // or policy approval; keep stale/model-invented names out of
+                // the executor path.
+                let executed = unavailable_ai_tool_result(call.id.clone(), call.name.clone());
                 send_ai_tool_status(
                     &ui_tx,
                     generation,
                     &conversation_id,
                     &assistant_id,
                     &call,
-                    "error",
+                    "rejected",
                     Some(executed.envelope.clone()),
-                    Some("read".to_string()),
+                    None,
                     Some(executed_summary(&executed)),
                 )
                 .ok();
@@ -656,16 +654,22 @@ async fn run_ai_chat_tool_loop(
                 });
                 history.push(ai_tool_result_message(executed));
                 continue;
-            };
+            }
+            let parsed_args = parse_ai_tool_args(&call.arguments);
+            let approval_args = parsed_args
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({}));
             let decision = resolve_ai_policy_decision(
                 &call.name,
-                Some(&args),
+                Some(&approval_args),
                 &config.tool_policy,
                 config.safety_mode,
                 config.profile_id.clone(),
             );
             let risk = ai_policy_risk_label(decision.risk).to_string();
             let summary = decision.reason_code.clone();
+            let mut executed_after_policy = false;
+            let mut execution_summary_args = serde_json::json!({});
 
             let mut executed = match decision.decision {
                 oxideterm_ai::AiPolicyDecisionKind::Deny => {
@@ -681,7 +685,7 @@ async fn run_ai_chat_tool_loop(
                         Some(summary.clone()),
                     )
                     .ok();
-                    rejected_ai_tool_result(
+                    pre_execution_rejected_ai_tool_result(
                         call.id.clone(),
                         call.name.clone(),
                         "tool_disabled",
@@ -722,11 +726,11 @@ async fn run_ai_chat_tool_loop(
                             Some("Rejected by user.".to_string()),
                         )
                         .ok();
-                        rejected_ai_tool_result(
+                        pre_execution_rejected_ai_tool_result(
                             call.id.clone(),
                             call.name.clone(),
                             "user_rejected",
-                            "The user rejected this tool call.",
+                            "Tool call rejected by user.",
                         )
                     } else {
                         send_ai_tool_status(
@@ -753,17 +757,42 @@ async fn run_ai_chat_tool_loop(
                             Some("Approved by user.".to_string()),
                         )
                         .ok();
-                        execute_ai_tool(
-                            &snapshot,
-                            &ui_tx,
-                            generation,
-                            &conversation_id,
-                            &assistant_id,
-                            call.id.clone(),
-                            call.name.clone(),
-                            args,
-                        )
-                        .await
+                        if let Some(mut execution_args) = parsed_args.clone() {
+                            if call.name == "run_command"
+                                && decision.risk == oxideterm_ai::AiActionRisk::Destructive
+                                && let Some(object) = execution_args.as_object_mut()
+                            {
+                                // Tauri passes this second approval bit to
+                                // local command execution after policy
+                                // approval; native keeps the same
+                                // defense-in-depth contract at the executor
+                                // boundary.
+                                object.insert(
+                                    "dangerousCommandApproved".to_string(),
+                                    serde_json::json!(true),
+                                );
+                            }
+                            execution_summary_args = execution_args.clone();
+                            executed_after_policy = true;
+                            execute_ai_tool(
+                                &snapshot,
+                                &ui_tx,
+                                generation,
+                                &conversation_id,
+                                &assistant_id,
+                                call.id.clone(),
+                                call.name.clone(),
+                                execution_args,
+                            )
+                            .await
+                        } else {
+                            pre_execution_rejected_ai_tool_result(
+                                call.id.clone(),
+                                call.name.clone(),
+                                "invalid_json_arguments",
+                                "Invalid JSON arguments",
+                            )
+                        }
                     }
                 }
                 oxideterm_ai::AiPolicyDecisionKind::Allow => {
@@ -791,24 +820,46 @@ async fn run_ai_chat_tool_loop(
                         Some(summary.clone()),
                     )
                     .ok();
-                    execute_ai_tool(
-                        &snapshot,
-                        &ui_tx,
-                        generation,
-                        &conversation_id,
-                        &assistant_id,
-                        call.id.clone(),
-                        call.name.clone(),
-                        args,
-                    )
-                    .await
+                    if let Some(mut execution_args) = parsed_args.clone() {
+                        if call.name == "run_command"
+                            && decision.risk == oxideterm_ai::AiActionRisk::Destructive
+                            && let Some(object) = execution_args.as_object_mut()
+                        {
+                            // Keep the local executor's dangerous-command
+                            // approval bit aligned with Tauri after policy
+                            // approval.
+                            object.insert(
+                                "dangerousCommandApproved".to_string(),
+                                serde_json::json!(true),
+                            );
+                        }
+                        execution_summary_args = execution_args.clone();
+                        executed_after_policy = true;
+                        execute_ai_tool(
+                            &snapshot,
+                            &ui_tx,
+                            generation,
+                            &conversation_id,
+                            &assistant_id,
+                            call.id.clone(),
+                            call.name.clone(),
+                            execution_args,
+                        )
+                        .await
+                    } else {
+                        pre_execution_rejected_ai_tool_result(
+                            call.id.clone(),
+                            call.name.clone(),
+                            "invalid_json_arguments",
+                            "Invalid JSON arguments",
+                        )
+                    }
                 }
             };
-            if matches!(
-                decision.decision,
-                oxideterm_ai::AiPolicyDecisionKind::Allow
-                    | oxideterm_ai::AiPolicyDecisionKind::RequireApproval
-            ) {
+            if executed_after_policy {
+                if call.name == "run_command" {
+                    annotate_ai_run_command_execution_result(&mut executed, &execution_summary_args);
+                }
                 annotate_executed_ai_tool_result_policy(&mut executed, &decision);
             }
 

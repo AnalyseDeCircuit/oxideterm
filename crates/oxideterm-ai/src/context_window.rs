@@ -82,7 +82,7 @@ static MODEL_CONTEXT_WINDOWS: LazyLock<Vec<(Regex, i64)>> = LazyLock::new(|| {
 });
 
 static CONTEXT_WINDOW_IN_NAME: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|[-_./:])(\d+)k(?:$|[-_./:@])").unwrap());
+    LazyLock::new(|| Regex::new(r"(?:^|[-_./:])(\d+)k").unwrap());
 
 pub fn model_context_window_info(
     model_id: &str,
@@ -149,6 +149,19 @@ pub fn model_context_window(
 pub fn extract_context_window_from_model_name(model_id: &str) -> Option<i64> {
     let mut best = None;
     for captures in CONTEXT_WINDOW_IN_NAME.captures_iter(model_id) {
+        let Some(full_match) = captures.get(0) else {
+            continue;
+        };
+        // Tauri uses a trailing lookahead here. Rust regex does not support
+        // lookahead, so keep the separator unconsumed and check the boundary
+        // manually to preserve overlapping matches such as `32k-128k`.
+        let has_tauri_boundary = model_id[full_match.end()..]
+            .chars()
+            .next()
+            .is_none_or(|ch| matches!(ch, '-' | '_' | '.' | '/' | ':' | '@'));
+        if !has_tauri_boundary {
+            continue;
+        }
         let Some(number) = captures
             .get(1)
             .and_then(|value| value.as_str().parse::<i64>().ok())

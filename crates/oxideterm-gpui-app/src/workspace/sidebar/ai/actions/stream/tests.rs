@@ -64,6 +64,221 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn history_trimming_keeps_latest_regular_message_when_budget_is_zero() {
+        let mut history = vec![
+            test_message("system", AiChatRole::System, "large system".repeat(100)),
+            test_message("user-1", AiChatRole::User, "first".to_string()),
+            test_message("assistant-1", AiChatRole::Assistant, "answer".to_string()),
+            test_message("user-2", AiChatRole::User, "latest".to_string()),
+        ];
+
+        let trimmed = trim_ai_stream_history_to_budget(&mut history, 100, 100);
+
+        assert_eq!(trimmed, 2);
+        assert_eq!(
+            history
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["system", "user-2"]
+        );
+    }
+
+    #[test]
+    fn token_estimate_counts_message_content_only_like_tauri_chat_store() {
+        let mut message = test_message("assistant", AiChatRole::Assistant, "hello".to_string());
+        let content_only = ai_message_estimated_tokens(&message);
+        message.thinking_content = Some("hidden thinking should not count".repeat(20));
+        message.context = Some("legacy context should not count".repeat(20));
+        message.tool_calls = vec![serde_json::json!({
+            "id": "call-1",
+            "name": "run_command",
+            "arguments": "{\"command\":\"echo hi\"}",
+            "result": { "output": "large tool output".repeat(20) }
+        })];
+
+        assert_eq!(ai_message_estimated_tokens(&message), content_only);
+    }
+
+    #[test]
+    fn token_estimate_uses_utf16_length_like_tauri() {
+        assert_eq!(ai_estimated_tokens("😀"), 1);
+        assert_eq!(ai_estimated_tokens("😀😀😀😀"), 3);
+    }
+
+    #[test]
+    fn context_indicator_tool_definition_tokens_use_real_orchestrator_schema() {
+        let tools = oxideterm_ai::orchestrator_tool_definitions();
+
+        assert_eq!(
+            ai_estimated_tool_definitions_tokens(),
+            ai_tool_definitions_estimated_tokens(&tools)
+        );
+        assert!(ai_estimated_tool_definitions_tokens() > tools.len() * 10);
+    }
+
+    #[test]
+    fn context_indicator_tool_result_tokens_only_count_user_and_assistant_messages() {
+        let tool_call = serde_json::json!({
+            "arguments": "{\"command\":\"echo hi\"}",
+            "result": { "output": "large tool output" },
+        });
+        let mut system = test_message("system", AiChatRole::System, String::new());
+        system.tool_calls = vec![tool_call.clone()];
+        let mut assistant = test_message("assistant", AiChatRole::Assistant, String::new());
+        assistant.tool_calls = vec![tool_call];
+        let conversation = AiConversation {
+            id: "conv-1".to_string(),
+            title: "Conversation".to_string(),
+            messages: vec![system, assistant.clone()],
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            origin: "sidebar".to_string(),
+            profile_id: None,
+            message_count: 2,
+            session_id: None,
+            session_metadata: None,
+            messages_loaded: true,
+        };
+
+        assert_eq!(
+            ai_conversation_tool_result_tokens(&conversation),
+            ai_tool_call_estimated_tokens(&assistant.tool_calls[0])
+        );
+    }
+
+    #[test]
+    fn sftp_target_shape_is_node_runtime_scoped_like_tauri() {
+        let node_id = NodeId::new("node-1".to_string());
+        let mut config = oxideterm_ssh::SshConfig::default();
+        config.host = "example.com".to_string();
+        config.username = "alice".to_string();
+        let node = WorkspaceSshNode {
+            saved_connection_id: Some("conn-1".to_string()),
+            config,
+            title: "example".to_string(),
+            terminal_ids: Vec::new(),
+            readiness: NodeReadiness::Ready,
+        };
+
+        let target = ai_sftp_target_for_node(&node_id, &node, "sftp-1".to_string());
+
+        assert_eq!(target.id, "sftp-session:sftp-1");
+        assert_eq!(target.kind, "sftp-session");
+        assert_eq!(
+            target.capabilities,
+            vec![
+                "filesystem.read".to_string(),
+                "filesystem.write".to_string(),
+                "state.list".to_string(),
+            ]
+        );
+        assert_eq!(target.refs.get("nodeId").map(String::as_str), Some("node-1"));
+        assert_eq!(target.refs.get("sessionId").map(String::as_str), Some("sftp-1"));
+        assert_eq!(target.refs.get("connectionId").map(String::as_str), Some("conn-1"));
+        assert!(!target.refs.contains_key("tabId"));
+        assert_eq!(
+            target.metadata.get("host").and_then(serde_json::Value::as_str),
+            Some("example.com")
+        );
+    }
+
+    #[test]
+    fn ide_workspace_target_uses_editor_tab_refs_like_tauri() {
+        let node_id = NodeId::new("node-1".to_string());
+        let mut config = oxideterm_ssh::SshConfig::default();
+        config.host = "example.com".to_string();
+        config.username = "alice".to_string();
+        let node = WorkspaceSshNode {
+            saved_connection_id: Some("conn-1".to_string()),
+            config,
+            title: "example".to_string(),
+            terminal_ids: Vec::new(),
+            readiness: NodeReadiness::Ready,
+        };
+
+        let target = ai_ide_workspace_target_for_node(
+            &node_id,
+            &node,
+            Some("editor-tab-1".to_string()),
+            Some("/srv/app".to_string()),
+            Some("app".to_string()),
+        );
+
+        assert_eq!(target.id, "ide-workspace:node-1");
+        assert_eq!(target.kind, "ide-workspace");
+        assert_eq!(target.label, "app");
+        assert_eq!(target.refs.get("nodeId").map(String::as_str), Some("node-1"));
+        assert_eq!(
+            target.refs.get("connectionId").map(String::as_str),
+            Some("conn-1")
+        );
+        assert_eq!(
+            target.refs.get("tabId").map(String::as_str),
+            Some("editor-tab-1")
+        );
+        assert_eq!(
+            target.metadata.get("rootPath").and_then(serde_json::Value::as_str),
+            Some("/srv/app")
+        );
+        assert_eq!(
+            target.metadata.get("activeTabId").and_then(serde_json::Value::as_str),
+            Some("editor-tab-1")
+        );
+    }
+
+    #[test]
+    fn connect_result_terminal_target_keeps_tauri_synthetic_refs() {
+        let mut refs = std::collections::BTreeMap::new();
+        refs.insert("sessionId".to_string(), "session-1".to_string());
+        refs.insert("tabId".to_string(), "tab-1".to_string());
+        let terminal = AiOrchestratorTarget {
+            id: "terminal-session:session-1".to_string(),
+            kind: "terminal-session".to_string(),
+            label: "SSH terminal session-".to_string(),
+            state: "connected".to_string(),
+            capabilities: vec![
+                "terminal.observe".to_string(),
+                "terminal.send".to_string(),
+                "terminal.wait".to_string(),
+                "state.list".to_string(),
+            ],
+            refs,
+            metadata: serde_json::json!({
+                "paneId": 7,
+                "terminalType": "terminal",
+            }),
+            terminal_buffer: None,
+            terminal_screen: None,
+            ssh_handle: None,
+        };
+
+        let target = ai_connect_result_terminal_target(
+            &terminal,
+            "prod (alice@example.com:22)",
+            Some("node-1"),
+            Some("conn-1"),
+        );
+
+        assert_eq!(target.label, "prod (alice@example.com:22) terminal");
+        assert_eq!(
+            target.refs.get("sessionId").map(String::as_str),
+            Some("session-1")
+        );
+        assert_eq!(target.refs.get("nodeId").map(String::as_str), Some("node-1"));
+        assert_eq!(
+            target.refs.get("connectionId").map(String::as_str),
+            Some("conn-1")
+        );
+        assert!(!target.refs.contains_key("tabId"));
+        assert_eq!(
+            target.metadata.get("terminalType").and_then(serde_json::Value::as_str),
+            Some("terminal")
+        );
+        assert!(target.metadata.get("paneId").is_none());
+    }
+
+    #[test]
     fn prompt_budget_policy_matches_tauri_levels() {
         let decision = determine_ai_compression_level(AiPromptBudgetInput {
             context_window: 1000,
@@ -178,11 +393,31 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn compaction_plan_keeps_tauri_zero_budget_boundary() {
+        let messages = vec![
+            test_message("u-1", AiChatRole::User, "first".to_string()),
+            test_message("a-1", AiChatRole::Assistant, "answer".to_string()),
+            test_message("u-2", AiChatRole::User, String::new()),
+            test_message("a-2", AiChatRole::Assistant, "a".to_string()),
+        ];
+
+        let plan = ai_compaction_plan(&messages, 1, true).expect("zero-budget plan");
+
+        assert_eq!(
+            plan.keep_messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a-2"]
+        );
+    }
+
+    #[test]
     fn compaction_summary_prompt_matches_tauri_shape() {
         let anchor = AiChatMessage {
             id: "anchor-1".to_string(),
             role: AiChatRole::System,
-            content: "previous summary".to_string(),
+            content: " previous summary ".to_string(),
             timestamp_ms: 1,
             model: None,
             context: None,
@@ -204,9 +439,9 @@ mod ai_turn_order_tests {
         };
         let messages = vec![
             anchor,
-            test_message("u-1", AiChatRole::User, "question".to_string()),
+            test_message("u-1", AiChatRole::User, " question ".to_string()),
             test_message("tool-1", AiChatRole::Tool, "tool output".to_string()),
-            test_message("a-1", AiChatRole::Assistant, "answer".to_string()),
+            test_message("a-1", AiChatRole::Assistant, " answer ".to_string()),
         ];
 
         let prompt = ai_compaction_summary_messages(&messages);
@@ -214,10 +449,59 @@ mod ai_turn_order_tests {
         assert_eq!(prompt.len(), 2);
         assert_eq!(prompt[0].role, AiChatRole::System);
         assert_eq!(prompt[1].role, AiChatRole::User);
-        assert!(prompt[1].content.contains("[Previous Summary]: previous summary"));
-        assert!(prompt[1].content.contains("User: question"));
-        assert!(prompt[1].content.contains("Assistant: answer"));
+        assert!(prompt[1].content.contains("[Previous Summary]:  previous summary "));
+        assert!(prompt[1].content.contains("User:  question "));
+        assert!(prompt[1].content.contains("Assistant:  answer "));
         assert!(!prompt[1].content.contains("tool output"));
+    }
+
+    #[test]
+    fn conversation_summary_prompt_excludes_tool_messages_like_tauri() {
+        let messages = vec![
+            test_message("u-1", AiChatRole::User, " question ".to_string()),
+            test_message("tool-1", AiChatRole::Tool, "tool output".to_string()),
+            test_message("a-1", AiChatRole::Assistant, " answer ".to_string()),
+        ];
+
+        let prompt = ai_conversation_summary_messages(&messages);
+
+        assert_eq!(prompt.len(), 2);
+        assert!(prompt[1].content.contains("User:  question "));
+        assert!(prompt[1].content.contains("Assistant:  answer "));
+        assert!(!prompt[1].content.contains("tool output"));
+    }
+
+    #[test]
+    fn compaction_anchor_snapshot_keeps_only_tauri_message_core() {
+        let mut message = test_message("a-1", AiChatRole::Assistant, "answer".to_string());
+        message.model = Some("gpt-4o".to_string());
+        message.context = Some("terminal context".to_string());
+        message.thinking_content = Some("reasoning".to_string());
+        message.tool_call_id = Some("call-1".to_string());
+        message.tool_calls = vec![serde_json::json!({ "id": "call-1" })];
+        message.turn = Some(serde_json::json!({ "parts": [] }));
+        message.transcript_ref = Some(serde_json::json!({ "endEntryId": "entry-1" }));
+        message.summary_ref = Some(serde_json::json!({ "kind": "conversation" }));
+        message.suggestions = vec![oxideterm_ai::AiFollowUpSuggestion {
+            icon: "Zap".to_string(),
+            text: "Next".to_string(),
+        }];
+
+        let snapshot = ai_compaction_anchor_snapshot(&[message]);
+
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].id, "a-1");
+        assert_eq!(snapshot[0].role, AiChatRole::Assistant);
+        assert_eq!(snapshot[0].content, "answer");
+        assert!(snapshot[0].model.is_none());
+        assert!(snapshot[0].context.is_none());
+        assert!(snapshot[0].thinking_content.is_none());
+        assert!(snapshot[0].tool_call_id.is_none());
+        assert!(snapshot[0].tool_calls.is_empty());
+        assert!(snapshot[0].turn.is_none());
+        assert!(snapshot[0].transcript_ref.is_none());
+        assert!(snapshot[0].summary_ref.is_none());
+        assert!(snapshot[0].suggestions.is_empty());
     }
 
     #[test]
@@ -293,6 +577,48 @@ mod ai_turn_order_tests {
         assert!(lookup_prompt.contains("conversation=conv-1"));
         assert!(lookup_prompt.contains("start=u-1"));
         assert!(lookup_prompt.contains("end=a-2"));
+    }
+
+    #[test]
+    fn conversation_summary_reference_supports_transcript_lookup_prompt() {
+        let summarized = vec![
+            test_message("u-1", AiChatRole::User, "first".to_string()),
+            test_message("a-1", AiChatRole::Assistant, "answer".to_string()),
+            test_message("u-2", AiChatRole::User, "second".to_string()),
+            test_message("a-2", AiChatRole::Assistant, "answer".to_string()),
+        ];
+        let source_ref = ai_summary_source_transcript_ref(&summarized, "conv-1");
+        let mut summary = test_message(
+            "summary-1",
+            AiChatRole::Assistant,
+            "summary".to_string(),
+        );
+        summary.transcript_ref = Some(serde_json::json!({
+            "conversationId": "conv-1",
+            "endEntryId": "transcript-summary-created-summary-1",
+        }));
+        summary.summary_ref = Some(serde_json::json!({
+            "kind": "conversation",
+            "roundId": null,
+            "transcriptRef": source_ref,
+        }));
+
+        let lookup_ref = ai_find_prompt_transcript_lookup_reference(&[summary])
+            .expect("conversation summary transcript lookup reference");
+        let lookup_prompt = ai_build_transcript_lookup_prompt_reference(lookup_ref);
+
+        assert!(lookup_prompt.contains("conversation=conv-1"));
+        assert!(lookup_prompt.contains("start=u-1"));
+        assert!(lookup_prompt.contains("end=a-2"));
+    }
+
+    #[test]
+    fn transcript_lookup_prompt_missing_conversation_matches_tauri_undefined_string() {
+        let lookup_prompt =
+            ai_build_transcript_lookup_prompt_reference(serde_json::json!({ "startEntryId": "s" }));
+
+        assert!(lookup_prompt.contains("conversation=undefined"));
+        assert!(lookup_prompt.contains("start=s"));
     }
 
     #[test]
@@ -914,7 +1240,7 @@ mod ai_turn_order_tests {
             AiChatMessage {
                 id: "anchor-1".to_string(),
                 role: AiChatRole::System,
-                content: "用户之前打开过本地终端。".to_string(),
+                content: " 用户之前打开过本地终端。 ".to_string(),
                 timestamp_ms: 1,
                 model: None,
                 context: None,
@@ -961,7 +1287,7 @@ mod ai_turn_order_tests {
         assert_eq!(history[1].role, AiChatRole::System);
         assert_eq!(
             history[1].content,
-            "Previous conversation summary:\n用户之前打开过本地终端。"
+            "Previous conversation summary:\n 用户之前打开过本地终端。 "
         );
         assert!(history[1].metadata.is_none());
         assert_eq!(history[2].role, AiChatRole::User);

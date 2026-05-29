@@ -59,7 +59,7 @@ fn ai_build_transcript_lookup_prompt_reference(transcript_ref: serde_json::Value
     let conversation_id = transcript_ref
         .get("conversationId")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown");
+        .unwrap_or("undefined");
     let mut range_parts = Vec::new();
     if let Some(start_entry_id) = start_entry_id {
         range_parts.push(format!("start={start_entry_id}"));
@@ -120,4 +120,3 @@ fn ai_diagnostic_event(
         data,
     }
 }
-

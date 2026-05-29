@@ -4,6 +4,28 @@ struct PooledSshConnection {
     remote_forward_handler: RemoteForwardHandlerSlot,
 }
 
+fn append_limited_command_output(
+    output: &mut Vec<u8>,
+    data: &[u8],
+    max_output_size: usize,
+    total_output_size: &mut usize,
+    truncated: &mut bool,
+) {
+    if *total_output_size >= max_output_size {
+        *truncated = true;
+        return;
+    }
+    let remaining = max_output_size.saturating_sub(*total_output_size);
+    if data.len() > remaining {
+        output.extend_from_slice(&data[..remaining]);
+        *total_output_size += remaining;
+        *truncated = true;
+    } else {
+        output.extend_from_slice(data);
+        *total_output_size += data.len();
+    }
+}
+
 impl PooledSshConnection {
     fn direct(
         handle: client::Handle<NativeClientHandler>,
@@ -223,6 +245,83 @@ impl SshConnectionHandle {
 
         String::from_utf8(output).map_err(|error| {
             SshTransportError::Channel(format!("remote command output was not UTF-8: {error}"))
+        })
+    }
+
+    pub async fn run_command_capture(
+        &self,
+        command: &str,
+        timeout: Duration,
+        max_output_size: usize,
+    ) -> Result<SshCommandOutput, SshTransportError> {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return Err(SshTransportError::ConnectionFailed(
+                "no active SSH connection is available for remote command execution".to_string(),
+            ));
+        };
+        if pooled.is_closed().await {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH connection is closed and cannot execute remote commands".to_string(),
+            ));
+        }
+
+        let mut channel = {
+            let handle = pooled.target.lock().await;
+            handle
+                .channel_open_session()
+                .await
+                .map_err(|error| SshTransportError::Channel(error.to_string()))?
+        };
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut exit_status = None;
+        let mut total_output_size = 0;
+        let mut truncated = false;
+        tokio::time::timeout(timeout, async {
+            while let Some(message) = channel.wait().await {
+                match message {
+                    ChannelMsg::Data { data } => {
+                        append_limited_command_output(
+                            &mut stdout,
+                            &data,
+                            max_output_size,
+                            &mut total_output_size,
+                            &mut truncated,
+                        );
+                    }
+                    ChannelMsg::ExtendedData { data, ext } if ext == 1 => {
+                        append_limited_command_output(
+                            &mut stderr,
+                            &data,
+                            max_output_size,
+                            &mut total_output_size,
+                            &mut truncated,
+                        );
+                    }
+                    ChannelMsg::ExitStatus {
+                        exit_status: status,
+                    } => {
+                        exit_status = Some(status);
+                    }
+                    ChannelMsg::Eof | ChannelMsg::Close => break,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .map_err(|_| SshTransportError::Timeout)?;
+        let _ = channel.close().await;
+
+        Ok(SshCommandOutput {
+            stdout: String::from_utf8_lossy(&stdout).to_string(),
+            stderr: String::from_utf8_lossy(&stderr).to_string(),
+            exit_code: exit_status.and_then(|status| i32::try_from(status).ok()),
+            truncated,
         })
     }
 

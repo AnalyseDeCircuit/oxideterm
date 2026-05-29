@@ -1421,6 +1421,7 @@ fn ai_conversation_tool_result_tokens(conversation: &AiConversation) -> usize {
     conversation
         .messages
         .iter()
+        .filter(|message| matches!(message.role, AiChatRole::User | AiChatRole::Assistant))
         .flat_map(|message| message.tool_calls.iter())
         .map(ai_tool_call_estimated_tokens)
         .sum()
@@ -1446,63 +1447,5 @@ fn ai_tool_call_estimated_tokens(tool_call: &serde_json::Value) -> usize {
 }
 
 fn ai_estimated_tool_definitions_tokens() -> usize {
-    AI_ORCHESTRATOR_TOOL_DEFINITION_ESTIMATES
-        .iter()
-        .map(|(name, description)| 10 + ai_estimated_tokens(name) + ai_estimated_tokens(description))
-        .sum()
+    ai_tool_definitions_estimated_tokens(&oxideterm_ai::orchestrator_tool_definitions())
 }
-
-const AI_ORCHESTRATOR_TOOL_DEFINITION_ESTIMATES: &[(&str, &str)] = &[
-    (
-        "list_targets",
-        "List available OxideTerm targets by view. Default view is connections for remote host discovery.",
-    ),
-    (
-        "select_target",
-        "Select exactly one target from OxideTerm targets when the user named a specific target.",
-    ),
-    (
-        "connect_target",
-        "Connect or open a selected target, including saved SSH connections.",
-    ),
-    (
-        "run_command",
-        "Run a command on an explicit target.",
-    ),
-    (
-        "observe_terminal",
-        "Read a terminal target screen, buffer, readiness, and waiting-for-input hints.",
-    ),
-    (
-        "send_terminal_input",
-        "Send text, Enter, or control input to a visible terminal target.",
-    ),
-    (
-        "read_resource",
-        "Read a resource from a target: settings, remote file, SFTP directory, IDE file, or RAG search.",
-    ),
-    (
-        "write_resource",
-        "Safely write a settings value or remote file resource.",
-    ),
-    (
-        "transfer_resource",
-        "Start an SFTP upload or download against an explicit SSH/SFTP target.",
-    ),
-    (
-        "open_app_surface",
-        "Open an OxideTerm app surface such as settings, connection manager, SFTP, IDE, file manager, or terminal.",
-    ),
-    (
-        "get_state",
-        "Read compact state for connections, transfers, settings, targets, health, or active context.",
-    ),
-    (
-        "remember_preference",
-        "Save a long-lived user preference for OxideSens memory.",
-    ),
-    (
-        "recall_preferences",
-        "Read saved long-lived OxideSens user preferences.",
-    ),
-];

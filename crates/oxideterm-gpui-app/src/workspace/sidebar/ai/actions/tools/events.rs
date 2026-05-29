@@ -289,23 +289,11 @@ fn ai_tool_call_message_value(call: &AiToolCall) -> serde_json::Value {
 }
 
 fn ai_tool_result_message(result: AiExecutedToolResult) -> AiChatMessage {
-    let fallback_tool_name = result.tool_name.clone();
-    let fallback_duration_ms = result.duration_ms;
+    let content = ai_tool_result_model_content(&result);
     AiChatMessage {
         id: format!("tool-result-{}", result.tool_call_id),
         role: AiChatRole::Tool,
-        content: serde_json::to_string(&result.envelope).unwrap_or_else(|_| {
-            serde_json::json!({
-                "ok": result.success,
-                "output": result.output,
-                "error": result.error,
-                "meta": {
-                    "toolName": fallback_tool_name,
-                    "durationMs": fallback_duration_ms,
-                }
-            })
-            .to_string()
-        }),
+        content,
         timestamp_ms: ai_now_ms(),
         model: None,
         context: None,
@@ -318,6 +306,6 @@ fn ai_tool_result_message(result: AiExecutedToolResult) -> AiChatMessage {
         transcript_ref: None,
         summary_ref: None,
         branches: None,
-            suggestions: Vec::new(),
+        suggestions: Vec::new(),
     }
 }

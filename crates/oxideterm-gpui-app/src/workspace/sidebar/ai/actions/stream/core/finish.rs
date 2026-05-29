@@ -22,8 +22,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let summary = summary.trim();
-        if summary.is_empty() {
+        if summary.trim().is_empty() {
             if silent {
                 self.clear_ai_compaction_notice_for(&conversation_id, cx);
             }
@@ -91,7 +90,7 @@ impl WorkspaceApp {
         let anchor = AiChatMessage {
             id: anchor_id.clone(),
             role: AiChatRole::System,
-            content: summary.to_string(),
+            content: summary.clone(),
             timestamp_ms: now,
             model: None,
             context: None,
@@ -140,7 +139,7 @@ impl WorkspaceApp {
             &conversation_id,
             &anchor_id,
             "compaction",
-            summary,
+            &summary,
             summary_round_id.clone(),
             Some(summary_source_transcript_ref),
             Some(total_compacted),
@@ -191,8 +190,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let summary = summary.trim();
-        if summary.is_empty() {
+        if summary.trim().is_empty() {
             cx.notify();
             return;
         }
@@ -226,6 +224,21 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        let summary_source_transcript_ref =
+            ai_summary_source_transcript_ref(&conversation.messages, &conversation_id);
+        let summary_round_id = ai_latest_summary_round_id(&conversation.messages);
+        let summary_entry_id = format!("transcript-summary-created-{summary_id}");
+        let transcript_ref = serde_json::json!({
+            "conversationId": conversation_id.clone(),
+            "endEntryId": summary_entry_id,
+        });
+        // Tauri keeps a source transcript reference on manual summaries so
+        // later prompt compaction can ask the model to trust the visible summary.
+        let summary_ref = serde_json::json!({
+            "kind": "conversation",
+            "roundId": summary_round_id.clone(),
+            "transcriptRef": summary_source_transcript_ref.clone(),
+        });
         conversation.messages = vec![AiChatMessage {
             id: summary_id.clone(),
             role: AiChatRole::Assistant,
@@ -239,8 +252,8 @@ impl WorkspaceApp {
             tool_call_id: None,
             tool_calls: Vec::new(),
             turn: None,
-            transcript_ref: None,
-            summary_ref: Some(serde_json::json!({ "kind": "conversation" })),
+            transcript_ref: Some(transcript_ref),
+            summary_ref: Some(summary_ref),
             branches: None,
             suggestions: Vec::new(),
         }];
@@ -249,6 +262,12 @@ impl WorkspaceApp {
             .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
         if let Some(object) = metadata.as_object_mut() {
             object.insert("lastSummaryAt".to_string(), serde_json::json!(now));
+            if let Some(summary_round_id) = summary_round_id.as_deref() {
+                object.insert(
+                    "lastSummaryRoundId".to_string(),
+                    serde_json::json!(summary_round_id),
+                );
+            }
         }
         conversation.updated_at_ms = now;
         self.ai_model_switch_warning_percentage = None;
@@ -257,9 +276,9 @@ impl WorkspaceApp {
             &conversation_id,
             &summary_id,
             "conversation",
-            summary,
-            None,
-            None,
+            &summary,
+            summary_round_id,
+            Some(summary_source_transcript_ref),
             Some(original_count),
             None,
             Some("manual"),

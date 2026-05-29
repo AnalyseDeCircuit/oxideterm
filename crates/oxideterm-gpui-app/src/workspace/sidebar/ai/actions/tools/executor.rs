@@ -104,21 +104,7 @@ impl AiOrchestratorRuntimeSnapshot {
         args: serde_json::Value,
     ) -> AiExecutedToolResult {
         let started = std::time::Instant::now();
-        let result = if oxideterm_ai::is_mcp_tool_name(&tool_name) {
-            self.execute_mcp_tool(&tool_name, args.clone()).await
-        } else if self.plugin_pending_tool_names.contains(&tool_name)
-            || plugin_host::is_native_plugin_ai_tool_name(&tool_name)
-        {
-            self.fail(
-                "Plugin runtime unavailable.",
-                "plugin_runtime_unavailable",
-                format!(
-                    "Plugin tool {tool_name} is declared in plugin.json, but native plugin runtime execution starts in Phase 3."
-                ),
-                "plugin.invoke",
-            )
-        } else {
-            match tool_name.as_str() {
+        let result = match tool_name.as_str() {
             "list_targets" => self.list_targets(&args),
             "select_target" => self.select_target(&args),
             "run_command" => self.run_command(&args).await,
@@ -127,145 +113,34 @@ impl AiOrchestratorRuntimeSnapshot {
             "write_resource" => self.write_resource(&args).await,
             "transfer_resource" => self.transfer_resource(&args).await,
             "get_state" => self.get_state(&args),
-            "list_mcp_resources" => self.list_mcp_resources(),
-            "read_mcp_resource" => self.read_mcp_resource(&args).await,
-            "recall_preferences" => self.ok("Read saved preferences.", self.memory.clone(), serde_json::json!({ "memory": self.memory }), "read"),
-            "remember_preference" => self.remember_preference(&args),
-            "connect_target" | "send_terminal_input" | "open_app_surface" => {
+            "recall_preferences" => self.ok(
+                if self.memory.trim().is_empty() {
+                    "No saved preferences."
+                } else {
+                    "Preferences recalled."
+                },
+                if self.memory.trim().is_empty() {
+                    "No saved preferences.".to_string()
+                } else {
+                    self.memory.clone()
+                },
+                serde_json::json!({
+                    "enabled": true,
+                    "content": self.memory,
+                }),
+                "read",
+            ),
+            "connect_target" | "send_terminal_input" | "open_app_surface" | "remember_preference" => {
                 self.ui_thread_required_action(&tool_name, &args)
             }
-            _ => self.fail("Unknown tool.", "unknown_tool", format!("Tool {tool_name} is not available."), "read"),
-            }
+            _ => self.fail("Unknown orchestrator tool.", "unknown_tool", format!("{tool_name} is not an OxideSens task tool."), "read"),
         };
         self.to_executed_tool_result(tool_call_id, tool_name, result, started.elapsed().as_millis())
     }
 
-    fn list_mcp_resources(&self) -> AiActionResultLite {
-        let resources = self.mcp_registry.resources();
-        if resources.is_empty() {
-            return self.ok(
-                "No MCP resources available.",
-                "No MCP resources available. Either no MCP servers are connected, or none expose resources.",
-                serde_json::json!({ "resources": [] }),
-                "read",
-            );
-        }
-        let output = resources
-            .iter()
-            .map(|(resource, server_id, server_name)| {
-                format!(
-                    "[{}] {} ({}){}{}  server_id={}",
-                    server_name,
-                    resource.name,
-                    resource.uri,
-                    resource
-                        .mime_type
-                        .as_deref()
-                        .map(|mime| format!(" [{mime}]"))
-                        .unwrap_or_default(),
-                    resource
-                        .description
-                        .as_deref()
-                        .map(|description| format!(" \u{2014} {description}"))
-                        .unwrap_or_default(),
-                    server_id
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        self.ok(
-            format!("Listed {} MCP resource(s).", resources.len()),
-            output,
-            serde_json::json!({
-                "resources": resources.into_iter().map(|(resource, server_id, server_name)| serde_json::json!({
-                    "serverId": server_id,
-                    "serverName": server_name,
-                    "uri": resource.uri,
-                    "name": resource.name,
-                    "description": resource.description,
-                    "mimeType": resource.mime_type,
-                })).collect::<Vec<_>>()
-            }),
-            "read",
-        )
-    }
-
-    async fn read_mcp_resource(&self, args: &serde_json::Value) -> AiActionResultLite {
-        let Some(server_id) = args.get("server_id").and_then(serde_json::Value::as_str).filter(|value| !value.is_empty()) else {
-            return self.fail_empty_output(
-                "MCP resource arguments are required.",
-                "missing_mcp_resource_args",
-                "Both server_id and uri are required.",
-                "read",
-            );
-        };
-        let Some(uri) = args.get("uri").and_then(serde_json::Value::as_str).filter(|value| !value.is_empty()) else {
-            return self.fail_empty_output(
-                "MCP resource arguments are required.",
-                "missing_mcp_resource_args",
-                "Both server_id and uri are required.",
-                "read",
-            );
-        };
-        match self.mcp_registry.read_resource(server_id, uri).await {
-            Ok(content) => {
-                let (output, truncated) = oxideterm_ai::mcp_resource_output(&content);
-                self.ok(
-                    format!("Read MCP resource {uri}."),
-                    output,
-                    serde_json::json!({
-                        "uri": content.uri,
-                        "mimeType": content.mime_type,
-                        "truncated": truncated,
-                    }),
-                    "read",
-                )
-            }
-            Err(error) => self.fail_empty_output(
-                "MCP resource read failed.",
-                "mcp_resource_read_failed",
-                error.to_string(),
-                "read",
-            ),
-        }
-    }
-
-    async fn execute_mcp_tool(&self, tool_name: &str, args: serde_json::Value) -> AiActionResultLite {
-        match self.mcp_registry.call_prefixed_tool(tool_name, args).await {
-            Ok(result) => {
-                let (ok, output, truncated) = oxideterm_ai::mcp_tool_output(&result);
-                if ok {
-                    self.ok(
-                        format!("Executed MCP tool {tool_name}."),
-                        output,
-                        serde_json::json!({ "isError": false, "truncated": truncated }),
-                        "read",
-                    )
-                } else {
-                    let message = if output.is_empty() {
-                        "MCP tool returned an error with no message.".to_string()
-                    } else {
-                        output
-                    };
-                    self.fail_empty_output(
-                        "MCP tool returned an error.",
-                        "mcp_tool_error",
-                        message,
-                        "read",
-                    )
-                }
-            }
-            Err(error) => self.fail_empty_output(
-                "MCP tool failed.",
-                "mcp_tool_failed",
-                error.to_string(),
-                "read",
-            ),
-        }
-    }
-
     fn list_targets(&self, args: &serde_json::Value) -> AiActionResultLite {
-        let view = args.get("view").and_then(serde_json::Value::as_str).unwrap_or("connections");
+        let view =
+            normalized_ai_target_view(args.get("view").and_then(serde_json::Value::as_str));
         let query = args.get("query").and_then(serde_json::Value::as_str).unwrap_or("").to_lowercase();
         let kind = args.get("kind").and_then(serde_json::Value::as_str).unwrap_or("all");
         let targets = self
@@ -273,88 +148,171 @@ impl AiOrchestratorRuntimeSnapshot {
             .iter()
             .filter(|target| kind == "all" || target.kind == kind)
             .filter(|target| target_in_ai_view(target, view))
-            .filter(|target| {
-                query.is_empty()
-                    || target.id.to_lowercase().contains(&query)
-                    || target.label.to_lowercase().contains(&query)
-                    || target.kind.to_lowercase().contains(&query)
-            })
+            .filter(|target| target_matches_ai_query(target, &query))
             .cloned()
             .collect::<Vec<_>>();
         let output = targets
             .iter()
-            .enumerate()
-            .map(|(index, target)| format!("{}. {} - {} [{}]", index + 1, target.id, target.label, target.kind))
+            .map(|target| {
+                format!(
+                    "{} — {} [{}, {}]",
+                    target.id, target.label, target.kind, target.state
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
-        let state_version = make_ai_state_version(
-            "targets",
-            [
-                view.to_string(),
-                kind.to_string(),
-                query.clone(),
-                targets.len().to_string(),
-                self.targets.len().to_string(),
-            ],
-        );
         self.ok(
-            format!("Found {} target(s).", targets.len()),
+            format!(
+                "Found {} target{}.",
+                targets.len(),
+                if targets.len() == 1 { "" } else { "s" }
+            ),
             if output.is_empty() { "No targets found.".to_string() } else { output },
-            serde_json::json!({
-                "runtimeEpoch": self.runtime_epoch,
-                "stateVersion": state_version,
-                "targets": targets.iter().map(target_json).collect::<Vec<_>>()
-            }),
+            serde_json::json!(targets.iter().map(target_json).collect::<Vec<_>>()),
             "read",
         )
-        .with_state_version(state_version)
+        .with_targets(targets)
     }
 
     fn select_target(&self, args: &serde_json::Value) -> AiActionResultLite {
-        let Some(query) = args.get("query").and_then(serde_json::Value::as_str) else {
-            return self.fail("Target query is required.", "missing_target_query", "select_target requires query.", "read");
+        let query = args
+            .get("query")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let Some(intent) = normalized_ai_intent(args.get("intent").and_then(serde_json::Value::as_str)) else {
+            return self
+                .fail(
+                    "Target intent is required.",
+                    "missing_target_intent",
+                    "select_target requires intent: connection, command, terminal, settings, file, sftp, app_surface, knowledge, status, local, or unknown.",
+                    "read",
+                )
+                .with_next_actions(vec![serde_json::json!({
+                        "action": "list_targets",
+                        "args": { "view": "connections", "query": query },
+                        "reason": "Inspect the correct target view before selecting."
+                    })]);
         };
-        let intent = args.get("intent").and_then(serde_json::Value::as_str).unwrap_or("unknown");
+        if matches!(intent, "command" | "terminal") && is_ai_command_like_query(query) {
+            let view = if intent == "command" { "live_sessions" } else { "connections" };
+            return self
+                .fail(
+                    "Command text is not a target.",
+                    "command_query_not_target",
+                    format!("{query:?} looks like a command. Select a live SSH or terminal target first, then call run_command with this command."),
+                    "read",
+                )
+                .with_next_actions(vec![serde_json::json!({
+                        "action": "list_targets",
+                        "args": { "view": view },
+                        "reason": "Choose the execution target before running the command."
+                    })]);
+        }
         let view = view_for_ai_intent(intent);
         let lowered = query.to_lowercase();
+        let select_kind =
+            normalized_ai_select_target_kind(args.get("kind").and_then(serde_json::Value::as_str));
         let matches = self
             .targets
             .iter()
             .filter(|target| target_in_ai_view(target, view))
-            .filter(|target| target.id.to_lowercase().contains(&lowered) || target.label.to_lowercase().contains(&lowered))
+            // Tauri validates select_target.kind before filtering; unknown
+            // values are ignored instead of producing an empty candidate set.
+            .filter(|target| {
+                select_kind.is_none_or(|kind| kind == "all" || target.kind == kind)
+            })
+            .filter(|target| target_matches_ai_query(target, &lowered))
             .cloned()
             .collect::<Vec<_>>();
         match matches.as_slice() {
-            [] => self.fail("No matching target found.", "target_not_found", format!("No target matched \"{query}\"."), "read"),
+            [] => {
+                let mut next_actions = vec![serde_json::json!({
+                    "action": "list_targets",
+                    "args": { "view": view, "query": query },
+                    "reason": "Inspect available targets and ask the user to choose."
+                })];
+                if matches!(intent, "command" | "terminal") {
+                    next_actions.push(serde_json::json!({
+                        "action": "list_targets",
+                        "args": { "view": "connections", "query": query },
+                        "reason": "If the named host is saved but not live, connect it before running commands."
+                    }));
+                }
+                self.fail(
+                    "No matching target found.",
+                    "target_not_found",
+                    format!("No target matched \"{query}\"."),
+                    "read",
+                )
+                .with_next_actions(next_actions)
+            }
             [target] => self.ok(
                 format!("Selected target: {}", target.label),
                 serde_json::to_string_pretty(&target_json(target)).unwrap_or_else(|_| target.id.clone()),
                 target_json(target),
                 "read",
-            ),
-            _ => self.fail(
-                "Multiple targets match. Ask the user to choose one.",
-                "target_disambiguation_required",
-                matches.iter().map(|target| format!("{} - {}", target.id, target.label)).collect::<Vec<_>>().join("\n"),
-                "read",
-            ).with_targets(matches),
+            ).with_target(target.clone()),
+            _ => {
+                let mut retry_args = serde_json::Map::from_iter([
+                    ("query".to_string(), serde_json::json!(query)),
+                    ("intent".to_string(), serde_json::json!(intent)),
+                ]);
+                if let Some(kind) = args.get("kind").and_then(serde_json::Value::as_str) {
+                    retry_args.insert("kind".to_string(), serde_json::json!(kind));
+                }
+                self.fail(
+                    "Multiple targets match. Ask the user to choose one.",
+                    "target_disambiguation_required",
+                    matches.iter().enumerate().map(|(index, target)| format!("{}. {} — {} [{}]", index + 1, target.id, target.label, target.kind)).collect::<Vec<_>>().join("\n"),
+                    "read",
+                ).with_targets(matches)
+                .with_next_actions(vec![serde_json::json!({
+                    "action": "select_target",
+                    "args": retry_args,
+                    "reason": "Retry with a more specific label, host, or target id."
+                })])
+            },
         }
     }
 
     async fn run_command(&self, args: &serde_json::Value) -> AiActionResultLite {
         let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
-            return self.fail("Target is required.", "missing_target_id", "run_command requires target_id.", "execute");
+            return self.fail_missing_target_id("execute");
         };
-        let Some(command) = args.get("command").and_then(serde_json::Value::as_str).filter(|command| !command.trim().is_empty()) else {
-            return self.fail("Command is required.", "missing_command", "run_command requires command.", "execute");
-        };
-        let timeout_secs = args.get("timeout_secs").and_then(serde_json::Value::as_u64).unwrap_or(30).clamp(1, 60);
+        let timeout_secs = args.get("timeout_secs").and_then(serde_json::Value::as_u64).unwrap_or(30);
         let Some(target) = self.targets.iter().find(|target| target.id == target_id) else {
-            return self.fail("Target not found.", "target_not_found", format!("No target matched {target_id}."), "execute");
+            return self.fail_target_not_found(target_id, "execute");
+        };
+        if target_requires_live_state(target) && target.state != "connected" {
+            return self
+                .fail(
+                    "Target is not ready.",
+                    "target_not_ready",
+                    format!("{target_id} is {}; run_command requires a connected target.", target.state),
+                    "execute",
+                )
+                .with_target(target.clone())
+                .with_next_actions(recovery_actions_for_target(target));
+        }
+        let Some(command) = args.get("command").and_then(serde_json::Value::as_str).filter(|command| !command.trim().is_empty()) else {
+            // Tauri resolves the target before runCommandOnTarget validates the
+            // command, so target recovery hints win when both inputs are bad.
+            return self.fail("Command is required.", "missing_command", "run_command requires a command.", "execute");
         };
 
         match target.kind.as_str() {
-            "local-shell" => run_local_ai_command(command, timeout_secs, target).await,
+            "local-shell" => {
+                let cwd = args.get("cwd").and_then(serde_json::Value::as_str);
+                let dangerous_command_approved = args
+                    .get("dangerousCommandApproved")
+                    .or_else(|| args.get("dangerous_command_approved"))
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                // Tauri relies on the tool schema for timeout bounds and passes
+                // the requested value through to local command execution.
+                run_local_ai_command(command, cwd, timeout_secs, dangerous_command_approved, target)
+                    .await
+            }
             "ssh-node" => {
                 let Some(handle) = target.ssh_handle.clone() else {
                     return self.fail(
@@ -364,11 +322,70 @@ impl AiOrchestratorRuntimeSnapshot {
                         "execute",
                     ).with_target(target.clone());
                 };
+                let cwd = args.get("cwd").and_then(serde_json::Value::as_str);
+                let remote_command = ai_command_with_cwd(command, cwd);
                 match handle
-                    .run_command(command, Duration::from_secs(timeout_secs), 24 * 1024)
+                    // Tauri leaves direct remote command output uncapped here;
+                    // the AI tool envelope owns model-facing truncation.
+                    .run_command_capture(&remote_command, Duration::from_secs(timeout_secs), usize::MAX)
                     .await
                 {
-                    Ok(output) => self.ok("Remote command completed.", output, serde_json::json!({ "exitCode": 0 }), "execute").with_target(target.clone()),
+                    Ok(result) => {
+                        let has_output = !result.stdout.trim().is_empty() || !result.stderr.trim().is_empty();
+                        let ok = result.exit_code == Some(0) || (result.exit_code.is_none() && has_output);
+                        let output = ai_command_output(&result.stdout, &result.stderr, result.exit_code);
+                        let summary = if result.exit_code == Some(0) {
+                            "Remote command completed.".to_string()
+                        } else if result.exit_code.is_none() && has_output {
+                            "Remote command output captured; exit code was not reported.".to_string()
+                        } else {
+                            format!(
+                                "Remote command exited with {}.",
+                                result.exit_code
+                                    .map(|code| code.to_string())
+                                    .unwrap_or_else(|| "unknown".to_string())
+                            )
+                        };
+                        let mut data = serde_json::json!({ "exitCode": result.exit_code });
+                        if result.truncated
+                            && let Some(object) = data.as_object_mut()
+                        {
+                            object.insert("truncated".to_string(), serde_json::json!(true));
+                        }
+                        let action = self
+                            .ok(summary, output, data, "execute")
+                            .with_target(target.clone())
+                            .with_observations(
+                                (result.exit_code.is_none() && has_output)
+                                    .then(|| "The remote command produced output, but the backend did not report an exit code.".to_string())
+                                    .into_iter()
+                                    .collect(),
+                            );
+                        if ok {
+                            action
+                        } else {
+                            AiActionResultLite {
+                                ok: false,
+                                summary: action.summary,
+                                output: action.output,
+                                data: action.data,
+                                error_code: Some("remote_command_failed".to_string()),
+                                error_message: Some(format!(
+                                    "Exit code: {}",
+                                    result.exit_code
+                                        .map(|code| code.to_string())
+                                        .unwrap_or_else(|| "unknown".to_string())
+                                )),
+                                risk: "execute",
+                                target: action.target,
+                                targets: action.targets,
+                                next_actions: action.next_actions,
+                                observations: action.observations,
+                                verified: action.verified,
+                                state_version: action.state_version,
+                            }
+                        }
+                    }
                     Err(error) => self.fail("Remote command failed.", "remote_command_error", error.to_string(), "execute").with_target(target.clone()),
                 }
             }
@@ -390,28 +407,105 @@ impl AiOrchestratorRuntimeSnapshot {
 
     fn observe_terminal(&self, args: &serde_json::Value) -> AiActionResultLite {
         let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
-            return self.fail("Target is required.", "missing_target_id", "observe_terminal requires target_id.", "read");
+            return self.fail_missing_target_id("read");
         };
-        let max_chars = args.get("max_chars").and_then(serde_json::Value::as_u64).unwrap_or(4000).clamp(200, 12000) as usize;
+        let max_chars = args
+            .get("max_chars")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(4000) as usize;
         let Some(target) = self.targets.iter().find(|target| target.id == target_id) else {
-            return self.fail("Target not found.", "target_not_found", format!("No target matched {target_id}."), "read");
+            return self.fail_target_not_found(target_id, "read");
         };
-        let output = target.terminal_buffer.clone().unwrap_or_default();
+        let Some(session_id) = target.refs.get("sessionId") else {
+            return self
+                .fail(
+                    "Terminal target is missing sessionId.",
+                    "missing_session_id",
+                    "observe_terminal requires a terminal-session target.",
+                    "read",
+                )
+                .with_target(target.clone());
+        };
+        let observed_target = self
+            .targets
+            .iter()
+            .find(|candidate| {
+                candidate.kind == "terminal-session"
+                    && candidate.refs.get("sessionId") == Some(session_id)
+            })
+            .unwrap_or(target);
+        if observed_target.terminal_buffer.is_none() {
+            // Tauri resolves the pane from sessionId, so a target with sessionId
+            // but no visible terminal snapshot maps to the pane-missing branch.
+            return self
+                .fail(
+                    "Terminal pane is not registered.",
+                    "terminal_pane_missing",
+                    "No visible pane is registered for this terminal session.",
+                    "read",
+                )
+                .with_target(target.clone());
+        }
+        let output = observed_target.terminal_buffer.clone().unwrap_or_default();
         let output = trim_tail_chars(&output, max_chars);
         self.ok(
             "Terminal observed.",
             output.clone(),
-            serde_json::json!({ "buffer": output, "readiness": target.state }),
+            serde_json::json!({
+                "buffer": output,
+                "screen": observed_target.terminal_screen.clone().unwrap_or_else(|| serde_json::json!({ "lines": [] })),
+                "readiness": ai_terminal_readiness_json(observed_target),
+                "waitingForInput": looks_waiting_for_input(observed_target.terminal_buffer.as_deref().unwrap_or_default()),
+            }),
             "read",
         ).with_target(target.clone())
     }
 
     async fn read_resource(&self, args: &serde_json::Value) -> AiActionResultLite {
-        let resource = args.get("resource").and_then(serde_json::Value::as_str).unwrap_or("");
-        if resource == "settings" {
-            return self.ok("Read settings.", serde_json::to_string_pretty(&self.settings_summary).unwrap_or_default(), self.settings_summary.clone(), "read");
+        let resource =
+            normalized_ai_resource_kind(args.get("resource").and_then(serde_json::Value::as_str));
+        let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
+            return self.fail_missing_target_id("read");
+        };
+        let Some(target) = self.targets.iter().find(|target| target.id == target_id).cloned() else {
+            return self.fail_target_not_found(target_id, "read");
+        };
+        if target_requires_live_state(&target) && target.state != "connected" {
+            return self
+                .fail(
+                    "Target is not ready.",
+                    "target_not_ready",
+                    format!("{target_id} is {}; read_resource requires a connected target.", target.state),
+                    "read",
+                )
+                .with_target(target.clone())
+                .with_next_actions(recovery_actions_for_target(&target));
         }
-        if resource == "rag" {
+        if !matches!(resource, "settings" | "file" | "ide" | "directory" | "sftp" | "rag") {
+            return self.fail(
+                "Unsupported resource read.",
+                "unsupported_resource",
+                format!("Cannot read unsupported resource \"{resource}\"."),
+                "read",
+            ).with_target(target);
+        }
+        if resource == "settings" {
+            let section = args.get("section").and_then(serde_json::Value::as_str);
+            let data = section
+                .and_then(|section| self.settings_state.get(section).cloned())
+                .unwrap_or_else(|| self.settings_state.clone());
+            return self
+                .ok(
+                    section
+                        .map(|section| format!("Read settings section {section}."))
+                        .unwrap_or_else(|| "Read settings.".to_string()),
+                    serde_json::to_string_pretty(&data).unwrap_or_default(),
+                    data,
+                    "read",
+                )
+                .with_target(target);
+        }
+        if target.kind == "rag-index" || resource == "rag" {
             let query = args
                 .get("query")
                 .or_else(|| args.get("path"))
@@ -433,40 +527,22 @@ impl AiOrchestratorRuntimeSnapshot {
                     serde_json::to_string_pretty(&results).unwrap_or_default(),
                     serde_json::to_value(results).unwrap_or_else(|_| serde_json::json!([])),
                     "read",
-                ),
+                )
+                .with_target(target),
                 Err(error) => self.fail(
                     "Knowledge search failed.",
                     "rag_search_error",
                     error,
                     "read",
-                ),
+                )
+                .with_target(target),
             };
         }
-        if !matches!(resource, "file" | "ide" | "directory" | "sftp") {
-            return self.fail(
-                "Unsupported resource read.",
-                "unsupported_resource",
-                format!("Cannot read unsupported resource \"{resource}\"."),
-                "read",
-            );
-        }
-        let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
-            return self.fail(
-                "Target is required.",
-                "missing_target_id",
-                "read_resource requires target_id.",
-                "read",
-            );
-        };
-        let Some(target) = self.targets.iter().find(|target| target.id == target_id).cloned() else {
-            return self.fail(
-                "Target not found.",
-                "target_not_found",
-                format!("No target matched {target_id}."),
-                "read",
-            );
-        };
-        let Some(node_id) = target.refs.get("nodeId").map(|value| NodeId::new(value.clone())) else {
+        let node_id = target
+            .refs
+            .get("nodeId")
+            .map(|value| NodeId::new(value.clone()));
+        if node_id.is_none() && target.kind != "sftp-session" {
             return self.fail(
                 "Target cannot read resources.",
                 "unsupported_read_target",
@@ -484,6 +560,7 @@ impl AiOrchestratorRuntimeSnapshot {
         };
 
         if matches!(resource, "file" | "ide")
+            && let Some(node_id) = node_id.as_ref()
             && let Ok(result) = self.agent_fs.node_agent_read_file(&node_id.0, path).await
         {
             let data = serde_json::json!({
@@ -509,9 +586,38 @@ impl AiOrchestratorRuntimeSnapshot {
                     data,
                     "read",
                 )
+                .with_target(target.clone());
+        }
+
+        if matches!(resource, "file" | "ide") && node_id.is_none() {
+            return self.fail(
+                "Unsupported resource read.",
+                "unsupported_resource",
+                format!("Cannot read resource \"{resource}\" from {}.", target.kind),
+                "read",
+            ).with_target(target);
+        }
+
+        if matches!(resource, "directory" | "sftp") && node_id.is_none() {
+            let data = serde_json::json!([]);
+            return self
+                .ok(
+                    "Listed 0 entries.",
+                    serde_json::to_string_pretty(&data).unwrap_or_default(),
+                    data,
+                    "read",
+                )
                 .with_target(target);
         }
 
+        let Some(node_id) = node_id else {
+            return self.fail(
+                "Target cannot read resources.",
+                "unsupported_read_target",
+                format!("{} does not expose readable resources.", target.kind),
+                "read",
+            ).with_target(target);
+        };
         let shared = match self.node_router.acquire_sftp(&node_id).await {
             Ok(shared) => shared,
             Err(error) => {
@@ -531,47 +637,27 @@ impl AiOrchestratorRuntimeSnapshot {
                     }),
                 )
                 .await
-                .map(|entries| serde_json::json!({ "path": path, "entries": entries }))
+                .map(|entries| serde_json::json!(entries))
             } else {
-                let stat = sftp.stat(path).await?;
-                let bytes = sftp.read_file_bytes(path).await?;
-                match String::from_utf8(bytes) {
-                    Ok(content) => {
-                        let hash = ai_hash_text_content(&content, "utf-8");
-                        Ok(serde_json::json!({
-                            "path": stat.path,
-                            "content": content,
-                            "hash": hash,
-                            "contentHash": hash,
-                            "size": stat.size,
-                            "mtime": stat.modified,
-                            "encoding": "utf-8",
-                        }))
-                    }
-                    Err(_) => sftp.preview(path).await.map(|preview| {
-                        serde_json::json!({
-                            "path": stat.path,
-                            "preview": preview,
-                            "size": stat.size,
-                            "mtime": stat.modified,
-                        })
-                    }),
-                }
+                // Tauri falls back from node-agent reads to nodeSftpPreview,
+                // so the model sees preview-shaped data instead of full file
+                // contents when the agent path is unavailable.
+                sftp.preview(path).await.map(|preview| serde_json::json!(preview))
             }
         }
         .await;
         match result {
             Ok(data) => {
-                let output = if let Some(content) = data.get("content").and_then(serde_json::Value::as_str) {
-                    truncate_for_model(content.to_string(), 12_000)
-                } else {
-                    truncate_for_model(serde_json::to_string_pretty(&data).unwrap_or_default(), 12_000)
-                };
+                let output =
+                    truncate_for_model(serde_json::to_string_pretty(&data).unwrap_or_default(), 12_000);
                 self.ok(
                     if matches!(resource, "directory" | "sftp") {
-                        format!("Listed resource {path}.")
+                        format!(
+                            "Listed {} entries.",
+                            data.as_array().map(Vec::len).unwrap_or(0)
+                        )
                     } else {
-                        format!("Read remote file {path}.")
+                        format!("Read remote file preview {path}.")
                     },
                     output,
                     data,
@@ -589,7 +675,25 @@ impl AiOrchestratorRuntimeSnapshot {
     }
 
     async fn write_resource(&self, args: &serde_json::Value) -> AiActionResultLite {
-        let resource = args.get("resource").and_then(serde_json::Value::as_str).unwrap_or("");
+        let resource =
+            normalized_ai_resource_kind(args.get("resource").and_then(serde_json::Value::as_str));
+        let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
+            return self.fail_missing_target_id("write");
+        };
+        let Some(target) = self.targets.iter().find(|target| target.id == target_id).cloned() else {
+            return self.fail_target_not_found(target_id, "write");
+        };
+        if target_requires_live_state(&target) && target.state != "connected" {
+            return self
+                .fail(
+                    "Target is not ready.",
+                    "target_not_ready",
+                    format!("{target_id} is {}; write_resource requires a connected target.", target.state),
+                    "write",
+                )
+                .with_target(target.clone())
+                .with_next_actions(recovery_actions_for_target(&target));
+        }
         if resource == "settings" {
             return self.fail(
                 "Settings write requires the native UI executor.",
@@ -599,31 +703,27 @@ impl AiOrchestratorRuntimeSnapshot {
             );
         }
         if resource != "file" {
+            let mut read_args = serde_json::Map::new();
+            read_args.insert("target_id".to_string(), serde_json::json!(target.id.clone()));
+            read_args.insert("resource".to_string(), serde_json::json!(resource));
+            if let Some(path) = args.get("path") {
+                read_args.insert("path".to_string(), path.clone());
+            }
+            if let Some(section) = args.get("section") {
+                read_args.insert("section".to_string(), section.clone());
+            }
             return self.fail(
                 "Unsupported resource write.",
                 "unsupported_resource_write",
                 format!("write_resource only supports settings or file, not \"{resource}\"."),
                 "write",
-            );
-        }
-        if args.get("dry_run").and_then(serde_json::Value::as_bool).unwrap_or(false) {
-            return self.ok("Dry-run resource write.", "Dry-run only; no native resource was changed.", args.clone(), "write");
-        }
-        let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
-            return self.fail(
-                "Target is required.",
-                "missing_target_id",
-                "write_resource(file) requires target_id.",
-                "write",
-            );
-        };
-        let Some(target) = self.targets.iter().find(|target| target.id == target_id).cloned() else {
-            return self.fail(
-                "Target not found.",
-                "target_not_found",
-                format!("No target matched {target_id}."),
-                "write",
-            );
+            )
+            .with_target(target.clone())
+            .with_next_actions(vec![serde_json::json!({
+                "action": "read_resource",
+                "args": read_args,
+                "reason": "Read or inspect the resource instead of writing it."
+            })]);
         };
         let Some(node_id) = target.refs.get("nodeId").map(|value| NodeId::new(value.clone())) else {
             return self.fail(
@@ -649,6 +749,17 @@ impl AiOrchestratorRuntimeSnapshot {
                 "write",
             ).with_target(target);
         };
+        if args.get("dry_run").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            return self
+                .ok(
+                    format!("Dry-run file write {path}."),
+                    "Dry-run only; file was not changed.",
+                    serde_json::Value::Null,
+                    "write",
+                )
+                .with_target(target)
+                .with_verified(false);
+        }
         let expected_hash = args
             .get("expected_hash")
             .or_else(|| args.get("expectedHash"))
@@ -679,21 +790,11 @@ impl AiOrchestratorRuntimeSnapshot {
                     )
                     .with_target(target);
             }
-            Err(NodeAgentRpcError::Conflict(message)) => {
-                return self
-                    .fail(
-                        "Remote file changed before writing.",
-                        "expected_hash_mismatch",
-                        message,
-                        "write",
-                    )
-                    .with_target(target);
-            }
-            Err(NodeAgentRpcError::Unavailable(_) | NodeAgentRpcError::Other(_)) => {}
+            Err(_) => {}
         }
-        let result = self
-            .write_remote_file(&node_id, path, content, expected_hash)
-            .await;
+        // Tauri's SFTP fallback receives only nodeId/path/content after the
+        // node-agent write path fails; expected_hash is a node-agent precondition.
+        let result = self.write_remote_file(&node_id, path, content, None).await;
         match result {
             Ok(data) => self
                 .ok(
@@ -743,29 +844,22 @@ impl AiOrchestratorRuntimeSnapshot {
 
     async fn transfer_resource(&self, args: &serde_json::Value) -> AiActionResultLite {
         let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
-            return self.fail(
-                "Target is required.",
-                "missing_target_id",
-                "transfer_resource requires target_id.",
-                "write",
-            );
+            return self.fail_missing_target_id("write");
         };
         let Some(target) = self.targets.iter().find(|target| target.id == target_id).cloned() else {
-            return self.fail(
-                "Target not found.",
-                "target_not_found",
-                format!("No target matched {target_id}."),
-                "write",
-            );
+            return self.fail_target_not_found(target_id, "write");
         };
-        let Some(node_id) = target.refs.get("nodeId").map(|value| NodeId::new(value.clone())) else {
-            return self.fail(
-                "SFTP transfer requires an SSH/SFTP target.",
-                "missing_node_id",
-                "transfer_resource requires a target with nodeId.",
-                "write",
-            ).with_target(target);
-        };
+        if target_requires_live_state(&target) && target.state != "connected" {
+            return self
+                .fail(
+                    "Target is not ready.",
+                    "target_not_ready",
+                    format!("{target_id} is {}; transfer_resource requires a connected target.", target.state),
+                    "write",
+                )
+                .with_target(target.clone())
+                .with_next_actions(recovery_actions_for_target(&target));
+        }
         let direction = args.get("direction").and_then(serde_json::Value::as_str).unwrap_or("");
         if direction != "upload" && direction != "download" {
             return self.fail(
@@ -775,24 +869,25 @@ impl AiOrchestratorRuntimeSnapshot {
                 "write",
             ).with_target(target);
         }
-        let Some(source_path) = args.get("source_path").and_then(serde_json::Value::as_str).filter(|value| !value.trim().is_empty()) else {
+        let Some(node_id) = target.refs.get("nodeId").map(|value| NodeId::new(value.clone())) else {
             return self.fail(
-                "Transfer paths are required.",
-                "missing_transfer_path",
-                "transfer_resource requires source_path.",
+                "SFTP transfer requires an SSH/SFTP target.",
+                "missing_node_id",
+                "transfer_resource requires a target with nodeId.",
                 "write",
             ).with_target(target);
         };
-        let Some(destination_path) = args.get("destination_path").and_then(serde_json::Value::as_str).filter(|value| !value.trim().is_empty()) else {
-            return self.fail(
-                "Transfer paths are required.",
-                "missing_transfer_path",
-                "transfer_resource requires destination_path.",
-                "write",
-            ).with_target(target);
-        };
+        let source_path = args
+            .get("source_path")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let destination_path = args
+            .get("destination_path")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
         let transfer_id = uuid::Uuid::new_v4().to_string();
-        let is_directory = source_path.ends_with('/') || destination_path.ends_with('/');
+        let is_directory = ai_transfer_path_looks_directory(source_path)
+            || ai_transfer_path_looks_directory(destination_path);
         let result = self
             .run_sftp_transfer(
                 &node_id,
@@ -811,8 +906,17 @@ impl AiOrchestratorRuntimeSnapshot {
                     } else {
                         format!("Completed {direction} transfer.")
                     },
-                    serde_json::to_string_pretty(&data).unwrap_or_else(|_| format!("transfer_id={transfer_id}")),
-                    data,
+                    if is_directory {
+                        serde_json::to_string_pretty(&data)
+                            .unwrap_or_else(|_| format!("transfer_id={transfer_id}"))
+                    } else {
+                        format!("transfer_id={transfer_id}")
+                    },
+                    if is_directory {
+                        data
+                    } else {
+                        serde_json::json!({ "transferId": transfer_id })
+                    },
                     "write",
                 )
                 .with_target(target),
@@ -823,47 +927,244 @@ impl AiOrchestratorRuntimeSnapshot {
     }
 
     fn get_state(&self, args: &serde_json::Value) -> AiActionResultLite {
-        let scope = args.get("scope").and_then(serde_json::Value::as_str).unwrap_or("active");
-        let mut data = match scope {
-            "targets" => serde_json::json!({ "targets": self.targets.iter().map(target_json).collect::<Vec<_>>() }),
-            "settings" => self.settings_summary.clone(),
-            "active" => serde_json::json!({
-                "targets": self.targets.iter().filter(|target| target.state == "connected").map(target_json).collect::<Vec<_>>(),
-            }),
-            _ => serde_json::json!({
-                "scope": scope,
-                "targetCount": self.targets.len(),
-            }),
-        };
-        let state_version = make_ai_state_version(
+        let scope = args
+            .get("scope")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("targets");
+        let requested_target = args
+            .get("target_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|target_id| self.targets.iter().find(|target| target.id == target_id))
+            .cloned();
+        let valid_scope = matches!(
             scope,
-            [
-                self.targets.len().to_string(),
-                self.targets
-                    .iter()
-                    .filter(|target| target.state == "connected")
-                    .count()
-                    .to_string(),
-            ],
+            "connections" | "transfers" | "settings" | "targets" | "health" | "active"
         );
-        if let Some(object) = data.as_object_mut() {
-            object.insert("runtimeEpoch".to_string(), serde_json::json!(self.runtime_epoch));
-            object.insert("stateVersion".to_string(), serde_json::json!(state_version));
+        if !valid_scope {
+            return self
+                .fail(
+                    "Unknown state scope.",
+                    "unknown_state_scope",
+                    format!("Unknown get_state scope \"{scope}\". Valid scopes: connections, transfers, settings, targets, health, active."),
+                    "read",
+                )
+                .with_next_actions(vec![serde_json::json!({
+                        "action": "get_state",
+                        "args": { "scope": "targets" },
+                        "reason": "Inspect valid target state instead."
+                    })])
+                .with_optional_target(requested_target);
         }
-        self.ok(format!("Read {scope} state."), serde_json::to_string_pretty(&data).unwrap_or_default(), data, "read")
-            .with_state_version(state_version)
-    }
-
-    fn remember_preference(&self, args: &serde_json::Value) -> AiActionResultLite {
-        let Some(preference) = args.get("preference").and_then(serde_json::Value::as_str).filter(|value| !value.trim().is_empty()) else {
-            return self.fail("Preference is required.", "missing_preference", "remember_preference requires preference.", "write");
+        let mut data = match scope {
+            "targets" => ai_targets_state(&self.targets, &self.runtime_epoch),
+            "settings" => self.settings_summary.clone(),
+            "connections" => ai_connections_state(&self.targets, &self.runtime_epoch),
+            "transfers" => ai_transfers_state(&self.sftp_transfer_manager, &self.runtime_epoch),
+            "health" => ai_health_state(self),
+            "active" => serde_json::json!({
+                "runtimeEpoch": self.runtime_epoch,
+                "activeTab": self.active_tab.clone(),
+                "activeNode": self.active_node.clone(),
+                "activeSessionId": self.active_session_id.clone(),
+                "targets": self.targets.iter().filter(|target| {
+                    target_matches_active_context(
+                        target,
+                        self.active_tab_id.as_deref(),
+                        self.active_node_id.as_deref(),
+                        self.active_session_id.as_deref(),
+                    )
+                }).map(compact_ai_target_json).collect::<Vec<_>>(),
+            }),
+            _ => unreachable!("scope was validated above"),
         };
-        self.ok(
-            "Preference accepted for this turn.",
-            format!("Preference noted: {preference}"),
-            serde_json::json!({ "preference": preference, "persisted": false }),
-            "write",
-        )
+        let state_version = match scope {
+            "targets" => make_ai_state_version(
+                "targets",
+                [
+                    self.targets.len().to_string(),
+                    self.targets
+                        .iter()
+                        .filter(|target| target_in_ai_view(target, "connections"))
+                        .count()
+                        .to_string(),
+                    self.targets
+                        .iter()
+                        .filter(|target| target_in_ai_view(target, "live_sessions"))
+                        .count()
+                        .to_string(),
+                    self.targets
+                        .iter()
+                        .filter(|target| target_in_ai_view(target, "app_surfaces"))
+                        .count()
+                        .to_string(),
+                    self.targets
+                        .iter()
+                        .filter(|target| target_in_ai_view(target, "files"))
+                        .count()
+                        .to_string(),
+                ],
+            ),
+            "active" => make_ai_state_version(
+                "active",
+                [
+                    self.active_tab_id.clone().unwrap_or_default(),
+                    self.active_node_id.clone().unwrap_or_default(),
+                    self.active_session_id.clone().unwrap_or_default(),
+                ],
+            ),
+            "connections" => make_ai_state_version(
+                "connections",
+                [
+                    self.targets
+                        .iter()
+                        .filter(|target| target_in_ai_view(target, "connections"))
+                        .count()
+                        .to_string(),
+                    self.targets
+                        .iter()
+                        .filter(|target| target.kind == "ssh-node" && target.state == "connected")
+                        .count()
+                        .to_string(),
+                    self.targets
+                        .iter()
+                        .filter(|target| target.kind == "ssh-node" && target.state == "stale")
+                        .count()
+                        .to_string(),
+                    self.targets
+                        .iter()
+                        .filter(|target| {
+                            target.kind == "ssh-node"
+                                && target
+                                    .metadata
+                                    .get("status")
+                                    .and_then(serde_json::Value::as_str)
+                                    == Some("error")
+                        })
+                        .count()
+                        .to_string(),
+                ],
+            ),
+            "transfers" => make_ai_state_version(
+                "transfers",
+                [
+                    data.get("total")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0)
+                        .to_string(),
+                    data.pointer("/counts/active")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0)
+                        .to_string(),
+                    data.pointer("/counts/pending")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0)
+                        .to_string(),
+                    data.pointer("/counts/error")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0)
+                        .to_string(),
+                ],
+            ),
+            "settings" => make_ai_state_version(
+                "settings",
+                [
+                    data.pointer("/ai/enabled")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                        .to_string(),
+                    data.pointer("/terminal/renderer")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    data.pointer("/terminal/encoding")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                ],
+            ),
+            "health" => make_ai_state_version(
+                "health",
+                [
+                    data.pointer("/tabs/open")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0)
+                        .to_string(),
+                    data.pointer("/terminalRegistry/entries")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0)
+                        .to_string(),
+                    data.pointer("/transfers/total")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0)
+                        .to_string(),
+                    data.pointer("/recentEvents/total")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0)
+                        .to_string(),
+                ],
+            ),
+            _ => unreachable!("scope was validated above"),
+        };
+        if let Some(object) = data.as_object_mut() {
+            object
+                .entry("runtimeEpoch".to_string())
+                .or_insert_with(|| serde_json::json!(self.runtime_epoch));
+        }
+        let result_targets = match scope {
+            "targets" => self.targets.clone(),
+            "connections" => self
+                .targets
+                .iter()
+                .filter(|target| target_in_ai_view(target, "connections"))
+                .cloned()
+                .collect::<Vec<_>>(),
+            "active" => self
+                .targets
+                .iter()
+                .filter(|target| {
+                    target_matches_active_context(
+                        target,
+                        self.active_tab_id.as_deref(),
+                        self.active_node_id.as_deref(),
+                        self.active_session_id.as_deref(),
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        let summary = match scope {
+            "targets" => format!("Found {} total targets across views.", self.targets.len()),
+            "active" => {
+                if self.active_tab.is_some() || self.active_node.is_some() {
+                    "Read active runtime state.".to_string()
+                } else {
+                    "No active tab or terminal session.".to_string()
+                }
+            }
+            "settings" => "Read settings summary.".to_string(),
+            "connections" => format!("Found {} connection targets.", result_targets.len()),
+            "transfers" => format!(
+                "Found {} tracked transfers.",
+                data.get("total").and_then(serde_json::Value::as_u64).unwrap_or(0)
+            ),
+            "health" => "Read OxideTerm health state.".to_string(),
+            _ => unreachable!("scope was validated above"),
+        };
+        let result = self
+            .ok(
+                summary,
+                serde_json::to_string_pretty(&data).unwrap_or_default(),
+                data,
+                "read",
+            )
+            .with_targets(result_targets)
+            .with_state_version(state_version);
+        if matches!(scope, "settings" | "connections" | "transfers" | "health") {
+            result.with_optional_target(requested_target)
+        } else {
+            result
+        }
     }
 
     fn ui_thread_required_action(
@@ -1309,6 +1610,9 @@ impl AiOrchestratorRuntimeSnapshot {
             risk,
             target: None,
             targets: Vec::new(),
+            next_actions: Vec::new(),
+            observations: Vec::new(),
+            verified: None,
             state_version: None,
         }
     }
@@ -1331,29 +1635,41 @@ impl AiOrchestratorRuntimeSnapshot {
             risk,
             target: None,
             targets: Vec::new(),
+            next_actions: Vec::new(),
+            observations: Vec::new(),
+            verified: None,
             state_version: None,
         }
     }
 
-    fn fail_empty_output(
+    fn fail_missing_target_id(&self, risk: &'static str) -> AiActionResultLite {
+        self.fail(
+            "target_id is required.",
+            "missing_target_id",
+            "This task tool requires an explicit target_id.",
+            risk,
+        )
+        .with_next_actions(vec![serde_json::json!({
+            "action": "list_targets",
+            "reason": "Find the correct target before acting."
+        })])
+    }
+
+    fn fail_target_not_found(
         &self,
-        summary: impl Into<String>,
-        code: impl Into<String>,
-        message: impl Into<String>,
+        target_id: &str,
         risk: &'static str,
     ) -> AiActionResultLite {
-        AiActionResultLite {
-            ok: false,
-            summary: summary.into(),
-            output: String::new(),
-            data: serde_json::Value::Null,
-            error_code: Some(code.into()),
-            error_message: Some(message.into()),
+        self.fail(
+            "Target not found.",
+            "target_not_found",
+            format!("Target not found: {target_id}"),
             risk,
-            target: None,
-            targets: Vec::new(),
-            state_version: None,
-        }
+        )
+        .with_next_actions(vec![serde_json::json!({
+            "action": "list_targets",
+            "reason": "Refresh available targets before continuing."
+        })])
     }
 
     fn to_executed_tool_result(
@@ -1363,35 +1679,96 @@ impl AiOrchestratorRuntimeSnapshot {
         result: AiActionResultLite,
         duration_ms: u128,
     ) -> AiExecutedToolResult {
-        let output = truncate_for_model(result.output.clone(), 12_000);
+        let (output, raw_output, output_preview, truncated) =
+            prepare_ai_tool_output(&result.output);
         let targets = result
             .target
             .iter()
             .chain(result.targets.iter())
-            .map(target_json)
+            .map(tool_result_target_json)
             .collect::<Vec<_>>();
-        let envelope = serde_json::json!({
-            "ok": result.ok,
-            "summary": result.summary,
-            "output": output,
-            "data": result.data,
-            "error": result.error_message.as_ref().map(|message| serde_json::json!({
-                "code": result.error_code.clone().unwrap_or_else(|| "tool_error".to_string()),
-                "message": message,
-                "recoverable": true,
-            })),
-            "targets": targets,
-            "meta": {
-                "toolName": tool_name,
-                "durationMs": duration_ms,
-                "verified": result.ok,
-                "capability": risk_to_capability(result.risk),
-                "targetId": result.target.as_ref().map(|target| target.id.clone()),
-                "truncated": result.output.len() > output.len(),
-                "runtimeEpoch": self.runtime_epoch,
-                "stateVersion": result.state_version,
-            }
+        let next_actions = result
+            .next_actions
+            .iter()
+            .filter_map(ai_next_action_json)
+            .collect::<Vec<_>>();
+        let waiting_for_input = result
+            .data
+            .get("waitingForInput")
+            .and_then(serde_json::Value::as_bool);
+        let data_is_internal_waiting_hint = result.data.as_object().is_some_and(|object| {
+            object.len() == 1 && object.contains_key("waitingForInput")
         });
+        let mut envelope = serde_json::Map::new();
+        envelope.insert("ok".to_string(), serde_json::json!(result.ok));
+        envelope.insert("summary".to_string(), serde_json::json!(result.summary));
+        envelope.insert("output".to_string(), serde_json::json!(output));
+        // Tauri omits `data` when an action did not provide it. Preserve that
+        // shape so models do not learn data=null as a meaningful result.
+        if !result.data.is_null() && !data_is_internal_waiting_hint {
+            envelope.insert("data".to_string(), result.data);
+        }
+        if let Some(raw_output) = raw_output {
+            envelope.insert("rawOutput".to_string(), serde_json::json!(raw_output));
+        }
+        envelope.insert("outputPreview".to_string(), output_preview);
+        if truncated && !envelope.contains_key("rawOutput") {
+            envelope.insert("warnings".to_string(), serde_json::json!([
+                "Full output exceeded the UI retention limit; showing a head/tail preview. Use a narrower command such as grep, tail -n, or find ... | head for exact data."
+            ]));
+        }
+        if let Some(message) = result.error_message.as_ref() {
+            envelope.insert(
+                "error".to_string(),
+                serde_json::json!({
+                    "code": result.error_code.clone().unwrap_or_else(|| "tool_error".to_string()),
+                    "message": message,
+                    "recoverable": true,
+                }),
+            );
+            envelope.insert("recoverable".to_string(), serde_json::json!(true));
+        }
+        if !targets.is_empty() {
+            envelope.insert("targets".to_string(), serde_json::json!(targets));
+        }
+        if !next_actions.is_empty() {
+            envelope.insert("nextActions".to_string(), serde_json::json!(next_actions));
+        }
+        if !result.observations.is_empty() {
+            envelope.insert(
+                "observations".to_string(),
+                serde_json::json!(result.observations),
+            );
+        }
+        if let Some(waiting_for_input) = waiting_for_input {
+            envelope.insert(
+                "waitingForInput".to_string(),
+                serde_json::json!(waiting_for_input),
+            );
+        }
+        let mut meta = serde_json::Map::new();
+        meta.insert("toolName".to_string(), serde_json::json!(tool_name));
+        meta.insert("durationMs".to_string(), serde_json::json!(duration_ms));
+        meta.insert(
+            "verified".to_string(),
+            serde_json::json!(result.verified.unwrap_or(result.ok)),
+        );
+        if let Some(capability) = risk_to_capability(result.risk) {
+            meta.insert("capability".to_string(), serde_json::json!(capability));
+        }
+        if let Some(target) = result.target.as_ref() {
+            meta.insert("targetId".to_string(), serde_json::json!(target.id));
+        }
+        meta.insert("truncated".to_string(), serde_json::json!(truncated));
+        meta.insert(
+            "runtimeEpoch".to_string(),
+            serde_json::json!(self.runtime_epoch),
+        );
+        if let Some(state_version) = result.state_version {
+            meta.insert("stateVersion".to_string(), serde_json::json!(state_version));
+        }
+        envelope.insert("meta".to_string(), serde_json::Value::Object(meta));
+        let envelope = serde_json::Value::Object(envelope);
         AiExecutedToolResult {
             tool_call_id,
             tool_name,
@@ -1402,6 +1779,12 @@ impl AiOrchestratorRuntimeSnapshot {
             envelope,
         }
     }
+}
+
+fn ai_transfer_path_looks_directory(path: &str) -> bool {
+    // Tauri uses /[\\/]$/ so both POSIX and Windows-style trailing separators
+    // select directory transfer semantics.
+    path.ends_with('/') || path.ends_with('\\')
 }
 
 fn make_ai_state_version(scope: &str, parts: impl IntoIterator<Item = String>) -> String {

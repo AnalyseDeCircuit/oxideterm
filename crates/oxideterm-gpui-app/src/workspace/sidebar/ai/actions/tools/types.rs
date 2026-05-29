@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use sha2::Digest as _;
 
@@ -9,18 +9,23 @@ const AI_PSEUDO_TOOL_RETRY_TOOL_NAME: &str = "tool_use_disabled";
 #[derive(Clone)]
 struct AiOrchestratorRuntimeSnapshot {
     targets: Vec<AiOrchestratorTarget>,
+    active_tab: Option<serde_json::Value>,
+    active_node: Option<serde_json::Value>,
+    active_session_id: Option<String>,
+    active_tab_id: Option<String>,
+    active_node_id: Option<String>,
     memory: String,
+    health_state: serde_json::Value,
+    settings_state: serde_json::Value,
     settings_summary: serde_json::Value,
     node_router: NodeRouter,
     sftp_transfer_manager: std::sync::Arc<SftpTransferManager>,
     agent_fs: NodeAgentIdeFileSystem,
     backend_runtime: std::sync::Arc<tokio::runtime::Runtime>,
-    mcp_registry: oxideterm_ai::McpRegistry,
     rag_store: std::sync::Arc<oxideterm_ai::RagStore>,
     ai_key_store: oxideterm_ai::AiProviderKeyStore,
     ai_providers: Vec<serde_json::Value>,
     ai_embedding_config: Option<serde_json::Value>,
-    plugin_pending_tool_names: HashSet<String>,
     ai_context_window: usize,
     runtime_epoch: String,
 }
@@ -35,6 +40,7 @@ struct AiOrchestratorTarget {
     refs: BTreeMap<String, String>,
     metadata: serde_json::Value,
     terminal_buffer: Option<String>,
+    terminal_screen: Option<serde_json::Value>,
     ssh_handle: Option<SshConnectionHandle>,
 }
 

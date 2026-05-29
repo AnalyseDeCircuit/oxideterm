@@ -85,6 +85,52 @@ fn provider_templates_match_tauri_order() {
 }
 
 #[test]
+fn orchestrator_tool_definitions_match_tauri_core_names_and_order() {
+    let tools = orchestrator_tool_definitions();
+    let names = tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        names,
+        vec![
+            "list_targets",
+            "select_target",
+            "connect_target",
+            "run_command",
+            "observe_terminal",
+            "send_terminal_input",
+            "read_resource",
+            "write_resource",
+            "transfer_resource",
+            "open_app_surface",
+            "get_state",
+            "remember_preference",
+            "recall_preferences",
+        ]
+    );
+    assert_eq!(
+        tools
+            .iter()
+            .find(|tool| tool.name == "list_targets")
+            .and_then(|tool| tool.parameters.pointer("/properties/view/enum"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(5)
+    );
+    assert_eq!(
+        tools
+            .iter()
+            .find(|tool| tool.name == "read_resource")
+            .and_then(|tool| tool.parameters.pointer("/properties/resource/enum"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(6)
+    );
+}
+
+#[test]
 fn orchestrator_send_terminal_input_blocks_control_schema() {
     let tools = orchestrator_tool_definitions();
     let terminal_input = tools
@@ -456,6 +502,13 @@ fn model_context_window_info_matches_tauri_priority() {
         }
     );
     assert_eq!(
+        model_context_window_info("custom-32k-128k-model", &empty, None, &empty),
+        ModelContextWindowInfo {
+            value: 131_072,
+            source: ContextWindowSource::Name,
+        }
+    );
+    assert_eq!(
         model_context_window_info("llama3.2", &empty, None, &empty).value,
         128_000
     );
@@ -605,6 +658,19 @@ fn ai_policy_matches_tauri_tool_keys_and_disabled_rules() {
     );
     assert_eq!(file_decision.decision, AiPolicyDecisionKind::Allow);
     assert_eq!(file_decision.reason_code, "auto_approved");
+
+    let unknown_decision = resolve_ai_policy_decision(
+        "list_mcp_resources",
+        None,
+        &policy,
+        AiPolicySafetyMode::Default,
+        None,
+    );
+    assert_eq!(unknown_decision.risk, AiActionRisk::Write);
+    assert_eq!(
+        unknown_decision.decision,
+        AiPolicyDecisionKind::RequireApproval
+    );
 }
 
 #[test]

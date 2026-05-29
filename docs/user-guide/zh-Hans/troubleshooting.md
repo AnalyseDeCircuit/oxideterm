@@ -1,8 +1,37 @@
 # 排障
 
-## 先跑只读检查
+排障先从桌面应用开始。可见应用状态通常能告诉你问题来自保存配置、在线 SSH 节点、终端会话、SFTP、转发、同步、设置还是插件。
 
-修改文件前先运行：
+## 先检查应用页面
+
+修改文件或运行修复命令前，先检查相关页面：
+
+- 会话：确认保存连接存在，并且 host、user、port、group 和认证方式符合预期。
+- 连接监控：确认节点是已连接、正在连接、已失效、正在重连还是不可用。
+- 终端标签页：确认 shell 是否接受输入，以及命令是否仍在运行。
+- SFTP 或文件管理器：重试目录读取或传输前，确认目标节点在线。
+- 设置：检查最近是否修改过终端、SSH、AI、云同步、插件或更新设置。
+- 通知：查看最近的警告和错误。
+
+如果某个连接或页面已失效，先从应用里重连，再考虑改配置。
+
+## 常见恢复步骤
+
+设置问题：重新打开设置，检查最近修改的部分。如果应用报告设置无效，先回退最小的可见变更。
+
+连接问题：编辑原保存连接，然后从“会话”重试。确认原配置错误前，不要创建重复连接。
+
+SFTP 或转发问题：先在连接监控里检查所属 SSH 节点。节点在线后再重试。
+
+云同步问题：打开云同步页面，检查状态并查看冲突，再选择同步方向。
+
+## 先备份
+
+执行恢复、导入、同步应用或手动修复文件前，先从应用里创建或确认备份。检查恢复计划，只应用能解决问题的最小部分。
+
+## CLI 伴侣工具诊断
+
+需要只读诊断、CI 检查或支持包时使用 CLI 伴侣工具：
 
 ```sh
 oxideterm paths --json
@@ -11,60 +40,22 @@ oxideterm doctor --strict
 oxideterm report --json
 ```
 
-`doctor --strict` 会把 warning 当作失败，适合 CI 或迁移脚本。
+`doctor --strict` 会把警告当作失败，适合 CI 或迁移脚本。
 
-## 常见恢复步骤
-
-如果设置加载失败：
+针对性检查：
 
 ```sh
 oxideterm settings validate --strict
-oxideterm settings show --json
-```
-
-如果连接状态不对：
-
-```sh
 oxideterm connections validate --strict
-oxideterm connections export --format raw-safe --json
-```
-
-如果云同步行为异常：
-
-```sh
 oxideterm cloud-sync status --json
-oxideterm cloud-sync history --failed-only
-oxideterm cloud-sync diff --dirty-only --format table
 ```
 
-## 先备份
+## 问题报告
 
-在覆盖文件修复状态前，先创建备份：
-
-```sh
-oxideterm backup create --output ./before-fix.json --json
-```
-
-然后用 dry-run 先检查针对性修复。
-
-## Shell Completion
-
-生成或安装 completion：
-
-```sh
-oxideterm completion zsh > ~/.zfunc/_oxideterm
-oxideterm completion path zsh
-oxideterm completion install zsh
-```
-
-只有确认要覆盖已有生成文件时，才加 `--force`。
-
-## Bug Report
-
-提交 issue 时优先附加脱敏 bundle，而不是原始配置文件：
+提交问题报告时优先附加脱敏支持包，而不是原始配置文件：
 
 ```sh
 oxideterm report --bundle ./oxideterm-report.json --json
 ```
 
-分享前先检查 bundle。必要时移除私人主机名、用户名、路径或项目名。
+分享前先检查支持包。必要时移除私人主机名、用户名、路径或项目名。

@@ -1,15 +1,131 @@
+fn ai_sftp_target_for_node(
+    node_id: &NodeId,
+    node: &WorkspaceSshNode,
+    sftp_session_id: String,
+) -> AiOrchestratorTarget {
+    let mut refs = BTreeMap::new();
+    refs.insert("nodeId".to_string(), node_id.0.clone());
+    refs.insert("sessionId".to_string(), sftp_session_id.clone());
+    if let Some(saved_connection_id) = node.saved_connection_id.as_ref() {
+        refs.insert("connectionId".to_string(), saved_connection_id.clone());
+    }
+    // Tauri exposes SFTP targets from node runtime state, not from the SFTP tab
+    // itself, so keep the target shape node-scoped even when a tab is open.
+    AiOrchestratorTarget {
+        id: format!("sftp-session:{sftp_session_id}"),
+        kind: "sftp-session".to_string(),
+        label: format!("SFTP {}", node.config.host),
+        state: "connected".to_string(),
+        capabilities: vec![
+            "filesystem.read".to_string(),
+            "filesystem.write".to_string(),
+            "state.list".to_string(),
+        ],
+        refs,
+        metadata: serde_json::json!({
+            "host": node.config.host,
+        }),
+        terminal_buffer: None,
+        terminal_screen: None,
+        ssh_handle: None,
+    }
+}
+
+fn ai_connect_result_terminal_target(
+    target: &AiOrchestratorTarget,
+    original_label: &str,
+    node_id: Option<&str>,
+    connection_id: Option<&str>,
+) -> AiOrchestratorTarget {
+    let mut refs = BTreeMap::new();
+    if let Some(node_id) = node_id {
+        refs.insert("nodeId".to_string(), node_id.to_string());
+    }
+    if let Some(session_id) = target.refs.get("sessionId") {
+        refs.insert("sessionId".to_string(), session_id.clone());
+    }
+    if let Some(connection_id) = connection_id {
+        refs.insert("connectionId".to_string(), connection_id.to_string());
+    }
+    // Tauri connect_target synthesizes a terminal target for the connection
+    // result; regular discovery keeps terminal refs limited to session/tab.
+    AiOrchestratorTarget {
+        id: target.id.clone(),
+        kind: target.kind.clone(),
+        label: format!("{original_label} terminal"),
+        state: target.state.clone(),
+        capabilities: target.capabilities.clone(),
+        refs,
+        metadata: serde_json::json!({ "terminalType": "terminal" }),
+        terminal_buffer: target.terminal_buffer.clone(),
+        terminal_screen: target.terminal_screen.clone(),
+        ssh_handle: None,
+    }
+}
+
+fn ai_ide_workspace_target_for_node(
+    node_id: &NodeId,
+    node: &WorkspaceSshNode,
+    active_editor_tab_id: Option<String>,
+    project_root_path: Option<String>,
+    project_name: Option<String>,
+) -> AiOrchestratorTarget {
+    let mut refs = BTreeMap::new();
+    refs.insert("nodeId".to_string(), node_id.0.clone());
+    if let Some(active_editor_tab_id) = active_editor_tab_id.as_ref() {
+        refs.insert("tabId".to_string(), active_editor_tab_id.clone());
+    }
+    if let Some(saved_connection_id) = node.saved_connection_id.as_ref() {
+        refs.insert("connectionId".to_string(), saved_connection_id.clone());
+    }
+    let mut metadata = serde_json::Map::new();
+    if let Some(project_root_path) = project_root_path {
+        metadata.insert("rootPath".to_string(), serde_json::json!(project_root_path));
+    }
+    metadata.insert(
+        "activeTabId".to_string(),
+        active_editor_tab_id
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    // Tauri's IDE target is keyed by node id and carries the active editor tab
+    // separately; it never uses the outer app tab id as the workspace tab ref.
+    AiOrchestratorTarget {
+        id: format!("ide-workspace:{}", node_id.0),
+        kind: "ide-workspace".to_string(),
+        label: project_name.unwrap_or_else(|| "IDE workspace".to_string()),
+        state: "connected".to_string(),
+        capabilities: vec![
+            "filesystem.read".to_string(),
+            "filesystem.write".to_string(),
+            "navigation.open".to_string(),
+            "state.list".to_string(),
+        ],
+        refs,
+        metadata: serde_json::Value::Object(metadata),
+        terminal_buffer: None,
+        terminal_screen: None,
+        ssh_handle: None,
+    }
+}
+
 impl WorkspaceApp {
     fn ai_orchestrator_snapshot(&self, cx: &mut Context<Self>) -> AiOrchestratorRuntimeSnapshot {
         let mut targets = Vec::new();
         for connection in self.connection_store.connections() {
             let mut refs = BTreeMap::new();
             refs.insert("connectionId".to_string(), connection.id.clone());
+            let connection_label = if connection.name.trim().is_empty() {
+                connection.host.as_str()
+            } else {
+                connection.name.as_str()
+            };
             targets.push(AiOrchestratorTarget {
                 id: format!("saved-connection:{}", connection.id),
                 kind: "saved-connection".to_string(),
                 label: format!(
                     "{} ({}@{}:{})",
-                    connection.name, connection.username, connection.host, connection.port
+                    connection_label, connection.username, connection.host, connection.port
                 ),
                 state: "available".to_string(),
                 capabilities: vec!["navigation.open".to_string(), "state.list".to_string()],
@@ -22,6 +138,7 @@ impl WorkspaceApp {
                     "group": connection.group,
                 }),
                 terminal_buffer: None,
+                terminal_screen: None,
                 ssh_handle: None,
             });
         }
@@ -29,10 +146,23 @@ impl WorkspaceApp {
         for tab in &self.tabs {
             let mut refs = BTreeMap::new();
             refs.insert("tabId".to_string(), tab.id.0.to_string());
+            if let Some(session_id) = tab.root_pane.as_ref().and_then(|root| {
+                let mut pane_ids = Vec::new();
+                root.collect_pane_ids(&mut pane_ids);
+                pane_ids
+                    .into_iter()
+                    .find_map(|pane_id| root.session_id_for_pane(pane_id))
+            }) {
+                refs.insert("sessionId".to_string(), session_id.0.to_string());
+            }
             targets.push(AiOrchestratorTarget {
                 id: format!("app-surface:{}:{}", ai_tab_kind_label(&tab.kind), tab.id.0),
                 kind: "app-surface".to_string(),
-                label: tab.title.clone(),
+                label: if tab.title.is_empty() {
+                    ai_tab_kind_label(&tab.kind).to_string()
+                } else {
+                    tab.title.clone()
+                },
                 state: if Some(tab.id) == self.active_tab_id {
                     "connected"
                 } else {
@@ -43,62 +173,129 @@ impl WorkspaceApp {
                 refs,
                 metadata: serde_json::json!({ "tabType": ai_tab_kind_label(&tab.kind) }),
                 terminal_buffer: None,
+                terminal_screen: None,
                 ssh_handle: None,
             });
         }
 
         for (node_id, node) in &self.ssh_nodes {
             let terminal_id = node.terminal_ids.first().copied();
-            let ssh_handle = self
-                .node_router
-                .resolve_connection_now(node_id)
-                .ok()
-                .map(|resolved| resolved.handle)
-                .or_else(|| {
-                    terminal_id
-                        .and_then(|session_id| self.terminal_endpoint_sessions.get(&session_id))
-                        .and_then(|endpoint| endpoint.session.lock().ssh_connection_handle())
-                });
-            let mut refs = BTreeMap::new();
-            refs.insert("nodeId".to_string(), node_id.0.clone());
-            if let Some(saved_connection_id) = node.saved_connection_id.as_ref() {
-                refs.insert("connectionId".to_string(), saved_connection_id.clone());
-            }
-            if let Some(session_id) = terminal_id {
-                refs.insert("sessionId".to_string(), session_id.0.to_string());
-            }
-            targets.push(AiOrchestratorTarget {
-                id: format!("ssh-node:{}", node_id.0),
-                kind: "ssh-node".to_string(),
-                label: format!(
-                    "{}@{}:{}",
-                    node.config.username, node.config.host, node.config.port
-                ),
-                state: match node.readiness {
+            let resolved_connection = self.node_router.resolve_connection_now(node_id).ok();
+            let sftp_session_id = resolved_connection
+                .as_ref()
+                .and_then(|resolved| resolved.sftp_session_id.clone());
+            if node.saved_connection_id.is_some() || node.readiness == NodeReadiness::Ready {
+                let runtime_status = match node.readiness {
                     NodeReadiness::Ready => "connected",
-                    NodeReadiness::Connecting => "opening",
-                    NodeReadiness::Error => "stale",
-                    NodeReadiness::Disconnected => "unavailable",
+                    NodeReadiness::Connecting => "connecting",
+                    NodeReadiness::Error => "error",
+                    NodeReadiness::Disconnected => "disconnected",
+                };
+                let ssh_handle = resolved_connection
+                    .as_ref()
+                    .map(|resolved| resolved.handle.clone())
+                    .or_else(|| {
+                        terminal_id
+                            .and_then(|session_id| self.terminal_endpoint_sessions.get(&session_id))
+                            .and_then(|endpoint| endpoint.session.lock().ssh_connection_handle())
+                    });
+                let mut refs = BTreeMap::new();
+                refs.insert("nodeId".to_string(), node_id.0.clone());
+                if let Some(saved_connection_id) = node.saved_connection_id.as_ref() {
+                    refs.insert("connectionId".to_string(), saved_connection_id.clone());
                 }
-                .to_string(),
-                capabilities: vec![
-                    "command.run".to_string(),
-                    "filesystem.read".to_string(),
-                    "filesystem.write".to_string(),
-                    "state.list".to_string(),
-                    "navigation.open".to_string(),
-                ],
-                refs,
-                metadata: serde_json::json!({
+                if let Some(session_id) = terminal_id {
+                    refs.insert("sessionId".to_string(), session_id.0.to_string());
+                }
+                let mut metadata = serde_json::json!({
                     "host": node.config.host,
                     "port": node.config.port,
                     "username": node.config.username,
+                    "status": runtime_status,
                     "terminalIds": node.terminal_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
                     "title": node.title,
-                }),
-                terminal_buffer: None,
-                ssh_handle,
-            });
+                });
+                if let Some(sftp_session_id) = sftp_session_id.as_ref()
+                    && let Some(object) = metadata.as_object_mut()
+                {
+                    object.insert(
+                        "sftpSessionId".to_string(),
+                        serde_json::json!(sftp_session_id),
+                    );
+                }
+                targets.push(AiOrchestratorTarget {
+                    id: format!("ssh-node:{}", node_id.0),
+                    kind: "ssh-node".to_string(),
+                    label: format!(
+                        "{}@{}:{}",
+                        node.config.username, node.config.host, node.config.port
+                    ),
+                    state: match node.readiness {
+                        NodeReadiness::Ready => "connected",
+                        NodeReadiness::Connecting => "opening",
+                        NodeReadiness::Error => "stale",
+                        NodeReadiness::Disconnected => "unavailable",
+                    }
+                    .to_string(),
+                    capabilities: vec![
+                        "command.run".to_string(),
+                        "filesystem.read".to_string(),
+                        "filesystem.write".to_string(),
+                        "state.list".to_string(),
+                        "navigation.open".to_string(),
+                    ],
+                    refs,
+                    metadata,
+                    terminal_buffer: None,
+                    terminal_screen: None,
+                    ssh_handle,
+                });
+            }
+            if let Some(sftp_session_id) = sftp_session_id {
+                targets.push(ai_sftp_target_for_node(node_id, node, sftp_session_id));
+            }
+        }
+
+        for node_id in self.sftp_tab_nodes.values() {
+            let Some(node) = self.ssh_nodes.get(node_id) else {
+                continue;
+            };
+            let Some(sftp_session_id) = self
+                .node_router
+                .resolve_connection_now(node_id)
+                .ok()
+                .and_then(|resolved| resolved.sftp_session_id)
+            else {
+                continue;
+            };
+            targets.push(ai_sftp_target_for_node(node_id, node, sftp_session_id));
+        }
+
+        for (tab_id, node_id) in &self.ide_tab_nodes {
+            let Some(node) = self.ssh_nodes.get(node_id) else {
+                continue;
+            };
+            let (project_root_path, project_name, active_editor_tab_id) = self
+                .ide_tab_surfaces
+                .get(tab_id)
+                .map(|surface| {
+                    surface.update(cx, |surface, _cx| {
+                        let context = surface.ai_context_snapshot();
+                        (
+                            surface.project_root_path(),
+                            context.map(|snapshot| snapshot.project_name),
+                            surface.active_editor_tab_id(),
+                        )
+                    })
+                })
+                .unwrap_or((None, None, None));
+            targets.push(ai_ide_workspace_target_for_node(
+                node_id,
+                node,
+                active_editor_tab_id,
+                project_root_path,
+                project_name,
+            ));
         }
 
         for tab in &self.tabs {
@@ -114,30 +311,57 @@ impl WorkspaceApp {
                 let Some(pane) = self.panes.get(&pane_id) else {
                     continue;
                 };
-                let terminal_type = if tab.kind == TabKind::LocalTerminal {
+                let is_local_terminal = tab.kind == TabKind::LocalTerminal;
+                let terminal_type = if is_local_terminal {
                     "local_terminal"
                 } else {
-                    "ssh_terminal"
+                    "terminal"
                 };
                 let mut refs = BTreeMap::new();
                 refs.insert("sessionId".to_string(), session_id.0.to_string());
                 refs.insert("tabId".to_string(), tab.id.0.to_string());
-                if let Some(node_id) = self.terminal_ssh_nodes.get(&session_id) {
-                    refs.insert("nodeId".to_string(), node_id.0.clone());
-                    if let Some(connection_id) = self
-                        .ssh_nodes
-                        .get(node_id)
-                        .and_then(|node| node.saved_connection_id.clone())
-                    {
-                        refs.insert("connectionId".to_string(), connection_id);
-                    }
-                }
-                let terminal_buffer = pane.read(cx).visible_text_snapshot();
+                let (terminal_buffer, terminal_screen, accepts_input, terminal_running) = {
+                    let pane = pane.read(cx);
+                    let screen = pane.ai_screen_snapshot();
+                    (
+                        pane.visible_text_snapshot(),
+                        ai_terminal_screen_snapshot_json(&screen),
+                        pane.ai_accepts_input(),
+                        pane.lifecycle().is_running(),
+                    )
+                };
+                let label = if is_local_terminal {
+                    format!("Local terminal {}", tab.title)
+                } else {
+                    format!("SSH terminal {}", ai_short_id(&session_id.0.to_string()))
+                };
+                let metadata = if is_local_terminal {
+                    // Tauri's local terminal store overwrites registry metadata
+                    // with shell-oriented metadata instead of pane internals.
+                    serde_json::json!({
+                        "terminalType": terminal_type,
+                        "shell": {
+                            "label": tab.title.clone(),
+                        },
+                    })
+                } else {
+                    serde_json::json!({
+                        "paneId": pane_id.0,
+                        "terminalType": terminal_type,
+                    })
+                };
                 targets.push(AiOrchestratorTarget {
                     id: format!("terminal-session:{}", session_id.0),
                     kind: "terminal-session".to_string(),
-                    label: format!("{} {}", if tab.kind == TabKind::LocalTerminal { "Local terminal" } else { "SSH terminal" }, session_id.0),
-                    state: "connected".to_string(),
+                    label,
+                    state: if is_local_terminal {
+                        if terminal_running { "connected" } else { "stale" }
+                    } else if accepts_input {
+                        "connected"
+                    } else {
+                        "opening"
+                    }
+                    .to_string(),
                     capabilities: vec![
                         "terminal.observe".to_string(),
                         "terminal.send".to_string(),
@@ -145,11 +369,9 @@ impl WorkspaceApp {
                         "state.list".to_string(),
                     ],
                     refs,
-                    metadata: serde_json::json!({
-                        "paneId": pane_id.0,
-                        "terminalType": terminal_type,
-                    }),
+                    metadata,
                     terminal_buffer: Some(terminal_buffer),
+                    terminal_screen: Some(terminal_screen),
                     ssh_handle: None,
                 });
             }
@@ -168,6 +390,7 @@ impl WorkspaceApp {
             refs: BTreeMap::new(),
             metadata: serde_json::json!({}),
             terminal_buffer: None,
+            terminal_screen: None,
             ssh_handle: None,
         });
         targets.push(AiOrchestratorTarget {
@@ -184,6 +407,7 @@ impl WorkspaceApp {
             refs: BTreeMap::new(),
             metadata: serde_json::json!({}),
             terminal_buffer: None,
+            terminal_screen: None,
             ssh_handle: None,
         });
         targets.push(AiOrchestratorTarget {
@@ -195,51 +419,175 @@ impl WorkspaceApp {
             refs: BTreeMap::new(),
             metadata: serde_json::json!({}),
             terminal_buffer: None,
+            terminal_screen: None,
             ssh_handle: None,
         });
 
+        // Tauri deduplicates targets by id after discovery; keep the first
+        // discovery order while replacing duplicate values with the latest
+        // runtime snapshot.
+        let mut target_indexes = std::collections::HashMap::<String, usize>::new();
+        let mut deduped_targets = Vec::<AiOrchestratorTarget>::new();
+        for target in targets {
+            if let Some(index) = target_indexes.get(&target.id).copied() {
+                deduped_targets[index] = target;
+            } else {
+                target_indexes.insert(target.id.clone(), deduped_targets.len());
+                deduped_targets.push(target);
+            }
+        }
+        let targets = deduped_targets;
+
         let settings = self.settings_store.settings();
+        let active_tab_ref = self
+            .active_tab_id
+            .and_then(|active_tab_id| self.tabs.iter().find(|tab| tab.id == active_tab_id));
+        let active_node_id = self
+            .active_ssh_node_id
+            .as_ref()
+            .map(|node_id| node_id.0.clone());
+        let active_session_id = active_tab_ref
+            .and_then(|tab| tab.root_pane.as_ref())
+            .and_then(|root| {
+                let mut pane_ids = Vec::new();
+                root.collect_pane_ids(&mut pane_ids);
+                pane_ids
+                    .into_iter()
+                    .find_map(|pane_id| root.session_id_for_pane(pane_id))
+            })
+            .map(|session_id| session_id.0.to_string())
+            .or_else(|| {
+                self.active_ssh_node_id
+                    .as_ref()
+                    .and_then(|node_id| self.ssh_nodes.get(node_id))
+                    .and_then(|node| node.terminal_ids.first().copied())
+                    .map(|session_id| session_id.0.to_string())
+            });
+        let active_tab = self.active_tab_id.and_then(|active_tab_id| {
+            self.tabs
+                .iter()
+                .find(|tab| tab.id == active_tab_id)
+                .map(|tab| {
+                    serde_json::json!({
+                        "id": tab.id.0.to_string(),
+                        "type": ai_tab_kind_label(&tab.kind),
+                        "title": tab.title,
+                        "sessionId": active_session_id.clone(),
+                    })
+                })
+        });
+        let active_node = self.active_ssh_node_id.as_ref().and_then(|node_id| {
+            self.ssh_nodes.get(node_id).map(|node| {
+                serde_json::json!({
+                    "id": node_id.0,
+                    "host": node.config.host,
+                    "username": node.config.username,
+                    "status": match node.readiness {
+                        NodeReadiness::Ready => "connected",
+                        NodeReadiness::Connecting => "connecting",
+                        NodeReadiness::Error => "error",
+                        NodeReadiness::Disconnected => "disconnected",
+                    },
+                    "terminalIds": node.terminal_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
+                })
+            })
+        });
+        let settings_summary = serde_json::json!({
+            "ai": {
+                "enabled": settings.ai.enabled,
+                "toolUse": {
+                    "enabled": settings.ai.tool_use.enabled,
+                    "maxRounds": settings.ai.tool_use.max_rounds,
+                    "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
+                    "autoApproveTools": settings.ai.tool_use.auto_approve_tools,
+                    "disabledTools": settings.ai.tool_use.disabled_tools,
+                },
+            },
+            "terminal": {
+                "renderer": settings.terminal.renderer,
+                "encoding": settings.terminal.terminal_encoding,
+            },
+            "sftp": {
+                "directoryParallelism": settings.sftp.directory_parallelism,
+            }
+        });
+        let transfers = ai_transfers_state(&self.sftp_transfer_manager, &self.ai_runtime_epoch);
+        let mut ssh_node_states = std::collections::BTreeMap::<String, usize>::new();
+        for node in self.ssh_nodes.values() {
+            let state = match node.readiness {
+                NodeReadiness::Ready => "connected",
+                NodeReadiness::Connecting => "connecting",
+                NodeReadiness::Error => "error",
+                NodeReadiness::Disconnected => "disconnected",
+            };
+            *ssh_node_states.entry(state.to_string()).or_default() += 1;
+        }
+        let recent_event_cutoff =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 60);
+        let recent_events = self
+            .notification_center
+            .event_log
+            .entries
+            .iter()
+            .filter(|entry| entry.timestamp >= recent_event_cutoff)
+            .collect::<Vec<_>>();
+        let recent_event_warnings = recent_events
+            .iter()
+            .filter(|entry| entry.severity == WorkspaceEventSeverity::Warn)
+            .count();
+        let recent_event_errors = recent_events
+            .iter()
+            .filter(|entry| entry.severity == WorkspaceEventSeverity::Error)
+            .count();
+        // Keep get_state(health) on the same public shape as Tauri even though
+        // native derives the values from GPUI-owned stores instead of Zustand.
+        let health_state = serde_json::json!({
+            "runtimeEpoch": self.ai_runtime_epoch,
+            "tabs": {
+                "open": self.tabs.len(),
+                "activeTabId": self.active_tab_id.map(|id| id.0.to_string()),
+            },
+            "terminalRegistry": { "entries": self.panes.len() },
+            "localTerminals": {
+                "count": self.visible_local_terminal_session_count() + self.detached_local_terminals.len(),
+            },
+            "sshNodes": {
+                "total": self.ssh_nodes.len(),
+                "states": ssh_node_states,
+            },
+            "transfers": {
+                "total": transfers.get("total").and_then(serde_json::Value::as_u64).unwrap_or(0),
+                "counts": transfers.get("counts").cloned().unwrap_or_else(|| serde_json::json!({})),
+            },
+            "recentEvents": {
+                "total": recent_events.len(),
+                "warnings": recent_event_warnings,
+                "errors": recent_event_errors,
+            },
+        });
         AiOrchestratorRuntimeSnapshot {
             targets,
+            active_tab,
+            active_node,
+            active_session_id,
+            active_tab_id: self.active_tab_id.map(|tab_id| tab_id.0.to_string()),
+            active_node_id,
             memory: settings.ai.memory.content.clone(),
+            health_state,
             node_router: self.node_router.clone(),
             sftp_transfer_manager: self.sftp_transfer_manager.clone(),
             agent_fs: self.ai_agent_fs.clone(),
             backend_runtime: self.forwarding_runtime.clone(),
-            mcp_registry: self.ai_mcp_registry.clone(),
             rag_store: self.ai_rag_store.clone(),
             ai_key_store: self.ai_key_store.clone(),
             ai_providers: settings.ai.providers.clone(),
             ai_embedding_config: settings.ai.embedding_config.clone(),
-            plugin_pending_tool_names: self
-                .plugin_registry
-                .contributions()
-                .ai_tool_names()
-                .into_iter()
-                .collect(),
             ai_context_window: AI_COMPACTION_DEFAULT_CONTEXT_WINDOW,
             runtime_epoch: self.ai_runtime_epoch.clone(),
-            settings_summary: serde_json::json!({
-                "ai": {
-                    "enabled": settings.ai.enabled,
-                    "activeProviderId": settings.ai.active_provider_id,
-                    "activeModel": settings.ai.active_model,
-                    "toolUse": {
-                        "enabled": settings.ai.tool_use.enabled,
-                        "maxRounds": settings.ai.tool_use.max_rounds,
-                        "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
-                        "autoApproveTools": settings.ai.tool_use.auto_approve_tools,
-                        "disabledTools": settings.ai.tool_use.disabled_tools,
-                    },
-                    "memory": {
-                        "enabled": settings.ai.memory.enabled,
-                        "contentLength": settings.ai.memory.content.len(),
-                    },
-                    "mcpServers": self.ai_mcp_registry.snapshots(),
-                },
-                "tabs": self.tabs.len(),
-                "terminalSessions": self.panes.len(),
-            }),
+            // Tauri read_resource(settings) exposes the settings object, while
+            // get_state(settings) returns a compact diagnostic summary.
+            settings_state: serde_json::to_value(settings).unwrap_or_else(|_| settings_summary.clone()),
+            settings_summary,
         }
     }
 
@@ -277,9 +625,9 @@ impl WorkspaceApp {
             "open_app_surface" => self.execute_ai_open_app_surface(&args, window, cx),
             "remember_preference" => self.execute_ai_remember_preference(&args, cx),
             _ => self.ai_orchestrator_snapshot(cx).fail(
-                "Unknown tool.",
+                "Unknown orchestrator tool.",
                 "unknown_tool",
-                format!("Tool {tool_name} is not available."),
+                format!("{tool_name} is not an OxideSens task tool."),
                 "read",
             ),
         };
@@ -336,6 +684,12 @@ impl WorkspaceApp {
             cx,
         );
         if !base.success {
+            let _ = sender.send(base);
+            return;
+        }
+        if base.envelope.get("summary").and_then(serde_json::Value::as_str)
+            == Some("Target is already live.")
+        {
             let _ = sender.send(base);
             return;
         }
@@ -397,21 +751,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
-        if args.get("control").and_then(serde_json::Value::as_str).is_some() {
-            return snapshot.fail(
-                "Terminal control input is not available through this tool.",
-                "terminal_control_disabled",
-                "Use run_command to execute shell commands. send_terminal_input only sends literal interactive text or Enter after observing a prompt.",
-                "interactive",
-            );
-        }
         let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
             return snapshot.fail(
-                "Target is required.",
-                "missing_target_id",
-                "connect_target requires target_id.",
+                "Target not found.",
+                "target_not_found",
+                "Target not found: ",
                 "write",
-            );
+            )
+            .with_next_actions(vec![serde_json::json!({
+                "action": "list_targets",
+                "reason": "Refresh available targets before connecting."
+            })]);
         };
         let Some(target) = snapshot.targets.iter().find(|target| target.id == target_id).cloned()
         else {
@@ -420,32 +770,58 @@ impl WorkspaceApp {
                 "target_not_found",
                 format!("Target not found: {target_id}"),
                 "write",
-            );
+            )
+            .with_next_actions(vec![serde_json::json!({
+                "action": "list_targets",
+                "reason": "Refresh available targets before connecting."
+            })]);
         };
 
         match target.kind.as_str() {
             "terminal-session" => {
-                if let Some(session_id) = target
-                    .refs
-                    .get("sessionId")
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .map(TerminalSessionId)
-                    && self.focus_terminal_session(session_id, window, cx)
-                {
+                if target.state != "connected" {
                     return snapshot
-                        .ok("Target is already live.", "", target_json(&target), "write")
-                        .with_target(target);
+                        .fail(
+                            "Target is not ready.",
+                            "target_not_ready",
+                            format!(
+                                "{} is {}; wait for it to become connected before continuing.",
+                                target.id, target.state
+                            ),
+                            "write",
+                        )
+                        .with_target(target)
+                        .with_next_actions(vec![serde_json::json!({
+                            "action": "list_targets",
+                            "reason": "Refresh available targets before retrying."
+                        })]);
                 }
                 snapshot
-                    .fail(
-                        "Terminal target is not ready.",
-                        "terminal_pane_missing",
-                        "No visible pane is registered for this terminal session.",
+                    .ok(
+                        "Target is already live.",
+                        "Target is already live.",
+                        serde_json::json!({
+                            "nodeId": target.refs.get("nodeId").cloned().unwrap_or_default(),
+                            "sessionId": target.refs.get("sessionId").cloned().unwrap_or_default(),
+                        }),
                         "write",
                     )
                     .with_target(target)
             }
             "ssh-node" => {
+                if target.state == "connected" {
+                    return snapshot
+                        .ok(
+                            "Target is already live.",
+                            "Target is already live.",
+                            serde_json::json!({
+                                "nodeId": target.refs.get("nodeId").cloned().unwrap_or_default(),
+                                "sessionId": target.refs.get("sessionId").cloned().unwrap_or_default(),
+                            }),
+                            "write",
+                        )
+                        .with_target(target);
+                }
                 let Some(node_id) = target.refs.get("nodeId").map(|value| NodeId::new(value.clone()))
                 else {
                     return snapshot
@@ -457,27 +833,8 @@ impl WorkspaceApp {
                         )
                         .with_target(target);
                 };
-                if let Some(session_id) = self
-                    .ssh_nodes
-                    .get(&node_id)
-                    .and_then(|node| node.terminal_ids.first().copied())
-                    && self.focus_terminal_session(session_id, window, cx)
-                {
-                    let data = serde_json::json!({
-                        "nodeId": node_id.0,
-                        "sessionId": session_id.0.to_string(),
-                        "connectionId": target.refs.get("connectionId").cloned().unwrap_or_default(),
-                    });
-                    return self
-                        .ai_orchestrator_snapshot(cx)
-                        .ok(
-                            "Target is already live.",
-                            "",
-                            data,
-                            "write",
-                        )
-                        .with_target(target);
-                }
+                // Tauri reconnects stale ssh-node targets and creates a fresh terminal;
+                // stale pane metadata must not be reported as an already-live target.
                 let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
                     return snapshot
                         .fail(
@@ -625,23 +982,36 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
-        let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
+        if args.get("control").and_then(serde_json::Value::as_str).is_some() {
             return snapshot.fail(
-                "Target is required.",
-                "missing_target_id",
-                "send_terminal_input requires target_id.",
+                "Terminal control input is not available through this tool.",
+                "terminal_control_disabled",
+                "Use run_command to execute shell commands. send_terminal_input only sends literal interactive text or Enter after observing a prompt.",
                 "interactive",
             );
+        }
+        let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
+            return snapshot.fail_missing_target_id("interactive");
         };
         let Some(target) = snapshot.targets.iter().find(|target| target.id == target_id).cloned()
         else {
-            return snapshot.fail(
-                "Target not found.",
-                "target_not_found",
-                format!("Target not found: {target_id}"),
-                "interactive",
-            );
+            return snapshot.fail_target_not_found(target_id, "interactive");
         };
+        if target_requires_live_state(&target) && target.state != "connected" {
+            // Tauri gates interactive terminal tools with requireLive before validating session refs.
+            return snapshot
+                .fail(
+                    "Target is not ready.",
+                    "target_not_ready",
+                    format!(
+                        "{target_id} is {}; send_terminal_input requires a connected target.",
+                        target.state
+                    ),
+                    "interactive",
+                )
+                .with_target(target.clone())
+                .with_next_actions(recovery_actions_for_target(&target));
+        }
         let Some(session_id) = target
             .refs
             .get("sessionId")
@@ -657,7 +1027,7 @@ impl WorkspaceApp {
                 )
                 .with_target(target);
         };
-        let Some((pane_id, pane)) = self.pane_for_terminal_session(session_id) else {
+        let Some((_pane_id, pane)) = self.pane_for_terminal_session(session_id) else {
             return snapshot
                 .fail(
                     "Terminal pane is not registered.",
@@ -673,10 +1043,22 @@ impl WorkspaceApp {
                 .fail(
                     "No terminal input specified.",
                     "missing_terminal_input",
-                    "Provide text or a supported control sequence.",
+                    "Provide text or request Enter with append_enter.",
                     "interactive",
                 )
-                .with_target(target);
+                .with_target(target.clone())
+                .with_next_actions(recovery_actions_for_target(&target));
+        }
+        if !pane.read(cx).ai_accepts_input() {
+            return snapshot
+                .fail(
+                    "Failed to send terminal input.",
+                    "terminal_send_failed",
+                    "No terminal writer is registered.",
+                    "interactive",
+                )
+                .with_target(target.clone())
+                .with_next_actions(recovery_actions_for_target(&target));
         }
         pane.update(cx, |pane, cx| {
             pane.send_ai_input_bytes(payload.as_bytes(), cx);
@@ -685,7 +1067,7 @@ impl WorkspaceApp {
             .ok(
                 "Terminal input sent.",
                 "Input sent.",
-                serde_json::json!({ "sessionId": session_id.0, "paneId": pane_id.0 }),
+                serde_json::Value::Null,
                 "interactive",
             )
             .with_target(target)
@@ -698,31 +1080,37 @@ impl WorkspaceApp {
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
         let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
-            return snapshot.fail(
-                "Target is required.",
-                "missing_target_id",
-                "run_command requires target_id.",
-                "interactive",
-            );
+            return snapshot.fail_missing_target_id("interactive");
         };
+        let Some(target) = snapshot.targets.iter().find(|target| target.id == target_id).cloned()
+        else {
+            return snapshot.fail_target_not_found(target_id, "interactive");
+        };
+        if target_requires_live_state(&target) && target.state != "connected" {
+            // Match Tauri's live-target guard before touching terminal session metadata.
+            return snapshot
+                .fail(
+                    "Target is not ready.",
+                    "target_not_ready",
+                    format!(
+                        "{target_id} is {}; run_command requires a connected target.",
+                        target.state
+                    ),
+                    "interactive",
+                )
+                .with_target(target);
+        }
         let Some(command) = args
             .get("command")
             .and_then(serde_json::Value::as_str)
             .filter(|command| !command.trim().is_empty())
         else {
+            // Match Tauri's executor order: requireTarget runs before the
+            // terminal capability validates command text.
             return snapshot.fail(
                 "Command is required.",
                 "missing_command",
                 "run_command requires a command.",
-                "interactive",
-            );
-        };
-        let Some(target) = snapshot.targets.iter().find(|target| target.id == target_id).cloned()
-        else {
-            return snapshot.fail(
-                "Target not found.",
-                "target_not_found",
-                format!("Target not found: {target_id}"),
                 "interactive",
             );
         };
@@ -741,7 +1129,7 @@ impl WorkspaceApp {
                 )
                 .with_target(target);
         };
-        let Some((pane_id, pane)) = self.pane_for_terminal_session(session_id) else {
+        let Some((_pane_id, pane)) = self.pane_for_terminal_session(session_id) else {
             return snapshot
                 .fail(
                     "Terminal pane is not ready.",
@@ -751,6 +1139,16 @@ impl WorkspaceApp {
                 )
                 .with_target(target);
         };
+        if !pane.read(cx).ai_accepts_input() {
+            return snapshot
+                .fail(
+                    "Terminal is not ready.",
+                    "terminal_not_ready",
+                    "Terminal writer/listener is not ready.",
+                    "interactive",
+                )
+                .with_target(target);
+        }
         let before = pane.read(cx).visible_text_snapshot();
         pane.update(cx, |pane, cx| {
             pane.begin_command_mark(command, TerminalCommandMarkDetectionSource::Ai, cx);
@@ -765,7 +1163,7 @@ impl WorkspaceApp {
                 .ok(
                     "Command sent to terminal.",
                     format!("Command sent: {command}"),
-                    serde_json::json!({ "sessionId": session_id.0, "paneId": pane_id.0 }),
+                    serde_json::Value::Null,
                     "interactive",
                 )
                 .with_target(target);
@@ -781,8 +1179,6 @@ impl WorkspaceApp {
                     output
                 },
                 serde_json::json!({
-                    "sessionId": session_id.0,
-                    "paneId": pane_id.0,
                     "waitingForInput": looks_waiting_for_input(&after),
                 }),
                 "interactive",
@@ -804,32 +1200,7 @@ impl WorkspaceApp {
             let result = snapshot.to_executed_tool_result(
                 tool_call_id,
                 tool_name,
-                snapshot.fail(
-                    "Target is required.",
-                    "missing_target_id",
-                    "run_command requires target_id.",
-                    "interactive",
-                ),
-                started.elapsed().as_millis(),
-            );
-            let _ = sender.send(result);
-            return;
-        };
-        let Some(command) = args
-            .get("command")
-            .and_then(serde_json::Value::as_str)
-            .filter(|command| !command.trim().is_empty())
-            .map(str::to_string)
-        else {
-            let result = snapshot.to_executed_tool_result(
-                tool_call_id,
-                tool_name,
-                snapshot.fail(
-                    "Command is required.",
-                    "missing_command",
-                    "run_command requires a command.",
-                    "interactive",
-                ),
+                snapshot.fail_missing_target_id("interactive"),
                 started.elapsed().as_millis(),
             );
             let _ = sender.send(result);
@@ -840,10 +1211,48 @@ impl WorkspaceApp {
             let result = snapshot.to_executed_tool_result(
                 tool_call_id,
                 tool_name,
+                snapshot.fail_target_not_found(target_id, "interactive"),
+                started.elapsed().as_millis(),
+            );
+            let _ = sender.send(result);
+            return;
+        };
+        if target_requires_live_state(&target) && target.state != "connected" {
+            // Keep the deferred UI execution path on the same live-target contract as Tauri.
+            let result = snapshot.to_executed_tool_result(
+                tool_call_id,
+                tool_name,
+                snapshot
+                    .fail(
+                        "Target is not ready.",
+                        "target_not_ready",
+                        format!(
+                            "{target_id} is {}; run_command requires a connected target.",
+                            target.state
+                        ),
+                        "interactive",
+                    )
+                    .with_target(target.clone())
+                    .with_next_actions(recovery_actions_for_target(&target)),
+                started.elapsed().as_millis(),
+            );
+            let _ = sender.send(result);
+            return;
+        }
+        let Some(command) = args
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .filter(|command| !command.trim().is_empty())
+            .map(str::to_string)
+        else {
+            // Keep the async UI executor on Tauri's target-first validation path.
+            let result = snapshot.to_executed_tool_result(
+                tool_call_id,
+                tool_name,
                 snapshot.fail(
-                    "Target not found.",
-                    "target_not_found",
-                    format!("Target not found: {target_id}"),
+                    "Command is required.",
+                    "missing_command",
+                    "run_command requires a command.",
                     "interactive",
                 ),
                 started.elapsed().as_millis(),
@@ -873,7 +1282,7 @@ impl WorkspaceApp {
             let _ = sender.send(result);
             return;
         };
-        let Some((pane_id, pane)) = self.pane_for_terminal_session(session_id) else {
+        let Some((_pane_id, pane)) = self.pane_for_terminal_session(session_id) else {
             let result = snapshot.to_executed_tool_result(
                 tool_call_id,
                 tool_name,
@@ -890,6 +1299,23 @@ impl WorkspaceApp {
             let _ = sender.send(result);
             return;
         };
+        if !pane.read(cx).ai_accepts_input() {
+            let result = snapshot.to_executed_tool_result(
+                tool_call_id,
+                tool_name,
+                snapshot
+                    .fail(
+                        "Terminal is not ready.",
+                        "terminal_not_ready",
+                        "Terminal writer/listener is not ready.",
+                        "interactive",
+                    )
+                    .with_target(target),
+                started.elapsed().as_millis(),
+            );
+            let _ = sender.send(result);
+            return;
+        }
         let before = pane.read(cx).visible_text_snapshot();
         pane.update(cx, |pane, cx| {
             pane.begin_command_mark(&command, TerminalCommandMarkDetectionSource::Ai, cx);
@@ -907,7 +1333,7 @@ impl WorkspaceApp {
                     .ok(
                         "Command sent to terminal.",
                         format!("Command sent: {command}"),
-                        serde_json::json!({ "sessionId": session_id.0, "paneId": pane_id.0 }),
+                        serde_json::Value::Null,
                         "interactive",
                     )
                     .with_target(target),
@@ -943,8 +1369,6 @@ impl WorkspaceApp {
                                     "Terminal command output captured.",
                                     terminal_delta_output(&before, &current),
                                     serde_json::json!({
-                                        "sessionId": session_id.0,
-                                        "paneId": pane_id.0,
                                         "waitingForInput": looks_waiting_for_input(&current),
                                     }),
                                     "interactive",
@@ -968,27 +1392,23 @@ impl WorkspaceApp {
                     tool_name,
                     AiActionResultLite {
                         ok: !output_empty,
-                        summary: if output_empty {
-                            "Terminal command did not produce completed output.".to_string()
-                        } else {
-                            "Terminal command output captured.".to_string()
-                        },
+                        summary: "Terminal command did not produce completed output.".to_string(),
                         output: if output_empty {
-                            "No new output after 30s. The command may be waiting for input or still running.".to_string()
+                            "No new output captured.".to_string()
                         } else {
                             output
                         },
                         data: serde_json::json!({
-                            "sessionId": session_id.0,
-                            "paneId": pane_id.0,
                             "waitingForInput": looks_waiting_for_input(&last),
-                            "timedOut": true,
                         }),
                         error_code: output_empty.then(|| "terminal_command_wait_timeout".to_string()),
                         error_message: output_empty.then(|| "No new output after 30s. The command may be waiting for input or still running.".to_string()),
                         risk: "interactive",
                         target: Some(target),
                         targets: Vec::new(),
+                        next_actions: Vec::new(),
+                        observations: Vec::new(),
+                        verified: None,
                         state_version: None,
                     },
                     started.elapsed().as_millis(),
@@ -1016,22 +1436,27 @@ impl WorkspaceApp {
             );
         }
         let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
-            return snapshot.fail(
-                "Target is required.",
-                "missing_target_id",
-                "write_resource(settings) requires target_id.",
-                "write",
-            );
+            return snapshot.fail_missing_target_id("write");
         };
         let Some(target) = snapshot.targets.iter().find(|target| target.id == target_id).cloned()
         else {
-            return snapshot.fail(
-                "Target not found.",
-                "target_not_found",
-                format!("Target not found: {target_id}"),
-                "write",
-            );
+            return snapshot.fail_target_not_found(target_id, "write");
         };
+        if target_requires_live_state(&target) && target.state != "connected" {
+            // Tauri resolves and live-checks the target before validating the settings payload.
+            return snapshot
+                .fail(
+                    "Target is not ready.",
+                    "target_not_ready",
+                    format!(
+                        "{target_id} is {}; write_resource requires a connected target.",
+                        target.state
+                    ),
+                    "write",
+                )
+                .with_target(target.clone())
+                .with_next_actions(recovery_actions_for_target(&target));
+        }
         let Some(section) = args.get("section").and_then(serde_json::Value::as_str) else {
             return snapshot.fail(
                 "Settings section and key are required.",
@@ -1055,7 +1480,8 @@ impl WorkspaceApp {
                 "Dry-run only; settings were not changed.",
                 serde_json::json!({ "section": section, "key": key, "value": value }),
                 "write",
-            ).with_target(target);
+            ).with_target(target)
+            .with_verified(false);
         }
         match settings_with_json_patch(self.settings_store.settings(), section, key, value.clone()) {
             Ok(next_settings) => {
@@ -1110,7 +1536,7 @@ impl WorkspaceApp {
         snapshot.ok(
             "Preference remembered.",
             preference.clone(),
-            serde_json::json!({ "preference": preference, "persisted": true }),
+            serde_json::Value::Null,
             "write",
         )
     }
@@ -1185,69 +1611,79 @@ impl WorkspaceApp {
                 }
                 self.open_settings_tab(window, cx);
                 snapshot
-                    .ok("Opened settings.", "Opened settings.", serde_json::json!({ "surface": surface }), "write")
+                    .ok("Opened settings.", "Opened settings.", serde_json::Value::Null, "write")
                     .with_optional_target(target)
             }
             "connection_manager" => {
                 self.open_session_manager_tab(window, cx);
                 snapshot
-                    .ok("Opened connection_manager.", "Opened connection_manager.", serde_json::json!({ "surface": surface }), "write")
+                    .ok(
+                        "Opened connection_manager.",
+                        "Opened connection_manager.",
+                        serde_json::Value::Null,
+                        "write",
+                    )
                     .with_optional_target(target)
             }
             "connection_pool" => {
                 self.open_connection_pool_tab(window, cx);
                 snapshot
-                    .ok("Opened connection_pool.", "Opened connection_pool.", serde_json::json!({ "surface": surface }), "write")
+                    .ok(
+                        "Opened connection_pool.",
+                        "Opened connection_pool.",
+                        serde_json::Value::Null,
+                        "write",
+                    )
                     .with_optional_target(target)
             }
             "connection_monitor" => {
                 self.open_connection_monitor_tab(window, cx);
                 snapshot
-                    .ok("Opened connection_monitor.", "Opened connection_monitor.", serde_json::json!({ "surface": surface }), "write")
+                    .ok(
+                        "Opened connection_monitor.",
+                        "Opened connection_monitor.",
+                        serde_json::Value::Null,
+                        "write",
+                    )
                     .with_optional_target(target)
             }
             "file_manager" => {
                 self.open_file_manager_tab(window, cx);
                 snapshot
-                    .ok("Opened file_manager.", "Opened file_manager.", serde_json::json!({ "surface": surface }), "write")
+                    .ok(
+                        "Opened file_manager.",
+                        "Opened file_manager.",
+                        serde_json::Value::Null,
+                        "write",
+                    )
                     .with_optional_target(target)
             }
             "sftp" => {
-                let Some(node_id) = target
+                let node_id = target
                     .as_ref()
                     .and_then(|target| target.refs.get("nodeId"))
                     .map(|value| NodeId::new(value.clone()))
-                    .or_else(|| self.active_ssh_node_id.clone())
-                else {
-                    return snapshot.fail(
-                        "SFTP surface requires an SSH target.",
-                        "missing_node_id",
-                        "open_app_surface(sftp) requires a target with nodeId.",
-                        "write",
-                    );
-                };
-                self.open_sftp_tab(node_id.clone(), window, cx);
+                    .or_else(|| self.active_ssh_node_id.clone());
+                // Match Tauri createTab: missing node context is a no-op but the tool result still reports the surface request.
+                if let Some(node_id) = node_id {
+                    self.open_sftp_tab(node_id, window, cx);
+                }
                 snapshot
-                    .ok("Opened sftp.", format!("Opened sftp for {}.", node_id.0), serde_json::json!({ "surface": surface, "nodeId": node_id.0 }), "write")
+                    .ok("Opened sftp.", "Opened sftp.", serde_json::Value::Null, "write")
                     .with_optional_target(target)
             }
             "ide" => {
-                let Some(node_id) = target
+                let node_id = target
                     .as_ref()
                     .and_then(|target| target.refs.get("nodeId"))
                     .map(|value| NodeId::new(value.clone()))
-                    .or_else(|| self.active_ssh_node_id.clone())
-                else {
-                    return snapshot.fail(
-                        "IDE surface requires an SSH target.",
-                        "missing_node_id",
-                        "open_app_surface(ide) requires a target with nodeId.",
-                        "write",
-                    );
-                };
-                self.open_ide_folder_picker_tab(node_id.clone(), cx);
+                    .or_else(|| self.active_ssh_node_id.clone());
+                // Match Tauri createTab: missing node context is a no-op but the tool result still reports the surface request.
+                if let Some(node_id) = node_id {
+                    self.open_ide_folder_picker_tab(node_id, cx);
+                }
                 snapshot
-                    .ok("Opened ide.", format!("Opened ide for {}.", node_id.0), serde_json::json!({ "surface": surface, "nodeId": node_id.0 }), "write")
+                    .ok("Opened ide.", "Opened ide.", serde_json::Value::Null, "write")
                     .with_optional_target(target)
             }
             _ => snapshot
@@ -1324,6 +1760,7 @@ impl WorkspaceApp {
             })
             .cloned()
             .or_else(|| ready_targets.first().cloned())?;
+        let primary_session_id = primary.refs.get("sessionId").cloned();
         let session_id = ready_targets
             .iter()
             .find(|target| target.kind == "terminal-session")
@@ -1337,35 +1774,62 @@ impl WorkspaceApp {
             .cloned()
             .or_else(|| node_id.clone())
             .unwrap_or_default();
-        let connection_id = primary
-            .refs
-            .get("connectionId")
-            .cloned()
-            .or_else(|| connection_id.clone())
-            .unwrap_or_default();
-        let returned_targets = std::iter::once(primary.clone())
-            .chain(
-                ready_targets
-                    .into_iter()
-                    .filter(|target| target.id != primary.id),
-            )
+        let summary = match original.kind.as_str() {
+            "ssh-node" => format!("Reconnected {}.", original.label),
+            _ => format!("Connected {}.", original.label),
+        };
+        let mut returned_targets = std::iter::once(primary.clone())
+            .chain(ready_targets.into_iter().filter(|target| target.id != primary.id))
             .collect::<Vec<_>>();
+        if let Some(primary_session_id) = primary_session_id.as_ref() {
+            let mut returned_target_ids = returned_targets
+                .iter()
+                .map(|target| target.id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            for terminal in &snapshot.targets {
+                if terminal.kind != "terminal-session"
+                    || terminal.state != "connected"
+                    || terminal.refs.get("sessionId") != Some(primary_session_id)
+                    || returned_target_ids.contains(&terminal.id)
+                {
+                    continue;
+                }
+                returned_target_ids.insert(terminal.id.clone());
+                returned_targets.push(ai_connect_result_terminal_target(
+                    terminal,
+                    &original.label,
+                    (!node_id.is_empty()).then_some(node_id.as_str()),
+                    connection_id.as_deref(),
+                ));
+            }
+        }
         let output = returned_targets
             .iter()
-            .map(|target| format!("{} — {}", target.id, target.label))
-            .collect::<Vec<_>>()
-            .join("\n");
+            .find(|target| target.kind == "terminal-session")
+            .filter(|_| primary.kind == "ssh-node")
+            .map(|terminal| {
+                format!(
+                    "Connected target {}; visible terminal {}.",
+                    primary.id, terminal.id
+                )
+            })
+            .unwrap_or_else(|| {
+                returned_targets
+                    .iter()
+                    .map(|target| format!("{} — {}", target.id, target.label))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         Some(snapshot.to_executed_tool_result(
             tool_call_id.to_string(),
             tool_name.to_string(),
             snapshot
                 .ok(
-                    format!("Connected {}.", primary.label),
+                    summary,
                     output,
                     serde_json::json!({
                         "nodeId": node_id,
                         "sessionId": session_id,
-                        "connectionId": connection_id,
                     }),
                     "write",
                 )
@@ -1380,7 +1844,7 @@ impl WorkspaceApp {
         tool_call_id: &str,
         tool_name: &str,
         args: &serde_json::Value,
-        base: &AiExecutedToolResult,
+        _base: &AiExecutedToolResult,
         duration_ms: u128,
         cx: &mut Context<Self>,
     ) -> AiExecutedToolResult {
@@ -1407,17 +1871,30 @@ impl WorkspaceApp {
             }
             _ => "The connection request did not return a live OxideTerm target.",
         };
-        let data = serde_json::json!({
-            "requestedArgs": args,
-            "initialResult": base.envelope,
-        });
+        let next_actions = match target.as_ref().map(|target| target.kind.as_str()) {
+            Some("saved-connection") => target
+                .as_ref()
+                .map(|target| {
+                    vec![serde_json::json!({
+                        "action": "select_target",
+                        "args": { "query": target.label },
+                        "reason": "Re-select the target and retry if credentials were updated."
+                    })]
+                })
+                .unwrap_or_default(),
+            Some("ssh-node") => vec![serde_json::json!({
+                "action": "list_targets",
+                "reason": "Refresh target state before retrying."
+            })],
+            _ => Vec::new(),
+        };
         snapshot.to_executed_tool_result(
             tool_call_id.to_string(),
             tool_name.to_string(),
             snapshot
                 .fail("Connection did not complete.", "connect_failed", detail, "write")
-                .with_data(data)
-                .with_optional_target(target),
+                .with_optional_target(target)
+                .with_next_actions(next_actions),
             duration_ms,
         )
     }

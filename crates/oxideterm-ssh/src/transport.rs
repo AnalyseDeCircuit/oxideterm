@@ -134,6 +134,16 @@ impl From<russh::Error> for SshTransportError {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SshCommandOutput {
+    // Keep direct SSH command execution aligned with Tauri nodeIdeExecCommand:
+    // exit status is structured output, not a transport-level failure.
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub truncated: bool,
+}
+
 #[derive(Debug)]
 pub enum SshTransportCommand {
     Data(Vec<u8>),

@@ -3,6 +3,12 @@ impl IdeSurface {
         self.root_path.clone()
     }
 
+    pub fn active_editor_tab_id(&self) -> Option<String> {
+        // AI target discovery follows Tauri's IDE store shape, where tabId is
+        // the active editor tab id rather than the outer application tab id.
+        self.workspace.active_tab().map(|tab_id| tab_id.0.to_string())
+    }
+
     pub fn open_file_paths(&self) -> Vec<String> {
         self.workspace
             .tabs()

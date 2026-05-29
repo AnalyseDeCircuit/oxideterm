@@ -14,7 +14,6 @@ fn ai_compaction_plan(
     if !silent && total_tokens > 0 {
         budget = budget.min(((total_tokens as f32) * 0.6).floor() as usize);
     }
-    let budget = budget.max(1);
     let mut keep_start = messages.len();
     let mut used = 0usize;
     for (index, message) in messages.iter().enumerate().rev() {
@@ -47,7 +46,7 @@ fn ai_compaction_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatMessa
             .as_ref()
             .is_some_and(|metadata| metadata.kind == "compaction-anchor")
         {
-            let summary = message.content.trim();
+            let summary = message.content.as_str();
             if !summary.is_empty() {
                 history_parts.push(format!("[Previous Summary]: {summary}"));
             }
@@ -57,7 +56,7 @@ fn ai_compaction_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatMessa
                 AiChatRole::Assistant => "Assistant",
                 _ => unreachable!(),
             };
-            history_parts.push(format!("{role}: {}", message.content.trim()));
+            history_parts.push(format!("{role}: {}", message.content));
         }
     }
     vec![
@@ -103,19 +102,14 @@ fn ai_compaction_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatMessa
 fn ai_conversation_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatMessage> {
     let history_text = messages
         .iter()
-        .filter(|message| {
-            matches!(
-                message.role,
-                AiChatRole::User | AiChatRole::Assistant | AiChatRole::Tool
-            )
-        })
+        .filter(|message| matches!(message.role, AiChatRole::User | AiChatRole::Assistant))
         .map(|message| {
             let role = if message.role == AiChatRole::User {
                 "User"
             } else {
                 "Assistant"
             };
-            format!("{role}: {}", message.content.trim())
+            format!("{role}: {}", message.content)
         })
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -195,6 +189,7 @@ fn ai_compaction_anchor_snapshot(messages: &[AiChatMessage]) -> Vec<AiChatMessag
         .take(AI_MAX_ANCHOR_SNAPSHOT)
         .map(|message| {
             let mut snapshot = message.clone();
+            snapshot.model = None;
             snapshot.context = None;
             snapshot.is_streaming = false;
             snapshot.thinking_content = None;
