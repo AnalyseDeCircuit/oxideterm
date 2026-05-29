@@ -65,7 +65,7 @@ use oxideterm_connections::{
 };
 use oxideterm_gpui_settings_view::*;
 use oxideterm_gpui_ui::{
-    ConfirmDialogVariant, ConfirmDialogView, button,
+    ConfirmDialogVariant, ConfirmDialogView,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
         SplitFooterButtonOptions, ToolbarButtonIconPosition, ToolbarButtonOptions,

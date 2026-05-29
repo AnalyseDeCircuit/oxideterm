@@ -33,7 +33,8 @@
       "activity": "活動",
       "event_log": "事件日誌",
       "notifications": "通知中心",
-      "saved_connections": "已儲存的連線"
+      "saved_connections": "已儲存的連線",
+      "forwarding": "連接埠轉發"
     },
     "tooltips": {
       "settings": "設定",

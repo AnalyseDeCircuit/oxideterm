@@ -1019,7 +1019,7 @@ impl WorkspaceApp {
                 label: format!("{}: {}", command.plugin_name, command.command),
                 section: PaletteSection::Plugins,
                 icon: LucideIcon::Puzzle,
-                detail: Some("等待 native plugin runtime".to_string()),
+                detail: Some(self.i18n.t("plugin.command_runtime_pending")),
                 shortcut: None,
                 value: format!(
                     "{} {} {}",
@@ -1041,7 +1041,7 @@ impl WorkspaceApp {
                 label: format!("{}: {}", command.plugin_name, command.label),
                 section: PaletteSection::Plugins,
                 icon: LucideIcon::Puzzle,
-                detail: Some("插件命令".to_string()),
+                detail: Some(self.i18n.t("plugin.command_detail")),
                 shortcut: command.shortcut.clone(),
                 value: format!(
                     "{} {} {} {}",
@@ -1066,7 +1066,7 @@ impl WorkspaceApp {
                 label: format!("{}: {}", keybinding.plugin_name, keybinding.label),
                 section: PaletteSection::Plugins,
                 icon: LucideIcon::Keyboard,
-                detail: Some("插件快捷键".to_string()),
+                detail: Some(self.i18n.t("plugin.keybinding_detail")),
                 shortcut: Some(keybinding.keybinding.clone()),
                 value: format!(
                     "{} {} {} {}",
@@ -1094,7 +1094,7 @@ impl WorkspaceApp {
                     label: format!("{}: {}", shortcut.plugin_name, shortcut.definition.command),
                     section: PaletteSection::Plugins,
                     icon: LucideIcon::Keyboard,
-                    detail: Some("插件终端快捷键等待 runtime".to_string()),
+                    detail: Some(self.i18n.t("plugin.terminal_shortcut_pending")),
                     shortcut: Some(shortcut.definition.key.clone()),
                     value: format!(
                         "{} {} {} {}",

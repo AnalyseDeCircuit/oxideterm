@@ -1,6 +1,7 @@
 {
   "app": {
-    "name": "OxideTerm"
+    "name": "OxideTerm",
+    "shellLauncher": "Trình khởi chạy shell"
   },
   "language": {
     "english": "English",
@@ -96,7 +97,9 @@
     "cmd_reload_window": "Tải lại cửa sổ",
     "quick_connect_alias_not_found": "Không tìm thấy alias SSH config '{{alias}}'",
     "quick_connect_resolve_failed": "Lỗi khi phân giải alias '{{alias}}'",
-    "footer_hint": "Nhấn Esc để đóng"
+    "footer_hint": "Nhấn Esc để đóng",
+    "session_ssh_terminal": "Terminal SSH",
+    "cmd_open_cloud_sync": "Mở đồng bộ đám mây"
   },
   "common": {
     "enabled": "Đã bật",
@@ -105,7 +108,11 @@
       "cancel": "Hủy",
       "confirm": "Xác nhận",
       "delete": "Xóa"
-    }
+    },
+    "cancel": "Hủy",
+    "delete": "Xóa",
+    "no": "Không",
+    "yes": "Có"
   },
   "topology": {
     "button_title": "Chế độ xem Topology",
@@ -418,7 +425,12 @@
         "access_key_id": "Access key ID",
         "secret_access_key": "Secret access key",
         "session_token": "Token phiên tùy chọn"
-      }
+      },
+      "history_empty": "Chưa có lịch sử đồng bộ.",
+      "native_description": "Đồng bộ tự lưu trữ được mã hóa cho OxideTerm.",
+      "native_scope_summary": "Các phần ứng dụng được đồng bộ mặc định: {{sections}}.",
+      "native_service_pending": "Dịch vụ đồng bộ tích hợp đang được kết nối với lớp tương thích.",
+      "native_service_ready": "Dịch vụ đồng bộ tích hợp đã kết nối với lớp tương thích."
     },
     "refresh": "Làm mới",
     "open_plugins_dir": "Mở thư mục",
@@ -494,7 +506,20 @@
     "clear_logs": "Xóa",
     "no_logs": "Chưa có nhật ký",
     "tab_not_available": "Chế độ xem tab plugin không khả dụng",
-    "tab_crashed": "Tab plugin đã gặp lỗi"
+    "tab_crashed": "Tab plugin đã gặp lỗi",
+    "detail_author": "Tác giả",
+    "registry_capabilities": "Khả năng: {{capabilities}}",
+    "reload_success": "{{name}} đã quét lại.",
+    "enable_success": "{{name}} đã bật.",
+    "disable_success": "{{name}} đã tắt.",
+    "load_failed_default": "Không tải được plugin.",
+    "open_dir_create_failed": "Không tạo được thư mục plugin: {{message}}",
+    "open_dir_failed": "Không mở được thư mục plugin: {{message}}",
+    "open_dir_status_failed": "Không mở được thư mục plugin: {{status}}",
+    "command_runtime_pending": "Đang chờ runtime plugin native",
+    "command_detail": "Lệnh plugin",
+    "keybinding_detail": "Phím tắt plugin",
+    "terminal_shortcut_pending": "Phím tắt terminal của plugin đang chờ runtime"
   },
   "onboarding": {
     "welcome": "Chào mừng đến với OxideTerm",

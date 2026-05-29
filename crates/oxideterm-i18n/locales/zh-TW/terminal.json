@@ -140,7 +140,17 @@
       "copied": "已複製",
       "insert": "插入",
       "execute": "執行"
-    }
+    },
+    "broadcast": {
+      "current": "目前",
+      "deselect_all": "取消全選",
+      "no_targets": "沒有其他可用終端",
+      "select_all": "全選",
+      "select_targets": "選擇廣播目標",
+      "target_count": "廣播中"
+    },
+    "typeLocal": "本機",
+    "typeSsh": "SSH"
   },
   "search": {
     "placeholder": "搜尋",

@@ -140,7 +140,17 @@
       "copied": "복사됨",
       "insert": "삽입",
       "execute": "실행"
-    }
+    },
+    "broadcast": {
+      "current": "현재",
+      "deselect_all": "모두 해제",
+      "no_targets": "사용 가능한 다른 터미널이 없습니다",
+      "select_all": "모두 선택",
+      "select_targets": "브로드캐스트 대상 선택",
+      "target_count": "브로드캐스트 중"
+    },
+    "typeLocal": "로컬",
+    "typeSsh": "SSH"
   },
   "search": {
     "placeholder": "검색",

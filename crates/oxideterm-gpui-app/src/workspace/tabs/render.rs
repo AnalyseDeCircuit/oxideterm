@@ -200,6 +200,10 @@ impl WorkspaceApp {
                 "tabbar.confirm_close_terminal_title",
                 self.i18n.t("tabbar.confirm_close_terminal_desc"),
             ),
+            TabCloseConfirm::LocalChildProcess { .. }
+            | TabCloseConfirm::LocalChildProcessBatch { .. } => {
+                ("tabbar.child_process_warning", String::new())
+            }
             TabCloseConfirm::Other { tab_ids } => (
                 "tabbar.confirm_close_other_title",
                 self.i18n
@@ -218,7 +222,8 @@ impl WorkspaceApp {
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div().child(self.i18n.t(title_key)).into_any_element(),
-                description: Some(div().child(description).into_any_element()),
+                description: (!description.is_empty())
+                    .then(|| div().child(description).into_any_element()),
                 cancel_label: div()
                     .child(self.i18n.t("common.actions.cancel"))
                     .into_any_element(),

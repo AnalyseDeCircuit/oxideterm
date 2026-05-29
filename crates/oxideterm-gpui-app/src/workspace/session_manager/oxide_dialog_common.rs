@@ -175,9 +175,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let percent = progress.percent();
         let label = if let Some(embed_keys) = export_embed_keys {
-            oxide_export_progress_label(&progress.stage, embed_keys)
+            oxide_export_progress_label(&progress.stage, embed_keys, &self.i18n)
         } else {
-            oxide_import_progress_label(&progress.stage, progress.total)
+            oxide_import_progress_label(&progress.stage, progress.total, &self.i18n)
         };
         let summary = (progress.total > 0).then(|| {
             format!("{}/{}", progress.current.min(progress.total), progress.total)
@@ -298,7 +298,7 @@ impl WorkspaceApp {
                         SelectableTextRole::PlainDocument,
                         "oxide-password-strength",
                         strength as u8,
-                        oxide_password_strength_label(strength),
+                        oxide_password_strength_label(strength, &self.i18n),
                         text_color,
                         cx,
                     )),
@@ -424,7 +424,7 @@ impl WorkspaceApp {
                                 div()
                                     .text_size(px(self.tokens.metrics.ui_text_sm))
                                     .text_color(rgb(self.tokens.ui.text))
-                                    .child(oxide_settings_section_label(&section).to_string()),
+                                    .child(oxide_settings_section_label(&section, &self.i18n)),
                             ),
                     ),
             );

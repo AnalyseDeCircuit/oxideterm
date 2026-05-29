@@ -1,6 +1,7 @@
 {
   "app": {
-    "name": "OxideTerm"
+    "name": "OxideTerm",
+    "shellLauncher": "シェルランチャー"
   },
   "language": {
     "english": "English",
@@ -96,7 +97,9 @@
     "cmd_reload_window": "ウィンドウを再読み込み",
     "quick_connect_alias_not_found": "SSH config alias '{{alias}}' が見つかりません",
     "quick_connect_resolve_failed": "SSH config alias '{{alias}}' の解析に失敗しました",
-    "footer_hint": "Escで閉じる"
+    "footer_hint": "Escで閉じる",
+    "session_ssh_terminal": "SSH ターミナル",
+    "cmd_open_cloud_sync": "クラウド同期を開く"
   },
   "common": {
     "enabled": "有効",
@@ -105,7 +108,11 @@
       "cancel": "キャンセル",
       "confirm": "確認",
       "delete": "削除"
-    }
+    },
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "no": "いいえ",
+    "yes": "はい"
   },
   "topology": {
     "button_title": "トポロジビュー",
@@ -418,7 +425,12 @@
         "access_key_id": "Access Key ID",
         "secret_access_key": "Secret Access Key",
         "session_token": "オプションの Session Token"
-      }
+      },
+      "history_empty": "同期履歴はまだありません。",
+      "native_description": "OxideTerm 向けの暗号化されたセルフホスト同期。",
+      "native_scope_summary": "既定で同期されるアプリ セクション: {{sections}}。",
+      "native_service_pending": "組み込み同期サービスを互換レイヤーに接続しています。",
+      "native_service_ready": "組み込み同期サービスは互換レイヤーに接続されています。"
     },
     "refresh": "更新",
     "open_plugins_dir": "ディレクトリを開く",
@@ -494,7 +506,20 @@
     "clear_logs": "クリア",
     "no_logs": "ログなし",
     "tab_not_available": "プラグインタブビューは利用できません",
-    "tab_crashed": "プラグインタブがクラッシュしました"
+    "tab_crashed": "プラグインタブがクラッシュしました",
+    "detail_author": "作者",
+    "registry_capabilities": "機能: {{capabilities}}",
+    "reload_success": "{{name}} を再スキャンしました。",
+    "enable_success": "{{name}} を有効化しました。",
+    "disable_success": "{{name}} を無効化しました。",
+    "load_failed_default": "プラグインの読み込みに失敗しました。",
+    "open_dir_create_failed": "プラグインディレクトリを作成できませんでした: {{message}}",
+    "open_dir_failed": "プラグインディレクトリを開けませんでした: {{message}}",
+    "open_dir_status_failed": "プラグインディレクトリを開けませんでした: {{status}}",
+    "command_runtime_pending": "ネイティブプラグインランタイムを待機中",
+    "command_detail": "プラグインコマンド",
+    "keybinding_detail": "プラグインキーバインド",
+    "terminal_shortcut_pending": "プラグインのターミナルショートカットはランタイム待機中"
   },
   "onboarding": {
     "welcome": "OxideTerm へようこそ",

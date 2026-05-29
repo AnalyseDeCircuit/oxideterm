@@ -61,7 +61,18 @@
       "proxy_chain_port": "Port",
       "proxy_chain_username": "Username",
       "proxy_chain_auth": "Auth",
-      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication."
+      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication.",
+      "agent_detected": "SSH-Agent erkannt",
+      "agent_forwarding_hint": "Nur auf vertrauenswürdigen Servern aktivieren. Ein bösartiger Server kann Ihren lokalen SSH-Agent für die Authentifizierung bei anderen Hosts verwenden.",
+      "agent_hint": "Stellen Sie sicher, dass Ihr SSH-Agent läuft und die erforderlichen Schlüssel geladen hat.",
+      "agent_not_detected": "SSH-Agent nicht erkannt",
+      "authentication": "Authentifizierungsmethode",
+      "post_connect_command": "Nach Verbindung ausführen",
+      "post_connect_command_hint": "Optional. Wird einmal ausgeführt, nachdem die interaktive Shell geöffnet wurde.",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "save_connection_hint": "Beim ersten Mal standardmäßig aus; Ihre Auswahl wird danach gemerkt.",
+      "two_factor_hint": "Der Server fragt während der Verbindung nach Anmeldedaten. Häufige Verwendungen: TOTP-Code, Hardware-Token, Challenge-Response.",
+      "two_factor_warning": "Hinweis: 2FA-Verbindungen können nicht automatisch wiederverbunden werden. Sie müssen manuell neu verbinden, wenn die Sitzung getrennt wird."
     },
     "auth": {
       "password": "Passwort",
@@ -118,6 +129,11 @@
       "connect": "Verbinden",
       "connecting": "Verbindung wird hergestellt...",
       "parent_not_ready": "Der übergeordnete Knoten ist nicht verbunden"
+    },
+    "errors": {
+      "chain_failed_title": "Verbindungskette fehlgeschlagen",
+      "chain_failed_desc": "Hop {{position}} von {{total}} fehlgeschlagen: {{error}}",
+      "generic_title": "Verbindung fehlgeschlagen"
     }
   }
 }

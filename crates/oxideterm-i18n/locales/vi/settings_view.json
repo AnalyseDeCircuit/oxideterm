@@ -48,7 +48,8 @@
       "local": "Terminal cục bộ",
       "reconnect": "Tự động kết nối lại",
       "help": "Trợ giúp & Giới thiệu",
-      "keybindings": "Phím tắt"
+      "keybindings": "Phím tắt",
+      "graphics": "Đồ họa"
     },
     "general": {
       "title": "Chung",
@@ -123,7 +124,8 @@
       "cli_not_bundled": "Tệp nhị phân CLI không có trong bản dựng này",
       "cli_checking": "Đang kiểm tra...",
       "cli_status_error": "Lỗi trạng thái",
-      "cli_uninstalled": "Đã gỡ cài đặt"
+      "cli_uninstalled": "Đã gỡ cài đặt",
+      "update_channel": "Kênh cập nhật"
     },
     "terminal": {
       "title": "Cài đặt Terminal",

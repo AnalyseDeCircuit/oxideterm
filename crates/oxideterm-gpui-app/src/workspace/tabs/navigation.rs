@@ -455,6 +455,17 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        if self.tabs[index].kind == TabKind::LocalTerminal
+            && self.local_terminal_tab_has_foreground_child_process(index, cx)
+        {
+            // Tauri warns before closing a local terminal whose foreground
+            // process is not the original shell. Native derives the same guard
+            // from the PTY process snapshot refreshed by the terminal tick.
+            self.tab_close_confirm = Some(TabCloseConfirm::LocalChildProcess { tab_id });
+            self.reset_standard_confirm_focus();
+            cx.notify();
+            return;
+        }
         self.close_tab_at_index(index, window, cx);
     }
 
@@ -535,9 +546,13 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        for tab_id in tab_ids {
-            self.close_tab_by_id(tab_id, window, cx);
+        if self.tab_close_ids_include_local_foreground_child_process(&tab_ids, cx) {
+            self.tab_close_confirm = Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
+            self.reset_standard_confirm_focus();
+            cx.notify();
+            return;
         }
+        self.close_other_tabs_or_active_pane(window, cx);
     }
 
     pub(super) fn request_close_all_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -547,6 +562,12 @@ impl WorkspaceApp {
         }
         if self.tab_close_ids_include_ssh_terminal(&tab_ids) {
             self.tab_close_confirm = Some(TabCloseConfirm::All { tab_ids });
+            self.reset_standard_confirm_focus();
+            cx.notify();
+            return;
+        }
+        if self.tab_close_ids_include_local_foreground_child_process(&tab_ids, cx) {
+            self.tab_close_confirm = Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
             self.reset_standard_confirm_focus();
             cx.notify();
             return;
@@ -561,6 +582,38 @@ impl WorkspaceApp {
             self.tabs
                 .iter()
                 .any(|tab| tab.id == *tab_id && tab.kind == TabKind::SshTerminal)
+        })
+    }
+
+    fn tab_close_ids_include_local_foreground_child_process(
+        &self,
+        tab_ids: &[TabId],
+        cx: &mut Context<Self>,
+    ) -> bool {
+        tab_ids.iter().any(|tab_id| {
+            self.tabs
+                .iter()
+                .position(|tab| tab.id == *tab_id && tab.kind == TabKind::LocalTerminal)
+                .is_some_and(|index| self.local_terminal_tab_has_foreground_child_process(index, cx))
+        })
+    }
+
+    fn local_terminal_tab_has_foreground_child_process(
+        &self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(root_pane) = self.tabs.get(index).and_then(|tab| tab.root_pane.as_ref()) else {
+            return false;
+        };
+        let mut pane_ids = Vec::new();
+        root_pane.collect_pane_ids(&mut pane_ids);
+        pane_ids.into_iter().any(|pane_id| {
+            let Some(pane) = self.panes.get(&pane_id) else {
+                return false;
+            };
+            let process = pane.read(cx).process_info();
+            terminal_process_info_has_foreground_child_process(&process)
         })
     }
 
@@ -583,7 +636,22 @@ impl WorkspaceApp {
             TabCloseConfirm::Single { tab_id } => {
                 self.close_tab_by_id(tab_id, window, cx);
             }
+            TabCloseConfirm::LocalChildProcess { tab_id } => {
+                self.close_tab_by_id(tab_id, window, cx);
+            }
             TabCloseConfirm::Other { tab_ids } | TabCloseConfirm::All { tab_ids } => {
+                if self.tab_close_ids_include_local_foreground_child_process(&tab_ids, cx) {
+                    self.tab_close_confirm =
+                        Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
+                    self.reset_standard_confirm_focus();
+                    cx.notify();
+                    return;
+                }
+                for tab_id in tab_ids {
+                    self.close_tab_by_id(tab_id, window, cx);
+                }
+            }
+            TabCloseConfirm::LocalChildProcessBatch { tab_ids } => {
                 for tab_id in tab_ids {
                     self.close_tab_by_id(tab_id, window, cx);
                 }
@@ -1021,5 +1089,47 @@ impl WorkspaceApp {
         self.clamp_tab_scroll(window);
         cx.stop_propagation();
         cx.notify();
+    }
+}
+
+fn terminal_process_info_has_foreground_child_process(
+    process: &oxideterm_terminal::TerminalProcessInfo,
+) -> bool {
+    let Some(shell_pid) = process.shell_pid else {
+        return false;
+    };
+    process
+        .foreground_process_group_id
+        .is_some_and(|foreground_group| foreground_group != shell_pid)
+        || process
+            .foreground_pid
+            .is_some_and(|foreground_pid| foreground_pid != shell_pid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_close_warning_detects_foreground_child_process() {
+        let shell_only = oxideterm_terminal::TerminalProcessInfo {
+            shell_pid: Some(10),
+            foreground_pid: Some(10),
+            foreground_process_group_id: Some(10),
+            ..Default::default()
+        };
+        assert!(!terminal_process_info_has_foreground_child_process(
+            &shell_only
+        ));
+
+        let foreground_child = oxideterm_terminal::TerminalProcessInfo {
+            shell_pid: Some(10),
+            foreground_pid: Some(42),
+            foreground_process_group_id: Some(42),
+            ..Default::default()
+        };
+        assert!(terminal_process_info_has_foreground_child_process(
+            &foreground_child
+        ));
     }
 }

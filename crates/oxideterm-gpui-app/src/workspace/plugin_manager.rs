@@ -297,9 +297,10 @@ impl WorkspaceApp {
                                 NativePluginManagerActionButtonTone::Muted,
                                 false,
                                 cx.listener(|this, _event, _window, cx| {
-                                    if let Err(error) =
-                                        open_native_plugins_dir(this.settings_store.path())
-                                    {
+                                    if let Err(error) = open_native_plugins_dir(
+                                        this.settings_store.path(),
+                                        &this.i18n,
+                                    ) {
                                         this.plugin_manager_operation_status =
                                             NativePluginManagerOperationStatus::Error(error);
                                     }
@@ -1079,7 +1080,7 @@ impl WorkspaceApp {
         );
         let download_url = entry.download_url.clone();
         let checksum = entry.checksum.clone();
-        let capabilities = native_plugin_registry_capabilities_label(entry);
+        let capabilities = native_plugin_registry_capabilities_label(&self.i18n, entry);
         div()
             .w_full()
             .rounded(px(self.tokens.radii.md))
@@ -1437,8 +1438,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let (state_label, state_color) = native_plugin_status_badge(plugin, theme);
-        let error_message = native_plugin_visible_error(plugin);
+        let (state_label, state_color) = native_plugin_status_badge(&self.i18n, plugin, theme);
+        let error_message = native_plugin_visible_error(&self.i18n, plugin);
         let is_expanded = self
             .plugin_manager_expanded_plugin_ids
             .contains(&plugin.manifest.id);
@@ -1596,11 +1597,11 @@ impl WorkspaceApp {
                                         plugin_host::NativePluginRegistry::discover(
                                             this.settings_store.path(),
                                         );
+                                    let success_template = this.i18n.t("plugin.reload_success");
                                     this.plugin_manager_operation_status =
-                                        NativePluginManagerOperationStatus::Success(format!(
-                                            "{} 已重新扫描。",
-                                            reload_plugin_id
-                                        ));
+                                        NativePluginManagerOperationStatus::Success(
+                                            success_template.replace("{{name}}", &reload_plugin_id),
+                                        );
                                     cx.stop_propagation();
                                     cx.notify();
                                 })),
@@ -1619,13 +1620,17 @@ impl WorkspaceApp {
                                     this.plugin_registry
                                         .record_manager_error(plugin_id.clone(), error);
                                 } else {
-                                    let action_label =
-                                        if next_enabled { "启用" } else { "禁用" };
+                                    let success_key = if next_enabled {
+                                        "plugin.enable_success"
+                                    } else {
+                                        "plugin.disable_success"
+                                    };
                                     this.plugin_manager_operation_status =
-                                        NativePluginManagerOperationStatus::Success(format!(
-                                            "{} 已{}。",
-                                            plugin_id, action_label
-                                        ));
+                                        NativePluginManagerOperationStatus::Success(
+                                            this.i18n
+                                                .t(success_key)
+                                                .replace("{{name}}", &plugin_id),
+                                        );
                                 }
                                 cx.stop_propagation();
                                 cx.notify();
@@ -1696,7 +1701,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let manifest = &plugin.manifest;
-        let contribution_labels = native_plugin_contribution_labels(manifest);
+        let contribution_labels = native_plugin_contribution_labels(&self.i18n, manifest);
         let main_entry = manifest.main.clone().unwrap_or_else(|| "-".to_string());
         let required_version = manifest
             .engines
@@ -1733,14 +1738,23 @@ impl WorkspaceApp {
                     .flex_col()
                     .gap(px(6.0))
                     .child(self.render_native_plugin_detail_row("ID", manifest.id.clone()))
-                    .child(self.render_native_plugin_detail_row("版本", manifest.version.clone()))
-                    .child(self.render_native_plugin_detail_row("入口", main_entry))
+                    .child(self.render_native_plugin_detail_row(
+                        self.i18n.t("plugin.detail_version"),
+                        manifest.version.clone(),
+                    ))
+                    .child(self.render_native_plugin_detail_row(
+                        self.i18n.t("plugin.detail_entry"),
+                        main_entry,
+                    ))
                     .when_some(manifest.author.clone(), |details, author| {
-                        details.child(self.render_native_plugin_detail_row("作者", author))
+                        details.child(self.render_native_plugin_detail_row(
+                            self.i18n.t("plugin.detail_author"),
+                            author,
+                        ))
                     })
                     .when_some(required_version, |details, version| {
                         details.child(self.render_native_plugin_detail_row(
-                            "要求",
+                            self.i18n.t("plugin.detail_requires"),
                             format!("OxideTerm {version}"),
                         ))
                     }),
@@ -1761,7 +1775,7 @@ impl WorkspaceApp {
                             div()
                                 .font_weight(gpui::FontWeight::MEDIUM)
                                 .text_color(rgb(theme.text))
-                                .child("贡献"),
+                                .child(self.i18n.t("plugin.detail_contributes")),
                         )
                         .child(div().flex().flex_wrap().gap(px(6.0)).children(
                             contribution_labels.into_iter().map(|label| {
@@ -1783,8 +1797,13 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_native_plugin_detail_row(&self, label: &'static str, value: String) -> AnyElement {
+    fn render_native_plugin_detail_row(
+        &self,
+        label: impl Into<String>,
+        value: String,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let label = label.into();
         div()
             .flex()
             .items_start()
@@ -1860,16 +1879,23 @@ fn native_plugin_conflict_id(error: &str) -> Option<String> {
 }
 
 fn native_plugin_registry_capabilities_label(
+    i18n: &I18n,
     entry: &plugin_host::NativePluginRegistryEntry,
 ) -> Option<String> {
     let capabilities = entry.capabilities_summary.as_ref()?;
     if capabilities.is_empty() {
         return None;
     }
-    Some(format!("能力：{}", capabilities.join(" / ")))
+    Some(
+        i18n.t("plugin.registry_capabilities")
+            .replace("{{capabilities}}", &capabilities.join(" / ")),
+    )
 }
 
-fn native_plugin_contribution_labels(manifest: &plugin_host::NativePluginManifest) -> Vec<String> {
+fn native_plugin_contribution_labels(
+    i18n: &I18n,
+    manifest: &plugin_host::NativePluginManifest,
+) -> Vec<String> {
     let Some(contributes) = manifest.contributes.as_ref() else {
         return Vec::new();
     };
@@ -1878,35 +1904,50 @@ fn native_plugin_contribution_labels(manifest: &plugin_host::NativePluginManifes
     if let Some(tabs) = &contributes.tabs
         && !tabs.is_empty()
     {
-        labels.push(format!("{} 个标签页", tabs.len()));
+        labels.push(
+            i18n.t("plugin.contrib_tabs")
+                .replace("{{count}}", &tabs.len().to_string()),
+        );
     }
     if let Some(sidebar_panels) = &contributes.sidebar_panels
         && !sidebar_panels.is_empty()
     {
-        labels.push(format!("{} 个侧边栏面板", sidebar_panels.len()));
+        labels.push(
+            i18n.t("plugin.contrib_sidebar_panels")
+                .replace("{{count}}", &sidebar_panels.len().to_string()),
+        );
     }
     if let Some(settings) = &contributes.settings
         && !settings.is_empty()
     {
-        labels.push(format!("{} 个设置项", settings.len()));
+        labels.push(
+            i18n.t("plugin.contrib_settings")
+                .replace("{{count}}", &settings.len().to_string()),
+        );
     }
     if let Some(terminal_hooks) = &contributes.terminal_hooks {
         if terminal_hooks.input_interceptor == Some(true) {
-            labels.push("输入拦截器".to_string());
+            labels.push(i18n.t("plugin.contrib_input_interceptor"));
         }
         if terminal_hooks.output_processor == Some(true) {
-            labels.push("输出处理器".to_string());
+            labels.push(i18n.t("plugin.contrib_output_processor"));
         }
         if let Some(shortcuts) = &terminal_hooks.shortcuts
             && !shortcuts.is_empty()
         {
-            labels.push(format!("{} 个快捷键", shortcuts.len()));
+            labels.push(
+                i18n.t("plugin.contrib_shortcuts")
+                    .replace("{{count}}", &shortcuts.len().to_string()),
+            );
         }
     }
     if let Some(connection_hooks) = &contributes.connection_hooks
         && !connection_hooks.is_empty()
     {
-        labels.push(format!("{} 个连接钩子", connection_hooks.len()));
+        labels.push(
+            i18n.t("plugin.contrib_connection_hooks")
+                .replace("{{count}}", &connection_hooks.len().to_string()),
+        );
     }
     labels
 }
@@ -1929,27 +1970,39 @@ fn native_plugin_is_error_like(state: plugin_host::NativePluginState) -> bool {
 }
 
 fn native_plugin_status_badge(
+    i18n: &I18n,
     plugin: &plugin_host::NativePluginInfo,
     theme: AppUiColors,
-) -> (&'static str, u32) {
+) -> (String, u32) {
     match plugin.state {
         plugin_host::NativePluginState::Active
         | plugin_host::NativePluginState::ReadyManifestOnly
         | plugin_host::NativePluginState::ReadyWasm
-        | plugin_host::NativePluginState::ReadyProcess => ("运行中", PLUGIN_MANAGER_TW_GREEN_500),
-        plugin_host::NativePluginState::Loading => ("加载中", theme.warning),
+        | plugin_host::NativePluginState::ReadyProcess => {
+            (i18n.t("plugin.status.active"), PLUGIN_MANAGER_TW_GREEN_500)
+        }
+        plugin_host::NativePluginState::Loading => (i18n.t("plugin.status.loading"), theme.warning),
         plugin_host::NativePluginState::Error | plugin_host::NativePluginState::AutoDisabled => {
-            ("错误", PLUGIN_MANAGER_TW_RED_400)
+            (i18n.t("plugin.status.error"), PLUGIN_MANAGER_TW_RED_400)
         }
-        plugin_host::NativePluginState::Disabled => ("已禁用", PLUGIN_MANAGER_TW_YELLOW_500),
-        plugin_host::NativePluginState::UnsupportedLegacyJs => {
-            ("未激活", PLUGIN_MANAGER_TW_YELLOW_500)
+        plugin_host::NativePluginState::Disabled => (
+            i18n.t("plugin.status.disabled"),
+            PLUGIN_MANAGER_TW_YELLOW_500,
+        ),
+        plugin_host::NativePluginState::UnsupportedLegacyJs => (
+            i18n.t("plugin.status.inactive"),
+            PLUGIN_MANAGER_TW_YELLOW_500,
+        ),
+        plugin_host::NativePluginState::Discovered => {
+            (i18n.t("plugin.status.inactive"), theme.text_muted)
         }
-        plugin_host::NativePluginState::Discovered => ("未激活", theme.text_muted),
     }
 }
 
-fn native_plugin_visible_error(plugin: &plugin_host::NativePluginInfo) -> Option<String> {
+fn native_plugin_visible_error(
+    i18n: &I18n,
+    plugin: &plugin_host::NativePluginInfo,
+) -> Option<String> {
     if !matches!(
         plugin.state,
         plugin_host::NativePluginState::Error | plugin_host::NativePluginState::AutoDisabled
@@ -1961,13 +2014,16 @@ fn native_plugin_visible_error(plugin: &plugin_host::NativePluginInfo) -> Option
             .config
             .last_error
             .clone()
-            .unwrap_or_else(|| "插件加载失败。".to_string()),
+            .unwrap_or_else(|| i18n.t("plugin.load_failed_default")),
     )
 }
 
-fn open_native_plugins_dir(settings_path: &std::path::Path) -> Result<(), String> {
+fn open_native_plugins_dir(settings_path: &std::path::Path, i18n: &I18n) -> Result<(), String> {
     let plugins_dir = plugin_host::native_plugins_dir(settings_path);
-    std::fs::create_dir_all(&plugins_dir).map_err(|error| format!("无法创建插件目录: {error}"))?;
+    std::fs::create_dir_all(&plugins_dir).map_err(|error| {
+        i18n.t("plugin.open_dir_create_failed")
+            .replace("{{message}}", &error.to_string())
+    })?;
     let status = if cfg!(target_os = "macos") {
         Command::new("open").arg(&plugins_dir).status()
     } else if cfg!(target_os = "windows") {
@@ -1975,11 +2031,16 @@ fn open_native_plugins_dir(settings_path: &std::path::Path) -> Result<(), String
     } else {
         Command::new("xdg-open").arg(&plugins_dir).status()
     }
-    .map_err(|error| format!("无法打开插件目录: {error}"))?;
+    .map_err(|error| {
+        i18n.t("plugin.open_dir_failed")
+            .replace("{{message}}", &error.to_string())
+    })?;
     if status.success() {
         Ok(())
     } else {
-        Err(format!("打开插件目录失败: {status}"))
+        Err(i18n
+            .t("plugin.open_dir_status_failed")
+            .replace("{{status}}", &status.to_string()))
     }
 }
 
@@ -2065,16 +2126,17 @@ mod tests {
 
     #[test]
     fn plugin_manager_renders_registry_capabilities_summary() {
+        let i18n = I18n::new(Locale::En);
         let entry = registry_entry_with_capabilities(Some(vec![
             "terminal read".to_string(),
             "status item".to_string(),
         ]));
         assert_eq!(
-            native_plugin_registry_capabilities_label(&entry).as_deref(),
-            Some("能力：terminal read / status item")
+            native_plugin_registry_capabilities_label(&i18n, &entry).as_deref(),
+            Some("Capabilities: terminal read / status item")
         );
 
         let entry = registry_entry_with_capabilities(Some(Vec::new()));
-        assert!(native_plugin_registry_capabilities_label(&entry).is_none());
+        assert!(native_plugin_registry_capabilities_label(&i18n, &entry).is_none());
     }
 }

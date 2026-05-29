@@ -672,6 +672,10 @@ impl Render for WorkspaceApp {
             .when(self.settings_page.settings_reset_confirm_open, |root| {
                 root.child(self.render_settings_reset_confirm_dialog(cx))
             })
+            .when_some(
+                self.render_settings_data_directory_confirm_dialog(cx),
+                |root, dialog| root.child(dialog),
+            )
             .when(self.cloud_sync_confirm.is_some(), |root| {
                 root.child(self.render_cloud_sync_confirm_dialog(cx))
             })

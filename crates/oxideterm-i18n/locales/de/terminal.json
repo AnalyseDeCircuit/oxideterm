@@ -140,7 +140,17 @@
       "copied": "Kopiert",
       "insert": "Einfügen",
       "execute": "Ausführen"
-    }
+    },
+    "broadcast": {
+      "current": "Aktuell",
+      "deselect_all": "Alle abwählen",
+      "no_targets": "Keine anderen Terminals verfügbar",
+      "select_all": "Alle auswählen",
+      "select_targets": "Broadcast-Ziele auswählen",
+      "target_count": "Broadcast aktiv"
+    },
+    "typeLocal": "LOKAL",
+    "typeSsh": "SSH"
   },
   "search": {
     "placeholder": "Suchen",

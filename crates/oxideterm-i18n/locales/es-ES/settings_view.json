@@ -48,7 +48,8 @@
       "local": "Terminal local",
       "reconnect": "Reconexión",
       "help": "Ayuda e Info",
-      "keybindings": "Atajos de teclado"
+      "keybindings": "Atajos de teclado",
+      "graphics": "Gráficos"
     },
     "general": {
       "title": "General",
@@ -123,7 +124,8 @@
       "cli_not_bundled": "El binario CLI no está incluido en esta compilación",
       "cli_checking": "Comprobando...",
       "cli_status_error": "Error de estado",
-      "cli_uninstalled": "Desinstalado"
+      "cli_uninstalled": "Desinstalado",
+      "update_channel": "Canal de actualización"
     },
     "terminal": {
       "title": "Configuración de terminal",

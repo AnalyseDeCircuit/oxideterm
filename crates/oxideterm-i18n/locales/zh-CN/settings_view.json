@@ -48,7 +48,8 @@
       "local": "本地终端",
       "reconnect": "自动重连",
       "help": "帮助与关于",
-      "keybindings": "快捷键"
+      "keybindings": "快捷键",
+      "graphics": "图形"
     },
     "general": {
       "title": "常规",
@@ -123,7 +124,8 @@
       "cli_not_bundled": "此构建不包含 CLI 二进制文件",
       "cli_checking": "正在检查...",
       "cli_status_error": "状态错误",
-      "cli_uninstalled": "已卸载"
+      "cli_uninstalled": "已卸载",
+      "update_channel": "更新通道"
     },
     "terminal": {
       "title": "终端设置",

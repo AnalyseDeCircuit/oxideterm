@@ -22,10 +22,26 @@ pub const SETTINGS_FILENAME: &str = "settings.json";
 const MAX_SETTINGS_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const BOOTSTRAP_FILENAME: &str = "bootstrap.json";
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct BootstrapConfig {
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     data_dir: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataDirectoryInfo {
+    pub path: PathBuf,
+    pub is_custom: bool,
+    pub default_path: PathBuf,
+    pub is_portable: bool,
+    pub can_change: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataDirectoryCheck {
+    pub has_existing_data: bool,
+    pub files_found: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -93,6 +109,111 @@ fn default_settings_dir() -> PathBuf {
     }
 
     PathBuf::from(".")
+}
+
+pub fn data_directory_info() -> Result<DataDirectoryInfo> {
+    let is_portable = oxideterm_portable_runtime::is_portable_mode()
+        .map_err(|error| anyhow!("failed to detect portable mode: {}", error))?;
+    let default_path = default_settings_dir();
+    let path = if is_portable {
+        oxideterm_portable_runtime::portable_data_dir()
+            .map_err(|error| anyhow!("failed to resolve portable data directory: {}", error))?
+            .unwrap_or_else(|| default_path.clone())
+    } else {
+        bootstrap_data_dir().unwrap_or_else(|| default_path.clone())
+    };
+    Ok(DataDirectoryInfo {
+        is_custom: !is_portable && path != default_path,
+        can_change: !is_portable,
+        is_portable,
+        path,
+        default_path,
+    })
+}
+
+pub fn check_data_directory(path: &Path) -> Result<DataDirectoryCheck> {
+    if !path.is_dir() {
+        return Ok(DataDirectoryCheck {
+            has_existing_data: false,
+            files_found: Vec::new(),
+        });
+    }
+
+    let known_files = [
+        "connections.json",
+        "state.redb",
+        "chat_history.redb",
+        "agent_history.redb",
+        "sftp_progress.redb",
+        "rag_index.redb",
+        "plugin-config.json",
+        "bootstrap.json",
+        "topology_edges.json",
+    ];
+    let mut files_found = Vec::new();
+    for name in known_files {
+        if path.join(name).exists() {
+            files_found.push(name.to_string());
+        }
+    }
+    for name in ["logs", "plugins", "rag_hnsw.bin"] {
+        if path.join(name).exists() {
+            files_found.push(name.to_string());
+        }
+    }
+
+    Ok(DataDirectoryCheck {
+        has_existing_data: !files_found.is_empty(),
+        files_found,
+    })
+}
+
+pub fn set_data_directory(path: &Path) -> Result<()> {
+    if oxideterm_portable_runtime::is_portable_mode()
+        .map_err(|error| anyhow!("failed to detect portable mode: {}", error))?
+    {
+        return Err(anyhow!("Data directory cannot be changed in portable mode"));
+    }
+    if !path.is_absolute() {
+        return Err(anyhow!("Data directory must be an absolute path"));
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(anyhow!("Data directory path must not contain '..'"));
+    }
+
+    fs::create_dir_all(path).context("Failed to create directory")?;
+    let canonical = path.canonicalize().context("Failed to resolve path")?;
+    let test_file = canonical.join(format!(".oxideterm_test_{}", std::process::id()));
+    // Tauri verifies writability before writing bootstrap.json; keep the same
+    // guard so a restart never points native at an unusable data directory.
+    fs::write(&test_file, b"test").context("Directory is not writable")?;
+    let _ = fs::remove_file(&test_file);
+
+    save_bootstrap_config(&BootstrapConfig {
+        data_dir: Some(canonical.to_string_lossy().to_string()),
+    })
+}
+
+pub fn reset_data_directory() -> Result<()> {
+    if oxideterm_portable_runtime::is_portable_mode()
+        .map_err(|error| anyhow!("failed to detect portable mode: {}", error))?
+    {
+        return Err(anyhow!("Data directory cannot be reset in portable mode"));
+    }
+    save_bootstrap_config(&BootstrapConfig::default())
+}
+
+fn save_bootstrap_config(config: &BootstrapConfig) -> Result<()> {
+    let path = default_settings_dir().join(BOOTSTRAP_FILENAME);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("failed to create bootstrap directory")?;
+    }
+    let bytes =
+        serde_json::to_vec_pretty(config).context("failed to serialize bootstrap config")?;
+    fs::write(path, bytes).context("failed to write bootstrap config")
 }
 
 fn bootstrap_data_dir() -> Option<PathBuf> {

@@ -467,8 +467,19 @@ struct TabDragState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum TabCloseConfirm {
     Single { tab_id: TabId },
+    LocalChildProcess { tab_id: TabId },
+    LocalChildProcessBatch { tab_ids: Vec<TabId> },
     Other { tab_ids: Vec<TabId> },
     All { tab_ids: Vec<TabId> },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum DataDirectoryConfirm {
+    Conflict {
+        path: PathBuf,
+        files_found: Vec<String>,
+    },
+    Reset,
 }
 
 #[derive(Clone)]
@@ -552,6 +563,7 @@ pub(crate) struct WorkspaceApp {
     settings_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     settings_section_list_state: ListState,
     settings_section_list_cache: RefCell<VirtualListSignatureCache>,
+    settings_data_directory_confirm: Option<DataDirectoryConfirm>,
     ai_execution_profile_list_state: ListState,
     ai_execution_profile_list_cache: RefCell<VirtualListSignatureCache>,
     ai_context_model_list_states: RefCell<HashMap<String, ListState>>,

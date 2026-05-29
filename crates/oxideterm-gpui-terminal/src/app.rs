@@ -19,8 +19,8 @@ use oxideterm_terminal::{
     SshSessionConfig, TelnetSessionConfig, TermMode, TerminalCommandMark,
     TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource,
     TerminalCommandMarkEvent, TerminalDrainBudget, TerminalDrainReport, TerminalEvent,
-    TerminalLifecycle, TerminalOutputProcessor, TerminalSession, TerminalSnapshot,
-    TrzszTransferDirection, TrzszTransferSelection,
+    TerminalLifecycle, TerminalOutputProcessor, TerminalProcessInfo, TerminalSession,
+    TerminalSnapshot, TrzszTransferDirection, TrzszTransferSelection,
 };
 use oxideterm_trzsz::TrzszState;
 use parking_lot::Mutex;
@@ -368,6 +368,10 @@ impl TerminalPane {
 
     pub fn shared_session(&self) -> SharedTerminalSession {
         self.terminal.clone()
+    }
+
+    pub fn process_info(&self) -> TerminalProcessInfo {
+        self.terminal.lock().process_info()
     }
 
     pub fn buffer_line_count(&self) -> usize {

@@ -129,6 +129,11 @@
       "connect": "Connect",
       "connecting": "Connecting...",
       "parent_not_ready": "Parent node is not connected"
+    },
+    "errors": {
+      "chain_failed_title": "Connection chain failed",
+      "chain_failed_desc": "Hop {{position}} of {{total}} failed: {{error}}",
+      "generic_title": "Connection failed"
     }
   },
   "connections": {

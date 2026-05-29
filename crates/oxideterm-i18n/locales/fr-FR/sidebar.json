@@ -33,7 +33,8 @@
       "activity": "Activité",
       "event_log": "Journal d'événements",
       "notifications": "Notifications",
-      "saved_connections": "Connexions enregistrées"
+      "saved_connections": "Connexions enregistrées",
+      "forwarding": "Redirection de ports"
     },
     "tooltips": {
       "settings": "Paramètres",

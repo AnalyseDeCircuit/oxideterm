@@ -48,7 +48,8 @@
       "local": "Lokales Terminal",
       "reconnect": "Wiederverbindung",
       "help": "Hilfe & Info",
-      "keybindings": "Tastenkürzel"
+      "keybindings": "Tastenkürzel",
+      "graphics": "Grafik"
     },
     "general": {
       "title": "Allgemein",
@@ -123,7 +124,8 @@
       "cli_not_bundled": "CLI-Binärdatei ist in diesem Build nicht enthalten",
       "cli_checking": "Prüfen...",
       "cli_status_error": "Statusfehler",
-      "cli_uninstalled": "Deinstalliert"
+      "cli_uninstalled": "Deinstalliert",
+      "update_channel": "Update-Kanal"
     },
     "terminal": {
       "title": "Terminal-Einstellungen",

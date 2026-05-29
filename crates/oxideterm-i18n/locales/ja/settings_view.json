@@ -48,7 +48,8 @@
       "local": "ローカルターミナル",
       "reconnect": "自動再接続",
       "help": "ヘルプと詳細",
-      "keybindings": "キーバインド"
+      "keybindings": "キーバインド",
+      "graphics": "グラフィックス"
     },
     "general": {
       "title": "一般",
@@ -123,7 +124,8 @@
       "cli_not_bundled": "このビルドには CLI バイナリが含まれていません",
       "cli_checking": "確認中...",
       "cli_status_error": "ステータスエラー",
-      "cli_uninstalled": "アンインストール済み"
+      "cli_uninstalled": "アンインストール済み",
+      "update_channel": "更新チャネル"
     },
     "terminal": {
       "title": "ターミナル設定",

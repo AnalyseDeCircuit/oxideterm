@@ -61,7 +61,18 @@
       "proxy_chain_port": "Port",
       "proxy_chain_username": "Username",
       "proxy_chain_auth": "Auth",
-      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication."
+      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication.",
+      "agent_detected": "Đã phát hiện SSH Agent",
+      "agent_forwarding_hint": "Chỉ bật trên máy chủ đáng tin cậy. Máy chủ độc hại có thể dùng SSH Agent cục bộ của bạn để xác thực tới máy chủ khác.",
+      "agent_hint": "Đảm bảo SSH Agent đang chạy và đã tải các khóa cần thiết.",
+      "agent_not_detected": "Không phát hiện SSH Agent",
+      "authentication": "Phương thức xác thực",
+      "post_connect_command": "Chạy sau khi kết nối",
+      "post_connect_command_hint": "Tùy chọn. Chạy một lần sau khi shell tương tác mở.",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "save_connection_hint": "Mặc định tắt ở lần đầu; lựa chọn của bạn sẽ được ghi nhớ sau đó.",
+      "two_factor_hint": "Máy chủ sẽ yêu cầu thông tin xác thực trong khi kết nối. Cách dùng phổ biến: mã TOTP, token phần cứng, hỏi-đáp xác thực.",
+      "two_factor_warning": "Lưu ý: kết nối 2FA không thể tự động kết nối lại. Bạn cần kết nối lại thủ công nếu phiên bị ngắt."
     },
     "auth": {
       "password": "Mật khẩu",
@@ -118,6 +129,11 @@
       "connect": "Kết nối",
       "connecting": "Đang kết nối...",
       "parent_not_ready": "Nút cha chưa được kết nối"
+    },
+    "errors": {
+      "chain_failed_title": "Chuỗi kết nối thất bại",
+      "chain_failed_desc": "Bước nhảy {{position}}/{{total}} thất bại: {{error}}",
+      "generic_title": "Kết nối thất bại"
     }
   }
 }

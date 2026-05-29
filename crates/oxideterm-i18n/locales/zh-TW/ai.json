@@ -240,7 +240,16 @@
       "policy_reason_bypass": "Bypass 模式已允許危險命令",
       "policy_reason_destructive": "危險命令需要審批",
       "policy_reason_auto_approved": "工具策略已允許",
-      "policy_reason_requires_approval": "工具策略要求審批"
+      "policy_reason_requires_approval": "工具策略要求審批",
+      "status": {
+        "pending": "等待執行",
+        "pending_approval": "等待確認",
+        "approved": "已允許",
+        "running": "執行中",
+        "completed": "已完成",
+        "error": "執行失敗",
+        "rejected": "已拒絕"
+      }
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "此聊天已停用工具使用，但模型輸出了偽工具記錄。OxideSens 已要求改用自然語言重試。",

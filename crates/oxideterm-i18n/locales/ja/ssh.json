@@ -61,7 +61,18 @@
       "proxy_chain_port": "Port",
       "proxy_chain_username": "Username",
       "proxy_chain_auth": "Auth",
-      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication."
+      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication.",
+      "agent_detected": "SSH Agent を検出しました",
+      "agent_forwarding_hint": "信頼できるサーバーでのみ有効にしてください。悪意のあるサーバーがローカルの SSH Agent を使って他のホストへ認証する可能性があります。",
+      "agent_hint": "SSH Agent が実行中で、必要な鍵が読み込まれていることを確認してください。",
+      "agent_not_detected": "SSH Agent が検出されません",
+      "authentication": "認証方式",
+      "post_connect_command": "接続後に実行",
+      "post_connect_command_hint": "任意。対話型シェルが開いた後に 1 回実行されます。",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "save_connection_hint": "初回は既定でオフです。その後は選択が記憶されます。",
+      "two_factor_hint": "接続中にサーバーが認証情報を求めます。一般的な用途: TOTP コード、ハードウェアトークン、チャレンジレスポンス。",
+      "two_factor_warning": "注意: 2FA 接続は自動再接続できません。セッションが切断された場合は手動で再接続する必要があります。"
     },
     "auth": {
       "password": "パスワード",
@@ -118,6 +129,11 @@
       "connect": "接続",
       "connecting": "接続中...",
       "parent_not_ready": "親ノードが接続されていません"
+    },
+    "errors": {
+      "chain_failed_title": "接続チェーンに失敗しました",
+      "chain_failed_desc": "{{total}} 中 {{position}} 番目のホップに失敗しました: {{error}}",
+      "generic_title": "接続に失敗しました"
     }
   }
 }

@@ -33,7 +33,8 @@
       "activity": "Hoạt động",
       "event_log": "Nhật ký sự kiện",
       "notifications": "Thông báo",
-      "saved_connections": "Kết nối đã lưu"
+      "saved_connections": "Kết nối đã lưu",
+      "forwarding": "Chuyển tiếp cổng"
     },
     "tooltips": {
       "settings": "Cài đặt",

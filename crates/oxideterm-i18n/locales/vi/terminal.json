@@ -140,7 +140,17 @@
       "copied": "Đã sao chép",
       "insert": "Chèn",
       "execute": "Thực thi"
-    }
+    },
+    "broadcast": {
+      "current": "Hiện tại",
+      "deselect_all": "Bỏ chọn tất cả",
+      "no_targets": "Không có terminal nào khác",
+      "select_all": "Chọn tất cả",
+      "select_targets": "Chọn mục tiêu phát",
+      "target_count": "Đang phát lệnh"
+    },
+    "typeLocal": "NỘI BỘ",
+    "typeSsh": "SSH"
   },
   "search": {
     "placeholder": "Tìm kiếm",

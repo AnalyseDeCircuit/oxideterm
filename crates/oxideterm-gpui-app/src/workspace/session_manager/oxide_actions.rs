@@ -354,7 +354,7 @@ impl WorkspaceApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(SharedString::from("选择 .oxide 文件")),
+            prompt: Some(SharedString::from(self.i18n.t("modals.import.select_file"))),
         });
         cx.spawn(async move |weak, cx| {
             let result = match receiver.await {
@@ -372,9 +372,9 @@ impl WorkspaceApp {
                 Err(error) => Err(error.to_string()),
             };
             let _ = weak.update(cx, |this, cx| {
-                let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() else {
-                    return;
-                };
+            let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() else {
+                return;
+            };
                 match result {
                     Ok((path, bytes)) => match OxideFile::from_bytes(&bytes) {
                         Ok(file) => {
@@ -416,12 +416,12 @@ impl WorkspaceApp {
             return;
         };
         let Some(bytes) = dialog.file_data.clone() else {
-            dialog.error = Some("请先选择 .oxide 文件".to_string());
+            dialog.error = Some(self.i18n.t("modals.import.select_file"));
             cx.notify();
             return;
         };
         if dialog.password.is_empty() {
-            dialog.error = Some("请输入解密密码".to_string());
+            dialog.error = Some(self.i18n.t("modals.import.error_enter_password"));
             cx.notify();
             return;
         }
@@ -438,6 +438,7 @@ impl WorkspaceApp {
         let password = zeroize::Zeroizing::new(dialog.password.clone());
         let conflict_strategy = dialog.conflict_strategy;
         let (tx, rx) = std::sync::mpsc::channel();
+        let i18n = self.i18n.clone();
         std::thread::spawn(move || {
             let result = preview_oxide_import_with_progress(
                 &store,
@@ -450,7 +451,7 @@ impl WorkspaceApp {
                     ));
                 },
             )
-            .map_err(oxide_file_error_message);
+            .map_err(|error| oxide_file_error_message(error, &i18n));
             let _ = tx.send(OxidePreviewWorkerMessage::Done(result));
         });
         self.poll_oxide_import_preview_worker(generation, rx, cx);
@@ -462,14 +463,14 @@ impl WorkspaceApp {
         };
         let Some(bytes) = dialog.file_data.clone() else {
             if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
-                dialog.error = Some("请先选择 .oxide 文件".to_string());
+                dialog.error = Some(self.i18n.t("modals.import.select_file"));
             }
             cx.notify();
             return;
         };
         if dialog.password.is_empty() {
             if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
-                dialog.error = Some("请输入解密密码".to_string());
+                dialog.error = Some(self.i18n.t("modals.import.error_enter_password"));
             }
             cx.notify();
             return;
@@ -510,6 +511,7 @@ impl WorkspaceApp {
         let mut store = self.connection_store.clone();
         let oxide_options = options.oxide_options.clone();
         let (tx, rx) = std::sync::mpsc::channel();
+        let i18n = self.i18n.clone();
         std::thread::spawn(move || {
             let result = apply_oxide_import_with_options_with_progress(
                 &mut store,
@@ -523,7 +525,7 @@ impl WorkspaceApp {
                 },
             )
             .map(|envelope| OxideCoreImportResult { store, envelope })
-            .map_err(oxide_file_error_message);
+            .map_err(|error| oxide_file_error_message(error, &i18n));
             let _ = tx.send(OxideImportWorkerMessage::Done(result));
         });
         self.poll_oxide_import_worker(generation, options, rx, cx);
@@ -889,7 +891,7 @@ impl WorkspaceApp {
         };
         if !self.oxide_export_has_content(dialog) {
             if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                dialog.error = Some("请选择要导出的内容".to_string());
+                dialog.error = Some(self.i18n.t("modals.export.error_select_something"));
             }
             cx.notify();
             return;
@@ -897,9 +899,9 @@ impl WorkspaceApp {
         if dialog.password.len() < 6 || dialog.password != dialog.confirm_password {
             if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
                 dialog.error = if dialog.password.len() < 6 {
-                    Some("密码长度至少为 6 位".to_string())
+                    Some(self.i18n.t("modals.export.error_password_too_short"))
                 } else {
-                    Some("两次密码不一致".to_string())
+                    Some(self.i18n.t("modals.export.error_password_mismatch"))
                 };
             }
             cx.notify();
@@ -930,13 +932,14 @@ impl WorkspaceApp {
             .session_manager
             .oxide_export_dialog
             .as_ref()
-            .ok_or_else(|| "导出对话框已关闭".to_string())
+            .ok_or_else(|| self.i18n.t("modals.export.error_export_failed"))
             .and_then(|dialog| self.build_oxide_export_options(dialog));
         match result {
             Ok(options) => {
                 cx.notify();
                 let store = self.connection_store.clone();
                 let (tx, rx) = std::sync::mpsc::channel();
+                let i18n = self.i18n.clone();
                 std::thread::spawn(move || {
                     let result = export_connections_to_oxide_with_progress(
                         &store,
@@ -949,7 +952,7 @@ impl WorkspaceApp {
                             ));
                         },
                     )
-                    .map_err(oxide_file_error_message);
+                    .map_err(|error| oxide_file_error_message(error, &i18n));
                     let _ = tx.send(OxideExportWorkerMessage::Done(result));
                 });
                 self.poll_oxide_export_worker(generation, rx, cx);
@@ -997,13 +1000,19 @@ impl WorkspaceApp {
                             }
                             match result {
                                 Ok(bytes) => {
+                                    let exported_count = this
+                                        .session_manager
+                                        .oxide_export_dialog
+                                        .as_ref()
+                                        .map(oxide_export_connection_count)
+                                        .unwrap_or(0);
                                     if let Some(dialog) =
                                         this.session_manager.oxide_export_dialog.as_mut()
                                     {
                                         dialog.progress_stage =
                                             Some(OxideTransferProgress::new("writing", 1, 1));
                                     }
-                                    this.prompt_save_oxide_export(bytes, cx);
+                                    this.prompt_save_oxide_export(bytes, exported_count, cx);
                                 }
                                 Err(error) => {
                                     if let Some(dialog) =
@@ -1030,7 +1039,7 @@ impl WorkspaceApp {
                             {
                                 dialog.busy = false;
                                 dialog.progress_stage = None;
-                                dialog.error = Some("导出任务已中断".to_string());
+                                dialog.error = Some(this.i18n.t("modals.export.error_export_failed"));
                                 cx.notify();
                             }
                         });
@@ -1042,7 +1051,12 @@ impl WorkspaceApp {
         .detach();
     }
 
-    fn prompt_save_oxide_export(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
+    fn prompt_save_oxide_export(
+        &mut self,
+        bytes: Vec<u8>,
+        exported_count: usize,
+        cx: &mut Context<Self>,
+    ) {
         let directory = std::env::var_os("HOME")
             .map(PathBuf::from)
             .map(|home| home.join("Downloads"))
@@ -1071,7 +1085,11 @@ impl WorkspaceApp {
                 match result {
                     Ok(path) => {
                         let _ = persist_oxide_last_export_timestamp(this.settings_store.path());
-                        let summary = format!("已导出到 {}", path.to_string_lossy());
+                        let summary = this
+                            .i18n
+                            .t("modals.export.success")
+                            .replace("{{count}}", &exported_count.to_string())
+                            .replace("{{path}}", path.to_string_lossy().as_ref());
                         this.session_manager.status = Some(summary);
                         this.session_manager.oxide_export_dialog = None;
                         this.session_manager.focused_input = None;
@@ -1200,7 +1218,7 @@ impl WorkspaceApp {
             options.oxide_options,
             |stage, current, total| on_progress(stage, current, total),
         )
-        .map_err(oxide_file_error_message)?;
+        .map_err(|error| oxide_file_error_message(error, &self.i18n))?;
 
         let imported_forwards = self.apply_oxide_import_forward_records(&mut envelope);
         envelope.imported_forwards = imported_forwards;
@@ -1453,11 +1471,11 @@ fn quick_command_strategy_from_oxide(
     }
 }
 
-fn oxide_file_error_message(error: OxideFileError) -> String {
+fn oxide_file_error_message(error: OxideFileError, i18n: &oxideterm_i18n::I18n) -> String {
     match error {
-        OxideFileError::DecryptionFailed => "密码错误，无法解密文件".to_string(),
-        OxideFileError::ChecksumMismatch => "文件验证失败，数据可能已被篡改".to_string(),
-        OxideFileError::PasswordTooShort => "密码长度至少为 6 位".to_string(),
+        OxideFileError::DecryptionFailed => i18n.t("modals.import.error_password"),
+        OxideFileError::ChecksumMismatch => i18n.t("modals.import.error_tampered"),
+        OxideFileError::PasswordTooShort => i18n.t("modals.export.error_password_too_short"),
         other => other.to_string(),
     }
 }

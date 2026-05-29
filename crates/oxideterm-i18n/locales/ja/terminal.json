@@ -140,7 +140,17 @@
       "copied": "コピーしました",
       "insert": "挿入",
       "execute": "実行"
-    }
+    },
+    "broadcast": {
+      "current": "現在",
+      "deselect_all": "すべて解除",
+      "no_targets": "他に利用可能なターミナルがありません",
+      "select_all": "すべて選択",
+      "select_targets": "ブロードキャスト対象を選択",
+      "target_count": "ブロードキャスト中"
+    },
+    "typeLocal": "ローカル",
+    "typeSsh": "SSH"
   },
   "search": {
     "placeholder": "検索",

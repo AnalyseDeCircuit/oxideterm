@@ -240,7 +240,16 @@
       "policy_reason_bypass": "Bypass mode approved a dangerous command",
       "policy_reason_destructive": "Dangerous command requires approval",
       "policy_reason_auto_approved": "Allowed by tool policy",
-      "policy_reason_requires_approval": "Approval required by tool policy"
+      "policy_reason_requires_approval": "Approval required by tool policy",
+      "status": {
+        "pending": "대기 중",
+        "pending_approval": "승인 대기 중",
+        "approved": "승인됨",
+        "running": "실행 중",
+        "completed": "완료됨",
+        "error": "실패",
+        "rejected": "거부됨"
+      }
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "이 채팅에서는 도구 사용이 비활성화되어 있는데, 모델이 가짜 도구 기록을 출력했습니다. OxideSens가 자연어로 다시 시도해 달라고 요청했습니다.",

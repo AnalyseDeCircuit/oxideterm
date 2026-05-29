@@ -61,7 +61,18 @@
       "proxy_chain_port": "Port",
       "proxy_chain_username": "Username",
       "proxy_chain_auth": "Auth",
-      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication."
+      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication.",
+      "agent_detected": "SSH Agent 감지됨",
+      "agent_forwarding_hint": "신뢰할 수 있는 서버에서만 활성화하세요. 악성 서버가 로컬 SSH Agent를 사용해 다른 호스트에 인증할 수 있습니다.",
+      "agent_hint": "SSH Agent가 실행 중이고 필요한 키가 로드되어 있는지 확인하세요.",
+      "agent_not_detected": "SSH Agent가 감지되지 않음",
+      "authentication": "인증 방법",
+      "post_connect_command": "연결 후 실행",
+      "post_connect_command_hint": "선택 사항입니다. 대화형 셸이 열린 뒤 한 번 실행됩니다.",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "save_connection_hint": "처음에는 기본적으로 꺼져 있으며, 이후 선택이 기억됩니다.",
+      "two_factor_hint": "연결 중 서버가 자격 증명을 요청합니다. 일반적인 용도: TOTP 코드, 하드웨어 토큰, 챌린지-응답.",
+      "two_factor_warning": "참고: 2FA 연결은 자동으로 다시 연결할 수 없습니다. 세션 연결이 끊기면 수동으로 다시 연결해야 합니다."
     },
     "auth": {
       "password": "비밀번호",
@@ -118,6 +129,11 @@
       "connect": "연결",
       "connecting": "연결 중...",
       "parent_not_ready": "상위 노드가 연결되어 있지 않습니다"
+    },
+    "errors": {
+      "chain_failed_title": "연결 체인 실패",
+      "chain_failed_desc": "총 {{total}}개 중 {{position}}번째 홉 실패: {{error}}",
+      "generic_title": "연결 실패"
     }
   }
 }

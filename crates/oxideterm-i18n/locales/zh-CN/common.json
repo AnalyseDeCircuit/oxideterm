@@ -1,6 +1,7 @@
 {
   "app": {
-    "name": "OxideTerm"
+    "name": "OxideTerm",
+    "shellLauncher": "Shell 启动器"
   },
   "language": {
     "english": "English",
@@ -97,7 +98,8 @@
     "cmd_reload_window": "重新加载窗口",
     "quick_connect_alias_not_found": "未找到名为 {{alias}} 的 SSH config alias",
     "quick_connect_resolve_failed": "解析 SSH config alias {{alias}} 失败",
-    "footer_hint": "按 Esc 关闭"
+    "footer_hint": "按 Esc 关闭",
+    "session_ssh_terminal": "SSH 终端"
   },
   "shortcuts_modal": {
     "title": "键盘快捷键",
@@ -113,7 +115,11 @@
       "cancel": "取消",
       "confirm": "确定",
       "delete": "删除"
-    }
+    },
+    "cancel": "取消",
+    "delete": "删除",
+    "no": "否",
+    "yes": "是"
   },
   "topology": {
     "button_title": "拓扑视图",
@@ -413,8 +419,8 @@
         "session_token": "可选的 Session Token"
       },
       "native_description": "用于 OxideTerm 的加密自托管同步。",
-      "native_service_pending": "正在把 native service 接到内置兼容层。",
-      "native_service_ready": "内置 native 同步服务已连接到兼容层。",
+      "native_service_pending": "正在将内置同步服务连接到兼容层。",
+      "native_service_ready": "内置同步服务已连接到兼容层。",
       "native_scope_summary": "默认同步的应用设置分区：{{sections}}。",
       "history_empty": "暂无同步记录。"
     },
@@ -500,7 +506,20 @@
       "disabled": "已禁用"
     },
     "tab_not_available": "插件标签页视图不可用",
-    "tab_crashed": "插件标签页崩溃"
+    "tab_crashed": "插件标签页崩溃",
+    "detail_author": "作者",
+    "registry_capabilities": "能力：{{capabilities}}",
+    "reload_success": "{{name}} 已重新扫描。",
+    "enable_success": "{{name}} 已启用。",
+    "disable_success": "{{name}} 已禁用。",
+    "load_failed_default": "插件加载失败。",
+    "open_dir_create_failed": "无法创建插件目录：{{message}}",
+    "open_dir_failed": "无法打开插件目录：{{message}}",
+    "open_dir_status_failed": "无法打开插件目录：{{status}}",
+    "command_runtime_pending": "正在等待原生插件运行时",
+    "command_detail": "插件命令",
+    "keybinding_detail": "插件快捷键",
+    "terminal_shortcut_pending": "插件终端快捷键正在等待运行时"
   },
   "onboarding": {
     "welcome": "欢迎使用 OxideTerm",

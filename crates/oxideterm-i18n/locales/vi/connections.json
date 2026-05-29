@@ -64,6 +64,49 @@
       "connection_failed": "Kết nối thất bại",
       "no_connection_id": "Không có ID kết nối nào được gán sau khi kết nối lại."
     },
-    "failedFetchStats": "Không thể lấy thống kê"
+    "failedFetchStats": "Không thể lấy thống kê",
+    "errors": {
+      "chain_busy_desc": "Một chuỗi kết nối khác đang được thực hiện. Vui lòng chờ.",
+      "chain_busy_title": "Thao tác đang diễn ra",
+      "chain_failed_desc": "Thất bại tại nút {{position}}/{{total}}: {{error}}",
+      "chain_failed_title": "Kết nối thất bại",
+      "generic_title": "Lỗi kết nối",
+      "node_connecting_desc": "Nút này đã đang được kết nối.",
+      "node_connecting_title": "Đang kết nối"
+    },
+    "reconnect": {
+      "cancelled": "Đã hủy kết nối lại",
+      "completed": "Kết nối đã được khôi phục, {{count}} dịch vụ đã phục hồi",
+      "failed": "Kết nối lại thất bại: {{error}}",
+      "recovered": "Kết nối đã phục hồi — phiên được giữ nguyên",
+      "ssh_restored": "Kết nối SSH đã được khôi phục",
+      "starting": "{{name}} đang kết nối lại..."
+    },
+    "toast": {
+      "proxy_chain_desc": "Độ sâu chuỗi {{depth}}. Đã đồng bộ topology.",
+      "proxy_chain_established": "Đã thiết lập chuỗi proxy",
+      "proxy_chain_invalid": "Chuỗi proxy không hợp lệ",
+      "proxy_hop_auth_unsupported": "Jump host này dùng kiểu xác thực không được hỗ trợ",
+      "proxy_hop_kbi_unsupported": "Jump host này không hỗ trợ keyboard-interactive/2FA"
+    },
+    "trace": {
+      "connected": "Connected · {{elapsed}}",
+      "connecting": "Connecting {{label}}",
+      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
+      "reconnecting": "Reconnecting {{label}}",
+      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
+      "stage": {
+        "authentication": "Authenticating",
+        "host_key": "Checking host key",
+        "opening_transport": "Opening transport",
+        "preparing": "Preparing connection",
+        "pty": "Allocating PTY",
+        "queued": "Queued",
+        "ready": "Ready",
+        "shell_ready": "Starting shell",
+        "ssh_handshake": "SSH handshake"
+      },
+      "target_unknown": "target"
+    }
   }
 }

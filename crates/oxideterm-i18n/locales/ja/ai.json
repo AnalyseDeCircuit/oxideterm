@@ -240,7 +240,16 @@
       "policy_reason_bypass": "Bypass mode approved a dangerous command",
       "policy_reason_destructive": "Dangerous command requires approval",
       "policy_reason_auto_approved": "Allowed by tool policy",
-      "policy_reason_requires_approval": "Approval required by tool policy"
+      "policy_reason_requires_approval": "Approval required by tool policy",
+      "status": {
+        "pending": "待機中",
+        "pending_approval": "承認待ち",
+        "approved": "承認済み",
+        "running": "実行中",
+        "completed": "完了",
+        "error": "失敗",
+        "rejected": "拒否済み"
+      }
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "このチャットではツール利用が無効で、モデルが疑似ツールの記録を出力しました。OxideSens は自然文での再試行を要求しました。",

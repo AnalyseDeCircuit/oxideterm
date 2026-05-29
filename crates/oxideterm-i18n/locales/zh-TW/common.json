@@ -1,6 +1,7 @@
 {
   "app": {
-    "name": "OxideTerm"
+    "name": "OxideTerm",
+    "shellLauncher": "Shell 啟動器"
   },
   "language": {
     "english": "English",
@@ -96,7 +97,9 @@
     "cmd_reload_window": "重新載入視窗",
     "quick_connect_alias_not_found": "找不到名為 {{alias}} 的 SSH config alias",
     "quick_connect_resolve_failed": "解析 SSH config alias {{alias}} 失敗",
-    "footer_hint": "按 Esc 關閉"
+    "footer_hint": "按 Esc 關閉",
+    "session_ssh_terminal": "SSH 終端機",
+    "cmd_open_cloud_sync": "開啟雲端同步"
   },
   "common": {
     "enabled": "已啟用",
@@ -105,7 +108,11 @@
       "cancel": "取消",
       "confirm": "確認",
       "delete": "刪除"
-    }
+    },
+    "cancel": "取消",
+    "delete": "刪除",
+    "no": "否",
+    "yes": "是"
   },
   "topology": {
     "button_title": "拓撲檢視",
@@ -418,7 +425,12 @@
         "access_key_id": "Access Key ID",
         "secret_access_key": "Secret Access Key",
         "session_token": "選用的 Session Token"
-      }
+      },
+      "history_empty": "尚無同步記錄。",
+      "native_description": "用於 OxideTerm 的加密自託管同步。",
+      "native_scope_summary": "預設同步的應用程式區段：{{sections}}。",
+      "native_service_pending": "正在將內建同步服務連接到相容層。",
+      "native_service_ready": "內建同步服務已連接到相容層。"
     },
     "refresh": "重新整理",
     "open_plugins_dir": "開啟目錄",
@@ -494,7 +506,20 @@
     "clear_logs": "清除",
     "no_logs": "暫無日誌",
     "tab_not_available": "外掛分頁檢視不可用",
-    "tab_crashed": "外掛分頁已崩潰"
+    "tab_crashed": "外掛分頁已崩潰",
+    "detail_author": "作者",
+    "registry_capabilities": "能力：{{capabilities}}",
+    "reload_success": "{{name}} 已重新掃描。",
+    "enable_success": "{{name}} 已啟用。",
+    "disable_success": "{{name}} 已停用。",
+    "load_failed_default": "外掛程式載入失敗。",
+    "open_dir_create_failed": "無法建立外掛程式目錄：{{message}}",
+    "open_dir_failed": "無法開啟外掛程式目錄：{{message}}",
+    "open_dir_status_failed": "無法開啟外掛程式目錄：{{status}}",
+    "command_runtime_pending": "正在等待原生外掛程式執行階段",
+    "command_detail": "外掛程式命令",
+    "keybinding_detail": "外掛程式快速鍵",
+    "terminal_shortcut_pending": "外掛程式終端快速鍵正在等待執行階段"
   },
   "onboarding": {
     "welcome": "歡迎使用 OxideTerm",

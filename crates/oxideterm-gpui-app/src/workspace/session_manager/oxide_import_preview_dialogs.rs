@@ -480,16 +480,17 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|dialog| dialog.expanded_app_settings_sections.contains(&section_id));
         let key_summary = if section.id == "legacy" {
-            "该文件导出于分组设置支持之前，只能整包导入应用设置。".to_string()
+            self.i18n.t("modals.import.app_settings_legacy_description")
         } else {
-            format!(
-                "顶层键：{}",
+            self.i18n.t("modals.import.app_settings_keys").replace(
+                "{{keys}}",
                 section
                     .field_keys
                     .iter()
-                    .map(|key| oxide_settings_field_label(key))
+                    .map(|key| oxide_settings_field_label(key, &self.i18n))
                     .collect::<Vec<_>>()
                     .join(", ")
+                    .as_str(),
             )
         };
         let mut card = div()
@@ -536,7 +537,9 @@ impl WorkspaceApp {
                                             .text_size(px(self.tokens.metrics.ui_text_sm))
                                             .font_weight(gpui::FontWeight::SEMIBOLD)
                                             .text_color(rgb(self.tokens.ui.text))
-                                            .child(oxide_settings_section_label(&section.id)),
+                                            .child(oxide_settings_section_label(
+                                                &section.id, &self.i18n,
+                                            )),
                                     )
                                     .child(
                                         div()
@@ -554,7 +557,8 @@ impl WorkspaceApp {
                                                     SelectableTextRole::PlainDocument,
                                                     "oxide-import-env-warning",
                                                     section.id.as_str(),
-                                                    "包含本地终端环境变量名",
+                                                    self.i18n
+                                                        .t("modals.import.app_settings_contains_env_vars"),
                                                     OXIDE_YELLOW_500,
                                                     cx,
                                                 )),
@@ -570,7 +574,9 @@ impl WorkspaceApp {
                                 SelectableTextRole::NonSelectable,
                                 "oxide-import-section-count",
                                 section.id.as_str(),
-                                format!("{} 项", section.field_keys.len()),
+                                self.i18n
+                                    .t("modals.import.plugin_settings_items")
+                                    .replace("{{count}}", &section.field_keys.len().to_string()),
                                 self.tokens.ui.text_muted,
                                 cx,
                             )),
@@ -612,7 +618,11 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.accent))
                             .cursor_pointer()
-                            .child(if expanded { "隐藏更改" } else { "查看更改" })
+                            .child(if expanded {
+                                self.i18n.t("modals.import.app_settings_hide_changes")
+                            } else {
+                                self.i18n.t("modals.import.app_settings_view_changes")
+                            })
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {
@@ -642,7 +652,7 @@ impl WorkspaceApp {
                                 .child(self.render_selectable_text_scoped(
                                     "oxide-import-app-settings-changes-heading",
                                     &section.id,
-                                    "顶层设置变更",
+                                    self.i18n.t("modals.import.app_settings_diff_title"),
                                     self.tokens.ui.text,
                                     cx,
                                 )),
@@ -650,7 +660,7 @@ impl WorkspaceApp {
                         for key in &section.field_keys {
                             if let Some(value) = section.field_values.get(key) {
                                 let line =
-                                    format!("{}: {}", oxide_settings_field_label(key), value);
+                                    format!("{}: {}", oxide_settings_field_label(key, &self.i18n), value);
                                 values = values.child(
                                     div()
                                         .rounded(px(self.tokens.radii.sm))

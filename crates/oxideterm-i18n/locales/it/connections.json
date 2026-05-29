@@ -64,6 +64,49 @@
       "connection_failed": "Connessione non riuscita",
       "no_connection_id": "Nessun ID connessione assegnato dopo la riconnessione."
     },
-    "failedFetchStats": "Impossibile recuperare le statistiche"
+    "failedFetchStats": "Impossibile recuperare le statistiche",
+    "errors": {
+      "chain_busy_desc": "Un'altra catena di connessione è già in corso. Attendi.",
+      "chain_busy_title": "Operazione in corso",
+      "chain_failed_desc": "Errore al nodo {{position}}/{{total}}: {{error}}",
+      "chain_failed_title": "Connessione non riuscita",
+      "generic_title": "Errore di connessione",
+      "node_connecting_desc": "Questo nodo è già in fase di connessione.",
+      "node_connecting_title": "Connessione già in corso"
+    },
+    "reconnect": {
+      "cancelled": "Riconnessione annullata",
+      "completed": "Connessione ripristinata, {{count}} servizio/i recuperato/i",
+      "failed": "Riconnessione fallita: {{error}}",
+      "recovered": "Connessione ripristinata — sessione preservata",
+      "ssh_restored": "Connessione SSH ripristinata",
+      "starting": "{{name}} si sta riconnettendo..."
+    },
+    "toast": {
+      "proxy_chain_desc": "Profondità catena {{depth}}. Topologia sincronizzata.",
+      "proxy_chain_established": "Connessione catena proxy stabilita",
+      "proxy_chain_invalid": "Catena proxy non valida",
+      "proxy_hop_auth_unsupported": "Questo jump host usa un tipo di autenticazione non supportato",
+      "proxy_hop_kbi_unsupported": "Questo jump host non supporta keyboard-interactive/2FA"
+    },
+    "trace": {
+      "connected": "Connected · {{elapsed}}",
+      "connecting": "Connecting {{label}}",
+      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
+      "reconnecting": "Reconnecting {{label}}",
+      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
+      "stage": {
+        "authentication": "Authenticating",
+        "host_key": "Checking host key",
+        "opening_transport": "Opening transport",
+        "preparing": "Preparing connection",
+        "pty": "Allocating PTY",
+        "queued": "Queued",
+        "ready": "Ready",
+        "shell_ready": "Starting shell",
+        "ssh_handshake": "SSH handshake"
+      },
+      "target_unknown": "target"
+    }
   }
 }

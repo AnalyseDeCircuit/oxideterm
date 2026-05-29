@@ -140,7 +140,17 @@
       "copied": "Copiado",
       "insert": "Inserir",
       "execute": "Executar"
-    }
+    },
+    "broadcast": {
+      "current": "Atual",
+      "deselect_all": "Desmarcar tudo",
+      "no_targets": "Nenhum outro terminal disponível",
+      "select_all": "Selecionar tudo",
+      "select_targets": "Selecionar destinos",
+      "target_count": "Transmissão ativa"
+    },
+    "typeLocal": "LOCAL",
+    "typeSsh": "SSH"
   },
   "search": {
     "placeholder": "Buscar",

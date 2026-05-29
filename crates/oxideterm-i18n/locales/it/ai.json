@@ -240,7 +240,16 @@
       "policy_reason_bypass": "Bypass mode approved a dangerous command",
       "policy_reason_destructive": "Dangerous command requires approval",
       "policy_reason_auto_approved": "Allowed by tool policy",
-      "policy_reason_requires_approval": "Approval required by tool policy"
+      "policy_reason_requires_approval": "Approval required by tool policy",
+      "status": {
+        "pending": "In sospeso",
+        "pending_approval": "In attesa di approvazione",
+        "approved": "Approvato",
+        "running": "In esecuzione",
+        "completed": "Completato",
+        "error": "Non riuscito",
+        "rejected": "Rifiutato"
+      }
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "L'uso degli strumenti è disattivato per questa chat e il modello ha emesso una pseudo-trascrizione di strumento. OxideSens ha richiesto un nuovo tentativo in linguaggio naturale.",

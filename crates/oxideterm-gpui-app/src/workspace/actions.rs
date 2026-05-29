@@ -623,6 +623,19 @@ impl WorkspaceApp {
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
+        } else if self.settings_data_directory_confirm.is_some() {
+            match self.handle_standard_confirm_key(event, cx) {
+                Some(ConfirmKeyboardAction::Cancel) => {
+                    self.cancel_settings_data_directory_confirm(cx);
+                    true
+                }
+                Some(ConfirmKeyboardAction::Confirm) => {
+                    self.confirm_settings_data_directory(cx);
+                    true
+                }
+                Some(ConfirmKeyboardAction::Handled) => true,
+                None => false,
+            }
         } else if self.settings_page.knowledge_create_dialog_open {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {

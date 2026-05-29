@@ -33,7 +33,8 @@
       "activity": "活动",
       "event_log": "事件日志",
       "notifications": "通知中心",
-      "saved_connections": "保存的连接"
+      "saved_connections": "保存的连接",
+      "forwarding": "端口转发"
     },
     "tooltips": {
       "settings": "设置",

@@ -64,6 +64,49 @@
       "connection_failed": "Verbindung fehlgeschlagen",
       "no_connection_id": "Nach der Wiederverbindung wurde keine Verbindungs-ID zugewiesen."
     },
-    "failedFetchStats": "Statistiken konnten nicht abgerufen werden"
+    "failedFetchStats": "Statistiken konnten nicht abgerufen werden",
+    "errors": {
+      "chain_busy_desc": "Eine andere Verbindungskette wird gerade aufgebaut. Bitte warten Sie.",
+      "chain_busy_title": "Vorgang läuft",
+      "chain_failed_desc": "Fehler bei Knoten {{position}}/{{total}}: {{error}}",
+      "chain_failed_title": "Verbindung fehlgeschlagen",
+      "generic_title": "Verbindungsfehler",
+      "node_connecting_desc": "Dieser Knoten wird bereits verbunden.",
+      "node_connecting_title": "Bereits am Verbinden"
+    },
+    "reconnect": {
+      "cancelled": "Neuverbindung abgebrochen",
+      "completed": "Verbindung wiederhergestellt, {{count}} Dienst(e) wiederhergestellt",
+      "failed": "Neuverbindung fehlgeschlagen: {{error}}",
+      "recovered": "Verbindung wiederhergestellt — Sitzung erhalten",
+      "ssh_restored": "SSH-Verbindung wiederhergestellt",
+      "starting": "{{name}} wird neu verbunden..."
+    },
+    "toast": {
+      "proxy_chain_desc": "Kettentiefe {{depth}}. Topologie synchronisiert.",
+      "proxy_chain_established": "Proxy-Ketten-Verbindung hergestellt",
+      "proxy_chain_invalid": "Proxy-Kette ist ungültig",
+      "proxy_hop_auth_unsupported": "Dieser Jump-Host verwendet einen nicht unterstützten Auth-Typ",
+      "proxy_hop_kbi_unsupported": "Dieser Jump-Host unterstützt Keyboard-Interactive/2FA nicht"
+    },
+    "trace": {
+      "connected": "Connected · {{elapsed}}",
+      "connecting": "Connecting {{label}}",
+      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
+      "reconnecting": "Reconnecting {{label}}",
+      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
+      "stage": {
+        "authentication": "Authenticating",
+        "host_key": "Checking host key",
+        "opening_transport": "Opening transport",
+        "preparing": "Preparing connection",
+        "pty": "Allocating PTY",
+        "queued": "Queued",
+        "ready": "Ready",
+        "shell_ready": "Starting shell",
+        "ssh_handshake": "SSH handshake"
+      },
+      "target_unknown": "target"
+    }
   }
 }

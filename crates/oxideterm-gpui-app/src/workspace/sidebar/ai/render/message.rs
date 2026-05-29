@@ -1093,8 +1093,8 @@ impl WorkspaceApp {
             let summary = call
                 .get("summary")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or_else(|| ai_tool_status_label(status))
-                .to_string();
+                .map(str::to_string)
+                .unwrap_or_else(|| self.ai_tool_status_label(status));
             let result = call.get("result").filter(|value| !value.is_null());
             let bypass_approval = result
                 .and_then(|value| value.pointer("/meta/approvalMode"))
@@ -1222,10 +1222,10 @@ impl WorkspaceApp {
                         .min_w_0()
                         .text_size(px(10.0))
                         .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
-                        .child("需要确认后执行"),
+                        .child(self.i18n.t("ai.tool_use.approval_required")),
                     ai_tool_approval_button(
                         &self.tokens,
-                        "允许",
+                        self.i18n.t("ai.tool_use.approve"),
                         true,
                         Self::render_lucide_icon(LucideIcon::Check, 11.0, rgb(0x22c55e)),
                     )
@@ -1238,7 +1238,7 @@ impl WorkspaceApp {
                     ),
                     ai_tool_approval_button(
                         &self.tokens,
-                        "拒绝",
+                        self.i18n.t("ai.tool_use.reject"),
                         false,
                         Self::render_lucide_icon(LucideIcon::X, 11.0, rgb(0xef4444)),
                     )
@@ -1567,7 +1567,20 @@ impl WorkspaceApp {
         }
     }
 
-
+    fn ai_tool_status_label(&self, status: AiToolStatus) -> String {
+        // Status fallback text must follow the active UI locale when the
+        // streamed tool call has not provided a model-facing summary yet.
+        let key = match status {
+            AiToolStatus::Pending => "ai.tool_use.status.pending",
+            AiToolStatus::PendingApproval => "ai.tool_use.status.pending_approval",
+            AiToolStatus::Approved => "ai.tool_use.status.approved",
+            AiToolStatus::Running => "ai.tool_use.status.running",
+            AiToolStatus::Completed => "ai.tool_use.status.completed",
+            AiToolStatus::Error => "ai.tool_use.status.error",
+            AiToolStatus::Rejected => "ai.tool_use.status.rejected",
+        };
+        self.i18n.t(key)
+    }
 }
 
 fn ai_message_element_seed(value: &str) -> u64 {
@@ -1720,18 +1733,6 @@ fn ai_tool_risk_from_value(value: Option<&serde_json::Value>, tool_name: &str) -
             }
             _ => AiToolRisk::Read,
         },
-    }
-}
-
-fn ai_tool_status_label(status: AiToolStatus) -> &'static str {
-    match status {
-        AiToolStatus::Pending => "等待执行",
-        AiToolStatus::PendingApproval => "等待确认",
-        AiToolStatus::Approved => "已允许",
-        AiToolStatus::Running => "执行中",
-        AiToolStatus::Completed => "已完成",
-        AiToolStatus::Error => "执行失败",
-        AiToolStatus::Rejected => "已拒绝",
     }
 }
 

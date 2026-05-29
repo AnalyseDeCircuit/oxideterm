@@ -1,6 +1,7 @@
 {
   "app": {
-    "name": "OxideTerm"
+    "name": "OxideTerm",
+    "shellLauncher": "Inicializador de shell"
   },
   "language": {
     "english": "English",
@@ -96,7 +97,9 @@
     "cmd_reload_window": "Recarregar janela",
     "quick_connect_alias_not_found": "Alias de config SSH '{{alias}}' não encontrado",
     "quick_connect_resolve_failed": "Erro ao resolver alias '{{alias}}'",
-    "footer_hint": "Pressione Esc para fechar"
+    "footer_hint": "Pressione Esc para fechar",
+    "session_ssh_terminal": "Terminal SSH",
+    "cmd_open_cloud_sync": "Abrir sincronização na nuvem"
   },
   "common": {
     "enabled": "Ativado",
@@ -105,7 +108,11 @@
       "cancel": "Cancelar",
       "confirm": "Confirmar",
       "delete": "Excluir"
-    }
+    },
+    "cancel": "Cancelar",
+    "delete": "Excluir",
+    "no": "Não",
+    "yes": "Sim"
   },
   "topology": {
     "button_title": "Visualização de topologia",
@@ -418,7 +425,12 @@
         "access_key_id": "Access key ID",
         "secret_access_key": "Secret access key",
         "session_token": "Token de sessão opcional"
-      }
+      },
+      "history_empty": "Ainda não há histórico de sincronização.",
+      "native_description": "Sincronização criptografada e auto-hospedada para OxideTerm.",
+      "native_scope_summary": "Seções do app sincronizadas por padrão: {{sections}}.",
+      "native_service_pending": "O serviço de sincronização integrado está sendo conectado à camada de compatibilidade.",
+      "native_service_ready": "O serviço de sincronização integrado está conectado à camada de compatibilidade."
     },
     "refresh": "Atualizar",
     "open_plugins_dir": "Abrir diretório",
@@ -494,7 +506,20 @@
     "clear_logs": "Limpar",
     "no_logs": "Sem logs",
     "tab_not_available": "Visualização da aba do plugin não disponível",
-    "tab_crashed": "A aba do plugin travou"
+    "tab_crashed": "A aba do plugin travou",
+    "detail_author": "Autor",
+    "registry_capabilities": "Recursos: {{capabilities}}",
+    "reload_success": "{{name}} verificado novamente.",
+    "enable_success": "{{name}} ativado.",
+    "disable_success": "{{name}} desativado.",
+    "load_failed_default": "Falha ao carregar o plugin.",
+    "open_dir_create_failed": "Falha ao criar o diretório de plugins: {{message}}",
+    "open_dir_failed": "Falha ao abrir o diretório de plugins: {{message}}",
+    "open_dir_status_failed": "Falha ao abrir o diretório de plugins: {{status}}",
+    "command_runtime_pending": "Aguardando o runtime nativo do plugin",
+    "command_detail": "Comando do plugin",
+    "keybinding_detail": "Atalho de teclado do plugin",
+    "terminal_shortcut_pending": "Atalho de terminal do plugin aguardando o runtime"
   },
   "onboarding": {
     "welcome": "Bem-vindo ao OxideTerm",

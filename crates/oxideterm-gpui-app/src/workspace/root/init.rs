@@ -276,6 +276,7 @@ impl WorkspaceApp {
             )
             .measure_all(),
             settings_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            settings_data_directory_confirm: None,
             // Execution profiles live inside the OxideSens section chrome, but
             // user-created profile counts are unbounded. Keep the rows on their
             // own ListState so scrolling the settings page does not rebuild all

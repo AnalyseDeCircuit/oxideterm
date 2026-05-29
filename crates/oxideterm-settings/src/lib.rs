@@ -20,6 +20,7 @@ pub use oxide_snapshot::{
 };
 pub use oxideterm_portable_runtime as portable_runtime;
 pub use store::{
-    SETTINGS_FILENAME, SettingsLoadResult, SettingsSaveResult, SettingsStore,
-    default_settings_path, save_settings_to_path,
+    DataDirectoryCheck, DataDirectoryInfo, SETTINGS_FILENAME, SettingsLoadResult,
+    SettingsSaveResult, SettingsStore, check_data_directory, data_directory_info,
+    default_settings_path, reset_data_directory, save_settings_to_path, set_data_directory,
 };

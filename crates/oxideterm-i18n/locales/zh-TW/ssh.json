@@ -129,6 +129,11 @@
       "connect": "連線",
       "connecting": "連線中...",
       "parent_not_ready": "父節點尚未連線"
+    },
+    "errors": {
+      "chain_failed_title": "連線鏈失敗",
+      "chain_failed_desc": "第 {{position}}/{{total}} 跳失敗：{{error}}",
+      "generic_title": "連線失敗"
     }
   },
   "connections": {

@@ -142,40 +142,54 @@ impl WorkspaceApp {
         let mut items = Vec::new();
         let connection_count = oxide_export_connection_count(dialog);
         if connection_count > 0 {
-            items.push(format!("{connection_count} 个连接"));
+            items.push(
+                self.i18n
+                    .t("modals.export.content_summary_connections")
+                    .replace("{{count}}", &connection_count.to_string()),
+            );
         }
         if dialog.include_forwards && !dialog.selected_forward_ids.is_empty() {
-            items.push(format!("{} 个已保存的转发", dialog.selected_forward_ids.len()));
+            items.push(
+                self.i18n
+                    .t("modals.export.content_summary_forwards")
+                    .replace("{{count}}", &dialog.selected_forward_ids.len().to_string()),
+            );
         }
         if dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty() {
             let labels = OXIDE_APP_SETTINGS_SECTIONS
                 .iter()
                 .filter(|section| dialog.selected_app_settings_sections.contains(**section))
-                .map(|section| oxide_settings_section_label(section))
+                .map(|section| oxide_settings_section_label(section, &self.i18n))
                 .collect::<Vec<_>>()
                 .join(", ");
-            items.push(format!("应用设置: {labels}"));
+            items.push(format!(
+                "{}: {labels}",
+                self.i18n.t("modals.export.content_summary_app_settings")
+            ));
         }
         let selected_plugin_setting_count = oxide_export_selected_plugin_setting_count(dialog);
         if dialog.include_plugin_settings && selected_plugin_setting_count > 0 {
-            items.push(format!(
-                "{} 个插件，{} 项设置",
-                dialog.selected_plugin_ids.len(),
-                selected_plugin_setting_count
-            ));
+            items.push(
+                self.i18n
+                    .t("modals.export.content_summary_plugin_settings")
+                    .replace("{{plugins}}", &dialog.selected_plugin_ids.len().to_string())
+                    .replace("{{count}}", &selected_plugin_setting_count.to_string()),
+            );
         }
         if dialog.include_portable_secrets {
-            items.push(format!(
-                "便携秘密项：{} 项",
-                dialog
+            let count = dialog
                     .preflight
                     .as_ref()
                     .map(|preflight| preflight.portable_secret_count)
-                    .unwrap_or(0)
-            ));
+                    .unwrap_or(0);
+            items.push(
+                self.i18n
+                    .t("modals.export.content_summary_portable_secrets")
+                    .replace("{{count}}", &count.to_string()),
+            );
         }
         if dialog.embed_keys {
-            items.push("SSH 私钥将被嵌入".to_string());
+            items.push(self.i18n.t("modals.export.content_summary_embed_keys"));
         }
         let content = if items.is_empty() {
             vec![
@@ -185,7 +199,7 @@ impl WorkspaceApp {
                     .child(self.render_selectable_text_scoped(
                         "oxide-export-content-summary-empty",
                         (),
-                        "尚未选择导出内容",
+                        self.i18n.t("modals.export.app_settings_no_sections"),
                         self.tokens.ui.text_muted,
                         cx,
                     ))
@@ -210,7 +224,11 @@ impl WorkspaceApp {
                 })
                 .collect()
         };
-        self.render_oxide_card(Some((LucideIcon::Shield, "所选内容".to_string())), content, cx)
+        self.render_oxide_card(
+            Some((LucideIcon::Shield, self.i18n.t("modals.export.content_summary_title"))),
+            content,
+            cx,
+        )
     }
 
     fn render_oxide_security_notice(
@@ -218,31 +236,42 @@ impl WorkspaceApp {
         dialog: &OxideExportDialogState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let yes_label = self.i18n.t("common.yes");
+        let no_label = self.i18n.t("common.no");
+        let app_settings_label = if dialog.include_app_settings {
+            yes_label.as_str()
+        } else {
+            no_label.as_str()
+        };
+        let plugin_settings_label =
+            if dialog.include_plugin_settings && oxide_export_selected_plugin_setting_count(dialog) > 0
+            {
+                yes_label.as_str()
+            } else {
+                no_label.as_str()
+            };
+        let portable_secrets_label = if dialog.include_portable_secrets {
+            yes_label.as_str()
+        } else {
+            no_label.as_str()
+        };
         self.render_oxide_tone_notice(
             OXIDE_BLUE_500,
-            "🔒 安全提示".to_string(),
+            self.i18n.t("modals.export.security_notice"),
             vec![
-                "文件使用 ChaCha20-Poly1305 加密，军事级安全".to_string(),
-                "密码使用 Argon2id 派生 (256MB, 4 轮)".to_string(),
-                "文件包含所选连接、转发规则和密钥口令".to_string(),
-                format!(
-                    "包含全局设置：{}；包含插件偏好：{}",
-                    if dialog.include_app_settings { "是" } else { "否" },
-                    if dialog.include_plugin_settings
-                        && oxide_export_selected_plugin_setting_count(dialog) > 0
-                    {
-                        "是"
-                    } else {
-                        "否"
-                    }
-                ),
-                format!(
-                    "包含便携秘密项：{}",
-                    if dialog.include_portable_secrets { "是" } else { "否" }
-                ),
-                "保存的服务器密码不会写入 .oxide 文件".to_string(),
-                "会话数据不会包含——仅连接配置".to_string(),
-                "请妥善保管加密密码，丢失无法恢复".to_string(),
+                self.i18n.t("modals.export.security_encryption"),
+                self.i18n.t("modals.export.security_kdf"),
+                self.i18n.t("modals.export.security_contains"),
+                self.i18n
+                    .t("modals.export.security_settings")
+                    .replace("{{app}}", app_settings_label)
+                    .replace("{{plugin}}", plugin_settings_label),
+                self.i18n
+                    .t("modals.export.security_portable_secrets")
+                    .replace("{{portable}}", portable_secrets_label),
+                self.i18n.t("modals.export.security_passwords_excluded"),
+                self.i18n.t("modals.export.security_no_session"),
+                self.i18n.t("modals.export.security_keep_safe"),
             ],
             cx,
         )
@@ -417,8 +446,8 @@ impl WorkspaceApp {
             .progress_stage
             .as_ref()
             .filter(|_| dialog.busy)
-            .map(|progress| oxide_export_progress_label(&progress.stage, dialog.embed_keys))
-            .unwrap_or_else(|| "导出".to_string());
+            .map(|progress| oxide_export_progress_label(&progress.stage, dialog.embed_keys, &self.i18n))
+            .unwrap_or_else(|| self.i18n.t("modals.export.export"));
         self.render_oxide_footer(
             dialog.busy,
             !oxide_export_has_selected_content(dialog),

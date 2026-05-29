@@ -33,7 +33,8 @@
       "activity": "アクティビティ",
       "event_log": "イベントログ",
       "notifications": "通知",
-      "saved_connections": "保存済み接続"
+      "saved_connections": "保存済み接続",
+      "forwarding": "ポート転送"
     },
     "tooltips": {
       "settings": "設定",

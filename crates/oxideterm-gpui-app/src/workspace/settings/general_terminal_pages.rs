@@ -18,13 +18,8 @@ impl WorkspaceApp {
                 vec![self.language_select_row(settings.general.language, cx)],
             ),
             1 => {
-                let data_dir = self
-                    .settings_store
-                    .path()
-                    .parent()
-                    .unwrap_or_else(|| self.settings_store.path())
-                    .display()
-                    .to_string();
+                let data_dir_info = self.settings_data_directory_info();
+                let data_dir = data_dir_info.path.display().to_string();
                 self.plain_settings_card(vec![
                     self.card_title("settings_view.general.data_directory"),
                     div()
@@ -63,12 +58,12 @@ impl WorkspaceApp {
                                 .truncate()
                                 .child(data_dir),
                         )
-                        .child(
-                            self.outline_button(
-                                self.i18n.t("settings_view.general.change"),
-                                ButtonSize::Sm,
-                            ),
-                        )
+                        .when(data_dir_info.can_change, |row| {
+                            row.child(self.settings_data_directory_change_button(cx))
+                        })
+                        .when(data_dir_info.can_change && data_dir_info.is_custom, |row| {
+                            row.child(self.settings_data_directory_reset_button(cx))
+                        })
                         .into_any_element(),
                     div()
                         .text_size(px(self.tokens.metrics.ui_text_xs))
@@ -262,6 +257,206 @@ impl WorkspaceApp {
             }
             _ => div().into_any_element(),
         }
+    }
+
+    fn settings_data_directory_info(&self) -> oxideterm_settings::DataDirectoryInfo {
+        oxideterm_settings::data_directory_info().unwrap_or_else(|_| {
+            let path = self
+                .settings_store
+                .path()
+                .parent()
+                .unwrap_or_else(|| self.settings_store.path())
+                .to_path_buf();
+            oxideterm_settings::DataDirectoryInfo {
+                default_path: path.clone(),
+                path,
+                is_custom: false,
+                is_portable: false,
+                can_change: false,
+            }
+        })
+    }
+
+    fn settings_data_directory_change_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.workspace_toolbar_action_button(
+            self.i18n.t("settings_view.general.change"),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.pick_settings_data_directory(cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn settings_data_directory_reset_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.workspace_toolbar_action_button(
+            self.i18n.t("settings_view.general.reset_to_default"),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.settings_data_directory_confirm = Some(DataDirectoryConfirm::Reset);
+                this.reset_standard_confirm_focus();
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn pick_settings_data_directory(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(SharedString::from(
+                self.i18n.t("settings_view.general.select_data_directory"),
+            )),
+        });
+        cx.spawn(async move |weak, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = weak.update(cx, |this, cx| {
+                match oxideterm_settings::check_data_directory(&path) {
+                    Ok(check) if check.has_existing_data => {
+                        // Tauri asks for a second confirmation before writing
+                        // bootstrap.json when known OxideTerm data already
+                        // exists in the target directory.
+                        this.settings_data_directory_confirm =
+                            Some(DataDirectoryConfirm::Conflict {
+                                path,
+                                files_found: check.files_found,
+                            });
+                        this.reset_standard_confirm_focus();
+                        cx.notify();
+                    }
+                    Ok(_) => this.apply_settings_data_directory(path, cx),
+                    Err(error) => {
+                        this.push_ai_settings_toast(
+                            error.to_string(),
+                            TerminalNoticeVariant::Error,
+                        );
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn apply_settings_data_directory(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        match oxideterm_settings::set_data_directory(&path) {
+            Ok(()) => {
+                self.push_ai_settings_toast(
+                    self.i18n.t("settings_view.general.data_directory_changed"),
+                    TerminalNoticeVariant::Success,
+                );
+            }
+            Err(error) => {
+                self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error);
+            }
+        }
+        cx.notify();
+    }
+
+    fn reset_settings_data_directory(&mut self, cx: &mut Context<Self>) {
+        match oxideterm_settings::reset_data_directory() {
+            Ok(()) => {
+                self.push_ai_settings_toast(
+                    self.i18n.t("settings_view.general.data_directory_reset"),
+                    TerminalNoticeVariant::Success,
+                );
+            }
+            Err(error) => {
+                self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error);
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn cancel_settings_data_directory_confirm(&mut self, cx: &mut Context<Self>) {
+        self.settings_data_directory_confirm = None;
+        self.clear_standard_confirm_focus();
+        cx.notify();
+    }
+
+    pub(super) fn confirm_settings_data_directory(&mut self, cx: &mut Context<Self>) {
+        let Some(confirm) = self.settings_data_directory_confirm.take() else {
+            return;
+        };
+        self.clear_standard_confirm_focus();
+        match confirm {
+            DataDirectoryConfirm::Conflict { path, .. } => {
+                self.apply_settings_data_directory(path, cx);
+            }
+            DataDirectoryConfirm::Reset => {
+                self.reset_settings_data_directory(cx);
+            }
+        }
+    }
+
+    pub(super) fn render_settings_data_directory_confirm_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let confirm = self.settings_data_directory_confirm.as_ref()?;
+        let (title_key, description) = match confirm {
+            DataDirectoryConfirm::Conflict { files_found, .. } => (
+                "settings_view.general.data_directory_conflict",
+                self.i18n
+                    .t("settings_view.general.data_directory_conflict_detail")
+                    .replace("{{files}}", &files_found.join(", ")),
+            ),
+            DataDirectoryConfirm::Reset => (
+                "settings_view.general.reset_data_directory",
+                self.i18n
+                    .t("settings_view.general.reset_data_directory_confirm"),
+            ),
+        };
+        Some(confirm_dialog_with_focus(
+            &self.tokens,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Default,
+                title: div().child(self.i18n.t(title_key)).into_any_element(),
+                description: Some(div().child(description).into_any_element()),
+                cancel_label: div()
+                    .child(self.i18n.t("common.actions.cancel"))
+                    .into_any_element(),
+                confirm_label: div()
+                    .child(self.i18n.t("common.actions.confirm"))
+                    .into_any_element(),
+            },
+            self.standard_confirm_focus(),
+            cx.listener(|this, _event, _window, cx| {
+                this.cancel_settings_data_directory_confirm(cx);
+                cx.stop_propagation();
+            }),
+            cx.listener(|this, _event, _window, cx| {
+                this.confirm_settings_data_directory(cx);
+                cx.stop_propagation();
+            }),
+        ))
     }
 
     fn settings_terminal_section(

@@ -1,6 +1,7 @@
 {
   "app": {
-    "name": "OxideTerm"
+    "name": "OxideTerm",
+    "shellLauncher": "셸 실행기"
   },
   "language": {
     "english": "English",
@@ -96,7 +97,9 @@
     "cmd_reload_window": "창 새로고침",
     "quick_connect_alias_not_found": "SSH config alias '{{alias}}'을(를) 찾을 수 없음",
     "quick_connect_resolve_failed": "SSH config alias '{{alias}}' 해석 실패",
-    "footer_hint": "Esc를 눌러 닫기"
+    "footer_hint": "Esc를 눌러 닫기",
+    "session_ssh_terminal": "SSH 터미널",
+    "cmd_open_cloud_sync": "클라우드 동기화 열기"
   },
   "common": {
     "enabled": "활성화됨",
@@ -105,7 +108,11 @@
       "cancel": "취소",
       "confirm": "확인",
       "delete": "삭제"
-    }
+    },
+    "cancel": "취소",
+    "delete": "삭제",
+    "no": "아니요",
+    "yes": "예"
   },
   "topology": {
     "button_title": "토폴로지 뷰",
@@ -418,7 +425,12 @@
         "access_key_id": "Access Key ID",
         "secret_access_key": "Secret Access Key",
         "session_token": "선택 사항 Session Token"
-      }
+      },
+      "history_empty": "아직 동기화 기록이 없습니다.",
+      "native_description": "OxideTerm용 암호화된 자체 호스팅 동기화입니다.",
+      "native_scope_summary": "기본으로 동기화되는 앱 섹션: {{sections}}.",
+      "native_service_pending": "내장 동기화 서비스를 호환성 계층에 연결하는 중입니다.",
+      "native_service_ready": "내장 동기화 서비스가 호환성 계층에 연결되었습니다."
     },
     "refresh": "새로고침",
     "open_plugins_dir": "디렉토리 열기",
@@ -494,7 +506,20 @@
     "clear_logs": "지우기",
     "no_logs": "로그 없음",
     "tab_not_available": "플러그인 탭 뷰를 사용할 수 없습니다",
-    "tab_crashed": "플러그인 탭이 충돌했습니다"
+    "tab_crashed": "플러그인 탭이 충돌했습니다",
+    "detail_author": "작성자",
+    "registry_capabilities": "기능: {{capabilities}}",
+    "reload_success": "{{name}} 다시 스캔되었습니다.",
+    "enable_success": "{{name}} 활성화됨.",
+    "disable_success": "{{name}} 비활성화됨.",
+    "load_failed_default": "플러그인을 로드하지 못했습니다.",
+    "open_dir_create_failed": "플러그인 디렉터리를 만들 수 없습니다: {{message}}",
+    "open_dir_failed": "플러그인 디렉터리를 열 수 없습니다: {{message}}",
+    "open_dir_status_failed": "플러그인 디렉터리를 열 수 없습니다: {{status}}",
+    "command_runtime_pending": "네이티브 플러그인 런타임 대기 중",
+    "command_detail": "플러그인 명령",
+    "keybinding_detail": "플러그인 키 바인딩",
+    "terminal_shortcut_pending": "플러그인 터미널 바로가기가 런타임을 기다리는 중"
   },
   "onboarding": {
     "welcome": "OxideTerm에 오신 것을 환영합니다",

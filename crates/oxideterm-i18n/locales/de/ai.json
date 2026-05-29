@@ -240,7 +240,16 @@
       "policy_reason_bypass": "Bypass mode approved a dangerous command",
       "policy_reason_destructive": "Dangerous command requires approval",
       "policy_reason_auto_approved": "Allowed by tool policy",
-      "policy_reason_requires_approval": "Approval required by tool policy"
+      "policy_reason_requires_approval": "Approval required by tool policy",
+      "status": {
+        "pending": "Ausstehend",
+        "pending_approval": "Wartet auf Freigabe",
+        "approved": "Freigegeben",
+        "running": "Wird ausgeführt",
+        "completed": "Abgeschlossen",
+        "error": "Fehlgeschlagen",
+        "rejected": "Abgelehnt"
+      }
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "Die Tool-Nutzung ist für diesen Chat deaktiviert, und das Modell hat ein Pseudo-Tool-Protokoll ausgegeben. OxideSens hat eine Wiederholung in Klartext angefordert.",

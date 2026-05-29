@@ -1,6 +1,7 @@
 {
   "app": {
-    "name": "OxideTerm"
+    "name": "OxideTerm",
+    "shellLauncher": "Shell Launcher"
   },
   "language": {
     "english": "English",
@@ -97,7 +98,8 @@
     "cmd_reload_window": "Reload Window",
     "quick_connect_alias_not_found": "SSH config alias '{{alias}}' not found",
     "quick_connect_resolve_failed": "Failed to resolve SSH config alias '{{alias}}'",
-    "footer_hint": "Press Esc to close"
+    "footer_hint": "Press Esc to close",
+    "session_ssh_terminal": "SSH Terminal"
   },
   "shortcuts_modal": {
     "title": "Keyboard Shortcuts",
@@ -113,7 +115,11 @@
       "cancel": "Cancel",
       "confirm": "Confirm",
       "delete": "Delete"
-    }
+    },
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "no": "No",
+    "yes": "Yes"
   },
   "topology": {
     "button_title": "Topology View",
@@ -413,8 +419,8 @@
         "session_token": "Optional session token"
       },
       "native_description": "Encrypted self-hosted sync for OxideTerm.",
-      "native_service_pending": "The native service is being wired to the built-in compatibility layer.",
-      "native_service_ready": "The built-in native sync service is connected to the compatibility layer.",
+      "native_service_pending": "The built-in sync service is being connected to the compatibility layer.",
+      "native_service_ready": "The built-in sync service is connected to the compatibility layer.",
       "native_scope_summary": "Default synced app sections: {{sections}}.",
       "history_empty": "No sync history yet."
     },
@@ -500,7 +506,20 @@
       "disabled": "Disabled"
     },
     "tab_not_available": "Plugin tab view not available",
-    "tab_crashed": "Plugin tab crashed"
+    "tab_crashed": "Plugin tab crashed",
+    "detail_author": "Author",
+    "registry_capabilities": "Capabilities: {{capabilities}}",
+    "reload_success": "{{name}} rescanned.",
+    "enable_success": "{{name}} enabled.",
+    "disable_success": "{{name}} disabled.",
+    "load_failed_default": "Plugin failed to load.",
+    "open_dir_create_failed": "Failed to create plugins directory: {{message}}",
+    "open_dir_failed": "Failed to open plugins directory: {{message}}",
+    "open_dir_status_failed": "Failed to open plugins directory: {{status}}",
+    "command_runtime_pending": "Waiting for native plugin runtime",
+    "command_detail": "Plugin command",
+    "keybinding_detail": "Plugin keybinding",
+    "terminal_shortcut_pending": "Plugin terminal shortcut waiting for runtime"
   },
   "onboarding": {
     "welcome": "Welcome to OxideTerm",

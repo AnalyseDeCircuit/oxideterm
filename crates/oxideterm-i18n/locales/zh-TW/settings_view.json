@@ -48,7 +48,8 @@
       "local": "本機終端機",
       "reconnect": "自動重連",
       "help": "說明與關於",
-      "keybindings": "快捷鍵"
+      "keybindings": "快捷鍵",
+      "graphics": "圖形"
     },
     "general": {
       "title": "一般",
@@ -123,7 +124,8 @@
       "cli_not_bundled": "此建置不包含 CLI 二進位檔案",
       "cli_checking": "正在檢查...",
       "cli_status_error": "狀態錯誤",
-      "cli_uninstalled": "已解除安裝"
+      "cli_uninstalled": "已解除安裝",
+      "update_channel": "更新通道"
     },
     "terminal": {
       "title": "終端機設定",

@@ -287,23 +287,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn outline_button(&self, label: String, size: ButtonSize) -> AnyElement {
-        // These settings rows currently render Tauri outline button chrome
-        // without a wired native action. Keep them on the plain Button primitive
-        // so real action buttons can be audited through workspace_toolbar_action_button.
-        button::button_with(
-            &self.tokens,
-            label,
-            ButtonOptions {
-                variant: ButtonVariant::Outline,
-                size,
-                radius: ButtonRadius::Md,
-                disabled: false,
-            },
-        )
-        .into_any_element()
-    }
-
     fn standard_footer_action_button(
         &self,
         label: String,

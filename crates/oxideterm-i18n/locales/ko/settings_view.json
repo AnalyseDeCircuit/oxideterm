@@ -48,7 +48,8 @@
       "local": "로컬 터미널",
       "reconnect": "자동 재연결",
       "help": "도움말 및 정보",
-      "keybindings": "키 바인딩"
+      "keybindings": "키 바인딩",
+      "graphics": "그래픽"
     },
     "general": {
       "title": "일반",
@@ -123,7 +124,8 @@
       "cli_not_bundled": "이 빌드에는 CLI 바이너리가 포함되어 있지 않습니다",
       "cli_checking": "확인 중...",
       "cli_status_error": "상태 오류",
-      "cli_uninstalled": "제거됨"
+      "cli_uninstalled": "제거됨",
+      "update_channel": "업데이트 채널"
     },
     "terminal": {
       "title": "터미널 설정",

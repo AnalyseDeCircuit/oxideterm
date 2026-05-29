@@ -1,14 +1,17 @@
-fn oxide_settings_section_label(section: &str) -> &'static str {
+fn oxide_settings_section_label(section: &str, i18n: &oxideterm_i18n::I18n) -> String {
+    // Keep .oxide section names on the same translation keys as the Tauri
+    // import/export modals so sectioned settings previews do not leak Chinese.
     match section {
-        "general" => "常规",
-        "terminalAppearance" => "终端外观",
-        "terminalBehavior" => "终端行为",
-        "appearance" => "外观",
-        "connections" => "连接",
-        "fileAndEditor" => "文件与编辑器",
-        "ai" => "OxideSens",
-        "localTerminal" => "本地终端",
-        _ => "设置",
+        "general" => i18n.t("settings_view.general.title"),
+        "terminalAppearance" => i18n.t("modals.export.app_settings_section_terminal_appearance"),
+        "terminalBehavior" => i18n.t("modals.export.app_settings_section_terminal_behavior"),
+        "appearance" => i18n.t("settings_view.appearance.title"),
+        "connections" => i18n.t("settings_view.connections.title"),
+        "fileAndEditor" => i18n.t("modals.export.app_settings_section_file_editor"),
+        "ai" => i18n.t("settings_view.tabs.ai"),
+        "localTerminal" => i18n.t("settings_view.local_terminal.title"),
+        "legacy" => i18n.t("modals.import.app_settings_legacy_title"),
+        _ => section.to_string(),
     }
 }
 
@@ -79,42 +82,53 @@ fn oxide_password_strength(password: &str) -> OxidePasswordStrength {
     }
 }
 
-fn oxide_password_strength_label(strength: OxidePasswordStrength) -> &'static str {
+fn oxide_password_strength_label(
+    strength: OxidePasswordStrength,
+    i18n: &oxideterm_i18n::I18n,
+) -> String {
     match strength {
-        OxidePasswordStrength::Weak => "密码较弱，建议使用 12+ 位并混合大小写字母、数字和符号",
-        OxidePasswordStrength::Fair => "中等",
-        OxidePasswordStrength::Strong => "强",
+        OxidePasswordStrength::Weak => i18n.t("modals.export.password_strength_weak"),
+        OxidePasswordStrength::Fair => i18n.t("modals.export.password_strength_fair"),
+        OxidePasswordStrength::Strong => i18n.t("modals.export.password_strength_strong"),
     }
 }
 
-fn oxide_export_progress_label(stage: &str, embed_keys: bool) -> String {
-    match stage {
-        "collecting_connections" if embed_keys => "读取密钥...",
-        "serializing_file" => "写入文件...",
-        "done" => "完成！",
-        _ => "加密中...",
-    }
-    .to_string()
+fn oxide_export_progress_label(
+    stage: &str,
+    embed_keys: bool,
+    i18n: &oxideterm_i18n::I18n,
+) -> String {
+    let key = match stage {
+        "collecting_connections" if embed_keys => "modals.export.stage_reading_keys",
+        "serializing_file" => "modals.export.stage_writing",
+        "done" => "modals.export.stage_done",
+        _ => "modals.export.stage_encrypting",
+    };
+    i18n.t(key)
 }
 
-fn oxide_import_progress_label(stage: &str, total: usize) -> String {
-    match stage {
-        "parsing_file" => "正在解析文件...",
+fn oxide_import_progress_label(
+    stage: &str,
+    total: usize,
+    i18n: &oxideterm_i18n::I18n,
+) -> String {
+    let key = match stage {
+        "parsing_file" => "modals.import.stage_parsing",
         "deriving_key" | "decrypting_payload" | "deserializing_payload" | "verifying_checksum" => {
-            "正在解密..."
+            "modals.import.stage_decrypting"
         }
         "collecting_existing" | "building_preview" | "analyzing_preview" if total == 8 => {
-            "正在分析导入预览..."
+            "modals.import.stage_analyzing"
         }
         "filtering_selection" | "collecting_existing" | "preparing_connections" => {
-            "正在准备导入..."
+            "modals.import.stage_preparing"
         }
-        "applying_connections" => "正在应用更改...",
-        "saving_config" => "正在保存导入的数据...",
-        "done" => "完成!",
-        _ => "正在解密...",
-    }
-    .to_string()
+        "applying_connections" => "modals.import.stage_applying",
+        "saving_config" => "modals.import.stage_saving",
+        "done" => "modals.import.stage_done",
+        _ => "modals.import.stage_decrypting",
+    };
+    i18n.t(key)
 }
 
 fn oxide_format_bytes(bytes: u64) -> String {
@@ -248,63 +262,65 @@ fn import_preview_selectable_names(preview: &ImportPreview) -> HashSet<String> {
     names
 }
 
-fn oxide_settings_field_label(field: &str) -> String {
+fn oxide_settings_field_label(field: &str, i18n: &oxideterm_i18n::I18n) -> String {
+    // These mappings mirror Tauri's OxideImportModal field formatter.
     match field {
-        "language" => "语言",
-        "updateChannel" => "更新通道",
-        "theme" => "主题",
-        "fontFamily" => "字体",
-        "customFontFamily" => "自定义字体",
-        "fontSize" => "字号",
-        "lineHeight" => "行高",
-        "cursorStyle" => "光标样式",
-        "cursorBlink" => "光标闪烁",
-        "backgroundEnabled" => "背景图",
-        "backgroundImage" => "背景图片",
-        "backgroundOpacity" => "背景透明度",
-        "backgroundBlur" => "背景模糊",
-        "backgroundFit" => "背景适配",
-        "backgroundEnabledTabs" => "背景启用范围",
-        "scrollback" => "回滚行数",
-        "renderer" => "渲染器",
-        "adaptiveRenderer" => "自适应渲染",
-        "showFpsOverlay" => "FPS 浮层",
-        "pasteProtection" => "粘贴保护",
-        "smartCopy" => "智能复制",
-        "osc52Clipboard" => "OSC52 剪贴板",
-        "copyOnSelect" => "选中即复制",
-        "middleClickPaste" => "中键粘贴",
-        "selectionRequiresShift" => "Shift 选择",
-        "sidebarCollapsedDefault" => "侧边栏默认折叠",
-        "uiDensity" => "UI 密度",
-        "borderRadius" => "圆角",
-        "uiFontFamily" => "界面字体",
-        "animationSpeed" => "动画速度",
-        "frostedGlass" => "磨砂玻璃",
-        "connectionDefaults.username" => "默认用户名",
-        "connectionDefaults.port" => "默认端口",
-        "reconnect.enabled" => "自动重连",
-        "reconnect.maxAttempts" => "最大重试次数",
-        "reconnect.baseDelayMs" => "基础延迟",
-        "reconnect.maxDelayMs" => "最大延迟",
-        "connectionPool.idleTimeoutSecs" => "空闲超时",
-        "sftp.maxConcurrentTransfers" => "并发传输",
-        "sftp.speedLimitEnabled" => "限速",
-        "sftp.speedLimitKBps" => "速度限制",
-        "sftp.conflictAction" => "冲突策略",
-        "ide.autoSave" => "自动保存",
-        "ide.lineHeight" => "编辑器行高",
-        "ide.agentMode" => "Agent 模式",
-        "ide.wordWrap" => "自动换行",
-        "defaultShellId" => "默认 Shell",
-        "recentShellIds" => "最近 Shell",
-        "defaultCwd" => "默认目录",
-        "gitBashPath" => "Git Bash 路径",
-        "loadShellProfile" => "加载 Shell profile",
-        "ohMyPoshEnabled" => "Oh My Posh",
-        "ohMyPoshTheme" => "Oh My Posh 主题",
-        "customEnvVars" => "环境变量",
-        _ => field,
+        "language" => i18n.t("settings_view.general.language"),
+        "updateChannel" => i18n.t("settings_view.general.update_channel"),
+        "theme" => i18n.t("settings_view.appearance.theme"),
+        "fontFamily" => i18n.t("settings_view.terminal.font_family"),
+        "customFontFamily" => i18n.t("settings_view.terminal.custom_font_stack"),
+        "fontSize" => i18n.t("settings_view.terminal.font_size"),
+        "lineHeight" => i18n.t("settings_view.terminal.line_height"),
+        "cursorStyle" => i18n.t("settings_view.terminal.cursor_style"),
+        "cursorBlink" => i18n.t("settings_view.terminal.cursor_blink"),
+        "backgroundEnabled" => i18n.t("settings_view.terminal.bg_enabled"),
+        "backgroundImage" => i18n.t("settings_view.terminal.bg_label"),
+        "backgroundOpacity" => i18n.t("settings_view.terminal.bg_opacity"),
+        "backgroundBlur" => i18n.t("settings_view.terminal.bg_blur"),
+        "backgroundFit" => i18n.t("settings_view.terminal.bg_fit"),
+        "backgroundEnabledTabs" => i18n.t("settings_view.terminal.bg_tabs"),
+        "scrollback" => i18n.t("settings_view.terminal.scrollback"),
+        "renderer" => i18n.t("settings_view.terminal.renderer"),
+        "adaptiveRenderer" => i18n.t("settings_view.terminal.adaptive_renderer"),
+        "showFpsOverlay" => i18n.t("settings_view.terminal.show_fps_overlay"),
+        "pasteProtection" => i18n.t("settings_view.terminal.paste_protection"),
+        "smartCopy" => i18n.t("settings_view.terminal.smart_copy"),
+        "osc52Clipboard" => i18n.t("settings_view.terminal.osc52_clipboard"),
+        "copyOnSelect" => i18n.t("settings_view.terminal.copy_on_select"),
+        "middleClickPaste" => i18n.t("settings_view.terminal.middle_click_paste"),
+        "selectionRequiresShift" => i18n.t("settings_view.terminal.selection_requires_shift"),
+        "sidebarCollapsedDefault" => i18n.t("modals.settings.appearance.sidebar_collapse"),
+        "uiDensity" => i18n.t("settings_view.appearance.density"),
+        "borderRadius" => i18n.t("settings_view.appearance.border_radius"),
+        "uiFontFamily" => i18n.t("settings_view.appearance.ui_font"),
+        "animationSpeed" => i18n.t("settings_view.appearance.animation"),
+        "frostedGlass" => i18n.t("settings_view.appearance.frosted_glass"),
+        "connectionDefaults.username" => i18n.t("settings_view.connections.default_username"),
+        "connectionDefaults.port" => i18n.t("settings_view.connections.default_port"),
+        "reconnect.enabled" => i18n.t("settings_view.reconnect.enabled"),
+        "reconnect.maxAttempts" => i18n.t("settings_view.reconnect.max_attempts"),
+        "reconnect.baseDelayMs" => i18n.t("settings_view.reconnect.base_delay"),
+        "reconnect.maxDelayMs" => i18n.t("settings_view.reconnect.max_delay"),
+        "connectionPool.idleTimeoutSecs" => i18n.t("settings_view.connections.idle_timeout.label"),
+        "sftp.maxConcurrentTransfers" => i18n.t("settings_view.sftp.concurrent"),
+        "sftp.directoryParallelism" => i18n.t("settings_view.sftp.directory_parallelism"),
+        "sftp.speedLimitEnabled" => i18n.t("settings_view.sftp.bandwidth"),
+        "sftp.speedLimitKBps" => i18n.t("settings_view.sftp.speed_limit"),
+        "sftp.conflictAction" => i18n.t("settings_view.sftp.conflict"),
+        "ide.autoSave" => i18n.t("settings_view.ide.auto_save"),
+        "ide.fontSize" => i18n.t("settings_view.ide.font_size"),
+        "ide.lineHeight" => i18n.t("settings_view.ide.line_height"),
+        "ide.agentMode" => i18n.t("settings_view.ide.agent_mode_label"),
+        "ide.wordWrap" => i18n.t("settings_view.ide.word_wrap"),
+        "defaultShellId" => i18n.t("settings_view.local_terminal.default_shell"),
+        "recentShellIds" => i18n.t("modals.import.app_settings_field_recent_shells"),
+        "defaultCwd" => i18n.t("settings_view.local_terminal.default_cwd"),
+        "gitBashPath" => i18n.t("settings_view.local_terminal.git_bash_path"),
+        "loadShellProfile" => i18n.t("settings_view.local_terminal.load_shell_profile"),
+        "ohMyPoshEnabled" => i18n.t("settings_view.local_terminal.oh_my_posh_enable"),
+        "ohMyPoshTheme" => i18n.t("settings_view.local_terminal.oh_my_posh_theme"),
+        "customEnvVars" => i18n.t("settings_view.local_terminal.custom_env"),
+        _ => field.to_string(),
     }
-    .to_string()
 }

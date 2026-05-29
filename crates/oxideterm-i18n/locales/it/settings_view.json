@@ -48,7 +48,8 @@
       "local": "Terminale Locale",
       "reconnect": "Riconnessione",
       "help": "Aiuto e Info",
-      "keybindings": "Scorciatoie da tastiera"
+      "keybindings": "Scorciatoie da tastiera",
+      "graphics": "Grafica"
     },
     "general": {
       "title": "Generale",
@@ -123,7 +124,8 @@
       "cli_not_bundled": "Il binario CLI non è incluso in questa build",
       "cli_checking": "Controllo...",
       "cli_status_error": "Errore di stato",
-      "cli_uninstalled": "Disinstallato"
+      "cli_uninstalled": "Disinstallato",
+      "update_channel": "Canale di aggiornamento"
     },
     "terminal": {
       "title": "Impostazioni Terminale",
