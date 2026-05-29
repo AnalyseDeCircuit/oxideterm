@@ -911,6 +911,22 @@ impl WorkspaceApp {
                     &self.connection_store,
                     &connection,
                 ) else {
+                    if self.try_reuse_active_saved_connection_terminal(
+                        &connection_id,
+                        &connection,
+                        window,
+                        cx,
+                    ) {
+                        let refreshed = self.ai_orchestrator_snapshot(cx);
+                        return refreshed
+                            .ok(
+                                "Focused existing SSH terminal.",
+                                "Focused existing SSH terminal.",
+                                serde_json::json!({ "connectionId": connection_id }),
+                                "write",
+                            )
+                            .with_target(target);
+                    }
                     return snapshot
                         .fail(
                             "Saved connection cannot be materialized.",

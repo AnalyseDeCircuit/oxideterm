@@ -61,7 +61,8 @@ impl WorkspaceApp {
         self.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(node_id.clone());
-        self.ensure_node_connection_started(&node_id);
+        // Tauri opens the forwarding surface against the selected node but
+        // leaves connection establishment to the explicit connect path.
         self.forwarding_view.error = None;
         self.start_port_profiler_for_node(node_id, cx);
         cx.notify();

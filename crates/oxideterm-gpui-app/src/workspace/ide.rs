@@ -70,9 +70,8 @@ impl WorkspaceApp {
         self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(node_id.clone());
         self.expanded_ssh_nodes.insert(node_id.clone());
-        // The folder chooser is a node/SFTP consumer like Tauri's IDE tree; it
-        // connects through NodeRouter and must not create or require a terminal.
-        self.ensure_node_connection_started(&node_id);
+        // The folder chooser is a node/SFTP consumer like Tauri's IDE tree.
+        // Opening it must not create a terminal or implicitly start SSH.
         cx.notify();
     }
 

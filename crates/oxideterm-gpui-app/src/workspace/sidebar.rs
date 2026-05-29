@@ -35,6 +35,8 @@ const EVENT_LOG_STICKY_BOTTOM_THRESHOLD_PX: f32 = 30.0;
 pub(super) enum SidebarSection {
     Sessions,
     Connections,
+    Sftp,
+    Forwards,
     Terminal,
     Activity,
     Network,
@@ -74,18 +76,20 @@ impl SidebarSection {
     pub(super) fn from_settings_key(key: &str) -> Self {
         match key {
             "connections" | "saved" => Self::Connections,
-            "connection_pool" | "sftp" | "terminal" => Self::Terminal,
+            "sftp" => Self::Sftp,
+            "forwards" => Self::Forwards,
+            "connection_pool" | "terminal" => Self::Terminal,
             "connection_monitor" => Self::Activity,
-            "forwards" | "activity" => Self::Activity,
+            "activity" => Self::Activity,
             "network" | "topology" => Self::Network,
             "extensions" => Self::Extensions,
-            "cloud_sync" => Self::Sessions,
-            "ai" | "assistant" => Self::Sessions,
+            "cloud_sync" => Self::CloudSync,
+            "ai" | "assistant" => Self::Assistant,
             "automation" => Self::Automation,
             "workspace" => Self::Workspace,
             "files" => Self::Files,
             "monitor" => Self::Monitor,
-            "notifications" => Self::Sessions,
+            "notifications" => Self::Notifications,
             "settings" => Self::Settings,
             _ => Self::Sessions,
         }
@@ -94,7 +98,10 @@ impl SidebarSection {
     pub(super) fn as_settings_key(self) -> &'static str {
         match self {
             Self::Sessions => "sessions",
-            Self::Connections => "connections",
+            // Tauri persists the saved-connections sidebar as `saved`.
+            Self::Connections => "saved",
+            Self::Sftp => "sftp",
+            Self::Forwards => "forwards",
             Self::Terminal => "connection_pool",
             Self::Activity => "activity",
             Self::Network => "topology",
@@ -119,3 +126,45 @@ include!("sidebar/region.rs");
 include!("sidebar/sessions.rs");
 include!("sidebar/saved.rs");
 include!("sidebar/helpers.rs");
+
+#[cfg(test)]
+mod sidebar_persistence_tests {
+    use super::SidebarSection;
+
+    #[test]
+    fn sidebar_sections_roundtrip_persisted_settings_keys() {
+        let sections = [
+            SidebarSection::Sessions,
+            SidebarSection::Connections,
+            SidebarSection::Sftp,
+            SidebarSection::Forwards,
+            SidebarSection::Terminal,
+            SidebarSection::Activity,
+            SidebarSection::Network,
+            SidebarSection::Extensions,
+            SidebarSection::CloudSync,
+            SidebarSection::Assistant,
+            SidebarSection::Automation,
+            SidebarSection::Workspace,
+            SidebarSection::Files,
+            SidebarSection::Monitor,
+            SidebarSection::Notifications,
+            SidebarSection::Settings,
+        ];
+
+        for section in sections {
+            assert_eq!(
+                SidebarSection::from_settings_key(section.as_settings_key()),
+                section
+            );
+        }
+    }
+
+    #[test]
+    fn sidebar_section_parser_accepts_legacy_saved_connection_alias() {
+        assert_eq!(
+            SidebarSection::from_settings_key("connections"),
+            SidebarSection::Connections
+        );
+    }
+}

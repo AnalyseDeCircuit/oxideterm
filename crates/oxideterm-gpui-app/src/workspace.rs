@@ -58,7 +58,7 @@ use oxideterm_connection_monitor::{
     ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
     MetricsSource, ProfilerRegistry, ProfilerUpdate, ResourceMetrics,
 };
-use oxideterm_connections::ConnectionStore;
+use oxideterm_connections::{ConnectionStore, SaveConnectionRequest};
 use oxideterm_forwarding::{
     ForwardEvent, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry, SavedForwardStore,
 };
@@ -150,9 +150,9 @@ use self::ime::{
 };
 use self::launcher::LauncherState;
 use self::new_connection::{
-    HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionField,
-    NewConnectionForm, NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab,
-    SshConnectionWorkerResult,
+    HostKeyChallenge, KeyboardInteractiveChallenge, NativeSessionTreeConnectPlan,
+    NativeSshPromptHandler, NewConnectionField, NewConnectionForm, NewConnectionSelect,
+    SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent, SshConnectionWorkerResult,
 };
 use self::onboarding::OnboardingState;
 use self::pane_tree::SplitDrag;
@@ -470,7 +470,6 @@ enum TabCloseConfirm {
     LocalChildProcess { tab_id: TabId },
     LocalChildProcessBatch { tab_ids: Vec<TabId> },
     Other { tab_ids: Vec<TabId> },
-    All { tab_ids: Vec<TabId> },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -704,6 +703,7 @@ pub(crate) struct WorkspaceApp {
     new_connection_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,
+    active_proxy_connect_run: Option<NativeProxyConnectRun>,
     keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
     ssh_worker_tx: std::sync::mpsc::Sender<SshConnectionWorkerResult>,
     ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
@@ -1027,6 +1027,14 @@ struct ConnectionChainRun {
     node_ids: Vec<NodeId>,
     next_index: usize,
     trace_plan: ConnectionTracePlan,
+}
+
+#[derive(Clone, Debug)]
+struct NativeProxyConnectRun {
+    plan: NativeSessionTreeConnectPlan,
+    title: String,
+    intent: SshConnectionIntent,
+    save_after_open: Option<SaveConnectionRequest>,
 }
 
 #[derive(Clone, Debug)]

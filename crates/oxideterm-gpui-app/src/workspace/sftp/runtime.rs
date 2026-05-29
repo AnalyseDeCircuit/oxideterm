@@ -35,7 +35,9 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(node_id.clone());
         self.activate_sftp_view_for_node(&node_id);
-        self.ensure_node_connection_started(&node_id);
+        // Opening the SFTP surface mirrors Tauri's createTab path: it does
+        // not start SSH. The SFTP worker consumes an already-connected node
+        // and reports the router's not-connected error when the node is down.
         self.sftp_view.remote_load_pending = true;
         cx.notify();
     }

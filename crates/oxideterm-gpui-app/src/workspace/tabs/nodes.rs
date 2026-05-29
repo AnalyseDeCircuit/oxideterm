@@ -120,7 +120,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn poll_node_events(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn poll_node_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut events = Vec::new();
         while let Ok(event) = self.node_event_rx.try_recv() {
             events.push(event);
@@ -128,7 +128,7 @@ impl WorkspaceApp {
 
         let mut changed = false;
         for event in events {
-            changed |= self.apply_node_event(event, cx);
+            changed |= self.apply_node_event(event, window, cx);
         }
         if changed {
             cx.notify();
@@ -213,6 +213,9 @@ impl WorkspaceApp {
                         self.connecting_node_locks.remove(&node_id);
                         self.schedule_next_reconnect_cascade_node();
                     }
+                    if self.active_proxy_connect_waits_for_node(&node_id) {
+                        self.advance_active_proxy_connect_after_node_connected(&node_id, window, cx);
+                    }
                     let _ = self.drain_ready_pending_ssh_terminal_opens(window, cx);
                     self.restore_forwarding_rules_for_reconnect(&node_id);
                     if self
@@ -294,6 +297,7 @@ impl WorkspaceApp {
                         self.pending_reconnect_cascade_nodes.clear();
                     }
                     self.finish_connection_trace_failed(&node_id, Some(error.clone()));
+                    self.fail_active_proxy_connect_for_node(&node_id, error.clone(), cx);
                     if active_reconnect_job {
                         self.log_reconnect_phase(
                             &node_id,
@@ -689,7 +693,12 @@ impl WorkspaceApp {
         let _ = self.node_event_tx.send(event);
     }
 
-    fn apply_node_event(&mut self, event: NodeStateEvent, cx: &mut Context<Self>) -> bool {
+    fn apply_node_event(
+        &mut self,
+        event: NodeStateEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         match event {
             NodeStateEvent::ConnectionStatusChanged {
                 connection_id,
@@ -777,6 +786,27 @@ impl WorkspaceApp {
                 }
                 if status == "link_down" {
                     self.schedule_grace_period_reconnect(&node_id, cx);
+                }
+                if status == "disconnected" {
+                    let mut nodes_to_close = if affected_children.is_empty() {
+                        vec![node_id.clone()]
+                    } else {
+                        // Native idle-timeout cascades may unregister child
+                        // connection ids before the root disconnected event is
+                        // consumed, so affected_children is a subtree signal
+                        // here rather than a reliable lookup table.
+                        self.node_runtime_store.subtree_postorder(&node_id)
+                    };
+                    if nodes_to_close.is_empty() {
+                        nodes_to_close.push(node_id.clone());
+                    }
+                    // Tauri's connection_status_changed(disconnected) handler
+                    // closes tabs by root and affected child node ids; native
+                    // must do the same for node-scoped SFTP/IDE/forwards tabs,
+                    // not only for terminal panes.
+                    for affected_node_id in nodes_to_close {
+                        self.close_tabs_for_node(&affected_node_id, window, cx);
+                    }
                 }
                 true
             }
@@ -878,6 +908,17 @@ impl WorkspaceApp {
                         && reason.to_ascii_lowercase().contains("link")
                     {
                         self.schedule_grace_period_reconnect(&node_id, cx);
+                    }
+                    if matches!(state, NodeReadiness::Disconnected) {
+                        let mut nodes_to_close = self.node_runtime_store.subtree_postorder(&node_id);
+                        if nodes_to_close.is_empty() {
+                            nodes_to_close.push(node_id.clone());
+                        }
+                        // Internal node:state disconnects are the native form
+                        // of the same Tauri terminal cleanup boundary.
+                        for affected_node_id in nodes_to_close {
+                            self.close_tabs_for_node(&affected_node_id, window, cx);
+                        }
                     }
                 }
                 true
@@ -1767,7 +1808,7 @@ impl WorkspaceApp {
         let _ = self.ssh_registry.retire_connection(connection_id);
     }
 
-    fn release_parent_ref_for_child_connection(
+    pub(super) fn release_parent_ref_for_child_connection(
         &self,
         child_node_id: &NodeId,
         child_connection_id: &str,

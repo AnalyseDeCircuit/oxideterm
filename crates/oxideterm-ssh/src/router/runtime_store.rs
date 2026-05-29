@@ -439,6 +439,33 @@ impl NodeRuntimeStore {
         nodes
     }
 
+    pub fn remove_subtree(&self, node_id: &NodeId) -> Vec<NodeId> {
+        let nodes = self.subtree_postorder(node_id);
+        if nodes.is_empty() {
+            return nodes;
+        }
+
+        if let Some(parent_id) = self.nodes.get(node_id).and_then(|node| node.parent_id.clone()) {
+            if let Some(mut parent) = self.nodes.get_mut(&parent_id) {
+                parent.children_ids.retain(|child_id| child_id != node_id);
+                parent.generation += 1;
+            }
+        } else {
+            self.root_ids
+                .write()
+                .retain(|root_id| root_id != node_id);
+        }
+
+        for removed_id in &nodes {
+            if let Some((_id, removed)) = self.nodes.remove(removed_id)
+                && let Some(connection_id) = removed.connection_id
+            {
+                self.connection_nodes.remove(&connection_id);
+            }
+        }
+        nodes
+    }
+
     fn bind_connection(
         &self,
         node_id: &NodeId,

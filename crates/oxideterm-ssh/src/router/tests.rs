@@ -149,6 +149,27 @@ mod tests {
     }
 
     #[test]
+    fn remove_subtree_detaches_parent_child_links() {
+        let store = NodeRuntimeStore::default();
+        let expansion = store
+            .expand_manual_preset(
+                "saved-a",
+                vec![
+                    SshConfig::password("jump-a", 22, "me", "pw"),
+                    SshConfig::password("jump-b", 22, "me", "pw"),
+                ],
+                SshConfig::password("target", 22, "me", "pw"),
+            )
+            .unwrap();
+
+        let removed = store.remove_subtree(&expansion.path_node_ids[0]);
+
+        assert_eq!(removed.len(), 3);
+        assert!(store.flatten().is_empty());
+        assert!(store.snapshot(&expansion.target_node_id).is_none());
+    }
+
+    #[test]
     fn drill_down_requires_ready_parent_like_tauri_tree() {
         let store = NodeRuntimeStore::default();
         let root = NodeId::new("root");

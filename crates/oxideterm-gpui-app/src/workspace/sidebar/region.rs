@@ -189,6 +189,8 @@ impl WorkspaceApp {
                 .flatten();
         let title_key = match self.active_sidebar_section {
             SidebarSection::Connections => "sidebar.panels.saved_connections",
+            SidebarSection::Sftp => "sidebar.panels.sftp",
+            SidebarSection::Forwards => "forwards.table.title",
             SidebarSection::Extensions => "sidebar.panels.plugins",
             SidebarSection::CloudSync => "plugin.cloud_sync.panel_title",
             SidebarSection::Notifications => "sidebar.panels.event_log",
@@ -303,7 +305,19 @@ impl WorkspaceApp {
         if self.active_sidebar_section == SidebarSection::CloudSync {
             return self.render_cloud_sync_sidebar_content(cx);
         }
+        if matches!(
+            self.active_sidebar_section,
+            SidebarSection::Sftp | SidebarSection::Forwards
+        ) {
+            // Tauri only persists these command-palette section keys here; it
+            // does not reuse the Sessions empty state for their sidebar body.
+            return self.render_blank_sidebar_content();
+        }
         self.render_empty_sessions_sidebar_content(cx)
+    }
+
+    fn render_blank_sidebar_content(&self) -> AnyElement {
+        div().flex_1().w_full().into_any_element()
     }
 
     pub(super) fn render_activity_tab_button(
