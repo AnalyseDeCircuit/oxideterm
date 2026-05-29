@@ -2,6 +2,8 @@
 
 Use the plugin manager in the desktop app for normal plugin work: browsing, installing, enabling, disabling, updating, and configuring plugins. Use the CLI companion only for headless checks and scripted changes.
 
+Developers building plugins should use [Native Plugin Development](./plugin-development.md). That guide covers the native manifest/runtime model, protocol frames, declarative UI, host APIs, and migration from Tauri/Web plugins.
+
 ## Plugin Manager
 
 Open Plugins from the activity bar to inspect installed plugins and available plugin actions. Before enabling a plugin you did not write, review its identity, permissions, settings, and any surfaces it adds to the app.
