@@ -2316,6 +2316,10 @@ impl WorkspaceApp {
         let node_handle = handle.clone();
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        let managed_key_resolver =
+            crate::workspace::session_manager::managed_key_resolver_from_store(
+                &self.connection_store,
+            );
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             // This is the native connect_tree_node path: authenticate the SSH
@@ -2325,7 +2329,9 @@ impl WorkspaceApp {
             if force_reconnect {
                 node_handle.clear_physical().await;
             }
-            let client = SshTransportClient::new(config).with_prompt_handler(prompt_handler);
+            let client = SshTransportClient::new(config)
+                .with_prompt_handler(prompt_handler)
+                .with_managed_key_resolver(managed_key_resolver);
             let parent_consumer = parent_id
                 .as_ref()
                 .map(|_| ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0)));

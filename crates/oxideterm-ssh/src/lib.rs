@@ -46,7 +46,7 @@ pub use router::{
 };
 pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,
-    KeyboardInteractiveResponses, RemoteForwardHandler, RemoteForwardedTcpIp, SshCommandOutput,
-    SshForwardStream, SshPromptError, SshPromptHandler, SshPtyHandle, SshShellChannel,
-    SshTransportClient, SshTransportCommand, SshTransportError,
+    KeyboardInteractiveResponses, ManagedKeyResolver, RemoteForwardHandler, RemoteForwardedTcpIp,
+    SshCommandOutput, SshForwardStream, SshPromptError, SshPromptHandler, SshPtyHandle,
+    SshShellChannel, SshTransportClient, SshTransportCommand, SshTransportError,
 };

@@ -72,7 +72,11 @@
       "proxy_chain_port": "Port",
       "proxy_chain_username": "Username",
       "proxy_chain_auth": "Auth",
-      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication."
+      "proxy_chain_kbi_unsupported": "Proxy chain connections do not support 2FA / keyboard-interactive authentication.",
+      "managed_key": "Managed SSH key",
+      "managed_key_placeholder": "Select a managed key",
+      "managed_key_hint": "Managed keys stay in the local keychain. This connection stores only the key reference and optional passphrase.",
+      "managed_key_required": "Managed SSH key is required for managed-key authentication."
     },
     "auth": {
       "password": "Password",
@@ -80,7 +84,8 @@
       "ssh_key": "SSH Key",
       "certificate": "Certificate",
       "agent": "Agent",
-      "two_factor": "2FA"
+      "two_factor": "2FA",
+      "managed_key": "Managed Key"
     },
     "host_key": {
       "title_unknown": "Unknown Host Key",

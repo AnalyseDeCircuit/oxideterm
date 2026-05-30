@@ -362,6 +362,26 @@ impl WorkspaceApp {
                                             })
                                     },
                                 )
+                                .when(form.auth_tab == SshAuthTab::ManagedKey, |content| {
+                                    content
+                                        .child(self.render_managed_key_select(
+                                            self.i18n.t("ssh.form.managed_key"),
+                                            &form.managed_key_id,
+                                            false,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.passphrase"),
+                                            &form.passphrase,
+                                            self.i18n.t("ssh.form.passphrase_placeholder"),
+                                            NewConnectionField::Passphrase,
+                                            true,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.managed_key_hint"),
+                                        ))
+                                })
                                 .when(form.auth_tab == SshAuthTab::Certificate, |content| {
                                     let content = if prompt_mode {
                                         content

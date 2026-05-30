@@ -11,8 +11,8 @@ use alacritty_terminal::{
 use anyhow::Result;
 use crossbeam_channel::{Receiver, unbounded};
 use oxideterm_ssh::{
-    ConnectionConsumer, SshConfig, SshConnectionHandle, SshConnectionRegistry, SshPromptHandler,
-    SshPtyHandle, SshTransportClient, SshTransportCommand,
+    ConnectionConsumer, ManagedKeyResolver, SshConfig, SshConnectionHandle, SshConnectionRegistry,
+    SshPromptHandler, SshPtyHandle, SshTransportClient, SshTransportCommand,
 };
 use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TerminalEncoding, TerminalInputEncoder, TerminalOutputDecoder,

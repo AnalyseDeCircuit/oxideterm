@@ -72,7 +72,11 @@
       "proxy_chain_port": "連接埠",
       "proxy_chain_username": "使用者名稱",
       "proxy_chain_auth": "認證",
-      "proxy_chain_kbi_unsupported": "代理鏈連線不支援 2FA / Keyboard-interactive 認證。"
+      "proxy_chain_kbi_unsupported": "代理鏈連線不支援 2FA / Keyboard-interactive 認證。",
+      "managed_key": "託管 SSH 金鑰",
+      "managed_key_placeholder": "選擇託管金鑰",
+      "managed_key_hint": "託管金鑰保存在本機鑰匙圈中。此連線只保存金鑰引用和可選金鑰密碼。",
+      "managed_key_required": "託管金鑰認證需要選擇託管 SSH 金鑰。"
     },
     "auth": {
       "password": "密碼",
@@ -80,7 +84,8 @@
       "ssh_key": "SSH 金鑰",
       "certificate": "憑證",
       "agent": "代理",
-      "two_factor": "雙重驗證"
+      "two_factor": "雙重驗證",
+      "managed_key": "託管金鑰"
     },
     "host_key": {
       "title_unknown": "未知主機金鑰",

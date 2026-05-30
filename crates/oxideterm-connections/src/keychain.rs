@@ -29,6 +29,14 @@ impl Default for ConnectionKeychain {
 }
 
 impl ConnectionKeychain {
+    pub(crate) fn with_service(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+            #[cfg(test)]
+            test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
+        }
+    }
+
     pub(crate) fn store(&self, id: &str, secret: &SecretString) -> Result<()> {
         #[cfg(test)]
         if let Some(store) = &self.test_store {

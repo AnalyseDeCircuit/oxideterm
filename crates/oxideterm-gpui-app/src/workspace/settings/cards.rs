@@ -452,8 +452,18 @@ impl WorkspaceApp {
         let should_notify = self
             .open_settings_select
             .is_some_and(|select| select.anchor_id() == anchor.id)
-            || (self.open_new_connection_select == Some(NewConnectionSelect::Group)
-                && anchor.id == SelectAnchorId::NewConnectionGroup)
+            || matches!(
+                (self.open_new_connection_select, anchor.id),
+                (Some(NewConnectionSelect::Group), SelectAnchorId::NewConnectionGroup)
+                    | (
+                        Some(NewConnectionSelect::ManagedKey),
+                        SelectAnchorId::NewConnectionManagedKey
+                    )
+                    | (
+                        Some(NewConnectionSelect::JumpManagedKey),
+                        SelectAnchorId::NewConnectionJumpManagedKey
+                    )
+            )
             || (matches!(
                 anchor.id,
                 SelectAnchorId::AiPanelRoot

@@ -1923,6 +1923,7 @@ fn new_connection_field_value(
         NewConnectionField::Username => &form.username,
         NewConnectionField::Password => &form.password,
         NewConnectionField::KeyPath => &form.key_path,
+        NewConnectionField::ManagedKeyId => &form.managed_key_id,
         NewConnectionField::CertPath => &form.cert_path,
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::Group => &form.group,
@@ -1933,6 +1934,7 @@ fn new_connection_field_value(
         NewConnectionField::JumpUsername => &form.jump_server_form.as_ref()?.username,
         NewConnectionField::JumpPassword => &form.jump_server_form.as_ref()?.password,
         NewConnectionField::JumpKeyPath => &form.jump_server_form.as_ref()?.key_path,
+        NewConnectionField::JumpManagedKeyId => &form.jump_server_form.as_ref()?.managed_key_id,
         NewConnectionField::JumpCertPath => &form.jump_server_form.as_ref()?.cert_path,
         NewConnectionField::JumpPassphrase => &form.jump_server_form.as_ref()?.passphrase,
     })
@@ -1949,6 +1951,7 @@ fn connection_field_value_mut(
         NewConnectionField::Username => &mut form.username,
         NewConnectionField::Password => &mut form.password,
         NewConnectionField::KeyPath => &mut form.key_path,
+        NewConnectionField::ManagedKeyId => &mut form.managed_key_id,
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
@@ -1988,6 +1991,13 @@ fn connection_field_value_mut(
                 .as_mut()
                 .expect("jump key path field without jump form")
                 .key_path
+        }
+        NewConnectionField::JumpManagedKeyId => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump managed key field without jump form")
+                .managed_key_id
         }
         NewConnectionField::JumpCertPath => {
             &mut form

@@ -3,6 +3,7 @@ pub struct SshSessionConfig {
     registry: Option<SshConnectionRegistry>,
     consumer: Option<ConnectionConsumer>,
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
+    managed_key_resolver: Option<ManagedKeyResolver>,
     trzsz_policy: Option<TrzszTransferPolicy>,
     defer_pty_until_resize: bool,
     post_connect_command: Option<String>,
@@ -17,6 +18,7 @@ impl SshSessionConfig {
             registry: None,
             consumer: None,
             prompt_handler: None,
+            managed_key_resolver: None,
             trzsz_policy: None,
             defer_pty_until_resize: false,
             post_connect_command: None,
@@ -47,6 +49,11 @@ impl SshSessionConfig {
 
     pub fn with_prompt_handler(mut self, prompt_handler: Arc<dyn SshPromptHandler>) -> Self {
         self.prompt_handler = Some(prompt_handler);
+        self
+    }
+
+    pub fn with_managed_key_resolver(mut self, resolver: ManagedKeyResolver) -> Self {
+        self.managed_key_resolver = Some(resolver);
         self
     }
 
@@ -93,6 +100,7 @@ impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
             registry: None,
             consumer: None,
             prompt_handler: None,
+            managed_key_resolver: None,
             trzsz_policy: None,
             defer_pty_until_resize: false,
         }
@@ -170,6 +178,7 @@ impl std::fmt::Debug for SshSessionConfig {
             .field("registry", &self.registry)
             .field("consumer", &self.consumer)
             .field("prompt_handler", &self.prompt_handler.is_some())
+            .field("managed_key_resolver", &self.managed_key_resolver.is_some())
             .field("trzsz_policy", &self.trzsz_policy)
             .field("defer_pty_until_resize", &self.defer_pty_until_resize)
             .field("post_connect_command", &self.post_connect_command.is_some())

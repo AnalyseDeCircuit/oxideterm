@@ -30,9 +30,9 @@ use super::{
 use crate::workspace::{
     NativeProxyConnectRun, WorkspaceApp,
     session_manager::{
-        form_from_saved_connection, proxy_chain_config_from_saved_connection,
-        save_request_from_form, save_request_from_form_with_existing_auth,
-        ssh_config_from_saved_connection,
+        form_from_saved_connection, managed_key_resolver_from_store,
+        proxy_chain_config_from_saved_connection, save_request_from_form,
+        save_request_from_form_with_existing_auth, ssh_config_from_saved_connection,
     },
 };
 
@@ -649,6 +649,19 @@ impl WorkspaceApp {
                 }
                 AuthMethod::key_secret(
                     form.key_path.trim().to_string(),
+                    zeroizing_non_empty_secret(&form.passphrase),
+                )
+            }
+            SshAuthTab::ManagedKey => {
+                if form.managed_key_id.trim().is_empty() {
+                    form.error = Some(self.i18n.t("ssh.form.managed_key_required"));
+                    cx.notify();
+                    return None;
+                }
+                // The connection config carries only the managed-key reference; the
+                // private key remains owned by the local managed keychain resolver.
+                AuthMethod::managed_key_secret(
+                    form.managed_key_id.trim().to_string(),
                     zeroizing_non_empty_secret(&form.passphrase),
                 )
             }
@@ -1437,6 +1450,7 @@ impl WorkspaceApp {
             self.session_manager.status = Some(self.i18n.t("ssh.form.test_running"));
         }
         let tx = self.ssh_worker_tx.clone();
+        let managed_key_resolver = managed_key_resolver_from_store(&self.connection_store);
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {
                 Ok(runtime) => {
@@ -1445,6 +1459,7 @@ impl WorkspaceApp {
                         .block_on(
                             SshTransportClient::new(config)
                                 .with_prompt_handler(prompt_handler)
+                                .with_managed_key_resolver(managed_key_resolver)
                                 .test_connection(),
                         )
                         .map_err(|error| error.to_string())
@@ -1473,6 +1488,9 @@ fn proxy_chain_from_form(
     for hop in form.proxy_hops.iter().filter(|hop| hop.complete()) {
         if hop.auth_tab == SshAuthTab::TwoFactor {
             return Err("Proxy hop does not support keyboard-interactive/2FA".to_string());
+        }
+        if hop.auth_tab == SshAuthTab::ManagedKey && hop.managed_key_id.trim().is_empty() {
+            return Err("Proxy hop managed key is required".to_string());
         }
         chain.push(ProxyHopConfig {
             host: hop.host.trim().to_string(),
@@ -1552,6 +1570,10 @@ fn auth_method_from_proxy_hop(hop: &NewConnectionProxyHop) -> AuthMethod {
         }
         SshAuthTab::SshKey => AuthMethod::key_secret(
             hop.key_path.trim().to_string(),
+            zeroizing_non_empty_secret(&hop.passphrase),
+        ),
+        SshAuthTab::ManagedKey => AuthMethod::managed_key_secret(
+            hop.managed_key_id.trim().to_string(),
             zeroizing_non_empty_secret(&hop.passphrase),
         ),
         SshAuthTab::Certificate => AuthMethod::certificate_secret(

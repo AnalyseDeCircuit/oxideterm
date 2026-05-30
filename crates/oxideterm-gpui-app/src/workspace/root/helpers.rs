@@ -1378,6 +1378,7 @@ fn auth_without_runtime_secret(auth: &AuthMethod) -> bool {
         AuthMethod::Key { passphrase, .. } | AuthMethod::Certificate { passphrase, .. } => {
             passphrase.is_none()
         }
+        AuthMethod::ManagedKey { passphrase, .. } => passphrase.is_none(),
         AuthMethod::Agent | AuthMethod::KeyboardInteractive => true,
     }
 }

@@ -426,6 +426,10 @@ impl WorkspaceApp {
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        let managed_key_resolver =
+            crate::workspace::session_manager::managed_key_resolver_from_store(
+                &self.connection_store,
+            );
         // Tauri passes postConnectCommand as a createTerminalForNode option.
         // Keep it one-shot for this terminal instead of letting every future
         // terminal opened from the same node replay the saved command.
@@ -433,6 +437,7 @@ impl WorkspaceApp {
             .with_post_connect_command(post_connect_command)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
+            .with_managed_key_resolver(managed_key_resolver)
             .with_deferred_pty(true)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
@@ -567,6 +572,10 @@ impl WorkspaceApp {
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        let managed_key_resolver =
+            crate::workspace::session_manager::managed_key_resolver_from_store(
+                &self.connection_store,
+            );
         // Opening another terminal for an already-connected node mirrors
         // Tauri's createTerminalForNode(nodeId) path: no post-connect command
         // is replayed unless the caller explicitly supplies one.
@@ -574,6 +583,7 @@ impl WorkspaceApp {
             .with_post_connect_command(None)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
+            .with_managed_key_resolver(managed_key_resolver)
             .with_deferred_pty(true)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);

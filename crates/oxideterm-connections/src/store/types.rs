@@ -57,6 +57,8 @@ pub enum SavedAuth {
         key_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         passphrase_keychain_id: Option<String>,
+        #[serde(default, rename = "passphrase", skip_serializing)]
+        plaintext_passphrase: Option<SecretString>,
     },
     Agent,
 }
@@ -316,6 +318,12 @@ pub struct ManagedSshKey {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ImportedManagedSshKey {
+    pub key: ManagedSshKey,
+    pub secret: SecretString,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DeletedConnectionTombstone {
     pub id: String,
@@ -390,6 +398,55 @@ pub struct ConnectionStore {
     data: ConnectionStoreData,
     storage_format: ConnectionStoreStorageFormat,
     keychain: ConnectionKeychain,
+    managed_keychain: ConnectionKeychain,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ManagedSshKeyInfo {
+    pub id: String,
+    pub name: String,
+    pub fingerprint: String,
+    pub public_key: String,
+    pub requires_passphrase: bool,
+    pub origin: ManagedSshKeyOrigin,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<&ManagedSshKey> for ManagedSshKeyInfo {
+    fn from(key: &ManagedSshKey) -> Self {
+        Self {
+            id: key.id.clone(),
+            name: key.name.clone(),
+            fingerprint: key.fingerprint.clone(),
+            public_key: key.public_key.clone(),
+            requires_passphrase: key.requires_passphrase,
+            origin: key.origin.clone(),
+            created_at: key.created_at.to_rfc3339(),
+            updated_at: key.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ManagedSshKeyUsageItem {
+    pub connection_id: String,
+    pub connection_name: String,
+    pub location: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ManagedSshKeyUsage {
+    pub key_id: String,
+    pub count: usize,
+    pub items: Vec<ManagedSshKeyUsageItem>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ManagedSshKeyDeleteResult {
+    pub deleted: bool,
+    pub key_id: String,
+    pub usage: ManagedSshKeyUsage,
 }
 
 #[derive(Debug)]

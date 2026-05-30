@@ -147,6 +147,7 @@ mod tests {
                 auth_tab: SshAuthTab::Password,
                 password: "jump-secret".to_string(),
                 key_path: String::new(),
+                managed_key_id: String::new(),
                 cert_path: String::new(),
                 passphrase: String::new(),
                 agent_forwarding: true,
@@ -183,6 +184,7 @@ mod tests {
                 auth_tab: SshAuthTab::TwoFactor,
                 password: String::new(),
                 key_path: String::new(),
+                managed_key_id: String::new(),
                 cert_path: String::new(),
                 passphrase: String::new(),
                 agent_forwarding: false,
@@ -321,6 +323,48 @@ mod tests {
         assert_eq!(chain[0].port, 2222);
         assert_eq!(chain[0].username, "ops");
         assert!(chain[0].agent_forwarding);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn saved_managed_key_becomes_reference_only_ssh_config() {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-gpui-managed-key-test-{}-connections.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let store = ConnectionStore::load(&path).unwrap();
+        let now = Utc::now();
+        let conn = SavedConnection {
+            id: "conn-managed-key".to_string(),
+            version: oxideterm_connections::CONFIG_VERSION,
+            name: "Managed".to_string(),
+            group: None,
+            host: "target.example.com".to_string(),
+            port: 22,
+            username: "me".to_string(),
+            auth: SavedAuth::ManagedKey {
+                key_id: "managed-key-1".to_string(),
+                passphrase_keychain_id: None,
+                plaintext_passphrase: None,
+            },
+            proxy_chain: Vec::new(),
+            options: oxideterm_connections::ConnectionOptions::default(),
+            created_at: now,
+            last_used_at: None,
+            updated_at: Some(now),
+            color: None,
+            tags: Vec::new(),
+            post_connect_command: None,
+        };
+
+        let config = ssh_config_from_saved_connection(&store, &conn).unwrap();
+
+        assert!(matches!(
+            config.auth,
+            AuthMethod::ManagedKey { key_id, passphrase }
+                if key_id == "managed-key-1" && passphrase.is_none()
+        ));
         let _ = std::fs::remove_file(path);
     }
 }

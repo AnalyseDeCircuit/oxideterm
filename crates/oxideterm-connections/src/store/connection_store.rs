@@ -35,6 +35,7 @@ impl ConnectionStore {
             data: loaded.data,
             storage_format: loaded.format,
             keychain: ConnectionKeychain::default(),
+            managed_keychain: ConnectionKeychain::with_service(MANAGED_SSH_KEYCHAIN_SERVICE),
         })
     }
 
@@ -364,13 +365,32 @@ impl ConnectionStore {
         &mut self,
         connections: Vec<SavedConnection>,
     ) -> Result<Vec<ConnectionInfo>> {
+        self.upsert_imported_connections_and_managed_keys_transaction(connections, Vec::new())
+    }
+
+    pub(crate) fn upsert_imported_connections_and_managed_keys_transaction(
+        &mut self,
+        connections: Vec<SavedConnection>,
+        managed_keys: Vec<ImportedManagedSshKey>,
+    ) -> Result<Vec<ConnectionInfo>> {
         let original_data = self.data.clone();
         let original_keychain = self.snapshot_keychain_entries(&original_data);
+        let original_managed_keychain = self.snapshot_managed_keychain_entries(&original_data);
         let mut touched_keychain_ids = HashSet::new();
+        let mut touched_managed_secret_ids = HashSet::new();
         let mut stale_old_keychain_ids = HashSet::new();
         let mut imported_ids = Vec::new();
 
         let result = (|| {
+            for managed_key in managed_keys {
+                touched_managed_secret_ids.insert(managed_key.key.secret_id.clone());
+                self.managed_keychain
+                    .store(&managed_key.key.secret_id, &managed_key.secret)?;
+                self.data
+                    .managed_ssh_keys
+                    .retain(|candidate| candidate.id != managed_key.key.id);
+                self.data.managed_ssh_keys.push(managed_key.key);
+            }
             for connection in connections {
                 let staged = self.stage_imported_connection(connection)?;
                 touched_keychain_ids.extend(staged.touched_keychain_ids);
@@ -386,6 +406,10 @@ impl ConnectionStore {
             self.data = original_data;
             let _ = self.save();
             self.rollback_keychain_entries(&touched_keychain_ids, &original_keychain);
+            self.rollback_managed_keychain_entries(
+                &touched_managed_secret_ids,
+                &original_managed_keychain,
+            );
             return Err(error);
         }
 
@@ -440,6 +464,10 @@ impl ConnectionStore {
                 passphrase_keychain_id: Some(keychain_id),
                 ..
             } => self.keychain.get(keychain_id).map(Some),
+            SavedAuth::ManagedKey {
+                passphrase_keychain_id: Some(keychain_id),
+                ..
+            } => self.keychain.get(keychain_id).map(Some),
             SavedAuth::Key {
                 plaintext_passphrase: Some(passphrase),
                 ..
@@ -447,10 +475,188 @@ impl ConnectionStore {
             | SavedAuth::Certificate {
                 plaintext_passphrase: Some(passphrase),
                 ..
+            }
+            | SavedAuth::ManagedKey {
+                plaintext_passphrase: Some(passphrase),
+                ..
             } => Ok(Some(passphrase.clone())),
-            SavedAuth::Key { .. } | SavedAuth::Certificate { .. } => Ok(None),
+            SavedAuth::Key { .. }
+            | SavedAuth::Certificate { .. }
+            | SavedAuth::ManagedKey { .. } => Ok(None),
             _ => bail!("Connection does not use key passphrase auth"),
         }
+    }
+
+    pub fn create_managed_ssh_key_from_text(
+        &mut self,
+        private_key: SecretString,
+        name: Option<String>,
+        passphrase: Option<SecretString>,
+    ) -> Result<ManagedSshKeyInfo> {
+        self.create_managed_ssh_key(
+            private_key,
+            name,
+            passphrase,
+            ManagedSshKeyOrigin::PastedText,
+            "Managed SSH Key",
+        )
+    }
+
+    pub fn create_managed_ssh_key_from_file(
+        &mut self,
+        path: impl AsRef<Path>,
+        name: Option<String>,
+        passphrase: Option<SecretString>,
+    ) -> Result<ManagedSshKeyInfo> {
+        let path = path.as_ref();
+        let fallback_name = fallback_name_from_path(path);
+        let private_key = SecretString::from(
+            fs::read_to_string(path)
+                .with_context(|| format!("failed to read SSH private key file {}", path.display()))?,
+        );
+        self.create_managed_ssh_key(
+            private_key,
+            name,
+            passphrase,
+            ManagedSshKeyOrigin::ImportedFile,
+            &fallback_name,
+        )
+    }
+
+    pub fn managed_ssh_keys(&self) -> Vec<ManagedSshKeyInfo> {
+        self.data
+            .managed_ssh_keys
+            .iter()
+            .map(ManagedSshKeyInfo::from)
+            .collect()
+    }
+
+    pub fn managed_ssh_key_metadata(&self, id: &str) -> Result<ManagedSshKey> {
+        self.data
+            .managed_ssh_keys
+            .iter()
+            .find(|key| key.id == id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Managed SSH key not found"))
+    }
+
+    pub fn rename_managed_ssh_key(
+        &mut self,
+        id: &str,
+        name: String,
+    ) -> Result<ManagedSshKeyInfo> {
+        let key = self
+            .data
+            .managed_ssh_keys
+            .iter_mut()
+            .find(|key| key.id == id)
+            .ok_or_else(|| anyhow::anyhow!("Managed SSH key not found"))?;
+        key.name = managed_key_display_name(Some(name), "Managed SSH Key");
+        key.updated_at = Utc::now();
+        let info = ManagedSshKeyInfo::from(&*key);
+        self.save()?;
+        Ok(info)
+    }
+
+    pub fn managed_ssh_key_usage(&self, id: &str) -> Result<ManagedSshKeyUsage> {
+        if !self.data.managed_ssh_keys.iter().any(|key| key.id == id) {
+            bail!("Managed SSH key not found");
+        }
+        Ok(managed_key_usage_from_data(&self.data, id))
+    }
+
+    pub fn delete_managed_ssh_key(
+        &mut self,
+        id: &str,
+        force: bool,
+    ) -> Result<ManagedSshKeyDeleteResult> {
+        let usage = self.managed_ssh_key_usage(id)?;
+        if usage.count > 0 && !force {
+            bail!(
+                "Managed SSH key is used by {} saved connection entries",
+                usage.count
+            );
+        }
+        let index = self
+            .data
+            .managed_ssh_keys
+            .iter()
+            .position(|key| key.id == id)
+            .ok_or_else(|| anyhow::anyhow!("Managed SSH key not found"))?;
+        let removed = self.data.managed_ssh_keys.remove(index);
+        if let Err(error) = self.save() {
+            self.data.managed_ssh_keys.push(removed);
+            return Err(error);
+        }
+        self.managed_keychain.delete(&removed.secret_id)?;
+        Ok(ManagedSshKeyDeleteResult {
+            deleted: true,
+            key_id: id.to_string(),
+            usage,
+        })
+    }
+
+    pub fn resolve_managed_ssh_key_private_key(&self, id: &str) -> Result<SecretString> {
+        let secret_id = self
+            .data
+            .managed_ssh_keys
+            .iter()
+            .find(|key| key.id == id)
+            .map(|key| key.secret_id.clone())
+            .ok_or_else(|| anyhow::anyhow!("Managed SSH key not found"))?;
+
+        // Secret material leaves the managed keychain only at the SSH auth boundary.
+        // Callers must decode/use it immediately and must not persist this value.
+        self.managed_keychain.get(&secret_id)
+    }
+
+    fn create_managed_ssh_key(
+        &mut self,
+        private_key: SecretString,
+        name: Option<String>,
+        passphrase: Option<SecretString>,
+        origin: ManagedSshKeyOrigin,
+        fallback_name: &str,
+    ) -> Result<ManagedSshKeyInfo> {
+        let decoded_key = decode_managed_private_key(&private_key, passphrase.as_ref())?;
+        let fingerprint = fingerprint_public_key(decoded_key.public_key());
+        let public_key = public_key_line_from_private_key(&decoded_key);
+        if let Some(existing) = self
+            .data
+            .managed_ssh_keys
+            .iter()
+            .find(|key| key.fingerprint == fingerprint)
+        {
+            bail!("Managed SSH key already exists: {}", existing.name);
+        }
+
+        let id = Uuid::new_v4().to_string();
+        let secret_id = format!("managed-key-{id}");
+        // Private key material crosses into the portable-aware secret backend here;
+        // ConnectionStoreData keeps only metadata and the keychain account id.
+        self.managed_keychain.store(&secret_id, &private_key)?;
+
+        let now = Utc::now();
+        let key = ManagedSshKey {
+            id,
+            secret_id,
+            name: managed_key_display_name(name, fallback_name),
+            fingerprint,
+            public_key,
+            requires_passphrase: managed_key_requires_passphrase(&private_key, passphrase.as_ref()),
+            origin,
+            created_at: now,
+            updated_at: now,
+        };
+        let info = ManagedSshKeyInfo::from(&key);
+        self.data.managed_ssh_keys.push(key);
+        if let Err(error) = self.save() {
+            if let Some(removed) = self.data.managed_ssh_keys.pop() {
+                let _ = self.managed_keychain.delete(&removed.secret_id);
+            }
+            return Err(error);
+        }
+        Ok(info)
     }
 
     fn materialize_auth(
@@ -553,6 +759,38 @@ impl ConnectionStore {
                         key_path,
                         cert_path,
                         has_passphrase,
+                        passphrase_keychain_id,
+                        plaintext_passphrase: None,
+                    })
+                }
+            }
+            SavedAuth::ManagedKey {
+                key_id,
+                passphrase_keychain_id,
+                plaintext_passphrase,
+            } => {
+                let retained_id = matching_managed_key_passphrase_id(existing_auth, &key_id);
+                if let Some(passphrase) = plaintext_passphrase {
+                    let keychain_id = retained_id
+                        .or(passphrase_keychain_id)
+                        .unwrap_or_else(new_key_passphrase_keychain_id);
+                    self.keychain.store(&keychain_id, &passphrase)?;
+                    Ok(SavedAuth::ManagedKey {
+                        key_id,
+                        passphrase_keychain_id: Some(keychain_id),
+                        plaintext_passphrase: None,
+                    })
+                } else if let Some(passphrase_keychain_id) =
+                    matching_managed_key_passphrase_id(existing_auth, &key_id)
+                {
+                    Ok(SavedAuth::ManagedKey {
+                        key_id,
+                        passphrase_keychain_id: Some(passphrase_keychain_id),
+                        plaintext_passphrase: None,
+                    })
+                } else {
+                    Ok(SavedAuth::ManagedKey {
+                        key_id,
                         passphrase_keychain_id,
                         plaintext_passphrase: None,
                     })
@@ -672,6 +910,19 @@ impl ConnectionStore {
             .collect()
     }
 
+    fn snapshot_managed_keychain_entries(
+        &self,
+        data: &ConnectionStoreData,
+    ) -> HashMap<String, Option<SecretString>> {
+        data.managed_ssh_keys
+            .iter()
+            .map(|key| {
+                let value = self.managed_keychain.get(&key.secret_id).ok();
+                (key.secret_id.clone(), value)
+            })
+            .collect()
+    }
+
     fn rollback_keychain_entries(
         &self,
         touched_keychain_ids: &HashSet<String>,
@@ -684,6 +935,23 @@ impl ConnectionStore {
                 }
                 Some(None) | None => {
                     let _ = self.keychain.delete(keychain_id);
+                }
+            }
+        }
+    }
+
+    fn rollback_managed_keychain_entries(
+        &self,
+        touched_secret_ids: &HashSet<String>,
+        original_keychain: &HashMap<String, Option<SecretString>>,
+    ) {
+        for secret_id in touched_secret_ids {
+            match original_keychain.get(secret_id) {
+                Some(Some(secret)) => {
+                    let _ = self.managed_keychain.store(secret_id, secret);
+                }
+                Some(None) | None => {
+                    let _ = self.managed_keychain.delete(secret_id);
                 }
             }
         }

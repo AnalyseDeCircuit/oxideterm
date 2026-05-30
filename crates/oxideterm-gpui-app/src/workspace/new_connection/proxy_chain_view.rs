@@ -4,12 +4,13 @@ impl WorkspaceApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.open_new_connection_select != Some(NewConnectionSelect::Group) {
-            return None;
-        }
-        let anchor = *self
-            .select_anchors
-            .get(&SelectAnchorId::NewConnectionGroup)?;
+        let select_id = self.open_new_connection_select?;
+        let anchor_id = match select_id {
+            NewConnectionSelect::Group => SelectAnchorId::NewConnectionGroup,
+            NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
+            NewConnectionSelect::JumpManagedKey => SelectAnchorId::NewConnectionJumpManagedKey,
+        };
+        let anchor = *self.select_anchors.get(&anchor_id)?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let viewport_height = f32::from(window.viewport_size().height);
@@ -21,13 +22,15 @@ impl WorkspaceApp {
             .max(self.tokens.metrics.ui_control_height)
             .min(self.tokens.metrics.ui_select_max_height);
 
-        let current_group = self
-            .new_connection_form
-            .as_ref()
-            .map(|form| form.group.as_str())
-            .unwrap_or_default();
-        let ungrouped_label = self.connection_form_ungrouped_label();
-        let mut popup = select_overlay_popup_with_max_height(&self.tokens, width, max_height).child(
+        let mut popup = select_overlay_popup_with_max_height(&self.tokens, width, max_height);
+        if select_id == NewConnectionSelect::Group {
+            let current_group = self
+                .new_connection_form
+                .as_ref()
+                .map(|form| form.group.as_str())
+                .unwrap_or_default();
+            let ungrouped_label = self.connection_form_ungrouped_label();
+            popup = popup.child(
                 select_option_action(
                     select_option(
                         &self.tokens,
@@ -43,36 +46,66 @@ impl WorkspaceApp {
                 ),
             );
 
-        let groups = self.connection_form_group_options(current_group);
-        for group in groups.iter().cloned() {
-            let selected = group == current_group;
-            popup = popup.child(
-                select_option_action(
-                    select_option(&self.tokens, group.clone(), selected),
-                    false,
-                    false,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.set_new_connection_group(group.clone(), cx);
-                        cx.stop_propagation();
-                    }),
-                ),
-            );
-        }
-        if groups.is_empty() {
-            popup = popup.child(
-                div()
-                    .relative()
-                    .flex()
-                    .w_full()
-                    .items_center()
-                    .rounded(px(self.tokens.radii.xs))
-                    .py(px(self.tokens.metrics.ui_menu_item_padding_y))
-                    .px(px(self.tokens.metrics.ui_menu_item_padding_x))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .opacity(0.65)
-                    .child(self.i18n.t("ssh.form.create_groups_hint")),
-            );
+            let groups = self.connection_form_group_options(current_group);
+            for group in groups.iter().cloned() {
+                let selected = group == current_group;
+                popup = popup.child(
+                    select_option_action(
+                        select_option(&self.tokens, group.clone(), selected),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.set_new_connection_group(group.clone(), cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+            }
+            if groups.is_empty() {
+                popup = popup.child(
+                    div()
+                        .relative()
+                        .flex()
+                        .w_full()
+                        .items_center()
+                        .rounded(px(self.tokens.radii.xs))
+                        .py(px(self.tokens.metrics.ui_menu_item_padding_y))
+                        .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .opacity(0.65)
+                        .child(self.i18n.t("ssh.form.create_groups_hint")),
+                );
+            }
+        } else {
+            let current_key_id = self
+                .new_connection_form
+                .as_ref()
+                .and_then(|form| match select_id {
+                    NewConnectionSelect::ManagedKey => Some(form.managed_key_id.as_str()),
+                    NewConnectionSelect::JumpManagedKey => form
+                        .jump_server_form
+                        .as_ref()
+                        .map(|jump_form| jump_form.managed_key_id.as_str()),
+                    NewConnectionSelect::Group => None,
+                })
+                .unwrap_or_default();
+            for key in self.connection_store.managed_ssh_keys() {
+                let selected = key.id == current_key_id;
+                let key_id = key.id.clone();
+                let label = format!("{} · {}", key.name, key.fingerprint);
+                popup = popup.child(
+                    select_option_action(
+                        select_option(&self.tokens, label, selected),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.set_new_connection_managed_key(select_id, key_id.clone(), cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+            }
         }
 
         let (anchor_corner, position, offset_y) = if opens_above {
@@ -129,7 +162,9 @@ impl WorkspaceApp {
         else {
             return div().into_any_element();
         };
-        let add_disabled = !jump_form.complete();
+        let add_disabled = !jump_form.complete()
+            || (jump_form.auth_tab == SshAuthTab::ManagedKey
+                && jump_form.managed_key_id.trim().is_empty());
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
@@ -222,6 +257,26 @@ impl WorkspaceApp {
                                     NewConnectionField::JumpPassphrase,
                                     true,
                                     cx,
+                                ))
+                        })
+                        .when(jump_form.auth_tab == SshAuthTab::ManagedKey, |content| {
+                            content
+                                .child(self.render_managed_key_select(
+                                    self.i18n.t("ssh.form.managed_key"),
+                                    &jump_form.managed_key_id,
+                                    true,
+                                    cx,
+                                ))
+                                .child(self.render_connection_field(
+                                    self.i18n.t("ssh.form.passphrase"),
+                                    &jump_form.passphrase,
+                                    self.i18n.t("ssh.form.passphrase_placeholder"),
+                                    NewConnectionField::JumpPassphrase,
+                                    true,
+                                    cx,
+                                ))
+                                .child(self.render_connection_hint(
+                                    self.i18n.t("ssh.form.managed_key_hint"),
                                 ))
                         })
                         .when(jump_form.auth_tab == SshAuthTab::Certificate, |content| {
@@ -495,12 +550,13 @@ impl WorkspaceApp {
         let auth_label = match hop.auth_tab {
             SshAuthTab::DefaultKey => self.i18n.t("ssh.auth.default_key"),
             SshAuthTab::SshKey => self.i18n.t("ssh.auth.ssh_key"),
+            SshAuthTab::ManagedKey => self.i18n.t("ssh.auth.managed_key"),
             SshAuthTab::Certificate => self.i18n.t("ssh.auth.certificate"),
             SshAuthTab::Password => self.i18n.t("ssh.auth.password"),
             SshAuthTab::Agent => self.i18n.t("ssh.auth.agent"),
             SshAuthTab::TwoFactor => self.i18n.t("ssh.auth.two_factor"),
         };
-        let auth_icon = if matches!(hop.auth_tab, SshAuthTab::SshKey | SshAuthTab::DefaultKey) {
+        let auth_icon = if matches!(hop.auth_tab, SshAuthTab::SshKey | SshAuthTab::DefaultKey | SshAuthTab::ManagedKey) {
             LucideIcon::Key
         } else {
             LucideIcon::Lock
@@ -660,6 +716,7 @@ impl WorkspaceApp {
         let tabs = [
             (SshAuthTab::DefaultKey, "ssh.auth.default_key"),
             (SshAuthTab::SshKey, "ssh.auth.ssh_key"),
+            (SshAuthTab::ManagedKey, "ssh.auth.managed_key"),
             (SshAuthTab::Certificate, "ssh.auth.certificate"),
             (SshAuthTab::Password, "ssh.auth.password"),
             (SshAuthTab::Agent, "ssh.auth.agent"),
@@ -676,6 +733,7 @@ impl WorkspaceApp {
                             jump_form.auth_tab = tab;
                             form.focused_field = match tab {
                                 SshAuthTab::Password => NewConnectionField::JumpPassword,
+                                SshAuthTab::ManagedKey => NewConnectionField::JumpManagedKeyId,
                                 SshAuthTab::SshKey | SshAuthTab::Certificate => {
                                     NewConnectionField::JumpKeyPath
                                 }

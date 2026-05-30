@@ -101,6 +101,8 @@ fn apply_oxide_import_with_options_inner(
             .map(|id| format!("Forward id not found in .oxide payload: {id}")),
     );
     let mut connections_to_save = Vec::new();
+    let mut restored_managed_keys = HashMap::new();
+    let mut imported_managed_keys = Vec::new();
 
     current_step += 1;
     report_progress("preparing_connections", current_step);
@@ -110,7 +112,14 @@ fn apply_oxide_import_with_options_inner(
                 result.skipped += 1;
             }
             PlannedImportAction::Import => {
-                let saved = encrypted_connection_to_saved(conn, None, None)?;
+                let saved = encrypted_connection_to_saved(
+                    store,
+                    conn,
+                    None,
+                    None,
+                    &mut restored_managed_keys,
+                    &mut imported_managed_keys,
+                )?;
                 if options.import_forwards {
                     result.imported_forwards += saved.1.len();
                     result.forward_records.extend(saved.1);
@@ -120,7 +129,14 @@ fn apply_oxide_import_with_options_inner(
             }
             PlannedImportAction::Rename(new_name) => {
                 let original = conn.name.clone();
-                let saved = encrypted_connection_to_saved(conn, Some(new_name.clone()), None)?;
+                let saved = encrypted_connection_to_saved(
+                    store,
+                    conn,
+                    Some(new_name.clone()),
+                    None,
+                    &mut restored_managed_keys,
+                    &mut imported_managed_keys,
+                )?;
                 if options.import_forwards {
                     result.imported_forwards += saved.1.len();
                     result.forward_records.extend(saved.1);
@@ -131,7 +147,14 @@ fn apply_oxide_import_with_options_inner(
                 result.renames.push((original, new_name));
             }
             PlannedImportAction::Replace(existing_id) => {
-                let saved = encrypted_connection_to_saved(conn, None, Some(existing_id.clone()))?;
+                let saved = encrypted_connection_to_saved(
+                    store,
+                    conn,
+                    None,
+                    Some(existing_id.clone()),
+                    &mut restored_managed_keys,
+                    &mut imported_managed_keys,
+                )?;
                 if options.import_forwards {
                     result.imported_forwards += saved.1.len();
                     result.forward_records.extend(saved.1);
@@ -143,7 +166,14 @@ fn apply_oxide_import_with_options_inner(
             }
             PlannedImportAction::Merge(existing_id) => {
                 let existing = store.get(&existing_id).cloned();
-                let saved = encrypted_connection_to_saved(conn, None, Some(existing_id.clone()))?;
+                let saved = encrypted_connection_to_saved(
+                    store,
+                    conn,
+                    None,
+                    Some(existing_id.clone()),
+                    &mut restored_managed_keys,
+                    &mut imported_managed_keys,
+                )?;
                 let (saved_connection, forward_records) = saved;
                 let merged = if let Some(existing) = existing {
                     merge_saved_connection(existing, saved_connection)
@@ -164,7 +194,10 @@ fn apply_oxide_import_with_options_inner(
 
     current_step += 1;
     report_progress("applying_connections", current_step);
-    store.upsert_imported_connections_transaction(connections_to_save)?;
+    store.upsert_imported_connections_and_managed_keys_transaction(
+        connections_to_save,
+        imported_managed_keys,
+    )?;
 
     current_step += 1;
     report_progress("saving_config", current_step);
@@ -235,9 +268,12 @@ fn filter_selected_forward_ids(
 }
 
 fn encrypted_connection_to_saved(
+    store: &ConnectionStore,
     conn: EncryptedConnection,
     name_override: Option<String>,
     id_override: Option<String>,
+    restored_managed_keys: &mut HashMap<String, String>,
+    imported_managed_keys: &mut Vec<ImportedManagedSshKey>,
 ) -> Result<(SavedConnection, Vec<OxideForwardRecord>), OxideFileError> {
     let id = id_override.unwrap_or_else(|| Uuid::new_v4().to_string());
     let forward_records = import_forwards(&id, conn.forwards);
@@ -253,11 +289,23 @@ fn encrypted_connection_to_saved(
             host: conn.host,
             port: conn.port,
             username: conn.username,
-            auth: import_auth(conn.auth)?,
+            auth: import_auth(
+                store,
+                conn.auth,
+                restored_managed_keys,
+                imported_managed_keys,
+            )?,
             proxy_chain: conn
                 .proxy_chain
                 .into_iter()
-                .map(import_proxy_hop)
+                .map(|hop| {
+                    import_proxy_hop(
+                        store,
+                        hop,
+                        restored_managed_keys,
+                        imported_managed_keys,
+                    )
+                })
                 .collect::<Result<_, _>>()?,
             options,
             created_at: now,
@@ -291,17 +339,27 @@ fn import_forwards(
         .collect()
 }
 
-fn import_proxy_hop(hop: EncryptedProxyHop) -> Result<SavedProxyHop, OxideFileError> {
+fn import_proxy_hop(
+    store: &ConnectionStore,
+    hop: EncryptedProxyHop,
+    restored_managed_keys: &mut HashMap<String, String>,
+    imported_managed_keys: &mut Vec<ImportedManagedSshKey>,
+) -> Result<SavedProxyHop, OxideFileError> {
     Ok(SavedProxyHop {
         host: hop.host,
         port: hop.port,
         username: hop.username,
-        auth: import_auth(hop.auth)?,
+        auth: import_auth(store, hop.auth, restored_managed_keys, imported_managed_keys)?,
         agent_forwarding: false,
     })
 }
 
-fn import_auth(auth: EncryptedAuth) -> Result<SavedAuth, OxideFileError> {
+fn import_auth(
+    store: &ConnectionStore,
+    auth: EncryptedAuth,
+    restored_managed_keys: &mut HashMap<String, String>,
+    imported_managed_keys: &mut Vec<ImportedManagedSshKey>,
+) -> Result<SavedAuth, OxideFileError> {
     Ok(match auth {
         EncryptedAuth::Password { password } => SavedAuth::Password {
             keychain_id: None,
@@ -311,21 +369,38 @@ fn import_auth(auth: EncryptedAuth) -> Result<SavedAuth, OxideFileError> {
             key_path,
             passphrase,
             embedded_key,
-        } => SavedAuth::Key {
-            key_path: embedded_key
-                .map(|encoded| extract_embedded_file(&key_path, encoded))
-                .transpose()?
-                .unwrap_or(key_path),
-            has_passphrase: passphrase.is_some(),
-            passphrase_keychain_id: None,
-            plaintext_passphrase: passphrase.map(SecretString::from),
-        },
+            managed_key,
+        } => {
+            if managed_key.is_some() {
+                prepare_managed_key_restore(
+                    store,
+                    &key_path,
+                    passphrase,
+                    embedded_key,
+                    managed_key,
+                    restored_managed_keys,
+                    imported_managed_keys,
+                )?
+                .expect("managed key metadata was provided")
+            } else {
+                SavedAuth::Key {
+                    key_path: embedded_key
+                        .map(|encoded| extract_embedded_file(&key_path, encoded))
+                        .transpose()?
+                        .unwrap_or(key_path),
+                    has_passphrase: passphrase.is_some(),
+                    passphrase_keychain_id: None,
+                    plaintext_passphrase: passphrase.map(SecretString::from),
+                }
+            }
+        }
         EncryptedAuth::Certificate {
             key_path,
             cert_path,
             passphrase,
             embedded_key,
             embedded_cert,
+            managed_key: _,
         } => SavedAuth::Certificate {
             key_path: embedded_key
                 .map(|encoded| extract_embedded_file(&key_path, encoded))
@@ -341,6 +416,112 @@ fn import_auth(auth: EncryptedAuth) -> Result<SavedAuth, OxideFileError> {
         },
         EncryptedAuth::Agent => SavedAuth::Agent,
     })
+}
+
+fn prepare_managed_key_restore(
+    store: &ConnectionStore,
+    key_path: &str,
+    passphrase: Option<Zeroizing<String>>,
+    embedded_key: Option<Zeroizing<String>>,
+    managed_key: Option<EncryptedManagedKeyMetadata>,
+    restored_managed_keys: &mut HashMap<String, String>,
+    imported_managed_keys: &mut Vec<ImportedManagedSshKey>,
+) -> Result<Option<SavedAuth>, OxideFileError> {
+    let Some(metadata) = managed_key else {
+        return Ok(None);
+    };
+    let Some(encoded_key) = embedded_key else {
+        return Err(OxideFileError::InvalidFormat(format!(
+            "Managed key '{}' is missing embedded key data",
+            metadata.name
+        )));
+    };
+
+    if let Some(restored_id) = restored_managed_keys.get(&metadata.key_id) {
+        return Ok(Some(SavedAuth::ManagedKey {
+            key_id: restored_id.clone(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: passphrase.map(SecretString::from),
+        }));
+    }
+
+    if let Some(fingerprint) = metadata.fingerprint.as_deref() {
+        if let Some(existing) = store
+            .managed_ssh_keys()
+            .into_iter()
+            .find(|key| key.fingerprint == fingerprint)
+        {
+            restored_managed_keys.insert(metadata.key_id, existing.id.clone());
+            return Ok(Some(SavedAuth::ManagedKey {
+                key_id: existing.id,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: passphrase.map(SecretString::from),
+            }));
+        }
+
+        if let Some(pending) = imported_managed_keys
+            .iter()
+            .find(|entry| entry.key.fingerprint == fingerprint)
+        {
+            restored_managed_keys.insert(metadata.key_id, pending.key.id.clone());
+            return Ok(Some(SavedAuth::ManagedKey {
+                key_id: pending.key.id.clone(),
+                passphrase_keychain_id: None,
+                plaintext_passphrase: passphrase.map(SecretString::from),
+            }));
+        }
+    }
+
+    let decoded = Zeroizing::new(
+        BASE64
+            .decode(encoded_key.as_bytes())
+            .map_err(|error| OxideFileError::InvalidFormat(error.to_string()))?,
+    );
+    let private_key = Zeroizing::new(
+        String::from_utf8(decoded.to_vec()).map_err(|error| {
+            OxideFileError::InvalidFormat(format!(
+                "Managed key '{key_path}' is not valid UTF-8: {error}"
+            ))
+        })?,
+    );
+    let key_id = Uuid::new_v4().to_string();
+    let secret_id = format!("managed-key-{key_id}");
+    let now = Utc::now();
+    let fingerprint = metadata
+        .fingerprint
+        .clone()
+        .unwrap_or_else(|| format!("imported-{key_id}"));
+    let key = ManagedSshKey {
+        id: key_id.clone(),
+        secret_id,
+        name: metadata
+            .name
+            .trim()
+            .is_empty()
+            .then_some("Managed SSH Key")
+            .unwrap_or(metadata.name.trim())
+            .to_string(),
+        fingerprint,
+        public_key: metadata.public_key.unwrap_or_default(),
+        requires_passphrase: metadata.requires_passphrase.unwrap_or(passphrase.is_some()),
+        origin: ManagedSshKeyOrigin::OxideImport,
+        created_at: now,
+        updated_at: now,
+    };
+    let saved_auth = SavedAuth::ManagedKey {
+        key_id: key_id.clone(),
+        passphrase_keychain_id: None,
+        plaintext_passphrase: passphrase.map(SecretString::from),
+    };
+
+    // Staged managed keys are committed with the imported connections so
+    // config metadata and secret storage roll back together on failure.
+    imported_managed_keys.push(ImportedManagedSshKey {
+        key,
+        secret: SecretString::from(private_key),
+    });
+    restored_managed_keys.insert(metadata.key_id, key_id);
+    Ok(Some(saved_auth))
 }
 
 fn extract_embedded_file(

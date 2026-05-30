@@ -75,6 +75,7 @@ fn proxy_hop_handler(hop: &ProxyHopConfig) -> NativeClientHandler {
 async fn authenticate_proxy_hop(
     handle: &mut client::Handle<NativeClientHandler>,
     hop: &ProxyHopConfig,
+    managed_key_resolver: Option<&ManagedKeyResolver>,
 ) -> Result<(), SshTransportError> {
     if matches!(hop.auth, AuthMethod::KeyboardInteractive) {
         return Err(SshTransportError::UnsupportedAuth(
@@ -97,6 +98,7 @@ async fn authenticate_proxy_hop(
         handle,
         &config,
         None,
+        managed_key_resolver,
         AuthenticationOptions {
             password_kbi_fallback: false,
             interactive_kbi_chain: false,
@@ -276,11 +278,13 @@ async fn authenticate(
     handle: &mut client::Handle<NativeClientHandler>,
     config: &SshConfig,
     prompt_handler: Option<&dyn SshPromptHandler>,
+    managed_key_resolver: Option<&ManagedKeyResolver>,
 ) -> Result<(), SshTransportError> {
     authenticate_with_options(
         handle,
         config,
         prompt_handler,
+        managed_key_resolver,
         AuthenticationOptions::default(),
     )
     .await
@@ -305,6 +309,7 @@ async fn authenticate_with_options(
     handle: &mut client::Handle<NativeClientHandler>,
     config: &SshConfig,
     prompt_handler: Option<&dyn SshPromptHandler>,
+    managed_key_resolver: Option<&ManagedKeyResolver>,
     options: AuthenticationOptions,
 ) -> Result<(), SshTransportError> {
     if let Some(result) = try_none_auth_probe(handle, &config.username).await
@@ -353,6 +358,21 @@ async fn authenticate_with_options(
             authenticate_certificate_best_algo(handle, &config.username, key, cert).await?
         }
         AuthMethod::Agent => authenticate_agent(handle, config).await?,
+        AuthMethod::ManagedKey { key_id, passphrase } => {
+            let Some(resolve_managed_key) = managed_key_resolver else {
+                return Err(SshTransportError::AuthenticationFailed(
+                    "Managed key authentication requires a key resolver".to_string(),
+                ));
+            };
+            // SshConfig stores only the managed key id. The resolver exposes
+            // keychain material for this auth attempt and drops it after decode.
+            let private_key = resolve_managed_key(key_id)?;
+            let key = load_private_key_from_memory(
+                private_key.as_str(),
+                passphrase.as_ref().map(|passphrase| passphrase.as_str()),
+            )?;
+            authenticate_publickey_best_algo(handle, &config.username, key).await?
+        }
         AuthMethod::KeyboardInteractive => {
             authenticate_keyboard_interactive(handle, &config.username, prompt_handler).await?
         }

@@ -1,6 +1,11 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    use rand::rngs::OsRng;
+    use russh::keys::ssh_key::LineEnding;
+    use russh::keys::{Algorithm, PrivateKey};
 
     fn temp_store(name: &str) -> ConnectionStore {
         let path = std::env::temp_dir().join(format!(
@@ -8,6 +13,17 @@ mod tests {
             Uuid::new_v4()
         ));
         ConnectionStore::load(path).unwrap()
+    }
+
+    fn generated_private_key_text() -> String {
+        let key_path = std::env::temp_dir()
+            .join(format!("oxideterm-managed-key-{}.key", Uuid::new_v4()));
+        let mut rng = OsRng;
+        let key = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
+        key.write_openssh_file(&key_path, LineEnding::LF).unwrap();
+        let private_key = fs::read_to_string(&key_path).unwrap();
+        let _ = fs::remove_file(key_path);
+        private_key
     }
 
     fn saved_connection(id: &str, name: &str) -> SavedConnection {
@@ -142,6 +158,69 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn managed_key_export_import_restores_managed_key_store_entry() {
+        let mut source = temp_store("managed-source");
+        let private_key = generated_private_key_text();
+        let managed_key = source
+            .create_managed_ssh_key_from_text(
+                SecretString::from(private_key.clone()),
+                Some("Deploy key".to_string()),
+                None,
+            )
+            .unwrap();
+        let mut connection = saved_connection("conn-1", "Prod");
+        connection.auth = SavedAuth::ManagedKey {
+            key_id: managed_key.id.clone(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: None,
+        };
+        connection.proxy_chain.clear();
+        source.upsert_imported_connection(connection).unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions::default(),
+        )
+        .unwrap();
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        assert_eq!(file.metadata.managed_key_count, Some(1));
+        let payload = decrypt_payload(&bytes, "secret!").unwrap();
+        assert!(matches!(
+            payload.connections[0].auth,
+            EncryptedAuth::Key {
+                managed_key: Some(_),
+                embedded_key: Some(_),
+                ..
+            }
+        ));
+
+        let mut target = temp_store("managed-target");
+        let result = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+
+        assert_eq!(result.imported, 1);
+        let keys = target.managed_ssh_keys();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].name, "Deploy key");
+        let imported = target.connections().first().unwrap();
+        assert!(matches!(
+            &imported.auth,
+            SavedAuth::ManagedKey { key_id, .. } if key_id == &keys[0].id
+        ));
+        let restored_key = target
+            .resolve_managed_ssh_key_private_key(&keys[0].id)
+            .unwrap();
+        assert_eq!(restored_key.expose_secret(), private_key);
     }
 
     #[test]

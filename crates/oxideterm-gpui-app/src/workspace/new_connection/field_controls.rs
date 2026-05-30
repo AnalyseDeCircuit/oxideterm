@@ -42,6 +42,10 @@ impl WorkspaceApp {
         // body. Drop its cached bounds when the body scrolls so a reopened
         // overlay cannot reuse pre-scroll coordinates.
         self.select_anchors.remove(&SelectAnchorId::NewConnectionGroup);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionManagedKey);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionJumpManagedKey);
     }
 
     fn render_connection_hint(&self, text: String) -> AnyElement {
@@ -270,6 +274,102 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn render_managed_key_select(
+        &self,
+        label: String,
+        selected_id: &str,
+        jump_form: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let keys = self.connection_store.managed_ssh_keys();
+        let selected_label = if selected_id.trim().is_empty() {
+            self.i18n.t("ssh.form.managed_key_placeholder")
+        } else {
+            keys.iter()
+                .find(|key| key.id == selected_id)
+                .map(|key| key.name.clone())
+                .unwrap_or_else(|| selected_id.to_string())
+        };
+        let select_id = if jump_form {
+            NewConnectionSelect::JumpManagedKey
+        } else {
+            NewConnectionSelect::ManagedKey
+        };
+        let anchor_id = if jump_form {
+            SelectAnchorId::NewConnectionJumpManagedKey
+        } else {
+            SelectAnchorId::NewConnectionManagedKey
+        };
+        let workspace = cx.entity();
+        let trigger = self
+            .new_connection_select_trigger(
+                select_id,
+                selected_label,
+                selected_id.trim().is_empty(),
+                keys.is_empty(),
+            )
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    if this.connection_store.managed_ssh_keys().is_empty() {
+                        cx.stop_propagation();
+                        return;
+                    }
+                    if let Some(form) = this.new_connection_form.as_mut() {
+                        form.field_focused = false;
+                        form.selected_field = None;
+                    }
+                    this.ime_marked_text = None;
+                    this.open_new_connection_select_from_pointer(select_id);
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            );
+
+        form_field(
+            &self.tokens,
+            label,
+            select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_select_anchor(anchor, cx);
+                });
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn set_new_connection_managed_key(
+        &mut self,
+        select_id: NewConnectionSelect,
+        key_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            match select_id {
+                NewConnectionSelect::ManagedKey => {
+                    form.managed_key_id = key_id;
+                    form.focused_field = NewConnectionField::ManagedKeyId;
+                }
+                NewConnectionSelect::JumpManagedKey => {
+                    let Some(jump_form) = form.jump_server_form.as_mut() else {
+                        return;
+                    };
+                    jump_form.managed_key_id = key_id;
+                    form.focused_field = NewConnectionField::JumpManagedKeyId;
+                }
+                NewConnectionSelect::Group => return,
+            }
+            form.field_focused = false;
+            form.selected_field = None;
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
     fn connection_form_group_options(&self, current_group: &str) -> Vec<String> {
         let mut groups = self.connection_store.groups().to_vec();
         let current = current_group.trim();
@@ -483,6 +583,7 @@ impl WorkspaceApp {
         let choices = [
             (SshAuthTab::Password, "ssh.auth.password"),
             (SshAuthTab::SshKey, "ssh.auth.ssh_key"),
+            (SshAuthTab::ManagedKey, "ssh.auth.managed_key"),
             (SshAuthTab::Agent, "ssh.auth.agent"),
             (SshAuthTab::Certificate, "ssh.auth.certificate"),
         ];
@@ -540,6 +641,7 @@ impl WorkspaceApp {
                     SshAuthTab::SshKey,
                     "sessionManager.edit_properties.auth_key",
                 ),
+                (SshAuthTab::ManagedKey, "ssh.auth.managed_key"),
                 (SshAuthTab::Certificate, "ssh.auth.certificate"),
                 (
                     SshAuthTab::Agent,
@@ -551,6 +653,7 @@ impl WorkspaceApp {
                 (SshAuthTab::Password, "ssh.auth.password"),
                 (SshAuthTab::DefaultKey, "ssh.auth.default_key"),
                 (SshAuthTab::SshKey, "ssh.auth.ssh_key"),
+                (SshAuthTab::ManagedKey, "ssh.auth.managed_key"),
                 (SshAuthTab::Certificate, "ssh.auth.certificate"),
                 (SshAuthTab::Agent, "ssh.auth.agent"),
                 (SshAuthTab::TwoFactor, "ssh.auth.two_factor"),

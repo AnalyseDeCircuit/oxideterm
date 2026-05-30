@@ -72,7 +72,11 @@
       "post_connect_command_placeholder": "cd /srv/app",
       "save_connection_hint": "Desactivado por defecto la primera vez; después se recordará tu elección.",
       "two_factor_hint": "El servidor solicitará credenciales durante la conexión. Usos comunes: código TOTP, token de hardware, desafío-respuesta.",
-      "two_factor_warning": "Nota: las conexiones con 2FA no pueden reconectarse automáticamente. Tendrás que reconectar manualmente si la sesión se desconecta."
+      "two_factor_warning": "Nota: las conexiones con 2FA no pueden reconectarse automáticamente. Tendrás que reconectar manualmente si la sesión se desconecta.",
+      "managed_key": "Managed SSH key",
+      "managed_key_placeholder": "Select a managed key",
+      "managed_key_hint": "Managed keys stay in the local keychain. This connection stores only the key reference and optional passphrase.",
+      "managed_key_required": "Managed SSH key is required for managed-key authentication."
     },
     "auth": {
       "password": "Contraseña",
@@ -80,7 +84,8 @@
       "ssh_key": "Clave SSH",
       "certificate": "Certificado",
       "agent": "Agente",
-      "two_factor": "2FA"
+      "two_factor": "2FA",
+      "managed_key": "Managed Key"
     },
     "host_key": {
       "title_unknown": "Clave de host desconocida",

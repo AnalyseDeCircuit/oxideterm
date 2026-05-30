@@ -17,6 +17,7 @@ pub enum ConnectionAuthDraftKind {
     Password,
     DefaultKey,
     SshKey,
+    ManagedKey,
     Certificate,
     Agent,
     TwoFactor,
@@ -30,6 +31,7 @@ pub struct ConnectionAuthDraft {
     pub password_loaded: bool,
     pub save_password: bool,
     pub key_path: String,
+    pub managed_key_id: String,
     pub cert_path: String,
     pub passphrase: SecretString,
 }
@@ -44,6 +46,7 @@ impl fmt::Debug for ConnectionAuthDraft {
             .field("password_loaded", &self.password_loaded)
             .field("save_password", &self.save_password)
             .field("key_path", &self.key_path)
+            .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
             .field("passphrase", &self.passphrase)
             .finish()
@@ -59,6 +62,7 @@ impl Default for ConnectionAuthDraft {
             password_loaded: true,
             save_password: false,
             key_path: String::new(),
+            managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: SecretString::default(),
         }
@@ -169,6 +173,11 @@ pub fn saved_auth_from_draft(draft: ConnectionAuthDraft) -> SavedAuth {
         ConnectionAuthDraftKind::SshKey => SavedAuth::Key {
             key_path: draft.key_path.trim().to_string(),
             has_passphrase: !draft.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!draft.passphrase.is_empty()).then_some(draft.passphrase),
+        },
+        ConnectionAuthDraftKind::ManagedKey => SavedAuth::ManagedKey {
+            key_id: draft.managed_key_id.trim().to_string(),
             passphrase_keychain_id: None,
             plaintext_passphrase: (!draft.passphrase.is_empty()).then_some(draft.passphrase),
         },

@@ -72,7 +72,11 @@
       "post_connect_command_placeholder": "cd /srv/app",
       "save_connection_hint": "처음에는 기본적으로 꺼져 있으며, 이후 선택이 기억됩니다.",
       "two_factor_hint": "연결 중 서버가 자격 증명을 요청합니다. 일반적인 용도: TOTP 코드, 하드웨어 토큰, 챌린지-응답.",
-      "two_factor_warning": "참고: 2FA 연결은 자동으로 다시 연결할 수 없습니다. 세션 연결이 끊기면 수동으로 다시 연결해야 합니다."
+      "two_factor_warning": "참고: 2FA 연결은 자동으로 다시 연결할 수 없습니다. 세션 연결이 끊기면 수동으로 다시 연결해야 합니다.",
+      "managed_key": "Managed SSH key",
+      "managed_key_placeholder": "Select a managed key",
+      "managed_key_hint": "Managed keys stay in the local keychain. This connection stores only the key reference and optional passphrase.",
+      "managed_key_required": "Managed SSH key is required for managed-key authentication."
     },
     "auth": {
       "password": "비밀번호",
@@ -80,7 +84,8 @@
       "ssh_key": "SSH 키",
       "certificate": "인증서",
       "agent": "에이전트",
-      "two_factor": "2FA"
+      "two_factor": "2FA",
+      "managed_key": "Managed Key"
     },
     "host_key": {
       "title_unknown": "알 수 없는 호스트 키",

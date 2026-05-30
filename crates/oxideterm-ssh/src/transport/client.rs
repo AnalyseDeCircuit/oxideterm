@@ -3,11 +3,17 @@ impl SshTransportClient {
         Self {
             config,
             prompt_handler: None,
+            managed_key_resolver: None,
         }
     }
 
     pub fn with_prompt_handler(mut self, prompt_handler: Arc<dyn SshPromptHandler>) -> Self {
         self.prompt_handler = Some(prompt_handler);
+        self
+    }
+
+    pub fn with_managed_key_resolver(mut self, resolver: ManagedKeyResolver) -> Self {
+        self.managed_key_resolver = Some(resolver);
         self
     }
 
@@ -202,7 +208,13 @@ impl SshTransportClient {
                     "failed to connect child node via parent tunnel: {error}"
                 ))
             })?;
-            authenticate(&mut target, &self.config, self.prompt_handler.as_deref()).await?;
+            authenticate(
+                &mut target,
+                &self.config,
+                self.prompt_handler.as_deref(),
+                self.managed_key_resolver.as_ref(),
+            )
+            .await?;
             Ok(Arc::new(PooledSshConnection::tunneled(
                 target,
                 Vec::new(),
@@ -292,7 +304,13 @@ impl SshTransportClient {
         .map_err(|_| SshTransportError::Timeout)?
         .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
 
-        authenticate(&mut handle, config, self.prompt_handler.as_deref()).await?;
+        authenticate(
+            &mut handle,
+            config,
+            self.prompt_handler.as_deref(),
+            self.managed_key_resolver.as_ref(),
+        )
+        .await?;
         Ok((handle, auth_banners))
     }
 
@@ -372,7 +390,7 @@ impl SshTransportClient {
         .map_err(|_| SshTransportError::Timeout)?
         .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
 
-        authenticate_proxy_hop(&mut handle, hop).await?;
+        authenticate_proxy_hop(&mut handle, hop, self.managed_key_resolver.as_ref()).await?;
         Ok(handle)
     }
 
@@ -398,7 +416,7 @@ impl SshTransportClient {
             ))
         })?;
 
-        authenticate_proxy_hop(&mut handle, hop).await?;
+        authenticate_proxy_hop(&mut handle, hop, self.managed_key_resolver.as_ref()).await?;
         Ok(handle)
     }
 
@@ -430,7 +448,13 @@ impl SshTransportClient {
             ))
         })?;
 
-        authenticate(&mut handle, &self.config, self.prompt_handler.as_deref()).await?;
+        authenticate(
+            &mut handle,
+            &self.config,
+            self.prompt_handler.as_deref(),
+            self.managed_key_resolver.as_ref(),
+        )
+        .await?;
         Ok((handle, auth_banners))
     }
 

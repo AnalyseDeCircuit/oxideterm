@@ -296,6 +296,7 @@ fn saved_auth_from_connection_info(payload: &ConnectionInfo) -> SavedAuth {
         AuthType::ManagedKey => SavedAuth::ManagedKey {
             key_id: payload.managed_key_id.clone().unwrap_or_default(),
             passphrase_keychain_id: None,
+            plaintext_passphrase: None,
         },
         AuthType::Certificate => SavedAuth::Certificate {
             key_path: payload.key_path.clone().unwrap_or_default(),
@@ -323,6 +324,7 @@ fn saved_auth_from_proxy_hop_info(hop: &ProxyHopInfo) -> SavedAuth {
         AuthType::ManagedKey => SavedAuth::ManagedKey {
             key_id: hop.managed_key_id.clone().unwrap_or_default(),
             passphrase_keychain_id: None,
+            plaintext_passphrase: None,
         },
         AuthType::Certificate => SavedAuth::Certificate {
             key_path: hop.key_path.clone().unwrap_or_default(),

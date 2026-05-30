@@ -1,6 +1,10 @@
 mod tests {
     use std::{fs, path::PathBuf};
 
+    use rand::rngs::OsRng;
+    use russh::keys::ssh_key::LineEnding;
+    use russh::keys::{Algorithm, PrivateKey};
+
     use super::*;
 
     fn temp_store_path(name: &str) -> PathBuf {
@@ -29,6 +33,20 @@ mod tests {
 
     fn load_empty_store(name: &str) -> ConnectionStore {
         ConnectionStore::load(temp_store_path(name)).expect("store should load")
+    }
+
+    fn generated_private_key_text(passphrase: Option<&str>) -> String {
+        let key_path = temp_store_path("managed-key-source").with_extension("key");
+        let mut rng = OsRng;
+        let key = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
+        let key = match passphrase {
+            Some(passphrase) => key.encrypt(&mut rng, passphrase).unwrap(),
+            None => key,
+        };
+        key.write_openssh_file(&key_path, LineEnding::LF).unwrap();
+        let private_key = fs::read_to_string(&key_path).unwrap();
+        let _ = fs::remove_file(key_path);
+        private_key
     }
 
     #[test]
@@ -815,6 +833,118 @@ mod tests {
     }
 
     #[test]
+    fn managed_key_create_stores_secret_and_returns_metadata_only() {
+        let mut store = load_empty_store("managed-key-create");
+        let private_key = generated_private_key_text(None);
+
+        let info = store
+            .create_managed_ssh_key_from_text(
+                SecretString::from(private_key.clone()),
+                Some("Deploy Key".to_string()),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(info.name, "Deploy Key");
+        assert_eq!(info.origin, ManagedSshKeyOrigin::PastedText);
+        assert!(!info.requires_passphrase);
+        assert!(info.public_key.starts_with("ssh-ed25519 "));
+        assert_eq!(store.data.managed_ssh_keys.len(), 1);
+        assert_eq!(
+            store
+                .managed_keychain
+                .get(&store.data.managed_ssh_keys[0].secret_id)
+                .unwrap(),
+            private_key.as_str()
+        );
+        assert!(!serde_json::to_string(&info).unwrap().contains("PRIVATE KEY"));
+    }
+
+    #[test]
+    fn managed_key_create_rejects_invalid_key_without_echoing_secret() {
+        let mut store = load_empty_store("managed-key-invalid");
+        let marker = "not-a-private-key-secret-marker";
+
+        let error = store
+            .create_managed_ssh_key_from_text(SecretString::from(marker), None, None)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "Invalid SSH private key");
+        assert!(!error.contains(marker));
+        assert!(store.data.managed_ssh_keys.is_empty());
+    }
+
+    #[test]
+    fn managed_key_create_detects_passphrase_protected_key() {
+        let mut store = load_empty_store("managed-key-passphrase");
+        let private_key = generated_private_key_text(Some("secret-passphrase"));
+
+        let info = store
+            .create_managed_ssh_key_from_text(
+                SecretString::from(private_key),
+                None,
+                Some(SecretString::from("secret-passphrase")),
+            )
+            .unwrap();
+
+        assert!(info.requires_passphrase);
+    }
+
+    #[test]
+    fn managed_key_delete_blocks_referenced_key_without_force() {
+        let mut store = load_empty_store("managed-key-delete-blocked");
+        let private_key = generated_private_key_text(None);
+        let info = store
+            .create_managed_ssh_key_from_text(SecretString::from(private_key), None, None)
+            .unwrap();
+        store
+            .upsert(request(
+                "conn-1",
+                SavedAuth::ManagedKey {
+                    key_id: info.id.clone(),
+                    passphrase_keychain_id: None,
+                    plaintext_passphrase: None,
+                },
+            ))
+            .unwrap();
+
+        let usage = store.managed_ssh_key_usage(&info.id).unwrap();
+        let error = store.delete_managed_ssh_key(&info.id, false).unwrap_err();
+
+        assert_eq!(usage.count, 1);
+        assert!(error.to_string().contains("used by 1 saved connection"));
+        assert_eq!(store.managed_ssh_keys().len(), 1);
+    }
+
+    #[test]
+    fn managed_key_connection_delete_does_not_delete_managed_key_secret() {
+        let mut store = load_empty_store("managed-key-connection-delete");
+        let private_key = generated_private_key_text(None);
+        let info = store
+            .create_managed_ssh_key_from_text(SecretString::from(private_key.clone()), None, None)
+            .unwrap();
+        let secret_id = store.data.managed_ssh_keys[0].secret_id.clone();
+        store
+            .upsert(request(
+                "conn-1",
+                SavedAuth::ManagedKey {
+                    key_id: info.id.clone(),
+                    passphrase_keychain_id: None,
+                    plaintext_passphrase: None,
+                },
+            ))
+            .unwrap();
+
+        assert!(store.delete("conn-1").unwrap());
+        assert_eq!(
+            store.managed_keychain.get(&secret_id).unwrap(),
+            private_key.as_str()
+        );
+        assert_eq!(store.managed_ssh_keys().len(), 1);
+    }
+
+    #[test]
     fn managed_key_connection_info_exposes_reference_only() {
         let conn = SavedConnection {
             id: "conn-1".to_string(),
@@ -827,6 +957,7 @@ mod tests {
             auth: SavedAuth::ManagedKey {
                 key_id: "managed-key-1".to_string(),
                 passphrase_keychain_id: Some("kc-managed-pass".to_string()),
+                plaintext_passphrase: None,
             },
             proxy_chain: Vec::new(),
             options: ConnectionOptions::default(),

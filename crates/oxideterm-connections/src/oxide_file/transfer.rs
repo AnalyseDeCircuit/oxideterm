@@ -13,16 +13,17 @@ use std::os::unix::fs::PermissionsExt;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::store::{ImportedManagedSshKey, ManagedSshKey, ManagedSshKeyOrigin};
 use crate::{
     AuthType, CONFIG_VERSION, ConnectionOptions, ConnectionStore, SavedAuth, SavedConnection,
     SavedProxyHop, SecretString,
 };
 
 use super::{
-    EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedPayload, EncryptedPluginSetting,
-    EncryptedPortableSecret, EncryptedProxyHop, OxideFile, OxideFileError, OxideMetadata,
-    compute_checksum, decrypt_oxide_file_with_progress, encrypt_oxide_file,
-    encrypt_oxide_file_with_progress,
+    EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedManagedKeyMetadata,
+    EncryptedPayload, EncryptedPluginSetting, EncryptedPortableSecret, EncryptedProxyHop,
+    OxideFile, OxideFileError, OxideMetadata, compute_checksum, decrypt_oxide_file_with_progress,
+    encrypt_oxide_file, encrypt_oxide_file_with_progress,
 };
 
 const EMBEDDED_KEY_MAX_BYTES: u64 = 1_048_576;

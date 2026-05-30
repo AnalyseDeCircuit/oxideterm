@@ -5,6 +5,7 @@ pub(in crate::workspace) enum SshAuthTab {
     Password,
     DefaultKey,
     SshKey,
+    ManagedKey,
     Certificate,
     Agent,
     TwoFactor,
@@ -53,6 +54,8 @@ pub(in crate::workspace) fn new_connection_form_mode(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum NewConnectionSelect {
     Group,
+    ManagedKey,
+    JumpManagedKey,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -63,6 +66,7 @@ pub(in crate::workspace) enum NewConnectionField {
     Username,
     Password,
     KeyPath,
+    ManagedKeyId,
     CertPath,
     Passphrase,
     Group,
@@ -73,6 +77,7 @@ pub(in crate::workspace) enum NewConnectionField {
     JumpUsername,
     JumpPassword,
     JumpKeyPath,
+    JumpManagedKeyId,
     JumpCertPath,
     JumpPassphrase,
 }
@@ -85,6 +90,7 @@ pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) auth_tab: SshAuthTab,
     pub(in crate::workspace) password: String,
     pub(in crate::workspace) key_path: String,
+    pub(in crate::workspace) managed_key_id: String,
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
     pub(in crate::workspace) agent_forwarding: bool,
@@ -100,6 +106,7 @@ impl fmt::Debug for NewConnectionProxyHop {
             .field("auth_tab", &self.auth_tab)
             .field("password", &"[redacted secret]")
             .field("key_path", &self.key_path)
+            .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
             .field("agent_forwarding", &self.agent_forwarding)
@@ -116,6 +123,7 @@ impl NewConnectionProxyHop {
             auth_tab: SshAuthTab::SshKey,
             password: String::new(),
             key_path: String::new(),
+            managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: String::new(),
             agent_forwarding: false,
@@ -141,6 +149,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) password_loading: bool,
     pub(in crate::workspace) password_error: Option<String>,
     pub(in crate::workspace) key_path: String,
+    pub(in crate::workspace) managed_key_id: String,
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
     pub(in crate::workspace) save_password: bool,
@@ -180,6 +189,7 @@ impl fmt::Debug for NewConnectionForm {
             .field("password_loading", &self.password_loading)
             .field("password_error", &self.password_error)
             .field("key_path", &self.key_path)
+            .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
             .field("save_password", &self.save_password)
@@ -217,6 +227,7 @@ impl Default for NewConnectionForm {
             password_loading: false,
             password_error: None,
             key_path: String::new(),
+            managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: String::new(),
             save_password: false,
@@ -269,6 +280,16 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Port,
             NewConnectionField::Username,
             NewConnectionField::KeyPath,
+            NewConnectionField::Passphrase,
+            NewConnectionField::Group,
+            NewConnectionField::PostConnectCommand,
+        ],
+        SshAuthTab::ManagedKey => vec![
+            NewConnectionField::Name,
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::Username,
+            NewConnectionField::ManagedKeyId,
             NewConnectionField::Passphrase,
             NewConnectionField::Group,
             NewConnectionField::PostConnectCommand,
@@ -331,6 +352,13 @@ pub(in crate::workspace) fn next_jump_connection_field(
             NewConnectionField::JumpKeyPath,
             NewConnectionField::JumpPassphrase,
         ],
+        SshAuthTab::ManagedKey => vec![
+            NewConnectionField::JumpHost,
+            NewConnectionField::JumpPort,
+            NewConnectionField::JumpUsername,
+            NewConnectionField::JumpManagedKeyId,
+            NewConnectionField::JumpPassphrase,
+        ],
         SshAuthTab::Certificate => vec![
             NewConnectionField::JumpHost,
             NewConnectionField::JumpPort,
@@ -369,6 +397,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::Username => &mut form.username,
         NewConnectionField::Password => &mut form.password,
         NewConnectionField::KeyPath => &mut form.key_path,
+        NewConnectionField::ManagedKeyId => &mut form.managed_key_id,
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
@@ -409,6 +438,13 @@ pub(in crate::workspace) fn current_connection_field_mut(
                 .expect("jump key path field without jump form")
                 .key_path
         }
+        NewConnectionField::JumpManagedKeyId => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump managed key field without jump form")
+                .managed_key_id
+        }
         NewConnectionField::JumpCertPath => {
             &mut form
                 .jump_server_form
@@ -434,6 +470,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::Username => &form.username,
         NewConnectionField::Password => &form.password,
         NewConnectionField::KeyPath => &form.key_path,
+        NewConnectionField::ManagedKeyId => &form.managed_key_id,
         NewConnectionField::CertPath => &form.cert_path,
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::Group => &form.group,
@@ -473,6 +510,13 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
                 .as_ref()
                 .expect("jump key path field without jump form")
                 .key_path
+        }
+        NewConnectionField::JumpManagedKeyId => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump managed key field without jump form")
+                .managed_key_id
         }
         NewConnectionField::JumpCertPath => {
             &form

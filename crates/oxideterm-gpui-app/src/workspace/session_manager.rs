@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 
@@ -48,7 +49,7 @@ use oxideterm_settings::{
     ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS,
     export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
 };
-use oxideterm_ssh::{AuthMethod, ProxyHopConfig};
+use oxideterm_ssh::{AuthMethod, ManagedKeyResolver, ProxyHopConfig, SshTransportError};
 
 use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;

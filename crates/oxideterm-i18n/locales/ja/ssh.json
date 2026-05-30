@@ -72,7 +72,11 @@
       "post_connect_command_placeholder": "cd /srv/app",
       "save_connection_hint": "初回は既定でオフです。その後は選択が記憶されます。",
       "two_factor_hint": "接続中にサーバーが認証情報を求めます。一般的な用途: TOTP コード、ハードウェアトークン、チャレンジレスポンス。",
-      "two_factor_warning": "注意: 2FA 接続は自動再接続できません。セッションが切断された場合は手動で再接続する必要があります。"
+      "two_factor_warning": "注意: 2FA 接続は自動再接続できません。セッションが切断された場合は手動で再接続する必要があります。",
+      "managed_key": "Managed SSH key",
+      "managed_key_placeholder": "Select a managed key",
+      "managed_key_hint": "Managed keys stay in the local keychain. This connection stores only the key reference and optional passphrase.",
+      "managed_key_required": "Managed SSH key is required for managed-key authentication."
     },
     "auth": {
       "password": "パスワード",
@@ -80,7 +84,8 @@
       "ssh_key": "SSHキー",
       "certificate": "証明書",
       "agent": "エージェント",
-      "two_factor": "2FA"
+      "two_factor": "2FA",
+      "managed_key": "Managed Key"
     },
     "host_key": {
       "title_unknown": "不明なホストキー",

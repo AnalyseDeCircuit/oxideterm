@@ -14,9 +14,9 @@ pub use crypto::{
 };
 pub use error::OxideFileError;
 pub use format::{
-    EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedPayload, EncryptedPluginSetting,
-    EncryptedPortableSecret, EncryptedProxyHop, FileHeader, MAGIC, NONCE_LEN, OxideFile,
-    OxideMetadata, SALT_LEN, TAG_LEN, VERSION, kdf_flags,
+    EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedManagedKeyMetadata,
+    EncryptedPayload, EncryptedPluginSetting, EncryptedPortableSecret, EncryptedProxyHop,
+    FileHeader, MAGIC, NONCE_LEN, OxideFile, OxideMetadata, SALT_LEN, TAG_LEN, VERSION, kdf_flags,
 };
 pub use transfer::{
     AppSettingsSectionPreview, ExportPreflightResult, ForwardDetail, ImportConflictStrategy,

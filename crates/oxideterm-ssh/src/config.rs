@@ -92,6 +92,10 @@ pub enum AuthMethod {
         passphrase: Option<Zeroizing<String>>,
     },
     Agent,
+    ManagedKey {
+        key_id: String,
+        passphrase: Option<Zeroizing<String>>,
+    },
     Certificate {
         key_path: String,
         cert_path: String,
@@ -119,6 +123,14 @@ impl fmt::Debug for AuthMethod {
                 )
                 .finish(),
             Self::Agent => formatter.write_str("Agent"),
+            Self::ManagedKey { key_id, passphrase } => formatter
+                .debug_struct("ManagedKey")
+                .field("key_id", key_id)
+                .field(
+                    "passphrase",
+                    &passphrase.as_ref().map(|_| "[redacted secret]"),
+                )
+                .finish(),
             Self::Certificate {
                 key_path,
                 cert_path,
@@ -158,6 +170,23 @@ impl AuthMethod {
     pub fn key_secret(key_path: impl Into<String>, passphrase: Option<Zeroizing<String>>) -> Self {
         Self::Key {
             key_path: key_path.into(),
+            passphrase,
+        }
+    }
+
+    pub fn managed_key(key_id: impl Into<String>, passphrase: Option<String>) -> Self {
+        Self::ManagedKey {
+            key_id: key_id.into(),
+            passphrase: passphrase.map(Zeroizing::new),
+        }
+    }
+
+    pub fn managed_key_secret(
+        key_id: impl Into<String>,
+        passphrase: Option<Zeroizing<String>>,
+    ) -> Self {
+        Self::ManagedKey {
+            key_id: key_id.into(),
             passphrase,
         }
     }

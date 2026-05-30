@@ -72,7 +72,11 @@
       "proxy_chain_port": "端口",
       "proxy_chain_username": "用户名",
       "proxy_chain_auth": "认证",
-      "proxy_chain_kbi_unsupported": "代理链连接不支持 2FA / Keyboard-interactive 认证。"
+      "proxy_chain_kbi_unsupported": "代理链连接不支持 2FA / Keyboard-interactive 认证。",
+      "managed_key": "托管 SSH 密钥",
+      "managed_key_placeholder": "选择托管密钥",
+      "managed_key_hint": "托管密钥保存在本地钥匙串中。此连接只保存密钥引用和可选密钥口令。",
+      "managed_key_required": "托管密钥认证需要选择托管 SSH 密钥。"
     },
     "auth": {
       "password": "密码",
@@ -80,7 +84,8 @@
       "ssh_key": "SSH 密钥",
       "certificate": "证书",
       "agent": "Agent",
-      "two_factor": "2FA"
+      "two_factor": "2FA",
+      "managed_key": "托管密钥"
     },
     "host_key": {
       "title_unknown": "未知主机密钥",

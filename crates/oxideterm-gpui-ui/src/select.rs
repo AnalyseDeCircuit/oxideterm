@@ -93,6 +93,8 @@ pub enum SelectAnchorId {
     AiSafetyMenu,
     AiContextPopover,
     NewConnectionGroup,
+    NewConnectionManagedKey,
+    NewConnectionJumpManagedKey,
     IdeAgentStatus,
     TerminalCastSeekbar,
 }

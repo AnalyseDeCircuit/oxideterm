@@ -66,10 +66,14 @@ impl SshPtySession {
             let registry = config.registry.clone();
             let consumer = config.consumer.clone();
             let prompt_handler = config.prompt_handler.clone();
+            let managed_key_resolver = config.managed_key_resolver.clone();
             runtime.spawn(async move {
                 let mut client = SshTransportClient::new(ssh_config);
                 if let Some(prompt_handler) = prompt_handler {
                     client = client.with_prompt_handler(prompt_handler);
+                }
+                if let Some(resolver) = managed_key_resolver {
+                    client = client.with_managed_key_resolver(resolver);
                 }
                 let result = match (registry, consumer) {
                     (Some(registry), Some(consumer)) => {

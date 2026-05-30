@@ -93,10 +93,19 @@ fn export_connections_to_oxide_inner(
         );
 
     let mut encrypted_connections = Vec::new();
+    let mut managed_key_ids = HashSet::new();
     for id in connection_ids {
         let conn = store
             .get(id)
             .ok_or_else(|| OxideFileError::InvalidFormat(format!("Connection {id} not found")))?;
+        if let SavedAuth::ManagedKey { key_id, .. } = &conn.auth {
+            managed_key_ids.insert(key_id.clone());
+        }
+        for hop in &conn.proxy_chain {
+            if let SavedAuth::ManagedKey { key_id, .. } = &hop.auth {
+                managed_key_ids.insert(key_id.clone());
+            }
+        }
         encrypted_connections.push(export_connection(
             store,
             conn,
@@ -146,6 +155,7 @@ fn export_connections_to_oxide_inner(
             .then_some(payload.plugin_settings.len()),
         portable_secret_count: (!payload.portable_secrets.is_empty())
             .then_some(payload.portable_secrets.len()),
+        managed_key_count: (!managed_key_ids.is_empty()).then_some(managed_key_ids.len()),
     };
     report_progress("building_metadata");
 
@@ -283,6 +293,7 @@ fn export_auth(
             } else {
                 None
             },
+            managed_key: None,
         }),
         SavedAuth::Certificate {
             key_path,
@@ -306,12 +317,49 @@ fn export_auth(
             } else {
                 None
             },
+            managed_key: None,
         }),
-        SavedAuth::ManagedKey { .. } => Err(OxideFileError::InvalidFormat(
-            "Managed key .oxide export is not implemented in this slice".to_string(),
-        )),
+        SavedAuth::ManagedKey { key_id, .. } => {
+            let metadata = store
+                .managed_ssh_key_metadata(key_id)
+                .map_err(|error| OxideFileError::InvalidFormat(error.to_string()))?;
+            let private_key = store
+                .resolve_managed_ssh_key_private_key(key_id)
+                .map_err(|error| OxideFileError::InvalidFormat(error.to_string()))?;
+            Ok(EncryptedAuth::Key {
+                key_path: managed_key_fallback_filename(&metadata.fingerprint),
+                passphrase: store
+                    .get_saved_auth_passphrase(auth)
+                    .ok()
+                    .flatten()
+                    .map(SecretString::into_zeroizing),
+                // The encoded private key is secret material and remains inside
+                // the encrypted .oxide payload with Zeroizing ownership.
+                embedded_key: Some(Zeroizing::new(BASE64.encode(
+                    private_key.expose_secret().as_bytes(),
+                ))),
+                managed_key: Some(EncryptedManagedKeyMetadata {
+                    key_id: metadata.id,
+                    name: metadata.name,
+                    fingerprint: Some(metadata.fingerprint),
+                    public_key: Some(metadata.public_key),
+                    origin: Some("oxide_import".to_string()),
+                    requires_passphrase: Some(metadata.requires_passphrase),
+                }),
+            })
+        }
         SavedAuth::Agent => Ok(EncryptedAuth::Agent),
     }
+}
+
+fn managed_key_fallback_filename(fingerprint: &str) -> String {
+    let sanitized = fingerprint
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    format!("managed-{}.key", sanitized)
 }
 
 fn export_forward(forward: &OxideForwardRecord) -> EncryptedForward {

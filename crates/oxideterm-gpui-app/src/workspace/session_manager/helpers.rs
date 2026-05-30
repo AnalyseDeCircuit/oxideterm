@@ -237,7 +237,7 @@ pub(super) fn form_from_saved_connection(
     conn: &SavedConnection,
     error: Option<String>,
 ) -> NewConnectionForm {
-    let (auth_tab, password, key_path, cert_path, passphrase, save_password) = match &conn.auth {
+    let (auth_tab, password, key_path, managed_key_id, cert_path, passphrase, save_password) = match &conn.auth {
         SavedAuth::Password {
             keychain_id,
             plaintext_password,
@@ -247,6 +247,7 @@ pub(super) fn form_from_saved_connection(
                 .as_ref()
                 .map(|password| password.expose_secret().to_string())
                 .unwrap_or_default(),
+            String::new(),
             String::new(),
             String::new(),
             String::new(),
@@ -263,6 +264,7 @@ pub(super) fn form_from_saved_connection(
             key_path.clone(),
             String::new(),
             String::new(),
+            String::new(),
             *has_passphrase || passphrase_keychain_id.is_some() || plaintext_passphrase.is_some(),
         ),
         SavedAuth::Key {
@@ -274,6 +276,7 @@ pub(super) fn form_from_saved_connection(
             SshAuthTab::SshKey,
             String::new(),
             key_path.clone(),
+            String::new(),
             String::new(),
             String::new(),
             *has_passphrase || passphrase_keychain_id.is_some() || plaintext_passphrase.is_some(),
@@ -288,22 +291,27 @@ pub(super) fn form_from_saved_connection(
             SshAuthTab::Certificate,
             String::new(),
             key_path.clone(),
+            String::new(),
             cert_path.clone(),
             String::new(),
             *has_passphrase || passphrase_keychain_id.is_some() || plaintext_passphrase.is_some(),
         ),
-        SavedAuth::ManagedKey { .. } => (
-            // The GPUI form has no managed-key selector in this slice, so keep the
-            // draft on Agent instead of exposing an unusable secret-backed option.
-            SshAuthTab::Agent,
+        SavedAuth::ManagedKey {
+            key_id,
+            passphrase_keychain_id,
+            plaintext_passphrase,
+        } => (
+            SshAuthTab::ManagedKey,
             String::new(),
             String::new(),
+            key_id.clone(),
             String::new(),
             String::new(),
-            false,
+            passphrase_keychain_id.is_some() || plaintext_passphrase.is_some(),
         ),
         SavedAuth::Agent => (
             SshAuthTab::Agent,
+            String::new(),
             String::new(),
             String::new(),
             String::new(),
@@ -327,6 +335,7 @@ pub(super) fn form_from_saved_connection(
         password_loading: false,
         password_error: None,
         key_path,
+        managed_key_id,
         cert_path,
         passphrase,
         save_password,
@@ -385,6 +394,7 @@ fn proxy_hop_draft_from_form(hop: &super::new_connection::NewConnectionProxyHop)
             kind: auth_draft_kind(hop.auth_tab),
             password: secret_from_ui_draft(&hop.password),
             key_path: hop.key_path.clone(),
+            managed_key_id: hop.managed_key_id.clone(),
             cert_path: hop.cert_path.clone(),
             passphrase: secret_from_ui_draft(&hop.passphrase),
             save_password: true,
@@ -402,6 +412,7 @@ fn auth_draft_from_form(form: &NewConnectionForm) -> ConnectionAuthDraft {
         password_loaded: form.password_loaded,
         save_password: form.save_password,
         key_path: form.key_path.clone(),
+        managed_key_id: form.managed_key_id.clone(),
         cert_path: form.cert_path.clone(),
         passphrase: secret_from_ui_draft(&form.passphrase),
     }
@@ -418,6 +429,7 @@ fn auth_draft_kind(tab: SshAuthTab) -> ConnectionAuthDraftKind {
         SshAuthTab::Password => ConnectionAuthDraftKind::Password,
         SshAuthTab::DefaultKey => ConnectionAuthDraftKind::DefaultKey,
         SshAuthTab::SshKey => ConnectionAuthDraftKind::SshKey,
+        SshAuthTab::ManagedKey => ConnectionAuthDraftKind::ManagedKey,
         SshAuthTab::Certificate => ConnectionAuthDraftKind::Certificate,
         SshAuthTab::Agent => ConnectionAuthDraftKind::Agent,
         SshAuthTab::TwoFactor => ConnectionAuthDraftKind::TwoFactor,
@@ -507,12 +519,28 @@ pub(super) fn auth_method_from_saved_auth(
                 .or_else(|| store.get_saved_auth_passphrase(auth).ok().flatten())
                 .map(SecretString::into_zeroizing),
         ),
-        SavedAuth::ManagedKey { .. } => {
-            // The encrypted key resolver is added in a later slice; returning None
-            // prevents this path from silently downgrading to agent or raw key auth.
-            return None;
-        }
+        SavedAuth::ManagedKey {
+            key_id,
+            passphrase_keychain_id,
+            ..
+        } => AuthMethod::managed_key_secret(
+            key_id.clone(),
+            passphrase_keychain_id
+                .as_ref()
+                .and_then(|_| store.get_saved_auth_passphrase(auth).ok().flatten())
+                .map(SecretString::into_zeroizing),
+        ),
         SavedAuth::Agent => AuthMethod::Agent,
+    })
+}
+
+pub(super) fn managed_key_resolver_from_store(store: &ConnectionStore) -> ManagedKeyResolver {
+    let store = store.clone();
+    Arc::new(move |key_id| {
+        store
+            .resolve_managed_ssh_key_private_key(key_id)
+            .map(SecretString::into_zeroizing)
+            .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))
     })
 }
 

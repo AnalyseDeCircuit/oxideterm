@@ -72,7 +72,11 @@
       "post_connect_command_placeholder": "cd /srv/app",
       "save_connection_hint": "Beim ersten Mal standardmäßig aus; Ihre Auswahl wird danach gemerkt.",
       "two_factor_hint": "Der Server fragt während der Verbindung nach Anmeldedaten. Häufige Verwendungen: TOTP-Code, Hardware-Token, Challenge-Response.",
-      "two_factor_warning": "Hinweis: 2FA-Verbindungen können nicht automatisch wiederverbunden werden. Sie müssen manuell neu verbinden, wenn die Sitzung getrennt wird."
+      "two_factor_warning": "Hinweis: 2FA-Verbindungen können nicht automatisch wiederverbunden werden. Sie müssen manuell neu verbinden, wenn die Sitzung getrennt wird.",
+      "managed_key": "Managed SSH key",
+      "managed_key_placeholder": "Select a managed key",
+      "managed_key_hint": "Managed keys stay in the local keychain. This connection stores only the key reference and optional passphrase.",
+      "managed_key_required": "Managed SSH key is required for managed-key authentication."
     },
     "auth": {
       "password": "Passwort",
@@ -80,7 +84,8 @@
       "ssh_key": "SSH-Schlüssel",
       "certificate": "Zertifikat",
       "agent": "Agent",
-      "two_factor": "2FA"
+      "two_factor": "2FA",
+      "managed_key": "Managed Key"
     },
     "host_key": {
       "title_unknown": "Unbekannter Hostschlüssel",

@@ -52,7 +52,23 @@ fn migrate_legacy_auth_credentials(
                 Ok(false)
             }
         }
-        SavedAuth::ManagedKey { .. } | SavedAuth::Agent => Ok(false),
+        SavedAuth::ManagedKey {
+            passphrase_keychain_id,
+            plaintext_passphrase,
+            ..
+        } => {
+            if let Some(passphrase) = plaintext_passphrase.take() {
+                let next_keychain_id = passphrase_keychain_id
+                    .clone()
+                    .unwrap_or_else(new_key_passphrase_keychain_id);
+                keychain.store(&next_keychain_id, &passphrase)?;
+                *passphrase_keychain_id = Some(next_keychain_id);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        SavedAuth::Agent => Ok(false),
     }
 }
 
@@ -82,6 +98,105 @@ fn non_empty<'a>(value: &'a str, label: &str) -> Result<&'a str> {
         bail!("{label} is required");
     }
     Ok(value)
+}
+
+fn managed_key_display_name(name: Option<String>, fallback: &str) -> String {
+    name.as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn decode_managed_private_key(
+    private_key: &SecretString,
+    passphrase: Option<&SecretString>,
+) -> Result<PrivateKey> {
+    russh::keys::decode_secret_key(
+        private_key.expose_secret(),
+        passphrase.map(SecretString::expose_secret),
+    )
+    .map_err(|error| {
+        let normalized = error.to_string().to_ascii_lowercase();
+        if normalized.contains("encrypted")
+            || normalized.contains("decrypt")
+            || normalized.contains("password")
+            || normalized.contains("passphrase")
+            || normalized.contains("bcrypt")
+            || normalized.contains("kdf")
+        {
+            if passphrase.is_some() {
+                anyhow::anyhow!("Invalid SSH key passphrase")
+            } else {
+                anyhow::anyhow!("SSH key requires a passphrase")
+            }
+        } else {
+            anyhow::anyhow!("Invalid SSH private key")
+        }
+    })
+}
+
+fn fingerprint_public_key(public_key: &russh::keys::PublicKey) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(public_key.public_key_bytes());
+    let hash = hasher.finalize();
+    format!("SHA256:{}", BASE64.encode(hash).trim_end_matches('='))
+}
+
+fn public_key_line_from_private_key(private_key: &PrivateKey) -> String {
+    let public_key = private_key.public_key();
+    format!(
+        "{} {}",
+        public_key.algorithm(),
+        BASE64.encode(public_key.public_key_bytes())
+    )
+}
+
+fn managed_key_requires_passphrase(
+    private_key: &SecretString,
+    passphrase: Option<&SecretString>,
+) -> bool {
+    let private_key = private_key.expose_secret();
+    passphrase.is_some()
+        || private_key.contains("ENCRYPTED")
+        || private_key.contains("Proc-Type: 4,ENCRYPTED")
+}
+
+fn fallback_name_from_path(path: &Path) -> String {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("Managed SSH Key")
+        .to_string()
+}
+
+fn managed_key_usage_from_data(data: &ConnectionStoreData, key_id: &str) -> ManagedSshKeyUsage {
+    let mut items = Vec::new();
+    for connection in &data.connections {
+        if matches!(&connection.auth, SavedAuth::ManagedKey { key_id: id, .. } if id == key_id) {
+            items.push(ManagedSshKeyUsageItem {
+                connection_id: connection.id.clone(),
+                connection_name: connection.name.clone(),
+                location: "connection".to_string(),
+            });
+        }
+
+        for (index, hop) in connection.proxy_chain.iter().enumerate() {
+            if matches!(&hop.auth, SavedAuth::ManagedKey { key_id: id, .. } if id == key_id) {
+                items.push(ManagedSshKeyUsageItem {
+                    connection_id: connection.id.clone(),
+                    connection_name: connection.name.clone(),
+                    location: format!("proxy_chain[{}]", index),
+                });
+            }
+        }
+    }
+
+    ManagedSshKeyUsage {
+        key_id: key_id.to_string(),
+        count: items.len(),
+        items,
+    }
 }
 
 fn existing_password_keychain_id(auth: Option<&SavedAuth>) -> Option<String> {
@@ -180,6 +295,17 @@ fn matching_certificate_passphrase(
         }) if existing_key_path == key_path && existing_cert_path == cert_path => {
             Some((*has_passphrase, passphrase_keychain_id.clone()))
         }
+        _ => None,
+    }
+}
+
+fn matching_managed_key_passphrase_id(auth: Option<&SavedAuth>, key_id: &str) -> Option<String> {
+    match auth {
+        Some(SavedAuth::ManagedKey {
+            key_id: existing_key_id,
+            passphrase_keychain_id,
+            ..
+        }) if existing_key_id == key_id => passphrase_keychain_id.clone(),
         _ => None,
     }
 }

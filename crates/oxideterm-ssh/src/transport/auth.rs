@@ -266,6 +266,15 @@ fn load_private_key_material(
     Ok(Arc::new(key))
 }
 
+fn load_private_key_from_memory(
+    private_key: &str,
+    passphrase: Option<&str>,
+) -> Result<Arc<PrivateKey>, SshTransportError> {
+    let key = russh::keys::decode_secret_key(private_key, passphrase)
+        .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
+    Ok(Arc::new(key))
+}
+
 fn load_certificate_auth_material(
     key_path: &str,
     cert_path: &str,

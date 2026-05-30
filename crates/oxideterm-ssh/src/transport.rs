@@ -177,6 +177,9 @@ pub enum SshTransportError {
     Channel(String),
 }
 
+pub type ManagedKeyResolver =
+    Arc<dyn Fn(&str) -> Result<Zeroizing<String>, SshTransportError> + Send + Sync>;
+
 impl From<russh::Error> for SshTransportError {
     fn from(error: russh::Error) -> Self {
         Self::ConnectionFailed(error.to_string())
@@ -418,6 +421,7 @@ impl Drop for SshPtyHandle {
 pub struct SshTransportClient {
     config: SshConfig,
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
+    managed_key_resolver: Option<ManagedKeyResolver>,
 }
 
 include!("transport/connection.rs");
