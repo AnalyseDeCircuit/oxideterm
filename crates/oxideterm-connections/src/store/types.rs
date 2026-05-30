@@ -8,6 +8,7 @@ pub const CONNECTION_TOMBSTONE_RETENTION_DAYS: i64 = 30;
 pub enum AuthType {
     Password,
     Key,
+    ManagedKey,
     Certificate,
     Agent,
 }
@@ -17,6 +18,7 @@ impl AuthType {
         match self {
             Self::Password => "password",
             Self::Key => "key",
+            Self::ManagedKey => "managed_key",
             Self::Certificate => "certificate",
             Self::Agent => "agent",
         }
@@ -51,6 +53,11 @@ pub enum SavedAuth {
         #[serde(default, rename = "passphrase", skip_serializing)]
         plaintext_passphrase: Option<SecretString>,
     },
+    ManagedKey {
+        key_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        passphrase_keychain_id: Option<String>,
+    },
     Agent,
 }
 
@@ -59,6 +66,7 @@ impl SavedAuth {
         match self {
             Self::Password { .. } => AuthType::Password,
             Self::Key { .. } => AuthType::Key,
+            Self::ManagedKey { .. } => AuthType::ManagedKey,
             Self::Certificate { .. } => AuthType::Certificate,
             Self::Agent => AuthType::Agent,
         }
@@ -74,6 +82,13 @@ impl SavedAuth {
     pub fn cert_path(&self) -> Option<&str> {
         match self {
             Self::Certificate { cert_path, .. } => Some(cert_path),
+            _ => None,
+        }
+    }
+
+    pub fn managed_key_id(&self) -> Option<&str> {
+        match self {
+            Self::ManagedKey { key_id, .. } => Some(key_id),
             _ => None,
         }
     }
@@ -114,6 +129,8 @@ pub struct ProxyHopInfo {
     pub auth_type: AuthType,
     pub key_path: Option<String>,
     pub cert_path: Option<String>,
+    pub managed_key_id: Option<String>,
+    pub managed_key_name: Option<String>,
     pub agent_forwarding: bool,
 }
 
@@ -126,6 +143,8 @@ impl From<&SavedProxyHop> for ProxyHopInfo {
             auth_type: hop.auth.auth_type(),
             key_path: hop.auth.key_path().map(ToOwned::to_owned),
             cert_path: hop.auth.cert_path().map(ToOwned::to_owned),
+            managed_key_id: hop.auth.managed_key_id().map(ToOwned::to_owned),
+            managed_key_name: None,
             agent_forwarding: hop.agent_forwarding,
         }
     }
@@ -194,6 +213,8 @@ pub struct ConnectionInfo {
     pub auth_type: AuthType,
     pub key_path: Option<String>,
     pub cert_path: Option<String>,
+    pub managed_key_id: Option<String>,
+    pub managed_key_name: Option<String>,
     pub proxy_chain: Vec<ProxyHopInfo>,
     pub created_at: String,
     pub last_used_at: Option<String>,
@@ -216,6 +237,8 @@ impl From<&SavedConnection> for ConnectionInfo {
             auth_type: conn.auth.auth_type(),
             key_path: conn.auth.key_path().map(ToOwned::to_owned),
             cert_path: conn.auth.cert_path().map(ToOwned::to_owned),
+            managed_key_id: conn.auth.managed_key_id().map(ToOwned::to_owned),
+            managed_key_name: None,
             proxy_chain: conn.proxy_chain.iter().map(ProxyHopInfo::from).collect(),
             created_at: conn.created_at.to_rfc3339(),
             last_used_at: conn.last_used_at.map(|time| time.to_rfc3339()),
@@ -255,6 +278,8 @@ pub struct ConnectionStoreData {
     pub recent: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connection_tombstones: Vec<DeletedConnectionTombstone>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub managed_ssh_keys: Vec<ManagedSshKey>,
 }
 
 impl Default for ConnectionStoreData {
@@ -265,8 +290,30 @@ impl Default for ConnectionStoreData {
             groups: Vec::new(),
             recent: Vec::new(),
             connection_tombstones: Vec::new(),
+            managed_ssh_keys: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagedSshKeyOrigin {
+    ImportedFile,
+    PastedText,
+    OxideImport,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ManagedSshKey {
+    pub id: String,
+    pub secret_id: String,
+    pub name: String,
+    pub fingerprint: String,
+    pub public_key: String,
+    pub requires_passphrase: bool,
+    pub origin: ManagedSshKeyOrigin,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

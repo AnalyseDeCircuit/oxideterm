@@ -494,6 +494,15 @@ fn normalized_ai_resource_kind(resource: Option<&str>) -> &'static str {
     }
 }
 
+fn ai_rag_query_arg(args: &serde_json::Value) -> &str {
+    // Tauri uses `options.query ?? options.path ?? ''` for RAG reads and does
+    // not trim the selected string before passing it to ragSearch.
+    args.get("query")
+        .or_else(|| args.get("path"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+}
+
 fn is_ai_command_like_query(query: &str) -> bool {
     let trimmed = query.trim();
     if trimmed.is_empty() {

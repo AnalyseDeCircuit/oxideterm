@@ -52,7 +52,7 @@ fn migrate_legacy_auth_credentials(
                 Ok(false)
             }
         }
-        SavedAuth::Agent => Ok(false),
+        SavedAuth::ManagedKey { .. } | SavedAuth::Agent => Ok(false),
     }
 }
 
@@ -119,6 +119,10 @@ fn collect_keychain_ids_for_auth(auth: &SavedAuth) -> Vec<String> {
         | SavedAuth::Certificate {
             passphrase_keychain_id: Some(keychain_id),
             ..
+        }
+        | SavedAuth::ManagedKey {
+            passphrase_keychain_id: Some(keychain_id),
+            ..
         } => vec![keychain_id.clone()],
         _ => Vec::new(),
     }
@@ -179,4 +183,3 @@ fn matching_certificate_passphrase(
         _ => None,
     }
 }
-

@@ -2451,6 +2451,38 @@ fn gemini_tool_messages_match_tauri_function_parts() {
 }
 
 #[test]
+fn gemini_tool_arguments_preserve_tauri_non_object_json_values() {
+    let array_args = AiChatMessage {
+        tool_calls: vec![serde_json::json!({
+            "id": "call-1",
+            "name": "get_state",
+            "arguments": "[\"scope\", \"active\"]",
+        })],
+        ..chat_message("assistant", AiChatRole::Assistant, "")
+    };
+    let string_args = AiChatMessage {
+        tool_calls: vec![serde_json::json!({
+            "id": "call-2",
+            "name": "get_state",
+            "arguments": "\"active\"",
+        })],
+        ..chat_message("assistant-2", AiChatRole::Assistant, "")
+    };
+
+    let (_, array_contents) = gemini_chat_contents(&[array_args]);
+    let (_, string_contents) = gemini_chat_contents(&[string_args]);
+
+    assert_eq!(
+        array_contents[1]["parts"][0]["functionCall"]["args"],
+        serde_json::json!(["scope", "active"])
+    );
+    assert_eq!(
+        string_contents[1]["parts"][0]["functionCall"]["args"],
+        serde_json::json!("active")
+    );
+}
+
+#[test]
 fn anthropic_and_gemini_stream_parsers_extract_content() {
     let anthropic = parse_anthropic_data_line(
         r#"data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}"#,
@@ -2472,6 +2504,26 @@ fn anthropic_and_gemini_stream_parsers_extract_content() {
         } => {
             assert_eq!(name, "get_state");
             assert_eq!(arguments, "{\"scope\":\"active\"}");
+        }
+        other => panic!("expected Gemini tool call, got {other:?}"),
+    }
+
+    let gemini_array_tool = parse_gemini_data_line(
+        r#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_state","args":["scope","active"]}}]}}]}"#,
+    );
+    match &gemini_array_tool.events[0] {
+        AiStreamEvent::ToolCallComplete { arguments, .. } => {
+            assert_eq!(arguments, "[\"scope\",\"active\"]");
+        }
+        other => panic!("expected Gemini tool call, got {other:?}"),
+    }
+
+    let gemini_empty_string_tool = parse_gemini_data_line(
+        r#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_state","args":""}}]}}]}"#,
+    );
+    match &gemini_empty_string_tool.events[0] {
+        AiStreamEvent::ToolCallComplete { arguments, .. } => {
+            assert_eq!(arguments, "{}");
         }
         other => panic!("expected Gemini tool call, got {other:?}"),
     }

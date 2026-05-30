@@ -118,6 +118,23 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn native_chat_tool_definitions_include_mcp_bridge_tools() {
+        let registry = oxideterm_ai::McpRegistry::new(oxideterm_ai::AiProviderKeyStore::new());
+        let policy = oxideterm_ai::AiToolUsePolicy {
+            enabled: true,
+            disabled_tools: vec!["list_mcp_resources".to_string(), "read_resource".to_string()],
+            ..oxideterm_ai::AiToolUsePolicy::default()
+        };
+
+        let tools = ai_stream_tool_definitions(true, &policy, &registry);
+        let names = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>();
+
+        assert!(names.contains(&"read_resource"));
+        assert!(names.contains(&"read_mcp_resource"));
+        assert!(!names.contains(&"list_mcp_resources"));
+    }
+
+    #[test]
     fn context_indicator_tool_result_tokens_only_count_user_and_assistant_messages() {
         let tool_call = serde_json::json!({
             "arguments": "{\"command\":\"echo hi\"}",

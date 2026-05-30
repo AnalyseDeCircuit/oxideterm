@@ -1,3 +1,24 @@
+fn ai_stream_tool_definitions(
+    tool_use_enabled: bool,
+    tool_policy: &oxideterm_ai::AiToolUsePolicy,
+    mcp_registry: &oxideterm_ai::McpRegistry,
+) -> Vec<oxideterm_ai::AiToolDefinition> {
+    if !tool_use_enabled {
+        return Vec::new();
+    }
+    let mut tools = oxideterm_ai::orchestrator_tool_definitions();
+    // Native does not ship Tauri's autonomous agent path yet. Expose MCP
+    // resource/dynamic tools through chat as a native-only bridge so MCP
+    // remains usable from the primary AI surface.
+    tools.extend(
+        mcp_registry
+            .tool_definitions()
+            .into_iter()
+            .filter(|tool| !tool_policy.disabled_tools.iter().any(|name| name == &tool.name)),
+    );
+    tools
+}
+
 impl WorkspaceApp {
     fn should_force_ai_pre_send_compaction(
         &self,
@@ -45,14 +66,11 @@ impl WorkspaceApp {
             Some(&provider.id),
             Some(&model),
         );
-        let tool_use_enabled = applied_profile.tool_policy.enabled;
-        let tools = if tool_use_enabled {
-            // Tauri's chat orchestrator exposes only ORCHESTRATOR_TOOL_DEFS;
-            // disabled tools are still defined and are denied by policy.
-            oxideterm_ai::orchestrator_tool_definitions()
-        } else {
-            Vec::new()
-        };
+        let tools = ai_stream_tool_definitions(
+            applied_profile.tool_policy.enabled,
+            &applied_profile.tool_policy,
+            &self.ai_mcp_registry,
+        );
         Ok(AiChatStreamConfig {
             provider_id: Some(provider.id),
             provider_type: provider.provider_type,

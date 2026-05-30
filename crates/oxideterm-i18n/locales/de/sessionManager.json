@@ -130,6 +130,7 @@
         "label": "Auth",
         "password": "Password",
         "key": "SSH Key",
+        "managed_key": "Managed Key",
         "certificate": "Certificate",
         "agent": "Agent",
         "password_warning": "Password authentication requires a password, which is not stored in topology. Use key or Agent authentication instead."

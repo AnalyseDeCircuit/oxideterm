@@ -2,6 +2,7 @@ fn auth_label(auth_type: AuthType) -> String {
     match auth_type {
         AuthType::Password => "Password",
         AuthType::Key => "Key",
+        AuthType::ManagedKey => "Managed Key",
         AuthType::Certificate => "Certificate",
         AuthType::Agent => "Agent",
     }
@@ -41,6 +42,12 @@ fn auth_badge_style(
 ) -> (LucideIcon, &'static str, Rgba, Rgba) {
     match auth_type {
         AuthType::Key => (LucideIcon::Key, "Key", rgba(0x10b98133), rgb(0x6ee7b7)),
+        AuthType::ManagedKey => (
+            LucideIcon::Key,
+            "Managed",
+            rgba(0x10b98133),
+            rgb(0x6ee7b7),
+        ),
         AuthType::Password => (LucideIcon::Lock, "Pwd", rgba(0xf59e0b33), rgb(0xfcd34d)),
         AuthType::Agent => (LucideIcon::Bot, "Agent", rgba(0x3b82f633), rgb(0x93c5fd)),
         AuthType::Certificate => (
@@ -285,6 +292,16 @@ pub(super) fn form_from_saved_connection(
             String::new(),
             *has_passphrase || passphrase_keychain_id.is_some() || plaintext_passphrase.is_some(),
         ),
+        SavedAuth::ManagedKey { .. } => (
+            // The GPUI form has no managed-key selector in this slice, so keep the
+            // draft on Agent instead of exposing an unusable secret-backed option.
+            SshAuthTab::Agent,
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            false,
+        ),
         SavedAuth::Agent => (
             SshAuthTab::Agent,
             String::new(),
@@ -490,6 +507,11 @@ pub(super) fn auth_method_from_saved_auth(
                 .or_else(|| store.get_saved_auth_passphrase(auth).ok().flatten())
                 .map(SecretString::into_zeroizing),
         ),
+        SavedAuth::ManagedKey { .. } => {
+            // The encrypted key resolver is added in a later slice; returning None
+            // prevents this path from silently downgrading to agent or raw key auth.
+            return None;
+        }
         SavedAuth::Agent => AuthMethod::Agent,
     })
 }
