@@ -291,6 +291,7 @@ fn export(args: OxideExportArgs) -> CliResult<i32> {
         &store,
         &connection_ids,
         args.embed_keys,
+        true,
         portable_secrets.len(),
     );
     if !preflight.can_export {

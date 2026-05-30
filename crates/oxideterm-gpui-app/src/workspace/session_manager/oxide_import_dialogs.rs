@@ -212,6 +212,14 @@ impl WorkspaceApp {
         if let Some(count) = metadata.portable_secret_count.filter(|count| *count > 0) {
             rows.push(("便携秘密项:".to_string(), format!("{count} 项")));
         }
+        if let Some(count) = metadata.managed_key_count.filter(|count| *count > 0) {
+            rows.push((
+                self.i18n.t("modals.import.contains_managed_keys"),
+                self.i18n
+                    .t("modals.import.managed_keys_count")
+                    .replace("{{count}}", &count.to_string()),
+            ));
+        }
 
         let mut children = vec![
             div()

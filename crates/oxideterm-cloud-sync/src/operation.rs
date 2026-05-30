@@ -231,7 +231,7 @@ impl CloudSyncOperationService {
                 .iter()
                 .map(|connection| connection.id.clone())
                 .collect::<Vec<_>>();
-            let preflight = preflight_export(connection_store, &connection_ids, false, 0);
+            let preflight = preflight_export(connection_store, &connection_ids, false, false, 0);
             if !preflight.can_export {
                 return Err(anyhow::anyhow!("preflight_failed: export preflight failed").into());
             }

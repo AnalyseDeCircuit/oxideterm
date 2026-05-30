@@ -147,7 +147,22 @@
       "error_export_failed": "导出失败",
       "success": "导出成功: {{count}} 个连接已保存到 {{path}}",
       "include_quick_commands": "包含快捷命令（{{count}}）",
-      "include_quick_commands_description": "快捷命令可能包含主机名、路径或命令中的敏感信息。"
+      "include_quick_commands_description": "快捷命令可能包含主机名、路径或命令中的敏感信息。",
+      "credential_material": "凭据材料",
+      "include_passwords": "包含已保存的服务器密码",
+      "include_passwords_description": "默认关闭。导入后，密码认证连接可能需要重新输入密码。",
+      "include_key_passphrases": "包含外部密钥口令",
+      "include_key_passphrases_description": "将已保存的密钥/证书口令保存在加密的 .oxide 文件中。",
+      "include_managed_keys": "包含托管密钥",
+      "include_managed_keys_description": "使用 OxideTerm 托管 SSH 密钥的连接需要启用此项。",
+      "include_managed_key_passphrases": "包含托管密钥口令",
+      "include_managed_key_passphrases_description": "关闭后，导入的连接可能会在之后请求托管密钥口令。",
+      "content_summary_passwords": "将包含已保存的服务器密码",
+      "content_summary_key_passphrases": "将包含外部密钥口令",
+      "content_summary_managed_keys": "将包含 {{count}} 个托管密钥",
+      "content_summary_managed_key_passphrases": "将包含托管密钥口令",
+      "warning_managed_keys_required": "{{count}} 个所选连接需要托管密钥。请启用托管密钥导出，或跳过这些连接。",
+      "error_managed_keys_required": "托管密钥导出已关闭，但所选连接依赖托管密钥。"
     },
     "import": {
       "title": "从 .oxide 文件导入配置",
@@ -255,7 +270,14 @@
       "section_quick_commands": "快捷命令（{{count}} 条命令）",
       "toggle_quick_commands": "导入 {{categories}} 个快捷命令组。已有冲突会按当前冲突策略处理；替换只替换冲突项。",
       "imported_quick_commands": "已导入 {{count}} 项快捷命令。",
-      "skipped_quick_commands": "已跳过快捷命令"
+      "skipped_quick_commands": "已跳过快捷命令",
+      "contains_managed_keys": "托管密钥：",
+      "managed_keys_count": "{{count}} 个托管密钥",
+      "section_managed_keys": "托管密钥（{{count}}）",
+      "toggle_managed_keys_restore": "将托管密钥恢复到 OxideTerm，使使用托管密钥的连接继续走密钥库认证。",
+      "toggle_managed_keys_extract": "托管密钥会按嵌入的备用密钥文件导入，而不是写入托管密钥库。",
+      "restore_managed_key_passphrases": "恢复托管密钥口令",
+      "restore_managed_key_passphrases_description": "关闭后，OxideTerm 会在需要时再询问托管密钥口令。"
     },
     "reconnect": {
       "title": "重新连接会话",
@@ -621,5 +643,12 @@
         "remove_api_key_failed": "移除 API 密钥失败: {{error}}"
       }
     }
+  },
+  "export": {
+    "summary_key_passphrases": "{{count}} 个密钥口令",
+    "summary_managed_keys": "{{count}} 个托管密钥",
+    "summary_managed_key_passphrases": "{{count}} 个托管密钥口令",
+    "warning_passwords_included": "将包含 {{count}} 个已保存的服务器密码到加密文件中。",
+    "security_passwords_included": "已保存的服务器密码会包含在这个加密的 .oxide 文件中"
   }
 }

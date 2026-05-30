@@ -147,7 +147,22 @@
       "error_export_failed": "Exportación fallida",
       "success": "Exportación exitosa: {{count}} conexiones guardadas en {{path}}",
       "include_quick_commands": "Include Quick Commands ({{count}})",
-      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands.",
+      "credential_material": "Material de credenciales",
+      "include_passwords": "Incluir contraseñas de servidor guardadas",
+      "include_passwords_description": "Desactivado por defecto. Las conexiones con contraseña pueden requerir reingreso después de importar.",
+      "include_key_passphrases": "Incluir frases de contraseña de claves externas",
+      "include_key_passphrases_description": "Mantiene las frases de contraseña de claves/certificados guardadas dentro del archivo .oxide cifrado.",
+      "include_managed_keys": "Incluir claves gestionadas",
+      "include_managed_keys_description": "Necesario para conexiones que usan claves SSH gestionadas por OxideTerm.",
+      "include_managed_key_passphrases": "Incluir frases de contraseña de claves gestionadas",
+      "include_managed_key_passphrases_description": "Si se desactiva, las conexiones importadas pueden pedir la frase de contraseña de la clave gestionada más tarde.",
+      "content_summary_passwords": "Se incluirán las contraseñas de servidor guardadas",
+      "content_summary_key_passphrases": "Se incluirán las frases de contraseña de claves externas",
+      "content_summary_managed_keys": "Se incluirán {{count}} clave(s) gestionadas",
+      "content_summary_managed_key_passphrases": "Se incluirán las frases de contraseña de claves gestionadas",
+      "warning_managed_keys_required": "{{count}} conexión(es) seleccionadas requieren claves gestionadas. Active la exportación de claves gestionadas u omítalas.",
+      "error_managed_keys_required": "La exportación de claves gestionadas está desactivada, pero las conexiones seleccionadas dependen de claves gestionadas."
     },
     "import": {
       "title": "Importar configuración desde archivo .oxide",
@@ -255,7 +270,14 @@
       "section_quick_commands": "Quick Commands ({{count}} commands)",
       "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
       "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
-      "skipped_quick_commands": "Quick Commands skipped"
+      "skipped_quick_commands": "Quick Commands skipped",
+      "contains_managed_keys": "Claves gestionadas:",
+      "managed_keys_count": "{{count}} clave(s) gestionadas",
+      "section_managed_keys": "Claves gestionadas ({{count}})",
+      "toggle_managed_keys_restore": "Restaurar claves gestionadas en OxideTerm para que las conexiones con claves gestionadas sigan usando autenticación respaldada por bóveda.",
+      "toggle_managed_keys_extract": "Las claves gestionadas se importarán como archivos de clave incrustados de respaldo en lugar de escribirse en el almacén de claves gestionadas.",
+      "restore_managed_key_passphrases": "Restaurar frases de contraseña de claves gestionadas",
+      "restore_managed_key_passphrases_description": "Si se desactiva, OxideTerm pedirá la frase de contraseña de la clave gestionada cuando sea necesario."
     },
     "reconnect": {
       "title": "Reconectar a sesión",
@@ -634,5 +656,12 @@
       "detached": "Sesión enviada al fondo",
       "detached_desc": "{{shell}} se está ejecutando en el fondo"
     }
+  },
+  "export": {
+    "summary_key_passphrases": "{{count}} frase(s) de contraseña de clave",
+    "summary_managed_keys": "{{count}} clave(s) gestionadas",
+    "summary_managed_key_passphrases": "{{count}} frase(s) de contraseña de claves gestionadas",
+    "warning_passwords_included": "Se incluirán {{count}} contraseña(s) de servidor guardadas en el archivo cifrado.",
+    "security_passwords_included": "Las contraseñas de servidor guardadas se incluyen dentro de este archivo .oxide cifrado"
   }
 }

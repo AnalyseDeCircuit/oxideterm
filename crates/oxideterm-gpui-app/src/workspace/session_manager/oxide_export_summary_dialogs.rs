@@ -11,6 +11,7 @@ impl WorkspaceApp {
         preflight: Option<ExportPreflightResult>,
         show_card: bool,
         embed_keys: bool,
+        include_passwords: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -90,13 +91,78 @@ impl WorkspaceApp {
                     .into_any_element(),
             );
         }
+        card_children.push(
+            div()
+                .grid()
+                .grid_cols(2)
+                .gap(px(8.0))
+                .children(
+                    [
+                        self.i18n
+                            .t("modals.export.summary_key_passphrases")
+                            .replace(
+                                "{{count}}",
+                                &preflight.key_passphrase_count.to_string(),
+                            ),
+                        self.i18n.t("modals.export.summary_managed_keys").replace(
+                            "{{count}}",
+                            &preflight.managed_key_count.to_string(),
+                        ),
+                        self.i18n
+                            .t("modals.export.summary_managed_key_passphrases")
+                            .replace(
+                                "{{count}}",
+                                &preflight.managed_key_passphrase_count.to_string(),
+                            ),
+                    ]
+                    .into_iter()
+                    .map(|label| {
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.render_selectable_text_scoped(
+                                "oxide-export-preflight-credential-stat",
+                                label.clone(),
+                                label,
+                                theme.text_muted,
+                                cx,
+                            ))
+                    }),
+                )
+                .into_any_element(),
+        );
+        if !preflight.can_export {
+            card_children.push(self.render_oxide_compact_warning(
+                OXIDE_RED_500,
+                self.i18n
+                    .t("modals.export.warning_managed_keys_required")
+                    .replace(
+                        "{{count}}",
+                        &preflight.blocked_managed_key_connections.len().to_string(),
+                    ),
+                Vec::new(),
+                cx,
+            ));
+        }
         if preflight.connections_with_passwords > 0 {
+            let password_warning = if include_passwords {
+                self.i18n
+                    .t("modals.export.warning_passwords_included")
+                    .replace(
+                        "{{count}}",
+                        &preflight.connections_with_passwords.to_string(),
+                    )
+            } else {
+                self.i18n
+                    .t("modals.export.warning_passwords_excluded")
+                    .replace(
+                        "{{count}}",
+                        &preflight.connections_with_passwords.to_string(),
+                    )
+            };
             card_children.push(self.render_oxide_compact_warning(
                 OXIDE_YELLOW_500,
-                format!(
-                    "{} 个密码认证连接会导出配置，但不会包含已保存的服务器密码。",
-                    preflight.connections_with_passwords
-                ),
+                password_warning,
                 Vec::new(),
                 cx,
             ));
@@ -178,9 +244,9 @@ impl WorkspaceApp {
         }
         if dialog.include_portable_secrets {
             let count = dialog
-                    .preflight
-                    .as_ref()
-                    .map(|preflight| preflight.portable_secret_count)
+                .preflight
+                .as_ref()
+                .map(|preflight| preflight.portable_secret_count)
                     .unwrap_or(0);
             items.push(
                 self.i18n
@@ -190,6 +256,51 @@ impl WorkspaceApp {
         }
         if dialog.embed_keys {
             items.push(self.i18n.t("modals.export.content_summary_embed_keys"));
+        }
+        if dialog.include_passwords {
+            items.push(self.i18n.t("modals.export.content_summary_passwords"));
+        }
+        if dialog.include_key_passphrases {
+            items.push(self.i18n.t("modals.export.content_summary_key_passphrases"));
+        }
+        if dialog.include_managed_keys {
+            if let Some(count) = dialog
+                .preflight
+                .as_ref()
+                .map(|preflight| preflight.managed_key_count)
+                .filter(|count| *count > 0)
+            {
+                items.push(
+                    self.i18n
+                        .t("modals.export.content_summary_managed_keys")
+                        .replace("{{count}}", &count.to_string()),
+                );
+            }
+        }
+        if dialog.include_managed_key_passphrases {
+            if let Some(count) = dialog
+                .preflight
+                .as_ref()
+                .map(|preflight| preflight.managed_key_passphrase_count)
+                .filter(|count| *count > 0)
+            {
+                items.push(
+                    self.i18n
+                        .t("modals.export.content_summary_managed_key_passphrases")
+                        .replace("{{count}}", &count.to_string()),
+                );
+            }
+        }
+        if let Some(preflight) = dialog.preflight.as_ref().filter(|preflight| !preflight.can_export)
+        {
+            items.push(
+                self.i18n
+                    .t("modals.export.warning_managed_keys_required")
+                    .replace(
+                        "{{count}}",
+                        &preflight.blocked_managed_key_connections.len().to_string(),
+                    ),
+            );
         }
         let content = if items.is_empty() {
             vec![
@@ -269,7 +380,11 @@ impl WorkspaceApp {
                 self.i18n
                     .t("modals.export.security_portable_secrets")
                     .replace("{{portable}}", portable_secrets_label),
-                self.i18n.t("modals.export.security_passwords_excluded"),
+                if dialog.include_passwords {
+                    self.i18n.t("modals.export.security_passwords_included")
+                } else {
+                    self.i18n.t("modals.export.security_passwords_excluded")
+                },
                 self.i18n.t("modals.export.security_no_session"),
                 self.i18n.t("modals.export.security_keep_safe"),
             ],

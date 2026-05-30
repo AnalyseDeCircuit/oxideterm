@@ -147,7 +147,22 @@
       "error_export_failed": "エクスポートに失敗しました",
       "success": "エクスポート成功: {{count}}件の接続が{{path}}に保存されました",
       "include_quick_commands": "Include Quick Commands ({{count}})",
-      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands.",
+      "credential_material": "認証情報",
+      "include_passwords": "保存済みサーバーパスワードを含める",
+      "include_passwords_description": "既定ではオフです。パスワード認証の接続は、インポート後に再入力が必要になる場合があります。",
+      "include_key_passphrases": "外部キーのパスフレーズを含める",
+      "include_key_passphrases_description": "保存済みのキー/証明書パスフレーズを暗号化された .oxide ファイル内に保持します。",
+      "include_managed_keys": "管理キーを含める",
+      "include_managed_keys_description": "OxideTerm 管理の SSH キーを使う接続に必要です。",
+      "include_managed_key_passphrases": "管理キーのパスフレーズを含める",
+      "include_managed_key_passphrases_description": "無効にすると、インポートされた接続は後で管理キーのパスフレーズを求める場合があります。",
+      "content_summary_passwords": "保存済みサーバーパスワードが含まれます",
+      "content_summary_key_passphrases": "外部キーのパスフレーズが含まれます",
+      "content_summary_managed_keys": "{{count}} 個の管理キーが含まれます",
+      "content_summary_managed_key_passphrases": "管理キーのパスフレーズが含まれます",
+      "warning_managed_keys_required": "選択した接続のうち {{count}} 件は管理キーが必要です。管理キーのエクスポートを有効にするか、それらをスキップしてください。",
+      "error_managed_keys_required": "管理キーのエクスポートは無効ですが、選択した接続は管理キーに依存しています。"
     },
     "import": {
       "title": ".oxideファイルから構成をインポート",
@@ -255,7 +270,14 @@
       "section_quick_commands": "Quick Commands ({{count}} commands)",
       "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
       "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
-      "skipped_quick_commands": "Quick Commands skipped"
+      "skipped_quick_commands": "Quick Commands skipped",
+      "contains_managed_keys": "管理キー:",
+      "managed_keys_count": "{{count}} 個の管理キー",
+      "section_managed_keys": "管理キー（{{count}}）",
+      "toggle_managed_keys_restore": "管理キーを OxideTerm に復元し、管理キー接続が引き続きボールトベース認証を使えるようにします。",
+      "toggle_managed_keys_extract": "管理キーは管理キーストアではなく、埋め込みフォールバックキーファイルとしてインポートされます。",
+      "restore_managed_key_passphrases": "管理キーのパスフレーズを復元",
+      "restore_managed_key_passphrases_description": "無効にすると、OxideTerm は必要時に管理キーのパスフレーズを要求します。"
     },
     "reconnect": {
       "title": "セッションに再接続",
@@ -634,5 +656,12 @@
       "detached": "セッションをバックグラウンドに移動しました",
       "detached_desc": "{{shell}} はバックグラウンドで実行中です"
     }
+  },
+  "export": {
+    "summary_key_passphrases": "{{count}} 個のキーパスフレーズ",
+    "summary_managed_keys": "{{count}} 個の管理キー",
+    "summary_managed_key_passphrases": "{{count}} 個の管理キーパスフレーズ",
+    "warning_passwords_included": "{{count}} 個の保存済みサーバーパスワードが暗号化ファイルに含まれます。",
+    "security_passwords_included": "保存済みサーバーパスワードはこの暗号化された .oxide ファイル内に含まれます"
   }
 }

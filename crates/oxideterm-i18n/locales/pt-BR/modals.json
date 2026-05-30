@@ -147,7 +147,22 @@
       "error_export_failed": "Falha na exportação",
       "success": "Exportação bem-sucedida: {{count}} conexões salvas em {{path}}",
       "include_quick_commands": "Include Quick Commands ({{count}})",
-      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands.",
+      "credential_material": "Material de credenciais",
+      "include_passwords": "Incluir senhas de servidor salvas",
+      "include_passwords_description": "Desativado por padrão. Conexões com senha podem exigir nova digitação após a importação.",
+      "include_key_passphrases": "Incluir frases secretas de chaves externas",
+      "include_key_passphrases_description": "Mantém frases secretas de chaves/certificados salvas dentro do arquivo .oxide criptografado.",
+      "include_managed_keys": "Incluir chaves gerenciadas",
+      "include_managed_keys_description": "Necessário para conexões que usam chaves SSH gerenciadas pelo OxideTerm.",
+      "include_managed_key_passphrases": "Incluir frases secretas de chaves gerenciadas",
+      "include_managed_key_passphrases_description": "Se desativado, conexões importadas podem pedir a frase secreta da chave gerenciada depois.",
+      "content_summary_passwords": "Senhas de servidor salvas serão incluídas",
+      "content_summary_key_passphrases": "Frases secretas de chaves externas serão incluídas",
+      "content_summary_managed_keys": "{{count}} chave(s) gerenciada(s) serão incluídas",
+      "content_summary_managed_key_passphrases": "Frases secretas de chaves gerenciadas serão incluídas",
+      "warning_managed_keys_required": "{{count}} conexão(ões) selecionada(s) exigem chaves gerenciadas. Ative a exportação de chaves gerenciadas ou ignore-as.",
+      "error_managed_keys_required": "A exportação de chaves gerenciadas está desativada, mas as conexões selecionadas dependem de chaves gerenciadas."
     },
     "import": {
       "title": "Importar configuração de arquivo .oxide",
@@ -255,7 +270,14 @@
       "section_quick_commands": "Quick Commands ({{count}} commands)",
       "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
       "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
-      "skipped_quick_commands": "Quick Commands skipped"
+      "skipped_quick_commands": "Quick Commands skipped",
+      "contains_managed_keys": "Chaves gerenciadas:",
+      "managed_keys_count": "{{count}} chave(s) gerenciada(s)",
+      "section_managed_keys": "Chaves gerenciadas ({{count}})",
+      "toggle_managed_keys_restore": "Restaurar chaves gerenciadas no OxideTerm para que conexões com chaves gerenciadas continuem usando autenticação baseada em cofre.",
+      "toggle_managed_keys_extract": "Chaves gerenciadas serão importadas por arquivos de chave de fallback incorporados em vez de serem gravadas no armazenamento de chaves gerenciadas.",
+      "restore_managed_key_passphrases": "Restaurar frases secretas de chaves gerenciadas",
+      "restore_managed_key_passphrases_description": "Se desativado, o OxideTerm pedirá a frase secreta da chave gerenciada quando necessário."
     },
     "reconnect": {
       "title": "Reconectar à sessão",
@@ -634,5 +656,12 @@
       "detached": "Sessão enviada para segundo plano",
       "detached_desc": "{{shell}} está em execução em segundo plano"
     }
+  },
+  "export": {
+    "summary_key_passphrases": "{{count}} frase(s) secreta(s) de chave",
+    "summary_managed_keys": "{{count}} chave(s) gerenciada(s)",
+    "summary_managed_key_passphrases": "{{count}} frase(s) secreta(s) de chave gerenciada",
+    "warning_passwords_included": "{{count}} senha(s) de servidor salvas serão incluídas no arquivo criptografado.",
+    "security_passwords_included": "Senhas de servidor salvas estão incluídas neste arquivo .oxide criptografado"
   }
 }

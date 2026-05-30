@@ -147,7 +147,22 @@
       "error_export_failed": "Xuất thất bại",
       "success": "Xuất thành công: {{count}} kết nối đã lưu vào {{path}}",
       "include_quick_commands": "Include Quick Commands ({{count}})",
-      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands.",
+      "credential_material": "Dữ liệu xác thực",
+      "include_passwords": "Bao gồm mật khẩu máy chủ đã lưu",
+      "include_passwords_description": "Tắt theo mặc định. Kết nối xác thực bằng mật khẩu có thể cần nhập lại sau khi nhập.",
+      "include_key_passphrases": "Bao gồm passphrase của khóa bên ngoài",
+      "include_key_passphrases_description": "Giữ passphrase khóa/chứng chỉ đã lưu trong tệp .oxide được mã hóa.",
+      "include_managed_keys": "Bao gồm khóa được quản lý",
+      "include_managed_keys_description": "Bắt buộc với kết nối dùng khóa SSH do OxideTerm quản lý.",
+      "include_managed_key_passphrases": "Bao gồm passphrase khóa được quản lý",
+      "include_managed_key_passphrases_description": "Nếu tắt, kết nối đã nhập có thể hỏi passphrase khóa được quản lý sau.",
+      "content_summary_passwords": "Mật khẩu máy chủ đã lưu sẽ được bao gồm",
+      "content_summary_key_passphrases": "Passphrase khóa bên ngoài sẽ được bao gồm",
+      "content_summary_managed_keys": "{{count}} khóa được quản lý sẽ được bao gồm",
+      "content_summary_managed_key_passphrases": "Passphrase khóa được quản lý sẽ được bao gồm",
+      "warning_managed_keys_required": "{{count}} kết nối đã chọn yêu cầu khóa được quản lý. Hãy bật xuất khóa được quản lý hoặc bỏ qua chúng.",
+      "error_managed_keys_required": "Xuất khóa được quản lý đang tắt, nhưng kết nối đã chọn phụ thuộc vào khóa được quản lý."
     },
     "import": {
       "title": "Nhập cấu hình từ file .oxide",
@@ -255,7 +270,14 @@
       "section_quick_commands": "Quick Commands ({{count}} commands)",
       "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
       "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
-      "skipped_quick_commands": "Quick Commands skipped"
+      "skipped_quick_commands": "Quick Commands skipped",
+      "contains_managed_keys": "Khóa được quản lý:",
+      "managed_keys_count": "{{count}} khóa được quản lý",
+      "section_managed_keys": "Khóa được quản lý ({{count}})",
+      "toggle_managed_keys_restore": "Khôi phục khóa được quản lý vào OxideTerm để kết nối dùng khóa được quản lý tiếp tục xác thực qua kho khóa.",
+      "toggle_managed_keys_extract": "Khóa được quản lý sẽ được nhập qua tệp khóa dự phòng nhúng thay vì ghi vào kho khóa được quản lý.",
+      "restore_managed_key_passphrases": "Khôi phục passphrase khóa được quản lý",
+      "restore_managed_key_passphrases_description": "Nếu tắt, OxideTerm sẽ hỏi passphrase khóa được quản lý khi cần."
     },
     "reconnect": {
       "title": "Kết nối lại phiên",
@@ -634,5 +656,12 @@
       "detached": "Phiên đã chuyển vào nền",
       "detached_desc": "{{shell}} đang chạy trong nền"
     }
+  },
+  "export": {
+    "summary_key_passphrases": "{{count}} passphrase khóa",
+    "summary_managed_keys": "{{count}} khóa được quản lý",
+    "summary_managed_key_passphrases": "{{count}} passphrase khóa được quản lý",
+    "warning_passwords_included": "{{count}} mật khẩu máy chủ đã lưu sẽ được bao gồm trong tệp mã hóa.",
+    "security_passwords_included": "Mật khẩu máy chủ đã lưu được bao gồm trong tệp .oxide đã mã hóa này"
   }
 }

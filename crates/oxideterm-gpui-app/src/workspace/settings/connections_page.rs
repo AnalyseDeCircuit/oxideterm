@@ -1039,7 +1039,7 @@ impl WorkspaceApp {
                     420.0,
                     cx,
                 ),
-                self.settings_managed_key_input_field(
+                self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyFilePassphrase,
                     self.settings_managed_key_file_passphrase.clone(),
@@ -1073,7 +1073,7 @@ impl WorkspaceApp {
                     cx,
                 ),
                 self.settings_managed_key_private_key_textarea(cx),
-                self.settings_managed_key_input_field(
+                self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyPastePassphrase,
                     self.settings_managed_key_paste_passphrase.clone(),
@@ -1252,6 +1252,30 @@ impl WorkspaceApp {
                     .child(self.i18n.t(label_key)),
             )
             .child(self.settings_text_input_control(input, value, placeholder, width, cx))
+            .into_any_element()
+    }
+
+    fn settings_managed_key_secret_input_field(
+        &self,
+        label_key: &str,
+        input: SettingsInput,
+        value: String,
+        placeholder: String,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t(label_key)),
+            )
+            .child(self.settings_secret_text_input_control(input, value, placeholder, width, cx))
             .into_any_element()
     }
 

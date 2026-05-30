@@ -476,11 +476,37 @@ mod tests {
             .upsert_imported_connection(saved_connection("conn-1", "Prod"))
             .unwrap();
 
-        let result = preflight_export(&source, &["conn-1".to_string()], false, 0);
+        let result = preflight_export(&source, &["conn-1".to_string()], false, true, 0);
 
         assert_eq!(result.connections_with_keys, 1);
         assert_eq!(result.connections_with_agent, 0);
         assert_eq!(result.connections_with_passwords, 0);
+    }
+
+    #[test]
+    fn preflight_blocks_managed_key_connections_when_excluded() {
+        let mut source = temp_store("preflight-managed-key-excluded");
+        let managed_key = source
+            .create_managed_ssh_key_from_text(
+                SecretString::from(generated_private_key_text()),
+                Some("Deploy key".to_string()),
+                None,
+            )
+            .unwrap();
+        let mut connection = saved_connection("conn-1", "Prod");
+        connection.auth = SavedAuth::ManagedKey {
+            key_id: managed_key.id,
+            passphrase_keychain_id: None,
+            plaintext_passphrase: None,
+        };
+        connection.proxy_chain.clear();
+        source.upsert_imported_connection(connection).unwrap();
+
+        let result = preflight_export(&source, &["conn-1".to_string()], false, false, 0);
+
+        assert!(!result.can_export);
+        assert_eq!(result.managed_key_count, 1);
+        assert_eq!(result.blocked_managed_key_connections, vec!["Prod"]);
     }
 
     #[test]

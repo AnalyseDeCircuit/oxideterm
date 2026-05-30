@@ -336,6 +336,8 @@ pub(super) struct OxideImportDialogState {
     pub(super) selected_plugin_ids: HashSet<String>,
     pub(super) import_forwards: bool,
     pub(super) import_portable_secrets: bool,
+    pub(super) restore_managed_keys: bool,
+    pub(super) restore_managed_key_passphrases: bool,
     pub(super) busy: bool,
     pub(super) operation_generation: u64,
     pub(super) progress_stage: Option<OxideTransferProgress>,
@@ -374,6 +376,8 @@ impl Default for OxideImportDialogState {
             selected_plugin_ids: HashSet::new(),
             import_forwards: true,
             import_portable_secrets: false,
+            restore_managed_keys: true,
+            restore_managed_key_passphrases: false,
             busy: false,
             operation_generation: 0,
             progress_stage: None,
@@ -411,6 +415,11 @@ impl std::fmt::Debug for OxideImportDialogState {
             .field("selected_plugin_ids", &self.selected_plugin_ids)
             .field("import_forwards", &self.import_forwards)
             .field("import_portable_secrets", &self.import_portable_secrets)
+            .field("restore_managed_keys", &self.restore_managed_keys)
+            .field(
+                "restore_managed_key_passphrases",
+                &self.restore_managed_key_passphrases,
+            )
             .field("busy", &self.busy)
             .field("operation_generation", &self.operation_generation)
             .field("progress_stage", &self.progress_stage)
@@ -437,6 +446,10 @@ pub(super) struct OxideExportDialogState {
     pub(super) include_forwards: bool,
     pub(super) include_portable_secrets: bool,
     pub(super) embed_keys: bool,
+    pub(super) include_passwords: bool,
+    pub(super) include_key_passphrases: bool,
+    pub(super) include_managed_keys: bool,
+    pub(super) include_managed_key_passphrases: bool,
     pub(super) password: String,
     pub(super) confirm_password: String,
     pub(super) description: String,
@@ -469,6 +482,10 @@ impl Default for OxideExportDialogState {
             include_forwards: true,
             include_portable_secrets: false,
             embed_keys: false,
+            include_passwords: false,
+            include_key_passphrases: true,
+            include_managed_keys: true,
+            include_managed_key_passphrases: false,
             password: String::new(),
             confirm_password: String::new(),
             description: String::new(),
@@ -507,6 +524,13 @@ impl std::fmt::Debug for OxideExportDialogState {
             .field("include_forwards", &self.include_forwards)
             .field("include_portable_secrets", &self.include_portable_secrets)
             .field("embed_keys", &self.embed_keys)
+            .field("include_passwords", &self.include_passwords)
+            .field("include_key_passphrases", &self.include_key_passphrases)
+            .field("include_managed_keys", &self.include_managed_keys)
+            .field(
+                "include_managed_key_passphrases",
+                &self.include_managed_key_passphrases,
+            )
             .field("password", &"[redacted secret]")
             .field("confirm_password", &"[redacted secret]")
             .field("description", &self.description)

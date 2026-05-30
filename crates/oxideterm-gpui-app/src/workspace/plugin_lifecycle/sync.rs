@@ -89,6 +89,7 @@ pub(super) fn native_plugin_sync_response(
                         connection_store,
                         &connection_ids,
                         native_plugin_bool_arg(&call.args, "embedKeys").unwrap_or(false),
+                        native_plugin_bool_arg(&call.args, "includeManagedKeys").unwrap_or(false),
                         0,
                     )),
                 ),
@@ -192,6 +193,12 @@ pub(super) fn native_plugin_sync_export_oxide_response(
             .and_then(Value::as_str)
             .map(str::to_string),
         embed_keys: native_plugin_bool_arg(args, "embedKeys").unwrap_or(false),
+        include_managed_keys: native_plugin_bool_arg(args, "includeManagedKeys").unwrap_or(false),
+        include_managed_key_passphrases: native_plugin_bool_arg(
+            args,
+            "includeManagedKeyPassphrases",
+        )
+        .unwrap_or(false),
         app_settings_json: native_plugin_optional_string_arg(args, "appSettingsJson"),
         quick_commands_json: native_plugin_optional_string_arg(args, "quickCommandsJson"),
         plugin_settings,

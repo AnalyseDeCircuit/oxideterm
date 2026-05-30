@@ -147,7 +147,22 @@
       "error_export_failed": "匯出失敗",
       "success": "匯出成功：已將 {{count}} 個連線儲存至 {{path}}",
       "include_quick_commands": "包含快捷命令（{{count}}）",
-      "include_quick_commands_description": "快捷命令可能包含主機名稱、路徑或命令中的敏感資訊。"
+      "include_quick_commands_description": "快捷命令可能包含主機名稱、路徑或命令中的敏感資訊。",
+      "credential_material": "憑證材料",
+      "include_passwords": "包含已儲存的伺服器密碼",
+      "include_passwords_description": "預設關閉。匯入後，密碼認證連線可能需要重新輸入密碼。",
+      "include_key_passphrases": "包含外部金鑰密語",
+      "include_key_passphrases_description": "將已儲存的金鑰/憑證密語保存在加密的 .oxide 檔案中。",
+      "include_managed_keys": "包含託管金鑰",
+      "include_managed_keys_description": "使用 OxideTerm 託管 SSH 金鑰的連線需要啟用此項。",
+      "include_managed_key_passphrases": "包含託管金鑰密語",
+      "include_managed_key_passphrases_description": "關閉後，匯入的連線可能會在之後要求託管金鑰密語。",
+      "content_summary_passwords": "將包含已儲存的伺服器密碼",
+      "content_summary_key_passphrases": "將包含外部金鑰密語",
+      "content_summary_managed_keys": "將包含 {{count}} 個託管金鑰",
+      "content_summary_managed_key_passphrases": "將包含託管金鑰密語",
+      "warning_managed_keys_required": "{{count}} 個所選連線需要託管金鑰。請啟用託管金鑰匯出，或略過這些連線。",
+      "error_managed_keys_required": "託管金鑰匯出已關閉，但所選連線依賴託管金鑰。"
     },
     "import": {
       "title": "從 .oxide 檔案匯入設定",
@@ -255,7 +270,14 @@
       "section_quick_commands": "快捷命令（{{count}} 條命令）",
       "toggle_quick_commands": "匯入 {{categories}} 個快捷命令群組。既有衝突會依目前衝突策略處理；取代只會取代衝突項。",
       "imported_quick_commands": "已匯入 {{count}} 項快捷命令。",
-      "skipped_quick_commands": "已略過快捷命令"
+      "skipped_quick_commands": "已略過快捷命令",
+      "contains_managed_keys": "託管金鑰：",
+      "managed_keys_count": "{{count}} 個託管金鑰",
+      "section_managed_keys": "託管金鑰（{{count}}）",
+      "toggle_managed_keys_restore": "將託管金鑰恢復到 OxideTerm，使使用託管金鑰的連線繼續走密鑰庫認證。",
+      "toggle_managed_keys_extract": "託管金鑰會按嵌入的備用金鑰檔案匯入，而不是寫入託管金鑰庫。",
+      "restore_managed_key_passphrases": "恢復託管金鑰密語",
+      "restore_managed_key_passphrases_description": "關閉後，OxideTerm 會在需要時再詢問託管金鑰密語。"
     },
     "reconnect": {
       "title": "重新連線工作階段",
@@ -634,5 +656,12 @@
       "detached": "工作階段已移至背景",
       "detached_desc": "{{shell}} 正在背景執行"
     }
+  },
+  "export": {
+    "summary_key_passphrases": "{{count}} 個金鑰密語",
+    "summary_managed_keys": "{{count}} 個託管金鑰",
+    "summary_managed_key_passphrases": "{{count}} 個託管金鑰密語",
+    "warning_passwords_included": "將包含 {{count}} 個已儲存的伺服器密碼到加密檔案中。",
+    "security_passwords_included": "已儲存的伺服器密碼會包含在這個加密的 .oxide 檔案中"
   }
 }

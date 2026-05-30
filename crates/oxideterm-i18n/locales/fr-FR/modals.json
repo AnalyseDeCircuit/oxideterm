@@ -147,7 +147,22 @@
       "error_export_failed": "Échec de l'exportation",
       "success": "Exportation réussie : {{count}} connexion(s) enregistrée(s) dans {{path}}",
       "include_quick_commands": "Include Quick Commands ({{count}})",
-      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands.",
+      "credential_material": "Identifiants",
+      "include_passwords": "Inclure les mots de passe serveur enregistrés",
+      "include_passwords_description": "Désactivé par défaut. Les connexions par mot de passe peuvent nécessiter une nouvelle saisie après importation.",
+      "include_key_passphrases": "Inclure les phrases secrètes des clés externes",
+      "include_key_passphrases_description": "Conserve les phrases secrètes de clés/certificats enregistrées dans le fichier .oxide chiffré.",
+      "include_managed_keys": "Inclure les clés gérées",
+      "include_managed_keys_description": "Nécessaire pour les connexions qui utilisent des clés SSH gérées par OxideTerm.",
+      "include_managed_key_passphrases": "Inclure les phrases secrètes des clés gérées",
+      "include_managed_key_passphrases_description": "Si désactivé, les connexions importées pourront demander la phrase secrète de la clé gérée plus tard.",
+      "content_summary_passwords": "Les mots de passe serveur enregistrés seront inclus",
+      "content_summary_key_passphrases": "Les phrases secrètes des clés externes seront incluses",
+      "content_summary_managed_keys": "{{count}} clé(s) gérée(s) seront incluses",
+      "content_summary_managed_key_passphrases": "Les phrases secrètes des clés gérées seront incluses",
+      "warning_managed_keys_required": "{{count}} connexion(s) sélectionnée(s) nécessitent des clés gérées. Activez l’export des clés gérées ou ignorez-les.",
+      "error_managed_keys_required": "L’export des clés gérées est désactivé, mais les connexions sélectionnées en dépendent."
     },
     "import": {
       "title": "Importer la configuration depuis un fichier .oxide",
@@ -255,7 +270,14 @@
       "section_quick_commands": "Quick Commands ({{count}} commands)",
       "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
       "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
-      "skipped_quick_commands": "Quick Commands skipped"
+      "skipped_quick_commands": "Quick Commands skipped",
+      "contains_managed_keys": "Clés gérées :",
+      "managed_keys_count": "{{count}} clé(s) gérée(s)",
+      "section_managed_keys": "Clés gérées ({{count}})",
+      "toggle_managed_keys_restore": "Restaurer les clés gérées dans OxideTerm afin que les connexions concernées continuent d’utiliser l’authentification adossée au coffre.",
+      "toggle_managed_keys_extract": "Les clés gérées seront importées via les fichiers de clés intégrés de secours au lieu d’être écrites dans le magasin de clés gérées.",
+      "restore_managed_key_passphrases": "Restaurer les phrases secrètes des clés gérées",
+      "restore_managed_key_passphrases_description": "Si désactivé, OxideTerm demandera la phrase secrète de la clé gérée lorsque nécessaire."
     },
     "reconnect": {
       "title": "Reconnecter la session",
@@ -634,5 +656,12 @@
       "detached": "Session mise en arrière-plan",
       "detached_desc": "{{shell}} s’exécute en arrière-plan"
     }
+  },
+  "export": {
+    "summary_key_passphrases": "{{count}} phrase(s) secrète(s) de clé",
+    "summary_managed_keys": "{{count}} clé(s) gérée(s)",
+    "summary_managed_key_passphrases": "{{count}} phrase(s) secrète(s) de clé gérée",
+    "warning_passwords_included": "{{count}} mot(s) de passe serveur enregistrés seront inclus dans le fichier chiffré.",
+    "security_passwords_included": "Les mots de passe serveur enregistrés sont inclus dans ce fichier .oxide chiffré"
   }
 }

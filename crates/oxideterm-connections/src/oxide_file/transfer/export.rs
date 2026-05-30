@@ -2,6 +2,7 @@ pub fn preflight_export(
     store: &ConnectionStore,
     connection_ids: &[String],
     embed_keys: bool,
+    include_managed_keys: bool,
     portable_secret_count: usize,
 ) -> ExportPreflightResult {
     let mut result = ExportPreflightResult {
@@ -17,9 +18,19 @@ pub fn preflight_export(
             continue;
         };
         collect_managed_key_id(&conn.auth, &mut managed_key_ids);
+        if !include_managed_keys && auth_uses_managed_key(&conn.auth) {
+            result
+                .blocked_managed_key_connections
+                .push(conn.name.clone());
+        }
         count_auth_preflight(&conn.name, &conn.auth, embed_keys, true, &mut result);
         for hop in &conn.proxy_chain {
             collect_managed_key_id(&hop.auth, &mut managed_key_ids);
+            if !include_managed_keys && auth_uses_managed_key(&hop.auth) {
+                result
+                    .blocked_managed_key_connections
+                    .push(conn.name.clone());
+            }
             count_auth_preflight(
                 &format!("{} (proxy)", conn.name),
                 &hop.auth,
@@ -30,6 +41,11 @@ pub fn preflight_export(
         }
     }
     result.managed_key_count = managed_key_ids.len();
+    result.blocked_managed_key_connections.sort();
+    result.blocked_managed_key_connections.dedup();
+    if !include_managed_keys && !result.blocked_managed_key_connections.is_empty() {
+        result.can_export = false;
+    }
 
     result
 }
@@ -212,6 +228,10 @@ fn collect_managed_key_id(auth: &SavedAuth, managed_key_ids: &mut HashSet<String
     if let SavedAuth::ManagedKey { key_id, .. } = auth {
         managed_key_ids.insert(key_id.clone());
     }
+}
+
+fn auth_uses_managed_key(auth: &SavedAuth) -> bool {
+    matches!(auth, SavedAuth::ManagedKey { .. })
 }
 
 fn auth_has_saved_passphrase(auth: &SavedAuth) -> bool {

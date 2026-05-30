@@ -64,6 +64,7 @@ impl WorkspaceApp {
     ) {
         let dialog = OxideImportDialogState {
             import_portable_secrets: true,
+            restore_managed_key_passphrases: true,
             ..OxideImportDialogState::default()
         };
         self.session_manager.oxide_import_dialog = Some(dialog);
@@ -91,6 +92,7 @@ impl WorkspaceApp {
         let mut dialog = OxideExportDialogState::default();
         dialog.include_portable_secrets = portable_migration;
         dialog.embed_keys = portable_migration;
+        dialog.include_managed_key_passphrases = portable_migration;
         dialog.available_forwards = self.exportable_saved_forwards();
         dialog.last_export_timestamp = load_oxide_last_export_timestamp(self.settings_store.path());
         dialog.selected_forward_ids = dialog
@@ -485,6 +487,8 @@ impl WorkspaceApp {
                 conflict_strategy: dialog.conflict_strategy,
                 import_forwards: dialog.import_forwards,
                 import_portable_secrets: dialog.import_portable_secrets,
+                restore_managed_keys: dialog.restore_managed_keys,
+                restore_managed_key_passphrases: dialog.restore_managed_key_passphrases,
                 ..OxideImportOptions::default()
             },
             import_quick_commands: dialog.import_quick_commands,
@@ -863,6 +867,7 @@ impl WorkspaceApp {
             &self.connection_store,
             &selected_ids,
             dialog.embed_keys,
+            dialog.include_managed_keys,
             self.oxide_export_portable_secret_count(dialog),
         )
     }
@@ -904,6 +909,17 @@ impl WorkspaceApp {
                 } else {
                     Some(self.i18n.t("modals.export.error_password_mismatch"))
                 };
+            }
+            cx.notify();
+            return;
+        }
+        if dialog
+            .preflight
+            .as_ref()
+            .is_some_and(|preflight| !preflight.can_export)
+        {
+            if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
+                dialog.error = Some(self.i18n.t("modals.export.error_managed_keys_required"));
             }
             cx.notify();
             return;
@@ -1195,6 +1211,10 @@ impl WorkspaceApp {
             description: (!dialog.description.trim().is_empty())
                 .then(|| dialog.description.trim().to_string()),
             embed_keys: dialog.embed_keys,
+            include_passwords: dialog.include_passwords,
+            include_key_passphrases: dialog.include_key_passphrases,
+            include_managed_keys: dialog.include_managed_keys,
+            include_managed_key_passphrases: dialog.include_managed_key_passphrases,
             app_settings_json,
             quick_commands_json,
             plugin_settings,

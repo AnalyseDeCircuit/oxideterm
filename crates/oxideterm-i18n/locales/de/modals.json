@@ -147,7 +147,22 @@
       "error_export_failed": "Export fehlgeschlagen",
       "success": "Export erfolgreich: {{count}} Verbindungen gespeichert unter {{path}}",
       "include_quick_commands": "Include Quick Commands ({{count}})",
-      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands.",
+      "credential_material": "Zugangsdatenmaterial",
+      "include_passwords": "Gespeicherte Serverpasswörter einschließen",
+      "include_passwords_description": "Standardmäßig deaktiviert. Passwortbasierte Verbindungen können nach dem Import eine erneute Eingabe erfordern.",
+      "include_key_passphrases": "Passphrasen externer Schlüssel einschließen",
+      "include_key_passphrases_description": "Speichert gesicherte Schlüssel-/Zertifikat-Passphrasen in der verschlüsselten .oxide-Datei.",
+      "include_managed_keys": "Verwaltete Schlüssel einschließen",
+      "include_managed_keys_description": "Erforderlich für Verbindungen, die von OxideTerm verwaltete SSH-Schlüssel verwenden.",
+      "include_managed_key_passphrases": "Passphrasen verwalteter Schlüssel einschließen",
+      "include_managed_key_passphrases_description": "Wenn deaktiviert, können importierte Verbindungen später nach der Passphrase des verwalteten Schlüssels fragen.",
+      "content_summary_passwords": "Gespeicherte Serverpasswörter werden eingeschlossen",
+      "content_summary_key_passphrases": "Passphrasen externer Schlüssel werden eingeschlossen",
+      "content_summary_managed_keys": "{{count}} verwaltete Schlüssel werden eingeschlossen",
+      "content_summary_managed_key_passphrases": "Passphrasen verwalteter Schlüssel werden eingeschlossen",
+      "warning_managed_keys_required": "{{count}} ausgewählte Verbindung(en) benötigen verwaltete Schlüssel. Aktivieren Sie den Export verwalteter Schlüssel oder überspringen Sie sie.",
+      "error_managed_keys_required": "Der Export verwalteter Schlüssel ist deaktiviert, aber ausgewählte Verbindungen benötigen verwaltete Schlüssel."
     },
     "import": {
       "title": "Konfiguration aus .oxide-Datei importieren",
@@ -255,7 +270,14 @@
       "section_quick_commands": "Quick Commands ({{count}} commands)",
       "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
       "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
-      "skipped_quick_commands": "Quick Commands skipped"
+      "skipped_quick_commands": "Quick Commands skipped",
+      "contains_managed_keys": "Verwaltete Schlüssel:",
+      "managed_keys_count": "{{count}} verwaltete(r) Schlüssel",
+      "section_managed_keys": "Verwaltete Schlüssel ({{count}})",
+      "toggle_managed_keys_restore": "Verwaltete Schlüssel in OxideTerm wiederherstellen, damit Verbindungen mit verwalteten Schlüsseln weiterhin Tresor-basierte Authentifizierung verwenden.",
+      "toggle_managed_keys_extract": "Verwaltete Schlüssel werden über eingebettete Fallback-Schlüsseldateien importiert statt in den verwalteten Schlüsselspeicher.",
+      "restore_managed_key_passphrases": "Passphrasen verwalteter Schlüssel wiederherstellen",
+      "restore_managed_key_passphrases_description": "Wenn deaktiviert, fragt OxideTerm bei Bedarf nach der Passphrase des verwalteten Schlüssels."
     },
     "reconnect": {
       "title": "Sitzung erneut verbinden",
@@ -634,5 +656,12 @@
       "detached": "Sitzung in den Hintergrund verschoben",
       "detached_desc": "{{shell}} läuft im Hintergrund"
     }
+  },
+  "export": {
+    "summary_key_passphrases": "{{count}} Schlüssel-Passphrase(n)",
+    "summary_managed_keys": "{{count}} verwaltete(r) Schlüssel",
+    "summary_managed_key_passphrases": "{{count}} Passphrase(n) verwalteter Schlüssel",
+    "warning_passwords_included": "{{count}} gespeicherte Serverpasswörter werden in die verschlüsselte Datei aufgenommen.",
+    "security_passwords_included": "Gespeicherte Serverpasswörter sind in dieser verschlüsselten .oxide-Datei enthalten"
   }
 }

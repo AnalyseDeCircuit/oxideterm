@@ -114,6 +114,16 @@ impl WorkspaceApp {
         if preview.plugin_settings_count > 0 {
             children.push(self.render_oxide_import_plugins(&preview, cx));
         }
+        if self
+            .session_manager
+            .oxide_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.metadata.as_ref())
+            .and_then(|metadata| metadata.managed_key_count)
+            .is_some_and(|count| count > 0)
+        {
+            children.push(self.render_oxide_import_managed_keys(cx));
+        }
         if preview.portable_secret_count > 0 {
             children.push(self.render_oxide_import_portable_secrets(&preview, cx));
         }
@@ -461,6 +471,64 @@ impl WorkspaceApp {
             children.push(sections.into_any_element());
         }
         self.render_oxide_import_preview_subcard(children)
+    }
+
+    fn render_oxide_import_managed_keys(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(dialog) = self.session_manager.oxide_import_dialog.as_ref() else {
+            return div().into_any_element();
+        };
+        let count = dialog
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.managed_key_count)
+            .unwrap_or(0);
+        let restore_managed_keys = dialog.restore_managed_keys;
+        let restore_passphrases = dialog.restore_managed_key_passphrases;
+        self.render_oxide_import_preview_subcard(vec![
+            self.render_oxide_option_row(
+                self.i18n
+                    .t("modals.import.section_managed_keys")
+                    .replace("{{count}}", &count.to_string()),
+                if restore_managed_keys {
+                    self.i18n.t("modals.import.toggle_managed_keys_restore")
+                } else {
+                    self.i18n.t("modals.import.toggle_managed_keys_extract")
+                },
+                restore_managed_keys,
+                cx.listener(|this, _event, _window, cx| {
+                    if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
+                        dialog.restore_managed_keys = !dialog.restore_managed_keys;
+                        if !dialog.restore_managed_keys {
+                            dialog.restore_managed_key_passphrases = false;
+                        }
+                    }
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+                cx,
+            ),
+            div()
+                .opacity(if restore_managed_keys { 1.0 } else { 0.45 })
+                .child(self.render_oxide_option_row(
+                    self.i18n
+                        .t("modals.import.restore_managed_key_passphrases"),
+                    self.i18n
+                        .t("modals.import.restore_managed_key_passphrases_description"),
+                    restore_passphrases,
+                    cx.listener(|this, _event, _window, cx| {
+                        if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
+                            if dialog.restore_managed_keys {
+                                dialog.restore_managed_key_passphrases =
+                                    !dialog.restore_managed_key_passphrases;
+                            }
+                        }
+                        cx.notify();
+                        cx.stop_propagation();
+                    }),
+                    cx,
+                ))
+                .into_any_element(),
+        ])
     }
 
     fn render_oxide_import_app_settings_section(

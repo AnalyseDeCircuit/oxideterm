@@ -204,6 +204,25 @@ impl WorkspaceApp {
         )
     }
 
+    fn settings_secret_text_input_control(
+        &self,
+        input: SettingsInput,
+        value: String,
+        placeholder: String,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.settings_text_input_control_inner(
+            input,
+            value,
+            placeholder,
+            width,
+            TextInputContentAlign::Start,
+            true,
+            cx,
+        )
+    }
+
     fn settings_text_input_control_with_align(
         &self,
         input: SettingsInput,
@@ -211,6 +230,19 @@ impl WorkspaceApp {
         placeholder: String,
         width: f32,
         align: TextInputContentAlign,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.settings_text_input_control_inner(input, value, placeholder, width, align, false, cx)
+    }
+
+    fn settings_text_input_control_inner(
+        &self,
+        input: SettingsInput,
+        value: String,
+        placeholder: String,
+        width: f32,
+        align: TextInputContentAlign,
+        secret: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let focused = self.focused_settings_input == Some(input);
@@ -230,7 +262,9 @@ impl WorkspaceApp {
                     placeholder,
                     focused,
                     caret_visible: self.new_connection_caret_visible,
-                    secret: false,
+                    // Managed-key passphrases mirror Tauri password inputs; the
+                    // shared settings input pipeline still owns focus and IME.
+                    secret,
                     selected_all: false,
                     selected_range: self.ime_selected_range_for_target(target),
                     marked_text: self.marked_text_for_target(target),
