@@ -404,25 +404,15 @@ impl WorkspaceApp {
             }
 
             if let Some(node) = self.ssh_nodes.get_mut(affected_node_id) {
-                node.readiness = if affected_node_id == node_id {
-                    NodeReadiness::Disconnected
-                } else {
-                    NodeReadiness::Error
-                };
+                // Tauri disconnect_tree_node marks every affected subtree node
+                // as Disconnected. Link-down propagation uses Error elsewhere;
+                // explicit user disconnect should not look like a failure.
+                node.readiness = NodeReadiness::Disconnected;
                 node.terminal_ids.clear();
             }
             if let Ok(event) = self
                 .node_router
                 .disconnect_node_runtime(affected_node_id, "explicit disconnect")
-            {
-                self.emit_node_event(event);
-            }
-            if affected_node_id != node_id
-                && let Ok(event) = self.node_router.sync_node_readiness_event(
-                    affected_node_id,
-                    NodeReadiness::Error,
-                    "parent disconnected",
-                )
             {
                 self.emit_node_event(event);
             }
@@ -679,9 +669,9 @@ impl WorkspaceApp {
         if tab.kind == TabKind::Graphics {
             self.shutdown_graphics_session();
         }
-        if let Some(node_id) = self.sftp_tab_nodes.remove(&tab.id) {
-            self.release_sftp_session_for_node(&node_id);
-        }
+        // Tauri keeps node SFTP alive when the SFTP tab is closed; the tab is
+        // only a view over the node-owned ConnectionEntry session.
+        self.sftp_tab_nodes.remove(&tab.id);
         if let Some(surface) = self.ide_tab_surfaces.remove(&tab.id) {
             surface.update(cx, |surface, cx| {
                 surface.release_remote_session(cx);
@@ -764,17 +754,6 @@ impl WorkspaceApp {
         session_ids
             .into_iter()
             .any(|session_id| self.terminal_ssh_nodes.get(&session_id) == Some(node_id))
-    }
-
-    fn release_sftp_session_for_node(&mut self, node_id: &NodeId) {
-        let session_id = format!("node:{}:sftp", node_id.0);
-        if let Some((connection_id, consumer)) = self.sftp_connection_consumers.remove(&session_id)
-        {
-            self.ssh_registry.release(&connection_id, &consumer);
-            let _ = self
-                .ssh_registry
-                .mark_sftp_session(&connection_id, false, None);
-        }
     }
 
     pub(super) fn next_tab(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {

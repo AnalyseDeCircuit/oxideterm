@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use regex::Regex;
+
 pub struct AiSlashCommand {
     pub name: &'static str,
     pub label_key: &'static str,
@@ -688,7 +690,11 @@ fn parse_references(text: &str) -> Vec<AiReferenceMatch> {
 }
 
 fn collapse_ai_input_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    // Match Tauri's `/\s{2,}/g` cleanup: preserve single whitespace
+    // characters, but collapse token-removal gaps and trim edges.
+    Regex::new(r"\s{2,}")
+        .map(|regex| regex.replace_all(text, " ").trim().to_string())
+        .unwrap_or_else(|_| text.trim().to_string())
 }
 
 pub fn ai_input_token_at_cursor(text: &str, cursor_pos: usize) -> AiInputTokenAtCursor {
@@ -740,10 +746,11 @@ pub fn ai_autocomplete_candidates(text: &str, cursor_pos: usize) -> Vec<AiAutoco
     let Some(token_type) = token.token_type else {
         return Vec::new();
     };
+    let partial = token.partial.to_lowercase();
     match token_type {
         AiInputTokenType::Slash => AI_SLASH_COMMANDS
             .iter()
-            .filter(|command| command.name.starts_with(&token.partial))
+            .filter(|command| command.name.starts_with(&partial))
             .map(|command| AiAutocompleteCandidate {
                 kind: AiAutocompleteKind::Slash,
                 name: command.name,
@@ -753,7 +760,7 @@ pub fn ai_autocomplete_candidates(text: &str, cursor_pos: usize) -> Vec<AiAutoco
             .collect(),
         AiInputTokenType::Participant => AI_PARTICIPANTS
             .iter()
-            .filter(|participant| participant.name.starts_with(&token.partial))
+            .filter(|participant| participant.name.starts_with(&partial))
             .map(|participant| AiAutocompleteCandidate {
                 kind: AiAutocompleteKind::Participant,
                 name: participant.name,
@@ -763,7 +770,7 @@ pub fn ai_autocomplete_candidates(text: &str, cursor_pos: usize) -> Vec<AiAutoco
             .collect(),
         AiInputTokenType::Reference => AI_REFERENCES
             .iter()
-            .filter(|reference| reference.reference_type.starts_with(&token.partial))
+            .filter(|reference| reference.reference_type.starts_with(&partial))
             .map(|reference| AiAutocompleteCandidate {
                 kind: AiAutocompleteKind::Reference,
                 name: reference.reference_type,

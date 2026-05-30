@@ -2,6 +2,7 @@ struct PooledSshConnection {
     target: Mutex<client::Handle<NativeClientHandler>>,
     _jump_handles: Vec<client::Handle<NativeClientHandler>>,
     remote_forward_handler: RemoteForwardHandlerSlot,
+    auth_banners: AuthBannerSink,
 }
 
 fn append_limited_command_output(
@@ -30,11 +31,13 @@ impl PooledSshConnection {
     fn direct(
         handle: client::Handle<NativeClientHandler>,
         remote_forward_handler: RemoteForwardHandlerSlot,
+        auth_banners: AuthBannerSink,
     ) -> Self {
         Self {
             target: Mutex::new(handle),
             _jump_handles: Vec::new(),
             remote_forward_handler,
+            auth_banners,
         }
     }
 
@@ -42,11 +45,13 @@ impl PooledSshConnection {
         target: client::Handle<NativeClientHandler>,
         jump_handles: Vec<client::Handle<NativeClientHandler>>,
         remote_forward_handler: RemoteForwardHandlerSlot,
+        auth_banners: AuthBannerSink,
     ) -> Self {
         Self {
             target: Mutex::new(target),
             _jump_handles: jump_handles,
             remote_forward_handler,
+            auth_banners,
         }
     }
 

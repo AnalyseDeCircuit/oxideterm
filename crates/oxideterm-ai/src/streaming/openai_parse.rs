@@ -60,13 +60,6 @@ pub(crate) fn parse_openai_data_line_with_accumulator(
             {
                 events.push(AiStreamEvent::Thinking(reasoning.to_string()));
             }
-            if let Some(content) = delta
-                .get("content")
-                .and_then(Value::as_str)
-                .filter(|content| !content.is_empty())
-            {
-                events.push(AiStreamEvent::Content(content.to_string()));
-            }
             collect_tool_call_delta(delta, accumulator, &mut events);
         }
         let finish_reason = json
@@ -77,6 +70,13 @@ pub(crate) fn parse_openai_data_line_with_accumulator(
             .and_then(Value::as_str);
         if matches!(finish_reason, Some("tool_calls" | "function_call")) {
             events.extend(accumulator.complete());
+        }
+        if let Some(content) = delta
+            .and_then(|delta| delta.get("content"))
+            .and_then(Value::as_str)
+            .filter(|content| !content.is_empty())
+        {
+            events.push(AiStreamEvent::Content(content.to_string()));
         }
     }
     ParsedStreamLine {
@@ -104,19 +104,21 @@ fn collect_tool_call_delta(
             chunk.id = id.to_string();
         }
         if let Some(function) = call.get("function") {
+            let mut saw_argument_delta = false;
             if let Some(name) = function.get("name").and_then(Value::as_str) {
                 chunk.name.push_str(name);
             }
             if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
                 chunk.arguments.push_str(arguments);
+                saw_argument_delta = !arguments.is_empty();
             }
-        }
-        if !chunk.id.is_empty() || !chunk.name.is_empty() || !chunk.arguments.is_empty() {
-            events.push(AiStreamEvent::ToolCall {
-                id: chunk.id.clone(),
-                name: chunk.name.clone(),
-                arguments: chunk.arguments.clone(),
-            });
+            if saw_argument_delta {
+                events.push(AiStreamEvent::ToolCall {
+                    id: chunk.id.clone(),
+                    name: chunk.name.clone(),
+                    arguments: chunk.arguments.clone(),
+                });
+            }
         }
     }
 }
@@ -126,7 +128,9 @@ impl OpenAiToolAccumulator {
         let calls = std::mem::take(&mut self.calls);
         calls
             .into_values()
-            .filter(|call| !call.id.is_empty() || !call.name.is_empty())
+            .filter(|call| {
+                !call.id.is_empty() || !call.name.is_empty() || !call.arguments.is_empty()
+            })
             .map(|call| AiStreamEvent::ToolCallComplete {
                 id: call.id,
                 name: call.name,
@@ -161,25 +165,40 @@ pub(crate) fn parse_openai_json_events(body: &str, context: &str) -> Result<Vec<
             events.push(AiStreamEvent::Content(content.to_string()));
         }
         if let Some(calls) = payload.get("tool_calls").and_then(Value::as_array) {
-            events.extend(calls.iter().filter_map(openai_tool_call_complete_event));
+            events.extend(
+                calls
+                    .iter()
+                    .enumerate()
+                    .map(|(index, call)| openai_tool_call_complete_event(call, index)),
+            );
         }
     }
     Ok(events)
 }
 
-fn openai_tool_call_complete_event(call: &Value) -> Option<AiStreamEvent> {
-    let id = call.get("id").and_then(Value::as_str)?;
-    let function = call.get("function")?;
-    let name = function.get("name").and_then(Value::as_str)?;
-    let arguments = function
-        .get("arguments")
+fn openai_tool_call_complete_event(call: &Value, index: usize) -> AiStreamEvent {
+    // Non-SSE OpenAI-compatible JSON responses can omit optional tool call
+    // fields. Tauri still forwards the call with JavaScript fallback values.
+    let id = call
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("call-{index}"));
+    let function = call.get("function");
+    let name = function
+        .and_then(|function| function.get("name"))
         .and_then(Value::as_str)
         .unwrap_or_default();
-    Some(AiStreamEvent::ToolCallComplete {
-        id: id.to_string(),
+    let arguments = function
+        .and_then(|function| function.get("arguments"))
+        .and_then(Value::as_str)
+        .unwrap_or("{}");
+    AiStreamEvent::ToolCallComplete {
+        id,
         name: name.to_string(),
         arguments: arguments.to_string(),
-    })
+    }
 }
 
 pub(crate) fn parse_openai_error(status: u16, body: &str) -> String {
@@ -260,6 +279,61 @@ mod tests {
     }
 
     #[test]
+    fn stream_parser_emits_tool_partial_only_for_argument_delta_like_tauri() {
+        let mut accumulator = OpenAiToolAccumulator::default();
+        let name_only = parse_openai_data_line_with_accumulator(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"run_command"}}]},"finish_reason":null}]}"#,
+            &mut accumulator,
+        );
+        assert!(name_only.events.is_empty());
+
+        let args_only = parse_openai_data_line_with_accumulator(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+            &mut accumulator,
+        );
+        assert_eq!(
+            args_only.events,
+            vec![
+                AiStreamEvent::ToolCall {
+                    id: "call-1".to_string(),
+                    name: "run_command".to_string(),
+                    arguments: "{}".to_string(),
+                },
+                AiStreamEvent::ToolCallComplete {
+                    id: "call-1".to_string(),
+                    name: "run_command".to_string(),
+                    arguments: "{}".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_parser_orders_tool_events_before_content_like_tauri() {
+        let mut accumulator = OpenAiToolAccumulator::default();
+        let parsed = parse_openai_data_line_with_accumulator(
+            r#"data: {"choices":[{"delta":{"content":"after","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"get_state","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+            &mut accumulator,
+        );
+        assert_eq!(
+            parsed.events,
+            vec![
+                AiStreamEvent::ToolCall {
+                    id: "call-1".to_string(),
+                    name: "get_state".to_string(),
+                    arguments: "{}".to_string(),
+                },
+                AiStreamEvent::ToolCallComplete {
+                    id: "call-1".to_string(),
+                    name: "get_state".to_string(),
+                    arguments: "{}".to_string(),
+                },
+                AiStreamEvent::Content("after".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn json_parser_extracts_openai_tool_call_complete() {
         let events = parse_openai_json_events(
             r#"{"choices":[{"message":{"tool_calls":[{"id":"call-1","type":"function","function":{"name":"get_state","arguments":"{\"scope\":\"active\"}"}}]}}]}"#,
@@ -273,6 +347,30 @@ mod tests {
                 name: "get_state".to_string(),
                 arguments: "{\"scope\":\"active\"}".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn json_parser_keeps_openai_tool_call_fallbacks_like_tauri() {
+        let events = parse_openai_json_events(
+            r#"{"choices":[{"message":{"tool_calls":[{"type":"function","function":{}},{"id":"","type":"function"}]}}]}"#,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(
+            events,
+            vec![
+                AiStreamEvent::ToolCallComplete {
+                    id: "call-0".to_string(),
+                    name: String::new(),
+                    arguments: "{}".to_string(),
+                },
+                AiStreamEvent::ToolCallComplete {
+                    id: "call-1".to_string(),
+                    name: String::new(),
+                    arguments: "{}".to_string(),
+                },
+            ]
         );
     }
 }

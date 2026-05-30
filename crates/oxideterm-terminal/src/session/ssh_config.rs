@@ -125,7 +125,8 @@ fn normalize_post_connect_command(command: Option<&str>) -> Result<Option<Vec<u8
 
 #[cfg(test)]
 mod ssh_config_tests {
-    use super::normalize_post_connect_command;
+    use super::{SshSessionConfig, normalize_post_connect_command};
+    use oxideterm_ssh::SshConfig;
 
     #[test]
     fn post_connect_command_trims_and_adds_enter_like_tauri() {
@@ -147,6 +148,18 @@ mod ssh_config_tests {
     fn post_connect_command_ignores_blank_values_like_tauri() {
         assert_eq!(normalize_post_connect_command(Some("   ")).unwrap(), None);
         assert_eq!(normalize_post_connect_command(None).unwrap(), None);
+    }
+
+    #[test]
+    fn post_connect_override_can_clear_saved_node_command() {
+        let config = SshConfig {
+            post_connect_command: Some("cd /srv/app".to_string()),
+            ..SshConfig::default()
+        };
+
+        let session_config = SshSessionConfig::from(config).with_post_connect_command(None);
+
+        assert_eq!(session_config.post_connect_command(), None);
     }
 }
 

@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::*;
-use crate::providers::{parse_provider_context_windows, parse_provider_models};
+use crate::providers::{
+    ollama_show_context_window, parse_provider_context_windows, parse_provider_models,
+};
 use crate::streaming::{
     anthropic_chat_messages, gemini_chat_body, gemini_chat_contents, openai_chat_messages,
     parse_anthropic_data_line, parse_gemini_data_line, parse_openai_data_line,
@@ -464,6 +466,34 @@ fn parses_provider_context_windows() {
             ("model-a".to_string(), 32768),
             ("model-b".to_string(), 8192)
         ])
+    );
+}
+
+#[test]
+fn parses_ollama_show_context_window_like_tauri() {
+    assert_eq!(
+        ollama_show_context_window(&serde_json::json!({
+            "model_info": {"general.context_length": 131072}
+        })),
+        Some(131_072)
+    );
+    assert_eq!(
+        ollama_show_context_window(&serde_json::json!({
+            "model_info": {"context_length": 32768}
+        })),
+        Some(32_768)
+    );
+    assert_eq!(
+        ollama_show_context_window(&serde_json::json!({
+            "parameters": {"num_ctx": 8192}
+        })),
+        Some(8_192)
+    );
+    assert_eq!(
+        ollama_show_context_window(&serde_json::json!({
+            "parameters": {"num_ctx": "8192"}
+        })),
+        None
     );
 }
 
@@ -941,6 +971,26 @@ fn sanitize_for_ai_redacts_memory_secrets_like_tauri() {
 }
 
 #[test]
+fn sanitize_for_ai_preserves_tauri_type_annotation_exclusions() {
+    let input = [
+        "type Config = {",
+        "  password: string;",
+        "  private_key: Uint8Array,",
+        "  api_key: Buffer",
+        "}",
+        "API_KEY=actualsecret123456",
+    ]
+    .join("\n");
+
+    let sanitized = sanitize_for_ai(&input);
+
+    assert!(sanitized.contains("password: string"));
+    assert!(sanitized.contains("private_key: Uint8Array"));
+    assert!(sanitized.contains("api_key: Buffer"));
+    assert!(sanitized.contains("API_KEY=[REDACTED]"));
+}
+
+#[test]
 fn sanitize_api_messages_redacts_provider_content_without_touching_tool_calls() {
     let original = vec![
         chat_message(
@@ -1238,6 +1288,10 @@ fn parses_tauri_style_slash_command_prefix() {
     assert_eq!(unknown.references[0].reference_type, "pane");
     assert_eq!(unknown.references[0].value.as_deref(), Some("2"));
     assert_eq!(unknown.clean_text, "@foo explain this #file:/tmp/a");
+    assert_eq!(
+        parse_ai_user_input("first\nsecond @terminal").clean_text,
+        "first\nsecond"
+    );
 
     assert_eq!(
         ai_input_token_at_cursor("hello @ter", 10),
@@ -1252,6 +1306,7 @@ fn parses_tauri_style_slash_command_prefix() {
     let candidates = ai_autocomplete_candidates("/ex", 3);
     assert_eq!(candidates[0].kind, AiAutocompleteKind::Slash);
     assert_eq!(candidates[0].name, "explain");
+    assert_eq!(ai_autocomplete_candidates("/EX", 3)[0].name, "explain");
     assert_eq!(
         apply_ai_autocomplete_candidate("/ex", 3, &candidates[0]),
         "/explain "
@@ -1296,6 +1351,7 @@ fn parses_follow_up_suggestions_like_tauri() {
         "Answer\n<suggestions>\n<s icon=\"Zap\">Run deploy</s>\n<s icon=\"Search\">Show logs</s>\n</suggestions>",
     );
     assert_eq!(parsed.clean_content, "Answer");
+    assert!(parsed.has_suggestions_block);
     assert_eq!(parsed.suggestions.len(), 2);
     assert_eq!(parsed.suggestions[0].icon, "Zap");
     assert_eq!(parsed.suggestions[0].text, "Run deploy");
@@ -1304,6 +1360,36 @@ fn parses_follow_up_suggestions_like_tauri() {
         ai_visible_suggestion_content("Answer\n<suggestions>\n<s icon=\"Zap\">..."),
         "Answer"
     );
+}
+
+#[test]
+fn strips_empty_or_invalid_follow_up_suggestion_blocks_like_tauri() {
+    let parsed = parse_ai_suggestions(
+        "Answer\n<suggestions>\n<s icon=\"Search\"></s>\n<s icon=\"Bug\">   </s>\n</suggestions>",
+    );
+
+    assert!(parsed.has_suggestions_block);
+    assert_eq!(parsed.clean_content, "Answer");
+    assert!(parsed.suggestions.is_empty());
+    assert_eq!(
+        ai_visible_suggestion_content(
+            "Answer\n<suggestions>\n<s icon=\"Search\"></s>\n</suggestions>"
+        ),
+        "Answer"
+    );
+}
+
+#[test]
+fn validates_follow_up_suggestion_text_by_characters_not_utf8_bytes() {
+    let localized_text = "检查连接状态".repeat(25);
+    let parsed = parse_ai_suggestions(&format!(
+        "Answer\n<suggestions>\n<s icon=\"Search\">{localized_text}</s>\n</suggestions>",
+    ));
+
+    assert!(parsed.has_suggestions_block);
+    assert_eq!(parsed.clean_content, "Answer");
+    assert_eq!(parsed.suggestions.len(), 1);
+    assert_eq!(parsed.suggestions[0].text, localized_text);
 }
 
 #[test]

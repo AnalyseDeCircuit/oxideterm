@@ -38,8 +38,8 @@ use crate::{
     AuthMethod, ConnectionConsumer, ConnectionState, ConnectionTransportStatus,
     KeepaliveProbeResult, ProxyHopConfig, SshConfig, SshConnectionHandle, SshConnectionRegistry,
     host_key::{
-        HostKeyStatus, HostKeyVerification, accept_host_key_for_session, check_host_key,
-        check_host_key_via_stream, learn_host_key, public_key_fingerprint, verify_host_key,
+        HostKeyStatus, HostKeyVerification, accept_host_key_for_session, check_host_key_via_stream,
+        learn_host_key, public_key_fingerprint, verify_host_key,
     },
 };
 
@@ -92,6 +92,55 @@ const SSH_OUTPUT_INTERACTIVE_FLUSH_MS: u64 = 1;
 const SSH_OUTPUT_INTERACTIVE_WINDOW_MS: u64 = 120;
 const UTF8_RESIDUAL_MAX_BYTES: usize = 4;
 const MAX_PROXY_CHAIN_DEPTH: usize = 32;
+const MAX_AUTH_BANNER_BYTES: usize = 16 * 1024;
+
+type AuthBannerSink = Arc<parking_lot::Mutex<Vec<String>>>;
+
+fn new_auth_banner_sink() -> AuthBannerSink {
+    Arc::new(parking_lot::Mutex::new(Vec::new()))
+}
+
+fn sanitize_auth_banner(banner: &str) -> Option<String> {
+    let mut out = String::with_capacity(banner.len().min(MAX_AUTH_BANNER_BYTES));
+    for ch in banner.chars() {
+        if out.len() >= MAX_AUTH_BANNER_BYTES {
+            break;
+        }
+        match ch {
+            '\r' | '\n' | '\t' => out.push(ch),
+            c if c.is_control() => {}
+            c => out.push(c),
+        }
+    }
+    let trimmed = out.trim_matches(['\r', '\n']).to_string();
+    if trimmed.trim().is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn take_auth_banners(sink: &AuthBannerSink) -> Vec<String> {
+    std::mem::take(&mut *sink.lock())
+}
+
+fn auth_banner_prelude_bytes(banners: Vec<String>) -> Vec<u8> {
+    if banners.is_empty() {
+        return Vec::new();
+    }
+
+    let mut prelude = Vec::new();
+    for banner in banners {
+        if !prelude.is_empty() {
+            prelude.extend_from_slice(b"\r\n");
+        }
+        let normalized = banner.replace("\r\n", "\n").replace('\r', "\n");
+        let normalized = normalized.replace('\n', "\r\n");
+        prelude.extend_from_slice(normalized.as_bytes());
+    }
+    prelude.extend_from_slice(b"\r\n");
+    prelude
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SshTransportError {
@@ -197,14 +246,6 @@ struct RemoteForwardRegistration {
 
 type RemoteForwardHandlerSlot = Arc<RwLock<Option<RemoteForwardRegistration>>>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProxyChainPreflightChallenge {
-    pub step_index: usize,
-    pub host: String,
-    pub port: u16,
-    pub status: HostKeyStatus,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeyboardInteractivePrompt {
     pub prompt: String,
@@ -245,8 +286,49 @@ pub struct SshPtyHandle {
     pub session_id: String,
     pub command_tx: mpsc::Sender<SshTransportCommand>,
     pub output_rx: mpsc::Receiver<Vec<u8>>,
+    auth_banners: AuthBannerSink,
     ssh_connection: Option<SshConnectionHandle>,
     registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
+}
+
+struct RegistryConsumerGuard {
+    release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
+}
+
+impl RegistryConsumerGuard {
+    fn new(
+        registry: SshConnectionRegistry,
+        connection_id: String,
+        consumer: ConnectionConsumer,
+    ) -> Self {
+        Self {
+            release: Some((registry, connection_id, consumer)),
+        }
+    }
+
+    fn release_tuple(&self) -> Option<(SshConnectionRegistry, String, ConnectionConsumer)> {
+        self.release.clone()
+    }
+
+    fn release_now(&mut self) {
+        if let Some((registry, connection_id, consumer)) = self.release.take() {
+            registry.release(&connection_id, &consumer);
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.release = None;
+    }
+}
+
+impl Drop for RegistryConsumerGuard {
+    fn drop(&mut self) {
+        // Terminal setup can be cancelled after the pool consumer is acquired
+        // but before an SshPtyHandle exists. Tauri close_terminal releases the
+        // terminal's connection ref in that in-flight window, so native keeps
+        // the same ownership invariant with a short-lived guard.
+        self.release_now();
+    }
 }
 
 pub struct SshShellChannel {
@@ -318,6 +400,10 @@ impl SshPtyHandle {
     pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
         self.ssh_connection.clone()
     }
+
+    pub fn take_auth_banner_prelude(&self) -> Vec<u8> {
+        auth_banner_prelude_bytes(take_auth_banners(&self.auth_banners))
+    }
 }
 
 impl Drop for SshPtyHandle {
@@ -344,7 +430,8 @@ include!("transport/paths.rs");
 
 #[cfg(test)]
 mod transport_lost_tests {
-    use super::ssh_channel_error_is_transport_lost;
+    use super::{RegistryConsumerGuard, ssh_channel_error_is_transport_lost};
+    use crate::{ConnectionConsumer, SshConfig, SshConnectionRegistry};
 
     #[test]
     fn channel_error_classifier_matches_idle_closed_transport() {
@@ -358,5 +445,62 @@ mod transport_lost_tests {
         assert!(!ssh_channel_error_is_transport_lost(
             "server refused PTY allocation"
         ));
+    }
+
+    #[test]
+    fn registry_consumer_guard_releases_cancelled_terminal_setup() {
+        let registry = SshConnectionRegistry::default();
+        let consumer = ConnectionConsumer::Terminal("term-1".to_string());
+        let handle = registry.acquire(
+            SshConfig::password("host", 22, "me", "pw"),
+            consumer.clone(),
+        );
+        let connection_id = handle.connection_id().to_string();
+
+        let guard = RegistryConsumerGuard::new(registry.clone(), connection_id, consumer);
+        drop(guard);
+
+        assert_eq!(handle.info().ref_count, 0);
+    }
+}
+
+#[cfg(test)]
+mod auth_banner_tests {
+    use super::{
+        auth_banner_prelude_bytes, new_auth_banner_sink, sanitize_auth_banner, take_auth_banners,
+    };
+
+    #[test]
+    fn sanitize_auth_banner_strips_control_chars() {
+        assert_eq!(
+            sanitize_auth_banner("hello\u{0007}\nworld"),
+            Some("hello\nworld".to_string())
+        );
+    }
+
+    #[test]
+    fn sanitize_auth_banner_drops_empty_banner() {
+        assert_eq!(sanitize_auth_banner("\u{0007}\r\n"), None);
+    }
+
+    #[test]
+    fn auth_banners_are_consumed_once() {
+        let sink = new_auth_banner_sink();
+        sink.lock().push("Banner A".to_string());
+        sink.lock().push("Banner B".to_string());
+
+        assert_eq!(
+            take_auth_banners(&sink),
+            vec!["Banner A".to_string(), "Banner B".to_string()]
+        );
+        assert!(take_auth_banners(&sink).is_empty());
+    }
+
+    #[test]
+    fn auth_banner_prelude_matches_terminal_line_endings() {
+        assert_eq!(
+            auth_banner_prelude_bytes(vec!["one\ntwo".to_string(), "three".to_string()]),
+            b"one\r\ntwo\r\nthree\r\n".to_vec()
+        );
     }
 }

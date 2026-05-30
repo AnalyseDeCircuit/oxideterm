@@ -396,15 +396,7 @@ fn ai_should_retry_required_tool_round(obligation: &AiOrchestratorObligation, as
     if trimmed.is_empty() {
         return true;
     }
-    let lower = trimmed.to_lowercase();
-    let action_claim = [
-        "opened", "connected", "executed", "ran", "read", "modified", "changed", "checked",
-        "verified", "diagnosed", "found", "failed", "succeeded", "已经", "已", "我来", "我已",
-        "现在", "结果是", "连接失败", "执行完成", "修改完成",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle));
-    if action_claim {
+    if ai_text_contains_tauri_action_claim(trimmed) {
         return true;
     }
     let looks_like_clarification = trimmed.ends_with('?')
@@ -415,11 +407,27 @@ fn ai_should_retry_required_tool_round(obligation: &AiOrchestratorObligation, as
     !looks_like_clarification
 }
 
+fn ai_text_contains_tauri_action_claim(text: &str) -> bool {
+    static ACTION_CLAIM_RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| {
+            // Keep this in sync with Tauri's ACTION_CLAIM_RE in aiChatStore.ts.
+            regex::Regex::new(r"(?i)\b(?:opened|connected|executed|ran|read|modified|changed|checked|verified|diagnosed|found|failed|succeeded)\b|(?:已经|已|我来|我已|现在).*(?:打开|连接|执行|运行|读取|修改|检查|诊断|确认|发现)|(?:结果是|连接失败|执行完成|修改完成)")
+                .expect("valid AI action-claim regex")
+        });
+    ACTION_CLAIM_RE.is_match(text)
+}
+
 fn ai_user_explicitly_requested_json(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    ["json", "jsonl", "json schema", "jsonschema", "payload", "response format", "object literal", "schema"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    static JSON_REQUEST_RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| {
+            // Mirror Tauri's JSON_REQUEST_RE so hard-deny suppression only
+            // applies when the user explicitly asks for JSON-like output.
+            regex::Regex::new(
+                r"(?i)\b(json|jsonl|json schema|jsonschema|payload|response format|object literal|schema)\b",
+            )
+            .expect("valid AI JSON-request regex")
+        });
+    JSON_REQUEST_RE.is_match(text)
 }
 
 fn ai_should_trigger_hard_deny(assistant_text: &str, user_requested_json: bool) -> bool {
@@ -777,6 +785,10 @@ fn ai_terminal_screen_snapshot_json(
 
 fn ai_terminal_readiness_json(target: &AiOrchestratorTarget) -> serde_json::Value {
     let ready = target.state == "connected";
+    // Tauri stores readiness in a registry and updates `updatedAt` on every patch.
+    // Native snapshots are computed on demand, so use the snapshot time while
+    // preserving the same numeric field shape for AI tool consumers.
+    let updated_at_ms = ai_now_ms();
     serde_json::json!({
         "sessionId": target.refs.get("sessionId").cloned().unwrap_or_default(),
         "terminalType": target.metadata.get("terminalType").cloned().unwrap_or(serde_json::Value::Null),
@@ -784,7 +796,7 @@ fn ai_terminal_readiness_json(target: &AiOrchestratorTarget) -> serde_json::Valu
         "frontendOutputListenerReady": target.terminal_buffer.is_some(),
         "renderBufferReady": target.terminal_screen.is_some(),
         "backendBufferReady": target.terminal_buffer.is_some(),
-        "updatedAt": serde_json::Value::Null,
+        "updatedAt": updated_at_ms,
     })
 }
 
@@ -1155,6 +1167,49 @@ mod tests {
     }
 
     #[test]
+    fn local_exec_timeout_caps_like_tauri_backend() {
+        assert_eq!(ai_local_exec_timeout_secs(1), 1);
+        assert_eq!(ai_local_exec_timeout_secs(60), 60);
+        assert_eq!(ai_local_exec_timeout_secs(90), 60);
+    }
+
+    #[test]
+    fn recall_preferences_memory_data_preserves_tauri_enabled_flag() {
+        let memory = ai_memory_settings_json(false, "  - use compact output\n");
+
+        assert_eq!(memory.get("enabled"), Some(&serde_json::json!(false)));
+        assert_eq!(ai_memory_content(&memory), "  - use compact output\n");
+        assert_eq!(ai_memory_trimmed_content(&memory), "- use compact output");
+    }
+
+    #[test]
+    fn tool_verified_default_requires_success_without_error_like_tauri() {
+        assert!(ai_tool_verified_default(true, None));
+        assert!(!ai_tool_verified_default(false, None));
+        assert!(!ai_tool_verified_default(true, Some("error")));
+    }
+
+    #[test]
+    fn terminal_run_command_preflight_keeps_execute_risk_like_tauri() {
+        assert_eq!(ai_run_command_preflight_risk(), "execute");
+    }
+
+    #[test]
+    fn ssh_reconnect_failure_next_action_matches_tauri() {
+        let actions = ai_ssh_reconnect_failed_next_actions();
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0].get("action"),
+            Some(&serde_json::json!("list_targets"))
+        );
+        assert_eq!(
+            actions[0].get("reason"),
+            Some(&serde_json::json!("Refresh target state before retrying."))
+        );
+    }
+
+    #[test]
     fn live_state_guard_only_applies_to_runtime_targets() {
         let mut target = sample_target();
         assert!(target_requires_live_state(&target));
@@ -1196,6 +1251,41 @@ mod tests {
     }
 
     #[test]
+    fn target_query_trims_before_matching_like_tauri() {
+        assert_eq!(normalized_ai_query(Some("  PROD  ")), "prod");
+        assert_eq!(normalized_ai_query(Some("\n")), "");
+        assert_eq!(normalized_ai_query(None), "");
+
+        let target = sample_target();
+        assert!(target_matches_ai_query(&target, &normalized_ai_query(Some("  prod-node-1  "))));
+    }
+
+    #[test]
+    fn opened_local_terminal_target_uses_tauri_synthetic_shape() {
+        let mut target = sample_target();
+        target.id = "terminal-session:abc123".to_string();
+        target.kind = "terminal-session".to_string();
+        target.label = "Local terminal zsh".to_string();
+        target.refs.insert("sessionId".to_string(), "abc123".to_string());
+        target.refs.insert("tabId".to_string(), "tab-1".to_string());
+        target.metadata = serde_json::json!({
+            "terminalType": "local_terminal",
+            "shell": { "label": "zsh" }
+        });
+
+        let opened = ai_opened_local_terminal_target(&target);
+        let value = target_json(&opened);
+
+        assert_eq!(value.pointer("/refs/sessionId"), Some(&serde_json::json!("abc123")));
+        assert!(value.pointer("/refs/tabId").is_none());
+        assert_eq!(
+            value.pointer("/metadata/terminalType"),
+            Some(&serde_json::json!("local_terminal"))
+        );
+        assert!(value.pointer("/metadata/shell").is_none());
+    }
+
+    #[test]
     fn resource_kind_validation_matches_tauri_executor_arg() {
         assert_eq!(normalized_ai_resource_kind(Some("file")), "file");
         assert_eq!(normalized_ai_resource_kind(Some("bogus")), "");
@@ -1224,6 +1314,30 @@ mod tests {
 
         assert_eq!(obligation.mode, AiOrchestratorObligationMode::Required);
         assert_eq!(obligation.candidate_tools, vec!["list_targets".to_string()]);
+    }
+
+    #[test]
+    fn required_tool_retry_action_claim_uses_tauri_boundaries() {
+        let obligation = AiOrchestratorObligation {
+            mode: AiOrchestratorObligationMode::Required,
+            reason: "test".to_string(),
+            candidate_tools: vec!["list_targets".to_string()],
+        };
+
+        assert!(!ai_text_contains_tauri_action_claim("ready?"));
+        assert!(!ai_should_retry_required_tool_round(&obligation, "ready?"));
+        assert!(!ai_text_contains_tauri_action_claim("已知条件是哪一个？"));
+        assert!(!ai_should_retry_required_tool_round(&obligation, "已知条件是哪一个？"));
+        assert!(ai_text_contains_tauri_action_claim("已经连接到目标"));
+        assert!(ai_should_retry_required_tool_round(&obligation, "已经连接到目标"));
+    }
+
+    #[test]
+    fn json_request_detection_uses_tauri_word_boundaries() {
+        assert!(ai_user_explicitly_requested_json("Return JSON schema."));
+        assert!(ai_user_explicitly_requested_json("Use an object literal"));
+        assert!(!ai_user_explicitly_requested_json("Please jsonify this later"));
+        assert!(!ai_user_explicitly_requested_json("This is schematic only"));
     }
 
     #[test]
@@ -1292,6 +1406,10 @@ mod tests {
         );
         assert_eq!(readiness.get("writerReady"), Some(&serde_json::json!(true)));
         assert!(readiness.get("renderBufferReady").is_some());
+        assert!(readiness
+            .get("updatedAt")
+            .and_then(serde_json::Value::as_i64)
+            .is_some_and(|updated_at| updated_at > 0));
     }
 
     #[test]

@@ -35,14 +35,6 @@ async fn open_direct_tcpip_stream_with_origin(
         })
 }
 
-fn proxy_step_has_accepted_fingerprint(hop: &ProxyHopConfig) -> bool {
-    hop.trust_host_key.is_some() && hop.expected_host_key_fingerprint.is_some()
-}
-
-fn target_step_has_accepted_fingerprint(config: &SshConfig) -> bool {
-    config.trust_host_key.is_some() && config.expected_host_key_fingerprint.is_some()
-}
-
 fn validate_proxy_chain_depth(chain: &[ProxyHopConfig]) -> Result<(), SshTransportError> {
     if chain.len() > MAX_PROXY_CHAIN_DEPTH {
         return Err(SshTransportError::ConnectionFailed(format!(
@@ -123,6 +115,7 @@ struct NativeClientHandler {
     agent_forwarding_requested: bool,
     agent_forward_semaphore: Arc<Semaphore>,
     remote_forward_handler: RemoteForwardHandlerSlot,
+    auth_banners: AuthBannerSink,
 }
 
 impl NativeClientHandler {
@@ -144,12 +137,31 @@ impl NativeClientHandler {
             agent_forwarding_requested,
             agent_forward_semaphore: Arc::new(Semaphore::new(16)),
             remote_forward_handler,
+            auth_banners: new_auth_banner_sink(),
         }
+    }
+
+    fn auth_banners(&self) -> AuthBannerSink {
+        self.auth_banners.clone()
     }
 }
 
 impl client::Handler for NativeClientHandler {
     type Error = SshTransportError;
+
+    async fn auth_banner(
+        &mut self,
+        banner: &str,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        // Authentication banners are server-auth messages. They are stored
+        // separately from shell output so the first visible terminal can show
+        // them once, matching Tauri's pending-auth-banner boundary.
+        if let Some(sanitized) = sanitize_auth_banner(banner) {
+            self.auth_banners.lock().push(sanitized);
+        }
+        Ok(())
+    }
 
     async fn check_server_key(
         &mut self,

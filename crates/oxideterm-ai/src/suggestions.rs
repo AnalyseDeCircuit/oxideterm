@@ -6,6 +6,7 @@ use crate::AiFollowUpSuggestion;
 pub struct AiSuggestionParseResult {
     pub clean_content: String,
     pub suggestions: Vec<AiFollowUpSuggestion>,
+    pub has_suggestions_block: bool,
 }
 
 const MAX_SUGGESTIONS: usize = 5;
@@ -17,18 +18,21 @@ pub fn parse_ai_suggestions(content: &str) -> AiSuggestionParseResult {
         return AiSuggestionParseResult {
             clean_content: content.to_string(),
             suggestions: Vec::new(),
+            has_suggestions_block: false,
         };
     };
     let Some(block_match) = block_re.captures(content) else {
         return AiSuggestionParseResult {
             clean_content: content.to_string(),
             suggestions: Vec::new(),
+            has_suggestions_block: false,
         };
     };
     let Some(whole_block) = block_match.get(0) else {
         return AiSuggestionParseResult {
             clean_content: content.to_string(),
             suggestions: Vec::new(),
+            has_suggestions_block: false,
         };
     };
     let block_inner = block_match
@@ -39,6 +43,7 @@ pub fn parse_ai_suggestions(content: &str) -> AiSuggestionParseResult {
         return AiSuggestionParseResult {
             clean_content: content[..whole_block.start()].trim_end().to_string(),
             suggestions: Vec::new(),
+            has_suggestions_block: true,
         };
     };
 
@@ -47,9 +52,11 @@ pub fn parse_ai_suggestions(content: &str) -> AiSuggestionParseResult {
         .filter_map(|captures| {
             let icon = captures.get(1)?.as_str().trim();
             let text = captures.get(2)?.as_str().trim();
+            // Tauri validates JavaScript string length, so character counts are
+            // closer than UTF-8 byte counts for localized suggestion text.
             (!text.is_empty()
-                && text.len() <= MAX_SUGGESTION_TEXT_LEN
-                && icon.len() <= MAX_SUGGESTION_ICON_LEN)
+                && text.chars().count() <= MAX_SUGGESTION_TEXT_LEN
+                && icon.chars().count() <= MAX_SUGGESTION_ICON_LEN)
                 .then(|| AiFollowUpSuggestion {
                     icon: icon.to_string(),
                     text: text.to_string(),
@@ -61,6 +68,7 @@ pub fn parse_ai_suggestions(content: &str) -> AiSuggestionParseResult {
     AiSuggestionParseResult {
         clean_content: content[..whole_block.start()].trim_end().to_string(),
         suggestions,
+        has_suggestions_block: true,
     }
 }
 
@@ -70,7 +78,7 @@ pub fn ai_has_partial_suggestions_block(content: &str) -> bool {
 
 pub fn ai_visible_suggestion_content(content: &str) -> String {
     let parsed = parse_ai_suggestions(content);
-    if !parsed.suggestions.is_empty() {
+    if parsed.has_suggestions_block {
         return parsed.clean_content;
     }
     if ai_has_partial_suggestions_block(content)

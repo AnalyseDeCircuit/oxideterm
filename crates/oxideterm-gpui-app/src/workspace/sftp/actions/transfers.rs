@@ -119,10 +119,16 @@ impl WorkspaceApp {
         node_id: NodeId,
         transfer_id: String,
     ) {
+        let router = self.node_router.clone();
         let progress_store = self.sftp_progress_store.clone();
         let tx = self.sftp_worker_tx.clone();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
+            // Tauri's reconnect resume phase first best-effort opens SFTP for
+            // each affected node, then resumes transfers even if that init
+            // fails. Preserve that ordering so node runtime SFTP state is
+            // restored before file-only resumes take the transfer-only path.
+            let _ = router.acquire_sftp(&node_id).await;
             let result = progress_store
                 .load(&transfer_id)
                 .await

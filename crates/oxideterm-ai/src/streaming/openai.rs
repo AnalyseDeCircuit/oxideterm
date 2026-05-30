@@ -168,7 +168,7 @@ pub(crate) async fn stream_ollama_completion(
         .build()
         .context("failed to create Ollama chat client")?;
     let body = openai_chat_body(&config, &messages);
-    let response = openai_stream_request(&client, &url, &config, &body)
+    let mut response = openai_stream_request(&client, &url, &config, &body)
         .await
         .map_err(|_| {
             anyhow!("Cannot connect to Ollama. Make sure Ollama is running (ollama serve).")
@@ -176,7 +176,22 @@ pub(crate) async fn stream_ollama_completion(
     if !response.status().is_success() {
         let status = response.status().as_u16();
         let error_text = response.text().await.unwrap_or_default();
-        return Err(anyhow!(parse_ollama_error(status, &error_text)));
+        let parsed = parse_ollama_error(status, &error_text);
+        if body.get("tool_choice").is_some() && is_tool_choice_unsupported_error(&parsed) {
+            let fallback_body = body_without_tool_choice(&body);
+            response = openai_stream_request(&client, &url, &config, &fallback_body)
+                .await
+                .map_err(|_| {
+                    anyhow!("Cannot connect to Ollama. Make sure Ollama is running (ollama serve).")
+                })?;
+            if !response.status().is_success() {
+                let retry_status = response.status().as_u16();
+                let retry_error_text = response.text().await.unwrap_or_default();
+                return Err(anyhow!(parse_ollama_error(retry_status, &retry_error_text)));
+            }
+        } else {
+            return Err(anyhow!(parsed));
+        }
     }
     let _ = stream_openai_response(response, &events).await?;
     let _ = events.send(AiStreamEvent::Done);

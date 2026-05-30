@@ -15,7 +15,9 @@ pub(crate) use discovery::{
     openai_compatible_candidates, parse_provider_json, url_encode_component,
 };
 #[cfg(test)]
-pub(crate) use discovery::{parse_provider_context_windows, parse_provider_models};
+pub(crate) use discovery::{
+    ollama_show_context_window, parse_provider_context_windows, parse_provider_models,
+};
 pub use selector::{
     check_model_selector_provider_online, is_local_provider_url, model_selector_display_name,
     model_selector_truncated_label, model_selector_visible_provider_groups,

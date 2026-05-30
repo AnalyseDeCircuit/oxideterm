@@ -81,6 +81,7 @@ pub struct TerminalPane {
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
+    input_locked: bool,
     marked_text: Option<String>,
     search_query: Option<String>,
     selected_search_match: Option<usize>,
@@ -303,6 +304,7 @@ impl TerminalPane {
             selection: None,
             pending_paste: None,
             plugin_input_interceptor: None,
+            input_locked: false,
             marked_text: None,
             search_query: None,
             selected_search_match: None,
@@ -535,6 +537,17 @@ impl TerminalPane {
 
     pub fn set_plugin_input_interceptor(&mut self, interceptor: Option<TerminalInputInterceptor>) {
         self.plugin_input_interceptor = interceptor;
+    }
+
+    pub fn set_input_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
+        if self.input_locked == locked {
+            return;
+        }
+        // Tauri TerminalView drops user input while a node is link-down or
+        // reconnecting. Keep that readiness gate before plugin hooks so plugins
+        // cannot accidentally send input into a standby SSH transport.
+        self.input_locked = locked;
+        cx.notify();
     }
 
     pub fn set_plugin_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
@@ -922,7 +935,7 @@ impl TerminalPane {
     }
 
     fn terminal_accepts_input(&self) -> bool {
-        !self.terminal_exited && self.terminal.lock().is_interactive()
+        !self.input_locked && !self.terminal_exited && self.terminal.lock().is_interactive()
     }
 
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {

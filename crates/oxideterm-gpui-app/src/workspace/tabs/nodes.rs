@@ -116,6 +116,7 @@ impl WorkspaceApp {
             self.finish_connection_trace_failed(&node_id, detail);
         }
         if changed {
+            self.refresh_ssh_terminal_input_locks(cx);
             cx.notify();
         }
     }
@@ -131,7 +132,82 @@ impl WorkspaceApp {
             changed |= self.apply_node_event(event, window, cx);
         }
         if changed {
+            self.refresh_ssh_terminal_input_locks(cx);
             cx.notify();
+        }
+    }
+
+    fn refresh_ssh_terminal_input_locks(&mut self, cx: &mut Context<Self>) {
+        let terminal_nodes = self.terminal_ssh_nodes.clone();
+        for (session_id, node_id) in terminal_nodes {
+            let locked = self.ssh_terminal_input_locked_for_node(&node_id);
+            let Some(pane_id) = self.tabs.iter().find_map(|tab| {
+                tab.root_pane
+                    .as_ref()
+                    .and_then(|root| root.pane_id_for_session(session_id))
+            }) else {
+                continue;
+            };
+            if let Some(pane) = self.panes.get(&pane_id) {
+                pane.update(cx, |pane, cx| pane.set_input_locked(locked, cx));
+            }
+        }
+    }
+
+    fn ssh_terminal_input_locked_for_node(&self, node_id: &NodeId) -> bool {
+        let Some(connection_id) = self.node_router.connection_id_for_node(node_id) else {
+            return true;
+        };
+        self.ssh_registry
+            .get(&connection_id)
+            .is_none_or(|handle| {
+                matches!(
+                    handle.state(),
+                    ConnectionState::LinkDown
+                        | ConnectionState::Reconnecting
+                        | ConnectionState::Disconnected
+                        | ConnectionState::Disconnecting
+                        | ConnectionState::Error(_)
+                )
+            })
+    }
+
+    fn cleanup_temporary_session_tree_node(&mut self, cleanup_root: &NodeId) {
+        let mut nodes_to_cleanup = self.node_runtime_store.subtree_postorder(cleanup_root);
+        if nodes_to_cleanup.is_empty() {
+            nodes_to_cleanup.push(cleanup_root.clone());
+        }
+        for node_id in &nodes_to_cleanup {
+            self.cancel_connection_trace_for_node(node_id);
+            self.connecting_node_locks.remove(node_id);
+            self.remove_pending_ssh_terminal_opens_for_node(node_id);
+            if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
+                let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
+                self.ssh_registry.release(&connection_id, &node_consumer);
+                self.release_parent_ref_for_child_connection(node_id, &connection_id);
+                if let Some(handle) = self.ssh_registry.get(&connection_id) {
+                    let runtime = self.forwarding_runtime.clone();
+                    runtime.spawn(async move {
+                        handle.clear_physical().await;
+                    });
+                }
+                let _ = self
+                    .ssh_registry
+                    .mark_state(&connection_id, ConnectionState::Disconnected);
+                self.node_router.emitter().unregister(&connection_id);
+                let _ = self.ssh_registry.retire_connection(&connection_id);
+            }
+        }
+
+        // Tauri cleanupNodeId removes the temporary root created for saved
+        // direct connect failures. Native stores that root in both the runtime
+        // tree and GPUI mirrors, so all owners must be cleared together.
+        let removed_nodes = self.node_router.remove_runtime_subtree(cleanup_root);
+        for node_id in removed_nodes {
+            self.ssh_nodes.remove(&node_id);
+            self.expanded_ssh_nodes.remove(&node_id);
+            self.saved_ssh_nodes
+                .retain(|_, saved_node_id| saved_node_id != &node_id);
         }
     }
 
@@ -365,7 +441,17 @@ impl WorkspaceApp {
                             Some(format!("connect-failed:{}", node_id.0)),
                         );
                     }
+                    let cleanup_node_id = self.pending_ssh_terminal_open_cleanup_for_node(&node_id);
                     self.remove_pending_ssh_terminal_opens_for_node(&node_id);
+                    if let Some(cleanup_node_id) = cleanup_node_id {
+                        self.cleanup_temporary_session_tree_node(&cleanup_node_id);
+                        if !connection_chain_node {
+                            self.schedule_next_reconnect_cascade_node();
+                        }
+                        self.persist_session_tree_snapshot();
+                        changed = true;
+                        continue;
+                    }
                     if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                         node.readiness = NodeReadiness::Error;
                     }
@@ -657,6 +743,7 @@ impl WorkspaceApp {
             }
         }
         if changed {
+            self.refresh_ssh_terminal_input_locks(cx);
             cx.notify();
         }
     }
@@ -2479,11 +2566,7 @@ impl WorkspaceApp {
             let detail = forward_restore_result_detail(restored, failures, &failure_details);
             let _ = tx.send(ReconnectWorkerResult::ForwardRulesRestored {
                 node_id: root_node_id,
-                result: if failures == 0 {
-                    PhaseResult::Ok
-                } else {
-                    PhaseResult::Failed
-                },
+                result: forward_restore_phase_result(failures),
                 restored,
                 detail,
                 job_id,

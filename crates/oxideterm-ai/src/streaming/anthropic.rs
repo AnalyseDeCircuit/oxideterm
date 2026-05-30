@@ -181,8 +181,8 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
                         parts.push(serde_json::json!({ "type": "text", "text": message.content }));
                     }
                     parts.extend(calls.into_iter().map(|call| {
-                        let input =
-                            serde_json::from_str::<Value>(&call.arguments).unwrap_or(Value::Null);
+                        let input = serde_json::from_str::<Value>(&call.arguments)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         serde_json::json!({
                             "type": "tool_use",
                             "id": call.id,
@@ -298,11 +298,6 @@ pub(crate) fn parse_anthropic_data_line_with_accumulator(
                         .unwrap_or_default()
                         .to_string();
                     accumulator.active = Some(AnthropicToolCallChunk {
-                        id: id.clone(),
-                        name: name.clone(),
-                        arguments: String::new(),
-                    });
-                    events.push(AiStreamEvent::ToolCall {
                         id,
                         name,
                         arguments: String::new(),
@@ -311,31 +306,44 @@ pub(crate) fn parse_anthropic_data_line_with_accumulator(
             }
             Some("content_block_delta") => {
                 let delta = json.get("delta");
-                if let Some(text) = delta
-                    .and_then(|delta| delta.get("text"))
+                match delta
+                    .and_then(|delta| delta.get("type"))
                     .and_then(Value::as_str)
-                    .filter(|text| !text.is_empty())
                 {
-                    events.push(AiStreamEvent::Content(text.to_string()));
-                }
-                if let Some(thinking) = delta
-                    .and_then(|delta| delta.get("thinking"))
-                    .and_then(Value::as_str)
-                    .filter(|thinking| !thinking.is_empty())
-                {
-                    events.push(AiStreamEvent::Thinking(thinking.to_string()));
-                }
-                if let Some(partial) = delta
-                    .and_then(|delta| delta.get("partial_json"))
-                    .and_then(Value::as_str)
-                    && let Some(active) = accumulator.active.as_mut()
-                {
-                    active.arguments.push_str(partial);
-                    events.push(AiStreamEvent::ToolCall {
-                        id: active.id.clone(),
-                        name: active.name.clone(),
-                        arguments: active.arguments.clone(),
-                    });
+                    Some("thinking_delta") => {
+                        if let Some(thinking) = delta
+                            .and_then(|delta| delta.get("thinking"))
+                            .and_then(Value::as_str)
+                            .filter(|thinking| !thinking.is_empty())
+                        {
+                            events.push(AiStreamEvent::Thinking(thinking.to_string()));
+                        }
+                    }
+                    Some("text_delta") => {
+                        if let Some(text) = delta
+                            .and_then(|delta| delta.get("text"))
+                            .and_then(Value::as_str)
+                            .filter(|text| !text.is_empty())
+                        {
+                            events.push(AiStreamEvent::Content(text.to_string()));
+                        }
+                    }
+                    Some("input_json_delta") => {
+                        if let Some(partial) = delta
+                            .and_then(|delta| delta.get("partial_json"))
+                            .and_then(Value::as_str)
+                            .filter(|partial| !partial.is_empty())
+                            && let Some(active) = accumulator.active.as_mut()
+                        {
+                            active.arguments.push_str(partial);
+                            events.push(AiStreamEvent::ToolCall {
+                                id: active.id.clone(),
+                                name: active.name.clone(),
+                                arguments: active.arguments.clone(),
+                            });
+                        }
+                    }
+                    _ => {}
                 }
             }
             Some("content_block_stop") => {
@@ -525,20 +533,43 @@ mod tests {
     }
 
     #[test]
+    fn anthropic_invalid_tool_arguments_fall_back_to_empty_object_like_tauri() {
+        let assistant = AiChatMessage {
+            id: "a1".to_string(),
+            role: AiChatRole::Assistant,
+            content: String::new(),
+            timestamp_ms: 1,
+            model: None,
+            context: None,
+            thinking_content: None,
+            is_streaming: false,
+            metadata: None,
+            tool_call_id: None,
+            tool_calls: vec![serde_json::json!({
+                "id": "call-1",
+                "name": "get_state",
+                "arguments": "{not json",
+            })],
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: None,
+            suggestions: Vec::new(),
+        };
+
+        let (_, converted) = anthropic_chat_messages(&[assistant]);
+
+        assert_eq!(converted[1]["content"][0]["input"], serde_json::json!({}));
+    }
+
+    #[test]
     fn anthropic_stream_parser_assembles_tool_use_chunks() {
         let mut accumulator = AnthropicToolAccumulator::default();
         let start = parse_anthropic_data_line_with_accumulator(
             r#"data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call-1","name":"get_state","input":{}}}"#,
             &mut accumulator,
         );
-        assert_eq!(
-            start.events,
-            vec![AiStreamEvent::ToolCall {
-                id: "call-1".to_string(),
-                name: "get_state".to_string(),
-                arguments: String::new(),
-            }]
-        );
+        assert!(start.events.is_empty());
         let delta = parse_anthropic_data_line_with_accumulator(
             r#"data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"scope\":\"active\"}"}}"#,
             &mut accumulator,
@@ -563,5 +594,15 @@ mod tests {
                 arguments: "{\"scope\":\"active\"}".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn anthropic_stream_parser_requires_delta_type_like_tauri() {
+        let mut accumulator = AnthropicToolAccumulator::default();
+        let parsed = parse_anthropic_data_line_with_accumulator(
+            r#"data: {"type":"content_block_delta","index":0,"delta":{"text":"ignored","thinking":"ignored","partial_json":"{}"}}"#,
+            &mut accumulator,
+        );
+        assert!(parsed.events.is_empty());
     }
 }

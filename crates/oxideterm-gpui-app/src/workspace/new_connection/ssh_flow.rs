@@ -502,7 +502,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn start_saved_connection_flow(
+    pub(in crate::workspace) fn start_saved_connection_flow(
         &mut self,
         id: String,
         mut config: SshConfig,
@@ -803,6 +803,13 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.active_proxy_connect_run.is_some() {
+            self.report_proxy_session_tree_error(
+                "CHAIN_LOCK_BUSY: Another connection chain is in progress".to_string(),
+                cx,
+            );
+            return;
+        }
         let endpoints = proxy_session_tree_endpoints(&config);
         let expansion_id = match &intent {
             SshConnectionIntent::ConnectSaved(id) => id.clone(),
@@ -816,8 +823,7 @@ impl WorkspaceApp {
                     return;
                 }
             };
-        let cleanup_node_id = matches!(intent, SshConnectionIntent::Connect)
-            .then(|| expansion.target_node_id.clone());
+        let cleanup_node_id = Some(expansion.target_node_id.clone());
         let plan = match NativeSessionTreeConnectPlan::from_expansion(
             &expansion,
             endpoints,
@@ -855,7 +861,7 @@ impl WorkspaceApp {
 
         match status {
             HostKeyStatus::Verified => {
-                self.mark_current_proxy_connect_step_accepted(false, None);
+                self.mark_current_proxy_connect_step_verified(cx);
                 self.continue_active_proxy_session_tree_connect(window, cx);
             }
             HostKeyStatus::Unknown { .. } | HostKeyStatus::Changed { .. } => {
@@ -1023,6 +1029,7 @@ impl WorkspaceApp {
     ) {
         self.active_proxy_connect_run = None;
         self.host_key_challenge = None;
+        self.release_proxy_session_tree_locks(&run.plan);
         let Some(target_config) = self
             .node_runtime_store
             .snapshot(&target_node_id)
@@ -1040,8 +1047,10 @@ impl WorkspaceApp {
                 self.new_connection_form = None;
                 self.duplicating_saved_connection_id = None;
                 self.close_new_connection_select();
+                let post_connect_command = target_config.post_connect_command.clone();
                 let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
                     target_node_id,
+                    post_connect_command,
                     target_config,
                     run.title,
                     None,
@@ -1060,8 +1069,10 @@ impl WorkspaceApp {
                     self.close_new_connection_select();
                 }
                 self.session_manager.status = None;
+                let post_connect_command = target_config.post_connect_command.clone();
                 let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
                     target_node_id,
+                    post_connect_command,
                     target_config,
                     run.title,
                     Some(id.clone()),
@@ -1138,23 +1149,13 @@ impl WorkspaceApp {
         self.continue_active_proxy_session_tree_connect(window, cx);
     }
 
-    fn mark_current_proxy_connect_step_accepted(
-        &mut self,
-        persist: bool,
-        fingerprint: Option<String>,
-    ) {
+    fn mark_current_proxy_connect_step_verified(&mut self, cx: &mut Context<Self>) {
         let Some(run) = self.active_proxy_connect_run.as_mut() else {
             return;
         };
-        let Some(step) = run.plan.steps.get_mut(run.plan.current_index) else {
-            return;
-        };
-        step.trust_host_key = Some(persist);
-        step.expected_host_key_fingerprint = fingerprint.or_else(|| {
-            self.ssh_nodes
-                .get(&step.node_id)
-                .and_then(|node| node.config.expected_host_key_fingerprint.clone())
-        });
+        if let Err(error) = run.plan.mark_current_preflight_verified() {
+            self.report_proxy_session_tree_error(error, cx);
+        }
     }
 
     fn apply_session_tree_step_host_key_options(&mut self, step: &NativeSessionTreeConnectStep) {
@@ -1192,16 +1193,12 @@ impl WorkspaceApp {
     }
 
     fn cleanup_proxy_session_tree_run(&mut self, run: &NativeProxyConnectRun) {
-        if run.plan.cleanup_node_id.is_none() {
-            return;
-        }
-        let cleanup_root = run
-            .plan
-            .steps
-            .first()
-            .map(|step| step.node_id.clone())
-            .or_else(|| run.plan.cleanup_node_id.clone());
-        let Some(cleanup_root) = cleanup_root else {
+        self.cleanup_proxy_session_tree_plan(&run.plan);
+    }
+
+    fn cleanup_proxy_session_tree_plan(&mut self, plan: &NativeSessionTreeConnectPlan) {
+        self.release_proxy_session_tree_locks(plan);
+        let Some(cleanup_root) = plan.cleanup_root_node_id() else {
             return;
         };
         let nodes_to_cleanup = self.node_runtime_store.subtree_postorder(&cleanup_root);
@@ -1238,6 +1235,12 @@ impl WorkspaceApp {
                 .retain(|_saved_id, saved_node_id| saved_node_id != &node_id);
         }
         self.persist_session_tree_snapshot();
+    }
+
+    fn release_proxy_session_tree_locks(&mut self, plan: &NativeSessionTreeConnectPlan) {
+        for step in &plan.steps {
+            self.connecting_node_locks.remove(&step.node_id);
+        }
     }
 
     fn report_proxy_session_tree_error(&mut self, error: String, cx: &mut Context<Self>) {
@@ -1332,8 +1335,11 @@ impl WorkspaceApp {
                                 .snapshot(&expansion.target_node_id)
                                 .map(|snapshot| snapshot.config)
                             {
+                                let post_connect_command =
+                                    target_config.post_connect_command.clone();
                                 let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
                                     expansion.target_node_id,
+                                    post_connect_command,
                                     target_config,
                                     title,
                                     None,
@@ -1351,8 +1357,10 @@ impl WorkspaceApp {
                     return;
                 }
                 let node_id = self.materialize_ssh_root_node(config.clone(), title.clone(), None);
+                let post_connect_command = config.post_connect_command.clone();
                 let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
                     node_id,
+                    post_connect_command,
                     config,
                     title,
                     None,

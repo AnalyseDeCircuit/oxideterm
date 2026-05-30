@@ -102,9 +102,16 @@ impl WorkspaceApp {
         if let Some(node_id) = self.saved_ssh_nodes.get(&saved_connection_id).cloned()
             && let Some(node) = self.ssh_nodes.get(&node_id).cloned()
         {
+            let node_config = self
+                .config_with_host_key_acceptance_for_node(&node_id, &config)
+                .unwrap_or(node.config);
+            // Tauri passes the saved connection's current post-connect command
+            // to createTerminalForNode even when the live node already exists.
+            let post_connect_command = config.post_connect_command.clone();
             self.queue_ssh_terminal_tab_for_node_with_mark_used(
                 node_id,
-                node.config,
+                post_connect_command,
+                node_config,
                 title,
                 Some(saved_connection_id.clone()),
                 Some(saved_connection_id.clone()),
@@ -131,8 +138,10 @@ impl WorkspaceApp {
                 .map(|snapshot| snapshot.config)
                 .ok_or_else(|| anyhow::anyhow!("target node was not materialized"))?;
             let target_node_id = expansion.target_node_id;
+            let post_connect_command = target_config.post_connect_command.clone();
             self.queue_ssh_terminal_tab_for_node_with_mark_used(
                 target_node_id,
+                post_connect_command,
                 target_config,
                 title,
                 Some(saved_connection_id.clone()),
@@ -159,9 +168,16 @@ impl WorkspaceApp {
                     // Tauri's saved direct-open path reuses an existing root
                     // node by host/port/user without rewriting the node origin
                     // to the saved connection. Keep the same tree owner here.
+                    let node_config = self
+                        .config_with_host_key_acceptance_for_node(&existing_node_id, &config)
+                        .unwrap_or(node.config);
+                    // Tauri reuses the existing direct root node but still
+                    // applies the saved connection's current terminal command.
+                    let post_connect_command = config.post_connect_command.clone();
                     self.queue_ssh_terminal_tab_for_node_with_mark_used(
                         existing_node_id,
-                        node.config,
+                        post_connect_command,
+                        node_config,
                         node.title,
                         node.saved_connection_id,
                         Some(saved_connection_id.clone()),
@@ -177,8 +193,11 @@ impl WorkspaceApp {
                 title.clone(),
                 Some(saved_connection_id.clone()),
             );
-            self.queue_ssh_terminal_tab_for_node_with_mark_used(
+            let cleanup_node_id = node_id.clone();
+            let post_connect_command = config.post_connect_command.clone();
+            let result = self.queue_ssh_terminal_tab_for_node_with_mark_used(
                 node_id,
+                post_connect_command,
                 config,
                 title,
                 Some(saved_connection_id.clone()),
@@ -186,8 +205,42 @@ impl WorkspaceApp {
                 None,
                 window,
                 cx,
-            )
+            );
+            if result.is_ok() {
+                self.mark_pending_ssh_terminal_open_cleanup(
+                    &cleanup_node_id,
+                    cleanup_node_id.clone(),
+                );
+            }
+            result
         }
+    }
+
+    fn config_with_host_key_acceptance_for_node(
+        &mut self,
+        node_id: &NodeId,
+        accepted_config: &SshConfig,
+    ) -> Option<SshConfig> {
+        let trust_host_key = accepted_config.trust_host_key?;
+        let expected_host_key_fingerprint =
+            accepted_config.expected_host_key_fingerprint.clone()?;
+        let node = self.ssh_nodes.get_mut(node_id)?;
+        let mut config = node.config.clone();
+        // Tauri passes accepted host-key data as connectNode step options. A
+        // reused native node connects from its stored config, so mirror those
+        // one-step options onto the existing node before starting the worker.
+        config.strict_host_key_checking = true;
+        config.trust_host_key = Some(trust_host_key);
+        config.expected_host_key_fingerprint = Some(expected_host_key_fingerprint);
+        node.config = config.clone();
+        let origin = self
+            .node_runtime_store
+            .snapshot(node_id)
+            .map(|snapshot| snapshot.origin)
+            .unwrap_or_default();
+        self.node_runtime_store
+            .upsert_node_with_origin(node_id.clone(), config.clone(), origin);
+        Some(config)
     }
 
     pub(super) fn try_reuse_active_saved_connection_terminal(
@@ -298,6 +351,7 @@ impl WorkspaceApp {
 
     pub(super) fn create_ssh_terminal_tab_for_node(
         &mut self,
+        post_connect_command: Option<String>,
         config: SshConfig,
         title: String,
         saved_connection_id: Option<String>,
@@ -372,7 +426,11 @@ impl WorkspaceApp {
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        // Tauri passes postConnectCommand as a createTerminalForNode option.
+        // Keep it one-shot for this terminal instead of letting every future
+        // terminal opened from the same node replay the saved command.
         let session_config = SshSessionConfig::from(config)
+            .with_post_connect_command(post_connect_command)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
             .with_deferred_pty(true)
@@ -509,7 +567,11 @@ impl WorkspaceApp {
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        // Opening another terminal for an already-connected node mirrors
+        // Tauri's createTerminalForNode(nodeId) path: no post-connect command
+        // is replayed unless the caller explicitly supplies one.
         let session_config = SshSessionConfig::from(node.config)
+            .with_post_connect_command(None)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
             .with_deferred_pty(true)
@@ -537,6 +599,7 @@ impl WorkspaceApp {
     ) -> Result<()> {
         self.queue_ssh_terminal_tab_for_node_with_mark_used(
             node_id,
+            None,
             config,
             title,
             saved_connection_id,
@@ -569,6 +632,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn queue_ssh_terminal_tab_for_node_with_mark_used(
         &mut self,
         node_id: NodeId,
+        post_connect_command: Option<String>,
         config: SshConfig,
         title: String,
         saved_connection_id: Option<String>,
@@ -588,6 +652,7 @@ impl WorkspaceApp {
             });
         if self.node_is_ready_for_terminal(&node_id) {
             self.create_ssh_terminal_tab_for_node(
+                post_connect_command,
                 config,
                 title,
                 saved_connection_id,
@@ -625,21 +690,52 @@ impl WorkspaceApp {
                     if existing.save_after_open.is_none() {
                         existing.save_after_open = save_after_open;
                     }
+                    if existing.post_connect_command.is_none() {
+                        existing.post_connect_command = post_connect_command;
+                    }
                 }
             }
         } else {
             self.pending_ssh_terminal_opens
                 .push_back(PendingSshTerminalOpen {
                     node_id: node_id.clone(),
+                    post_connect_command,
                     saved_connection_id,
                     mark_used_connection_id,
                     save_after_open,
+                    cleanup_node_id: None,
                     title,
                 });
         }
         self.ensure_node_connection_started(&node_id);
         cx.notify();
         Ok(())
+    }
+
+    pub(super) fn mark_pending_ssh_terminal_open_cleanup(
+        &mut self,
+        node_id: &NodeId,
+        cleanup_node_id: NodeId,
+    ) {
+        if let Some(pending) = self
+            .pending_ssh_terminal_opens
+            .iter_mut()
+            .find(|pending| pending.node_id == *node_id)
+        {
+            // Tauri saved direct plans set cleanupNodeId only for freshly
+            // created roots. Existing direct nodes are reused without cleanup.
+            pending.cleanup_node_id = Some(cleanup_node_id);
+        }
+    }
+
+    pub(super) fn pending_ssh_terminal_open_cleanup_for_node(
+        &self,
+        node_id: &NodeId,
+    ) -> Option<NodeId> {
+        self.pending_ssh_terminal_opens
+            .iter()
+            .find(|pending| pending.node_id == *node_id)
+            .and_then(|pending| pending.cleanup_node_id.clone())
     }
 
     pub(super) fn drain_ready_pending_ssh_terminal_opens(
@@ -660,6 +756,7 @@ impl WorkspaceApp {
             };
             if self
                 .create_ssh_terminal_tab_for_node(
+                    request.post_connect_command,
                     node.config,
                     request.title,
                     request.saved_connection_id,

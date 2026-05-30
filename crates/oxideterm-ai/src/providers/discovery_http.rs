@@ -124,7 +124,12 @@ async fn fetch_openai_compatible_json(
             {
                 continue;
             }
-            return Err(anyhow!("{context} failed: {message}"));
+            let detail = parse_openai_compatible_error(&body);
+            let suffix = detail
+                .filter(|detail| !detail.is_empty())
+                .map(|detail| format!(" — {detail}"))
+                .unwrap_or_default();
+            return Err(anyhow!("{context} failed: {message}{suffix}"));
         }
         match parse_provider_json(&body, context) {
             Ok(json) => return Ok(json),
@@ -163,6 +168,21 @@ fn path_has_version_segment(pathname: &str) -> bool {
 
 pub(crate) fn looks_like_html_response(body: &str) -> bool {
     body.trim_start().starts_with('<')
+}
+
+fn parse_openai_compatible_error(body: &str) -> Option<String> {
+    if body.is_empty() {
+        return None;
+    }
+    if let Ok(json) = serde_json::from_str::<Value>(body) {
+        return json
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .or_else(|| json.get("message"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+    }
+    Some(body.chars().take(200).collect())
 }
 
 pub(crate) fn api_key_required_ref<'a>(
@@ -206,4 +226,26 @@ pub(crate) fn url_encode_component(value: &str) -> String {
             _ => format!("%{byte:02X}").chars().collect(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_compatible_error_detail_matches_tauri_priority() {
+        assert_eq!(
+            parse_openai_compatible_error(r#"{"error":{"message":"bad key"}}"#).as_deref(),
+            Some("bad key")
+        );
+        assert_eq!(
+            parse_openai_compatible_error(r#"{"message":"missing model"}"#).as_deref(),
+            Some("missing model")
+        );
+        assert_eq!(
+            parse_openai_compatible_error("plain provider failure").as_deref(),
+            Some("plain provider failure")
+        );
+        assert!(parse_openai_compatible_error("").is_none());
+    }
 }

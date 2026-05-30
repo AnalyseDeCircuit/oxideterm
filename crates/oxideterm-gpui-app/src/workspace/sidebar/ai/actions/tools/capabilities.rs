@@ -137,6 +137,7 @@ async fn run_local_ai_command(
         }
         process.current_dir(path);
     }
+    let timeout_secs = ai_local_exec_timeout_secs(timeout_secs);
     match tokio::time::timeout(Duration::from_secs(timeout_secs), process.output()).await {
         Ok(Ok(output)) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -211,6 +212,44 @@ async fn run_local_ai_command(
             state_version: None,
         },
     }
+}
+
+fn ai_local_exec_timeout_secs(timeout_secs: u64) -> u64 {
+    // Tauri's local_exec_command caps the backend timeout at 60 seconds even if
+    // a caller bypasses the tool schema bounds.
+    timeout_secs.min(60)
+}
+
+fn ai_memory_settings_json(enabled: bool, content: &str) -> serde_json::Value {
+    // Tauri recall_preferences returns settings.ai.memory verbatim, including
+    // the enabled flag even when the content is empty.
+    serde_json::json!({
+        "enabled": enabled,
+        "content": content,
+    })
+}
+
+fn ai_memory_content(memory: &serde_json::Value) -> &str {
+    memory
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+}
+
+fn ai_memory_trimmed_content(memory: &serde_json::Value) -> &str {
+    ai_memory_content(memory).trim()
+}
+
+fn ai_tool_verified_default(ok: bool, error_message: Option<&str>) -> bool {
+    // Tauri marks an implicit result as verified only when it succeeded and did
+    // not carry an error object.
+    ok && error_message.is_none()
+}
+
+fn ai_run_command_preflight_risk() -> &'static str {
+    // Tauri validates run_command target readiness and command text before the
+    // terminal capability switches the action risk to interactive.
+    "execute"
 }
 
 fn truncate_ai_local_exec_output(value: &str) -> String {
@@ -319,6 +358,11 @@ fn target_matches_ai_query(target: &AiOrchestratorTarget, query: &str) -> bool {
     haystack.contains(query)
 }
 
+fn normalized_ai_query(query: Option<&str>) -> String {
+    // Tauri trims discovery queries before filtering targets.
+    query.unwrap_or("").trim().to_lowercase()
+}
+
 fn ai_js_query_string(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::Null => String::new(),
@@ -365,6 +409,15 @@ fn recovery_actions_for_target(target: &AiOrchestratorTarget) -> Vec<serde_json:
             "reason": "Find a currently available target before continuing."
         })],
     }
+}
+
+fn ai_ssh_reconnect_failed_next_actions() -> Vec<serde_json::Value> {
+    // Tauri returns this specific recovery hint when connect_target cannot
+    // reconnect a stale ssh-node target.
+    vec![serde_json::json!({
+        "action": "list_targets",
+        "reason": "Refresh target state before retrying."
+    })]
 }
 
 fn view_for_ai_intent(intent: &str) -> &'static str {

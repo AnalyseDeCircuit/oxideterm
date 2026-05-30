@@ -126,7 +126,7 @@ fn set_ai_turn_status(message: &mut AiChatMessage, status: &str) {
 
 fn finalize_ai_turn_suggestions(message: &mut AiChatMessage) {
     let parsed = parse_ai_suggestions(&message.content);
-    if parsed.suggestions.is_empty() {
+    if !parsed.has_suggestions_block {
         return;
     }
 
@@ -145,7 +145,7 @@ fn finalize_ai_turn_suggestions(message: &mut AiChatMessage) {
         && let Some(text) = object.get("text").and_then(serde_json::Value::as_str)
     {
         let part_parsed = parse_ai_suggestions(text);
-        if !part_parsed.suggestions.is_empty() {
+        if part_parsed.has_suggestions_block {
             object.insert("text".to_string(), serde_json::json!(part_parsed.clean_content));
         }
     }
