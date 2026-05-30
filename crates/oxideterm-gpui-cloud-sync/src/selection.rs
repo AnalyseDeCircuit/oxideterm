@@ -117,6 +117,7 @@ pub fn cloud_sync_legacy_import_options(
             ),
             import_forwards: selection.import_forwards,
             import_portable_secrets,
+            ..OxideImportOptions::default()
         },
         import_plugin_settings: selection.effective_import_plugin_settings(),
         selected_plugin_ids: selection.selected_plugin_hash_set(),

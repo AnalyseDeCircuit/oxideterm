@@ -10,13 +10,16 @@ pub fn preflight_export(
         portable_secret_count,
         ..ExportPreflightResult::default()
     };
+    let mut managed_key_ids = HashSet::new();
 
     for id in connection_ids {
         let Some(conn) = store.get(id) else {
             continue;
         };
+        collect_managed_key_id(&conn.auth, &mut managed_key_ids);
         count_auth_preflight(&conn.name, &conn.auth, embed_keys, true, &mut result);
         for hop in &conn.proxy_chain {
+            collect_managed_key_id(&hop.auth, &mut managed_key_ids);
             count_auth_preflight(
                 &format!("{} (proxy)", conn.name),
                 &hop.auth,
@@ -26,6 +29,7 @@ pub fn preflight_export(
             );
         }
     }
+    result.managed_key_count = managed_key_ids.len();
 
     result
 }
@@ -109,7 +113,7 @@ fn export_connections_to_oxide_inner(
         encrypted_connections.push(export_connection(
             store,
             conn,
-            options.embed_keys,
+            &options,
             forwards_by_connection
                 .get(id.as_str())
                 .cloned()
@@ -187,6 +191,12 @@ fn count_auth_preflight(
             }
         }
     }
+    if auth_has_saved_passphrase(auth) {
+        match auth {
+            SavedAuth::ManagedKey { .. } => result.managed_key_passphrase_count += 1,
+            _ => result.key_passphrase_count += 1,
+        }
+    }
     if !embed_keys {
         return;
     }
@@ -195,6 +205,32 @@ fn count_auth_preflight(
     }
     if let Some(path) = auth.cert_path() {
         count_key_path(label, path, result);
+    }
+}
+
+fn collect_managed_key_id(auth: &SavedAuth, managed_key_ids: &mut HashSet<String>) {
+    if let SavedAuth::ManagedKey { key_id, .. } = auth {
+        managed_key_ids.insert(key_id.clone());
+    }
+}
+
+fn auth_has_saved_passphrase(auth: &SavedAuth) -> bool {
+    match auth {
+        SavedAuth::Key {
+            has_passphrase,
+            passphrase_keychain_id,
+            ..
+        }
+        | SavedAuth::Certificate {
+            has_passphrase,
+            passphrase_keychain_id,
+            ..
+        } => *has_passphrase && passphrase_keychain_id.is_some(),
+        SavedAuth::ManagedKey {
+            passphrase_keychain_id,
+            ..
+        } => passphrase_keychain_id.is_some(),
+        _ => false,
     }
 }
 
@@ -210,17 +246,17 @@ fn count_key_path(label: &str, path: &str, result: &mut ExportPreflightResult) {
 fn export_connection(
     store: &ConnectionStore,
     conn: &SavedConnection,
-    embed_keys: bool,
+    options: &OxideExportOptions,
     forwards: Vec<EncryptedForward>,
 ) -> Result<EncryptedConnection, OxideFileError> {
-    let proxy_chain = export_proxy_chain(store, conn, embed_keys)?;
+    let proxy_chain = export_proxy_chain(store, conn, options)?;
     Ok(EncryptedConnection {
         name: conn.name.clone(),
         group: conn.group.clone(),
         host: conn.host.clone(),
         port: conn.port,
         username: conn.username.clone(),
-        auth: export_auth(store, &conn.auth, embed_keys)?,
+        auth: export_auth(store, &conn.auth, options)?,
         color: conn.color.clone(),
         tags: conn.tags.clone(),
         options: conn.options.clone(),
@@ -232,13 +268,13 @@ fn export_connection(
 fn export_proxy_chain(
     store: &ConnectionStore,
     conn: &SavedConnection,
-    embed_keys: bool,
+    options: &OxideExportOptions,
 ) -> Result<Vec<EncryptedProxyHop>, OxideFileError> {
     if !conn.proxy_chain.is_empty() {
         return conn
             .proxy_chain
             .iter()
-            .map(|hop| export_proxy_hop(store, hop, embed_keys))
+            .map(|hop| export_proxy_hop(store, hop, options))
             .collect();
     }
 
@@ -255,40 +291,52 @@ fn export_proxy_chain(
         host: jump.host.clone(),
         port: jump.port,
         username: jump.username.clone(),
-        auth: export_auth(store, &jump.auth, embed_keys)?,
+        auth: export_auth(store, &jump.auth, options)?,
     }])
 }
 
 fn export_proxy_hop(
     store: &ConnectionStore,
     hop: &SavedProxyHop,
-    embed_keys: bool,
+    options: &OxideExportOptions,
 ) -> Result<EncryptedProxyHop, OxideFileError> {
     Ok(EncryptedProxyHop {
         host: hop.host.clone(),
         port: hop.port,
         username: hop.username.clone(),
-        auth: export_auth(store, &hop.auth, embed_keys)?,
+        auth: export_auth(store, &hop.auth, options)?,
     })
 }
 
 fn export_auth(
     store: &ConnectionStore,
     auth: &SavedAuth,
-    embed_keys: bool,
+    options: &OxideExportOptions,
 ) -> Result<EncryptedAuth, OxideFileError> {
     match auth {
         SavedAuth::Password { .. } => Ok(EncryptedAuth::Password {
-            password: Zeroizing::new(String::new()),
+            password: if options.include_passwords {
+                store
+                    .get_saved_auth_password(auth)
+                    .ok()
+                    .map(SecretString::into_zeroizing)
+                    .unwrap_or_else(|| Zeroizing::new(String::new()))
+            } else {
+                Zeroizing::new(String::new())
+            },
         }),
         SavedAuth::Key { key_path, .. } => Ok(EncryptedAuth::Key {
             key_path: key_path.clone(),
-            passphrase: store
-                .get_saved_auth_passphrase(auth)
-                .ok()
-                .flatten()
-                .map(SecretString::into_zeroizing),
-            embedded_key: if embed_keys {
+            passphrase: if options.include_key_passphrases {
+                store
+                    .get_saved_auth_passphrase(auth)
+                    .ok()
+                    .flatten()
+                    .map(SecretString::into_zeroizing)
+            } else {
+                None
+            },
+            embedded_key: if options.embed_keys {
                 read_and_embed_key(key_path)?
             } else {
                 None
@@ -302,17 +350,21 @@ fn export_auth(
         } => Ok(EncryptedAuth::Certificate {
             key_path: key_path.clone(),
             cert_path: cert_path.clone(),
-            passphrase: store
-                .get_saved_auth_passphrase(auth)
-                .ok()
-                .flatten()
-                .map(SecretString::into_zeroizing),
-            embedded_key: if embed_keys {
+            passphrase: if options.include_key_passphrases {
+                store
+                    .get_saved_auth_passphrase(auth)
+                    .ok()
+                    .flatten()
+                    .map(SecretString::into_zeroizing)
+            } else {
+                None
+            },
+            embedded_key: if options.embed_keys {
                 read_and_embed_key(key_path)?
             } else {
                 None
             },
-            embedded_cert: if embed_keys {
+            embedded_cert: if options.embed_keys {
                 read_and_embed_key(cert_path)?
             } else {
                 None
@@ -320,6 +372,11 @@ fn export_auth(
             managed_key: None,
         }),
         SavedAuth::ManagedKey { key_id, .. } => {
+            if !options.include_managed_keys {
+                return Err(OxideFileError::InvalidFormat(
+                    "Managed key export is disabled for a selected connection".to_string(),
+                ));
+            }
             let metadata = store
                 .managed_ssh_key_metadata(key_id)
                 .map_err(|error| OxideFileError::InvalidFormat(error.to_string()))?;
@@ -328,11 +385,15 @@ fn export_auth(
                 .map_err(|error| OxideFileError::InvalidFormat(error.to_string()))?;
             Ok(EncryptedAuth::Key {
                 key_path: managed_key_fallback_filename(&metadata.fingerprint),
-                passphrase: store
-                    .get_saved_auth_passphrase(auth)
-                    .ok()
-                    .flatten()
-                    .map(SecretString::into_zeroizing),
+                passphrase: if options.include_managed_key_passphrases {
+                    store
+                        .get_saved_auth_passphrase(auth)
+                        .ok()
+                        .flatten()
+                        .map(SecretString::into_zeroizing)
+                } else {
+                    None
+                },
                 // The encoded private key is secret material and remains inside
                 // the encrypted .oxide payload with Zeroizing ownership.
                 embedded_key: Some(Zeroizing::new(BASE64.encode(

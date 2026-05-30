@@ -163,6 +163,7 @@ pub fn native_plugin_sync_import_oxide_args(
             import_forwards: native_plugin_bool_arg(args, "importForwards").unwrap_or(true),
             import_portable_secrets: native_plugin_bool_arg(args, "importPortableSecrets")
                 .unwrap_or(false),
+            ..OxideImportOptions::default()
         },
         import_app_settings: native_plugin_bool_arg(args, "importAppSettings").unwrap_or(true),
         selected_app_settings_sections: native_plugin_optional_string_set_arg(

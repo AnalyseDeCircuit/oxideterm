@@ -162,6 +162,13 @@ pub enum SettingsInput {
     NativePluginInstallUrl,
     NativePluginInstallChecksum,
     NativePluginRegistryUrl,
+    ManagedKeyFilePath,
+    ManagedKeyFileName,
+    ManagedKeyFilePassphrase,
+    ManagedKeyPasteName,
+    ManagedKeyPastePrivateKey,
+    ManagedKeyPastePassphrase,
+    ManagedKeyRenameName,
     PluginSetting(usize),
 }
 
@@ -322,6 +329,7 @@ impl SettingsInput {
                 | Self::AiSystemPrompt
                 | Self::AiMemoryContent
                 | Self::AiMcpArgs
+                | Self::ManagedKeyPastePrivateKey
         )
     }
 
@@ -331,7 +339,7 @@ impl SettingsInput {
         match self {
             Self::TerminalCommandBarFocusHandoff | Self::TerminalCommandSpecsJson => 20.0,
             Self::AiSystemPrompt | Self::AiMemoryContent => 22.0,
-            Self::AiMcpArgs => 20.0,
+            Self::AiMcpArgs | Self::ManagedKeyPastePrivateKey => 20.0,
             _ => DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT,
         }
     }
@@ -412,6 +420,13 @@ impl SettingsInput {
             Self::NativePluginInstallUrl => PLUGIN_MANAGER_INPUT_ANCHOR_BASE,
             Self::NativePluginInstallChecksum => PLUGIN_MANAGER_INPUT_ANCHOR_BASE + 1,
             Self::NativePluginRegistryUrl => PLUGIN_MANAGER_INPUT_ANCHOR_BASE + 2,
+            Self::ManagedKeyFilePath => 30_000,
+            Self::ManagedKeyFileName => 30_001,
+            Self::ManagedKeyFilePassphrase => 30_002,
+            Self::ManagedKeyPasteName => 30_003,
+            Self::ManagedKeyPastePrivateKey => 30_004,
+            Self::ManagedKeyPastePassphrase => 30_005,
+            Self::ManagedKeyRenameName => 30_006,
             Self::PluginSetting(index) => PLUGIN_SETTING_INPUT_ANCHOR_BASE + index as u64,
         }
     }
@@ -432,6 +447,9 @@ impl SettingsInput {
                 | Self::PortableCurrentPassword
                 | Self::PortableNewPassword
                 | Self::PortableConfirmPassword
+                | Self::ManagedKeyFilePassphrase
+                | Self::ManagedKeyPastePrivateKey
+                | Self::ManagedKeyPastePassphrase
         )
     }
 

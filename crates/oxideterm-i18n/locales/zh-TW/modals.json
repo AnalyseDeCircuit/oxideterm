@@ -430,6 +430,35 @@
       "connect_failed": "連線失敗",
       "save_failed": "儲存連線失敗"
     },
+    "managed_key": {
+      "selector": {
+        "label": "託管 SSH 金鑰",
+        "placeholder": "選擇託管金鑰",
+        "loading": "正在載入託管金鑰...",
+        "refresh": "重新整理"
+      },
+      "display_name": "顯示名稱（可選）",
+      "passphrase": "密碼短語（可選）",
+      "passphrase_placeholder": "加密金鑰的密碼短語",
+      "passphrase_hint": "僅當託管金鑰已加密時需要。它用於此連線，且只會在連線儲存密碼短語時儲存。",
+      "custody_hint": "託管金鑰儲存在 OxideTerm 的本機鑰匙圈/便攜金鑰庫中。連線設定只儲存金鑰引用。",
+      "cancel": "取消",
+      "import": "匯入",
+      "importing": "正在匯入...",
+      "import_file": {
+        "open": "匯入金鑰檔案",
+        "browse_title": "選擇 SSH 私鑰",
+        "title": "匯入託管 SSH 金鑰",
+        "description": "將現有私鑰複製到 OxideTerm 的本機託管金鑰儲存。",
+        "path": "私鑰檔案"
+      },
+      "paste": {
+        "open": "貼上私鑰",
+        "title": "貼上託管 SSH 金鑰",
+        "description": "貼上 OpenSSH 私鑰。換行會保留用於驗證。",
+        "private_key": "私鑰"
+      }
+    },
     "settings": {
       "title": "設定",
       "description": "應用程式設定。",

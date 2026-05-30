@@ -66,6 +66,9 @@ impl WorkspaceApp {
             .when_some(self.render_theme_editor_modal(cx), |surface, modal| {
                 surface.child(modal)
             })
+            .when_some(self.render_settings_managed_key_dialog(cx), |surface, modal| {
+                surface.child(modal)
+            })
             .when_some(self.render_portable_password_change_dialog(cx), |surface, modal| {
                 surface.child(modal)
             })
@@ -452,7 +455,7 @@ impl WorkspaceApp {
             SettingsTab::Appearance => self.settings_appearance_section(section_index, cx),
             SettingsTab::Local => self.settings_local_section(section_index, cx),
             SettingsTab::Connections => self.settings_connections_section(section_index, cx),
-            SettingsTab::Ssh => self.settings_ssh_section(section_index),
+            SettingsTab::Ssh => self.settings_ssh_section(section_index, cx),
             SettingsTab::Reconnect => self.settings_reconnect_section(section_index, cx),
             SettingsTab::Sftp => self.settings_sftp_section(section_index, cx),
             SettingsTab::Ide => self.settings_ide_section(section_index, cx),

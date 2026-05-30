@@ -44,6 +44,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use self::settings::SettingsManagedKeyDialog;
 use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, CursorStyle,
@@ -524,6 +525,15 @@ pub(crate) struct WorkspaceApp {
     onboarding: OnboardingState,
     shortcuts_modal: ShortcutsModalState,
     settings_page: SettingsPageModel,
+    settings_managed_key_dialog: Option<SettingsManagedKeyDialog>,
+    settings_managed_key_status: Option<String>,
+    settings_managed_key_file_path: String,
+    settings_managed_key_file_name: String,
+    settings_managed_key_file_passphrase: String,
+    settings_managed_key_paste_name: String,
+    settings_managed_key_paste_private_key: String,
+    settings_managed_key_paste_passphrase: String,
+    settings_managed_key_rename_name: String,
     quick_commands: QuickCommandsState,
     quick_command_list_state: ListState,
     quick_command_list_cache: RefCell<VirtualListSignatureCache>,

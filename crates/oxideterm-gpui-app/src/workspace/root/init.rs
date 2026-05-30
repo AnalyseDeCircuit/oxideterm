@@ -172,6 +172,15 @@ impl WorkspaceApp {
                 scroll_handle: UniformListScrollHandle::new(),
             },
             settings_page: SettingsPageModel::default(),
+            settings_managed_key_dialog: None,
+            settings_managed_key_status: None,
+            settings_managed_key_file_path: String::new(),
+            settings_managed_key_file_name: String::new(),
+            settings_managed_key_file_passphrase: String::new(),
+            settings_managed_key_paste_name: String::new(),
+            settings_managed_key_paste_private_key: String::new(),
+            settings_managed_key_paste_passphrase: String::new(),
+            settings_managed_key_rename_name: String::new(),
             quick_commands: QuickCommandsState::load(settings_store.path()),
             // Quick command popovers can contain user-sized command sets; keep
             // their rows on the same variable-height list path as migrated

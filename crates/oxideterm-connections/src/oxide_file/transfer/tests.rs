@@ -224,6 +224,51 @@ mod tests {
     }
 
     #[test]
+    fn managed_key_import_can_extract_embedded_key_when_restore_disabled() {
+        let mut source = temp_store("managed-fallback-source");
+        let private_key = generated_private_key_text();
+        let managed_key = source
+            .create_managed_ssh_key_from_text(
+                SecretString::from(private_key),
+                Some("Deploy key".to_string()),
+                None,
+            )
+            .unwrap();
+        let mut connection = saved_connection("conn-1", "Prod");
+        connection.auth = SavedAuth::ManagedKey {
+            key_id: managed_key.id,
+            passphrase_keychain_id: None,
+            plaintext_passphrase: None,
+        };
+        connection.proxy_chain.clear();
+        source.upsert_imported_connection(connection).unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions::default(),
+        )
+        .unwrap();
+        let mut target = temp_store("managed-fallback-target");
+        let result = apply_oxide_import_with_options(
+            &mut target,
+            &bytes,
+            "secret!",
+            OxideImportOptions {
+                restore_managed_keys: false,
+                ..OxideImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.imported, 1);
+        assert!(target.managed_ssh_keys().is_empty());
+        let imported = target.connections().first().unwrap();
+        assert!(matches!(&imported.auth, SavedAuth::Key { key_path, .. } if key_path.contains(".ssh/imported")));
+    }
+
+    #[test]
     fn transfer_progress_matches_tauri_stage_lifecycle() {
         let mut source = temp_store("progress-source");
         source

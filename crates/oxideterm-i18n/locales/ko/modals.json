@@ -430,6 +430,35 @@
       "connect_failed": "연결 실패",
       "save_failed": "연결 저장 실패"
     },
+    "managed_key": {
+      "selector": {
+        "label": "Managed SSH key",
+        "placeholder": "Select a managed key",
+        "loading": "Loading managed keys...",
+        "refresh": "Refresh"
+      },
+      "display_name": "Display name (optional)",
+      "passphrase": "Passphrase (optional)",
+      "passphrase_placeholder": "Passphrase for encrypted key",
+      "passphrase_hint": "Only needed when the managed key is encrypted. It is used for this connection and saved only when the connection is saved with a passphrase.",
+      "custody_hint": "Managed keys are stored in OxideTerm's local keychain/portable keystore. Connection configs store only a key reference.",
+      "cancel": "Cancel",
+      "import": "Import",
+      "importing": "Importing...",
+      "import_file": {
+        "open": "Import key file",
+        "browse_title": "Select SSH Private Key",
+        "title": "Import managed SSH key",
+        "description": "Copy an existing private key into OxideTerm's local managed key store.",
+        "path": "Private key file"
+      },
+      "paste": {
+        "open": "Paste private key",
+        "title": "Paste managed SSH key",
+        "description": "Paste an OpenSSH private key. Line breaks are preserved for validation.",
+        "private_key": "Private key"
+      }
+    },
     "settings": {
       "title": "설정",
       "description": "애플리케이션 구성 설정.",

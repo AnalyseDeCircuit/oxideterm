@@ -485,6 +485,7 @@ impl WorkspaceApp {
                 conflict_strategy: dialog.conflict_strategy,
                 import_forwards: dialog.import_forwards,
                 import_portable_secrets: dialog.import_portable_secrets,
+                ..OxideImportOptions::default()
             },
             import_quick_commands: dialog.import_quick_commands,
             quick_command_strategy: quick_command_strategy_from_oxide(dialog.conflict_strategy),
@@ -1199,6 +1200,7 @@ impl WorkspaceApp {
             plugin_settings,
             portable_secrets,
             forwards,
+            ..OxideExportOptions::default()
         })
     }
 

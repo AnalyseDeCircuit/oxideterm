@@ -784,6 +784,19 @@ impl WorkspaceApp {
             SettingsInput::PortableCurrentPassword => self.portable_current_password.clone(),
             SettingsInput::PortableNewPassword => self.portable_new_password.clone(),
             SettingsInput::PortableConfirmPassword => self.portable_confirm_password.clone(),
+            SettingsInput::ManagedKeyFilePath => self.settings_managed_key_file_path.clone(),
+            SettingsInput::ManagedKeyFileName => self.settings_managed_key_file_name.clone(),
+            SettingsInput::ManagedKeyFilePassphrase => {
+                self.settings_managed_key_file_passphrase.clone()
+            }
+            SettingsInput::ManagedKeyPasteName => self.settings_managed_key_paste_name.clone(),
+            SettingsInput::ManagedKeyPastePrivateKey => {
+                self.settings_managed_key_paste_private_key.clone()
+            }
+            SettingsInput::ManagedKeyPastePassphrase => {
+                self.settings_managed_key_paste_passphrase.clone()
+            }
+            SettingsInput::ManagedKeyRenameName => self.settings_managed_key_rename_name.clone(),
             SettingsInput::PluginSetting(index) => self
                 .plugin_registry
                 .contributions()
@@ -880,6 +893,37 @@ impl WorkspaceApp {
             SettingsInput::PortableConfirmPassword => {
                 zeroize::Zeroize::zeroize(&mut self.portable_confirm_password);
                 self.portable_confirm_password = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::ManagedKeyFilePath => {
+                self.settings_managed_key_file_path = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::ManagedKeyFileName => {
+                self.settings_managed_key_file_name = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::ManagedKeyFilePassphrase => {
+                zeroize::Zeroize::zeroize(&mut self.settings_managed_key_file_passphrase);
+                self.settings_managed_key_file_passphrase = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::ManagedKeyPasteName => {
+                self.settings_managed_key_paste_name = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::ManagedKeyPastePrivateKey => {
+                zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_private_key);
+                self.settings_managed_key_paste_private_key = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::ManagedKeyPastePassphrase => {
+                zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_passphrase);
+                self.settings_managed_key_paste_passphrase = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::ManagedKeyRenameName => {
+                self.settings_managed_key_rename_name = self.settings_input_draft.clone();
                 cx.notify();
             }
             SettingsInput::PluginSetting(index) => {

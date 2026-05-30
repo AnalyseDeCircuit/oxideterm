@@ -60,7 +60,8 @@ use oxideterm_ai::{
     take_provider_key_secret as ai_take_provider_key_secret,
 };
 use oxideterm_connections::{
-    SshConfigHost, list_available_ssh_keys, list_ssh_config_hosts, resolve_ssh_config_alias,
+    ManagedSshKeyInfo, ManagedSshKeyOrigin, ManagedSshKeyUsage, SecretString, SshConfigHost,
+    list_available_ssh_keys, list_ssh_config_hosts, resolve_ssh_config_alias,
     saved_connection_from_ssh_host,
 };
 use oxideterm_gpui_settings_view::*;
@@ -92,6 +93,19 @@ use oxideterm_gpui_ui::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum PortableSettingsDialog {
     ChangePassword,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::workspace) enum SettingsManagedKeyDialog {
+    ImportFile,
+    Paste,
+    Rename {
+        key_id: String,
+    },
+    Delete {
+        key: ManagedSshKeyInfo,
+        usage: ManagedSshKeyUsage,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

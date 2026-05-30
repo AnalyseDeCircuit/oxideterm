@@ -677,6 +677,7 @@ impl CloudSyncOperationService {
                         conflict_strategy: ImportConflictStrategy::Replace,
                         import_forwards: false,
                         import_portable_secrets: false,
+                        ..OxideImportOptions::default()
                     },
                     |stage, current, import_total| {
                         let fraction = fractional_import_progress(current, import_total);
@@ -715,6 +716,7 @@ impl CloudSyncOperationService {
                         conflict_strategy: ImportConflictStrategy::Replace,
                         import_forwards: false,
                         import_portable_secrets: false,
+                        ..OxideImportOptions::default()
                     },
                     |stage, current, import_total| {
                         let fraction = fractional_import_progress(current, import_total);

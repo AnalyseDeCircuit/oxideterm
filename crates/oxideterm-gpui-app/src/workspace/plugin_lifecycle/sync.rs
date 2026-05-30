@@ -197,6 +197,7 @@ pub(super) fn native_plugin_sync_export_oxide_response(
         plugin_settings,
         portable_secrets: Vec::new(),
         forwards: Vec::new(),
+        ..OxideExportOptions::default()
     };
     let progress_registration_id = native_plugin_sync_progress_registration_id(args);
     let mut report_progress = |stage: &str, current: usize, total: usize| {

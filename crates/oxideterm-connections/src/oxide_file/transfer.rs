@@ -43,15 +43,37 @@ pub struct OxideForwardRecord {
     pub auto_start: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct OxideExportOptions {
     pub description: Option<String>,
     pub embed_keys: bool,
+    pub include_passwords: bool,
+    pub include_key_passphrases: bool,
+    pub include_managed_keys: bool,
+    pub include_managed_key_passphrases: bool,
     pub app_settings_json: Option<String>,
     pub quick_commands_json: Option<String>,
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     pub portable_secrets: Vec<EncryptedPortableSecret>,
     pub forwards: Vec<OxideForwardRecord>,
+}
+
+impl Default for OxideExportOptions {
+    fn default() -> Self {
+        Self {
+            description: None,
+            embed_keys: false,
+            include_passwords: false,
+            include_key_passphrases: true,
+            include_managed_keys: true,
+            include_managed_key_passphrases: false,
+            app_settings_json: None,
+            quick_commands_json: None,
+            plugin_settings: Vec::new(),
+            portable_secrets: Vec::new(),
+            forwards: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +83,10 @@ pub struct OxideImportOptions {
     pub conflict_strategy: ImportConflictStrategy,
     pub import_forwards: bool,
     pub import_portable_secrets: bool,
+    /// Restore managed-key metadata instead of extracting managed keys as plain imported key files.
+    pub restore_managed_keys: bool,
+    /// Store managed-key passphrases from the encrypted archive when callers explicitly opt in.
+    pub restore_managed_key_passphrases: bool,
 }
 
 impl Default for OxideImportOptions {
@@ -71,6 +97,8 @@ impl Default for OxideImportOptions {
             conflict_strategy: ImportConflictStrategy::Rename,
             import_forwards: true,
             import_portable_secrets: false,
+            restore_managed_keys: true,
+            restore_managed_key_passphrases: false,
         }
     }
 }
@@ -83,6 +111,10 @@ pub struct ExportPreflightResult {
     pub connections_with_keys: usize,
     pub connections_with_passwords: usize,
     pub connections_with_agent: usize,
+    pub key_passphrase_count: usize,
+    pub managed_key_count: usize,
+    pub managed_key_passphrase_count: usize,
+    pub blocked_managed_key_connections: Vec<String>,
     pub total_key_bytes: u64,
     pub can_export: bool,
     pub portable_secret_count: usize,

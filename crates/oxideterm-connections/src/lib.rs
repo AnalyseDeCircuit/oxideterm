@@ -20,7 +20,8 @@ pub use ssh_keys::{SshKeyInfo, list_available_ssh_keys};
 pub use store::{
     ApplySavedConnectionsSyncOutcome, ApplySavedConnectionsSyncSnapshotResult, AuthType,
     CONFIG_VERSION, ConnectionInfo, ConnectionOptions, ConnectionStore, ConnectionStoreData,
-    DeletedConnectionTombstone, LocalSyncMetadata, ProxyHopInfo, SaveConnectionRequest, SavedAuth,
-    SavedConnection, SavedConnectionSyncRecord, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot, SavedProxyHop, validate_group_name,
+    DeletedConnectionTombstone, LocalSyncMetadata, ManagedSshKeyInfo, ManagedSshKeyOrigin,
+    ManagedSshKeyUsage, ProxyHopInfo, SaveConnectionRequest, SavedAuth, SavedConnection,
+    SavedConnectionSyncRecord, SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
+    SavedProxyHop, validate_group_name,
 };

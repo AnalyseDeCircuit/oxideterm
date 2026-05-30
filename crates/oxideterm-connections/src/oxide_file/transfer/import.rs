@@ -119,6 +119,7 @@ fn apply_oxide_import_with_options_inner(
                     None,
                     &mut restored_managed_keys,
                     &mut imported_managed_keys,
+                    &options,
                 )?;
                 if options.import_forwards {
                     result.imported_forwards += saved.1.len();
@@ -136,6 +137,7 @@ fn apply_oxide_import_with_options_inner(
                     None,
                     &mut restored_managed_keys,
                     &mut imported_managed_keys,
+                    &options,
                 )?;
                 if options.import_forwards {
                     result.imported_forwards += saved.1.len();
@@ -154,6 +156,7 @@ fn apply_oxide_import_with_options_inner(
                     Some(existing_id.clone()),
                     &mut restored_managed_keys,
                     &mut imported_managed_keys,
+                    &options,
                 )?;
                 if options.import_forwards {
                     result.imported_forwards += saved.1.len();
@@ -173,6 +176,7 @@ fn apply_oxide_import_with_options_inner(
                     Some(existing_id.clone()),
                     &mut restored_managed_keys,
                     &mut imported_managed_keys,
+                    &options,
                 )?;
                 let (saved_connection, forward_records) = saved;
                 let merged = if let Some(existing) = existing {
@@ -274,6 +278,7 @@ fn encrypted_connection_to_saved(
     id_override: Option<String>,
     restored_managed_keys: &mut HashMap<String, String>,
     imported_managed_keys: &mut Vec<ImportedManagedSshKey>,
+    import_options: &OxideImportOptions,
 ) -> Result<(SavedConnection, Vec<OxideForwardRecord>), OxideFileError> {
     let id = id_override.unwrap_or_else(|| Uuid::new_v4().to_string());
     let forward_records = import_forwards(&id, conn.forwards);
@@ -294,6 +299,7 @@ fn encrypted_connection_to_saved(
                 conn.auth,
                 restored_managed_keys,
                 imported_managed_keys,
+                import_options,
             )?,
             proxy_chain: conn
                 .proxy_chain
@@ -304,6 +310,7 @@ fn encrypted_connection_to_saved(
                         hop,
                         restored_managed_keys,
                         imported_managed_keys,
+                        import_options,
                     )
                 })
                 .collect::<Result<_, _>>()?,
@@ -344,12 +351,19 @@ fn import_proxy_hop(
     hop: EncryptedProxyHop,
     restored_managed_keys: &mut HashMap<String, String>,
     imported_managed_keys: &mut Vec<ImportedManagedSshKey>,
+    import_options: &OxideImportOptions,
 ) -> Result<SavedProxyHop, OxideFileError> {
     Ok(SavedProxyHop {
         host: hop.host,
         port: hop.port,
         username: hop.username,
-        auth: import_auth(store, hop.auth, restored_managed_keys, imported_managed_keys)?,
+        auth: import_auth(
+            store,
+            hop.auth,
+            restored_managed_keys,
+            imported_managed_keys,
+            import_options,
+        )?,
         agent_forwarding: false,
     })
 }
@@ -359,6 +373,7 @@ fn import_auth(
     auth: EncryptedAuth,
     restored_managed_keys: &mut HashMap<String, String>,
     imported_managed_keys: &mut Vec<ImportedManagedSshKey>,
+    import_options: &OxideImportOptions,
 ) -> Result<SavedAuth, OxideFileError> {
     Ok(match auth {
         EncryptedAuth::Password { password } => SavedAuth::Password {
@@ -371,11 +386,16 @@ fn import_auth(
             embedded_key,
             managed_key,
         } => {
-            if managed_key.is_some() {
+            if managed_key.is_some() && import_options.restore_managed_keys {
+                let managed_passphrase = if import_options.restore_managed_key_passphrases {
+                    passphrase
+                } else {
+                    None
+                };
                 prepare_managed_key_restore(
                     store,
                     &key_path,
-                    passphrase,
+                    managed_passphrase,
                     embedded_key,
                     managed_key,
                     restored_managed_keys,

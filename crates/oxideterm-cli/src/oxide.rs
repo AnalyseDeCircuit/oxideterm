@@ -143,6 +143,7 @@ fn import(args: OxideImportArgs) -> CliResult<i32> {
             conflict_strategy: strategy,
             import_forwards: !args.no_forwards,
             import_portable_secrets: args.import_portable_secrets,
+            ..OxideImportOptions::default()
         },
     )
     .map_err(|error| CliError::new("oxide_preview_failed", error.to_string(), args.write.json))?;
@@ -182,6 +183,7 @@ fn import(args: OxideImportArgs) -> CliResult<i32> {
             conflict_strategy: strategy,
             import_forwards: !args.no_forwards,
             import_portable_secrets: args.import_portable_secrets,
+            ..OxideImportOptions::default()
         },
     )
     .map_err(|error| CliError::new("oxide_import_failed", error.to_string(), write.json))?;
