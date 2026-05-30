@@ -12,16 +12,18 @@ import { Checkbox } from '../ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { Info } from 'lucide-react';
+import { ManagedSshKeySelector } from './ManagedSshKeySelector';
 
 interface JumpServer {
   id: string;
   host: string;
   port: string;
   username: string;
-  authType: 'password' | 'key' | 'default_key' | 'agent' | 'certificate';
+  authType: 'password' | 'key' | 'default_key' | 'managed_key' | 'agent' | 'certificate';
   password?: string;
   keyPath?: string;
   certPath?: string;
+  managedKeyId?: string;
   passphrase?: string;
   agentForwarding?: boolean;
 }
@@ -41,16 +43,17 @@ export const AddJumpServerDialog: React.FC<AddJumpServerDialogProps> = ({
   const [host, setHost] = useState('');
   const [port, setPort] = useState('22');
   const [username, setUsername] = useState('');
-  const [authType, setAuthType] = useState<'password' | 'key' | 'default_key' | 'agent' | 'certificate'>('key');
+  const [authType, setAuthType] = useState<'password' | 'key' | 'default_key' | 'managed_key' | 'agent' | 'certificate'>('key');
   const [password, setPassword] = useState('');
   const [keyPath, setKeyPath] = useState('');
   const [certPath, setCertPath] = useState('');
+  const [managedKeyId, setManagedKeyId] = useState('');
   const [passphrase, setPassphrase] = useState<string>('');
   const [agentForwarding, setAgentForwarding] = useState(false);
 
   // Type-safe auth type handler
   const handleAuthTypeChange = (value: string) => {
-    if (value === 'password' || value === 'key' || value === 'default_key' || value === 'agent' || value === 'certificate') {
+    if (value === 'password' || value === 'key' || value === 'default_key' || value === 'managed_key' || value === 'agent' || value === 'certificate') {
       setAuthType(value);
     }
   };
@@ -100,7 +103,8 @@ export const AddJumpServerDialog: React.FC<AddJumpServerDialogProps> = ({
       password: authType === 'password' ? password : undefined,
       keyPath: authType === 'key' || authType === 'certificate' ? keyPath : undefined,
       certPath: authType === 'certificate' ? certPath : undefined,
-      passphrase: authType === 'key' || authType === 'certificate' ? passphrase || undefined : undefined,
+      managedKeyId: authType === 'managed_key' ? managedKeyId : undefined,
+      passphrase: authType === 'key' || authType === 'certificate' || authType === 'managed_key' ? passphrase || undefined : undefined,
       agentForwarding,
     });
     onClose();
@@ -155,9 +159,10 @@ export const AddJumpServerDialog: React.FC<AddJumpServerDialogProps> = ({
               onValueChange={handleAuthTypeChange}
               className="w-full"
             >
-                <TabsList className="grid w-full grid-cols-5">
+                <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="default_key">{t('modals.jump_server.auth_default_key')}</TabsTrigger>
           <TabsTrigger value="key">{t('modals.jump_server.auth_ssh_key')}</TabsTrigger>
+          <TabsTrigger value="managed_key">{t('modals.new_connection.auth_managed_key')}</TabsTrigger>
               <TabsTrigger value="certificate">{t('modals.new_connection.auth_certificate')}</TabsTrigger>
           <TabsTrigger value="password">{t('modals.jump_server.auth_password')}</TabsTrigger>
           <TabsTrigger value="agent">{t('modals.jump_server.auth_agent')}</TabsTrigger>
@@ -191,6 +196,15 @@ export const AddJumpServerDialog: React.FC<AddJumpServerDialogProps> = ({
               />
             </div>
           </div>
+              </TabsContent>
+
+              <TabsContent value="managed_key">
+                <ManagedSshKeySelector
+                  selectedId={managedKeyId}
+                  onSelectedIdChange={setManagedKeyId}
+                  passphrase={passphrase}
+                  onPassphraseChange={setPassphrase}
+                />
               </TabsContent>
 
               <TabsContent value="certificate" forceMount>
@@ -274,7 +288,7 @@ export const AddJumpServerDialog: React.FC<AddJumpServerDialogProps> = ({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>{t('modals.jump_server.cancel')}</Button>
-          <Button onClick={handleAdd} disabled={!host || !username}>
+          <Button onClick={handleAdd} disabled={!host || !username || (authType === 'managed_key' && !managedKeyId)}>
             {t('modals.jump_server.add')}
           </Button>
         </DialogFooter>

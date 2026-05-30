@@ -6,7 +6,7 @@
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use chrono::Utc;
 use serde::Serialize;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tauri::State;
 use tauri::ipc::Channel;
 use tracing::info;
@@ -15,9 +15,9 @@ use crate::commands::config::ConfigState;
 use crate::commands::forwarding::ForwardingRegistry;
 use crate::config::types::SavedAuth;
 use crate::oxide_file::{
-    EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedPayload, EncryptedPluginSetting,
-    EncryptedPortableSecret, EncryptedProxyHop, OxideMetadata, compute_checksum,
-    encrypt_oxide_file, encrypt_oxide_file_with_progress,
+    EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedManagedKeyMetadata,
+    EncryptedPayload, EncryptedPluginSetting, EncryptedPortableSecret, EncryptedProxyHop,
+    OxideMetadata, compute_checksum, encrypt_oxide_file, encrypt_oxide_file_with_progress,
 };
 use zeroize::Zeroizing;
 
@@ -157,6 +157,16 @@ fn count_quick_commands(snapshot_json: &str) -> Option<(usize, usize)> {
     let commands = value.get("commands")?.as_array()?.len();
     let categories = value.get("categories")?.as_array()?.len();
     Some((commands, categories))
+}
+
+fn managed_key_fallback_filename(fingerprint: &str) -> String {
+    let sanitized = fingerprint
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    format!("managed-{}.key", sanitized)
 }
 
 /// Pre-flight check before export - detects issues early
@@ -395,6 +405,7 @@ async fn export_to_oxide_inner(
     let selected_forward_ids =
         selected_forward_ids.map(|ids| ids.into_iter().collect::<std::collections::HashSet<_>>());
     let mut connections = Vec::new();
+    let mut managed_key_ids = HashSet::new();
 
     for id in &connection_ids {
         let saved_conn = config
@@ -438,6 +449,7 @@ async fn export_to_oxide_inner(
                         key_path: key_path.clone(),
                         passphrase: passphrase.map(Zeroizing::new),
                         embedded_key,
+                        managed_key: None,
                     })
                 }
                 SavedAuth::Certificate {
@@ -481,10 +493,43 @@ async fn export_to_oxide_inner(
                         passphrase: passphrase.map(Zeroizing::new),
                         embedded_key,
                         embedded_cert,
+                        managed_key: None,
                     })
                 }
-                SavedAuth::ManagedKey { .. } => {
-                    Err("Managed key .oxide export is not implemented in this slice".to_string())
+                SavedAuth::ManagedKey {
+                    key_id,
+                    passphrase_keychain_id,
+                } => {
+                    let metadata = config_state
+                        .get_managed_ssh_key_metadata(key_id)
+                        .map_err(|e| format!("Managed key error for {}: {}", context, e))?;
+                    let private_key = config_state
+                        .resolve_managed_ssh_key_private_key(key_id)
+                        .map_err(|e| format!("Managed key secret error for {}: {}", context, e))?;
+                    let passphrase = passphrase_keychain_id
+                        .as_ref()
+                        .map(|kc_id| {
+                            config_state.get_keychain_value(kc_id).map_err(|e| {
+                                format!("Managed key passphrase error for {}: {}", context, e)
+                            })
+                        })
+                        .transpose()?;
+
+                    Ok(EncryptedAuth::Key {
+                        key_path: managed_key_fallback_filename(&metadata.fingerprint),
+                        passphrase: passphrase.map(Zeroizing::new),
+                        // This base64 payload is still secret material. It is kept only
+                        // inside the encrypted .oxide payload and zeroized with the auth enum.
+                        embedded_key: Some(Zeroizing::new(BASE64.encode(private_key.as_bytes()))),
+                        managed_key: Some(EncryptedManagedKeyMetadata {
+                            key_id: metadata.id,
+                            name: metadata.name,
+                            fingerprint: Some(metadata.fingerprint),
+                            public_key: Some(metadata.public_key),
+                            origin: Some("oxide_import".to_string()),
+                            requires_passphrase: Some(metadata.requires_passphrase),
+                        }),
+                    })
                 }
                 SavedAuth::Agent => Ok(EncryptedAuth::Agent),
             }
@@ -526,6 +571,15 @@ async fn export_to_oxide_inner(
                 username: jump_conn.username.clone(),
                 auth: hop_auth,
             });
+        }
+
+        if let SavedAuth::ManagedKey { key_id, .. } = &saved_conn.auth {
+            managed_key_ids.insert(key_id.clone());
+        }
+        for hop in &saved_conn.proxy_chain {
+            if let SavedAuth::ManagedKey { key_id, .. } = &hop.auth {
+                managed_key_ids.insert(key_id.clone());
+            }
         }
 
         // Export target server with its proxy_chain
@@ -617,6 +671,7 @@ async fn export_to_oxide_inner(
             .then_some(payload.plugin_settings.len()),
         portable_secret_count: (!payload.portable_secrets.is_empty())
             .then_some(payload.portable_secrets.len()),
+        managed_key_count: (!managed_key_ids.is_empty()).then_some(managed_key_ids.len()),
     };
     report_progress("building_metadata", &mut current_step);
 

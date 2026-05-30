@@ -21,12 +21,13 @@ use uuid::Uuid;
 use crate::commands::config::{ConfigState, collect_connection_keychain_ids};
 use crate::commands::forwarding::ForwardingRegistry;
 use crate::config::types::{
-    CONFIG_VERSION, ConnectionOptions, ProxyHopConfig, SavedAuth, SavedConnection,
+    CONFIG_VERSION, ConnectionOptions, ManagedSshKey, ManagedSshKeyOrigin, ProxyHopConfig,
+    SavedAuth, SavedConnection,
 };
 use crate::forwarding::{ForwardRule, ForwardStatus};
 use crate::oxide_file::{
-    EncryptedAuth, EncryptedForward, EncryptedPluginSetting, EncryptedPortableSecret,
-    EncryptedProxyHop, OxideMetadata, decrypt_oxide_file_with_progress,
+    EncryptedAuth, EncryptedForward, EncryptedManagedKeyMetadata, EncryptedPluginSetting,
+    EncryptedPortableSecret, EncryptedProxyHop, OxideMetadata, decrypt_oxide_file_with_progress,
 };
 use crate::state::PersistedForward;
 use zeroize::Zeroizing;
@@ -687,10 +688,16 @@ struct PendingKeychainEntry {
     value: Zeroizing<String>,
 }
 
+struct PendingManagedKeyEntry {
+    key: ManagedSshKey,
+    secret: Zeroizing<String>,
+}
+
 /// Pending connection with all resolved auth data
 struct PendingConnection {
     connection: SavedConnection,
     keychain_entries: Vec<PendingKeychainEntry>,
+    managed_key_entries: Vec<PendingManagedKeyEntry>,
     old_keychain_ids: Vec<String>,
     forward_ids_to_delete: Vec<String>,
     forwards_to_persist: Vec<PersistedForward>,
@@ -1441,12 +1448,147 @@ async fn import_from_oxide_inner(
         .map(|c| c.name.clone())
         .collect();
     let mut replaced_names = HashSet::new();
+    let mut restored_managed_keys: HashMap<String, String> = HashMap::new();
 
-    // Helper function to convert EncryptedAuth to SavedAuth WITHOUT writing to keychain
-    // Returns (SavedAuth, Vec<PendingKeychainEntry>)
-    fn prepare_auth(auth: EncryptedAuth, id: &str) -> (SavedAuth, Vec<PendingKeychainEntry>) {
+    fn prepare_passphrase_entry(
+        id: &str,
+        passphrase: Option<Zeroizing<String>>,
+    ) -> (Option<String>, Vec<PendingKeychainEntry>) {
+        match passphrase {
+            Some(pass) => {
+                let keychain_id = format!("oxide_key_{}", id);
+                (
+                    Some(keychain_id.clone()),
+                    vec![PendingKeychainEntry {
+                        id: keychain_id,
+                        value: pass,
+                    }],
+                )
+            }
+            None => (None, Vec::new()),
+        }
+    }
+
+    fn prepare_managed_key_restore(
+        key_path: String,
+        passphrase: Option<Zeroizing<String>>,
+        embedded_key: Option<Zeroizing<String>>,
+        managed_key: Option<EncryptedManagedKeyMetadata>,
+        id: &str,
+        config_snapshot: &crate::config::types::ConfigFile,
+        restored_managed_keys: &mut HashMap<String, String>,
+    ) -> Result<
+        Option<(
+            SavedAuth,
+            Vec<PendingKeychainEntry>,
+            Vec<PendingManagedKeyEntry>,
+        )>,
+        String,
+    > {
+        let Some(metadata) = managed_key else {
+            return Ok(None);
+        };
+        let Some(key_data) = embedded_key else {
+            return Err(format!(
+                "Managed key '{}' is missing embedded key data",
+                metadata.name
+            ));
+        };
+
+        if let Some(restored_id) = restored_managed_keys.get(&metadata.key_id) {
+            let (passphrase_keychain_id, keychain_entries) =
+                prepare_passphrase_entry(id, passphrase);
+            return Ok(Some((
+                SavedAuth::ManagedKey {
+                    key_id: restored_id.clone(),
+                    passphrase_keychain_id,
+                },
+                keychain_entries,
+                Vec::new(),
+            )));
+        }
+
+        if let Some(fingerprint) = metadata.fingerprint.as_deref()
+            && let Some(existing) = config_snapshot
+                .managed_ssh_keys
+                .iter()
+                .find(|key| key.fingerprint == fingerprint)
+        {
+            restored_managed_keys.insert(metadata.key_id, existing.id.clone());
+            let (passphrase_keychain_id, keychain_entries) =
+                prepare_passphrase_entry(id, passphrase);
+            return Ok(Some((
+                SavedAuth::ManagedKey {
+                    key_id: existing.id.clone(),
+                    passphrase_keychain_id,
+                },
+                keychain_entries,
+                Vec::new(),
+            )));
+        }
+
+        let decoded = BASE64
+            .decode(key_data.as_bytes())
+            .map_err(|error| format!("Failed to decode managed key '{}': {}", key_path, error))?;
+        let private_key = Zeroizing::new(String::from_utf8(decoded).map_err(|error| {
+            format!("Managed key '{}' is not valid UTF-8: {}", key_path, error)
+        })?);
+        let new_id = Uuid::new_v4().to_string();
+        let secret_id = format!("managed-key-{}", new_id);
+        let now = Utc::now();
+        let fallback_name = metadata
+            .name
+            .trim()
+            .is_empty()
+            .then_some("Managed SSH Key")
+            .unwrap_or(metadata.name.trim())
+            .to_string();
+        let key = ManagedSshKey {
+            id: new_id.clone(),
+            secret_id: secret_id.clone(),
+            name: fallback_name,
+            fingerprint: metadata
+                .fingerprint
+                .unwrap_or_else(|| format!("imported-{}", new_id)),
+            public_key: metadata.public_key.unwrap_or_default(),
+            requires_passphrase: metadata.requires_passphrase.unwrap_or(passphrase.is_some()),
+            origin: ManagedSshKeyOrigin::OxideImport,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let (passphrase_keychain_id, keychain_entries) = prepare_passphrase_entry(id, passphrase);
+        restored_managed_keys.insert(metadata.key_id, new_id.clone());
+
+        Ok(Some((
+            SavedAuth::ManagedKey {
+                key_id: new_id,
+                passphrase_keychain_id,
+            },
+            keychain_entries,
+            vec![PendingManagedKeyEntry {
+                key,
+                secret: private_key,
+            }],
+        )))
+    }
+
+    // Helper function to convert EncryptedAuth to SavedAuth WITHOUT writing to keychain.
+    // Returns pending keychain and managed-key entries for atomic import rollback.
+    fn prepare_auth(
+        auth: EncryptedAuth,
+        id: &str,
+        config_snapshot: &crate::config::types::ConfigFile,
+        restored_managed_keys: &mut HashMap<String, String>,
+    ) -> Result<
+        (
+            SavedAuth,
+            Vec<PendingKeychainEntry>,
+            Vec<PendingManagedKeyEntry>,
+        ),
+        String,
+    > {
         let mut entries = Vec::new();
-
         let saved_auth = match auth {
             EncryptedAuth::Password { password } => {
                 if password.is_empty() {
@@ -1467,7 +1609,25 @@ async fn import_from_oxide_inner(
                 key_path,
                 passphrase,
                 embedded_key,
+                managed_key,
             } => {
+                if managed_key.is_some() {
+                    let Some((auth, keychain_entries, pending_managed_entries)) =
+                        prepare_managed_key_restore(
+                            key_path.clone(),
+                            passphrase,
+                            embedded_key,
+                            managed_key,
+                            id,
+                            config_snapshot,
+                            restored_managed_keys,
+                        )?
+                    else {
+                        unreachable!("managed_key was checked before restore");
+                    };
+                    return Ok((auth, keychain_entries, pending_managed_entries));
+                }
+
                 let passphrase_keychain_id = if let Some(pass) = passphrase {
                     let kc_id = format!("oxide_key_{}", id);
                     entries.push(PendingKeychainEntry {
@@ -1501,6 +1661,7 @@ async fn import_from_oxide_inner(
                 passphrase,
                 embedded_key,
                 embedded_cert,
+                managed_key: _,
             } => {
                 let passphrase_keychain_id = if let Some(pass) = passphrase {
                     let kc_id = format!("oxide_cert_{}", id);
@@ -1542,20 +1703,36 @@ async fn import_from_oxide_inner(
             EncryptedAuth::Agent => SavedAuth::Agent,
         };
 
-        (saved_auth, entries)
+        Ok((saved_auth, entries, Vec::new()))
     }
 
     fn prepare_proxy_chain(
         proxy_chain: Vec<EncryptedProxyHop>,
         base_id: &str,
-    ) -> (Vec<ProxyHopConfig>, Vec<PendingKeychainEntry>) {
+        config_snapshot: &crate::config::types::ConfigFile,
+        restored_managed_keys: &mut HashMap<String, String>,
+    ) -> Result<
+        (
+            Vec<ProxyHopConfig>,
+            Vec<PendingKeychainEntry>,
+            Vec<PendingManagedKeyEntry>,
+        ),
+        String,
+    > {
         let mut hops = Vec::new();
         let mut all_entries = Vec::new();
+        let mut all_managed_entries = Vec::new();
 
         for (hop_index, enc_hop) in proxy_chain.into_iter().enumerate() {
             let hop_id = format!("{}_hop{}", base_id, hop_index);
-            let (hop_auth, entries) = prepare_auth(enc_hop.auth, &hop_id);
+            let (hop_auth, entries, managed_entries) = prepare_auth(
+                enc_hop.auth,
+                &hop_id,
+                config_snapshot,
+                restored_managed_keys,
+            )?;
             all_entries.extend(entries);
+            all_managed_entries.extend(managed_entries);
 
             hops.push(ProxyHopConfig {
                 host: enc_hop.host,
@@ -1566,7 +1743,7 @@ async fn import_from_oxide_inner(
             });
         }
 
-        (hops, all_entries)
+        Ok((hops, all_entries, all_managed_entries))
     }
 
     fn import_portable_secret(
@@ -1624,12 +1801,22 @@ async fn import_from_oxide_inner(
         };
 
         // Prepare main connection auth
-        let (auth, mut keychain_entries) = prepare_auth(enc_conn.auth, &credential_base_id);
+        let (auth, mut keychain_entries, mut managed_key_entries) = prepare_auth(
+            enc_conn.auth,
+            &credential_base_id,
+            &config_snapshot,
+            &mut restored_managed_keys,
+        )?;
 
         // Prepare proxy_chain auth
-        let (proxy_chain, hop_entries) =
-            prepare_proxy_chain(enc_conn.proxy_chain, &credential_base_id);
+        let (proxy_chain, hop_entries, hop_managed_entries) = prepare_proxy_chain(
+            enc_conn.proxy_chain,
+            &credential_base_id,
+            &config_snapshot,
+            &mut restored_managed_keys,
+        )?;
         keychain_entries.extend(hop_entries);
+        managed_key_entries.extend(hop_managed_entries);
 
         let mut imported_connection = PreparedImportConnection {
             name: original_name.clone(),
@@ -1802,6 +1989,7 @@ async fn import_from_oxide_inner(
         pending_connections.push(PendingConnection {
             connection: saved_conn,
             keychain_entries,
+            managed_key_entries,
             old_keychain_ids,
             forward_ids_to_delete,
             forwards_to_persist,
@@ -1826,6 +2014,7 @@ async fn import_from_oxide_inner(
         let PendingConnection {
             connection,
             keychain_entries,
+            managed_key_entries,
             old_keychain_ids,
             forward_ids_to_delete,
             forwards_to_persist,
@@ -1848,11 +2037,28 @@ async fn import_from_oxide_inner(
                 break;
             }
         }
+        if keychain_ok {
+            for entry in &managed_key_entries {
+                if let Err(e) =
+                    config_state.set_managed_keychain_value(&entry.key.secret_id, &entry.secret)
+                {
+                    errors.push(format!(
+                        "Failed to store managed key for {}: {}",
+                        &connection_name, e
+                    ));
+                    keychain_ok = false;
+                    break;
+                }
+            }
+        }
 
         if !keychain_ok {
             // Rollback: try to delete already-written keychain entries for this connection
             for entry in &keychain_entries {
                 let _ = config_state.delete_keychain_value(&entry.id);
+            }
+            for entry in &managed_key_entries {
+                let _ = config_state.delete_managed_keychain_value(&entry.key.secret_id);
             }
             continue;
         }
@@ -1864,12 +2070,24 @@ async fn import_from_oxide_inner(
                     config.groups.push(group);
                 }
             }
+            for entry in &managed_key_entries {
+                if !config
+                    .managed_ssh_keys
+                    .iter()
+                    .any(|key| key.id == entry.key.id)
+                {
+                    config.managed_ssh_keys.push(entry.key.clone());
+                }
+            }
             config.add_connection(connection);
         }) {
             errors.push(format!("Failed to save connection: {}", e));
             // Rollback keychain entries for this connection
             for entry in &keychain_entries {
                 let _ = config_state.delete_keychain_value(&entry.id);
+            }
+            for entry in &managed_key_entries {
+                let _ = config_state.delete_managed_keychain_value(&entry.key.secret_id);
             }
             continue;
         }

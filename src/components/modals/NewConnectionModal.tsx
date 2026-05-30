@@ -60,7 +60,7 @@ type ConnectFormRequest = {
   host: string;
   port: number;
   username: string;
-  authType: 'password' | 'key' | 'default_key' | 'agent' | 'certificate' | 'keyboard_interactive';
+  authType: 'password' | 'key' | 'default_key' | 'managed_key' | 'agent' | 'certificate' | 'keyboard_interactive';
   password?: string;
   keyPath?: string;
   certPath?: string;
@@ -270,7 +270,7 @@ export const NewConnectionModal = () => {
 
   // Type-safe auth type handler
   const handleAuthTypeChange = (value: string) => {
-    if (value === 'password' || value === 'key' || value === 'default_key' || value === 'agent' || value === 'certificate' || value === 'keyboard_interactive') {
+    if (value === 'password' || value === 'key' || value === 'default_key' || value === 'managed_key' || value === 'agent' || value === 'certificate' || value === 'keyboard_interactive') {
       setAuthType(value);
     }
   };
@@ -289,6 +289,7 @@ export const NewConnectionModal = () => {
         setUsername(quickConnectData.username);
         setAuthType(quickConnectData.authType ?? 'password');
         setKeyPath(quickConnectData.keyPath ?? '');
+        setManagedKeyId(quickConnectData.managedKeyId ?? '');
         setCertPath(quickConnectData.certPath ?? '');
         setProxyServers(quickConnectData.proxyChain ?? []);
         setProxyChainExpanded((quickConnectData.proxyChain?.length ?? 0) > 0);
@@ -344,9 +345,10 @@ export const NewConnectionModal = () => {
     host: string; 
     port: string; 
     username: string; 
-    authType: 'password' | 'key' | 'default_key' | 'agent' | 'certificate';
+    authType: 'password' | 'key' | 'default_key' | 'managed_key' | 'agent' | 'certificate';
     password?: string;
     keyPath?: string;
+    managedKeyId?: string;
     certPath?: string;
     passphrase?: string;
     agentForwarding?: boolean;
@@ -359,6 +361,7 @@ export const NewConnectionModal = () => {
       auth_type: server.authType,
       password: server.password,
       key_path: server.keyPath,
+      managed_key_id: server.managedKeyId,
       cert_path: server.certPath,
       passphrase: server.passphrase,
       agent_forwarding: server.agentForwarding,
@@ -373,9 +376,10 @@ export const NewConnectionModal = () => {
 
   const canConnect = () => {
     if (proxyServers.length > 0) {
-      return proxyServers.every(server => server.host && server.username);
+      return proxyServers.every(server => server.host && server.username)
+        && (authType !== 'managed_key' || Boolean(managedKeyId));
     }
-    return host && username;
+    return Boolean(host && username && (authType !== 'managed_key' || managedKeyId));
   };
 
   const handleConnect = async () => {
@@ -402,7 +406,8 @@ export const NewConnectionModal = () => {
         password: authType === 'password' ? password : undefined,
         keyPath: (authType === 'key' || authType === 'certificate') ? keyPath : undefined,
         certPath: authType === 'certificate' ? certPath : undefined,
-        passphrase: (authType === 'key' || authType === 'default_key' || authType === 'certificate') && passphrase ? passphrase : undefined,
+        managedKeyId: authType === 'managed_key' ? managedKeyId : undefined,
+        passphrase: (authType === 'key' || authType === 'default_key' || authType === 'certificate' || authType === 'managed_key') && passphrase ? passphrase : undefined,
         agentForwarding,
         postConnectCommand,
       };
@@ -417,6 +422,7 @@ export const NewConnectionModal = () => {
             authType: hop.auth_type,
             password: hop.password,
             keyPath: hop.key_path,
+            managedKeyId: hop.managed_key_id,
             certPath: hop.cert_path,
             passphrase: hop.passphrase,
             agentForwarding: hop.agent_forwarding,
@@ -428,6 +434,7 @@ export const NewConnectionModal = () => {
             authType: request.authType === 'keyboard_interactive' ? 'password' : request.authType,
             password: request.password,
             keyPath: request.keyPath,
+            managedKeyId: request.managedKeyId,
             certPath: request.certPath,
             passphrase: request.passphrase,
             agentForwarding: request.agentForwarding,
@@ -503,6 +510,7 @@ export const NewConnectionModal = () => {
         password,
         keyPath,
         certPath,
+        managedKeyId,
         passphrase,
         proxyChain: proxyServers.map((hop) => ({
           host: hop.host,
@@ -511,6 +519,7 @@ export const NewConnectionModal = () => {
           authType: hop.auth_type,
           password: hop.password,
           keyPath: hop.key_path,
+          managedKeyId: hop.managed_key_id,
           certPath: hop.cert_path,
           passphrase: hop.passphrase,
         })),
@@ -839,10 +848,11 @@ export const NewConnectionModal = () => {
                 onValueChange={handleAuthTypeChange}
                 className="w-full"
               >
-                <TabsList className="grid w-full grid-cols-6">
+                <TabsList className="grid w-full grid-cols-7">
                   <TabsTrigger value="password">{t('modals.new_connection.auth_password')}</TabsTrigger>
                   <TabsTrigger value="default_key">{t('modals.new_connection.auth_default_key')}</TabsTrigger>
                   <TabsTrigger value="key">{t('modals.new_connection.auth_key')}</TabsTrigger>
+                  <TabsTrigger value="managed_key">{t('modals.new_connection.auth_managed_key')}</TabsTrigger>
                   <TabsTrigger value="certificate">{t('modals.new_connection.auth_certificate')}</TabsTrigger>
                   <TabsTrigger value="agent">{t('modals.new_connection.auth_agent')}</TabsTrigger>
                   <TabsTrigger value="keyboard_interactive" disabled={kbiDisabledForProxyChain}>{t('modals.new_connection.auth_2fa')}</TabsTrigger>
@@ -913,7 +923,16 @@ export const NewConnectionModal = () => {
                     </div>
                   </div>
                 </TabsContent>
-                
+
+                <TabsContent value="managed_key">
+                  <ManagedSshKeySelector
+                    selectedId={managedKeyId}
+                    onSelectedIdChange={setManagedKeyId}
+                    passphrase={passphrase}
+                    onPassphraseChange={setPassphrase}
+                  />
+                </TabsContent>
+
                 <TabsContent value="agent">
                   <div className="text-sm text-theme-text-muted pt-2 space-y-2">
                   <p>{t('modals.new_connection.agent_desc')}</p>

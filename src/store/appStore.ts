@@ -44,8 +44,9 @@ export type QuickConnectData = {
   host: string;
   port: number;
   username: string;
-  authType?: Extract<AuthType, 'key' | 'default_key' | 'agent' | 'certificate'>;
+  authType?: Extract<AuthType, 'key' | 'default_key' | 'managed_key' | 'agent' | 'certificate'>;
   keyPath?: string | null;
+  managedKeyId?: string | null;
   certPath?: string | null;
   proxyChain?: ProxyHopConfig[];
 } | null;

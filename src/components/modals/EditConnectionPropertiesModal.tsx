@@ -31,6 +31,7 @@ import {
 import { open } from '@tauri-apps/plugin-dialog';
 import { api } from '../../lib/api';
 import type { ConnectionInfo, SaveConnectionRequest } from '../../types';
+import { ManagedSshKeySelector } from './ManagedSshKeySelector';
 
 type EditableAuthType = 'password' | 'key' | 'managed_key' | 'agent' | 'certificate';
 
@@ -186,6 +187,7 @@ export const EditConnectionPropertiesModal = ({
     if (!conn || !host || !username) return;
     const draftRequest = duplicateDraftRef.current?.saveRequest;
     const usesKeyMaterial = authType === 'key' || authType === 'certificate';
+    const usesPassphrase = usesKeyMaterial || authType === 'managed_key';
     setSaving(true);
     setError('');
     try {
@@ -204,7 +206,7 @@ export const EditConnectionPropertiesModal = ({
         key_path: usesKeyMaterial ? keyPath : undefined,
         cert_path: authType === 'certificate' ? certPath : undefined,
         managed_key_id: authType === 'managed_key' ? managedKeyId : undefined,
-        passphrase: usesKeyMaterial ? (passphrase || draftRequest?.passphrase) : undefined,
+        passphrase: usesPassphrase ? (passphrase || draftRequest?.passphrase) : undefined,
         color: color || undefined,
         tags: conn.tags,
         agent_forwarding: conn.agent_forwarding ?? draftRequest?.agent_forwarding,
@@ -286,9 +288,10 @@ export const EditConnectionPropertiesModal = ({
           <div className="grid gap-2">
             <Label>{t('sessionManager.edit_properties.auth_type')}</Label>
             <Tabs value={authType} onValueChange={handleAuthTypeChange} className="w-full">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="password">{t('sessionManager.edit_properties.auth_password')}</TabsTrigger>
                 <TabsTrigger value="key">{t('sessionManager.edit_properties.auth_key')}</TabsTrigger>
+                <TabsTrigger value="managed_key">{t('modals.new_connection.auth_managed_key')}</TabsTrigger>
                 <TabsTrigger value="certificate">{t('modals.new_connection.auth_certificate')}</TabsTrigger>
                 <TabsTrigger value="agent">{t('sessionManager.edit_properties.auth_agent')}</TabsTrigger>
               </TabsList>
@@ -356,6 +359,15 @@ export const EditConnectionPropertiesModal = ({
                     />
                   </div>
                 </div>
+              </TabsContent>
+
+              <TabsContent value="managed_key">
+                <ManagedSshKeySelector
+                  selectedId={managedKeyId}
+                  onSelectedIdChange={setManagedKeyId}
+                  passphrase={passphrase}
+                  onPassphraseChange={setPassphrase}
+                />
               </TabsContent>
 
               <TabsContent value="certificate">
@@ -466,7 +478,7 @@ export const EditConnectionPropertiesModal = ({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {t('sessionManager.edit_properties.cancel')}
           </Button>
-          <Button onClick={handleSave} disabled={saving || !host || !username}>
+          <Button onClick={handleSave} disabled={saving || !host || !username || (authType === 'managed_key' && !managedKeyId)}>
             {saving
               ? t(isDuplicateMode ? 'sessionManager.edit_properties.creating' : 'sessionManager.edit_properties.saving')
               : t(isDuplicateMode ? 'sessionManager.edit_properties.create' : 'sessionManager.edit_properties.save')}

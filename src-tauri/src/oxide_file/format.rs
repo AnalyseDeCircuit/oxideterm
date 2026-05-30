@@ -138,6 +138,8 @@ pub struct OxideMetadata {
     pub plugin_settings_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub portable_secret_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_key_count: Option<usize>,
 }
 
 /// Encrypted payload structure
@@ -212,6 +214,21 @@ pub struct EncryptedProxyHop {
     pub auth: EncryptedAuth,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedManagedKeyMetadata {
+    pub key_id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requires_passphrase: Option<bool>,
+}
+
 /// Authentication data (stored encrypted)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -226,6 +243,10 @@ pub enum EncryptedAuth {
         /// Embedded private key content (base64 encoded) for portable backups
         #[serde(default, skip_serializing_if = "Option::is_none")]
         embedded_key: Option<Zeroizing<String>>,
+        /// Managed-key restore metadata. Older clients ignore this field and
+        /// import the embedded key through the existing external-key fallback.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        managed_key: Option<EncryptedManagedKeyMetadata>,
     },
     Certificate {
         key_path: String,
@@ -237,6 +258,8 @@ pub enum EncryptedAuth {
         /// Embedded certificate content (base64 encoded)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         embedded_cert: Option<Zeroizing<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        managed_key: Option<EncryptedManagedKeyMetadata>,
     },
     Agent,
 }
@@ -358,5 +381,53 @@ mod tests {
 
         let result = FileHeader::from_bytes(&bytes);
         assert!(matches!(result, Err(OxideFileError::InvalidMagic)));
+    }
+
+    #[test]
+    fn test_old_key_auth_deserializes_without_managed_metadata() {
+        let json = r#"{
+            "type": "key",
+            "key_path": "~/.ssh/id_ed25519",
+            "passphrase": null,
+            "embedded_key": null
+        }"#;
+
+        let auth: EncryptedAuth = serde_json::from_str(json).unwrap();
+
+        match auth {
+            EncryptedAuth::Key {
+                key_path,
+                managed_key,
+                ..
+            } => {
+                assert_eq!(key_path, "~/.ssh/id_ed25519");
+                assert!(managed_key.is_none());
+            }
+            other => panic!("unexpected auth: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_managed_key_metadata_keeps_key_auth_shape() {
+        let auth = EncryptedAuth::Key {
+            key_path: "managed-SHA256-test.key".to_string(),
+            passphrase: None,
+            embedded_key: Some(Zeroizing::new("base64-private-key".to_string())),
+            managed_key: Some(EncryptedManagedKeyMetadata {
+                key_id: "managed-key-1".to_string(),
+                name: "Imported managed key".to_string(),
+                fingerprint: Some("SHA256:test".to_string()),
+                public_key: Some("ssh-ed25519 AAAA".to_string()),
+                origin: Some("oxide_import".to_string()),
+                requires_passphrase: Some(false),
+            }),
+        };
+
+        let value = serde_json::to_value(auth).unwrap();
+
+        assert_eq!(value["type"], "key");
+        assert_eq!(value["managed_key"]["keyId"], "managed-key-1");
+        assert_eq!(value["managed_key"]["fingerprint"], "SHA256:test");
+        assert!(value.get("embedded_key").is_some());
     }
 }

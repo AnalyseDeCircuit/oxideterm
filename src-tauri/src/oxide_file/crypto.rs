@@ -313,6 +313,7 @@ mod tests {
             quick_command_categories_count: None,
             plugin_settings_count: None,
             portable_secret_count: None,
+            managed_key_count: None,
         }
     }
 

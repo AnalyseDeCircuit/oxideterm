@@ -408,10 +408,11 @@ export interface ProxyHopConfig {
   host: string;
   port: number;
   username: string;
-  auth_type: 'password' | 'key' | 'default_key' | 'agent' | 'certificate';
+  auth_type: 'password' | 'key' | 'default_key' | 'managed_key' | 'agent' | 'certificate';
   password?: string;
   key_path?: string;
   cert_path?: string;
+  managed_key_id?: string;
   passphrase?: string;
   agent_forwarding?: boolean;
 }

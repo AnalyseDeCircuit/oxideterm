@@ -492,19 +492,38 @@ impl ConfigState {
         self.keychain.delete(key).map_err(|e| e.to_string())
     }
 
+    pub(crate) fn set_managed_keychain_value(&self, key: &str, value: &str) -> Result<(), String> {
+        self.ensure_ready()?;
+        self.managed_keychain
+            .store(key, value)
+            .map_err(|e| e.to_string())
+    }
+
+    pub(crate) fn delete_managed_keychain_value(&self, key: &str) -> Result<(), String> {
+        self.ensure_ready()?;
+        self.managed_keychain.delete(key).map_err(|e| e.to_string())
+    }
+
+    pub(crate) fn get_managed_ssh_key_metadata(
+        &self,
+        key_id: &str,
+    ) -> Result<ManagedSshKey, String> {
+        self.ensure_ready()?;
+        self.config
+            .read()
+            .managed_ssh_keys
+            .iter()
+            .find(|key| key.id == key_id)
+            .cloned()
+            .ok_or_else(|| "Managed SSH key not found".to_string())
+    }
+
     pub(crate) fn resolve_managed_ssh_key_private_key(
         &self,
         key_id: &str,
     ) -> Result<Zeroizing<String>, String> {
         self.ensure_ready()?;
-        let secret_id = self
-            .config
-            .read()
-            .managed_ssh_keys
-            .iter()
-            .find(|key| key.id == key_id)
-            .map(|key| key.secret_id.clone())
-            .ok_or_else(|| "Managed SSH key not found".to_string())?;
+        let secret_id = self.get_managed_ssh_key_metadata(key_id)?.secret_id;
 
         // Secret material leaves the managed keychain only at the SSH auth boundary.
         // Callers must decode/use it immediately and must not persist this value.
@@ -790,12 +809,17 @@ fn auth_to_connect_info(
                 None,
             )
         }
-        SavedAuth::ManagedKey { key_id, .. } => (
+        SavedAuth::ManagedKey {
+            key_id,
+            passphrase_keychain_id,
+        } => (
             "managed_key".to_string(),
             None,
             None,
             None,
-            None,
+            passphrase_keychain_id
+                .as_ref()
+                .and_then(|kc_id| keychain.get(kc_id).ok()),
             Some(key_id.clone()),
         ),
         SavedAuth::Agent => ("agent".to_string(), None, None, None, None, None),
@@ -1810,9 +1834,18 @@ fn build_saved_auth(
         "managed_key" => {
             let key_id =
                 managed_key_id.ok_or("Managed key ID required for managed key authentication")?;
+            let passphrase_keychain_id = if let Some(passphrase) = passphrase {
+                let keychain_id = format!("oxide_conn_key_{}", uuid::Uuid::new_v4());
+                keychain
+                    .store(&keychain_id, passphrase)
+                    .map_err(|e| e.to_string())?;
+                Some(keychain_id)
+            } else {
+                None
+            };
             Ok(SavedAuth::ManagedKey {
                 key_id: key_id.to_string(),
-                passphrase_keychain_id: None,
+                passphrase_keychain_id,
             })
         }
         _ => Ok(SavedAuth::Agent),
@@ -1939,10 +1972,12 @@ fn build_saved_auth_for_update(
                 SavedAuth::ManagedKey {
                     key_id: existing_key_id,
                     passphrase_keychain_id,
-                } if existing_key_id == key_id => Ok(SavedAuth::ManagedKey {
-                    key_id: key_id.to_string(),
-                    passphrase_keychain_id: passphrase_keychain_id.clone(),
-                }),
+                } if existing_key_id == key_id && passphrase.is_none() => {
+                    Ok(SavedAuth::ManagedKey {
+                        key_id: key_id.to_string(),
+                        passphrase_keychain_id: passphrase_keychain_id.clone(),
+                    })
+                }
                 _ => build_saved_auth(
                     auth_type,
                     None,
@@ -2111,9 +2146,20 @@ pub async fn save_connection(
                                 .managed_key_id
                                 .as_ref()
                                 .ok_or("Managed key ID required for proxy hop")?;
+                            let passphrase_keychain_id =
+                                if let Some(ref passphrase) = hop_req.passphrase {
+                                    let kc_id = format!("oxide_hop_key_{}", uuid::Uuid::new_v4());
+                                    state
+                                        .keychain
+                                        .store(&kc_id, passphrase)
+                                        .map_err(|e| e.to_string())?;
+                                    Some(kc_id)
+                                } else {
+                                    None
+                                };
                             SavedAuth::ManagedKey {
                                 key_id: key_id.clone(),
-                                passphrase_keychain_id: None,
+                                passphrase_keychain_id,
                             }
                         }
                         "default_key" => {
@@ -2755,7 +2801,7 @@ mod tests {
         assert!(password.is_none());
         assert!(key_path.is_none());
         assert!(cert_path.is_none());
-        assert!(passphrase.is_none());
+        assert_eq!(passphrase.as_deref(), Some("secret-passphrase"));
         assert_eq!(managed_key_id.as_deref(), Some("managed-key-1"));
     }
 

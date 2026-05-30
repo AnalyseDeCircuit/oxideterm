@@ -457,7 +457,8 @@
       "connect": "连接",
       "connecting": "连接中...",
       "connect_failed": "连接失败",
-      "save_failed": "保存连接失败"
+      "save_failed": "保存连接失败",
+      "auth_managed_key": "托管密钥"
     },
     "settings": {
       "title": "设置",
@@ -619,6 +620,35 @@
         "import_host_failed": "导入主机失败: {{error}}",
         "save_api_key_failed": "保存 API 密钥失败: {{error}}",
         "remove_api_key_failed": "移除 API 密钥失败: {{error}}"
+      }
+    },
+    "managed_key": {
+      "selector": {
+        "label": "托管 SSH 密钥",
+        "placeholder": "选择托管密钥",
+        "loading": "正在加载托管密钥...",
+        "refresh": "刷新"
+      },
+      "display_name": "显示名称（可选）",
+      "passphrase": "密钥密码（可选）",
+      "passphrase_placeholder": "加密密钥的密码",
+      "passphrase_hint": "仅当托管密钥被加密时需要。它会用于本次连接；只有保存连接并填写密钥密码时才会保存。",
+      "custody_hint": "托管密钥会存入 OxideTerm 本地钥匙串/便携密钥库。连接配置只保存密钥引用。",
+      "cancel": "取消",
+      "import": "导入",
+      "importing": "正在导入...",
+      "import_file": {
+        "open": "导入密钥文件",
+        "browse_title": "选择 SSH 私钥",
+        "title": "导入托管 SSH 密钥",
+        "description": "将现有私钥复制到 OxideTerm 本地托管密钥库。",
+        "path": "私钥文件"
+      },
+      "paste": {
+        "open": "粘贴私钥",
+        "title": "粘贴托管 SSH 密钥",
+        "description": "粘贴 OpenSSH 私钥。换行会保留用于校验。",
+        "private_key": "私钥"
       }
     }
   }
