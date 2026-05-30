@@ -113,23 +113,23 @@ impl AiOrchestratorRuntimeSnapshot {
             "write_resource" => self.write_resource(&args).await,
             "transfer_resource" => self.transfer_resource(&args).await,
             "get_state" => self.get_state(&args),
-            "recall_preferences" => self.ok(
-                if self.memory.trim().is_empty() {
-                    "No saved preferences."
-                } else {
-                    "Preferences recalled."
-                },
-                if self.memory.trim().is_empty() {
-                    "No saved preferences.".to_string()
-                } else {
-                    self.memory.clone()
-                },
-                serde_json::json!({
-                    "enabled": true,
-                    "content": self.memory,
-                }),
-                "read",
-            ),
+            "recall_preferences" => {
+                let memory_content = ai_memory_trimmed_content(&self.memory);
+                self.ok(
+                    if memory_content.is_empty() {
+                        "No saved preferences."
+                    } else {
+                        "Preferences recalled."
+                    },
+                    if memory_content.is_empty() {
+                        "No saved preferences.".to_string()
+                    } else {
+                        memory_content.to_string()
+                    },
+                    self.memory.clone(),
+                    "read",
+                )
+            }
             "connect_target" | "send_terminal_input" | "open_app_surface" | "remember_preference" => {
                 self.ui_thread_required_action(&tool_name, &args)
             }
@@ -141,7 +141,7 @@ impl AiOrchestratorRuntimeSnapshot {
     fn list_targets(&self, args: &serde_json::Value) -> AiActionResultLite {
         let view =
             normalized_ai_target_view(args.get("view").and_then(serde_json::Value::as_str));
-        let query = args.get("query").and_then(serde_json::Value::as_str).unwrap_or("").to_lowercase();
+        let query = normalized_ai_query(args.get("query").and_then(serde_json::Value::as_str));
         let kind = args.get("kind").and_then(serde_json::Value::as_str).unwrap_or("all");
         let targets = self
             .targets
@@ -209,7 +209,7 @@ impl AiOrchestratorRuntimeSnapshot {
                     })]);
         }
         let view = view_for_ai_intent(intent);
-        let lowered = query.to_lowercase();
+        let lowered = normalized_ai_query(Some(query));
         let select_kind =
             normalized_ai_select_target_kind(args.get("kind").and_then(serde_json::Value::as_str));
         let matches = self
@@ -666,8 +666,70 @@ impl AiOrchestratorRuntimeSnapshot {
                 .with_target(target)
             }
             Err(error) if error.is_channel_recoverable() => {
-                self.fail("Resource read failed.", "resource_read_failed", error.to_string(), "read")
-                    .with_target(target)
+                // Tauri wraps node_sftp_list_dir/node_sftp_preview in
+                // sftp_with_retry!, so AI read_resource must rebuild a stale
+                // shared SFTP channel once before exposing a read failure.
+                let rebuilt = match self.node_router.invalidate_and_reacquire_sftp(&node_id).await {
+                    Ok(shared) => shared,
+                    Err(route_error) => {
+                        return self
+                            .fail(
+                                "Resource read failed.",
+                                "resource_read_failed",
+                                route_error.to_string(),
+                                "read",
+                            )
+                            .with_target(target);
+                    }
+                };
+                let retry = async {
+                    let sftp = rebuilt.lock().await;
+                    if matches!(resource, "directory" | "sftp") {
+                        sftp.list_dir(
+                            path,
+                            Some(oxideterm_sftp::ListFilter {
+                                show_hidden: true,
+                                pattern: None,
+                                sort: oxideterm_sftp::SortOrder::Name,
+                            }),
+                        )
+                        .await
+                        .map(|entries| serde_json::json!(entries))
+                    } else {
+                        sftp.preview(path).await.map(|preview| serde_json::json!(preview))
+                    }
+                }
+                .await;
+                match retry {
+                    Ok(data) => {
+                        let output = truncate_for_model(
+                            serde_json::to_string_pretty(&data).unwrap_or_default(),
+                            12_000,
+                        );
+                        self.ok(
+                            if matches!(resource, "directory" | "sftp") {
+                                format!(
+                                    "Listed {} entries.",
+                                    data.as_array().map(Vec::len).unwrap_or(0)
+                                )
+                            } else {
+                                format!("Read remote file preview {path}.")
+                            },
+                            output,
+                            data,
+                            "read",
+                        )
+                        .with_target(target)
+                    }
+                    Err(retry_error) => self
+                        .fail(
+                            "Resource read failed.",
+                            "resource_read_failed",
+                            retry_error.to_string(),
+                            "read",
+                        )
+                        .with_target(target),
+                }
             }
             Err(error) => self.fail("Resource read failed.", "resource_read_failed", error.to_string(), "read")
                 .with_target(target),
@@ -1751,7 +1813,9 @@ impl AiOrchestratorRuntimeSnapshot {
         meta.insert("durationMs".to_string(), serde_json::json!(duration_ms));
         meta.insert(
             "verified".to_string(),
-            serde_json::json!(result.verified.unwrap_or(result.ok)),
+            serde_json::json!(result.verified.unwrap_or_else(|| {
+                ai_tool_verified_default(result.ok, result.error_message.as_deref())
+            })),
         );
         if let Some(capability) = risk_to_capability(result.risk) {
             meta.insert("capability".to_string(), serde_json::json!(capability));

@@ -10,9 +10,11 @@ struct WorkspaceSshNode {
 #[derive(Clone, Debug)]
 struct PendingSshTerminalOpen {
     node_id: NodeId,
+    post_connect_command: Option<String>,
     saved_connection_id: Option<String>,
     mark_used_connection_id: Option<String>,
     save_after_open: Option<SaveConnectionRequest>,
+    cleanup_node_id: Option<NodeId>,
     title: String,
 }
 

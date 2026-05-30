@@ -678,34 +678,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(conn) = self.connection_store.get(&connection_id).cloned() else {
-            return;
-        };
-        let Some(config) =
-            super::session_manager::ssh_config_from_saved_connection(&self.connection_store, &conn)
-        else {
-            if self.try_reuse_active_saved_connection_terminal(&connection_id, &conn, window, cx) {
-                return;
-            }
-            self.open_saved_connection_prompt(
-                &connection_id,
-                SavedConnectionPromptAction::Connect,
-                Some(
-                    self.i18n
-                        .t("sessionManager.edit_properties.password_placeholder"),
-                ),
-                window,
-                cx,
-            );
-            return;
-        };
-        let _ = self.open_or_create_saved_ssh_terminal_tab(
-            connection_id,
-            config,
-            conn.name.clone(),
-            window,
-            cx,
-        );
+        // Route every palette open through the same saved-connection flow as
+        // the Sessions table so proxy chains use step-by-step host-key
+        // preflight instead of the older direct terminal queue.
+        self.open_saved_connection(&connection_id, window, cx);
     }
 
     fn open_quick_connect_form(

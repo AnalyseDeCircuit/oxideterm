@@ -14,7 +14,7 @@ struct AiOrchestratorRuntimeSnapshot {
     active_session_id: Option<String>,
     active_tab_id: Option<String>,
     active_node_id: Option<String>,
-    memory: String,
+    memory: serde_json::Value,
     health_state: serde_json::Value,
     settings_state: serde_json::Value,
     settings_summary: serde_json::Value,

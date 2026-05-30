@@ -176,6 +176,88 @@ fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
     warnings.push("Migrated AI settings to multi-provider format".to_string());
 }
 
+fn normalize_ai_tool_auto_approve_keys(settings: &mut Value, raw: &Value) {
+    let legacy_write_enabled = raw
+        .get("ai")
+        .and_then(|ai| ai.get("toolUse"))
+        .and_then(|tool_use| tool_use.get("autoApproveTools"))
+        .and_then(|auto_approve| auto_approve.get("write_resource"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    if !legacy_write_enabled {
+        return;
+    }
+
+    let raw_auto_approve = raw
+        .get("ai")
+        .and_then(|ai| ai.get("toolUse"))
+        .and_then(|tool_use| tool_use.get("autoApproveTools"))
+        .and_then(Value::as_object);
+    let Some(auto_approve) = settings
+        .get_mut("ai")
+        .and_then(|ai| ai.get_mut("toolUse"))
+        .and_then(|tool_use| tool_use.get_mut("autoApproveTools"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+
+    // Tauri maps the old broad write_resource approval to both granular write
+    // scopes unless the saved config already chose each granular value.
+    if !raw_auto_approve.is_some_and(|saved| saved.contains_key("write_resource:settings")) {
+        auto_approve.insert("write_resource:settings".to_string(), json!(true));
+    }
+    if !raw_auto_approve.is_some_and(|saved| saved.contains_key("write_resource:file")) {
+        auto_approve.insert("write_resource:file".to_string(), json!(true));
+    }
+}
+
+fn migrate_ai_tool_use_settings(settings: &mut Value, raw: &Value) {
+    let Some(raw_tool_use) = raw
+        .get("ai")
+        .and_then(|ai| ai.get("toolUse"))
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    if raw_tool_use
+        .get("autoApproveTools")
+        .is_some_and(Value::is_object)
+    {
+        return;
+    }
+
+    let old_read_only = raw_tool_use
+        .get("autoApproveReadOnly")
+        .and_then(Value::as_bool)
+        != Some(false);
+    let old_all = raw_tool_use.get("autoApproveAll").and_then(Value::as_bool) == Some(true);
+    let default_tool_use = AiToolUseSettings::default();
+    let auto_approve = default_tool_use
+        .auto_approve_tools
+        .into_iter()
+        .map(|(name, default_value)| {
+            let enabled = old_all || (old_read_only && default_value.as_bool() == Some(true));
+            (name, json!(enabled))
+        })
+        .collect::<Map<String, Value>>();
+
+    let Some(tool_use) = settings
+        .get_mut("ai")
+        .and_then(|ai| ai.get_mut("toolUse"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    tool_use.insert("autoApproveTools".to_string(), Value::Object(auto_approve));
+    tool_use.insert("disabledTools".to_string(), json!([]));
+    tool_use.insert("maxRounds".to_string(), json!(DEFAULT_AI_TOOL_MAX_ROUNDS));
+    // Tauri replaces the old toolUse object, so legacy flags must not survive
+    // into serde flatten extras or settings snapshots.
+    tool_use.remove("autoApproveReadOnly");
+    tool_use.remove("autoApproveAll");
+}
+
 fn normalize_ai_execution_profiles(settings: &mut Value, raw_had_execution_profiles: bool) {
     let Some(ai) = settings.get_mut("ai").and_then(Value::as_object_mut) else {
         return;
@@ -382,6 +464,8 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     }
     normalize_sftp_speed_limit_key(&mut settings, &raw);
     migrate_ai_providers(&mut settings, &mut migration_warnings);
+    migrate_ai_tool_use_settings(&mut settings, &raw);
+    normalize_ai_tool_auto_approve_keys(&mut settings, &raw);
 
     if saved_version < SETTINGS_SCHEMA_VERSION
         && let Some(old_scrollback) = raw
@@ -693,6 +777,120 @@ mod tests {
         .expect("sanitize settings");
 
         assert_eq!(sanitized.settings.sftp.speed_limit_kbps, 4096);
+    }
+
+    #[test]
+    fn legacy_write_resource_auto_approval_expands_like_tauri() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "toolUse": {
+                    "autoApproveTools": {
+                        "write_resource": true
+                    }
+                }
+            }
+        }))
+        .expect("sanitize settings");
+
+        let auto_approve = sanitized.settings.ai.tool_use.auto_approve_tools;
+        assert_eq!(
+            auto_approve
+                .get("write_resource:settings")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            auto_approve
+                .get("write_resource:file")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn explicit_write_resource_subscope_auto_approval_is_preserved() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "toolUse": {
+                    "autoApproveTools": {
+                        "write_resource": true,
+                        "write_resource:file": false
+                    }
+                }
+            }
+        }))
+        .expect("sanitize settings");
+
+        let auto_approve = sanitized.settings.ai.tool_use.auto_approve_tools;
+        assert_eq!(
+            auto_approve
+                .get("write_resource:settings")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            auto_approve
+                .get("write_resource:file")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn legacy_tool_use_read_only_flags_migrate_like_tauri() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "toolUse": {
+                    "enabled": true,
+                    "autoApproveReadOnly": true,
+                    "autoApproveAll": false
+                }
+            }
+        }))
+        .expect("sanitize settings");
+
+        let tool_use = sanitized.settings.ai.tool_use;
+        assert!(tool_use.enabled);
+        assert_eq!(
+            tool_use
+                .auto_approve_tools
+                .get("list_targets")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            tool_use
+                .auto_approve_tools
+                .get("run_command")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(tool_use.disabled_tools.is_empty());
+        assert!(!tool_use.extra.contains_key("autoApproveReadOnly"));
+        assert!(!tool_use.extra.contains_key("autoApproveAll"));
+    }
+
+    #[test]
+    fn legacy_tool_use_auto_approve_all_migrates_like_tauri() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "toolUse": {
+                    "enabled": true,
+                    "autoApproveAll": true
+                }
+            }
+        }))
+        .expect("sanitize settings");
+
+        assert!(
+            sanitized
+                .settings
+                .ai
+                .tool_use
+                .auto_approve_tools
+                .values()
+                .all(|value| value.as_bool() == Some(true))
+        );
     }
 
     #[test]

@@ -1893,6 +1893,7 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::KeyboardInteractive(index) => {
                 if let Some(challenge) = self.keyboard_interactive_challenge.as_mut()
+                    && !challenge.timed_out()
                     && let Some(response) = challenge.responses.get_mut(index)
                 {
                     replace_utf16(response, replacement_range, text);

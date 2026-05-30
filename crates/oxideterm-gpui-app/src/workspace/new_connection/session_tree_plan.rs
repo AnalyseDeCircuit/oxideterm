@@ -1,5 +1,5 @@
-// Phase 2 introduces the Tauri-shaped plan model before Phase 3 wires the
-// executor into the live proxy connection path.
+// Tauri connects expanded proxy chains as a resumable, root-to-target plan:
+// preflight the current node, connect it, then advance to the next step.
 #![allow(dead_code)]
 
 use oxideterm_ssh::{HostKeyStatus, NodeId, NodeTreeExpansion};
@@ -26,11 +26,20 @@ pub(in crate::workspace) struct NativeSessionTreeConnectStep {
     pub(in crate::workspace) port: u16,
     pub(in crate::workspace) trust_host_key: Option<bool>,
     pub(in crate::workspace) expected_host_key_fingerprint: Option<String>,
+    pub(in crate::workspace) preflight_verified: bool,
 }
 
 impl NativeSessionTreeConnectStep {
     pub(in crate::workspace) fn has_accepted_host_key(&self) -> bool {
-        self.trust_host_key.is_some() || self.expected_host_key_fingerprint.is_some()
+        self.trust_host_key.is_some() && self.expected_host_key_fingerprint.is_some()
+    }
+
+    pub(in crate::workspace) fn can_connect_without_preflight(&self) -> bool {
+        // Tauri only skips preflight on a resumed host-key challenge when both
+        // trustHostKey and expectedHostKeyFingerprint are present. A freshly
+        // verified preflight is native-only state used to continue the same
+        // connect loop without adding fake fingerprint data to the plan.
+        self.preflight_verified || self.has_accepted_host_key()
     }
 
     pub(in crate::workspace) fn with_accepted_host_key(
@@ -40,6 +49,7 @@ impl NativeSessionTreeConnectStep {
     ) -> Self {
         self.trust_host_key = Some(trust_host_key);
         self.expected_host_key_fingerprint = Some(expected_host_key_fingerprint.into());
+        self.preflight_verified = false;
         self
     }
 }
@@ -77,6 +87,7 @@ impl NativeSessionTreeConnectPlan {
                 port: endpoint.port,
                 trust_host_key: None,
                 expected_host_key_fingerprint: None,
+                preflight_verified: false,
             })
             .collect::<Vec<_>>();
 
@@ -98,7 +109,7 @@ impl NativeSessionTreeConnectPlan {
             };
         };
 
-        if step.has_accepted_host_key() {
+        if step.can_connect_without_preflight() {
             NativeSessionTreeConnectAction::Connect { step }
         } else {
             NativeSessionTreeConnectAction::Preflight { step }
@@ -121,7 +132,24 @@ impl NativeSessionTreeConnectPlan {
         };
         step.trust_host_key = Some(trust_host_key);
         step.expected_host_key_fingerprint = Some(expected_host_key_fingerprint.into());
+        step.preflight_verified = false;
         Ok(())
+    }
+
+    pub(in crate::workspace) fn mark_current_preflight_verified(&mut self) -> Result<(), String> {
+        let Some(step) = self.steps.get_mut(self.current_index) else {
+            return Err("proxy connect plan has no current step".to_string());
+        };
+        step.preflight_verified = true;
+        step.trust_host_key = None;
+        step.expected_host_key_fingerprint = None;
+        Ok(())
+    }
+
+    pub(in crate::workspace) fn cleanup_root_node_id(&self) -> Option<NodeId> {
+        // Tauri cleanupSessionTreeConnectPlan calls removeNode(cleanupNodeId)
+        // exactly; it does not reinterpret cleanup as "the first step".
+        self.cleanup_node_id.clone()
     }
 
     pub(in crate::workspace) fn challenge_for_current_step(
@@ -232,6 +260,23 @@ mod tests {
     }
 
     #[test]
+    fn session_tree_connect_plan_cleanup_uses_cleanup_node_not_first_step() {
+        let plan = NativeSessionTreeConnectPlan::from_expansion(
+            &expansion(),
+            vec![
+                NativeSessionTreeConnectEndpoint::new("jump-a", 22),
+                NativeSessionTreeConnectEndpoint::new("jump-b", 22),
+                NativeSessionTreeConnectEndpoint::new("target.internal", 22),
+            ],
+            Some(node_id("target")),
+        )
+        .expect("valid plan");
+
+        assert_eq!(plan.cleanup_root_node_id(), Some(node_id("target")));
+        assert_ne!(plan.cleanup_root_node_id(), Some(node_id("hop-1")));
+    }
+
+    #[test]
     fn session_tree_connect_plan_rejects_endpoint_count_mismatch() {
         let error = NativeSessionTreeConnectPlan::from_expansion(
             &expansion(),
@@ -244,15 +289,17 @@ mod tests {
     }
 
     #[test]
-    fn session_tree_connect_step_accepts_verified_preflight_without_fingerprint() {
+    fn session_tree_connect_step_separates_verified_preflight_from_accepted_fingerprint() {
         let step = NativeSessionTreeConnectStep {
             node_id: node_id("hop-1"),
             host: "jump-a".to_string(),
             port: 22,
             trust_host_key: Some(false),
             expected_host_key_fingerprint: None,
+            preflight_verified: false,
         };
-        assert!(step.has_accepted_host_key());
+        assert!(!step.has_accepted_host_key());
+        assert!(!step.can_connect_without_preflight());
 
         assert!(
             step.with_accepted_host_key(false, "SHA256:test")
@@ -305,6 +352,32 @@ mod tests {
                     step.expected_host_key_fingerprint.as_deref(),
                     Some("SHA256:test")
                 );
+            }
+            action => panic!("unexpected action: {action:?}"),
+        }
+    }
+
+    #[test]
+    fn session_tree_connect_plan_connects_verified_step_without_fake_fingerprint() {
+        let mut plan = NativeSessionTreeConnectPlan::from_expansion(
+            &expansion(),
+            vec![
+                NativeSessionTreeConnectEndpoint::new("jump-a", 22),
+                NativeSessionTreeConnectEndpoint::new("jump-b", 22),
+                NativeSessionTreeConnectEndpoint::new("target.internal", 22),
+            ],
+            Some(node_id("target")),
+        )
+        .expect("valid plan");
+        plan.mark_current_preflight_verified()
+            .expect("current step can be marked verified");
+
+        match plan.next_action() {
+            NativeSessionTreeConnectAction::Connect { step } => {
+                assert_eq!(step.node_id, node_id("hop-1"));
+                assert!(step.preflight_verified);
+                assert_eq!(step.trust_host_key, None);
+                assert_eq!(step.expected_host_key_fingerprint, None);
             }
             action => panic!("unexpected action: {action:?}"),
         }

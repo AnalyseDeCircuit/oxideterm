@@ -112,9 +112,9 @@ impl WorkspaceApp {
                     .acquire_sftp(&node_id)
                     .await
                     .map_err(|error| error.to_string())?;
-                let sftp = shared.lock().await;
-                let (_, entries) = sftp
-                    .list_dir_with_cwd(
+                let first_result = {
+                    let sftp = shared.lock().await;
+                    sftp.list_dir_with_cwd(
                         &directory,
                         Some(ListFilter {
                             show_hidden: true,
@@ -123,7 +123,31 @@ impl WorkspaceApp {
                         }),
                     )
                     .await
-                    .map_err(|error| error.to_string())?;
+                };
+                let (_, entries) = match first_result {
+                    Ok(entries) => entries,
+                    Err(error) if error.is_channel_recoverable() => {
+                        // Remote completion uses the same read-only SFTP
+                        // semantics as Tauri node_sftp_list_dir: rebuild a
+                        // stale channel once before dropping suggestions.
+                        let rebuilt = node_router
+                            .invalidate_and_reacquire_sftp(&node_id)
+                            .await
+                            .map_err(|route_error| route_error.to_string())?;
+                        let sftp = rebuilt.lock().await;
+                        sftp.list_dir_with_cwd(
+                            &directory,
+                            Some(ListFilter {
+                                show_hidden: true,
+                                pattern: None,
+                                sort: SortOrder::Name,
+                            }),
+                        )
+                        .await
+                        .map_err(|retry_error| retry_error.to_string())?
+                    }
+                    Err(error) => return Err(error.to_string()),
+                };
                 Ok::<Vec<TerminalPathEntry>, String>(
                     entries
                         .into_iter()

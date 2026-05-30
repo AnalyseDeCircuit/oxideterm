@@ -34,6 +34,7 @@ impl WorkspaceApp {
             tab_id,
             node_id,
             "forwards.messages.created",
+            true,
             move |manager| {
                 Box::pin(async move {
                     let created = manager
@@ -87,6 +88,7 @@ impl WorkspaceApp {
             tab_id,
             node_id,
             "forwards.messages.created",
+            true,
             move |manager| {
                 Box::pin(async move {
                     let created = manager.create_forward_with_health_check(rule, true).await?;
@@ -154,6 +156,7 @@ impl WorkspaceApp {
             tab_id,
             node_id,
             "forwards.messages.updated",
+            true,
             move |manager| {
                 Box::pin(async move {
                     let updated = manager.update_forward(&forward_id, update)?;
@@ -208,6 +211,7 @@ impl WorkspaceApp {
         tab_id: TabId,
         node_id: NodeId,
         message_key: &'static str,
+        sync_saved_forwards_on_success: bool,
         operation: F,
         cx: &mut Context<Self>,
     ) where
@@ -222,7 +226,10 @@ impl WorkspaceApp {
             > + Send
             + 'static,
     {
-        if !self.ensure_node_connection_started(&node_id) {
+        // Tauri gates ForwardsView work on nodeReady and its node_forwarding
+        // commands require an existing forwarding manager; opening this surface
+        // must not become an implicit SSH connect action.
+        if !self.node_is_ready_for_forwarding(&node_id) {
             self.forwarding_view.error = Some(self.i18n.t("forwards.messages.node_not_ready"));
             cx.notify();
             return;
@@ -257,6 +264,7 @@ impl WorkspaceApp {
             let _ = tx.send(ForwardingWorkerResult::Operation {
                 tab_id,
                 message_key,
+                sync_saved_forwards_on_success,
                 binding,
                 result,
             });
@@ -337,7 +345,10 @@ impl WorkspaceApp {
         {
             return;
         }
-        if !self.ensure_node_connection_started(&node_id) {
+        // Port detection follows the same nodeReady gate as Tauri's
+        // usePortDetection hook. A restored Forwards tab should stay passive
+        // until the user reconnects the node explicitly.
+        if !self.node_is_ready_for_forwarding(&node_id) {
             self.forwarding_port_detection_by_node
                 .entry(node_id.clone())
                 .or_default()
@@ -412,6 +423,22 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn node_is_ready_for_forwarding(&self, node_id: &NodeId) -> bool {
+        self.ssh_nodes
+            .get(node_id)
+            .is_some_and(|node| node.readiness == NodeReadiness::Ready)
+            && self
+                .node_router
+                .connection_id_for_node(node_id)
+                .and_then(|connection_id| self.ssh_registry.get(&connection_id))
+                .is_some_and(|handle| {
+                    matches!(
+                        handle.state(),
+                        ConnectionState::Active | ConnectionState::Idle
+                    )
+                })
+    }
+
     pub(super) fn poll_forwarding_worker_results(&mut self, cx: &mut Context<Self>) {
         let mut results = Vec::new();
         while let Ok(result) = self.forwarding_worker_rx.try_recv() {
@@ -422,6 +449,7 @@ impl WorkspaceApp {
                 ForwardingWorkerResult::Operation {
                     tab_id,
                     message_key,
+                    sync_saved_forwards_on_success,
                     binding,
                     result,
                 } => {
@@ -436,7 +464,13 @@ impl WorkspaceApp {
                                 self.forwarding_view.skip_health_check = false;
                                 self.forwarding_view.editing_forward = None;
                                 self.forwarding_view.focused_input = None;
-                                self.queue_cloud_sync_dirty_refresh(cx);
+                                if sync_saved_forwards_on_success {
+                                    // Tauri emits saved-forwards:update only
+                                    // for persisted mutations. A temporary stop
+                                    // preserves the saved rule and must not mark
+                                    // cloud sync dirty by itself.
+                                    self.queue_cloud_sync_dirty_refresh(cx);
+                                }
                             }
                             Err(error) => self.forwarding_view.error = Some(error),
                         }
@@ -484,7 +518,6 @@ impl WorkspaceApp {
                     match status {
                         ForwardStatus::Suspended => {
                             let description = self.i18n.t("forwards.toast.suspended_desc");
-                            self.forwarding_view.error = Some(description.clone());
                             self.push_forward_status_notice(
                                 self.i18n.t("forwards.toast.suspended_title"),
                                 Some(description),
@@ -492,7 +525,6 @@ impl WorkspaceApp {
                             );
                         }
                         ForwardStatus::Error => {
-                            self.forwarding_view.error = error.clone();
                             self.push_forward_status_notice(
                                 self.i18n.t("forwards.toast.error_title"),
                                 error,
@@ -515,10 +547,17 @@ impl WorkspaceApp {
                     if !self.active_forwards_tab_matches_session(&session_id) {
                         continue;
                     }
-                    self.forwarding_view.error = Some(
-                        self.i18n
-                            .t("forwards.toast.session_suspended_desc")
-                            .replace("{{count}}", &forward_ids.len().to_string()),
+                    // Tauri handles sessionSuspended as a toast-only runtime
+                    // event. Keep inline form errors reserved for create/edit
+                    // validation and operation failures.
+                    self.push_forward_status_notice(
+                        self.i18n.t("forwards.toast.session_suspended_title"),
+                        Some(
+                            self.i18n
+                                .t("forwards.toast.session_suspended_desc")
+                                .replace("{{count}}", &forward_ids.len().to_string()),
+                        ),
+                        TerminalNoticeVariant::Warning,
                     );
                     cx.notify();
                 }

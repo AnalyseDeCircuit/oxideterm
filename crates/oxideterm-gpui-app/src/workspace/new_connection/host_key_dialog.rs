@@ -79,11 +79,14 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn cancel_host_key_challenge(&mut self, cx: &mut Context<Self>) {
         self.host_key_challenge = None;
         self.cancel_active_proxy_connect_run();
+        // Tauri HostKeyConfirmDialog cancellation only clears pending
+        // connect/test state. It does not surface a form or session-manager
+        // error for a user-initiated close.
         if let Some(form) = self.new_connection_form.as_mut() {
             form.pending = false;
-            form.error = Some(self.i18n.t("ssh.host_key.cancelled"));
+            form.error = None;
         } else {
-            self.session_manager.status = Some(self.i18n.t("ssh.host_key.cancelled"));
+            self.session_manager.status = None;
         }
         cx.notify();
     }

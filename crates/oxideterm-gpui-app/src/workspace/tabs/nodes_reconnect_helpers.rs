@@ -119,6 +119,13 @@ fn forward_restore_result_detail(
     detail
 }
 
+fn forward_restore_phase_result(_failures: u32) -> PhaseResult {
+    // Tauri treats restore-forwards as a best-effort phase: individual
+    // nodeCreateForward failures are logged, but the reconnect pipeline still
+    // proceeds to transfer and IDE recovery.
+    PhaseResult::Ok
+}
+
 fn forward_type_to_snapshot(forward_type: ForwardType) -> &'static str {
     match forward_type {
         ForwardType::Local => "local",
@@ -265,6 +272,12 @@ mod node_reconnect_helper_tests {
         assert!(detail.starts_with("forward restore failed:"));
         assert!(detail.contains("local 127.0.0.1:8080 -> localhost:3000"));
         assert!(detail.contains("Port already in use"));
+    }
+
+    #[test]
+    fn reconnect_forward_restore_failures_do_not_abort_pipeline_like_tauri() {
+        assert_eq!(forward_restore_phase_result(0), PhaseResult::Ok);
+        assert_eq!(forward_restore_phase_result(2), PhaseResult::Ok);
     }
 
     #[test]

@@ -1,3 +1,6 @@
+const AI_CONNECT_TARGET_TIMEOUT_TICKS: usize = 900;
+const AI_CONNECT_TARGET_POLL_INTERVAL_MS: u64 = 100;
+
 fn ai_sftp_target_for_node(
     node_id: &NodeId,
     node: &WorkspaceSshNode,
@@ -59,6 +62,27 @@ fn ai_connect_result_terminal_target(
         metadata: serde_json::json!({ "terminalType": "terminal" }),
         terminal_buffer: target.terminal_buffer.clone(),
         terminal_screen: target.terminal_screen.clone(),
+        ssh_handle: None,
+    }
+}
+
+fn ai_opened_local_terminal_target(target: &AiOrchestratorTarget) -> AiOrchestratorTarget {
+    let mut refs = BTreeMap::new();
+    if let Some(session_id) = target.refs.get("sessionId") {
+        refs.insert("sessionId".to_string(), session_id.clone());
+    }
+    // Tauri returns a synthetic local-terminal target from open_app_surface,
+    // not the richer target-discovery snapshot that carries tab metadata.
+    AiOrchestratorTarget {
+        id: target.id.clone(),
+        kind: target.kind.clone(),
+        label: target.label.clone(),
+        state: target.state.clone(),
+        capabilities: target.capabilities.clone(),
+        refs,
+        metadata: serde_json::json!({ "terminalType": "local_terminal" }),
+        terminal_buffer: None,
+        terminal_screen: None,
         ssh_handle: None,
     }
 }
@@ -573,7 +597,7 @@ impl WorkspaceApp {
             active_session_id,
             active_tab_id: self.active_tab_id.map(|tab_id| tab_id.0.to_string()),
             active_node_id,
-            memory: settings.ai.memory.content.clone(),
+            memory: ai_memory_settings_json(settings.ai.memory.enabled, &settings.ai.memory.content),
             health_state,
             node_router: self.node_router.clone(),
             sftp_transfer_manager: self.sftp_transfer_manager.clone(),
@@ -706,8 +730,11 @@ impl WorkspaceApp {
         }
         cx.spawn(async move |weak, cx| {
             let mut sender = Some(sender);
-            for _ in 0..50 {
-                Timer::after(Duration::from_millis(100)).await;
+            for _ in 0..AI_CONNECT_TARGET_TIMEOUT_TICKS {
+                // Tauri waits for connectToSaved to finish before returning
+                // connect_target. Keep native's UI-thread bridge patient enough
+                // for slow SSH/proxy chains, while still polling the snapshot.
+                Timer::after(Duration::from_millis(AI_CONNECT_TARGET_POLL_INTERVAL_MS)).await;
                 let ready = weak.update(cx, |this, cx| {
                     this.ai_connect_target_ready_result(
                         &tool_call_id,
@@ -883,7 +910,8 @@ impl WorkspaceApp {
                             error.to_string(),
                             "write",
                         )
-                        .with_target(target),
+                        .with_target(target)
+                        .with_next_actions(ai_ssh_reconnect_failed_next_actions()),
                 }
             }
             "saved-connection" => {
@@ -941,46 +969,41 @@ impl WorkspaceApp {
                 } else {
                     connection.name.clone()
                 };
-                match self.open_or_create_saved_ssh_terminal_tab(
+                // Use the same saved-connection flow as the GUI. Proxy-chain
+                // saved targets must pass through the resumable SessionTree
+                // preflight plan before a terminal is created.
+                self.start_saved_connection_flow(
                     connection_id.clone(),
                     config,
                     title,
                     window,
                     cx,
-                ) {
-                    Ok(()) => {
-                        let refreshed = self.ai_orchestrator_snapshot(cx);
-                        let targets = refreshed
-                            .targets
-                            .iter()
-                            .filter(|candidate| {
-                                candidate.refs.get("connectionId") == Some(&connection_id)
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>();
-                        let output = targets
-                            .iter()
-                            .map(|target| format!("{} — {}", target.id, target.label))
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        refreshed
-                            .ok(
-                                format!("Connected {}.", target.label),
-                                if output.is_empty() {
-                                    format!("Connection requested for {connection_id}.")
-                                } else {
-                                    output
-                                },
-                                serde_json::json!({ "connectionId": connection_id }),
-                                "write",
-                            )
-                            .with_target(target)
-                            .with_targets(targets)
-                    }
-                    Err(error) => snapshot
-                        .fail("Connection failed.", "connect_error", error.to_string(), "write")
-                        .with_target(target),
-                }
+                );
+                let refreshed = self.ai_orchestrator_snapshot(cx);
+                let targets = refreshed
+                    .targets
+                    .iter()
+                    .filter(|candidate| candidate.refs.get("connectionId") == Some(&connection_id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let output = targets
+                    .iter()
+                    .map(|target| format!("{} — {}", target.id, target.label))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                refreshed
+                    .ok(
+                        format!("Connected {}.", target.label),
+                        if output.is_empty() {
+                            format!("Connection requested for {connection_id}.")
+                        } else {
+                            output
+                        },
+                        serde_json::json!({ "connectionId": connection_id }),
+                        "write",
+                    )
+                    .with_target(target)
+                    .with_targets(targets)
             }
             _ => snapshot
                 .fail(
@@ -1097,11 +1120,11 @@ impl WorkspaceApp {
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
         let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str) else {
-            return snapshot.fail_missing_target_id("interactive");
+            return snapshot.fail_missing_target_id(ai_run_command_preflight_risk());
         };
         let Some(target) = snapshot.targets.iter().find(|target| target.id == target_id).cloned()
         else {
-            return snapshot.fail_target_not_found(target_id, "interactive");
+            return snapshot.fail_target_not_found(target_id, ai_run_command_preflight_risk());
         };
         if target_requires_live_state(&target) && target.state != "connected" {
             // Match Tauri's live-target guard before touching terminal session metadata.
@@ -1113,7 +1136,7 @@ impl WorkspaceApp {
                         "{target_id} is {}; run_command requires a connected target.",
                         target.state
                     ),
-                    "interactive",
+                    ai_run_command_preflight_risk(),
                 )
                 .with_target(target);
         }
@@ -1128,7 +1151,7 @@ impl WorkspaceApp {
                 "Command is required.",
                 "missing_command",
                 "run_command requires a command.",
-                "interactive",
+                ai_run_command_preflight_risk(),
             );
         };
         let Some(session_id) = target
@@ -1217,7 +1240,7 @@ impl WorkspaceApp {
             let result = snapshot.to_executed_tool_result(
                 tool_call_id,
                 tool_name,
-                snapshot.fail_missing_target_id("interactive"),
+                snapshot.fail_missing_target_id(ai_run_command_preflight_risk()),
                 started.elapsed().as_millis(),
             );
             let _ = sender.send(result);
@@ -1228,7 +1251,7 @@ impl WorkspaceApp {
             let result = snapshot.to_executed_tool_result(
                 tool_call_id,
                 tool_name,
-                snapshot.fail_target_not_found(target_id, "interactive"),
+                snapshot.fail_target_not_found(target_id, ai_run_command_preflight_risk()),
                 started.elapsed().as_millis(),
             );
             let _ = sender.send(result);
@@ -1247,7 +1270,7 @@ impl WorkspaceApp {
                             "{target_id} is {}; run_command requires a connected target.",
                             target.state
                         ),
-                        "interactive",
+                        ai_run_command_preflight_risk(),
                     )
                     .with_target(target.clone())
                     .with_next_actions(recovery_actions_for_target(&target)),
@@ -1270,7 +1293,7 @@ impl WorkspaceApp {
                     "Command is required.",
                     "missing_command",
                     "run_command requires a command.",
-                    "interactive",
+                    ai_run_command_preflight_risk(),
                 ),
                 started.elapsed().as_millis(),
             );
@@ -1594,7 +1617,7 @@ impl WorkspaceApp {
                                     .and_then(serde_json::Value::as_str)
                                     == Some("local_terminal")
                         })
-                        .cloned();
+                        .map(ai_opened_local_terminal_target);
                     refreshed
                         .ok(
                             "Opened local terminal.",

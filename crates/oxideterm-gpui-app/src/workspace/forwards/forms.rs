@@ -247,6 +247,7 @@ impl WorkspaceApp {
                     tab_id,
                     node_id.clone(),
                     "forwards.messages.deleted",
+                    true,
                     move |manager| {
                         Box::pin(async move {
                             manager.delete_forward(&delete_id).await?;

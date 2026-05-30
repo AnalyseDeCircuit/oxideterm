@@ -1,10 +1,11 @@
 use gpui::{
-    AnyElement, Context, KeyDownEvent, MouseButton, ParentElement, Styled, Window, div, prelude::*,
-    px, rgb,
+    AnyElement, Context, KeyDownEvent, MouseButton, ParentElement, Styled, Timer, Window, div,
+    prelude::*, px, rgb, rgba,
 };
 use oxideterm_ssh::{
     KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, SshPromptError,
 };
+use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
 use crate::workspace::WorkspaceApp;
@@ -17,10 +18,13 @@ use oxideterm_gpui_ui::{
     text_input, text_input_anchor_probe,
 };
 
+const KBI_PROMPT_TIMEOUT_SECS: u64 = 60;
+
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
     request: KeyboardInteractivePromptRequest,
     pub(in crate::workspace) responses: KeyboardInteractiveResponses,
     pub(in crate::workspace) focused_prompt: usize,
+    expires_at: Instant,
     response_tx: Option<oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>>,
 }
 
@@ -35,8 +39,23 @@ impl KeyboardInteractiveChallenge {
             request,
             responses,
             focused_prompt: 0,
+            expires_at: Instant::now() + Duration::from_secs(KBI_PROMPT_TIMEOUT_SECS),
             response_tx: Some(response_tx),
         }
+    }
+
+    pub(in crate::workspace) fn timed_out(&self) -> bool {
+        Instant::now() >= self.expires_at
+    }
+
+    fn seconds_left(&self) -> u64 {
+        self.expires_at
+            .saturating_duration_since(Instant::now())
+            .as_secs()
+    }
+
+    fn all_responses_filled(&self) -> bool {
+        self.responses.iter().all(|response| !response.is_empty())
     }
 }
 
@@ -48,13 +67,57 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(existing) = self.keyboard_interactive_challenge.as_ref()
+            && existing.request.flow_id != request.flow_id
+        {
+            // Tauri keeps the active GlobalKbiDialog owner and cancels a
+            // competing auth flow instead of letting a later prompt steal the
+            // dialog from the flow the user is already answering.
+            let _ = response_tx.send(Err(SshPromptError::Cancelled));
+            return;
+        }
+        if let Some(mut existing) = self.keyboard_interactive_challenge.take()
+            && let Some(existing_tx) = existing.response_tx.take()
+        {
+            // A same-flow replacement is unexpected for the native oneshot
+            // bridge, but closing the old sender prevents a stale prompt from
+            // waiting until the transport-side KBI timeout.
+            let _ = existing_tx.send(Err(SshPromptError::Cancelled));
+        }
         self.prepare_modal_interaction_boundary();
         self.keyboard_interactive_challenge =
             Some(KeyboardInteractiveChallenge::new(request, response_tx));
+        self.keyboard_interactive_timer_generation =
+            self.keyboard_interactive_timer_generation.wrapping_add(1);
+        self.schedule_keyboard_interactive_timer(self.keyboard_interactive_timer_generation, cx);
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
         cx.notify();
+    }
+
+    fn schedule_keyboard_interactive_timer(&self, generation: u64, cx: &mut Context<Self>) {
+        cx.spawn(async move |weak, cx| {
+            loop {
+                Timer::after(Duration::from_secs(1)).await;
+                let keep_ticking = weak
+                    .update(cx, |this, cx| {
+                        let Some(challenge) = this.keyboard_interactive_challenge.as_ref() else {
+                            return false;
+                        };
+                        if this.keyboard_interactive_timer_generation != generation {
+                            return false;
+                        }
+                        cx.notify();
+                        !challenge.timed_out()
+                    })
+                    .unwrap_or(false);
+                if !keep_ticking {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(in crate::workspace) fn handle_keyboard_interactive_key(
@@ -82,7 +145,9 @@ impl WorkspaceApp {
                 true
             }
             "enter" => {
-                self.submit_keyboard_interactive_challenge(window, cx);
+                if !challenge.timed_out() && challenge.all_responses_filled() {
+                    self.submit_keyboard_interactive_challenge(window, cx);
+                }
                 true
             }
             "tab" => {
@@ -102,7 +167,9 @@ impl WorkspaceApp {
                 true
             }
             "backspace" => {
-                if let Some(response) = challenge.responses.get_mut(challenge.focused_prompt) {
+                if !challenge.timed_out()
+                    && let Some(response) = challenge.responses.get_mut(challenge.focused_prompt)
+                {
                     response.pop();
                 }
                 self.new_connection_caret_visible = true;
@@ -117,6 +184,9 @@ impl WorkspaceApp {
         let Some(challenge) = self.keyboard_interactive_challenge.as_mut() else {
             return;
         };
+        if challenge.timed_out() {
+            return;
+        }
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
@@ -137,6 +207,13 @@ impl WorkspaceApp {
         let Some(mut challenge) = self.keyboard_interactive_challenge.take() else {
             return;
         };
+        if challenge.timed_out() || !challenge.all_responses_filled() {
+            self.keyboard_interactive_challenge = Some(challenge);
+            cx.notify();
+            return;
+        }
+        self.keyboard_interactive_timer_generation =
+            self.keyboard_interactive_timer_generation.wrapping_add(1);
         if let Some(response_tx) = challenge.response_tx.take() {
             let _ = response_tx.send(Ok(challenge.responses));
         }
@@ -153,6 +230,8 @@ impl WorkspaceApp {
         let Some(mut challenge) = self.keyboard_interactive_challenge.take() else {
             return;
         };
+        self.keyboard_interactive_timer_generation =
+            self.keyboard_interactive_timer_generation.wrapping_add(1);
         if let Some(response_tx) = challenge.response_tx.take() {
             let _ = response_tx.send(Err(SshPromptError::Cancelled));
         }
@@ -176,6 +255,9 @@ impl WorkspaceApp {
         } else {
             challenge.request.name.clone()
         };
+        let timed_out = challenge.timed_out();
+        let seconds_left = challenge.seconds_left();
+        let can_submit = !timed_out && challenge.all_responses_filled();
 
         let mut prompt_list = div()
             .flex()
@@ -294,6 +376,37 @@ impl WorkspaceApp {
                             .flex()
                             .flex_col()
                             .gap(px(self.tokens.metrics.modal_body_gap))
+                            .child(
+                                div()
+                                    .rounded(px(self.tokens.radii.sm))
+                                    .border_1()
+                                    .border_color(if seconds_left <= 15 {
+                                        rgba(0xef444480)
+                                    } else {
+                                        rgb(theme.border)
+                                    })
+                                    .bg(if seconds_left <= 15 {
+                                        rgba(0x7f1d1d40)
+                                    } else {
+                                        rgba((theme.bg_hover << 8) | 0x80)
+                                    })
+                                    .px(px(12.0))
+                                    .py(px(8.0))
+                                    .text_size(px(self.tokens.metrics.form_text_font_size))
+                                    .text_color(if seconds_left <= 15 {
+                                        rgb(0xef4444)
+                                    } else {
+                                        rgb(theme.text_muted)
+                                    })
+                                    .child(if timed_out {
+                                        self.i18n.t("modals.kbi.timeout")
+                                    } else {
+                                        self.i18n_replace(
+                                            "modals.kbi.time_remaining",
+                                            &[("seconds", seconds_left.to_string())],
+                                        )
+                                    }),
+                            )
                             .child(prompt_list),
                     )
                     .child(
@@ -312,12 +425,14 @@ impl WorkspaceApp {
                                 self.i18n.t("ssh.form.cancel"),
                                 false,
                                 false,
+                                false,
                                 cx,
                             ))
                             .child(self.render_keyboard_interactive_button(
                                 self.i18n.t("ssh.kbi.continue"),
                                 true,
                                 true,
+                                !can_submit,
                                 cx,
                             )),
                     ),
@@ -330,6 +445,7 @@ impl WorkspaceApp {
         label: String,
         _primary: bool,
         submit: bool,
+        disabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let variant = if submit {
@@ -348,7 +464,7 @@ impl WorkspaceApp {
                     variant,
                     size: ButtonSize::Sm,
                     radius: ButtonRadius::Md,
-                    disabled: false,
+                    disabled,
                 },
                 height: Some(self.tokens.metrics.form_button_height),
                 padding_x: Some(self.tokens.metrics.form_button_padding_x),
@@ -356,6 +472,9 @@ impl WorkspaceApp {
                 ..ToolbarButtonOptions::default()
             },
             cx.listener(move |this, _event, window, cx| {
+                if disabled {
+                    return;
+                }
                 if submit {
                     this.submit_keyboard_interactive_challenge(window, cx);
                 } else {

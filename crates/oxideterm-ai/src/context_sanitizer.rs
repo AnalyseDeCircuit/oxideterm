@@ -72,7 +72,22 @@ pub fn sanitize_for_ai(text: &str) -> String {
         .replace_all(&result, format!("${{1}}{REDACTED}"))
         .into_owned();
     result = KEY_VALUE_SECRET
-        .replace_all(&result, format!("${{1}}{REDACTED}"))
+        .replace_all(&result, |captures: &regex::Captures<'_>| {
+            let full_match = captures
+                .get(0)
+                .map(|value| value.as_str())
+                .unwrap_or_default();
+            let prefix = captures
+                .get(1)
+                .map(|value| value.as_str())
+                .unwrap_or_default();
+            let value = full_match.strip_prefix(prefix).unwrap_or_default();
+            if is_tauri_type_annotation_value(prefix, value) {
+                full_match.to_string()
+            } else {
+                format!("{prefix}{REDACTED}")
+            }
+        })
         .into_owned();
     result = JSON_DOUBLE_QUOTED_SECRET
         .replace_all(&result, format!("${{1}}{REDACTED}${{2}}"))
@@ -104,6 +119,32 @@ pub fn sanitize_for_ai(text: &str) -> String {
     CONNECTION_PASSWORD
         .replace_all(&result, format!("${{1}}{REDACTED}${{3}}"))
         .into_owned()
+}
+
+fn is_tauri_type_annotation_value(prefix: &str, value: &str) -> bool {
+    if !prefix.trim_end().ends_with(':') {
+        return false;
+    }
+    let normalized = value
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_end_matches(',')
+        .trim();
+    matches!(
+        normalized,
+        "string"
+            | "number"
+            | "boolean"
+            | "any"
+            | "unknown"
+            | "never"
+            | "void"
+            | "null"
+            | "undefined"
+            | "Buffer"
+            | "Uint8Array"
+    )
 }
 
 pub fn sanitize_api_messages_for_provider(messages: Vec<AiChatMessage>) -> Vec<AiChatMessage> {

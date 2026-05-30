@@ -389,6 +389,7 @@ impl WorkspaceApp {
                     tab_id,
                     node_id.clone(),
                     "forwards.messages.created",
+                    true,
                     move |manager| {
                         Box::pin(async move {
                             let created = match label_key {
@@ -670,6 +671,7 @@ impl WorkspaceApp {
                                     tab_id,
                                     node_id.clone(),
                                     "forwards.messages.stopped",
+                                    false,
                                     move |manager| {
                                         Box::pin(async move {
                                             manager.stop_forward(&forward_id).await.map(|_| ())
@@ -699,6 +701,7 @@ impl WorkspaceApp {
                                         tab_id,
                                         node_id.clone(),
                                         "forwards.messages.restarted",
+                                        true,
                                         move |manager| {
                                             Box::pin(async move {
                                                 let restarted =

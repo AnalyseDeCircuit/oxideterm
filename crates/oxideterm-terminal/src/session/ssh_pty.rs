@@ -124,11 +124,18 @@ impl SshPtySession {
 
         match result {
             Ok(handle) => {
+                let auth_banner_prelude = handle.take_auth_banner_prelude();
                 self.handle = Some(handle);
                 let _ = self.send_command(SshTransportCommand::Resize {
                     cols: self.resize.cols as u16,
                     rows: self.resize.rows as u16,
                 });
+                if !auth_banner_prelude.is_empty() {
+                    // Tauri prepends SSH authentication banners when the first
+                    // visible terminal becomes ready; consume them before any
+                    // post-connect input so the login notice keeps that order.
+                    self.feed_transport_output(&auth_banner_prelude);
+                }
                 match self.config.post_connect_input() {
                     Ok(Some(payload)) => {
                         let _ = self.send_command(SshTransportCommand::Data(payload));

@@ -177,6 +177,7 @@ pub(super) enum ForwardingWorkerResult {
     Operation {
         tab_id: TabId,
         message_key: &'static str,
+        sync_saved_forwards_on_success: bool,
         binding: Option<(String, String, ConnectionConsumer)>,
         result: Result<(), String>,
     },
