@@ -416,7 +416,7 @@ fn parses_provider_model_payloads() {
                 "data": [{"id": "gpt-4o-mini"}, {"id": "gpt-4o-mini"}, {"id": "gpt-4o"}]
             })
         ),
-        vec!["gpt-4o", "gpt-4o-mini"]
+        vec!["gpt-4o", "gpt-4o-mini", "gpt-4o-mini"]
     );
     assert_eq!(
         parse_provider_models(
@@ -443,10 +443,10 @@ fn parses_provider_model_payloads() {
         parse_provider_models(
             "openai_compatible",
             &serde_json::json!({
-                "models": [{"key": "model-b"}, {"id": "model-a"}]
+                "models": [{"key": "model-b"}, {"id": "model-a"}, {"id": ""}, {"id": "  spaced"}]
             })
         ),
-        vec!["model-a", "model-b"]
+        vec!["  spaced", "model-a", "model-b"]
     );
 }
 
@@ -458,7 +458,9 @@ fn parses_provider_context_windows() {
             &serde_json::json!({
                 "data": [
                     {"id": "model-a", "context_window": 32768},
-                    {"id": "model-b", "context_length": 8192}
+                    {"id": "model-b", "context_length": 8192},
+                    {"id": "model-zero", "context_window": 0},
+                    {"id": "model-negative", "context_length": -1}
                 ]
             })
         ),
@@ -2338,6 +2340,31 @@ fn gemini_messages_merge_roles_and_system_instruction() {
     assert_eq!(contents[0]["parts"][0]["text"], "one");
     assert_eq!(contents[0]["parts"][1]["text"], "two");
     assert_eq!(contents[1]["role"], "model");
+}
+
+#[test]
+fn gemini_system_instruction_keeps_tauri_empty_message_semantics() {
+    let messages = vec![
+        chat_message("1", AiChatRole::System, "sys"),
+        chat_message("2", AiChatRole::System, ""),
+        chat_message("3", AiChatRole::User, "one"),
+    ];
+    let (system, _) = gemini_chat_contents(&messages);
+    assert_eq!(system.as_deref(), Some("sys\n\n"));
+
+    let messages = vec![
+        chat_message("1", AiChatRole::System, ""),
+        chat_message("2", AiChatRole::System, "sys"),
+        chat_message("3", AiChatRole::User, "one"),
+    ];
+    let (system, _) = gemini_chat_contents(&messages);
+    assert_eq!(system.as_deref(), Some("sys"));
+
+    let body = gemini_chat_body(
+        &test_stream_config("gemini"),
+        &[chat_message("1", AiChatRole::System, "")],
+    );
+    assert!(body.get("system_instruction").is_none());
 }
 
 #[test]

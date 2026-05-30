@@ -58,7 +58,7 @@ pub(crate) async fn stream_gemini_completion(
 pub(crate) fn gemini_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMessage]) -> Value {
     let (system_instruction, contents) = gemini_chat_contents(messages);
     let mut body = serde_json::json!({ "contents": contents });
-    if let Some(system) = system_instruction
+    if let Some(system) = system_instruction.filter(|system| !system.is_empty())
         && let Some(object) = body.as_object_mut()
     {
         object.insert(
@@ -89,15 +89,23 @@ pub(crate) fn gemini_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMe
 }
 
 pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String>, Vec<Value>) {
-    let mut system_parts = Vec::new();
+    let mut system_instruction: Option<String> = None;
     let mut contents = Vec::<Value>::new();
     let mut tool_names_by_id = HashMap::<String, String>::new();
     for message in messages {
         match message.role {
-            AiChatRole::System if !message.content.is_empty() => {
-                system_parts.push(message.content.clone());
+            AiChatRole::System => {
+                system_instruction = Some(match system_instruction {
+                    // Gemini's Tauri adapter uses JavaScript truthiness here:
+                    // an empty previous system prompt is replaced, while a
+                    // non-empty one keeps the "\n\n" separator even for empty
+                    // later system prompts.
+                    Some(current) if !current.is_empty() => {
+                        format!("{current}\n\n{}", message.content)
+                    }
+                    _ => message.content.clone(),
+                });
             }
-            AiChatRole::System => {}
             AiChatRole::Tool => {
                 let name = message
                     .tool_call_id
@@ -158,8 +166,7 @@ pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String
             serde_json::json!({ "role": "user", "parts": [{ "text": "(Continue)" }] }),
         );
     }
-    let system = (!system_parts.is_empty()).then(|| system_parts.join("\n\n"));
-    (system, contents)
+    (system_instruction, contents)
 }
 
 fn gemini_tool_definitions(tools: &[AiToolDefinition]) -> Vec<Value> {

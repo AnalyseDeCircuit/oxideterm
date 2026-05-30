@@ -46,6 +46,7 @@ pub(crate) fn parse_provider_models(provider_type: &str, payload: &Value) -> Vec
                     .and_then(Value::as_str)
                     .map(str::to_string)
             })
+            .filter(|model| !model.is_empty())
             .collect::<Vec<_>>(),
         "openai" => payload
             .get("data")
@@ -78,7 +79,7 @@ pub(crate) fn parse_provider_models(provider_type: &str, payload: &Value) -> Vec
             .filter_map(|model| model.get("id").and_then(Value::as_str).map(str::to_string))
             .collect::<Vec<_>>(),
     };
-    let mut models = dedupe_non_empty(models);
+    let mut models = models;
     if models.is_empty() && provider_type == "openai" {
         models = payload
             .get("data")
@@ -87,7 +88,6 @@ pub(crate) fn parse_provider_models(provider_type: &str, payload: &Value) -> Vec
             .flatten()
             .filter_map(|model| model.get("id").and_then(Value::as_str).map(str::to_string))
             .collect();
-        models = dedupe_non_empty(models);
     }
     models.sort();
     models
@@ -122,7 +122,11 @@ pub(crate) fn parse_provider_context_windows(
                 else {
                     continue;
                 };
-                if let Some(ctx) = model.get("inputTokenLimit").and_then(Value::as_i64) {
+                if let Some(ctx) = model
+                    .get("inputTokenLimit")
+                    .and_then(Value::as_i64)
+                    .filter(|ctx| *ctx > 0)
+                {
                     result.insert(id.to_string(), ctx);
                 }
             }
@@ -141,6 +145,7 @@ pub(crate) fn parse_provider_context_windows(
                     .get("context_window")
                     .or_else(|| model.get("input_token_limit"))
                     .and_then(Value::as_i64)
+                    .filter(|ctx| *ctx > 0)
                 {
                     result.insert(id.to_string(), ctx);
                 }
@@ -159,6 +164,7 @@ pub(crate) fn parse_provider_context_windows(
                     .get("context_window")
                     .or_else(|| model.get("context_length"))
                     .and_then(Value::as_i64)
+                    .filter(|ctx| *ctx > 0)
                 {
                     result.insert(id.to_string(), ctx);
                 }
@@ -166,15 +172,4 @@ pub(crate) fn parse_provider_context_windows(
         }
     }
     result
-}
-
-fn dedupe_non_empty(models: Vec<String>) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    models
-        .into_iter()
-        .filter_map(|model| {
-            let model = model.trim().to_string();
-            (!model.is_empty() && seen.insert(model.clone())).then_some(model)
-        })
-        .collect()
 }

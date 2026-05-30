@@ -70,7 +70,7 @@ fn anthropic_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMessage]) 
             serde_json::json!({ "type": "enabled", "budget_tokens": thinking_budget }),
         );
     }
-    if let Some(system) = system
+    if let Some(system) = system.filter(|system| !system.is_empty())
         && let Some(object) = body.as_object_mut()
     {
         object.insert("system".to_string(), serde_json::json!(system));
@@ -145,25 +145,39 @@ fn anthropic_thinking_budget(config: &AiChatStreamConfig) -> Option<i64> {
 }
 
 pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<String>, Vec<Value>) {
-    let mut system_parts = Vec::new();
+    let mut system: Option<String> = None;
     let mut converted = Vec::<(String, Value)>::new();
     for message in messages {
         match message.role {
-            AiChatRole::System if !message.content.is_empty() => {
-                system_parts.push(message.content.clone());
+            AiChatRole::System => {
+                system = Some(match system {
+                    // Match Tauri's JS truthiness when folding system prompts:
+                    // an empty accumulated prompt is replaced, while a
+                    // non-empty prompt keeps separators even for empty input.
+                    Some(current) if !current.is_empty() => {
+                        format!("{current}\n\n{}", message.content)
+                    }
+                    _ => message.content.clone(),
+                });
             }
-            AiChatRole::System => {}
             AiChatRole::User => {
                 converted.push(("user".to_string(), Value::String(message.content.clone())))
             }
-            AiChatRole::Tool => converted.push((
-                "user".to_string(),
-                serde_json::json!([{
+            AiChatRole::Tool => {
+                let mut tool_result = serde_json::json!({
                     "type": "tool_result",
-                    "tool_use_id": message.tool_call_id.as_deref().unwrap_or_default(),
                     "content": message.content,
-                }]),
-            )),
+                });
+                if let Some(tool_call_id) = message.tool_call_id.as_ref()
+                    && let Some(object) = tool_result.as_object_mut()
+                {
+                    object.insert(
+                        "tool_use_id".to_string(),
+                        Value::String(tool_call_id.clone()),
+                    );
+                }
+                converted.push(("user".to_string(), Value::Array(vec![tool_result])));
+            }
             AiChatRole::Assistant => {
                 let calls = message
                     .tool_calls
@@ -226,7 +240,6 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
         .into_iter()
         .map(|(role, content)| serde_json::json!({ "role": role, "content": content }))
         .collect::<Vec<_>>();
-    let system = (!system_parts.is_empty()).then(|| system_parts.join("\n\n"));
     (system, messages)
 }
 
@@ -530,6 +543,72 @@ mod tests {
             converted[2]["content"][0]["tool_use_id"].as_str(),
             Some("call-1")
         );
+    }
+
+    #[test]
+    fn anthropic_system_and_missing_tool_call_id_match_tauri_json() {
+        let system = AiChatMessage {
+            id: "s1".to_string(),
+            role: AiChatRole::System,
+            content: "sys".to_string(),
+            timestamp_ms: 1,
+            model: None,
+            context: None,
+            thinking_content: None,
+            is_streaming: false,
+            metadata: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: None,
+            suggestions: Vec::new(),
+        };
+        let empty_system = AiChatMessage {
+            id: "s2".to_string(),
+            role: AiChatRole::System,
+            content: String::new(),
+            timestamp_ms: 2,
+            model: None,
+            context: None,
+            thinking_content: None,
+            is_streaming: false,
+            metadata: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: None,
+            suggestions: Vec::new(),
+        };
+        let tool = AiChatMessage {
+            id: "t1".to_string(),
+            role: AiChatRole::Tool,
+            content: "{\"ok\":true}".to_string(),
+            timestamp_ms: 3,
+            model: None,
+            context: None,
+            thinking_content: None,
+            is_streaming: false,
+            metadata: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: None,
+            suggestions: Vec::new(),
+        };
+
+        let (system_prompt, converted) =
+            anthropic_chat_messages(&[system.clone(), empty_system.clone(), tool]);
+        assert_eq!(system_prompt.as_deref(), Some("sys\n\n"));
+        assert!(converted[0]["content"][0].get("tool_use_id").is_none());
+
+        let body = anthropic_chat_body(&config("off", 4096), &[empty_system]);
+        assert!(body.get("system").is_none());
     }
 
     #[test]

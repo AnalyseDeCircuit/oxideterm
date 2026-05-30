@@ -110,16 +110,24 @@ pub(crate) fn openai_chat_messages(
     messages: &[AiChatMessage],
 ) -> Vec<Value> {
     let mut system_parts = Vec::new();
-    let mut normalized = Vec::new();
+    let mut non_system = Vec::new();
     for message in messages {
         match message.role {
             AiChatRole::System if !message.content.is_empty() => {
                 system_parts.push(message.content.clone());
             }
             AiChatRole::System => {}
-            _ => normalized.push(message),
+            _ => non_system.push(message),
         }
     }
+
+    // Tauri only normalizes system messages when there is at least one
+    // non-empty system prompt; all-empty system messages are sent as-is.
+    let normalized = if system_parts.is_empty() {
+        messages.iter().collect::<Vec<_>>()
+    } else {
+        non_system
+    };
 
     let last_user_index = normalized
         .iter()
@@ -128,57 +136,7 @@ pub(crate) fn openai_chat_messages(
     let mut out = normalized
         .iter()
         .enumerate()
-        .map(|(index, message)| match message.role {
-            AiChatRole::User => serde_json::json!({
-                "role": "user",
-                "content": message.content,
-            }),
-            AiChatRole::Tool => serde_json::json!({
-                "role": "tool",
-                "tool_call_id": message.tool_call_id.as_deref().unwrap_or_default(),
-                "content": message.content,
-            }),
-            AiChatRole::Assistant => {
-                let calls = tool_calls_from_message(message);
-                if calls.is_empty() {
-                    serde_json::json!({
-                        "role": "assistant",
-                        "content": message.content,
-                    })
-                } else {
-                    let mut assistant = serde_json::json!({
-                        "role": "assistant",
-                        "content": if message.content.is_empty() {
-                            Value::Null
-                        } else {
-                            Value::String(message.content.clone())
-                        },
-                        "tool_calls": calls
-                            .into_iter()
-                            .map(|call| serde_json::json!({
-                                "id": call.id,
-                                "type": "function",
-                                "function": {
-                                    "name": call.name,
-                                    "arguments": call.arguments,
-                                },
-                            }))
-                            .collect::<Vec<_>>(),
-                    });
-                    if let Some(reasoning) = message.thinking_content.as_ref()
-                        && should_preserve_reasoning_content(config, index, last_user_index)
-                        && let Some(object) = assistant.as_object_mut()
-                    {
-                        object.insert(
-                            "reasoning_content".to_string(),
-                            Value::String(reasoning.clone()),
-                        );
-                    }
-                    assistant
-                }
-            }
-            AiChatRole::System => unreachable!("system messages are merged before conversion"),
-        })
+        .map(|(index, message)| openai_message_value(config, message, index, last_user_index))
         .collect::<Vec<_>>();
     if !system_parts.is_empty() {
         out.insert(
@@ -190,6 +148,78 @@ pub(crate) fn openai_chat_messages(
         );
     }
     out
+}
+
+fn openai_message_value(
+    config: &AiChatStreamConfig,
+    message: &AiChatMessage,
+    index: usize,
+    last_user_index: usize,
+) -> Value {
+    match message.role {
+        AiChatRole::User => serde_json::json!({
+            "role": "user",
+            "content": message.content,
+        }),
+        AiChatRole::System => serde_json::json!({
+            "role": "system",
+            "content": message.content,
+        }),
+        AiChatRole::Tool => {
+            let mut tool = serde_json::json!({
+                "role": "tool",
+                "content": message.content,
+            });
+            if let Some(tool_call_id) = message.tool_call_id.as_ref()
+                && let Some(object) = tool.as_object_mut()
+            {
+                object.insert(
+                    "tool_call_id".to_string(),
+                    Value::String(tool_call_id.clone()),
+                );
+            }
+            tool
+        }
+        AiChatRole::Assistant => {
+            let calls = tool_calls_from_message(message);
+            if calls.is_empty() {
+                serde_json::json!({
+                    "role": "assistant",
+                    "content": message.content,
+                })
+            } else {
+                let mut assistant = serde_json::json!({
+                    "role": "assistant",
+                    "content": if message.content.is_empty() {
+                        Value::Null
+                    } else {
+                        Value::String(message.content.clone())
+                    },
+                    "tool_calls": calls
+                        .into_iter()
+                        .map(|call| serde_json::json!({
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.name,
+                                "arguments": call.arguments,
+                            },
+                        }))
+                        .collect::<Vec<_>>(),
+                });
+                if let Some(reasoning) = message.thinking_content.as_ref()
+                    && should_preserve_reasoning_content(config, index, last_user_index)
+                    && let Some(object) = assistant.as_object_mut()
+                {
+                    object.insert(
+                        "reasoning_content".to_string(),
+                        Value::String(reasoning.clone()),
+                    );
+                }
+                assistant
+            }
+        }
+    }
 }
 
 fn should_preserve_reasoning_content(
@@ -212,6 +242,27 @@ fn tool_calls_from_message(message: &AiChatMessage) -> Vec<AiToolCall> {
 mod tests {
     use super::*;
     use crate::{AiPolicySafetyMode, AiToolUsePolicy};
+
+    fn message(role: AiChatRole, content: &str) -> AiChatMessage {
+        AiChatMessage {
+            id: format!("message-{content}"),
+            role,
+            content: content.to_string(),
+            timestamp_ms: 1,
+            model: None,
+            context: None,
+            thinking_content: None,
+            is_streaming: false,
+            metadata: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: None,
+            suggestions: Vec::new(),
+        }
+    }
 
     fn config(provider_type: &str, reasoning_effort: &str) -> AiChatStreamConfig {
         AiChatStreamConfig {
@@ -333,5 +384,43 @@ mod tests {
         );
         assert_eq!(converted[1]["role"].as_str(), Some("tool"));
         assert_eq!(converted[1]["tool_call_id"].as_str(), Some("call-1"));
+    }
+
+    #[test]
+    fn openai_tool_message_omits_missing_call_id_like_tauri_json() {
+        let tool = message(AiChatRole::Tool, "{\"ok\":true}");
+        let converted = openai_chat_messages(&config("openai", "auto"), &[tool]);
+
+        assert_eq!(converted[0]["role"].as_str(), Some("tool"));
+        assert_eq!(converted[0]["content"].as_str(), Some("{\"ok\":true}"));
+        assert!(converted[0].get("tool_call_id").is_none());
+    }
+
+    #[test]
+    fn openai_empty_system_message_branch_matches_tauri_merge_semantics() {
+        let config = config("openai", "auto");
+        let converted = openai_chat_messages(
+            &config,
+            &[
+                message(AiChatRole::System, ""),
+                message(AiChatRole::User, "hello"),
+            ],
+        );
+        assert_eq!(converted[0]["role"].as_str(), Some("system"));
+        assert_eq!(converted[0]["content"].as_str(), Some(""));
+        assert_eq!(converted[1]["role"].as_str(), Some("user"));
+
+        let converted = openai_chat_messages(
+            &config,
+            &[
+                message(AiChatRole::System, ""),
+                message(AiChatRole::System, "real system"),
+                message(AiChatRole::User, "hello"),
+            ],
+        );
+        assert_eq!(converted.len(), 2);
+        assert_eq!(converted[0]["role"].as_str(), Some("system"));
+        assert_eq!(converted[0]["content"].as_str(), Some("real system"));
+        assert_eq!(converted[1]["role"].as_str(), Some("user"));
     }
 }
