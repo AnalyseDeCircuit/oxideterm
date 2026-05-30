@@ -771,4 +771,79 @@ mod tests {
         assert!(target.get("local-id").is_some());
         assert!(target.get("remote-id").is_none());
     }
+
+    #[test]
+    fn connection_store_data_deserializes_missing_managed_keys_as_empty() {
+        let data: ConnectionStoreData = serde_json::from_value(serde_json::json!({
+            "version": CONFIG_VERSION,
+            "connections": [],
+            "groups": [],
+            "recent": []
+        }))
+        .unwrap();
+
+        assert!(data.managed_ssh_keys.is_empty());
+    }
+
+    #[test]
+    fn managed_ssh_key_metadata_round_trips_without_private_key() {
+        let now = Utc::now();
+        let data = ConnectionStoreData {
+            managed_ssh_keys: vec![ManagedSshKey {
+                id: "managed-key-1".to_string(),
+                secret_id: "managed-key-secret-1".to_string(),
+                name: "Production deploy key".to_string(),
+                fingerprint: "SHA256:test".to_string(),
+                public_key: "ssh-ed25519 AAAATEST".to_string(),
+                requires_passphrase: true,
+                origin: ManagedSshKeyOrigin::ImportedFile,
+                created_at: now,
+                updated_at: now,
+            }],
+            ..ConnectionStoreData::default()
+        };
+
+        let value = serde_json::to_value(&data).unwrap();
+
+        assert_eq!(value["managed_ssh_keys"][0]["id"], "managed-key-1");
+        assert_eq!(value["managed_ssh_keys"][0]["origin"], "imported_file");
+        assert!(value.to_string().contains("ssh-ed25519 AAAATEST"));
+        assert!(!value.to_string().contains("PRIVATE KEY"));
+
+        let round_trip: ConnectionStoreData = serde_json::from_value(value).unwrap();
+        assert_eq!(round_trip.managed_ssh_keys, data.managed_ssh_keys);
+    }
+
+    #[test]
+    fn managed_key_connection_info_exposes_reference_only() {
+        let conn = SavedConnection {
+            id: "conn-1".to_string(),
+            version: CONFIG_VERSION,
+            name: "Managed".to_string(),
+            group: None,
+            host: "example.com".to_string(),
+            port: 22,
+            username: "deploy".to_string(),
+            auth: SavedAuth::ManagedKey {
+                key_id: "managed-key-1".to_string(),
+                passphrase_keychain_id: Some("kc-managed-pass".to_string()),
+            },
+            proxy_chain: Vec::new(),
+            options: ConnectionOptions::default(),
+            created_at: Utc::now(),
+            last_used_at: None,
+            updated_at: None,
+            color: None,
+            tags: Vec::new(),
+            post_connect_command: None,
+        };
+
+        let info = ConnectionInfo::from(&conn);
+
+        assert_eq!(info.auth_type, AuthType::ManagedKey);
+        assert_eq!(info.managed_key_id.as_deref(), Some("managed-key-1"));
+        assert!(info.managed_key_name.is_none());
+        assert!(info.key_path.is_none());
+        assert!(info.cert_path.is_none());
+    }
 }

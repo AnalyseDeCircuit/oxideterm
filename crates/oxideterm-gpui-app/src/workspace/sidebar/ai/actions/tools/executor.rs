@@ -105,6 +105,8 @@ impl AiOrchestratorRuntimeSnapshot {
     ) -> AiExecutedToolResult {
         let started = std::time::Instant::now();
         let result = match tool_name.as_str() {
+            "list_mcp_resources" => self.list_mcp_resources(),
+            "read_mcp_resource" => self.read_mcp_resource(&args).await,
             "list_targets" => self.list_targets(&args),
             "select_target" => self.select_target(&args),
             "run_command" => self.run_command(&args).await,
@@ -133,9 +135,138 @@ impl AiOrchestratorRuntimeSnapshot {
             "connect_target" | "send_terminal_input" | "open_app_surface" | "remember_preference" => {
                 self.ui_thread_required_action(&tool_name, &args)
             }
+            _ if oxideterm_ai::is_mcp_tool_name(&tool_name) => {
+                self.call_mcp_tool(&tool_name, args).await
+            }
             _ => self.fail("Unknown orchestrator tool.", "unknown_tool", format!("{tool_name} is not an OxideSens task tool."), "read"),
         };
         self.to_executed_tool_result(tool_call_id, tool_name, result, started.elapsed().as_millis())
+    }
+
+    fn list_mcp_resources(&self) -> AiActionResultLite {
+        let resources = self.ai_mcp_registry.resources();
+        if resources.is_empty() {
+            return self.ok(
+                "No MCP resources available.",
+                "No MCP resources available. Either no MCP servers are connected, or none expose resources.",
+                serde_json::json!([]),
+                "read",
+            );
+        }
+        let data = resources
+            .iter()
+            .map(|(resource, server_id, server_name)| {
+                serde_json::json!({
+                    "serverId": server_id,
+                    "serverName": server_name,
+                    "uri": resource.uri,
+                    "name": resource.name,
+                    "description": resource.description,
+                    "mimeType": resource.mime_type,
+                })
+            })
+            .collect::<Vec<_>>();
+        let output = resources
+            .iter()
+            .map(|(resource, server_id, server_name)| {
+                let mime = resource
+                    .mime_type
+                    .as_deref()
+                    .map(|mime| format!(" [{mime}]"))
+                    .unwrap_or_default();
+                let description = resource
+                    .description
+                    .as_deref()
+                    .map(|description| format!(" — {description}"))
+                    .unwrap_or_default();
+                format!(
+                    "[{server_name}] {} ({}){mime}{description}  server_id={server_id}",
+                    resource.name, resource.uri
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.ok(
+            format!("Found {} MCP resource{}.", resources.len(), if resources.len() == 1 { "" } else { "s" }),
+            output,
+            serde_json::Value::Array(data),
+            "read",
+        )
+    }
+
+    async fn read_mcp_resource(&self, args: &serde_json::Value) -> AiActionResultLite {
+        let server_id = args
+            .get("server_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let uri = args
+            .get("uri")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if server_id.is_empty() || uri.is_empty() {
+            return self.fail(
+                "MCP resource arguments are required.",
+                "missing_mcp_resource_args",
+                "Both server_id and uri are required.",
+                "read",
+            );
+        }
+        match self.ai_mcp_registry.read_resource(server_id, uri).await {
+            Ok(content) => {
+                let (output, truncated) = oxideterm_ai::mcp_resource_output(&content);
+                self.ok(
+                    format!("Read MCP resource {uri}."),
+                    output,
+                    serde_json::json!(content),
+                    "read",
+                )
+                .with_verified(!truncated)
+            }
+            Err(error) => self.fail(
+                "MCP resource read failed.",
+                "mcp_resource_read_failed",
+                error.to_string(),
+                "read",
+            ),
+        }
+    }
+
+    async fn call_mcp_tool(
+        &self,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> AiActionResultLite {
+        match self.ai_mcp_registry.call_prefixed_tool(tool_name, args).await {
+            Ok(result) => {
+                let (success, output, truncated) = oxideterm_ai::mcp_tool_output(&result);
+                if success {
+                    self.ok(
+                        format!("Executed MCP tool {tool_name}."),
+                        output,
+                        serde_json::json!(result),
+                        "write",
+                    )
+                    .with_verified(!truncated)
+                } else {
+                    self.fail(
+                        "MCP tool returned an error.",
+                        "mcp_tool_error",
+                        if output.is_empty() {
+                            "MCP tool returned an error with no message.".to_string()
+                        } else {
+                            output
+                        },
+                        "write",
+                    )
+                }
+            }
+            Err(error) => self.fail(
+                "MCP tool execution failed.",
+                "mcp_tool_execution_failed",
+                error.to_string(),
+                "write",
+            ),
+        }
     }
 
     fn list_targets(&self, args: &serde_json::Value) -> AiActionResultLite {
@@ -506,12 +637,7 @@ impl AiOrchestratorRuntimeSnapshot {
                 .with_target(target);
         }
         if target.kind == "rag-index" || resource == "rag" {
-            let query = args
-                .get("query")
-                .or_else(|| args.get("path"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .trim();
+            let query = ai_rag_query_arg(args);
             let results = oxideterm_ai::rag_search(
                 &self.rag_store,
                 oxideterm_ai::RagSearchRequest {

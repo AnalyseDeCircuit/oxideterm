@@ -127,10 +127,11 @@ pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String
                 }
                 for call in message.tool_calls.iter().filter_map(AiToolCall::from_value) {
                     tool_names_by_id.insert(call.id.clone(), call.name.clone());
+                    // Tauri passes any successfully parsed JSON value through
+                    // to Gemini functionCall.args; only parse failures become
+                    // an empty object.
                     let args = serde_json::from_str::<Value>(&call.arguments)
-                        .ok()
-                        .filter(Value::is_object)
-                        .unwrap_or_else(|| serde_json::json!({}));
+                        .unwrap_or_else(|_| serde_json::json!({}));
                     parts.push(serde_json::json!({
                         "functionCall": { "name": call.name, "args": args },
                     }));
@@ -243,7 +244,7 @@ pub(crate) fn parse_gemini_data_line(line: &str) -> ParsedStreamLine {
                     .to_string();
                 let arguments = function_call
                     .get("args")
-                    .filter(|args| args.is_object())
+                    .filter(|args| gemini_js_truthy(args))
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}))
                     .to_string();
@@ -258,6 +259,19 @@ pub(crate) fn parse_gemini_data_line(line: &str) -> ParsedStreamLine {
     ParsedStreamLine {
         events,
         saw_frame: true,
+    }
+}
+
+fn gemini_js_truthy(value: &Value) -> bool {
+    // Tauri uses `part.functionCall.args || {}` before JSON.stringify. Mirror
+    // JavaScript truthiness for JSON values so arrays/objects are preserved
+    // while null, false, zero, and empty string fall back to `{}`.
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64() != Some(0.0),
+        Value::String(value) => !value.is_empty(),
+        Value::Array(_) | Value::Object(_) => true,
     }
 }
 

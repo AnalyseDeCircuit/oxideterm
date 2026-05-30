@@ -42,6 +42,7 @@ struct TopologyNodeConfig {
 enum TopologyAuthType {
     Password,
     Key,
+    ManagedKey,
     Certificate,
     Agent,
 }
@@ -51,6 +52,7 @@ impl TopologyAuthType {
         match self {
             Self::Password => "sessionManager.auto_route.auth.password",
             Self::Key => "sessionManager.auto_route.auth.key",
+            Self::ManagedKey => "sessionManager.auto_route.auth.managed_key",
             Self::Certificate => "sessionManager.auto_route.auth.certificate",
             Self::Agent => "sessionManager.auto_route.auth.agent",
         }
@@ -60,6 +62,7 @@ impl TopologyAuthType {
         match self {
             Self::Password => "password",
             Self::Key => "key",
+            Self::ManagedKey => "managed_key",
             Self::Certificate => "certificate",
             Self::Agent => "agent",
         }
@@ -363,7 +366,9 @@ impl WorkspaceApp {
                 }
             }
             TopologyAuthType::Agent => AuthMethod::Agent,
-            TopologyAuthType::Certificate => {
+            TopologyAuthType::ManagedKey | TopologyAuthType::Certificate => {
+                // Managed keys need the encrypted key resolver; until that slice lands,
+                // topology drill-down must not guess a filesystem key path.
                 return Err(self
                     .i18n
                     .t("sessionManager.auto_route.errors.unsupported_auth")
@@ -1111,6 +1116,7 @@ fn topology_auth_type(auth: &SavedAuth) -> TopologyAuthType {
     match auth {
         SavedAuth::Password { .. } => TopologyAuthType::Password,
         SavedAuth::Key { .. } => TopologyAuthType::Key,
+        SavedAuth::ManagedKey { .. } => TopologyAuthType::ManagedKey,
         SavedAuth::Certificate { .. } => TopologyAuthType::Certificate,
         SavedAuth::Agent => TopologyAuthType::Agent,
     }

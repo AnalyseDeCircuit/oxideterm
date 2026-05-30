@@ -172,7 +172,9 @@ fn count_auth_preflight(
         match auth.auth_type() {
             AuthType::Password => result.connections_with_passwords += 1,
             AuthType::Agent => result.connections_with_agent += 1,
-            AuthType::Key | AuthType::Certificate => result.connections_with_keys += 1,
+            AuthType::Key | AuthType::ManagedKey | AuthType::Certificate => {
+                result.connections_with_keys += 1
+            }
         }
     }
     if !embed_keys {
@@ -305,6 +307,9 @@ fn export_auth(
                 None
             },
         }),
+        SavedAuth::ManagedKey { .. } => Err(OxideFileError::InvalidFormat(
+            "Managed key .oxide export is not implemented in this slice".to_string(),
+        )),
         SavedAuth::Agent => Ok(EncryptedAuth::Agent),
     }
 }

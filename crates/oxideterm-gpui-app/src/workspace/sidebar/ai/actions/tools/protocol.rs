@@ -1293,6 +1293,19 @@ mod tests {
     }
 
     #[test]
+    fn rag_query_arg_preserves_tauri_nullish_without_trim() {
+        assert_eq!(
+            ai_rag_query_arg(&serde_json::json!({ "query": "  keep spaces  ", "path": "fallback" })),
+            "  keep spaces  "
+        );
+        assert_eq!(
+            ai_rag_query_arg(&serde_json::json!({ "path": "  fallback path  " })),
+            "  fallback path  "
+        );
+        assert_eq!(ai_rag_query_arg(&serde_json::json!({})), "");
+    }
+
+    #[test]
     fn transfer_directory_detection_accepts_tauri_separators() {
         assert!(ai_transfer_path_looks_directory("/tmp/project/"));
         assert!(ai_transfer_path_looks_directory(r"C:\Users\me\Downloads\"));

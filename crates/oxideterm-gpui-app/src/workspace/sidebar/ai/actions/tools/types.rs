@@ -23,6 +23,7 @@ struct AiOrchestratorRuntimeSnapshot {
     agent_fs: NodeAgentIdeFileSystem,
     backend_runtime: std::sync::Arc<tokio::runtime::Runtime>,
     rag_store: std::sync::Arc<oxideterm_ai::RagStore>,
+    ai_mcp_registry: oxideterm_ai::McpRegistry,
     ai_key_store: oxideterm_ai::AiProviderKeyStore,
     ai_providers: Vec<serde_json::Value>,
     ai_embedding_config: Option<serde_json::Value>,
