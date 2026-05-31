@@ -77,6 +77,63 @@ impl ConnectionStore {
             .with_context(|| format!("failed to write {}", self.path.display()))
     }
 
+    fn data_dir(&self) -> Result<&Path> {
+        self.path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("invalid connections store path"))
+    }
+
+    fn store_managed_ssh_key_secret(
+        &self,
+        secret_id: &str,
+        secret: &SecretString,
+    ) -> Result<ManagedSshKeySecretWrite> {
+        match self.managed_keychain.store(secret_id, secret) {
+            Ok(()) => Ok(ManagedSshKeySecretWrite {
+                created_config_key: false,
+            }),
+            Err(_keychain_error) => {
+                let _ = self.managed_keychain.delete(secret_id);
+                let (config_key, created_config_key) = get_or_create_config_encryption_key()?;
+                write_managed_ssh_key_secret_file(self.data_dir()?, secret_id, secret, &config_key)?;
+                Ok(ManagedSshKeySecretWrite { created_config_key })
+            }
+        }
+    }
+
+    fn get_managed_ssh_key_secret(&self, secret_id: &str) -> Result<SecretString> {
+        match self.managed_keychain.get(secret_id) {
+            Ok(secret) => Ok(secret),
+            Err(keychain_error) => {
+                let config_key = load_config_encryption_key()?.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Managed SSH key secret unavailable from keychain ({keychain_error:#}) and local config key is missing"
+                    )
+                })?;
+                read_managed_ssh_key_secret_file(self.data_dir()?, secret_id, &config_key)
+                    .with_context(|| {
+                        format!(
+                            "managed SSH key secret unavailable from keychain ({keychain_error:#}) or encrypted file"
+                        )
+                    })
+            }
+        }
+    }
+
+    fn delete_managed_ssh_key_secret(&self, secret_id: &str) -> Result<()> {
+        let keychain_result = self.managed_keychain.delete(secret_id);
+        let file_result = delete_managed_ssh_key_secret_file(self.data_dir()?, secret_id);
+
+        match (keychain_result, file_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(_keychain_error), Ok(())) => Ok(()),
+            (Ok(()), Err(file_error)) => Err(file_error),
+            (Err(keychain_error), Err(file_error)) => Err(anyhow::anyhow!(
+                "failed to delete managed SSH key secret from keychain ({keychain_error:#}) and encrypted file ({file_error:#})"
+            )),
+        }
+    }
+
     pub fn upsert(&mut self, request: SaveConnectionRequest) -> Result<ConnectionInfo> {
         let group = normalize_optional_group_name(request.group.as_deref())?;
         let now = Utc::now();
@@ -462,14 +519,16 @@ impl ConnectionStore {
         let original_managed_keychain = self.snapshot_managed_keychain_entries(&original_data);
         let mut touched_keychain_ids = HashSet::new();
         let mut touched_managed_secret_ids = HashSet::new();
+        let mut created_managed_secret_config_key = false;
         let mut stale_old_keychain_ids = HashSet::new();
         let mut imported_ids = Vec::new();
 
         let result = (|| {
             for managed_key in managed_keys {
                 touched_managed_secret_ids.insert(managed_key.key.secret_id.clone());
-                self.managed_keychain
-                    .store(&managed_key.key.secret_id, &managed_key.secret)?;
+                let secret_write =
+                    self.store_managed_ssh_key_secret(&managed_key.key.secret_id, &managed_key.secret)?;
+                created_managed_secret_config_key |= secret_write.created_config_key;
                 self.data
                     .managed_ssh_keys
                     .retain(|candidate| candidate.id != managed_key.key.id);
@@ -494,6 +553,9 @@ impl ConnectionStore {
                 &touched_managed_secret_ids,
                 &original_managed_keychain,
             );
+            if created_managed_secret_config_key {
+                rollback_created_config_key();
+            }
             return Err(error);
         }
 
@@ -672,7 +734,7 @@ impl ConnectionStore {
             self.data.managed_ssh_keys.push(removed);
             return Err(error);
         }
-        self.managed_keychain.delete(&removed.secret_id)?;
+        self.delete_managed_ssh_key_secret(&removed.secret_id)?;
         Ok(ManagedSshKeyDeleteResult {
             deleted: true,
             key_id: id.to_string(),
@@ -689,9 +751,9 @@ impl ConnectionStore {
             .map(|key| key.secret_id.clone())
             .ok_or_else(|| anyhow::anyhow!("Managed SSH key not found"))?;
 
-        // Secret material leaves the managed keychain only at the SSH auth boundary.
+        // Secret material leaves the managed backend only at the SSH auth boundary.
         // Callers must decode/use it immediately and must not persist this value.
-        self.managed_keychain.get(&secret_id)
+        self.get_managed_ssh_key_secret(&secret_id)
     }
 
     fn create_managed_ssh_key(
@@ -716,9 +778,9 @@ impl ConnectionStore {
 
         let id = Uuid::new_v4().to_string();
         let secret_id = format!("managed-key-{id}");
-        // Private key material crosses into the portable-aware secret backend here;
-        // ConnectionStoreData keeps only metadata and the keychain account id.
-        self.managed_keychain.store(&secret_id, &private_key)?;
+        // Private key material crosses into the managed secret backend here;
+        // ConnectionStoreData keeps only metadata and the secret id.
+        let secret_write = self.store_managed_ssh_key_secret(&secret_id, &private_key)?;
 
         let now = Utc::now();
         let key = ManagedSshKey {
@@ -736,7 +798,10 @@ impl ConnectionStore {
         self.data.managed_ssh_keys.push(key);
         if let Err(error) = self.save() {
             if let Some(removed) = self.data.managed_ssh_keys.pop() {
-                let _ = self.managed_keychain.delete(&removed.secret_id);
+                let _ = self.delete_managed_ssh_key_secret(&removed.secret_id);
+                if secret_write.created_config_key {
+                    rollback_created_config_key();
+                }
             }
             return Err(error);
         }
@@ -1001,7 +1066,7 @@ impl ConnectionStore {
         data.managed_ssh_keys
             .iter()
             .map(|key| {
-                let value = self.managed_keychain.get(&key.secret_id).ok();
+                let value = self.get_managed_ssh_key_secret(&key.secret_id).ok();
                 (key.secret_id.clone(), value)
             })
             .collect()
@@ -1032,10 +1097,10 @@ impl ConnectionStore {
         for secret_id in touched_secret_ids {
             match original_keychain.get(secret_id) {
                 Some(Some(secret)) => {
-                    let _ = self.managed_keychain.store(secret_id, secret);
+                    let _ = self.store_managed_ssh_key_secret(secret_id, secret);
                 }
                 Some(None) | None => {
-                    let _ = self.managed_keychain.delete(secret_id);
+                    let _ = self.delete_managed_ssh_key_secret(secret_id);
                 }
             }
         }

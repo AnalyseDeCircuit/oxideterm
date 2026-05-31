@@ -932,6 +932,31 @@ mod tests {
     }
 
     #[test]
+    fn managed_key_secret_file_round_trips_large_private_key_material() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "oxideterm-managed-key-secret-{}",
+            Uuid::new_v4()
+        ));
+        let config_key = [42u8; CONFIG_ENCRYPTION_KEY_LEN];
+        let secret_id = "managed-key-large-rsa";
+        let private_key = SecretString::from(format!(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n{}\n-----END OPENSSH PRIVATE KEY-----\n",
+            "A".repeat(4096)
+        ));
+
+        write_managed_ssh_key_secret_file(&data_dir, secret_id, &private_key, &config_key).unwrap();
+
+        let secret_path = managed_ssh_key_secret_file_path(&data_dir, secret_id).unwrap();
+        let secret_file = fs::read_to_string(secret_path).unwrap();
+        assert!(!secret_file.contains(private_key.expose_secret()));
+
+        let restored = read_managed_ssh_key_secret_file(&data_dir, secret_id, &config_key).unwrap();
+        assert_eq!(restored, private_key);
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
     fn managed_key_create_rejects_invalid_key_without_echoing_secret() {
         let mut store = load_empty_store("managed-key-invalid");
         let marker = "not-a-private-key-secret-marker";

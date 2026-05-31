@@ -636,7 +636,7 @@ impl Render for WorkspaceApp {
                 self.new_connection_form
                     .as_ref()
                     .is_some_and(|form| form.jump_server_form.is_some()),
-                |root| root.child(self.render_add_jump_server_modal(cx)),
+                |root| root.child(self.render_add_jump_server_modal(window, cx)),
             )
             .when_some(
                 self.render_new_connection_select_overlay(window, cx),

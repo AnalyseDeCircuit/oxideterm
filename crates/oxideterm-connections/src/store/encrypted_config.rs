@@ -5,6 +5,11 @@ const CONFIG_ENCRYPTION_KEY_LEN: usize = 32;
 const CONFIG_ENCRYPTION_NONCE_LEN: usize = 12;
 const CONFIG_KEYCHAIN_SERVICE: &str = "com.oxideterm.config";
 const CONFIG_KEYCHAIN_ID: &str = "local-config-master-key";
+const MANAGED_SSH_KEY_SECRET_DIR: &str = "managed-ssh-key-secrets";
+const MANAGED_SSH_KEY_SECRET_FILE_FORMAT: &str = "oxideterm.managed-ssh-key-secret.encrypted";
+const MANAGED_SSH_KEY_SECRET_FILE_VERSION: u32 = 1;
+const MANAGED_SSH_KEY_SECRET_FILE_ALGORITHM: &str = "chacha20poly1305";
+const MANAGED_SSH_KEY_SECRET_NONCE_LEN: usize = 12;
 #[cfg(target_os = "macos")]
 const MACOS_KEYCHAIN_COMMAND_TIMEOUT_SECS: u64 = 30;
 
@@ -34,6 +39,19 @@ struct EncryptedConfigEnvelope {
     algorithm: String,
     nonce: String,
     ciphertext: String,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ManagedSshKeySecretEnvelope {
+    format: String,
+    version: u32,
+    algorithm: String,
+    nonce: String,
+    ciphertext: String,
+}
+
+struct ManagedSshKeySecretWrite {
+    created_config_key: bool,
 }
 
 fn decode_connection_store_data(bytes: &[u8]) -> Result<LoadedConnectionStoreData> {
@@ -88,6 +106,148 @@ fn encode_connection_store_data(
         }
         ConnectionStoreStorageFormat::Missing | ConnectionStoreStorageFormat::Plaintext => {
             serde_json::to_vec_pretty(data).context("failed to serialize connections")
+        }
+    }
+}
+
+fn validate_managed_ssh_key_secret_id(secret_id: &str) -> Result<()> {
+    let valid = !secret_id.is_empty()
+        && secret_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+
+    if valid {
+        Ok(())
+    } else {
+        bail!("Invalid managed SSH key secret ID")
+    }
+}
+
+fn managed_ssh_key_secret_file_path(data_dir: &Path, secret_id: &str) -> Result<PathBuf> {
+    validate_managed_ssh_key_secret_id(secret_id)?;
+    Ok(data_dir
+        .join(MANAGED_SSH_KEY_SECRET_DIR)
+        .join(format!("{secret_id}.json")))
+}
+
+fn encrypt_managed_ssh_key_secret(
+    private_key: &SecretString,
+    key: &[u8; CONFIG_ENCRYPTION_KEY_LEN],
+) -> Result<ManagedSshKeySecretEnvelope> {
+    let mut nonce = [0u8; MANAGED_SSH_KEY_SECRET_NONCE_LEN];
+    let mut rng = rand::rngs::OsRng;
+    rand::RngCore::fill_bytes(&mut rng, &mut nonce);
+
+    let cipher = chacha20poly1305::ChaCha20Poly1305::new_from_slice(key)
+        .context("failed to initialize managed SSH key secret cipher")?;
+    let ciphertext = chacha20poly1305::aead::Aead::encrypt(
+        &cipher,
+        chacha20poly1305::Nonce::from_slice(&nonce),
+        private_key.expose_secret().as_bytes(),
+    )
+    .map_err(|_| anyhow::anyhow!("failed to encrypt managed SSH key secret"))?;
+
+    use base64::Engine as _;
+    Ok(ManagedSshKeySecretEnvelope {
+        format: MANAGED_SSH_KEY_SECRET_FILE_FORMAT.to_string(),
+        version: MANAGED_SSH_KEY_SECRET_FILE_VERSION,
+        algorithm: MANAGED_SSH_KEY_SECRET_FILE_ALGORITHM.to_string(),
+        nonce: base64::engine::general_purpose::STANDARD.encode(nonce),
+        ciphertext: base64::engine::general_purpose::STANDARD.encode(ciphertext),
+    })
+}
+
+fn decrypt_managed_ssh_key_secret(
+    envelope: ManagedSshKeySecretEnvelope,
+    key: &[u8; CONFIG_ENCRYPTION_KEY_LEN],
+) -> Result<SecretString> {
+    if envelope.format != MANAGED_SSH_KEY_SECRET_FILE_FORMAT {
+        bail!("invalid managed SSH key secret file format");
+    }
+    if envelope.version != MANAGED_SSH_KEY_SECRET_FILE_VERSION {
+        bail!(
+            "unsupported managed SSH key secret version {}",
+            envelope.version
+        );
+    }
+    if envelope.algorithm != MANAGED_SSH_KEY_SECRET_FILE_ALGORITHM {
+        bail!(
+            "unsupported managed SSH key secret algorithm {}",
+            envelope.algorithm
+        );
+    }
+
+    use base64::Engine as _;
+    let nonce = base64::engine::general_purpose::STANDARD
+        .decode(envelope.nonce)
+        .context("failed to decode managed SSH key secret nonce")?;
+    let nonce: [u8; MANAGED_SSH_KEY_SECRET_NONCE_LEN] = nonce
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("invalid managed SSH key secret nonce length"))?;
+    let ciphertext = base64::engine::general_purpose::STANDARD
+        .decode(envelope.ciphertext)
+        .context("failed to decode managed SSH key secret ciphertext")?;
+
+    let cipher = chacha20poly1305::ChaCha20Poly1305::new_from_slice(key)
+        .context("failed to initialize managed SSH key secret cipher")?;
+    // Decrypted private-key text is zeroized after conversion into SecretString.
+    let plaintext = zeroize::Zeroizing::new(
+        chacha20poly1305::aead::Aead::decrypt(
+            &cipher,
+            chacha20poly1305::Nonce::from_slice(&nonce),
+            ciphertext.as_ref(),
+        )
+        .map_err(|_| anyhow::anyhow!("failed to decrypt managed SSH key secret"))?,
+    );
+    let text = String::from_utf8(plaintext.to_vec())
+        .context("managed SSH key secret is not valid UTF-8")?;
+    Ok(SecretString::from(text))
+}
+
+fn write_managed_ssh_key_secret_file(
+    data_dir: &Path,
+    secret_id: &str,
+    private_key: &SecretString,
+    key: &[u8; CONFIG_ENCRYPTION_KEY_LEN],
+) -> Result<()> {
+    let path = managed_ssh_key_secret_file_path(data_dir, secret_id)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("invalid managed SSH key secret path"))?;
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+
+    // Matches Tauri fallback behavior: large private keys are stored as local
+    // ciphertext when the OS credential backend rejects long secret values.
+    let envelope = encrypt_managed_ssh_key_secret(private_key, key)?;
+    let bytes =
+        serde_json::to_vec_pretty(&envelope).context("failed to serialize managed SSH key secret")?;
+    let temp_path = path.with_extension("json.tmp");
+    fs::write(&temp_path, bytes)
+        .with_context(|| format!("failed to write {}", temp_path.display()))?;
+    fs::rename(&temp_path, &path)
+        .with_context(|| format!("failed to finalize {}", path.display()))?;
+    Ok(())
+}
+
+fn read_managed_ssh_key_secret_file(
+    data_dir: &Path,
+    secret_id: &str,
+    key: &[u8; CONFIG_ENCRYPTION_KEY_LEN],
+) -> Result<SecretString> {
+    let path = managed_ssh_key_secret_file_path(data_dir, secret_id)?;
+    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let envelope: ManagedSshKeySecretEnvelope =
+        serde_json::from_slice(&bytes).context("failed to parse managed SSH key secret")?;
+    decrypt_managed_ssh_key_secret(envelope, key)
+}
+
+fn delete_managed_ssh_key_secret_file(data_dir: &Path, secret_id: &str) -> Result<()> {
+    let path = managed_ssh_key_secret_file_path(data_dir, secret_id)?;
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to delete {}", path.display()))
         }
     }
 }

@@ -153,6 +153,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn render_add_jump_server_modal(
         &self,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(jump_form) = self
@@ -165,6 +166,8 @@ impl WorkspaceApp {
         let add_disabled = !jump_form.complete()
             || (jump_form.auth_tab == SshAuthTab::ManagedKey
                 && jump_form.managed_key_id.trim().is_empty());
+        let modal_max_height = f32::from(window.viewport_size().height)
+            * self.tokens.metrics.modal_max_viewport_height_ratio;
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
@@ -184,6 +187,9 @@ impl WorkspaceApp {
             .child(
                 modal_container(&self.tokens)
                 .w(px(TAURI_JUMP_MODAL_WIDTH))
+                .max_h(px(modal_max_height))
+                .flex()
+                .flex_col()
                 .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                     cx.stop_propagation();
                 })
@@ -194,6 +200,27 @@ impl WorkspaceApp {
                 ))
                 .child(
                     modal_body(&self.tokens)
+                        .id("new-connection-jump-server-body-scroll")
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .selectable_overflow_y_scroll(
+                            &self.selectable_text_scroll_handle(
+                                "new-connection-jump-server-body-scroll",
+                            ),
+                        )
+                        .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                            // Keep native anchored selects aligned with Tauri/Radix:
+                            // scrolling the modal body closes popup content tied to a moved trigger.
+                            let had_open_select =
+                                browser_behavior::close_browser_trigger_select_on_container_scroll(
+                                    &mut this.open_new_connection_select,
+                                    &mut this.new_connection_select_focus_origin,
+                                );
+                            this.clear_new_connection_select_anchor();
+                            if had_open_select {
+                                cx.notify();
+                            }
+                        }))
                         .flex()
                         .flex_col()
                         .gap_4()
@@ -721,10 +748,15 @@ impl WorkspaceApp {
             (SshAuthTab::Password, "ssh.auth.password"),
             (SshAuthTab::Agent, "ssh.auth.agent"),
         ];
-        let mut row = segmented_tabs(&self.tokens);
-        for (tab, key) in tabs {
-            row = row.child(
-                segmented_tab(&self.tokens, self.i18n.t(key), tab == active_tab).on_mouse_down(
+        let mut first_row = self.render_auth_tab_row();
+        let mut second_row = self.render_auth_tab_row();
+        for (index, (tab, key)) in tabs.into_iter().enumerate() {
+            let item = segmented_tab(&self.tokens, self.i18n.t(key), tab == active_tab)
+                .min_h(px(self.tokens.metrics.ui_tabs_list_height))
+                .whitespace_normal()
+                .text_align(gpui::TextAlign::Center)
+                .line_height(px(self.tokens.metrics.ui_text_sm + 2.0))
+                .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         if let Some(form) = this.new_connection_form.as_mut()
@@ -743,10 +775,21 @@ impl WorkspaceApp {
                         }
                         cx.notify();
                     }),
-                ),
-            );
+                );
+            if index < 3 {
+                first_row = first_row.child(item);
+            } else {
+                second_row = second_row.child(item);
+            }
         }
-        form_field(&self.tokens, self.i18n.t("ssh.form.proxy_jump_auth"), row)
+        // Mirrors Tauri AddJumpServerDialog's two-row wrap for translated auth labels.
+        let rows = div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.one))
+            .child(first_row)
+            .child(second_row);
+        form_field(&self.tokens, self.i18n.t("ssh.form.proxy_jump_auth"), rows)
     }
 
     fn add_pending_jump_server(&mut self, cx: &mut Context<Self>) {

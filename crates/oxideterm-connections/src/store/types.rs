@@ -408,6 +408,7 @@ pub enum ManagedSshKeyOrigin {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ManagedSshKey {
     pub id: String,
+    /// Managed secret ID containing the private key material.
     pub secret_id: String,
     pub name: String,
     pub fingerprint: String,
