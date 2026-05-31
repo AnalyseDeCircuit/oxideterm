@@ -141,7 +141,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let all_count = self.connection_store.connections().len();
+        let all_count =
+            self.connection_store.connections().len() + self.connection_store.serial_profiles().len();
         let rows = self.session_manager_folder_tree_rows();
         self.sync_session_manager_folder_tree_list_state(&rows);
         let state = self.session_manager_folder_tree_list_state.clone();
@@ -243,7 +244,13 @@ impl WorkspaceApp {
             .connections()
             .iter()
             .filter(|conn| conn.group.is_none())
-            .count();
+            .count()
+            + self
+                .connection_store
+                .serial_profiles()
+                .iter()
+                .filter(|profile| profile.group.is_none())
+                .count();
         if ungrouped_count > 0 {
             rows.push(SessionManagerFolderTreeRow::Ungrouped);
         }
@@ -301,7 +308,13 @@ impl WorkspaceApp {
                         .connections()
                         .iter()
                         .filter(|conn| conn.group.is_none())
-                        .count();
+                        .count()
+                        + self
+                            .connection_store
+                            .serial_profiles()
+                            .iter()
+                            .filter(|profile| profile.group.is_none())
+                            .count();
                     self.render_group_tree_item(
                         Some(UNGROUPED_FILTER.to_string()),
                         LucideIcon::Folder,
@@ -334,6 +347,12 @@ impl WorkspaceApp {
                     .connections()
                     .iter()
                     .filter(|conn| conn.group.is_none())
+                    .count()
+                    .hash(&mut hasher);
+                self.connection_store
+                    .serial_profiles()
+                    .iter()
+                    .filter(|profile| profile.group.is_none())
                     .count()
                     .hash(&mut hasher);
                 self.session_manager.selected_group.hash(&mut hasher);

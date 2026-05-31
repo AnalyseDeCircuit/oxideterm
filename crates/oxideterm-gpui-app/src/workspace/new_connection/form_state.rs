@@ -12,6 +12,12 @@ pub(in crate::workspace) enum SshAuthTab {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum NewConnectionTransport {
+    Ssh,
+    Serial,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SavedConnectionPromptAction {
     Connect,
     Test,
@@ -80,6 +86,9 @@ pub(in crate::workspace) enum NewConnectionField {
     JumpManagedKeyId,
     JumpCertPath,
     JumpPassphrase,
+    SerialPortPath,
+    SerialBaudRate,
+    SerialProfileName,
 }
 
 #[derive(Clone)]
@@ -137,6 +146,7 @@ impl NewConnectionProxyHop {
 
 #[derive(Clone)]
 pub(in crate::workspace) struct NewConnectionForm {
+    pub(in crate::workspace) transport: NewConnectionTransport,
     pub(in crate::workspace) name: String,
     pub(in crate::workspace) host: String,
     pub(in crate::workspace) port: String,
@@ -168,12 +178,23 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) selected_field: Option<NewConnectionField>,
     pub(in crate::workspace) error: Option<String>,
     pub(in crate::workspace) pending: bool,
+    pub(in crate::workspace) serial_ports: Vec<oxideterm_terminal::SerialPortInfo>,
+    pub(in crate::workspace) serial_ports_loading: bool,
+    pub(in crate::workspace) serial_port_path: String,
+    pub(in crate::workspace) serial_baud_rate: String,
+    pub(in crate::workspace) serial_data_bits: u8,
+    pub(in crate::workspace) serial_stop_bits: u8,
+    pub(in crate::workspace) serial_parity: oxideterm_terminal::SerialParity,
+    pub(in crate::workspace) serial_flow_control: oxideterm_terminal::SerialFlowControl,
+    pub(in crate::workspace) save_serial_profile: bool,
+    pub(in crate::workspace) serial_profile_name: String,
 }
 
 impl fmt::Debug for NewConnectionForm {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("NewConnectionForm")
+            .field("transport", &self.transport)
             .field("name", &self.name)
             .field("host", &self.host)
             .field("port", &self.port)
@@ -208,6 +229,16 @@ impl fmt::Debug for NewConnectionForm {
             .field("selected_field", &self.selected_field)
             .field("error", &self.error)
             .field("pending", &self.pending)
+            .field("serial_ports", &self.serial_ports)
+            .field("serial_ports_loading", &self.serial_ports_loading)
+            .field("serial_port_path", &self.serial_port_path)
+            .field("serial_baud_rate", &self.serial_baud_rate)
+            .field("serial_data_bits", &self.serial_data_bits)
+            .field("serial_stop_bits", &self.serial_stop_bits)
+            .field("serial_parity", &self.serial_parity)
+            .field("serial_flow_control", &self.serial_flow_control)
+            .field("save_serial_profile", &self.save_serial_profile)
+            .field("serial_profile_name", &self.serial_profile_name)
             .finish()
     }
 }
@@ -215,6 +246,7 @@ impl fmt::Debug for NewConnectionForm {
 impl Default for NewConnectionForm {
     fn default() -> Self {
         Self {
+            transport: NewConnectionTransport::Ssh,
             name: String::new(),
             host: String::new(),
             port: "22".to_string(),
@@ -246,6 +278,16 @@ impl Default for NewConnectionForm {
             selected_field: None,
             error: None,
             pending: false,
+            serial_ports: Vec::new(),
+            serial_ports_loading: false,
+            serial_port_path: String::new(),
+            serial_baud_rate: "115200".to_string(),
+            serial_data_bits: 8,
+            serial_stop_bits: 1,
+            serial_parity: oxideterm_terminal::SerialParity::None,
+            serial_flow_control: oxideterm_terminal::SerialFlowControl::None,
+            save_serial_profile: false,
+            serial_profile_name: String::new(),
         }
     }
 }
@@ -253,8 +295,29 @@ impl Default for NewConnectionForm {
 pub(in crate::workspace) fn next_connection_field(
     field: NewConnectionField,
     auth_tab: SshAuthTab,
+    transport: NewConnectionTransport,
     forward: bool,
 ) -> NewConnectionField {
+    if transport == NewConnectionTransport::Serial {
+        let fields = [
+            NewConnectionField::SerialPortPath,
+            NewConnectionField::SerialBaudRate,
+            NewConnectionField::SerialProfileName,
+        ];
+        let index = fields
+            .iter()
+            .position(|candidate| *candidate == field)
+            .unwrap_or(0);
+        let next = if forward {
+            (index + 1) % fields.len()
+        } else if index == 0 {
+            fields.len() - 1
+        } else {
+            index - 1
+        };
+        return fields[next];
+    }
+
     let fields: Vec<NewConnectionField> = match auth_tab {
         SshAuthTab::Password => vec![
             NewConnectionField::Name,
@@ -459,6 +522,9 @@ pub(in crate::workspace) fn current_connection_field_mut(
                 .expect("jump passphrase field without jump form")
                 .passphrase
         }
+        NewConnectionField::SerialPortPath => &mut form.serial_port_path,
+        NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
+        NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
     }
 }
 
@@ -532,6 +598,9 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
                 .expect("jump passphrase field without jump form")
                 .passphrase
         }
+        NewConnectionField::SerialPortPath => &form.serial_port_path,
+        NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
+        NewConnectionField::SerialProfileName => &form.serial_profile_name,
     }
 }
 

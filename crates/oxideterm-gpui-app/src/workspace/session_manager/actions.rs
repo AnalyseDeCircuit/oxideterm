@@ -27,6 +27,29 @@ impl WorkspaceApp {
         rows
     }
 
+    fn filtered_session_serial_profiles(&self) -> Vec<SerialProfile> {
+        let query = self.session_manager.search_query.trim().to_lowercase();
+        let mut rows = self.connection_store.serial_profiles().to_vec();
+        rows.retain(|profile| self.serial_profile_matches_filter(profile));
+        if !query.is_empty() {
+            rows.retain(|profile| {
+                profile.name.to_lowercase().contains(&query)
+                    || profile.port_path.to_lowercase().contains(&query)
+                    || profile
+                        .group
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_lowercase()
+                        .contains(&query)
+            });
+        }
+        rows.sort_by(|left, right| right.last_used_at.cmp(&left.last_used_at));
+        if self.session_manager.selected_group.as_deref() == Some(RECENT_FILTER) {
+            rows.truncate(20);
+        }
+        rows
+    }
+
     fn connection_matches_filter(&self, conn: &ConnectionInfo) -> bool {
         match self.session_manager.selected_group.as_deref() {
             None => true,
@@ -34,6 +57,17 @@ impl WorkspaceApp {
             Some(RECENT_FILTER) => conn.last_used_at.is_some(),
             Some(group) => conn.group.as_deref().is_some_and(|conn_group| {
                 conn_group == group || conn_group.starts_with(&format!("{group}/"))
+            }),
+        }
+    }
+
+    fn serial_profile_matches_filter(&self, profile: &SerialProfile) -> bool {
+        match self.session_manager.selected_group.as_deref() {
+            None => true,
+            Some(UNGROUPED_FILTER) => profile.group.is_none(),
+            Some(RECENT_FILTER) => profile.last_used_at.is_some(),
+            Some(group) => profile.group.as_deref().is_some_and(|profile_group| {
+                profile_group == group || profile_group.starts_with(&format!("{group}/"))
             }),
         }
     }
@@ -63,7 +97,8 @@ impl WorkspaceApp {
     }
 
     fn connection_count_for_group(&self, group: &str) -> usize {
-        self.connection_store
+        let connection_count = self
+            .connection_store
             .connections()
             .iter()
             .filter(|conn| {
@@ -71,7 +106,18 @@ impl WorkspaceApp {
                     candidate == group || candidate.starts_with(&format!("{group}/"))
                 })
             })
-            .count()
+            .count();
+        let serial_count = self
+            .connection_store
+            .serial_profiles()
+            .iter()
+            .filter(|profile| {
+                profile.group.as_deref().is_some_and(|candidate| {
+                    candidate == group || candidate.starts_with(&format!("{group}/"))
+                })
+            })
+            .count();
+        connection_count + serial_count
     }
 
     fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
@@ -81,6 +127,11 @@ impl WorkspaceApp {
         }
         for conn in self.connection_store.connections() {
             if let Some(group) = conn.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+        for profile in self.connection_store.serial_profiles() {
+            if let Some(group) = profile.group.as_deref() {
                 add_group_path_segments(group, &mut paths);
             }
         }
@@ -276,6 +327,24 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn request_delete_serial_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(profile) = self
+            .connection_store
+            .serial_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::SerialProfile {
+            id: profile.id,
+            name: profile.name,
+        });
+        self.close_session_row_menus();
+        cx.notify();
+    }
+
     fn request_delete_selected_connections(&mut self, cx: &mut Context<Self>) {
         let ids = self
             .session_manager
@@ -305,8 +374,70 @@ impl WorkspaceApp {
         };
         match confirm {
             SessionManagerDeleteConfirm::Single { id, .. } => self.delete_connection(&id, cx),
+            SessionManagerDeleteConfirm::SerialProfile { id, .. } => {
+                self.delete_serial_profile(&id, cx)
+            }
             SessionManagerDeleteConfirm::Batch { ids } => self.delete_connections_by_id(ids, cx),
         }
+    }
+
+    fn delete_serial_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        match self.connection_store.delete_serial_profile(id) {
+            Ok(true) => {
+                self.session_manager.status =
+                    Some(self.i18n.t("sessionManager.serial_profiles.delete"));
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Ok(false) => {
+                self.session_manager.status =
+                    Some(self.i18n.t("sessionManager.serial_profiles.delete_failed"));
+            }
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.serial_profiles.delete_failed")
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    fn open_saved_serial_profile(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .connection_store
+            .serial_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        let config = oxideterm_terminal::SerialSessionConfig {
+            port_path: profile.port_path.clone(),
+            baud_rate: profile.baud_rate,
+            data_bits: profile.data_bits,
+            stop_bits: profile.stop_bits,
+            parity: terminal_serial_parity_from_profile(&profile.parity),
+            flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
+        };
+        match self.create_serial_terminal_tab(config, window, cx) {
+            Ok(_) => {
+                let _ = self.connection_store.mark_serial_profile_used(id);
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.serial_profiles.open_failed")
+                ));
+            }
+        }
+        cx.notify();
     }
 
     fn delete_connections_by_id(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {

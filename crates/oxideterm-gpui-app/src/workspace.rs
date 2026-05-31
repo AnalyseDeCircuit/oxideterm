@@ -129,8 +129,9 @@ use oxideterm_ssh::{
 };
 use oxideterm_terminal::TerminalCommandMarkDetectionSource;
 use oxideterm_terminal::{
-    LocalPtyConfig, ShellInfo, SshSessionConfig, TelnetSessionConfig, TerminalCursorShape,
-    TerminalEncoding as SessionTerminalEncoding, TerminalLifecycle, scan_shells,
+    LocalPtyConfig, SerialSessionConfig, ShellInfo, SshSessionConfig, TelnetSessionConfig,
+    TerminalCursorShape, TerminalEncoding as SessionTerminalEncoding, TerminalLifecycle,
+    scan_shells,
 };
 use oxideterm_theme::{
     AppUiColors, TerminalTheme, ThemeTokens, UiRadii, derive_ui_colors_from_terminal, theme_by_id,

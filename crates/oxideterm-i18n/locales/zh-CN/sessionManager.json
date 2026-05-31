@@ -145,6 +145,15 @@
       "status": {
         "connecting": "正在连接 {{name}}..."
       }
+    },
+    "serial_profiles": {
+      "title": "串口配置",
+      "count": "{{count}} 个配置",
+      "open": "打开",
+      "delete": "删除",
+      "open_failed": "打开串口配置失败",
+      "delete_failed": "删除串口配置失败",
+      "confirm_delete": "删除串口配置“{{name}}”？"
     }
   }
 }

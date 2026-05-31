@@ -145,6 +145,15 @@
       "status": {
         "connecting": "正在連線 {{name}}..."
       }
+    },
+    "serial_profiles": {
+      "title": "序列埠設定檔",
+      "count": "{{count}} 個設定檔",
+      "open": "開啟",
+      "delete": "刪除",
+      "open_failed": "開啟序列埠設定檔失敗",
+      "delete_failed": "刪除序列埠設定檔失敗",
+      "confirm_delete": "刪除序列埠設定檔「{{name}}」？"
     }
   }
 }

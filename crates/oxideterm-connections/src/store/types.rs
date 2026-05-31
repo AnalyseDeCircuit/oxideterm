@@ -288,6 +288,20 @@ pub struct SerialProfile {
     pub last_used_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SaveSerialProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub group: Option<String>,
+    pub port_path: String,
+    pub baud_rate: Option<u32>,
+    pub data_bits: Option<u8>,
+    pub stop_bits: Option<u8>,
+    pub parity: Option<SerialParity>,
+    pub flow_control: Option<SerialFlowControl>,
+    pub connect_on_open: Option<bool>,
+}
+
 impl SerialProfile {
     pub fn new(name: impl Into<String>, port_path: impl Into<String>) -> Self {
         let now = Utc::now();

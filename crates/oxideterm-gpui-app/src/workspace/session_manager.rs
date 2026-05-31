@@ -12,7 +12,7 @@ use gpui::{Div, StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
-    SavedProxyHop, SecretString, SshConfigHost, list_ssh_config_hosts,
+    SavedProxyHop, SecretString, SerialProfile, SshConfigHost, list_ssh_config_hosts,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord,
@@ -188,6 +188,7 @@ pub(super) enum SessionTransferAction {
 #[derive(Clone, Debug)]
 pub(super) enum SessionManagerDeleteConfirm {
     Single { id: String, name: String },
+    SerialProfile { id: String, name: String },
     Batch { ids: Vec<String> },
 }
 

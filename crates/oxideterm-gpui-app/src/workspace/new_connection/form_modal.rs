@@ -21,6 +21,11 @@ impl WorkspaceApp {
         let drill_down_mode = self.drill_down_parent_node_id.is_some();
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
+        let serial_mode = !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+            && form.transport == NewConnectionTransport::Serial;
         let title = if drill_down_mode {
             self.i18n.t("ssh.drill_down.title")
         } else if prompt_mode {
@@ -53,12 +58,23 @@ impl WorkspaceApp {
                 .t("sessionManager.edit_properties.duplicate_description")
         } else if edit_properties_mode {
             self.i18n.t("sessionManager.edit_properties.description")
+        } else if serial_mode {
+            self.i18n.t("modals.new_connection.serial_description")
         } else {
             self.i18n.t("ssh.form.subtitle")
         };
-        let has_required_fields = !form.host.trim().is_empty()
-            && !form.username.trim().is_empty()
-            && form.port.trim().parse::<u16>().is_ok();
+        let has_required_fields = if serial_mode {
+            !form.serial_port_path.trim().is_empty()
+                && form
+                    .serial_baud_rate
+                    .trim()
+                    .parse::<u32>()
+                    .is_ok_and(|baud| baud > 0)
+        } else {
+            !form.host.trim().is_empty()
+                && !form.username.trim().is_empty()
+                && form.port.trim().parse::<u16>().is_ok()
+        };
         let primary_disabled = form.pending || !has_required_fields;
         dismissible_dialog_backdrop()
             .on_mouse_down(
@@ -117,6 +133,18 @@ impl WorkspaceApp {
                                 .flex()
                                 .flex_col()
                                 .gap(px(self.tokens.metrics.modal_section_gap))
+                                .when(
+                                    !prompt_mode
+                                        && !duplicate_mode
+                                        && !edit_properties_mode
+                                        && !drill_down_mode,
+                                    |content| content.child(self.render_transport_selector(cx)),
+                                )
+                                .when(serial_mode, |content| {
+                                    content.child(self.render_serial_form_branch(cx))
+                                })
+                                .when(!serial_mode, |content| {
+                                    content
                                 .when(!prompt_mode && !drill_down_mode, |content| {
                                     content
                                         .child(self.render_connection_field(
@@ -624,7 +652,8 @@ impl WorkspaceApp {
                                                 ))
                                                 .child(self.render_proxy_chain_section(cx))
                                         })
-                                }),
+                                })
+                                    }),
                         )
                         .when_some(
                             if prompt_mode {
@@ -655,7 +684,8 @@ impl WorkspaceApp {
                         .when(
                             !edit_properties_mode
                                 && self.saved_connection_prompt_action.is_none()
-                                && !drill_down_mode,
+                                && !drill_down_mode
+                                && !serial_mode,
                             |footer| {
                                 footer.child(self.render_connection_button(
                                     self.i18n.t("ssh.form.test"),
@@ -683,6 +713,8 @@ impl WorkspaceApp {
                                 }
                             } else if edit_properties_mode {
                                 self.i18n.t("sessionManager.edit_properties.save")
+                            } else if serial_mode {
+                                self.i18n.t("modals.new_connection.serial_open")
                             } else {
                                 self.i18n.t("ssh.form.connect")
                             },
