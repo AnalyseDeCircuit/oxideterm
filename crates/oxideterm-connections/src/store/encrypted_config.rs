@@ -8,9 +8,12 @@ const CONFIG_KEYCHAIN_ID: &str = "local-config-master-key";
 #[cfg(target_os = "macos")]
 const MACOS_KEYCHAIN_COMMAND_TIMEOUT_SECS: u64 = 30;
 
+use std::sync::{Mutex, OnceLock};
+
 use chacha20poly1305::KeyInit as _;
 
 type ConfigEncryptionKey = zeroize::Zeroizing<[u8; CONFIG_ENCRYPTION_KEY_LEN]>;
+static CONFIG_ENCRYPTION_KEY_CACHE: OnceLock<Mutex<Option<ConfigEncryptionKey>>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConnectionStoreStorageFormat {
@@ -170,11 +173,17 @@ fn decrypt_connection_store_data(
 }
 
 fn load_config_encryption_key() -> Result<Option<ConfigEncryptionKey>> {
+    if let Some(key) = cached_config_encryption_key() {
+        return Ok(Some(key));
+    }
+
     let secret = match load_config_key_secret()? {
         Some(secret) => secret,
         None => return Ok(None),
     };
-    Ok(Some(decode_config_encryption_key(secret.as_str())?))
+    let key = decode_config_encryption_key(secret.as_str())?;
+    remember_config_encryption_key(&key);
+    Ok(Some(key))
 }
 
 fn get_or_create_config_encryption_key() -> Result<(ConfigEncryptionKey, bool)> {
@@ -186,7 +195,33 @@ fn get_or_create_config_encryption_key() -> Result<(ConfigEncryptionKey, bool)> 
     let mut rng = rand::rngs::OsRng;
     rand::RngCore::fill_bytes(&mut rng, &mut key[..]);
     store_config_key_secret(&encode_config_encryption_key(&*key)?)?;
+    remember_config_encryption_key(&key);
     Ok((key, true))
+}
+
+fn config_encryption_key_cache() -> &'static Mutex<Option<ConfigEncryptionKey>> {
+    CONFIG_ENCRYPTION_KEY_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn cached_config_encryption_key() -> Option<ConfigEncryptionKey> {
+    config_encryption_key_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.clone())
+}
+
+fn remember_config_encryption_key(key: &ConfigEncryptionKey) {
+    if let Ok(mut cache) = config_encryption_key_cache().lock() {
+        // Keep the local config master key in memory only for this process so
+        // repeated connection-store reads do not re-trigger OS authentication.
+        *cache = Some(key.clone());
+    }
+}
+
+fn clear_cached_config_encryption_key() {
+    if let Ok(mut cache) = config_encryption_key_cache().lock() {
+        *cache = None;
+    }
 }
 
 fn decode_config_encryption_key(secret: &str) -> Result<ConfigEncryptionKey> {
@@ -255,17 +290,22 @@ fn rollback_created_config_key() {
 }
 
 fn delete_config_key_secret() -> Result<()> {
-    if oxideterm_portable_runtime::is_portable_mode()
+    let result = if oxideterm_portable_runtime::is_portable_mode()
         .context("failed to determine portable mode")?
     {
-        return oxideterm_portable_runtime::keystore::delete_secret(
+        oxideterm_portable_runtime::keystore::delete_secret(
             CONFIG_KEYCHAIN_SERVICE,
             CONFIG_KEYCHAIN_ID,
         )
-        .context("failed to delete local config key");
-    }
+        .context("failed to delete local config key")
+    } else {
+        delete_system_config_key_secret()
+    };
 
-    delete_system_config_key_secret()
+    if result.is_ok() {
+        clear_cached_config_encryption_key();
+    }
+    result
 }
 
 #[cfg(target_os = "macos")]
@@ -497,4 +537,22 @@ fn decode_connection_store_data_for_tests(
         data: decrypt_connection_store_data(envelope, key)?,
         format: ConnectionStoreStorageFormat::Encrypted,
     })
+}
+
+#[cfg(test)]
+mod encrypted_config_tests {
+    use super::*;
+
+    #[test]
+    fn config_encryption_key_cache_round_trips_and_clears() {
+        clear_cached_config_encryption_key();
+
+        let key = zeroize::Zeroizing::new([7u8; CONFIG_ENCRYPTION_KEY_LEN]);
+        remember_config_encryption_key(&key);
+
+        assert_eq!(&*cached_config_encryption_key().expect("cached key"), &*key);
+
+        clear_cached_config_encryption_key();
+        assert!(cached_config_encryption_key().is_none());
+    }
 }
