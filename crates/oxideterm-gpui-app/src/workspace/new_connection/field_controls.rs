@@ -659,16 +659,23 @@ impl WorkspaceApp {
                 (SshAuthTab::TwoFactor, "ssh.auth.two_factor"),
             ]
         };
-        let mut row = segmented_tabs(&self.tokens);
-        for (tab, key) in tabs {
+        let build_tab = |this: &Self,
+                         tab: SshAuthTab,
+                         key: &str,
+                         active_tab: SshAuthTab,
+                         disabled: bool,
+                         cx: &mut Context<Self>| {
             let selected = tab == active_tab
                 || (edit_properties_mode
                     && tab == SshAuthTab::SshKey
                     && active_tab == SshAuthTab::DefaultKey);
-            let disabled = tab == SshAuthTab::TwoFactor && kbi_disabled_for_proxy_chain;
-            let item = segmented_tab(&self.tokens, self.i18n.t(key), selected)
+            let item = segmented_tab(&this.tokens, this.i18n.t(key), selected)
+                .min_h(px(this.tokens.metrics.ui_tabs_list_height))
+                .whitespace_normal()
+                .text_align(gpui::TextAlign::Center)
+                .line_height(px(this.tokens.metrics.ui_text_sm + 2.0))
                 .opacity(if disabled { 0.45 } else { 1.0 });
-            row = row.child(if disabled {
+            if disabled {
                 item
             } else {
                 item.on_mouse_down(
@@ -682,8 +689,37 @@ impl WorkspaceApp {
                         cx.notify();
                     }),
                 )
-            });
-        }
+            }
+        };
+
+        let row = if edit_properties_mode {
+            let mut row = segmented_tabs(&self.tokens);
+            for (tab, key) in tabs {
+                let disabled = tab == SshAuthTab::TwoFactor && kbi_disabled_for_proxy_chain;
+                row = row.child(build_tab(self, tab, key, active_tab, disabled, cx));
+            }
+            row.into_any_element()
+        } else {
+            let mut first_row = self.render_auth_tab_row();
+            let mut second_row = self.render_auth_tab_row();
+            for (index, (tab, key)) in tabs.into_iter().enumerate() {
+                let disabled = tab == SshAuthTab::TwoFactor && kbi_disabled_for_proxy_chain;
+                let item = build_tab(self, tab, key, active_tab, disabled, cx);
+                if index < 3 {
+                    first_row = first_row.child(item);
+                } else {
+                    second_row = second_row.child(item);
+                }
+            }
+            // Mirrors Tauri's 3+4 auth-tab wrap while keeping one shared auth state.
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.spacing.one))
+                .child(first_row)
+                .child(second_row)
+                .into_any_element()
+        };
         let field = form_field(&self.tokens, self.i18n.t("ssh.form.authentication"), row);
         if kbi_disabled_for_proxy_chain {
             div()
@@ -699,6 +735,19 @@ impl WorkspaceApp {
         } else {
             field
         }
+    }
+
+    fn render_auth_tab_row(&self) -> Div {
+        div()
+            .min_h(px(self.tokens.metrics.ui_tabs_list_height))
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_center()
+            .p(px(self.tokens.metrics.ui_tabs_list_padding))
+            .rounded(px(self.tokens.radii.xs))
+            .bg(rgb(self.tokens.ui.bg_panel))
+            .text_color(rgb(self.tokens.ui.text_muted))
     }
 
     fn render_drill_auth_tabs(&self, active_tab: SshAuthTab, cx: &mut Context<Self>) -> AnyElement {
