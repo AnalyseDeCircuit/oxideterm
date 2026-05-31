@@ -54,7 +54,12 @@ fn decode_config_encryption_key(secret: &str) -> Result<[u8; CONFIG_ENCRYPTION_K
 
 fn load_config_encryption_key(keychain: &Keychain) -> Result<ConfigEncryptionKeyLookup, String> {
     match keychain.get(CONFIG_KEYCHAIN_ID) {
-        Ok(secret) => decode_config_encryption_key(&secret).map(ConfigEncryptionKeyLookup::Found),
+        Ok(secret) => {
+            // The local config master key leaves the keychain only long enough
+            // to decode the encrypted connections file key for this startup.
+            let secret = Zeroizing::new(secret);
+            decode_config_encryption_key(secret.as_str()).map(ConfigEncryptionKeyLookup::Found)
+        }
         Err(KeychainError::NotFound(_)) => Ok(ConfigEncryptionKeyLookup::Missing),
         Err(KeychainError::PortableLocked) => Ok(ConfigEncryptionKeyLookup::Locked),
         Err(err) => Err(err.to_string()),
@@ -135,7 +140,10 @@ impl ConfigState {
             storage: ConfigStorage::new().map_err(|e| e.to_string())?,
             config: RwLock::new(ConfigFile::default()),
             bootstrap_status: RwLock::new(initial_status),
-            config_keychain: Keychain::with_service(CONFIG_KEYCHAIN_SERVICE),
+            config_keychain: Keychain::with_biometrics_reason(
+                CONFIG_KEYCHAIN_SERVICE,
+                "OxideTerm needs to unlock your encrypted connections",
+            ),
             keychain: Keychain::new(),
             managed_keychain: Keychain::with_service(MANAGED_SSH_KEYCHAIN_SERVICE),
             ai_keychain: Keychain::with_biometrics(AI_KEYCHAIN_SERVICE),

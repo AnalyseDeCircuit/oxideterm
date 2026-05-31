@@ -31,6 +31,7 @@ use super::portable_keystore;
 
 /// Service name for keychain entries
 const SERVICE_NAME: &str = "com.oxideterm.ssh";
+const DEFAULT_BIOMETRIC_REASON: &str = "OxideTerm needs to access your stored secrets";
 
 // ─── macOS: security CLI wrapper ─────────────────────────────────────────────
 
@@ -147,9 +148,19 @@ pub struct Keychain {
     /// the secret. Store/delete/exists use keyring directly without auth.
     #[cfg(target_os = "macos")]
     use_biometrics: bool,
+    /// User-facing reason shown by macOS LocalAuthentication for this keychain.
+    #[cfg(target_os = "macos")]
+    biometric_reason: Option<String>,
 }
 
 impl Keychain {
+    #[cfg(target_os = "macos")]
+    fn biometric_reason(&self) -> &str {
+        self.biometric_reason
+            .as_deref()
+            .unwrap_or(DEFAULT_BIOMETRIC_REASON)
+    }
+
     fn uses_portable_backend(&self) -> Result<bool, KeychainError> {
         if !self.portable_passthrough {
             return Ok(false);
@@ -180,6 +191,8 @@ impl Keychain {
             test_store: None,
             #[cfg(target_os = "macos")]
             use_biometrics: false,
+            #[cfg(target_os = "macos")]
+            biometric_reason: None,
         }
     }
 
@@ -192,6 +205,8 @@ impl Keychain {
             test_store: None,
             #[cfg(target_os = "macos")]
             use_biometrics: false,
+            #[cfg(target_os = "macos")]
+            biometric_reason: None,
         }
     }
 
@@ -203,6 +218,8 @@ impl Keychain {
             test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
             #[cfg(target_os = "macos")]
             use_biometrics: false,
+            #[cfg(target_os = "macos")]
+            biometric_reason: None,
         }
     }
 
@@ -215,6 +232,8 @@ impl Keychain {
             test_store: None,
             #[cfg(target_os = "macos")]
             use_biometrics: false,
+            #[cfg(target_os = "macos")]
+            biometric_reason: None,
         }
     }
 
@@ -227,6 +246,15 @@ impl Keychain {
     ///
     /// On non-macOS platforms: identical to [`Self::with_service`].
     pub fn with_biometrics(service: impl Into<String>) -> Self {
+        Self::with_biometrics_reason(service, "OxideTerm needs to access your AI API key")
+    }
+
+    /// Create with Touch ID authentication for reads and a custom prompt reason.
+    pub fn with_biometrics_reason(service: impl Into<String>, reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        #[cfg(not(target_os = "macos"))]
+        let _ = &reason;
+
         Self {
             service: service.into(),
             portable_passthrough: true,
@@ -234,11 +262,25 @@ impl Keychain {
             test_store: None,
             #[cfg(target_os = "macos")]
             use_biometrics: true,
+            #[cfg(target_os = "macos")]
+            biometric_reason: Some(reason),
         }
     }
 
     /// Create a biometric-gated keychain that always uses the OS backend.
     pub fn with_system_biometrics(service: impl Into<String>) -> Self {
+        Self::with_system_biometrics_reason(service, DEFAULT_BIOMETRIC_REASON)
+    }
+
+    /// Create an OS-only biometric keychain with a custom prompt reason.
+    pub fn with_system_biometrics_reason(
+        service: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        let reason = reason.into();
+        #[cfg(not(target_os = "macos"))]
+        let _ = &reason;
+
         Self {
             service: service.into(),
             portable_passthrough: false,
@@ -246,6 +288,8 @@ impl Keychain {
             test_store: None,
             #[cfg(target_os = "macos")]
             use_biometrics: true,
+            #[cfg(target_os = "macos")]
+            biometric_reason: Some(reason),
         }
     }
 
@@ -354,7 +398,7 @@ impl Keychain {
         if self.use_biometrics {
             // Touch ID gate
             if super::touch_id::is_biometric_available() {
-                match super::touch_id::authenticate("OxideTerm needs to access your AI API key") {
+                match super::touch_id::authenticate(self.biometric_reason()) {
                     Ok(()) => {
                         tracing::debug!("Touch ID authentication succeeded for id={}", id);
                     }
@@ -520,12 +564,11 @@ impl Keychain {
         #[cfg(target_os = "macos")]
         if self.use_biometrics {
             if super::touch_id::is_biometric_available() {
-                super::touch_id::authenticate("OxideTerm needs to access your plugin secrets")
-                    .map_err(|e| {
-                        KeychainError::Keyring(keyring::Error::PlatformFailure(
-                            format!("Touch ID: {}", e).into(),
-                        ))
-                    })?;
+                super::touch_id::authenticate(self.biometric_reason()).map_err(|e| {
+                    KeychainError::Keyring(keyring::Error::PlatformFailure(
+                        format!("Touch ID: {}", e).into(),
+                    ))
+                })?;
             }
 
             let mut results = Vec::with_capacity(ids.len());

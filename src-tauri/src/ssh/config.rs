@@ -239,7 +239,6 @@ mod tests {
                 passphrase: None,
             },
             AuthMethod::KeyboardInteractive,
-            AuthMethod::KeyboardInteractive,
         ];
 
         for variant in variants {
@@ -267,6 +266,19 @@ mod tests {
                     assert_eq!(left_pass, right_pass);
                 }
                 (AuthMethod::Agent, AuthMethod::Agent) => {}
+                (
+                    AuthMethod::ManagedKey {
+                        key_id: left_key_id,
+                        passphrase: left_pass,
+                    },
+                    AuthMethod::ManagedKey {
+                        key_id: right_key_id,
+                        passphrase: right_pass,
+                    },
+                ) => {
+                    assert_eq!(left_key_id, right_key_id);
+                    assert_eq!(left_pass, right_pass);
+                }
                 (
                     AuthMethod::Certificate {
                         key_path: left_key,
