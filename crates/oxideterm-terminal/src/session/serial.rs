@@ -700,6 +700,19 @@ fn run_serial_worker(
     };
 
     let _ = worker_tx.send(SerialWorkerEvent::Connected);
+    run_serial_worker_with_port(&mut *port, &config, command_rx, worker_tx);
+}
+
+// Keep the worker loop injectable so lifecycle tests can use a fake serial
+// stream while production still owns a real serialport handle.
+fn run_serial_worker_with_port<P>(
+    port: &mut P,
+    config: &SerialSessionConfig,
+    command_rx: crossbeam_channel::Receiver<SerialCommand>,
+    worker_tx: crossbeam_channel::Sender<SerialWorkerEvent>,
+) where
+    P: Read + Write + ?Sized,
+{
     let mut buffer = [0_u8; 8192];
     loop {
         while let Ok(command) = command_rx.try_recv() {
@@ -952,6 +965,9 @@ fn map_serial_io_error(
 #[cfg(test)]
 mod serial_tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::io;
+    use std::sync::{Arc, Mutex};
 
     fn valid_config() -> SerialSessionConfig {
         SerialSessionConfig {
@@ -961,6 +977,50 @@ mod serial_tests {
             stop_bits: 1,
             parity: SerialParity::None,
             flow_control: SerialFlowControl::None,
+        }
+    }
+
+    enum FakeRead {
+        Bytes(Vec<u8>),
+        Error(io::ErrorKind),
+    }
+
+    struct FakeSerialPort {
+        reads: VecDeque<FakeRead>,
+        writes: Arc<Mutex<Vec<Vec<u8>>>>,
+    }
+
+    impl FakeSerialPort {
+        fn new(reads: impl Into<VecDeque<FakeRead>>) -> Self {
+            Self {
+                reads: reads.into(),
+                writes: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl Read for FakeSerialPort {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            match self.reads.pop_front() {
+                Some(FakeRead::Bytes(bytes)) => {
+                    let len = bytes.len().min(buf.len());
+                    buf[..len].copy_from_slice(&bytes[..len]);
+                    Ok(len)
+                }
+                Some(FakeRead::Error(kind)) => Err(io::Error::new(kind, "fake serial error")),
+                None => Err(io::Error::new(io::ErrorKind::TimedOut, "fake timeout")),
+            }
+        }
+    }
+
+    impl Write for FakeSerialPort {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.writes.lock().unwrap().push(buf.to_vec());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
         }
     }
 
@@ -1001,5 +1061,105 @@ mod serial_tests {
         );
 
         assert_eq!(error.code, SerialErrorCode::DeviceDisconnected);
+    }
+
+    #[test]
+    fn fake_serial_worker_lifecycle_writes_reads_and_reports_disconnect() {
+        let config = valid_config();
+        let mut port = FakeSerialPort::new(VecDeque::from([
+            FakeRead::Bytes(vec![0x00, b'o', b'k']),
+            FakeRead::Error(io::ErrorKind::UnexpectedEof),
+        ]));
+        let writes = port.writes.clone();
+        let (command_tx, command_rx) = crossbeam_channel::unbounded();
+        let (worker_tx, worker_rx) = crossbeam_channel::unbounded();
+
+        command_tx
+            .send(SerialCommand::Data(b"at\r".to_vec()))
+            .unwrap();
+        run_serial_worker_with_port(&mut port, &config, command_rx, worker_tx);
+
+        assert_eq!(writes.lock().unwrap().as_slice(), &[b"at\r".to_vec()]);
+        assert!(matches!(
+            worker_rx.recv().unwrap(),
+            SerialWorkerEvent::Output(bytes) if bytes == [0x00, b'o', b'k']
+        ));
+        assert!(matches!(
+            worker_rx.recv().unwrap(),
+            SerialWorkerEvent::Failed(error)
+                if error.code == SerialErrorCode::DeviceDisconnected
+        ));
+    }
+
+    #[test]
+    fn fake_serial_worker_lifecycle_closes_without_reading_after_close_command() {
+        let config = valid_config();
+        let mut port = FakeSerialPort::new(VecDeque::from([FakeRead::Bytes(
+            b"unexpected".to_vec(),
+        )]));
+        let (command_tx, command_rx) = crossbeam_channel::unbounded();
+        let (worker_tx, worker_rx) = crossbeam_channel::unbounded();
+
+        command_tx.send(SerialCommand::Close).unwrap();
+        run_serial_worker_with_port(&mut port, &config, command_rx, worker_tx);
+
+        assert!(matches!(
+            worker_rx.recv().unwrap(),
+            SerialWorkerEvent::Closed
+        ));
+        assert!(worker_rx.try_recv().is_err());
+    }
+
+    #[test]
+    #[ignore = "requires OXIDETERM_SERIAL_MANUAL_PORT to point at a real or pseudo serial device"]
+    fn manual_serial_pseudo_device_round_trip_and_reopen() {
+        let port_path = std::env::var("OXIDETERM_SERIAL_MANUAL_PORT")
+            .expect("OXIDETERM_SERIAL_MANUAL_PORT must point at a serial device");
+        let mut config = valid_config();
+        config.port_path = port_path.clone();
+        config.validate().unwrap();
+
+        let first_ping = b"oxideterm-serial-ping-1\r";
+        let first_pong = b"oxideterm-serial-pong-1\r";
+        let second_ping = b"oxideterm-serial-ping-2\r";
+        let second_pong = b"oxideterm-serial-pong-2\r";
+        let first_expected = manual_serial_expected(first_ping, first_pong);
+        let second_expected = manual_serial_expected(second_ping, second_pong);
+
+        manual_serial_round_trip(&port_path, first_ping, &first_expected);
+        manual_serial_round_trip(&port_path, second_ping, &second_expected);
+    }
+
+    fn manual_serial_expected(loopback_payload: &[u8], responder_payload: &[u8]) -> Vec<u8> {
+        match std::env::var("OXIDETERM_SERIAL_MANUAL_MODE")
+            .unwrap_or_else(|_| "loopback".to_string())
+            .as_str()
+        {
+            "loopback" => loopback_payload.to_vec(),
+            "responder" => responder_payload.to_vec(),
+            mode => panic!(
+                "unsupported OXIDETERM_SERIAL_MANUAL_MODE={mode}; use loopback or responder"
+            ),
+        }
+    }
+
+    fn manual_serial_round_trip(port_path: &str, ping: &[u8], expected: &[u8]) {
+        let mut port = serialport::new(port_path, 115_200)
+            .data_bits(serialport::DataBits::Eight)
+            .stop_bits(serialport::StopBits::One)
+            .parity(serialport::Parity::None)
+            .flow_control(serialport::FlowControl::None)
+            .timeout(std::time::Duration::from_secs(2))
+            .open()
+            .expect("manual serial port should open at 115200 8N1");
+
+        port.write_all(ping).expect("manual serial write failed");
+        port.flush().expect("manual serial flush failed");
+
+        let mut read_buf = vec![0_u8; expected.len()];
+        port.read_exact(&mut read_buf)
+            .expect("manual serial read failed");
+        assert_eq!(read_buf, expected);
+        drop(port);
     }
 }

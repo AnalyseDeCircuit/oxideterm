@@ -34,3 +34,4 @@ dist/
 docs/tauri/*
 AGENTS.md
 tasks/*
+docs/native-mosh-spike-boundary.md

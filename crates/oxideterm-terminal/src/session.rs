@@ -1,4 +1,10 @@
-use std::{cell::Cell, collections::VecDeque, sync::Arc, time::Instant};
+use std::{
+    cell::Cell,
+    collections::VecDeque,
+    io::{Read, Write},
+    sync::Arc,
+    time::Instant,
+};
 
 use alacritty_terminal::{
     event::{Event as AlacEvent, EventListener},
