@@ -15,8 +15,8 @@ use gpui::{
 };
 use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
-    GraphicsOptions, LocalPtyConfig, ShellIntegrationLifecycleState, ShellIntegrationStatus,
-    SshSessionConfig, TelnetSessionConfig, TermMode, TerminalCommandMark,
+    GraphicsOptions, LocalPtyConfig, SerialSessionConfig, ShellIntegrationLifecycleState,
+    ShellIntegrationStatus, SshSessionConfig, TelnetSessionConfig, TermMode, TerminalCommandMark,
     TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource,
     TerminalCommandMarkEvent, TerminalDrainBudget, TerminalDrainReport, TerminalEvent,
     TerminalLifecycle, TerminalOutputProcessor, TerminalProcessInfo, TerminalSession,
@@ -226,6 +226,25 @@ impl TerminalPane {
                 preferences.terminal_encoding,
                 preferences.scrollback_lines,
             ),
+        ));
+        Self::from_session(terminal, preferences, window, cx)
+    }
+
+    pub fn new_serial_with_preferences(
+        config: SerialSessionConfig,
+        preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        let terminal = Arc::new(Mutex::new(
+            TerminalSession::serial_with_graphics_and_encoding(
+                config,
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                graphics_options_from_preferences(&preferences),
+                preferences.terminal_encoding,
+                preferences.scrollback_lines,
+            )?,
         ));
         Self::from_session(terminal, preferences, window, cx)
     }

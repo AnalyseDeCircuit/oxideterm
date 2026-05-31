@@ -23,5 +23,5 @@ pub use store::{
     DeletedConnectionTombstone, LocalSyncMetadata, ManagedSshKeyInfo, ManagedSshKeyOrigin,
     ManagedSshKeyUsage, ProxyHopInfo, SaveConnectionRequest, SavedAuth, SavedConnection,
     SavedConnectionSyncRecord, SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
-    SavedProxyHop, validate_group_name,
+    SavedProxyHop, SerialFlowControl, SerialParity, SerialProfile, validate_group_name,
 };

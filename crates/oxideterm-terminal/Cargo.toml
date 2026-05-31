@@ -14,5 +14,6 @@ oxideterm-terminal-encoding = { path = "../oxideterm-terminal-encoding" }
 oxideterm-terminal-graphics = { path = "../oxideterm-terminal-graphics" }
 oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 polling.workspace = true
+serialport.workspace = true
 tokio.workspace = true
 tracing.workspace = true

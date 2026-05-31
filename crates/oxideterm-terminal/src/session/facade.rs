@@ -147,6 +147,26 @@ impl TerminalSession {
         }
     }
 
+    pub fn serial_with_graphics_and_encoding(
+        config: SerialSessionConfig,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback_lines: usize,
+    ) -> std::result::Result<Self, SerialError> {
+        Ok(Self {
+            backend: Box::new(SerialSession::new(
+                config,
+                cols,
+                rows,
+                graphics_options,
+                encoding,
+                scrollback_lines,
+            )?),
+        })
+    }
+
     pub fn kind(&self) -> TerminalSessionKind {
         self.backend.kind()
     }

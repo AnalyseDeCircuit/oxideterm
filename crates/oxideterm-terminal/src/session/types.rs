@@ -3,6 +3,7 @@ pub enum TerminalSessionKind {
     LocalPty,
     SshPty,
     Telnet,
+    Serial,
 }
 
 pub type TerminalOutputProcessor = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;

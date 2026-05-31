@@ -804,6 +804,77 @@ mod tests {
     }
 
     #[test]
+    fn connection_store_data_deserializes_missing_serial_profiles_as_empty() {
+        let data: ConnectionStoreData = serde_json::from_value(serde_json::json!({
+            "version": CONFIG_VERSION,
+            "connections": [],
+            "groups": [],
+            "recent": []
+        }))
+        .unwrap();
+
+        assert!(data.serial_profiles.is_empty());
+        assert!(data.connections.is_empty());
+    }
+
+    #[test]
+    fn serial_profile_metadata_round_trips_without_ssh_fields() {
+        let now = Utc::now();
+        let profile = SerialProfile {
+            id: "serial-1".to_string(),
+            name: "Lab console".to_string(),
+            group: Some("Lab".to_string()),
+            port_path: "/dev/cu.usbserial-1".to_string(),
+            baud_rate: 115_200,
+            data_bits: 8,
+            stop_bits: 1,
+            parity: SerialParity::None,
+            flow_control: SerialFlowControl::Hardware,
+            connect_on_open: true,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        };
+        let data = ConnectionStoreData {
+            serial_profiles: vec![profile.clone()],
+            ..ConnectionStoreData::default()
+        };
+
+        let value = serde_json::to_value(&data).unwrap();
+
+        assert_eq!(value["serial_profiles"][0]["id"], "serial-1");
+        assert_eq!(value["serial_profiles"][0]["flow_control"], "hardware");
+        assert!(value["serial_profiles"][0].get("host").is_none());
+        assert!(value["serial_profiles"][0].get("username").is_none());
+        assert!(value["serial_profiles"][0].get("auth").is_none());
+
+        let round_trip: ConnectionStoreData = serde_json::from_value(value).unwrap();
+        assert_eq!(round_trip.serial_profiles, vec![profile]);
+        assert!(round_trip.connections.is_empty());
+    }
+
+    #[test]
+    fn serial_profile_validation_rejects_invalid_parameters() {
+        let mut profile = SerialProfile::new("Lab console", "/dev/cu.usbserial-1");
+        assert!(profile.validate().is_ok());
+
+        profile.data_bits = 9;
+        assert!(profile.validate().is_err());
+
+        profile.data_bits = 8;
+        profile.stop_bits = 3;
+        assert!(profile.validate().is_err());
+
+        profile.stop_bits = 1;
+        profile.baud_rate = 0;
+        assert!(profile.validate().is_err());
+
+        profile.baud_rate = 115_200;
+        profile.port_path.clear();
+        assert!(profile.validate().is_err());
+    }
+
+    #[test]
     fn managed_ssh_key_metadata_round_trips_without_private_key() {
         let now = Utc::now();
         let data = ConnectionStoreData {

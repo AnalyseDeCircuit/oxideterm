@@ -252,6 +252,89 @@ impl From<&SavedConnection> for ConnectionInfo {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SerialParity {
+    None,
+    Odd,
+    Even,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SerialFlowControl {
+    None,
+    Software,
+    Hardware,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SerialProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    pub port_path: String,
+    pub baud_rate: u32,
+    pub data_bits: u8,
+    pub stop_bits: u8,
+    pub parity: SerialParity,
+    pub flow_control: SerialFlowControl,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub connect_on_open: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+impl SerialProfile {
+    pub fn new(name: impl Into<String>, port_path: impl Into<String>) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name: name.into(),
+            group: None,
+            port_path: port_path.into(),
+            baud_rate: 115_200,
+            data_bits: 8,
+            stop_bits: 1,
+            parity: SerialParity::None,
+            flow_control: SerialFlowControl::None,
+            connect_on_open: false,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            bail!("Serial profile id is required");
+        }
+        if self.name.trim().is_empty() {
+            bail!("Serial profile name is required");
+        }
+        if self.port_path.trim().is_empty() {
+            bail!("Serial port path is required");
+        }
+        if self.baud_rate == 0 {
+            bail!("Serial baud rate must be greater than zero");
+        }
+        if !(5..=8).contains(&self.data_bits) {
+            bail!("Serial data bits must be between 5 and 8");
+        }
+        if !matches!(self.stop_bits, 1 | 2) {
+            bail!("Serial stop bits must be 1 or 2");
+        }
+        Ok(())
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Clone, Debug)]
 pub struct SaveConnectionRequest {
     pub id: Option<String>,
@@ -282,6 +365,8 @@ pub struct ConnectionStoreData {
     pub connection_tombstones: Vec<DeletedConnectionTombstone>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub managed_ssh_keys: Vec<ManagedSshKey>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub serial_profiles: Vec<SerialProfile>,
 }
 
 impl Default for ConnectionStoreData {
@@ -293,6 +378,7 @@ impl Default for ConnectionStoreData {
             recent: Vec::new(),
             connection_tombstones: Vec::new(),
             managed_ssh_keys: Vec::new(),
+            serial_profiles: Vec::new(),
         }
     }
 }

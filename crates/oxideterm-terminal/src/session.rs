@@ -137,6 +137,7 @@ include!("session/local_backend.rs");
 include!("session/ssh_config.rs");
 include!("session/ssh_pty.rs");
 include!("session/telnet.rs");
+include!("session/serial.rs");
 
 #[cfg(test)]
 mod tests {
