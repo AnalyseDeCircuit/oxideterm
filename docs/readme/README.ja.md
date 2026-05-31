@@ -33,7 +33,7 @@
 | 重視すること | OxideTerm Native が提供するもの |
 |---|---|
 | 単なる shell ではなく SSH ワークスペース | terminal、SFTP、forwarding、trzsz、軽量 IDE、monitoring、AI context を 1 つのノードに統合 |
-| ローカル shell とリモート SSH | zsh/bash/fish/pwsh/WSL2 と SSH を同じワークフローで扱える |
+| ローカル shell、シリアルコンソール、リモート SSH | zsh/bash/fish/pwsh/WSL2、ローカルシリアル端末、SSH を同じワークフローで扱える |
 | クラウドアカウント不要 | SSH、SFTP、forwarding、local shell、設定はローカルファースト |
 | BYOK AI | OpenAI、Anthropic、Gemini、Ollama、OpenAI-compatible endpoint を利用 |
 | WebView なし | DOM/CSS/JavaScript なしで GPUI が GPU surface に直接描画 |
@@ -65,7 +65,7 @@ Electron、Tauri、Web terminal、hosted service ではありません。Chromiu
 
 | カテゴリ | 機能 |
 |---|---|
-| Terminal | Local PTY、SSH、split panes、shell integration、command marks、asciicast、trzsz、Sixel/Kitty graphics、rendering policy |
+| Terminal | Local PTY、SSH、local serial terminals、split panes、shell integration、command marks、asciicast、trzsz、Sixel/Kitty graphics、rendering policy |
 | SSH & Auth | connection pool、unlimited ProxyJump、Grace Period reconnect、Host-key TOFU、SSH Agent forwarding、password/key/cert/keyboard-interactive |
 | SFTP / IDE | dual-pane browser、transfer queue、preview、bookmarks、atomic writes、remote file tree、multi-tab editor、conflict resolution |
 | Port Forwarding | Local、Remote、Dynamic SOCKS5、saved rules、reconnect restore、death reporting、idle timeout |

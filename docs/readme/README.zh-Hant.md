@@ -33,7 +33,7 @@
 | 如果你在意... | OxideTerm Native 提供... |
 |---|---|
 | SSH 工作區，而不只是 shell | 一個遠端節點同時擁有終端、SFTP、轉發、trzsz、輕量 IDE、監控和 AI 上下文 |
-| 本地 shell 與遠端 SSH 共存 | zsh/bash/fish/pwsh/WSL2 與遠端 SSH 在同一工作流中運行 |
+| 本地 shell、序列埠主控台與遠端 SSH 共存 | zsh/bash/fish/pwsh/WSL2、本地序列埠終端與遠端 SSH 在同一工作流中運行 |
 | 不需要雲端帳號 | SSH、SFTP、轉發、本地 shell 和設定都本地優先 |
 | BYOK AI | 使用自己的 OpenAI、Anthropic、Gemini、Ollama 或相容端點 |
 | 沒有 WebView | GPUI 直接繪製 GPU 介面，沒有 DOM、CSS、JavaScript |
@@ -65,7 +65,7 @@ OxideTerm Native 是一個**純 Rust 原生桌面 SSH 工作區**。Tauri 版本
 
 | 分類 | 功能 |
 |---|---|
-| 終端 | 本地 PTY、SSH、分屏、shell integration、命令標記、asciicast 錄製/回放、trzsz、Sixel/Kitty graphics、渲染策略 |
+| 終端 | 本地 PTY、SSH、本地序列埠終端、分屏、shell integration、命令標記、asciicast 錄製/回放、trzsz、Sixel/Kitty graphics、渲染策略 |
 | SSH 與認證 | 連線池、無限 ProxyJump、Grace Period 重連、Host-key TOFU、SSH Agent 轉發、密碼/金鑰/憑證/鍵盤互動認證 |
 | SFTP / IDE | 雙欄瀏覽器、傳輸佇列、預覽、書籤、原子寫入、遠端檔案樹、多分頁編輯、衝突處理 |
 | 轉發 | Local、Remote、Dynamic SOCKS5，保存規則，重連恢復，死亡回報，閒置逾時 |

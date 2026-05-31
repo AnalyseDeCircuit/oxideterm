@@ -33,7 +33,7 @@
 | If you care about... | OxideTerm Native gives you... |
 |---|---|
 | SSH workspace, not just a shell | **Remote-node workspace**: one node with terminal, SFTP, port forwarding, trzsz, mini IDE, monitoring, and AI context around it |
-| Local shells in the same workflow | **Hybrid engine**: local PTY (zsh/bash/fish/pwsh/WSL2) and remote SSH live side by side |
+| Local shells and serial consoles in the same workflow | **Hybrid engine**: local PTY (zsh/bash/fish/pwsh/WSL2), local serial terminals, and remote SSH live side by side |
 | No cloud account for SSH workflows | **Local-first core**: SSH, SFTP, forwarding, local shell, and config work without signup |
 | BYOK AI instead of platform credits | **OxideSens**: bring your own OpenAI/Anthropic/Gemini/Ollama endpoint with MCP and RAG support |
 | No WebView at all | **Pure GPUI**: GPU-backed immediate-mode rendering in Rust — not a WebView wrapper |
@@ -75,7 +75,7 @@ OxideTerm started there too (the Tauri version). The native branch removes the b
 
 | Category | Features |
 |---|---|
-| **Terminal** | Local PTY (zsh/bash/fish/pwsh/WSL2), SSH remote, split panes, shell integration, command marks, recording/playback (asciicast v2), trzsz in-band file transfer, Sixel/Kitty graphics, rendering policy (Boost/Normal/Idle) |
+| **Terminal** | Local PTY (zsh/bash/fish/pwsh/WSL2), SSH remote, local serial terminals, split panes, shell integration, command marks, recording/playback (asciicast v2), trzsz in-band file transfer, Sixel/Kitty graphics, rendering policy (Boost/Normal/Idle) |
 | **SSH & Auth** | Connection pool, multi-hop ProxyJump (unlimited hops), Grace Period reconnect, host-key TOFU, SSH Agent forwarding. Auth: password, public key (RSA/Ed25519/ECDSA), SSH Agent, certificate, keyboard-interactive 2FA |
 | **SFTP** | Dual-pane browser, transfer queue (concurrent, speed-limited), adaptive chunking, progress + ETA, text/binary/image/archive preview, bookmarks, atomic writes |
 | **IDE** | SFTP-backed remote file tree, multi-tab editor, dirty tracking, conflict resolution, snapshot/restore, local + remote filesystem abstraction |

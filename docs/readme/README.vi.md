@@ -33,7 +33,7 @@
 | Nếu bạn quan tâm... | OxideTerm Native mang lại... |
 |---|---|
 | SSH workspace, không chỉ shell | Terminal, SFTP, forwarding, trzsz, mini IDE, monitoring và AI context quanh một node |
-| Local shell và remote SSH | zsh/bash/fish/pwsh/WSL2 và SSH trong cùng workflow |
+| Local shell, serial console và remote SSH | zsh/bash/fish/pwsh/WSL2, local serial terminal và SSH trong cùng workflow |
 | Không cần cloud account | SSH, SFTP, forwarding, local shell và config hoạt động local-first |
 | BYOK AI | Endpoint OpenAI, Anthropic, Gemini, Ollama hoặc compatible của bạn |
 | Không WebView | GPUI vẽ trực tiếp lên GPU surface, không DOM, CSS hoặc JavaScript |
@@ -65,7 +65,7 @@ Nó không phải Electron, Tauri, web terminal hay hosted service. Không Chrom
 
 | Category | Features |
 |---|---|
-| Terminal | Local PTY, SSH, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
+| Terminal | Local PTY, SSH, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
 | SSH & Auth | connection pool, unlimited ProxyJump, Grace Period reconnect, Host-key TOFU, SSH Agent forwarding, password/key/cert/keyboard-interactive |
 | SFTP / IDE | dual-pane browser, transfer queue, preview, bookmarks, atomic writes, remote file tree, multi-tab editor, conflict resolution |
 | Forwarding | Local, Remote, Dynamic SOCKS5, saved rules, reconnect restore, death reporting, idle timeout |

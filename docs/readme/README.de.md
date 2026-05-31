@@ -33,7 +33,7 @@
 | Wenn dir wichtig ist... | OxideTerm Native bietet... |
 |---|---|
 | SSH-Arbeitsbereich statt nur Shell | Terminal, SFTP, Forwarding, trzsz, Mini-IDE, Monitoring und KI-Kontext um einen Knoten |
-| Lokale Shells und Remote-SSH | zsh/bash/fish/pwsh/WSL2 und SSH im selben Workflow |
+| Lokale Shells, serielle Konsolen und Remote-SSH | zsh/bash/fish/pwsh/WSL2, lokale serielle Terminals und SSH im selben Workflow |
 | Kein Cloud-Konto | SSH, SFTP, Forwarding, lokale Shell und Config bleiben local-first |
 | BYOK-KI | Eigene OpenAI-, Anthropic-, Gemini-, Ollama- oder kompatible Endpunkte |
 | Kein WebView | GPUI rendert direkt auf eine GPU-Surface, ohne DOM, CSS oder JavaScript |
@@ -65,7 +65,7 @@ Es ist keine Electron-App, keine Tauri-App, kein Web-Terminal und kein gehostete
 
 | Kategorie | Funktionen |
 |---|---|
-| Terminal | Local PTY, SSH, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
+| Terminal | Local PTY, SSH, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
 | SSH & Auth | Connection pool, unlimited ProxyJump, Grace Period reconnect, Host-key TOFU, SSH Agent forwarding, password/key/cert/keyboard-interactive |
 | SFTP / IDE | Dual-pane browser, transfer queue, preview, bookmarks, atomic writes, remote file tree, multi-tab editor, conflict resolution |
 | Forwarding | Local, Remote, Dynamic SOCKS5, saved rules, reconnect restore, death reporting, idle timeout |

@@ -33,7 +33,7 @@
 | 중요하게 보는 것 | OxideTerm Native가 제공하는 것 |
 |---|---|
 | shell 이상의 SSH workspace | terminal, SFTP, forwarding, trzsz, mini IDE, monitoring, AI context를 하나의 node에 통합 |
-| local shell과 remote SSH | zsh/bash/fish/pwsh/WSL2와 remote SSH를 같은 workflow에서 사용 |
+| local shell, serial console, remote SSH | zsh/bash/fish/pwsh/WSL2, local serial terminal, remote SSH를 같은 workflow에서 사용 |
 | cloud account 불필요 | SSH, SFTP, forwarding, local shell, config는 local-first |
 | BYOK AI | OpenAI, Anthropic, Gemini, Ollama, compatible endpoint 사용 |
 | WebView 없음 | DOM/CSS/JavaScript 없이 GPUI가 GPU surface에 직접 렌더링 |
@@ -65,7 +65,7 @@ Electron, Tauri, web terminal, hosted service가 아닙니다. Chromium, WebView
 
 | Category | Features |
 |---|---|
-| Terminal | Local PTY, SSH, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
+| Terminal | Local PTY, SSH, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
 | SSH & Auth | connection pool, unlimited ProxyJump, Grace Period reconnect, Host-key TOFU, SSH Agent forwarding, password/key/cert/keyboard-interactive |
 | SFTP / IDE | dual-pane browser, transfer queue, preview, bookmarks, atomic writes, remote file tree, multi-tab editor, conflict resolution |
 | Forwarding | Local, Remote, Dynamic SOCKS5, saved rules, reconnect restore, death reporting, idle timeout |

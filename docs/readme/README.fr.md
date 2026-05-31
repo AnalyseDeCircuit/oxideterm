@@ -33,7 +33,7 @@
 | Si vous tenez à... | OxideTerm Native apporte... |
 |---|---|
 | Un espace SSH, pas seulement un shell | Terminal, SFTP, forwarding, trzsz, mini IDE, monitoring et contexte IA autour d'un noeud |
-| Shell local et SSH distant ensemble | zsh/bash/fish/pwsh/WSL2 et SSH dans le même workflow |
+| Shell local, consoles série et SSH distant ensemble | zsh/bash/fish/pwsh/WSL2, terminaux série locaux et SSH dans le même workflow |
 | Aucun compte cloud | SSH, SFTP, forwarding, shell local et configuration restent local-first |
 | IA BYOK | Vos propres endpoints OpenAI, Anthropic, Gemini, Ollama ou compatibles |
 | Aucun WebView | GPUI dessine directement sur une surface GPU, sans DOM, CSS ni JavaScript |
@@ -65,7 +65,7 @@ Ce n'est ni Electron, ni Tauri, ni un terminal web, ni un service hébergé. Il 
 
 | Catégorie | Fonctionnalités |
 |---|---|
-| Terminal | PTY local, SSH, split panes, shell integration, marques de commande, asciicast, trzsz, graphiques Sixel/Kitty, politique de rendu |
+| Terminal | PTY local, SSH, terminaux série locaux, split panes, shell integration, marques de commande, asciicast, trzsz, graphiques Sixel/Kitty, politique de rendu |
 | SSH & Auth | Pool de connexions, ProxyJump illimité, Grace Period reconnect, TOFU host-key, SSH Agent forwarding, mot de passe/clé/certificat/keyboard-interactive |
 | SFTP / IDE | Navigateur double panneau, file de transferts, aperçu, favoris, écritures atomiques, arbre distant, éditeur multi-onglets, résolution de conflits |
 | Forwarding | Local, Remote, Dynamic SOCKS5, règles sauvegardées, restauration après reconnexion, rapport de mort, idle timeout |
