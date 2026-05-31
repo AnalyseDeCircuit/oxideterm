@@ -33,6 +33,24 @@ Typical flow:
 
 For unstable hosts, keep Connection Monitor open while testing. It shows whether a node is connected, connecting, stale, or unavailable.
 
+## Serial Terminals
+
+Serial terminals are local device transports, not SSH subfeatures. Use them for USB-UART adapters, development boards, router consoles, switch consoles, or other local serial devices.
+
+Open a serial terminal from the New Connection dialog by selecting the `Serial` branch. Fill in `Serial port`, `Baud rate`, `Data bits`, `Stop bits`, `Parity`, and `Flow control`, then choose `Open Serial`. The command palette also exposes `Open Serial Terminal`.
+
+Common port names:
+
+| Platform | Examples |
+|----------|----------|
+| macOS | `/dev/cu.usbserial-0001`, `/dev/cu.usbmodem*` |
+| Linux | `/dev/ttyUSB0`, `/dev/ttyACM0` |
+| Windows | `COM3`, `COM10` |
+
+Use `Save serial profile` and `Profile name` when the same device settings should be reused. Saved serial profiles are separate from saved SSH connections.
+
+Serial terminals do not provide SFTP, port forwarding, ProxyJump, SSH host-key verification, SSH Agent, remote IDE, or SSH connection-pool behavior. Serial split panes are disabled because a serial device is normally an exclusive writer.
+
 ## Port Forwards
 
 Use the forwarding UI to create and manage local, remote, and dynamic forwards.

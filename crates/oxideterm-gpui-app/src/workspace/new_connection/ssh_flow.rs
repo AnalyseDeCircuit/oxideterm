@@ -141,6 +141,20 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn open_serial_connection_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_new_connection_form(window, cx);
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.transport = NewConnectionTransport::Serial;
+            form.focused_field = super::form_state::NewConnectionField::SerialPortPath;
+            form.field_focused = false;
+        }
+        self.refresh_serial_ports(cx);
+    }
+
     pub(in crate::workspace) fn open_drill_down_form(
         &mut self,
         parent_node_id: NodeId,

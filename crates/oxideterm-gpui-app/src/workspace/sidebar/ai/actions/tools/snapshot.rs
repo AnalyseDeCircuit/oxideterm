@@ -335,8 +335,12 @@ impl WorkspaceApp {
                 let Some(pane) = self.panes.get(&pane_id) else {
                     continue;
                 };
+                let serial_config = self.serial_terminal_configs.get(&session_id);
+                let is_serial_terminal = serial_config.is_some();
                 let is_local_terminal = tab.kind == TabKind::LocalTerminal;
-                let terminal_type = if is_local_terminal {
+                let terminal_type = if is_serial_terminal {
+                    "serial"
+                } else if is_local_terminal {
                     "local_terminal"
                 } else {
                     "terminal"
@@ -355,12 +359,25 @@ impl WorkspaceApp {
                         pane.lifecycle().is_running(),
                     )
                 };
-                let label = if is_local_terminal {
+                let label = if let Some(config) = serial_config {
+                    format!("Serial {}", config.port_path)
+                } else if is_local_terminal {
                     format!("Local terminal {}", tab.title)
                 } else {
                     format!("SSH terminal {}", ai_short_id(&session_id.0.to_string()))
                 };
-                let metadata = if is_local_terminal {
+                let metadata = if let Some(config) = serial_config {
+                    serde_json::json!({
+                        "terminalType": terminal_type,
+                        "terminalTransport": "serial",
+                        "portPath": config.port_path,
+                        "baudRate": config.baud_rate,
+                        "dataBits": config.data_bits,
+                        "stopBits": config.stop_bits,
+                        "parity": format!("{:?}", config.parity).to_lowercase(),
+                        "flowControl": format!("{:?}", config.flow_control).to_lowercase(),
+                    })
+                } else if is_local_terminal {
                     // Tauri's local terminal store overwrites registry metadata
                     // with shell-oriented metadata instead of pane internals.
                     serde_json::json!({

@@ -10,6 +10,21 @@ pub(super) struct SplitDrag {
 }
 
 impl WorkspaceApp {
+    pub(super) fn active_tab_has_serial_terminal(&self) -> bool {
+        let Some(tab) = self.active_tab() else {
+            return false;
+        };
+        let Some(root_pane) = tab.root_pane.as_ref() else {
+            return false;
+        };
+
+        let mut session_ids = Vec::new();
+        root_pane.collect_session_ids(&mut session_ids);
+        session_ids
+            .iter()
+            .any(|session_id| self.serial_terminal_configs.contains_key(session_id))
+    }
+
     pub(super) fn split_active_pane(
         &mut self,
         direction: SplitDirection,
@@ -31,6 +46,9 @@ impl WorkspaceApp {
         }
 
         if self.tabs[active_index].kind == TabKind::SshTerminal {
+            return;
+        }
+        if self.active_tab_has_serial_terminal() {
             return;
         }
 
@@ -85,6 +103,7 @@ impl WorkspaceApp {
             .as_ref()
             .and_then(|root_pane| root_pane.session_id_for_pane(active_pane_id))
         {
+            self.serial_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id);
         }
 
@@ -137,6 +156,7 @@ impl WorkspaceApp {
             .into_iter()
             .filter(|session_id| *session_id != active_session_id)
         {
+            self.serial_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id);
         }
         for pane_id in pane_ids

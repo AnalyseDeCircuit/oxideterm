@@ -99,7 +99,8 @@
     "quick_connect_resolve_failed": "SSH config alias '{{alias}}' 해석 실패",
     "footer_hint": "Esc를 눌러 닫기",
     "session_ssh_terminal": "SSH 터미널",
-    "cmd_open_cloud_sync": "클라우드 동기화 열기"
+    "cmd_open_cloud_sync": "클라우드 동기화 열기",
+    "cmd_open_serial_terminal": "Open Serial Terminal"
   },
   "common": {
     "enabled": "활성화됨",

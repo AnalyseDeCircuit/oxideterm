@@ -99,7 +99,8 @@
     "quick_connect_resolve_failed": "Échec de la résolution de l'alias '{{alias}}'",
     "footer_hint": "Appuyez sur Échap pour fermer",
     "session_ssh_terminal": "Terminal SSH",
-    "cmd_open_cloud_sync": "Ouvrir la synchronisation cloud"
+    "cmd_open_cloud_sync": "Ouvrir la synchronisation cloud",
+    "cmd_open_serial_terminal": "Open Serial Terminal"
   },
   "common": {
     "enabled": "Activé",

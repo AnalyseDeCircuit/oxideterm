@@ -414,6 +414,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let is_local_terminal = active_tab.kind == TabKind::LocalTerminal;
         let can_split = is_local_terminal
+            && !self.active_tab_has_serial_terminal()
             && active_tab
                 .root_pane
                 .as_ref()

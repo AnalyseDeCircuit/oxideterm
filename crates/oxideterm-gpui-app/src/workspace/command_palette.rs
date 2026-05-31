@@ -65,6 +65,7 @@ enum PaletteAction {
         port: u16,
     },
     QuickConnectAlias(String),
+    OpenSerialTerminal,
     Sidebar(SidebarSection),
     OpenSavedConnections,
     OpenSessionManager,
@@ -450,6 +451,7 @@ impl WorkspaceApp {
             PaletteAction::QuickConnectAlias(alias) => {
                 self.open_ssh_config_alias_from_palette(alias, window, cx);
             }
+            PaletteAction::OpenSerialTerminal => self.open_serial_connection_form(window, cx),
             PaletteAction::Sidebar(section) => self.set_sidebar_section(section, cx),
             PaletteAction::OpenSavedConnections => self.open_session_manager_tab(window, cx),
             PaletteAction::OpenSessionManager => self.open_session_manager_tab(window, cx),
@@ -2188,6 +2190,13 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             "app.newConnection",
             LucideIcon::Plus,
         ),
+        CommandSpec {
+            id: "cmd:open_serial_terminal",
+            label_key: Cow::Borrowed("command_palette.cmd_open_serial_terminal"),
+            icon: LucideIcon::Radio,
+            shortcut_action: None,
+            action: PaletteAction::OpenSerialTerminal,
+        },
         keybinding_command(
             "cmd:settings",
             "command_palette.cmd_settings",

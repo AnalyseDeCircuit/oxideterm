@@ -819,7 +819,7 @@ impl WorkspaceApp {
         row.into_any_element()
     }
 
-    fn refresh_serial_ports(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn refresh_serial_ports(&mut self, cx: &mut Context<Self>) {
         if let Some(form) = self.new_connection_form.as_mut() {
             form.serial_ports_loading = true;
             form.error = None;

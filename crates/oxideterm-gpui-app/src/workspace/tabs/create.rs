@@ -101,6 +101,7 @@ impl WorkspaceApp {
         // Serial mirrors Tauri local-terminal transport semantics: it is not
         // an SSH node and must not expose SFTP, forwarding, or ProxyJump.
         self.panes.insert(pane_id, pane.clone());
+        self.serial_terminal_configs.insert(session_id, config);
         self.refresh_native_plugin_terminal_hooks(cx);
         self.tabs.push(Tab {
             id: tab_id,

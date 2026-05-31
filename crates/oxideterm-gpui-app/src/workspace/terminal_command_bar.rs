@@ -121,6 +121,7 @@ impl WorkspaceApp {
             .is_some_and(|tab| tab.kind == TabKind::LocalTerminal);
         let can_split = self.active_tab().is_some_and(|tab| {
             tab.kind == TabKind::LocalTerminal
+                && !self.active_tab_has_serial_terminal()
                 && tab
                     .root_pane
                     .as_ref()

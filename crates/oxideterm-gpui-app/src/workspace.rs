@@ -127,11 +127,10 @@ use oxideterm_ssh::{
     ReconnectPhase, ReconnectSnapshot, ReconnectTiming, SshConfig, SshConnectionHandle,
     SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
 };
-use oxideterm_terminal::TerminalCommandMarkDetectionSource;
 use oxideterm_terminal::{
     LocalPtyConfig, SerialSessionConfig, ShellInfo, SshSessionConfig, TelnetSessionConfig,
-    TerminalCursorShape, TerminalEncoding as SessionTerminalEncoding, TerminalLifecycle,
-    scan_shells,
+    TerminalCommandMarkDetectionSource, TerminalCursorShape,
+    TerminalEncoding as SessionTerminalEncoding, TerminalLifecycle, scan_shells,
 };
 use oxideterm_theme::{
     AppUiColors, TerminalTheme, ThemeTokens, UiRadii, derive_ui_colors_from_terminal, theme_by_id,
@@ -519,6 +518,7 @@ pub(crate) struct WorkspaceApp {
     terminal_quick_commands_open: bool,
     terminal_quick_command_pending: Option<String>,
     detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
+    serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
     detached_local_terminals_popover_open: bool,
     terminal_cast_player: Option<TerminalCastPlayerState>,
     terminal_cast_seek_dragging: bool,

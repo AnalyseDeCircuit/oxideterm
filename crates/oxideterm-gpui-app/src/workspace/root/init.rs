@@ -152,6 +152,7 @@ impl WorkspaceApp {
             terminal_quick_commands_open: false,
             terminal_quick_command_pending: None,
             detached_local_terminals: HashMap::new(),
+            serial_terminal_configs: HashMap::new(),
             detached_local_terminals_popover_open: false,
             terminal_cast_player: None,
             terminal_cast_seek_dragging: false,

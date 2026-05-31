@@ -99,7 +99,8 @@
     "quick_connect_resolve_failed": "解析 SSH config alias {{alias}} 失敗",
     "footer_hint": "按 Esc 關閉",
     "session_ssh_terminal": "SSH 終端機",
-    "cmd_open_cloud_sync": "開啟雲端同步"
+    "cmd_open_cloud_sync": "開啟雲端同步",
+    "cmd_open_serial_terminal": "開啟序列埠終端機"
   },
   "common": {
     "enabled": "已啟用",

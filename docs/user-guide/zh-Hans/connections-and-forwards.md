@@ -33,6 +33,24 @@
 
 对不稳定主机做测试时，保持连接监控可见。它会显示节点是已连接、正在连接、已失效还是不可用。
 
+## 串口终端
+
+串口终端是本地设备传输，不是 SSH 子功能。它适用于 USB-UART 适配器、开发板、路由器控制台、交换机控制台或其他本地串口设备。
+
+在新建连接弹窗中选择 `Serial` 分支即可打开串口终端。填写 `Serial port`、`Baud rate`、`Data bits`、`Stop bits`、`Parity` 和 `Flow control`，然后选择 `Open Serial`。命令面板也提供 `Open Serial Terminal`。
+
+常见端口名：
+
+| 平台 | 示例 |
+|------|------|
+| macOS | `/dev/cu.usbserial-0001`、`/dev/cu.usbmodem*` |
+| Linux | `/dev/ttyUSB0`、`/dev/ttyACM0` |
+| Windows | `COM3`、`COM10` |
+
+需要复用同一组设备参数时，使用 `Save serial profile` 和 `Profile name`。保存的串口配置和保存的 SSH 连接是分离的。
+
+串口终端不提供 SFTP、端口转发、ProxyJump、SSH 主机密钥校验、SSH Agent、远程 IDE 或 SSH 连接池行为。串口分屏被禁用，因为串口设备通常是独占写入资源。
+
 ## 端口转发
 
 使用转发页面创建和管理本地、远端和动态转发。

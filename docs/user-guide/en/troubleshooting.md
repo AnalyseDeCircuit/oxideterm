@@ -25,6 +25,13 @@ For SFTP or forwarding issues, check the owning SSH node in Connection Monitor. 
 
 For cloud sync issues, open Cloud Sync, inspect status, and review conflicts before choosing a direction.
 
+For serial terminal issues, start from the device and permission boundary:
+
+- No ports listed: enter `/dev/cu.*`, `/dev/ttyUSB*`, `/dev/ttyACM*`, or `COMx` manually and confirm the OS can see the device.
+- Permission denied: on Linux, check `dialout`, `uucp`, or the distribution-specific serial group and log out/in after changing membership. On macOS, check system permissions and USB serial drivers.
+- Device busy: close other terminal programs, debuggers, flashing tools, or OxideTerm tabs that may already hold the port.
+- Device unplugged: close the current serial terminal, reconnect the device, and reopen it. If the OS assigned a new path, update the serial profile.
+
 ## Backups First
 
 Before applying a restore, import, sync apply, or manual file repair, create or verify a backup from the app. Review the restore plan and apply the smallest section that solves the issue.

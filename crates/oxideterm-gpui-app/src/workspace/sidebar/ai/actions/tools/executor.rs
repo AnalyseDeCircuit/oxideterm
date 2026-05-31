@@ -664,6 +664,14 @@ impl AiOrchestratorRuntimeSnapshot {
                 .with_target(target),
             };
         }
+        if ai_target_is_serial_terminal(&target) {
+            return self.fail(
+                "Serial terminals do not expose SSH resources.",
+                "unsupported_serial_resource_target",
+                "Serial targets only support terminal observe/send/wait. They do not provide SFTP, remote files, or port forwarding.",
+                "read",
+            ).with_target(target);
+        }
         let node_id = target
             .refs
             .get("nodeId")
@@ -913,6 +921,14 @@ impl AiOrchestratorRuntimeSnapshot {
                 "reason": "Read or inspect the resource instead of writing it."
             })]);
         };
+        if ai_target_is_serial_terminal(&target) {
+            return self.fail(
+                "Serial terminals do not expose SSH resources.",
+                "unsupported_serial_resource_target",
+                "Serial targets only support terminal observe/send/wait. They do not provide SFTP, remote files, or port forwarding.",
+                "write",
+            ).with_target(target);
+        }
         let Some(node_id) = target.refs.get("nodeId").map(|value| NodeId::new(value.clone())) else {
             return self.fail(
                 "Target cannot write resources.",
@@ -1054,6 +1070,14 @@ impl AiOrchestratorRuntimeSnapshot {
                 "Transfer direction is required.",
                 "missing_transfer_direction",
                 "direction must be upload or download.",
+                "write",
+            ).with_target(target);
+        }
+        if ai_target_is_serial_terminal(&target) {
+            return self.fail(
+                "Serial terminals do not expose SSH resources.",
+                "unsupported_serial_resource_target",
+                "Serial targets only support terminal observe/send/wait. They do not provide SFTP, remote files, or port forwarding.",
                 "write",
             ).with_target(target);
         }
@@ -1975,6 +1999,19 @@ fn ai_transfer_path_looks_directory(path: &str) -> bool {
     // Tauri uses /[\\/]$/ so both POSIX and Windows-style trailing separators
     // select directory transfer semantics.
     path.ends_with('/') || path.ends_with('\\')
+}
+
+fn ai_target_is_serial_terminal(target: &AiOrchestratorTarget) -> bool {
+    target
+        .metadata
+        .get("terminalTransport")
+        .and_then(serde_json::Value::as_str)
+        == Some("serial")
+        || target
+            .metadata
+            .get("terminalType")
+            .and_then(serde_json::Value::as_str)
+            == Some("serial")
 }
 
 fn make_ai_state_version(scope: &str, parts: impl IntoIterator<Item = String>) -> String {

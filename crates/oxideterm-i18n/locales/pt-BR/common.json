@@ -99,7 +99,8 @@
     "quick_connect_resolve_failed": "Erro ao resolver alias '{{alias}}'",
     "footer_hint": "Pressione Esc para fechar",
     "session_ssh_terminal": "Terminal SSH",
-    "cmd_open_cloud_sync": "Abrir sincronização na nuvem"
+    "cmd_open_cloud_sync": "Abrir sincronização na nuvem",
+    "cmd_open_serial_terminal": "Open Serial Terminal"
   },
   "common": {
     "enabled": "Ativado",

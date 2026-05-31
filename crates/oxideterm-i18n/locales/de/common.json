@@ -99,7 +99,8 @@
     "quick_connect_resolve_failed": "Fehler beim Auflösen des SSH-Config-Alias '{{alias}}'",
     "footer_hint": "Esc zum Schließen drücken",
     "session_ssh_terminal": "SSH-Terminal",
-    "cmd_open_cloud_sync": "Cloud-Sync öffnen"
+    "cmd_open_cloud_sync": "Cloud-Sync öffnen",
+    "cmd_open_serial_terminal": "Open Serial Terminal"
   },
   "common": {
     "enabled": "Aktiviert",
