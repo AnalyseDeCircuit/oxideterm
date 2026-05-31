@@ -100,7 +100,7 @@
     "footer_hint": "Pressione Esc para fechar",
     "session_ssh_terminal": "Terminal SSH",
     "cmd_open_cloud_sync": "Abrir sincronização na nuvem",
-    "cmd_open_serial_terminal": "Open Serial Terminal"
+    "cmd_open_serial_terminal": "Abrir terminal serial"
   },
   "common": {
     "enabled": "Ativado",

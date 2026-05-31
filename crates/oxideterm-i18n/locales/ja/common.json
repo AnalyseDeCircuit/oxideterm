@@ -100,7 +100,7 @@
     "footer_hint": "Escで閉じる",
     "session_ssh_terminal": "SSH ターミナル",
     "cmd_open_cloud_sync": "クラウド同期を開く",
-    "cmd_open_serial_terminal": "Open Serial Terminal"
+    "cmd_open_serial_terminal": "シリアルターミナルを開く"
   },
   "common": {
     "enabled": "有効",

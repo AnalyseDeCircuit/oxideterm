@@ -100,7 +100,7 @@
     "footer_hint": "Appuyez sur Échap pour fermer",
     "session_ssh_terminal": "Terminal SSH",
     "cmd_open_cloud_sync": "Ouvrir la synchronisation cloud",
-    "cmd_open_serial_terminal": "Open Serial Terminal"
+    "cmd_open_serial_terminal": "Ouvrir un terminal série"
   },
   "common": {
     "enabled": "Activé",

@@ -100,7 +100,7 @@
     "footer_hint": "Nhấn Esc để đóng",
     "session_ssh_terminal": "Terminal SSH",
     "cmd_open_cloud_sync": "Mở đồng bộ đám mây",
-    "cmd_open_serial_terminal": "Open Serial Terminal"
+    "cmd_open_serial_terminal": "Mở terminal serial"
   },
   "common": {
     "enabled": "Đã bật",

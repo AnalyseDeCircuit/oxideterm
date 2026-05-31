@@ -100,7 +100,7 @@
     "footer_hint": "Esc를 눌러 닫기",
     "session_ssh_terminal": "SSH 터미널",
     "cmd_open_cloud_sync": "클라우드 동기화 열기",
-    "cmd_open_serial_terminal": "Open Serial Terminal"
+    "cmd_open_serial_terminal": "시리얼 터미널 열기"
   },
   "common": {
     "enabled": "활성화됨",
