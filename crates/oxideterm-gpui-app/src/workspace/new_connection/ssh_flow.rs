@@ -7,7 +7,9 @@ use std::{
 };
 
 use gpui::{Context, Window};
-use oxideterm_connections::{SaveConnectionRequest, first_available_default_key_path};
+use oxideterm_connections::{
+    SaveConnectionRequest, SaveSerialProfileRequest, first_available_default_key_path,
+};
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionState, HostKeyStatus,
     KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, NodeId, NodeReadiness,
@@ -18,7 +20,7 @@ use tokio::sync::oneshot;
 
 use super::{
     form_state::{
-        NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
+        NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionTransport,
         SavedConnectionPromptAction, SshAuthTab, new_connection_form_mode,
     },
     host_key_dialog::HostKeyChallenge,
@@ -35,6 +37,7 @@ use crate::workspace::{
         save_request_from_form_with_existing_auth, ssh_config_from_saved_connection,
     },
 };
+use oxideterm_terminal::SerialSessionConfig;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshConnectionIntent {
@@ -203,6 +206,23 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .new_connection_form
+            .as_ref()
+            .is_some_and(|form| form.transport == NewConnectionTransport::Serial)
+            && self.drill_down_parent_node_id.is_none()
+            && matches!(
+                new_connection_form_mode(
+                    self.editing_saved_connection_id.as_deref(),
+                    self.duplicating_saved_connection_id.as_deref(),
+                    self.saved_connection_prompt_action,
+                ),
+                NewConnectionFormMode::NewConnection
+            )
+        {
+            self.submit_serial_connection_form(window, cx);
+            return;
+        }
         if let Some(parent_id) = self.drill_down_parent_node_id.clone() {
             self.start_new_connection_flow(SshConnectionIntent::DrillDown(parent_id), window, cx);
             return;
@@ -225,6 +245,74 @@ impl WorkspaceApp {
                 self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
             }
         }
+    }
+
+    fn submit_serial_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return;
+        };
+        let port_path = form.serial_port_path.trim().to_string();
+        let baud_rate = form.serial_baud_rate.trim().parse::<u32>().ok();
+        if port_path.is_empty() {
+            form.error = Some(self.i18n.t("modals.new_connection.serial_port_required"));
+            cx.notify();
+            return;
+        }
+        let Some(baud_rate) = baud_rate.filter(|baud| *baud > 0) else {
+            form.error = Some(
+                self.i18n
+                    .t("modals.new_connection.serial_invalid_baud_rate"),
+            );
+            cx.notify();
+            return;
+        };
+        let config = SerialSessionConfig {
+            port_path: port_path.clone(),
+            baud_rate,
+            data_bits: form.serial_data_bits,
+            stop_bits: form.serial_stop_bits,
+            parity: form.serial_parity,
+            flow_control: form.serial_flow_control,
+        };
+        let save_request = form.save_serial_profile.then(|| SaveSerialProfileRequest {
+            id: None,
+            name: serial_profile_name_or_port(&form.serial_profile_name, &port_path),
+            group: serial_profile_group_from_form(&form.group, &self.i18n),
+            port_path: port_path.clone(),
+            baud_rate: Some(baud_rate),
+            data_bits: Some(form.serial_data_bits),
+            stop_bits: Some(form.serial_stop_bits),
+            parity: Some(serial_profile_parity_from_terminal(form.serial_parity)),
+            flow_control: Some(serial_profile_flow_from_terminal(form.serial_flow_control)),
+            connect_on_open: None,
+        });
+        form.pending = true;
+        form.error = None;
+
+        match self.create_serial_terminal_tab(config, window, cx) {
+            Ok(_) => {
+                if let Some(request) = save_request {
+                    match self.connection_store.upsert_serial_profile(request) {
+                        Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
+                        Err(error) => {
+                            self.session_manager.status = Some(format!(
+                                "{}: {error}",
+                                self.i18n.t("modals.new_connection.serial_save_failed")
+                            ));
+                        }
+                    }
+                }
+                self.new_connection_form = None;
+                self.close_new_connection_select();
+            }
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.pending = false;
+                    form.error = Some(error.to_string());
+                }
+            }
+        }
+        cx.notify();
     }
 
     pub(in crate::workspace) fn start_new_connection_flow(
@@ -1583,6 +1671,55 @@ fn auth_method_from_proxy_hop(hop: &NewConnectionProxyHop) -> AuthMethod {
         ),
         SshAuthTab::Agent => AuthMethod::Agent,
         SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
+    }
+}
+
+fn serial_profile_name_or_port(name: &str, port_path: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        port_path.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+fn serial_profile_group_from_form(group: &str, i18n: &oxideterm_i18n::I18n) -> Option<String> {
+    let group = group.trim();
+    if group.is_empty()
+        || group == "Ungrouped"
+        || group == "未分组"
+        || group == i18n.t("ssh.form.ungrouped")
+        || group == i18n.t("sessionManager.edit_properties.ungrouped")
+    {
+        None
+    } else {
+        Some(group.to_string())
+    }
+}
+
+fn serial_profile_parity_from_terminal(
+    parity: oxideterm_terminal::SerialParity,
+) -> oxideterm_connections::SerialParity {
+    match parity {
+        oxideterm_terminal::SerialParity::None => oxideterm_connections::SerialParity::None,
+        oxideterm_terminal::SerialParity::Odd => oxideterm_connections::SerialParity::Odd,
+        oxideterm_terminal::SerialParity::Even => oxideterm_connections::SerialParity::Even,
+    }
+}
+
+fn serial_profile_flow_from_terminal(
+    flow: oxideterm_terminal::SerialFlowControl,
+) -> oxideterm_connections::SerialFlowControl {
+    match flow {
+        oxideterm_terminal::SerialFlowControl::None => {
+            oxideterm_connections::SerialFlowControl::None
+        }
+        oxideterm_terminal::SerialFlowControl::Software => {
+            oxideterm_connections::SerialFlowControl::Software
+        }
+        oxideterm_terminal::SerialFlowControl::Hardware => {
+            oxideterm_connections::SerialFlowControl::Hardware
+        }
     }
 }
 

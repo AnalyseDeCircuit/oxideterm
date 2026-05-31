@@ -191,6 +191,12 @@ impl WorkspaceApp {
                 confirm_delete_connection_label(&self.i18n, name),
                 self.i18n.t("sessionManager.actions.delete"),
             ),
+            SessionManagerDeleteConfirm::SerialProfile { name, .. } => (
+                self.i18n
+                    .t("sessionManager.serial_profiles.confirm_delete")
+                    .replace("{{name}}", name),
+                self.i18n.t("sessionManager.serial_profiles.delete"),
+            ),
             SessionManagerDeleteConfirm::Batch { ids } => (
                 confirm_batch_delete_label(&self.i18n, ids.len()),
                 self.i18n.t("common.actions.confirm"),

@@ -81,6 +81,44 @@ impl WorkspaceApp {
         Ok(session_id)
     }
 
+    pub(super) fn create_serial_terminal_tab(
+        &mut self,
+        config: SerialSessionConfig,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
+        let tab_id = self.alloc_tab_id();
+        let pane_id = self.alloc_pane_id();
+        let session_id = self.alloc_session_id();
+        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::LocalTerminal);
+        let title = format!("Serial {}", config.port_path);
+        let pane_config = config.clone();
+        let pane = cx.new(|cx| {
+            TerminalPane::new_serial_with_preferences(pane_config, preferences, window, cx)
+                .expect("failed to initialize Serial terminal pane")
+        });
+
+        // Serial mirrors Tauri local-terminal transport semantics: it is not
+        // an SSH node and must not expose SFTP, forwarding, or ProxyJump.
+        self.panes.insert(pane_id, pane.clone());
+        self.refresh_native_plugin_terminal_hooks(cx);
+        self.tabs.push(Tab {
+            id: tab_id,
+            kind: TabKind::LocalTerminal,
+            title,
+            title_source: TabTitleSource::Static,
+            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+            active_pane_id: Some(pane_id),
+        });
+        self.active_tab_id = Some(tab_id);
+        self.active_surface = ActiveSurface::Terminal;
+        self.needs_active_pane_focus = true;
+        pane.read(cx).focus(window);
+        self.reveal_active_tab(window);
+        cx.notify();
+        Ok(session_id)
+    }
+
     pub(super) fn open_or_create_saved_ssh_terminal_tab(
         &mut self,
         saved_connection_id: String,

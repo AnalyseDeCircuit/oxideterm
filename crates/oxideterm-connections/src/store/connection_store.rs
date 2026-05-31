@@ -55,6 +55,10 @@ impl ConnectionStore {
             .collect()
     }
 
+    pub fn serial_profiles(&self) -> &[SerialProfile] {
+        &self.data.serial_profiles
+    }
+
     pub fn groups(&self) -> &[String] {
         &self.data.groups
     }
@@ -276,6 +280,86 @@ impl ConnectionStore {
         self.data.recent.retain(|recent_id| recent_id != id);
         self.data.recent.insert(0, id.to_string());
         self.data.recent.truncate(10);
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn upsert_serial_profile(
+        &mut self,
+        request: SaveSerialProfileRequest,
+    ) -> Result<SerialProfile> {
+        let group = normalize_optional_group_name(request.group.as_deref())?;
+        let now = Utc::now();
+        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let mut profile = self
+            .data
+            .serial_profiles
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+            .unwrap_or_else(|| {
+                let mut profile = SerialProfile::new(request.name.trim(), request.port_path.trim());
+                profile.id = id.clone();
+                profile
+            });
+
+        profile.name = request.name.trim().to_string();
+        profile.group = group;
+        profile.port_path = request.port_path.trim().to_string();
+        profile.baud_rate = request.baud_rate.unwrap_or(115_200);
+        profile.data_bits = request.data_bits.unwrap_or(8);
+        profile.stop_bits = request.stop_bits.unwrap_or(1);
+        profile.parity = request.parity.unwrap_or(SerialParity::None);
+        profile.flow_control = request.flow_control.unwrap_or(SerialFlowControl::None);
+        profile.connect_on_open = request.connect_on_open.unwrap_or(false);
+        if !self
+            .data
+            .serial_profiles
+            .iter()
+            .any(|existing| existing.id == id)
+        {
+            profile.created_at = now;
+        }
+        profile.updated_at = now;
+        profile.validate()?;
+
+        if let Some(existing) = self
+            .data
+            .serial_profiles
+            .iter_mut()
+            .find(|existing| existing.id == id)
+        {
+            *existing = profile.clone();
+        } else {
+            self.data.serial_profiles.push(profile.clone());
+        }
+        self.normalize();
+        self.save()?;
+        Ok(profile)
+    }
+
+    pub fn delete_serial_profile(&mut self, id: &str) -> Result<bool> {
+        let before = self.data.serial_profiles.len();
+        self.data.serial_profiles.retain(|profile| profile.id != id);
+        let deleted = self.data.serial_profiles.len() != before;
+        if deleted {
+            self.save()?;
+        }
+        Ok(deleted)
+    }
+
+    pub fn mark_serial_profile_used(&mut self, id: &str) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .serial_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+        else {
+            return Ok(false);
+        };
+        let now = Utc::now();
+        profile.last_used_at = Some(now);
+        profile.updated_at = now;
         self.save()?;
         Ok(true)
     }

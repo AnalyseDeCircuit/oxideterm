@@ -227,6 +227,48 @@ fn connections_moved_label(i18n: &I18n, count: usize, group: String) -> String {
         .replace("{{group}}", &group)
 }
 
+fn terminal_serial_parity_from_profile(
+    parity: &oxideterm_connections::SerialParity,
+) -> oxideterm_terminal::SerialParity {
+    match parity {
+        oxideterm_connections::SerialParity::None => oxideterm_terminal::SerialParity::None,
+        oxideterm_connections::SerialParity::Odd => oxideterm_terminal::SerialParity::Odd,
+        oxideterm_connections::SerialParity::Even => oxideterm_terminal::SerialParity::Even,
+    }
+}
+
+fn terminal_serial_flow_from_profile(
+    flow: &oxideterm_connections::SerialFlowControl,
+) -> oxideterm_terminal::SerialFlowControl {
+    match flow {
+        oxideterm_connections::SerialFlowControl::None => {
+            oxideterm_terminal::SerialFlowControl::None
+        }
+        oxideterm_connections::SerialFlowControl::Software => {
+            oxideterm_terminal::SerialFlowControl::Software
+        }
+        oxideterm_connections::SerialFlowControl::Hardware => {
+            oxideterm_terminal::SerialFlowControl::Hardware
+        }
+    }
+}
+
+fn serial_profile_parity_label(parity: &oxideterm_connections::SerialParity) -> &'static str {
+    match parity {
+        oxideterm_connections::SerialParity::None => "",
+        oxideterm_connections::SerialParity::Odd => "O",
+        oxideterm_connections::SerialParity::Even => "E",
+    }
+}
+
+fn serial_profile_flow_label(flow: &oxideterm_connections::SerialFlowControl) -> &'static str {
+    match flow {
+        oxideterm_connections::SerialFlowControl::None => "",
+        oxideterm_connections::SerialFlowControl::Software => " · XON/XOFF",
+        oxideterm_connections::SerialFlowControl::Hardware => " · RTS/CTS",
+    }
+}
+
 fn current_username() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))

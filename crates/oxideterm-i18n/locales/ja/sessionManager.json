@@ -145,6 +145,15 @@
       "status": {
         "connecting": "Connecting {{name}}..."
       }
+    },
+    "serial_profiles": {
+      "title": "Serial Profiles",
+      "count": "{{count}} profile(s)",
+      "open": "Open",
+      "delete": "Delete",
+      "open_failed": "Failed to open serial profile",
+      "delete_failed": "Failed to delete serial profile",
+      "confirm_delete": "Delete serial profile \"{{name}}\"?"
     }
   }
 }

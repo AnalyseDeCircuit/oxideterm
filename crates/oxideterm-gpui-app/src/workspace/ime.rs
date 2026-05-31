@@ -1929,6 +1929,9 @@ fn new_connection_field_value(
         NewConnectionField::Group => &form.group,
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
         NewConnectionField::Color => &form.color,
+        NewConnectionField::SerialPortPath => &form.serial_port_path,
+        NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
+        NewConnectionField::SerialProfileName => &form.serial_profile_name,
         NewConnectionField::JumpHost => &form.jump_server_form.as_ref()?.host,
         NewConnectionField::JumpPort => &form.jump_server_form.as_ref()?.port,
         NewConnectionField::JumpUsername => &form.jump_server_form.as_ref()?.username,
@@ -1957,6 +1960,9 @@ fn connection_field_value_mut(
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
         NewConnectionField::Color => &mut form.color,
+        NewConnectionField::SerialPortPath => &mut form.serial_port_path,
+        NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
+        NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
         NewConnectionField::JumpHost => {
             &mut form
                 .jump_server_form

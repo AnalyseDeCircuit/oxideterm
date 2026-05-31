@@ -6,10 +6,12 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let rows = self.filtered_session_connections();
+        let serial_profiles = self.filtered_session_serial_profiles();
         let all_selected = !rows.is_empty()
             && rows
                 .iter()
                 .all(|row| self.session_manager.selected_ids.contains(&row.id));
+        let is_empty = rows.is_empty() && serial_profiles.is_empty();
         let empty_message = if self.session_manager.search_query.trim().is_empty() {
             self.i18n.t("sessionManager.table.no_connections")
         } else {
@@ -34,6 +36,13 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.bg)
             })
+            .when(!serial_profiles.is_empty(), |table| {
+                table.child(self.render_serial_profile_section(
+                    serial_profiles,
+                    has_background,
+                    cx,
+                ))
+            })
             .child(self.render_connection_table_header(has_background, all_selected, cx))
             .child(
                 div()
@@ -41,7 +50,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_h(px(0.0))
                     .overflow_hidden()
-                    .when(rows.is_empty(), |body| {
+                    .when(is_empty, |body| {
                         body.flex().items_center().justify_center().child(
                             div()
                                 .flex()
@@ -129,6 +138,132 @@ impl WorkspaceApp {
                         ))
                     })
             )
+            .into_any_element()
+    }
+
+    fn render_serial_profile_section(
+        &self,
+        profiles: Vec<SerialProfile>,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let count_label = self
+            .i18n
+            .t("sessionManager.serial_profiles.count")
+            .replace("{{count}}", &profiles.len().to_string());
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two));
+        for profile in profiles {
+            list = list.child(self.render_serial_profile_row(profile, has_background, cx));
+        }
+        div()
+            .flex_none()
+            .border_b_1()
+            .border_color(theme_border(theme.border, has_background))
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
+            .p(px(self.tokens.spacing.three))
+            .child(
+                div()
+                    .mb(px(self.tokens.spacing.two))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(self.i18n.t("sessionManager.serial_profiles.title")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(count_label),
+                    ),
+            )
+            .child(list)
+            .into_any_element()
+    }
+
+    fn render_serial_profile_row(
+        &self,
+        profile: SerialProfile,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let id = profile.id.clone();
+        let delete_id = profile.id.clone();
+        let subtitle = format!(
+            "{} · {} · {}{}{}",
+            profile.port_path,
+            profile.baud_rate,
+            profile.data_bits,
+            serial_profile_parity_label(&profile.parity),
+            serial_profile_flow_label(&profile.flow_control)
+        );
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(theme_border_half(theme.border, has_background))
+            .bg(theme_secondary_bg(theme.bg_secondary, has_background))
+            .px(px(self.tokens.spacing.three))
+            .py(px(self.tokens.spacing.two))
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.spacing.three))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(MANAGER_ROW_TEXT_SIZE))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(profile.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .child(subtitle),
+                    ),
+            )
+            .child(self.render_row_icon_button(
+                LucideIcon::Play,
+                MANAGER_ROW_ACTION_BUTTON,
+                12.0,
+                rgb(0x4ade80),
+                has_background,
+                move |this, _event, window, cx| {
+                    this.open_saved_serial_profile(&id, window, cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
+            .child(self.render_row_icon_button(
+                LucideIcon::Trash2,
+                MANAGER_ROW_ACTION_BUTTON,
+                12.0,
+                rgb(0xf87171),
+                has_background,
+                move |this, _event, _window, cx| {
+                    this.request_delete_serial_profile(&delete_id, cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
             .into_any_element()
     }
 
