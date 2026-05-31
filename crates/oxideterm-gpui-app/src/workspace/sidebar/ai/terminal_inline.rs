@@ -1,7 +1,5 @@
 use std::sync::mpsc::{Receiver, TryRecvError};
 
-use zeroize::Zeroizing;
-
 const AI_INLINE_PANEL_WIDTH: f32 = 520.0;
 const AI_INLINE_PANEL_TOP: f32 = 48.0;
 const AI_INLINE_PANEL_MARGIN: f32 = 12.0;
@@ -761,13 +759,16 @@ impl WorkspaceApp {
         self.ai_inline_panel.rx = Some(ui_rx);
         self.schedule_terminal_ai_inline_poll(cx);
         self.forwarding_runtime.spawn(async move {
-            let has_key = tokio::task::spawn_blocking(move || key_store.get_provider_key(&provider_id))
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .flatten()
-                .is_some_and(|key: Zeroizing<String>| !key.trim().is_empty());
-            let _ = ui_tx.send(AiInlinePanelDelivery::KeyStatus { generation, has_key });
+            // Opening the inline panel only needs the key existence hint; reading
+            // the secret here would trigger Touch ID before the user sends a prompt.
+            let has_key =
+                tokio::task::spawn_blocking(move || key_store.has_provider_key(&provider_id))
+                    .await
+                    .unwrap_or(false);
+            let _ = ui_tx.send(AiInlinePanelDelivery::KeyStatus {
+                generation,
+                has_key,
+            });
         });
     }
 

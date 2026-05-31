@@ -204,8 +204,8 @@ impl WorkspaceApp {
                     div()
                         .w_full()
                         .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
-                        .grid()
-                        .grid_cols(2)
+                        .flex()
+                        .flex_row()
                         .gap(px(32.0))
                         .child(self.reconnect_select_field(
                             "settings_view.reconnect.max_attempts",
@@ -228,8 +228,8 @@ impl WorkspaceApp {
                     div()
                         .w_full()
                         .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
-                        .grid()
-                        .grid_cols(2)
+                        .flex()
+                        .flex_row()
                         .gap(px(32.0))
                         .child(self.reconnect_select_field(
                             "settings_view.reconnect.max_delay",
@@ -314,7 +314,7 @@ impl WorkspaceApp {
         let control = self.settings_select_control(select_id, value, !enabled, None, cx);
 
         div()
-            .w_full()
+            .w(px(SETTINGS_RECONNECT_FIELD_WIDTH))
             .min_w(px(0.0))
             .grid()
             .gap(px(8.0))
@@ -331,7 +331,11 @@ impl WorkspaceApp {
                     )
                     .child(
                         div()
+                            .w_full()
+                            .min_w_0()
+                            .whitespace_normal()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .line_height(px(SETTINGS_RECONNECT_HINT_LINE_HEIGHT))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.i18n.t(hint_key)),
                     ),
