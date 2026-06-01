@@ -230,6 +230,9 @@ export function ConnectionImportPanel({ onImported }: ConnectionImportPanelProps
                                             {draft.duplicate && <span className="text-[10px] px-1.5 py-0.5 rounded bg-theme-accent/20 text-theme-accent">{t('settings_view.connections.importers.duplicate')}</span>}
                                         </div>
                                         <div className="text-xs text-theme-text-muted truncate">{draft.username}@{draft.host}:{draft.port}</div>
+                                        <div className="text-xs text-theme-text-muted truncate">
+                                            {[draft.group, t(`settings_view.connections.importers.sources.${draft.source}`), draft.sourcePath].filter(Boolean).join(' · ')}
+                                        </div>
                                         {(draft.warnings.length > 0 || draft.unsupportedFields.length > 0) && (
                                             <div className="text-xs text-amber-500 truncate">
                                                 {[...draft.warnings, ...draft.unsupportedFields].join(' · ')}

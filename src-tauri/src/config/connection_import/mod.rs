@@ -310,6 +310,11 @@ fn parse_securecrt_file(
             unsupported_fields.push(key);
             continue;
         }
+        if looks_like_proxy_key(&normalized) {
+            warnings.push("Proxy/jump setting was not imported".to_string());
+            unsupported_fields.push(key);
+            continue;
+        }
         fields.insert(normalized, value);
     }
 
@@ -339,6 +344,11 @@ fn parse_xshell_file(
         let normalized = normalize_key(&key);
         if looks_like_secret_key(&normalized) {
             warnings.push("Password was not imported".to_string());
+            unsupported_fields.push(key);
+            continue;
+        }
+        if looks_like_proxy_key(&normalized) {
+            warnings.push("Proxy/jump setting was not imported".to_string());
             unsupported_fields.push(key);
             continue;
         }
@@ -379,7 +389,7 @@ fn draft_from_fields(
     path: &Path,
     root: Option<&Path>,
     fields: BTreeMap<String, String>,
-    warnings: Vec<String>,
+    mut warnings: Vec<String>,
     unsupported_fields: Vec<String>,
 ) -> Result<ImportedConnectionDraft, ConnectionImportError> {
     let host =
@@ -394,9 +404,16 @@ fn draft_from_fields(
         &["username", "user", "loginname", "account", "userid"],
     )
     .unwrap_or_else(whoami::username);
-    let port = pick_field(&fields, &["port", "sshport"])
+    let raw_port = pick_field(&fields, &["port", "sshport"]);
+    let port = raw_port
+        .as_deref()
         .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(22);
+        .unwrap_or_else(|| {
+            if raw_port.is_some() {
+                warnings.push("Invalid port; defaulted to 22".to_string());
+            }
+            22
+        });
     let name =
         pick_field(&fields, &["name", "sessionname", "label"]).unwrap_or_else(|| file_stem(path));
     let key_path = pick_field(
@@ -563,6 +580,16 @@ fn looks_like_secret_key(key: &str) -> bool {
         || key.contains("secret")
 }
 
+fn looks_like_proxy_key(key: &str) -> bool {
+    key.contains("proxy")
+        || key.contains("firewall")
+        || key.contains("jumphost")
+        || key.contains("jumpserver")
+        || key.contains("bastion")
+        || key.contains("gateway")
+        || key.contains("socks")
+}
+
 fn pick_field(fields: &BTreeMap<String, String>, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| fields.get(*key).filter(|value| !value.trim().is_empty()))
@@ -664,7 +691,10 @@ fn draft_id(draft: &ImportedConnectionDraft) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::{
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn fixture_path(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -672,6 +702,16 @@ mod tests {
             .join("fixtures")
             .join("connection_import")
             .join(name)
+    }
+
+    fn temp_import_file(extension: &str, content: &str) -> PathBuf {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("oxideterm-import-{id}.{extension}"));
+        std::fs::write(&path, content).unwrap();
+        path
     }
 
     #[test]
@@ -764,5 +804,82 @@ mod tests {
 
         assert_eq!(preview.duplicates, 1);
         assert!(preview.drafts[0].duplicate);
+    }
+
+    #[test]
+    fn records_missing_host_as_preview_error() {
+        let path = temp_import_file("xsh", "UserName=alice\n");
+        let preview = preview_connection_import(
+            ConnectionImportSource::Xshell,
+            &[path.display().to_string()],
+            &HashSet::new(),
+        )
+        .unwrap();
+
+        assert!(preview.drafts.is_empty());
+        assert_eq!(preview.errors.len(), 1);
+        assert!(preview.errors[0].message.contains("Missing host"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn invalid_port_warns_and_defaults_to_ssh_port() {
+        let path = temp_import_file("xsh", "Host=gpu.invalid\nUserName=alice\nPort=abc\n");
+        let preview = preview_connection_import(
+            ConnectionImportSource::Xshell,
+            &[path.display().to_string()],
+            &HashSet::new(),
+        )
+        .unwrap();
+
+        let draft = &preview.drafts[0];
+        assert_eq!(draft.port, 22);
+        assert!(
+            draft
+                .warnings
+                .iter()
+                .any(|warning| warning == "Invalid port; defaulted to 22")
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn unsupported_proxy_fields_warn_instead_of_silent_import() {
+        let path = temp_import_file(
+            "xsh",
+            "Host=gpu.invalid\nUserName=alice\nProxyServer=jump.example.com\n",
+        );
+        let preview = preview_connection_import(
+            ConnectionImportSource::Xshell,
+            &[path.display().to_string()],
+            &HashSet::new(),
+        )
+        .unwrap();
+
+        let draft = &preview.drafts[0];
+        assert!(draft.proxy_chain.is_empty());
+        assert!(
+            draft
+                .warnings
+                .iter()
+                .any(|warning| warning == "Proxy/jump setting was not imported")
+        );
+        assert_eq!(draft.unsupported_fields, vec!["ProxyServer".to_string()]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn records_malformed_termius_json_as_preview_error() {
+        let path = temp_import_file("json", "{");
+        let preview = preview_connection_import(
+            ConnectionImportSource::Termius,
+            &[path.display().to_string()],
+            &HashSet::new(),
+        )
+        .unwrap();
+
+        assert!(preview.drafts.is_empty());
+        assert_eq!(preview.errors.len(), 1);
+        let _ = std::fs::remove_file(path);
     }
 }
