@@ -1,13 +1,15 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <em>Si vous voulez un espace de travail SSH local-first sans Electron, WebView, télémétrie ni abonnement, ajoutez une étoile à OxideTerm pour aider davantage d'utilisateurs SSH à le découvrir.</em>
+  <strong>Espace de travail SSH local-first pour celles et ceux qui veulent le workflow OxideTerm sans WebView.</strong>
+  <br>
+  Connectez-vous une fois à une machine distante, puis travaillez avec son shell, ses fichiers, ses ports, ses transferts, un éditeur léger, des consoles série et une IA BYOK depuis un workspace Rust natif.
+  <br>
+  <strong>Zéro WebView. Zéro OpenSSL. Zéro télémétrie. Zéro abonnement. BYOK-first. Rust pur, de bout en bout.</strong>
 </p>
 
 <p align="center">
-  <strong>Espace de travail SSH local-first : shell, SFTP, redirection de ports, trzsz, édition distante et IA BYOK autour d'un même noeud distant.</strong>
-  <br>
-  <strong>Zéro WebView. Zéro OpenSSL. Zéro télémétrie. Zéro abonnement. BYOK-first. Rust pur, de bout en bout.</strong>
+  <em>Si vous voulez un espace de travail SSH local-first sans Electron, WebView, télémétrie ni abonnement, ajoutez une étoile à OxideTerm pour aider davantage d'utilisateurs SSH à le découvrir.</em>
 </p>
 
 <p align="center">
@@ -19,7 +21,7 @@
 </p>
 
 <p align="center">
-  <sub>Réécriture native Rust de <a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> — rendu GPU, zéro WebView, avec <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a> (framework de rendu de Zed)</sub>
+  <sub>Prochaine grande édition native de <a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> — rendu GPU, zéro WebView, avec <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a> (framework de rendu de Zed)</sub>
 </p>
 
 <p align="center">
@@ -27,6 +29,8 @@
 </p>
 
 ---
+
+> **État de la release :** OxideTerm Native est préparé comme la prochaine grande version d'OxideTerm. Les installateurs publics ne sont pas encore publiés ; lancez-le depuis le code source pour l'instant. Les releases packagées actuelles restent sur la ligne Tauri jusqu'à ce que les installateurs native soient prêts.
 
 ## Pourquoi OxideTerm Native ?
 
@@ -45,7 +49,7 @@
 
 ## Ce que c'est / ce que ce n'est pas
 
-OxideTerm Native est un **espace de travail SSH desktop natif en Rust pur**. Les fonctions de la version Tauri — terminal, SFTP, forwarding, édition, IA, cloud sync, plugins et CLI — sont réimplémentées en Rust avec une interface GPUI.
+OxideTerm Native est un **espace de travail SSH desktop natif en Rust pur** et la prochaine grande édition d'OxideTerm. Il porte la même idée produit — terminal, SFTP, forwarding, édition, IA, cloud sync, plugins et CLI autour d'un noeud distant — dans une interface GPUI sans runtime navigateur.
 
 Ce n'est ni Electron, ni Tauri, ni un terminal web, ni un service hébergé. Il n'y a pas de Chromium, WebView, JavaScript ou CSS ; GPUI dessine chaque surface directement.
 
@@ -88,7 +92,9 @@ Domain Crates
 
 Il n'y a pas de frontière de sérialisation entre l'UI et le backend SSH/terminal. Les octets du terminal modifient directement `TerminalState`, puis GPUI lit l'état et émet les draw calls GPU.
 
-## Démarrage rapide
+## Lancer depuis le code source
+
+Les installateurs native publics ne sont pas encore publiés. Tant que les builds packagés ne sont pas prêts, lancez l'édition native depuis le code source.
 
 ```sh
 cargo run
@@ -118,12 +124,16 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 | Écritures CLI | dry-run, garde `--yes`, sauvegardes rollback |
 | Plugins | isolation wasmtime et API hôte à capacités |
 
-## Roadmap / Contribution
+## État de la release
 
 - [x] SSH Agent forwarding, Grace Period reconnect, shell desktop GPUI
 - [x] Flux terminal in-process sans WebSocket
 - [x] SFTP, forwarding, IDE, IA, cloud sync, plugins, CLI
-- [ ] ProxyCommand complet, audit logging, builds packagés
+- [x] Terminaux série locaux
+- [ ] Installateurs publics packagés
+- [ ] ProxyCommand complet, audit logging
+
+## Contribution
 
 ## Neutralité des providers
 

@@ -1,13 +1,15 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <em>Electron、WebView、テレメトリ、サブスクリプションなしのローカルファースト SSH ワークスペースが必要なら、OxideTerm に Star を付けて、より多くの SSH ユーザーに届けてください。</em>
+  <strong>OxideTerm のワークフローを WebView なしで使いたい人のためのローカルファースト SSH ワークスペース。</strong>
+  <br>
+  リモートマシンへ一度接続すれば、shell、ファイル、ポート、転送、軽量エディタ、シリアルコンソール、BYOK AI を 1 つのネイティブ Rust ワークスペースで扱えます。
+  <br>
+  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. 徹底して Pure Rust。</strong>
 </p>
 
 <p align="center">
-  <strong>ローカルファースト SSH ワークスペース: shell、SFTP、ポートフォワーディング、trzsz、リモート編集、BYOK AI を 1 つのリモートノードに集約。</strong>
-  <br>
-  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. 徹底して Pure Rust。</strong>
+  <em>Electron、WebView、テレメトリ、サブスクリプションなしのローカルファースト SSH ワークスペースが必要なら、OxideTerm に Star を付けて、より多くの SSH ユーザーに届けてください。</em>
 </p>
 
 <p align="center">
@@ -19,7 +21,7 @@
 </p>
 
 <p align="center">
-  <sub><a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> のネイティブ Rust リライト — GPU レンダリング、ゼロ WebView、<a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a>（Zed のレンダリングフレームワーク）を使用</sub>
+  <sub><a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> の次期メジャー native edition — GPU レンダリング、ゼロ WebView、<a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a>（Zed のレンダリングフレームワーク）を使用</sub>
 </p>
 
 <p align="center">
@@ -27,6 +29,8 @@
 </p>
 
 ---
+
+> **リリース状況:** OxideTerm Native は OxideTerm の次期メジャーリリースとして準備中です。公開インストーラはまだ提供されていないため、現時点ではソースから実行してください。native インストーラが準備できるまで、現在のパッケージ版リリースは Tauri 系列のままです。
 
 ## なぜ Native 版か
 
@@ -45,7 +49,7 @@
 
 ## これは何か / 何ではないか
 
-OxideTerm Native は**純 Rust のネイティブデスクトップ SSH ワークスペース**です。Tauri 版の terminal、SFTP、forwarding、editing、AI、cloud sync、plugins、CLI を Rust と GPUI UI layer で再実装しています。
+OxideTerm Native は**純 Rust のネイティブデスクトップ SSH ワークスペース**であり、OxideTerm の次期メジャー edition です。Terminal、SFTP、forwarding、editing、AI、cloud sync、plugins、CLI を 1 つのリモートノード中心にまとめる同じ製品思想を、browser runtime のない GPUI UI layer へ移します。
 
 Electron、Tauri、Web terminal、hosted service ではありません。Chromium、WebView、JavaScript、CSS はなく、すべての UI は GPUI が GPU surface に直接描画します。
 
@@ -88,7 +92,9 @@ Domain Crates
 
 UI と SSH/terminal backend の間にシリアライズ境界はありません。Terminal bytes は `TerminalState` を直接変更し、GPUI が state を読んで GPU draw call を発行します。
 
-## Quick Start
+## ソースから実行
+
+公開 native インストーラはまだ提供されていません。パッケージ版 build が準備できるまでは、native edition をソースから実行してください。
 
 ```sh
 cargo run
@@ -118,12 +124,16 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 | CLI writes | dry-run plans、`--yes` guards、rollback backups |
 | Plugins | wasmtime isolation and capability-based host API |
 
-## Roadmap / Contributing
+## リリース状況
 
 - [x] SSH Agent forwarding、Grace Period reconnect、GPUI desktop shell
 - [x] in-process terminal data flow without WebSocket
 - [x] SFTP、port forwarding、IDE、AI、cloud sync、plugins、CLI
-- [ ] Full ProxyCommand、audit logging、packaged release builds
+- [x] ローカルシリアル端末
+- [ ] 公開パッケージ版インストーラ
+- [ ] Full ProxyCommand、audit logging
+
+## Contributing
 
 ## Provider Neutrality
 

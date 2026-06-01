@@ -1,13 +1,15 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <em>Electron, WebView, telemetry, subscription 없는 local-first SSH workspace가 필요하다면 OxideTerm에 Star를 눌러 더 많은 SSH 사용자가 찾을 수 있게 해 주세요.</em>
+  <strong>WebView 없이 OxideTerm workflow를 원하는 사용자를 위한 local-first SSH workspace.</strong>
+  <br>
+  remote machine에 한 번 연결한 뒤 shell, files, ports, transfers, lightweight editor, serial consoles, BYOK AI를 하나의 native Rust workspace에서 다룹니다.
+  <br>
+  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. 끝까지 Pure Rust.</strong>
 </p>
 
 <p align="center">
-  <strong>Local-first SSH workspace: shell, SFTP, port forwarding, trzsz, remote editing, BYOK AI를 하나의 remote node 주변에 통합합니다.</strong>
-  <br>
-  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. 끝까지 Pure Rust.</strong>
+  <em>Electron, WebView, telemetry, subscription 없는 local-first SSH workspace가 필요하다면 OxideTerm에 Star를 눌러 더 많은 SSH 사용자가 찾을 수 있게 해 주세요.</em>
 </p>
 
 <p align="center">
@@ -19,7 +21,7 @@
 </p>
 
 <p align="center">
-  <sub><a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a>의 native Rust rewrite — GPU-rendered, zero-WebView, <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a>(Zed rendering framework) 사용</sub>
+  <sub><a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a>의 next major native edition — GPU-rendered, zero-WebView, <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a>(Zed rendering framework) 사용</sub>
 </p>
 
 <p align="center">
@@ -27,6 +29,8 @@
 </p>
 
 ---
+
+> **Release status:** OxideTerm Native는 OxideTerm의 다음 major release로 준비 중입니다. Public installer는 아직 공개되지 않았으므로 지금은 source에서 실행해 주세요. Native installer가 준비될 때까지 현재 packaged release는 Tauri line에 남아 있습니다.
 
 ## 왜 Native인가?
 
@@ -45,7 +49,7 @@
 
 ## 무엇인가 / 무엇이 아닌가
 
-OxideTerm Native는 **pure-Rust native desktop SSH workspace**입니다. Tauri 버전의 terminal, SFTP, forwarding, editing, AI, cloud sync, plugins, CLI를 Rust와 GPUI UI layer로 재구현합니다.
+OxideTerm Native는 **pure-Rust native desktop SSH workspace**이자 OxideTerm의 next major edition입니다. Terminal, SFTP, forwarding, editing, AI, cloud sync, plugins, CLI를 하나의 remote node 주변에 구성하는 같은 product idea를 browser runtime 없는 GPUI UI layer로 옮깁니다.
 
 Electron, Tauri, web terminal, hosted service가 아닙니다. Chromium, WebView, JavaScript, CSS가 없고 모든 UI는 GPUI가 GPU surface에 직접 그립니다.
 
@@ -88,7 +92,9 @@ Domain Crates
 
 UI와 SSH/terminal backend 사이에 serialization boundary가 없습니다. Terminal bytes는 `TerminalState`를 직접 변경하고 GPUI가 state를 읽어 GPU draw call을 발행합니다.
 
-## Quick Start
+## Source에서 실행
+
+Public native installer는 아직 공개되지 않았습니다. Packaged build가 준비될 때까지 native edition은 source에서 실행해 주세요.
 
 ```sh
 cargo run
@@ -118,12 +124,16 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 | CLI writes | dry-run plans, `--yes` guards, rollback backups |
 | Plugins | wasmtime isolation and capability-based host API |
 
-## Roadmap / Contributing
+## Release Status
 
 - [x] SSH Agent forwarding, Grace Period reconnect, GPUI desktop shell
 - [x] in-process terminal data flow without WebSocket
 - [x] SFTP, forwarding, IDE, AI, cloud sync, plugins, CLI
-- [ ] Full ProxyCommand, audit logging, packaged release builds
+- [x] Local serial terminals
+- [ ] Public packaged installers
+- [ ] Full ProxyCommand, audit logging
+
+## Contributing
 
 ## Provider Neutrality
 
