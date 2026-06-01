@@ -3,6 +3,9 @@
 <p align="center">
   <strong>OxideTerm の次期ゼロ WebView edition。</strong>
   <br>
+
+### Architecture — Single-Process, Zero-Bridge
+
   リモートマシンへ一度接続すれば、shell、ファイル、ポート、転送、軽量エディタ、シリアルコンソール、BYOK AI を 1 つのネイティブ Rust ワークスペースで扱えます。
   <br>
   ネイティブ GPUI アプリ · 純粋な Rust SSH · コア SSH ワークフローにアカウント不要
@@ -117,6 +120,8 @@ OxideTerm Native は WebView bridge を取り除き、terminal、SSH、SFTP、fo
 <summary><strong>Architecture, SSH internals, GPUI shell, reconnect, AI, plugins など</strong></summary>
 <br>
 
+### Architecture — Single-Process, Zero-Bridge
+
 ```text
 GPUI Render Loop
   WorkspaceApp / Tab surfaces / GPUI views
@@ -179,6 +184,33 @@ UI は GPUI で直接描画され、DOM/CSS/JavaScript rendering pipeline はあ
 - draggable dividers 付き binary pane tree、terminal tab ごとに最大 4 panes
 - Command palette、global key bindings、sidebars は GPUI primitives
 - Immediate-mode rendering は serialization round-trip なしで Rust state に反応
+
+### Terminal State と Rendering
+
+Terminal rendering はまず Rust state としてモデル化され、その後 GPUI が描画します。
+
+- PTY output は `TerminalState` に入り、scrollback、cursor、selection、marks、search state は Rust 側に保持されます
+- Rendering policy は Boost、Normal、Idle の間で切り替えられ、browser event loop の協調を待ちません
+- Sixel と Kitty graphics は DOM nodes や canvas overlays ではなく、terminal-owned assets として追跡されます
+- Split panes は同じ workspace state model を共有し、tab restore と reconnect が terminal topology をまとめて snapshot できます
+
+### SFTP と IDE Workspace
+
+Remote files は分離された付属機能ではなく、同じ node workspace の一部です。
+
+- SFTP sessions は `NodeRouter` 経由で解決され、reconnect が underlying SSH connection を差し替えても UI の node address は変わりません
+- Transfer queues は visible file panes から独立して direction、progress、retry state、speed limits を追跡します
+- IDE tabs は dirty buffers、remote paths、conflict state、restore metadata をまとめて保持します
+- Backend が対応する場合、remote writes は staged/atomic behavior を使い、通常の edit flow に partial writes を出しにくくします
+
+### Plugins、CLI、Diagnostics
+
+Native branch は extension と support surfaces を Rust-native boundaries に保ちます。
+
+- Plugins は browser globals ではなく typed host capabilities を使い、wasmtime sandbox で実行されます
+- CLI は domain crates に直接 link し、doctor、settings、connections、forwards、portable bundles、backups、reports を扱います
+- Diagnostics は raw secret-bearing payloads ではなく counts、paths、feature flags、redacted hints を優先します
+- 状態を変更する CLI flows は dry-run plans、`--yes` guards、rollback backups を使います
 
 ### Port Forwarding — Lock-Free I/O
 

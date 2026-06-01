@@ -182,6 +182,33 @@ OxideSens 仍然是 BYOK-first，native 版本把 context building 放在 proces
 - Command palette、global key bindings 與 sidebar 都使用 GPUI primitive
 - Immediate-mode rendering 直接回應 Rust state 變化，無 serialization round-trip
 
+### 終端狀態與渲染
+
+終端渲染先建模為 Rust state，再由 GPUI 繪製：
+
+- PTY output 進入 `TerminalState`；scrollback、cursor、selection、marks 與 search state 都留在 Rust 中
+- Rendering policy 可在 Boost、Normal、Idle 之間切換，不需要等待 browser event loop 配合
+- Sixel 與 Kitty graphics 作為 terminal-owned assets 追蹤，而不是 DOM node 或 canvas overlay
+- Split panes 共享同一套 workspace state，tab restore 與 reconnect 可以一起快照 terminal topology
+
+### SFTP 與 IDE 工作區
+
+Remote files 屬於同一個 node workspace，而不是割裂的附屬功能：
+
+- SFTP session 透過 `NodeRouter` 解析，reconnect 替換底層 SSH connection 時 UI 的 node address 不變
+- Transfer queues 獨立追蹤 direction、progress、retry state 與 speed limits，不依賴目前可見 file panes
+- IDE tabs 同時保存 dirty buffers、remote paths、conflict state 與 restore metadata
+- Backend 支援時，remote writes 使用 staged/atomic behavior，避免普通 editing flow 出現 partial writes
+
+### Plugins、CLI 與 Diagnostics
+
+Native 分支把 extension 與 support surfaces 保持在 Rust-native boundaries：
+
+- Plugins 在 wasmtime sandbox 中執行，使用 typed host capabilities，而不是 browser globals
+- CLI 直接連結 domain crates，涵蓋 doctor、settings、connections、forwards、portable bundles、backups 與 reports
+- Diagnostics 優先輸出 counts、paths、feature flags 與 redacted hints，避免暴露含 secrets 的 raw payloads
+- 會修改狀態的 CLI flows 使用 dry-run plans、`--yes` guards 與 rollback backups
+
 ### Port Forwarding — Lock-Free I/O
 
 Port forwarding 語義與 Tauri 相同，但獨立為 Rust crate：

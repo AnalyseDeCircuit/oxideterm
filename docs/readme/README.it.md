@@ -3,6 +3,9 @@
 <p align="center">
   <strong>La prossima edizione zero-WebView di OxideTerm.</strong>
   <br>
+
+### Architettura — processo singolo, zero bridge
+
   Connettiti una volta a una macchina remota e lavora con shell, file, porte, trasferimenti, editor leggero, console seriali e BYOK AI da un workspace Rust nativo.
   <br>
   App GPUI nativa · SSH puro in Rust · nessun account per i workflow SSH principali
@@ -117,6 +120,8 @@ OxideTerm Native rimuove il bridge WebView e mantiene terminale, SSH, SFTP, forw
 <summary><strong>Architettura, internals SSH, shell GPUI, riconnessione, AI, plugin e altro</strong></summary>
 <br>
 
+### Architettura — processo singolo, zero bridge
+
 ```text
 GPUI Render Loop
   WorkspaceApp / Tab surfaces / GPUI views
@@ -179,6 +184,33 @@ La UI è disegnata direttamente con GPUI, senza pipeline DOM/CSS/JavaScript:
 - Binary pane tree con divider trascinabili, fino a quattro panes per tab terminale
 - Command palette, scorciatoie globali e sidebars costruite con primitive GPUI
 - Immediate-mode rendering reagisce allo stato Rust senza round-trip di serializzazione
+
+### Stato del terminale e rendering
+
+Il rendering del terminale viene prima modellato come stato Rust e poi disegnato da GPUI:
+
+- L’output PTY entra in `TerminalState`; scrollback, cursore, selezione, marks e stato di ricerca restano in Rust
+- La rendering policy può passare tra Boost, Normal e Idle senza aspettare un browser event loop
+- Le grafiche Sixel e Kitty sono tracciate come asset del terminale, non come DOM nodes o canvas overlays
+- Split panes condividono lo stesso workspace state model, quindi tab restore e reconnect possono snapshotare insieme la topologia del terminale
+
+### Workspace SFTP e IDE
+
+I file remoti fanno parte dello stesso node workspace, non di una funzione separata:
+
+- Le sessioni SFTP sono risolte tramite `NodeRouter`, così reconnect può cambiare la connessione SSH sottostante senza modificare il node address della UI
+- Le transfer queues tracciano direction, progress, retry state e speed limits indipendentemente dai file panes visibili
+- Le tab IDE tengono insieme dirty buffers, remote paths, conflict state e restore metadata
+- Quando il backend lo supporta, le scritture remote usano staged/atomic behavior per evitare partial writes nei normali edit flow
+
+### Plugins, CLI e diagnostics
+
+Il branch native mantiene estensioni e superfici di supporto dentro confini Rust-native:
+
+- I plugins girano in una sandbox wasmtime con typed host capabilities invece di browser globals
+- La CLI linka direttamente domain crates per doctor, settings, connections, forwards, portable bundles, backups e reports
+- Diagnostics preferisce counts, paths, feature flags e redacted hints rispetto a raw payloads con segreti
+- I CLI flows mutanti usano dry-run plans, `--yes` guards e rollback backups quando applicabile
 
 ### Port forwarding — Lock-Free I/O
 
