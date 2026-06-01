@@ -130,6 +130,81 @@ Domain Crates
 
 Không có serialization boundary giữa UI và SSH/terminal backend. Terminal bytes sửa `TerminalState` trực tiếp; GPUI đọc state và phát GPU draw calls.
 
+### SSH Rust thuần — russh (ring)
+
+Native edition liên kết cùng stack `russh` của Tauri line trực tiếp vào desktop binary:
+
+- **Không phụ thuộc C/OpenSSL** nhờ `ring`
+- SSH2 đầy đủ: key exchange, channels, SFTP subsystem, port forwarding
+- ChaCha20-Poly1305 / AES-GCM, khóa Ed25519/RSA/ECDSA
+- SSH Agent trên Unix (`SSH_AUTH_SOCK`) và Windows (`\\.\pipe\openssh-ssh-agent`)
+- ProxyJump nhiều hop với auth độc lập ở từng hop
+
+### Smart Reconnect với Grace Period
+
+Reconnect semantics khớp với Tauri line, nhưng orchestration chạy hoàn toàn trong Rust async tasks:
+
+1. Phát hiện SSH keepalive timeout mà không bị JavaScript timer throttling
+2. Snapshot terminal panes, SFTP transfers, forwards và IDE files
+3. Probe kết nối cũ trong 30 giây Grace Period để TUI apps có thể sống qua thay đổi mạng
+4. Nếu không phục hồi được, kết nối lại, restore forwards, resume transfers và mở lại IDE files
+
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+
+### SSH connection pool và node routing
+
+`SshConnectionRegistry` dùng `DashMap`, giữ mô hình node-first của Tauri nhưng bỏ WebSocket lifecycle bridge:
+
+- Một SSH connection vật lý có thể phục vụ terminal panes, SFTP, port forwards và IDE work
+- Mỗi connection đi qua `connecting → active → idle → link_down → reconnecting`
+- UI gọi theo `nodeId`; `NodeRouter` resolve `connectionId` đang active một cách atomic
+- `NodeRuntimeStore` lưu topology snapshots vào `session_tree.json`
+- Jump host fail sẽ cascade `link_down` xuống downstream nodes
+
+### OxideSens AI
+
+OxideSens vẫn BYOK-first, với context building chạy in-process:
+
+- Providers: OpenAI, Anthropic, Gemini, Ollama hoặc endpoint OpenAI-compatible
+- MCP: stdio và SSE transports, tool discovery và invocation
+- RAG: BM25 full-text, HNSW vector index, Reciprocal Rank Fusion, CJK bigram tokenizer
+- AI context đến từ workspace state; credentials được redact trước khi gọi provider
+- API keys ở trong OS keychain, không đi vào logs hoặc IPC frames
+
+### GPUI Desktop Shell
+
+UI được vẽ trực tiếp bằng GPUI, không có DOM/CSS/JavaScript rendering pipeline:
+
+- 17 workspace tab types: local/SSH terminal, SFTP, IDE, Forwards, Settings, Plugin, Topology và hơn nữa
+- Binary pane tree với dividers kéo được, tối đa bốn panes mỗi terminal tab
+- Command palette, global key bindings và sidebars dùng GPUI primitives
+- Immediate-mode rendering phản ứng với Rust state mà không cần serialization round-trip
+
+### Port Forwarding — Lock-Free I/O
+
+Forwarding giữ semantics của Tauri trong một Rust crate độc lập:
+
+- Local `-L`, Remote `-R`, Dynamic SOCKS5 `-D`
+- Một task `ssh_io` sở hữu mỗi SSH Channel, tránh `Arc<Mutex<Channel>>`
+- Reconnect auto-restore, death reporting và idle timeout
+
+### trzsz — truyền file in-band
+
+trzsz tiếp tục dùng terminal stream, không cần port phụ hoặc remote agent:
+
+- Upload/download qua terminal stream hiện có
+- Hoạt động xuyên qua ProxyJump chains
+- Native file pickers tránh giới hạn bộ nhớ của browser
+- Transfer hai chiều, hỗ trợ thư mục, limits có thể cấu hình
+
+### Export `.oxide` mã hóa
+
+Encrypted bundle format khớp với Tauri line:
+
+- **ChaCha20-Poly1305 AEAD** authenticated encryption
+- **Argon2id KDF**: 256 MB memory cost, 4 iterations, tăng chi phí GPU brute-force
+- Bao gồm connections, forwards, settings, quick commands, plugin settings và portable secrets
+
 </details>
 
 ---

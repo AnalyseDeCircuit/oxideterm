@@ -130,6 +130,81 @@ Domain Crates
 
 UI と SSH/terminal backend の間にシリアライズ境界はありません。Terminal bytes は `TerminalState` を直接変更し、GPUI が state を読んで GPU draw call を発行します。
 
+### 純粋な Rust SSH — russh (ring)
+
+Native edition は Tauri line と同じ `russh` stack を desktop binary に直接 link します。
+
+- `ring` により **C/OpenSSL 依存なし**
+- 完整 SSH2: key exchange、channels、SFTP subsystem、port forwarding
+- ChaCha20-Poly1305 / AES-GCM、Ed25519/RSA/ECDSA keys
+- SSH Agent: Unix (`SSH_AUTH_SOCK`) と Windows (`\\.\pipe\openssh-ssh-agent`)
+- hop ごとに独立認証する multi-hop ProxyJump
+
+### Grace Period 付き Smart Reconnect
+
+Reconnect semantics は Tauri line と同じですが、orchestration は Rust async task 内で完結します。
+
+1. JavaScript timer throttling なしで SSH keepalive timeout を検出
+2. terminal panes、SFTP transfers、forwards、IDE files を snapshot
+3. Grace Period 中に旧接続を 30 秒 probe し、ネットワーク切替時も TUI apps を残せるようにする
+4. 復旧できない場合は再接続し、forwards 復元、transfers 再開、IDE files 再オープン
+
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+
+### SSH Connection Pool と Node Routing
+
+`SshConnectionRegistry` は `DashMap` backed で、WebSocket lifecycle bridge なしに Tauri の node-first model を維持します。
+
+- 1 つの物理 SSH connection が terminal panes、SFTP、port forwards、IDE work を共有
+- 各 connection は `connecting → active → idle → link_down → reconnecting` を遷移
+- UI は `nodeId` で command を出し、`NodeRouter` が active `connectionId` を atomic に解決
+- `NodeRuntimeStore` が topology snapshots を `session_tree.json` に永続化
+- jump host failure は downstream nodes に `link_down` を cascade
+
+### OxideSens AI
+
+OxideSens は BYOK-first のまま、context building は in-process で行います。
+
+- Providers: OpenAI、Anthropic、Gemini、Ollama、任意の OpenAI-compatible endpoint
+- MCP: stdio / SSE transports、tool discovery、invocation
+- RAG: BM25 full-text、HNSW vector index、Reciprocal Rank Fusion、CJK bigram tokenizer
+- AI context は workspace state から作られ、credentials は provider call 前に redact
+- API keys は OS keychain に保存され、logs や IPC frames には入りません
+
+### GPUI Desktop Shell
+
+UI は GPUI で直接描画され、DOM/CSS/JavaScript rendering pipeline はありません。
+
+- 17 workspace tab types: local/SSH terminal、SFTP、IDE、Forwards、Settings、Plugin、Topology など
+- draggable dividers 付き binary pane tree、terminal tab ごとに最大 4 panes
+- Command palette、global key bindings、sidebars は GPUI primitives
+- Immediate-mode rendering は serialization round-trip なしで Rust state に反応
+
+### Port Forwarding — Lock-Free I/O
+
+Forwarding は Tauri semantics を standalone Rust crate で保持します。
+
+- Local `-L`、Remote `-R`、Dynamic SOCKS5 `-D`
+- 単一の `ssh_io` task が各 SSH Channel を所有し、`Arc<Mutex<Channel>>` を避ける
+- reconnect auto-restore、death reporting、idle timeout
+
+### trzsz — In-Band File Transfer
+
+trzsz は引き続き terminal stream を使い、追加 port や remote agent は不要です。
+
+- 既存 terminal stream 経由の upload/download
+- ProxyJump chains 越しに動作
+- Native file pickers により browser memory limits を回避
+- 双方向 transfer、directory support、configurable limits
+
+### `.oxide` Encrypted Export
+
+Encrypted bundle format は Tauri line と同じです。
+
+- **ChaCha20-Poly1305 AEAD** authenticated encryption
+- **Argon2id KDF**: 256 MB memory cost、4 iterations により GPU brute-force cost を上げる
+- connections、forwards、settings、quick commands、plugin settings、portable secrets を含む
+
 </details>
 
 ---

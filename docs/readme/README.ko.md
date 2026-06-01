@@ -130,6 +130,81 @@ Domain Crates
 
 UI와 SSH/terminal backend 사이에 serialization boundary가 없습니다. Terminal bytes는 `TerminalState`를 직접 변경하고 GPUI가 state를 읽어 GPU draw call을 발행합니다.
 
+### 순수 Rust SSH — russh (ring)
+
+Native edition은 Tauri line과 같은 `russh` stack을 desktop binary에 직접 link합니다.
+
+- `ring` 기반으로 **C/OpenSSL 의존성 없음**
+- 전체 SSH2: key exchange, channels, SFTP subsystem, port forwarding
+- ChaCha20-Poly1305 / AES-GCM, Ed25519/RSA/ECDSA keys
+- SSH Agent: Unix (`SSH_AUTH_SOCK`)와 Windows (`\\.\pipe\openssh-ssh-agent`)
+- 각 hop에서 독립 인증하는 multi-hop ProxyJump
+
+### Grace Period 기반 Smart Reconnect
+
+Reconnect semantics는 Tauri line과 같지만 orchestration은 Rust async task 안에서 완결됩니다.
+
+1. JavaScript timer throttling 없이 SSH keepalive timeout 감지
+2. terminal panes, SFTP transfers, forwards, IDE files snapshot
+3. Grace Period 동안 기존 연결을 30초 probe하여 네트워크 전환 시 TUI apps가 살아남을 수 있게 함
+4. 복구 실패 시 재연결, forwards 복원, transfers 재개, IDE files 재오픈
+
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+
+### SSH Connection Pool 및 Node Routing
+
+`SshConnectionRegistry`는 `DashMap` 기반이며 WebSocket lifecycle bridge 없이 Tauri의 node-first model을 유지합니다.
+
+- 하나의 물리 SSH connection이 terminal panes, SFTP, port forwards, IDE work를 공유
+- 각 connection은 `connecting → active → idle → link_down → reconnecting` 상태를 이동
+- UI는 `nodeId`로 command를 보내고 `NodeRouter`가 active `connectionId`를 atomic하게 resolve
+- `NodeRuntimeStore`가 topology snapshots를 `session_tree.json`에 persist
+- jump host failure는 downstream nodes에 `link_down`을 cascade
+
+### OxideSens AI
+
+OxideSens는 BYOK-first를 유지하며 context building은 in-process로 수행됩니다.
+
+- Providers: OpenAI, Anthropic, Gemini, Ollama 또는 OpenAI-compatible endpoint
+- MCP: stdio/SSE transports, tool discovery, invocation
+- RAG: BM25 full-text, HNSW vector index, Reciprocal Rank Fusion, CJK bigram tokenizer
+- AI context는 workspace state에서 만들어지며 credentials는 provider call 전에 redact
+- API keys는 OS keychain에 저장되고 logs 또는 IPC frames에 들어가지 않음
+
+### GPUI Desktop Shell
+
+UI는 GPUI로 직접 그려지며 DOM/CSS/JavaScript rendering pipeline이 없습니다.
+
+- 17 workspace tab types: local/SSH terminal, SFTP, IDE, Forwards, Settings, Plugin, Topology 등
+- draggable dividers를 가진 binary pane tree, terminal tab당 최대 4 panes
+- Command palette, global key bindings, sidebars는 GPUI primitives
+- Immediate-mode rendering은 serialization round-trip 없이 Rust state에 반응
+
+### Port Forwarding — Lock-Free I/O
+
+Forwarding은 standalone Rust crate에서 Tauri semantics를 유지합니다.
+
+- Local `-L`, Remote `-R`, Dynamic SOCKS5 `-D`
+- 하나의 `ssh_io` task가 각 SSH Channel을 소유하여 `Arc<Mutex<Channel>>` 회피
+- reconnect auto-restore, death reporting, idle timeout
+
+### trzsz — In-Band File Transfer
+
+trzsz는 계속 terminal stream을 사용하며 extra port나 remote agent가 필요 없습니다.
+
+- 기존 terminal stream을 통한 upload/download
+- ProxyJump chains를 통과해 동작
+- Native file pickers로 browser memory limits 회피
+- bidirectional transfer, directory support, configurable limits
+
+### `.oxide` Encrypted Export
+
+Encrypted bundle format은 Tauri line과 동일합니다.
+
+- **ChaCha20-Poly1305 AEAD** authenticated encryption
+- **Argon2id KDF**: 256 MB memory cost, 4 iterations로 GPU brute-force cost 증가
+- connections, forwards, settings, quick commands, plugin settings, portable secrets 포함
+
 </details>
 
 ---

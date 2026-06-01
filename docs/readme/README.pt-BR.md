@@ -130,6 +130,81 @@ Domain Crates
 
 Não existe fronteira de serialização entre UI e backend SSH/terminal. Os bytes do terminal modificam `TerminalState` diretamente; GPUI lê o estado e emite draw calls GPU.
 
+### SSH puro em Rust — russh (ring)
+
+A edição nativa vincula o mesmo stack `russh` da linha Tauri diretamente no binário desktop:
+
+- **Zero dependências C/OpenSSL** via `ring`
+- SSH2 completo: key exchange, channels, subsistema SFTP, port forwarding
+- ChaCha20-Poly1305 / AES-GCM, chaves Ed25519/RSA/ECDSA
+- SSH Agent no Unix (`SSH_AUTH_SOCK`) e Windows (`\\.\pipe\openssh-ssh-agent`)
+- ProxyJump multi-hop com autenticação independente em cada salto
+
+### Smart Reconnect com Grace Period
+
+A semântica de reconnect corresponde à linha Tauri, mas a orquestração roda inteiramente em tarefas async Rust:
+
+1. Detectar SSH keepalive timeout sem JavaScript timer throttling
+2. Fazer snapshot de terminal panes, transferências SFTP, forwards e arquivos IDE
+3. Testar a conexão antiga por 30 segundos de Grace Period para que TUIs sobrevivam a trocas de rede
+4. Se a recuperação falhar, reconectar, restaurar forwards, retomar transferências e reabrir arquivos IDE
+
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+
+### Pool de conexões SSH e roteamento por nó
+
+`SshConnectionRegistry` usa `DashMap` e preserva o modelo node-first do Tauri sem a ponte de lifecycle WebSocket:
+
+- Uma conexão SSH física pode servir terminal panes, SFTP, port forwards e trabalho IDE
+- Cada conexão passa por `connecting → active → idle → link_down → reconnecting`
+- A UI endereça `nodeId`; `NodeRouter` resolve atomicamente o `connectionId` ativo
+- `NodeRuntimeStore` persiste snapshots de topologia em `session_tree.json`
+- Falha em jump host propaga `link_down` para nós downstream
+
+### OxideSens AI
+
+OxideSens continua BYOK-first, com construção de contexto dentro do processo:
+
+- Providers: OpenAI, Anthropic, Gemini, Ollama ou qualquer endpoint OpenAI-compatible
+- MCP: transports stdio e SSE, descoberta e invocação de ferramentas
+- RAG: BM25 full-text, índice vetorial HNSW, Reciprocal Rank Fusion, tokenizer CJK bigram
+- O contexto AI vem do estado do workspace; credenciais são mascaradas antes de chamadas ao provider
+- API keys ficam no keychain do sistema e nunca entram em logs ou frames IPC
+
+### Shell desktop GPUI
+
+A UI é desenhada diretamente com GPUI, sem pipeline DOM/CSS/JavaScript:
+
+- 17 tipos de abas workspace: terminal local/SSH, SFTP, IDE, Forwards, Settings, Plugin, Topology e mais
+- Binary pane tree com divisores arrastáveis, até quatro panes por aba terminal
+- Command palette, atalhos globais e sidebars feitos com primitives GPUI
+- Immediate-mode rendering reage ao estado Rust sem round-trip de serialização
+
+### Port forwarding — Lock-Free I/O
+
+Forwarding mantém a semântica Tauri em um crate Rust independente:
+
+- Local `-L`, Remote `-R`, Dynamic SOCKS5 `-D`
+- Um único task `ssh_io` possui cada SSH Channel e evita `Arc<Mutex<Channel>>`
+- Auto-restore após reconnect, death reporting e idle timeout
+
+### trzsz — transferência in-band
+
+trzsz continua usando o stream do terminal, sem porta extra ou agent remoto:
+
+- Upload/download pelo stream terminal existente
+- Funciona através de cadeias ProxyJump
+- File pickers nativos evitam limites de memória do navegador
+- Transferência bidirecional, suporte a diretórios, limites configuráveis
+
+### Export `.oxide` criptografado
+
+O formato de bundle criptografado corresponde à linha Tauri:
+
+- **ChaCha20-Poly1305 AEAD** authenticated encryption
+- **Argon2id KDF**: 256 MB memory cost, 4 iterations, eleva o custo de brute force por GPU
+- Cobre connections, forwards, settings, quick commands, plugin settings e portable secrets
+
 </details>
 
 ---

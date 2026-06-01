@@ -132,9 +132,80 @@ Domain Crates
 
 UI 與 SSH/終端後端之間沒有序列化邊界。終端位元組直接修改 `TerminalState`，GPUI 讀取狀態並發出 GPU draw call。
 
-### 純 Rust SSH、智慧重連與連線池
+### 純 Rust SSH — russh (ring)
 
-原生版本直接連結與 Tauri 版本同源的 `russh` stack：無 C/OpenSSL 依賴，支援 SSH2、SFTP、轉發、Agent、ProxyJump 和多種金鑰演算法。重連流程會快照終端、SFTP、轉發和 IDE 狀態，先給舊連線 30 秒 Grace Period，再必要時重建並恢復工作區。
+原生版本把與 Tauri 版本同源的 `russh` stack 直接連結進桌面應用二進位：
+
+- **零 C/OpenSSL 依賴**：密碼學實作透過 `ring` 完成
+- 完整 SSH2：key exchange、channel、SFTP subsystem 與 port forwarding
+- ChaCha20-Poly1305 / AES-GCM、Ed25519/RSA/ECDSA keys
+- SSH Agent：Unix `SSH_AUTH_SOCK` 與 Windows `\\.\pipe\openssh-ssh-agent`
+- 多跳 ProxyJump，每一跳獨立認證
+
+### Grace Period 智慧重連
+
+重連語義與 Tauri 版本一致，但 orchestration 全部在 Rust async task 內完成：
+
+1. 透過 SSH keepalive 偵測連線逾時，沒有 JavaScript timer throttle
+2. 快照 terminal pane、SFTP transfer、port forward 與 IDE file state
+3. **Grace Period**：先探測舊連線 30 秒，網路切換時 TUI 應用有機會原地存活
+4. 舊連線無法恢復時，新 SSH 連線會恢復 forwarding、續傳並重新開啟 IDE files
+
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+
+### SSH 連線池與節點路由
+
+`SshConnectionRegistry` 使用 `DashMap` 管理連線，沿用 Tauri 的 node-first 架構，但沒有 WebSocket lifecycle bridge：
+
+- 一個實體 SSH 連線可被 terminal、SFTP、port forward 和 IDE 同時使用
+- 每條連線有 `connecting → active → idle → link_down → reconnecting` state machine
+- UI 只按 `nodeId` 操作，`NodeRouter` 原子解析到底層 `connectionId`
+- `NodeRuntimeStore` 將節點拓撲快照持久化到 `session_tree.json`
+- Jump host 失敗會級聯標記下游節點為 `link_down`
+
+### OxideSens AI
+
+OxideSens 仍然是 BYOK-first，native 版本把 context building 放在 process 內完成：
+
+- Provider：OpenAI、Anthropic、Gemini、Ollama 或任何 OpenAI-compatible endpoint
+- MCP：stdio 與 SSE transport，支援 tool discovery 與 invocation
+- RAG：BM25 full-text、HNSW vector index、RRF fusion 與 CJK bigram tokenizer
+- AI context 來自目前 workspace state；credentials 在送往 provider 前會被遮蔽
+- API key 存入 OS Keychain，不寫入 log，也不會進入 IPC frame
+
+### GPUI 桌面外殼
+
+整個 UI 使用 GPUI 直接繪製，沒有 DOM/CSS/JavaScript rendering pipeline：
+
+- 17 類 workspace tab：local/SSH terminal、SFTP、IDE、Forwards、Settings、Plugin、Topology 等
+- Binary pane tree 與可拖曳 divider，terminal tab 最多 4 個 pane
+- Command palette、global key bindings 與 sidebar 都使用 GPUI primitive
+- Immediate-mode rendering 直接回應 Rust state 變化，無 serialization round-trip
+
+### Port Forwarding — Lock-Free I/O
+
+Port forwarding 語義與 Tauri 相同，但獨立為 Rust crate：
+
+- Local `-L`、Remote `-R`、Dynamic SOCKS5 `-D`
+- SSH Channel 由單一 `ssh_io` task 持有，避免 `Arc<Mutex<Channel>>`
+- 支援 reconnect auto-restore、death reporting 與 idle timeout
+
+### trzsz 內聯檔案傳輸
+
+trzsz 繼續走 terminal stream，不需要額外 port 或 remote agent：
+
+- Upload/download 復用既有 terminal stream
+- 可穿透 ProxyJump chain
+- Native file picker 不受 browser memory 限制
+- 支援 bidirectional、directory transfer 與 configurable limits
+
+### `.oxide` 加密匯出
+
+加密格式與 Tauri 版本保持一致：
+
+- **ChaCha20-Poly1305 AEAD** authenticated encryption
+- **Argon2id KDF**：256 MB memory cost、4 iterations，提高 GPU brute-force 成本
+- 覆蓋 connections、forwards、settings、quick commands、plugin settings 與 portable secrets
 
 </details>
 

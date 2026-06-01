@@ -130,6 +130,81 @@ Domain Crates
 
 Il n'y a pas de frontière de sérialisation entre l'UI et le backend SSH/terminal. Les octets du terminal modifient directement `TerminalState`, puis GPUI lit l'état et émet les draw calls GPU.
 
+### SSH pur Rust — russh (ring)
+
+L’édition native lie directement dans le binaire desktop le même stack `russh` que la ligne Tauri :
+
+- **Zéro dépendance C/OpenSSL** grâce à `ring`
+- SSH2 complet : key exchange, channels, sous-système SFTP, redirection de ports
+- ChaCha20-Poly1305 / AES-GCM, clés Ed25519/RSA/ECDSA
+- SSH Agent sur Unix (`SSH_AUTH_SOCK`) et Windows (`\\.\pipe\openssh-ssh-agent`)
+- ProxyJump multi-hop avec authentification indépendante à chaque saut
+
+### Reconnexion intelligente avec Grace Period
+
+La sémantique de reconnexion correspond à la ligne Tauri, mais l’orchestration tourne entièrement dans des tâches async Rust :
+
+1. Détecter le timeout SSH keepalive sans JavaScript timer throttling
+2. Snapshot des terminal panes, transferts SFTP, forwards et fichiers IDE
+3. Sonder l’ancienne connexion pendant 30 secondes de Grace Period pour laisser survivre les TUI lors d’un changement réseau
+4. Si la récupération échoue, reconnecter, restaurer les forwards, reprendre les transferts et rouvrir les fichiers IDE
+
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+
+### Pool de connexions SSH et routage par nœud
+
+`SshConnectionRegistry` s’appuie sur `DashMap` et conserve le modèle node-first de Tauri sans pont de cycle de vie WebSocket :
+
+- Une connexion SSH physique peut servir terminal panes, SFTP, port forwards et travail IDE
+- Chaque connexion passe par `connecting → active → idle → link_down → reconnecting`
+- L’UI adresse `nodeId`; `NodeRouter` résout atomiquement le `connectionId` actif
+- `NodeRuntimeStore` persiste les snapshots de topologie dans `session_tree.json`
+- La panne d’un jump host propage `link_down` aux nœuds descendants
+
+### OxideSens AI
+
+OxideSens reste BYOK-first, avec construction du contexte dans le processus :
+
+- Providers : OpenAI, Anthropic, Gemini, Ollama ou tout endpoint OpenAI-compatible
+- MCP : transports stdio et SSE, découverte et invocation d’outils
+- RAG : BM25 full-text, index vectoriel HNSW, Reciprocal Rank Fusion, tokenizer CJK bigram
+- Le contexte IA vient de l’état du workspace ; les identifiants sont masqués avant les appels provider
+- Les clés API restent dans le trousseau OS et n’entrent jamais dans les logs ou frames IPC
+
+### Shell desktop GPUI
+
+L’UI est dessinée directement avec GPUI, sans pipeline DOM/CSS/JavaScript :
+
+- 17 types d’onglets workspace : terminal local/SSH, SFTP, IDE, Forwards, Settings, Plugin, Topology, etc.
+- Arbre binaire de panes avec séparateurs déplaçables, jusqu’à quatre panes par onglet terminal
+- Command palette, raccourcis globaux et sidebars construits avec des primitives GPUI
+- Immediate-mode rendering réagit à l’état Rust sans round-trip de sérialisation
+
+### Redirection de ports — Lock-Free I/O
+
+Le forwarding conserve la sémantique Tauri dans un crate Rust autonome :
+
+- Local `-L`, Remote `-R`, Dynamic SOCKS5 `-D`
+- Un seul task `ssh_io` possède chaque SSH Channel et évite `Arc<Mutex<Channel>>`
+- Auto-restauration après reconnexion, death reporting et idle timeout
+
+### trzsz — transfert in-band
+
+trzsz continue d’utiliser le flux terminal, sans port supplémentaire ni agent distant :
+
+- Upload/download via le flux terminal existant
+- Fonctionne à travers les chaînes ProxyJump
+- Les sélecteurs de fichiers natifs évitent les limites mémoire du navigateur
+- Transfert bidirectionnel, dossiers, limites configurables
+
+### Export `.oxide` chiffré
+
+Le format de bundle chiffré correspond à la ligne Tauri :
+
+- **ChaCha20-Poly1305 AEAD** authenticated encryption
+- **Argon2id KDF** : 256 MB memory cost, 4 iterations, augmente le coût du brute force GPU
+- Couvre connections, forwards, settings, quick commands, plugin settings et portable secrets
+
 </details>
 
 ---
