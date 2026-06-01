@@ -105,9 +105,9 @@ body:
           required: true
         - label: I have confirmed that another SSH client can connect with the same credentials and server / 我已确认其他 SSH 客户端使用相同凭据和服务端可以正常连接
           required: true
-        - label: I searched existing issues for duplicates / 我已搜索过是否已有相同 Issue
+        - label: I searched existing issues and provided server details, error messages, and a working-client comparison / 我已搜索过已有 Issue，并提供了服务端信息、错误信息和可正常连接的客户端对比
           required: true
         - label: |
-            I understand OxideTerm is free, open-source software — not a commercial product with 24/7 support. The author's time and energy are limited. I agree that issues with vague descriptions, low-effort content, insufficient information, or prolonged inactivity may be closed without further notice.
-            我明白 OxideTerm 是免费开源软件，而非提供 7×24 小时支持的商业产品，作者本人时间与精力均有限。我同意：描述模糊、内容敷衍、信息不足或长时间无回复的 Issue 将有可能被直接关闭。
+            I understand vague, incomplete, or inactive issues may be closed.
+            我理解描述模糊、信息不足或长期无回复的 Issue 可能会被关闭。
           required: true

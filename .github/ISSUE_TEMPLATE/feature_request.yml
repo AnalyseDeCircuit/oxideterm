@@ -11,7 +11,7 @@ body:
 
         ---
 
-        **Scope:** OxideTerm is an SSH-based terminal and DevOps platform (local shells, SSH, SFTP, remote IDE, port forwarding, AI, plugins). Requests for unrelated remote-access protocols  are out of scope and will be closed.
+        **Scope:** OxideTerm is an SSH-based terminal and DevOps platform (local shells, SSH, SFTP, remote IDE, port forwarding, AI, plugins). Requests for unrelated remote-access protocols are out of scope and will be closed.
         **范围：** OxideTerm 是基于 SSH 的终端与 DevOps 平台（本地终端、SSH、SFTP、远程 IDE、端口转发、AI、插件）。与此无关的远程访问协议不在项目范围内，相关请求将被直接关闭。
 
         **One request per issue.** Multiple unrelated suggestions in a single issue will be closed — please open separate issues.
@@ -77,19 +77,13 @@ body:
       options:
         - label: I am using the latest release and have confirmed this feature does not already exist / 我正在使用最新正式版，并已确认该功能尚不存在
           required: true
-        - label: This issue contains a single, focused feature request (not a list of unrelated ideas) / 本 Issue 只包含一个明确的功能建议（而非多条不相关的想法）
-          required: true
-        - label: This request is within OxideTerm's scope (terminal, SSH, SFTP, IDE, forwarding, AI, plugins) — not an unrelated protocol / 本建议在 OxideTerm 的项目范围内（终端、SSH、SFTP、IDE、转发、AI、插件），而非无关协议
+        - label: This is one focused request within OxideTerm's scope / 这是一个聚焦且属于 OxideTerm 范围内的请求
           required: true
         - label: I searched existing issues for duplicates / 我已搜索过是否已有相同 Issue
           required: true
         - label: I have described a concrete problem or use case and a proposed solution / 我已描述了具体的问题或使用场景，并给出了期望方案
           required: true
         - label: |
-            I understand that filing an issue does not obligate the maintainer to implement it. OxideTerm is maintained on a best-effort basis — bug fixes are prioritized and feature requests may not be addressed.
-            我明白提交 Issue 并不意味着维护者有义务实现它。OxideTerm 以尽力而为的方式维护——Bug 修复优先处理，功能请求可能不会被实现。
-          required: true
-        - label: |
-            I understand OxideTerm is free, open-source software — not a commercial product with 24/7 support. The author's time and energy are limited. I agree that issues with vague descriptions, low-effort content, insufficient information, or prolonged inactivity may be closed without further notice.
-            我明白 OxideTerm 是免费开源软件，而非提供 7×24 小时支持的商业产品，作者本人时间与精力均有限。我同意：描述模糊、内容敷衍、信息不足或长时间无回复的 Issue 将有可能被直接关闭。
+            I understand feature requests are handled best-effort, and vague or inactive issues may be closed.
+            我理解功能请求会尽力处理，描述模糊或长期无回复的 Issue 可能会被关闭。
           required: true

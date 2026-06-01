@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         **Not for security issues** — use [Report a vulnerability](https://github.com/AnalyseDeCircuit/OxideTerm/security/advisories/new) instead.
-        **非安全漏洞** — 请用 GitHub 私密漏洞报告，勿用本模板。
+        **安全漏洞** — 请用 GitHub 私密漏洞报告，勿用本模板。
 
         **One bug per issue.** Please do not combine multiple unrelated bugs — open separate issues instead.
         **每个 Issue 只报一个 bug。** 请勿将多个不相关的问题合并提交，请分别创建 Issue。
@@ -101,13 +101,11 @@ body:
           required: true
         - label: I searched existing issues for duplicates / 我已搜索过是否已有相同 Issue
           required: true
-        - label: This issue describes a single bug (not a list of unrelated problems or feature requests) / 本 Issue 只描述一个 bug（而非多个不相关的问题或功能建议）
-          required: true
-        - label: I have confirmed this is unexpected behavior, not a usage question or expected design (for questions, use Discussions) / 我已确认这是异常行为，而非使用疑问或预期设计（使用问题请到 Discussions 提问）
+        - label: This is one reproducible bug, not a usage question or feature request / 这是一个可复现的 bug，而不是使用问题或功能建议
           required: true
         - label: I have provided the OxideTerm version, platform, and steps to reproduce / 我已提供版本号、平台及复现步骤
           required: true
         - label: |
-            I understand OxideTerm is free, open-source software — not a commercial product with 24/7 support. The author's time and energy are limited. I agree that issues with vague descriptions, low-effort content, insufficient information, or prolonged inactivity may be closed without further notice.
-            我明白 OxideTerm 是免费开源软件，而非提供 7×24 小时支持的商业产品，作者本人时间与精力均有限。我同意：描述模糊、内容敷衍、信息不足或长时间无回复的 Issue 将有可能被直接关闭。
+            I understand vague, incomplete, or inactive issues may be closed.
+            我理解描述模糊、信息不足或长期无回复的 Issue 可能会被关闭。
           required: true
