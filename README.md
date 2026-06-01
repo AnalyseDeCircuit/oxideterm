@@ -203,6 +203,33 @@ The entire UI is written in Rust using GPUI (Zed's GPU-backed UI framework):
 - **Command palette**, global key bindings, sidebar panels — all GPUI primitives
 - **Immediate-mode rendering**: UI reflects Rust state changes without a serialization round-trip
 
+### 🧱 Terminal State and Rendering
+
+Terminal rendering is modeled as Rust state first, then drawn by GPUI:
+
+- PTY output lands in `TerminalState`; scrollback, cursor, selection, marks, and search state stay in Rust
+- Rendering policy can shift between Boost, Normal, and Idle without asking a browser event loop to cooperate
+- Sixel and Kitty graphics are tracked as terminal-owned assets instead of DOM nodes or canvas overlays
+- Split panes share the same workspace state model, so tab restore and reconnect can snapshot terminal topology together
+
+### 🗂️ SFTP and IDE Workspace
+
+Remote files are part of the same node workspace rather than a separate disconnected feature:
+
+- SFTP sessions are resolved through `NodeRouter`, so reconnect can swap the underlying SSH connection without changing the UI's node address
+- Transfer queues track direction, progress, retry state, and speed limits independently from the visible file panes
+- IDE tabs keep dirty buffers, remote paths, conflict state, and restore metadata together
+- Remote writes use staged/atomic behavior where the backend supports it, keeping partial writes out of normal edit flows
+
+### 🧩 Plugins, CLI, and Diagnostics
+
+The native branch keeps extension and support surfaces in Rust-native boundaries:
+
+- Plugins run in a wasmtime sandbox with typed host capabilities instead of browser globals
+- The CLI links directly to domain crates for doctor, settings, connections, forwards, portable bundles, backups, and reports
+- Diagnostics prefer counts, paths, feature flags, and redacted hints over raw secret-bearing payloads
+- Mutating CLI flows use dry-run plans, `--yes` guards, and rollback backups where applicable
+
 ### 🔀 Port Forwarding — Lock-Free I/O
 
 Identical semantics to Tauri, implemented as standalone Rust crate:

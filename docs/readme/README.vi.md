@@ -3,6 +3,9 @@
 <p align="center">
   <strong>Phiên bản zero-WebView tiếp theo của OxideTerm.</strong>
   <br>
+
+### Architecture — Single-Process, Zero-Bridge
+
   Kết nối tới máy từ xa một lần, rồi làm việc với shell, tệp, cổng, truyền tải, editor nhẹ, serial console và BYOK AI trong một workspace Rust native.
   <br>
   Ứng dụng GPUI native · SSH thuần Rust · không cần tài khoản cho workflow SSH chính
@@ -117,6 +120,8 @@ OxideTerm Native loại bỏ WebView bridge và giữ terminal, SSH, SFTP, forwa
 <summary><strong>Kiến trúc, nội bộ SSH, GPUI shell, reconnect, AI, plugins và hơn nữa</strong></summary>
 <br>
 
+### Architecture — Single-Process, Zero-Bridge
+
 ```text
 GPUI Render Loop
   WorkspaceApp / Tab surfaces / GPUI views
@@ -179,6 +184,33 @@ UI được vẽ trực tiếp bằng GPUI, không có DOM/CSS/JavaScript render
 - Binary pane tree với dividers kéo được, tối đa bốn panes mỗi terminal tab
 - Command palette, global key bindings và sidebars dùng GPUI primitives
 - Immediate-mode rendering phản ứng với Rust state mà không cần serialization round-trip
+
+### Terminal State và Rendering
+
+Terminal rendering được mô hình hóa trước thành Rust state, rồi GPUI vẽ ra:
+
+- PTY output đi vào `TerminalState`; scrollback, cursor, selection, marks và search state đều ở trong Rust
+- Rendering policy có thể chuyển giữa Boost, Normal và Idle mà không cần browser event loop hợp tác
+- Sixel và Kitty graphics được theo dõi như terminal-owned assets, không phải DOM nodes hoặc canvas overlays
+- Split panes dùng chung workspace state model, nên tab restore và reconnect có thể snapshot terminal topology cùng nhau
+
+### SFTP và IDE Workspace
+
+Remote files là một phần của cùng node workspace, không phải tính năng tách rời:
+
+- SFTP sessions được resolve qua `NodeRouter`, nên reconnect có thể thay underlying SSH connection mà không đổi node address của UI
+- Transfer queues theo dõi direction, progress, retry state và speed limits độc lập với file panes đang hiển thị
+- IDE tabs giữ chung dirty buffers, remote paths, conflict state và restore metadata
+- Khi backend hỗ trợ, remote writes dùng staged/atomic behavior để tránh partial writes trong edit flow thông thường
+
+### Plugins, CLI và Diagnostics
+
+Native branch giữ extension và support surfaces trong Rust-native boundaries:
+
+- Plugins chạy trong wasmtime sandbox với typed host capabilities thay vì browser globals
+- CLI link trực tiếp domain crates cho doctor, settings, connections, forwards, portable bundles, backups và reports
+- Diagnostics ưu tiên counts, paths, feature flags và redacted hints thay vì raw payloads có secrets
+- CLI flows có thay đổi state dùng dry-run plans, `--yes` guards và rollback backups khi phù hợp
 
 ### Port Forwarding — Lock-Free I/O
 
