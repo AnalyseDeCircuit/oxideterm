@@ -59,7 +59,10 @@ use oxideterm_connection_monitor::{
     ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
     MetricsSource, ProfilerRegistry, ProfilerUpdate, ResourceMetrics,
 };
-use oxideterm_connections::{ConnectionStore, SaveConnectionRequest};
+use oxideterm_connections::{
+    ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
+    ConnectionStore, SaveConnectionRequest,
+};
 use oxideterm_forwarding::{
     ForwardEvent, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry, SavedForwardStore,
 };
@@ -535,6 +538,12 @@ pub(crate) struct WorkspaceApp {
     settings_managed_key_paste_private_key: String,
     settings_managed_key_paste_passphrase: String,
     settings_managed_key_rename_name: String,
+    settings_connection_import_source: ConnectionImportSource,
+    settings_connection_import_paths: Vec<String>,
+    settings_connection_import_preview: Option<ConnectionImportPreview>,
+    settings_selected_connection_import_drafts: HashSet<String>,
+    settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy,
+    settings_connection_import_target_group: String,
     quick_commands: QuickCommandsState,
     quick_command_list_state: ListState,
     quick_command_list_cache: RefCell<VirtualListSignatureCache>,

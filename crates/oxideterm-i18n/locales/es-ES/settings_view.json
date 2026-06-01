@@ -492,6 +492,38 @@
         "batch_import_skipped": "{{count}} host(s) omitido(s) (ya existente(s))",
         "already_imported": "Ya importado"
       },
+      "importers": {
+        "title": "Importar desde otros clientes",
+        "description": "Previsualiza e importa archivos de conexión de SecureCRT, Xshell o Termius. Las contraseñas y campos secretos nunca se importan.",
+        "source": "Origen",
+        "sources": {
+          "securecrt": "Archivos session de SecureCRT",
+          "xshell": "Archivos Xshell .xsh",
+          "termius": "Exportación de Termius"
+        },
+        "paths": "Archivos o carpeta",
+        "choose_files": "Elegir archivos",
+        "choose_directory": "Elegir carpeta",
+        "preview": "Previsualizar",
+        "previewing": "Previsualizando...",
+        "no_paths": "No hay archivos seleccionados",
+        "preview_failed": "Error de previsualización: {{error}}",
+        "apply_failed": "Error de importación: {{error}}",
+        "imported_count": "{{count}} importado(s)",
+        "skipped_count": "{{count}} omitido(s)",
+        "renamed_count": "{{count}} renombrado(s)",
+        "error_count": "{{count}} error(es)",
+        "no_changes": "No se importaron conexiones",
+        "select_all": "Seleccionar todo",
+        "deselect_all": "Deseleccionar todo",
+        "duplicate_skip": "Omitir duplicados",
+        "duplicate_rename": "Renombrar duplicados",
+        "target_group": "Grupo destino (opcional)",
+        "importing": "Importando...",
+        "import_selected": "Importar selección ({{count}})",
+        "duplicate": "Duplicado",
+        "no_drafts": "No se encontraron conexiones importables"
+      },
       "idle_timeout": {
         "title": "Pool de conexiones",
         "description": "Configura la gestión de conexiones SSH inactivas.",

@@ -492,6 +492,38 @@
         "batch_import_skipped": "Đã bỏ qua {{count}} máy chủ (đã tồn tại)",
         "already_imported": "Đã nhập"
       },
+      "importers": {
+        "title": "Nhập từ client khác",
+        "description": "Xem trước và nhập tệp kết nối SecureCRT, Xshell hoặc Termius. Mật khẩu và trường secret không bao giờ được nhập.",
+        "source": "Nguồn",
+        "sources": {
+          "securecrt": "Tệp session SecureCRT",
+          "xshell": "Tệp Xshell .xsh",
+          "termius": "Bản xuất Termius"
+        },
+        "paths": "Tệp hoặc thư mục",
+        "choose_files": "Chọn tệp",
+        "choose_directory": "Chọn thư mục",
+        "preview": "Xem trước",
+        "previewing": "Đang xem trước...",
+        "no_paths": "Chưa chọn tệp",
+        "preview_failed": "Xem trước thất bại: {{error}}",
+        "apply_failed": "Nhập thất bại: {{error}}",
+        "imported_count": "Đã nhập {{count}}",
+        "skipped_count": "Đã bỏ qua {{count}}",
+        "renamed_count": "Đã đổi tên {{count}}",
+        "error_count": "{{count}} lỗi",
+        "no_changes": "Không có kết nối nào được nhập",
+        "select_all": "Chọn tất cả",
+        "deselect_all": "Bỏ chọn tất cả",
+        "duplicate_skip": "Bỏ qua trùng lặp",
+        "duplicate_rename": "Đổi tên trùng lặp",
+        "target_group": "Nhóm đích (tuỳ chọn)",
+        "importing": "Đang nhập...",
+        "import_selected": "Nhập đã chọn ({{count}})",
+        "duplicate": "Trùng lặp",
+        "no_drafts": "Không tìm thấy kết nối có thể nhập"
+      },
       "idle_timeout": {
         "title": "Nhóm kết nối",
         "description": "Cấu hình quản lý kết nối SSH không hoạt động.",

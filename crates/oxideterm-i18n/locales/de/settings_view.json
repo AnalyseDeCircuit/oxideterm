@@ -492,6 +492,38 @@
         "batch_import_skipped": "{{count}} Host(s) übersprungen (bereits vorhanden)",
         "already_imported": "Bereits importiert"
       },
+      "importers": {
+        "title": "Aus anderen Clients importieren",
+        "description": "SecureCRT-, Xshell- oder Termius-Verbindungsdateien vorab prüfen und importieren. Passwörter und Secret-Felder werden nie importiert.",
+        "source": "Quelle",
+        "sources": {
+          "securecrt": "SecureCRT session-Dateien",
+          "xshell": "Xshell .xsh-Dateien",
+          "termius": "Termius-Export"
+        },
+        "paths": "Dateien oder Ordner",
+        "choose_files": "Dateien wählen",
+        "choose_directory": "Ordner wählen",
+        "preview": "Vorschau",
+        "previewing": "Vorschau...",
+        "no_paths": "Keine Dateien ausgewählt",
+        "preview_failed": "Vorschau fehlgeschlagen: {{error}}",
+        "apply_failed": "Import fehlgeschlagen: {{error}}",
+        "imported_count": "{{count}} importiert",
+        "skipped_count": "{{count}} übersprungen",
+        "renamed_count": "{{count}} umbenannt",
+        "error_count": "{{count}} Fehler",
+        "no_changes": "Keine Verbindungen importiert",
+        "select_all": "Alle auswählen",
+        "deselect_all": "Auswahl aufheben",
+        "duplicate_skip": "Duplikate überspringen",
+        "duplicate_rename": "Duplikate umbenennen",
+        "target_group": "Zielgruppe (optional)",
+        "importing": "Importiere...",
+        "import_selected": "Ausgewählte importieren ({{count}})",
+        "duplicate": "Duplikat",
+        "no_drafts": "Keine importierbaren Verbindungen gefunden"
+      },
       "idle_timeout": {
         "title": "Verbindungspool",
         "description": "Verwaltung inaktiver SSH-Verbindungen konfigurieren.",

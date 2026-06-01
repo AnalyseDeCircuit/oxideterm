@@ -492,6 +492,38 @@
         "batch_import_skipped": "{{count}} host(s) skipped (already exist)",
         "already_imported": "Already imported"
       },
+      "importers": {
+        "title": "Import from Other Clients",
+        "description": "Preview and import SecureCRT, Xshell, or Termius connection files. Passwords and secret fields are never imported.",
+        "source": "Source",
+        "sources": {
+          "securecrt": "SecureCRT session files",
+          "xshell": "Xshell .xsh files",
+          "termius": "Termius export"
+        },
+        "paths": "Files or Folder",
+        "choose_files": "Choose Files",
+        "choose_directory": "Choose Folder",
+        "preview": "Preview",
+        "previewing": "Previewing...",
+        "no_paths": "No files selected",
+        "preview_failed": "Preview failed: {{error}}",
+        "apply_failed": "Import failed: {{error}}",
+        "imported_count": "Imported {{count}}",
+        "skipped_count": "Skipped {{count}}",
+        "renamed_count": "Renamed {{count}}",
+        "error_count": "{{count}} error(s)",
+        "no_changes": "No connections imported",
+        "select_all": "Select All",
+        "deselect_all": "Deselect All",
+        "duplicate_skip": "Skip duplicates",
+        "duplicate_rename": "Rename duplicates",
+        "target_group": "Target group (optional)",
+        "importing": "Importing...",
+        "import_selected": "Import Selected ({{count}})",
+        "duplicate": "Duplicate",
+        "no_drafts": "No importable connections found"
+      },
       "idle_timeout": {
         "title": "Connection Pool",
         "description": "Configure how idle SSH connections are managed.",

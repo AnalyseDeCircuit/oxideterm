@@ -797,6 +797,9 @@ impl WorkspaceApp {
                 self.settings_managed_key_paste_passphrase.clone()
             }
             SettingsInput::ManagedKeyRenameName => self.settings_managed_key_rename_name.clone(),
+            SettingsInput::ConnectionImportTargetGroup => {
+                self.settings_connection_import_target_group.clone()
+            }
             SettingsInput::PluginSetting(index) => self
                 .plugin_registry
                 .contributions()
@@ -924,6 +927,10 @@ impl WorkspaceApp {
             }
             SettingsInput::ManagedKeyRenameName => {
                 self.settings_managed_key_rename_name = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::ConnectionImportTargetGroup => {
+                self.settings_connection_import_target_group = self.settings_input_draft.clone();
                 cx.notify();
             }
             SettingsInput::PluginSetting(index) => {

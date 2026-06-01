@@ -492,6 +492,38 @@
         "batch_import_skipped": "{{count}} 件のホストをスキップしました（既存）",
         "already_imported": "インポート済み"
       },
+      "importers": {
+        "title": "他のクライアントからインポート",
+        "description": "SecureCRT、Xshell、Termius の接続ファイルをプレビューしてインポートします。パスワードとシークレット項目はインポートされません。",
+        "source": "ソース",
+        "sources": {
+          "securecrt": "SecureCRT session ファイル",
+          "xshell": "Xshell .xsh ファイル",
+          "termius": "Termius エクスポート"
+        },
+        "paths": "ファイルまたはフォルダー",
+        "choose_files": "ファイルを選択",
+        "choose_directory": "フォルダーを選択",
+        "preview": "プレビュー",
+        "previewing": "プレビュー中...",
+        "no_paths": "ファイルが選択されていません",
+        "preview_failed": "プレビューに失敗しました: {{error}}",
+        "apply_failed": "インポートに失敗しました: {{error}}",
+        "imported_count": "{{count}} 件をインポート",
+        "skipped_count": "{{count}} 件をスキップ",
+        "renamed_count": "{{count}} 件の名前を変更",
+        "error_count": "{{count}} 件のエラー",
+        "no_changes": "接続はインポートされませんでした",
+        "select_all": "すべて選択",
+        "deselect_all": "選択解除",
+        "duplicate_skip": "重複をスキップ",
+        "duplicate_rename": "重複をリネーム",
+        "target_group": "対象グループ（任意）",
+        "importing": "インポート中...",
+        "import_selected": "選択したものをインポート ({{count}})",
+        "duplicate": "重複",
+        "no_drafts": "インポート可能な接続が見つかりません"
+      },
       "idle_timeout": {
         "title": "接続プール",
         "description": "アイドル状態のSSH接続の管理設定。",

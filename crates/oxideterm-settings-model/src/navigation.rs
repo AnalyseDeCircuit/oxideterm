@@ -28,7 +28,7 @@ pub fn settings_tab_section_count(
         SettingsTab::Terminal => terminal_settings_section_count(dynamic.terminal_page),
         SettingsTab::Appearance => 3,
         SettingsTab::Local => 5,
-        SettingsTab::Connections => 4,
+        SettingsTab::Connections => 5,
         SettingsTab::Ssh => 1,
         SettingsTab::Reconnect => 3,
         SettingsTab::Sftp => 3,

@@ -492,6 +492,38 @@
         "batch_import_skipped": "跳過 {{count}} 個主機（已存在）",
         "already_imported": "已導入"
       },
+      "importers": {
+        "title": "從其他客戶端匯入",
+        "description": "預覽並匯入 SecureCRT、Xshell 或 Termius 的連線檔。密碼與 secret 欄位永遠不會被匯入。",
+        "source": "來源",
+        "sources": {
+          "securecrt": "SecureCRT session 檔",
+          "xshell": "Xshell .xsh 檔",
+          "termius": "Termius 匯出"
+        },
+        "paths": "檔案或資料夾",
+        "choose_files": "選擇檔案",
+        "choose_directory": "選擇資料夾",
+        "preview": "預覽",
+        "previewing": "預覽中...",
+        "no_paths": "尚未選擇檔案",
+        "preview_failed": "預覽失敗：{{error}}",
+        "apply_failed": "匯入失敗：{{error}}",
+        "imported_count": "已匯入 {{count}} 個",
+        "skipped_count": "已跳過 {{count}} 個",
+        "renamed_count": "已重新命名 {{count}} 個",
+        "error_count": "{{count}} 個錯誤",
+        "no_changes": "沒有匯入連線",
+        "select_all": "全選",
+        "deselect_all": "取消全選",
+        "duplicate_skip": "跳過重複項",
+        "duplicate_rename": "重新命名重複項",
+        "target_group": "目標分組（選填）",
+        "importing": "匯入中...",
+        "import_selected": "匯入所選 ({{count}})",
+        "duplicate": "重複",
+        "no_drafts": "找不到可匯入連線"
+      },
       "idle_timeout": {
         "title": "連線池",
         "description": "設定閒置 SSH 連線的管理策略。",

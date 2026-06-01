@@ -182,6 +182,12 @@ impl WorkspaceApp {
             settings_managed_key_paste_private_key: String::new(),
             settings_managed_key_paste_passphrase: String::new(),
             settings_managed_key_rename_name: String::new(),
+            settings_connection_import_source: ConnectionImportSource::SecureCrt,
+            settings_connection_import_paths: Vec::new(),
+            settings_connection_import_preview: None,
+            settings_selected_connection_import_drafts: HashSet::new(),
+            settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy::Skip,
+            settings_connection_import_target_group: String::new(),
             quick_commands: QuickCommandsState::load(settings_store.path()),
             // Quick command popovers can contain user-sized command sets; keep
             // their rows on the same variable-height list path as migrated

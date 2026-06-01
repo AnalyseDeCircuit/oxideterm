@@ -492,6 +492,38 @@
         "batch_import_skipped": "跳过 {{count}} 个主机（已存在）",
         "already_imported": "已导入"
       },
+      "importers": {
+        "title": "从其他客户端导入",
+        "description": "预览并导入 SecureCRT、Xshell 或 Termius 的连接文件。密码和 secret 字段永远不会被导入。",
+        "source": "来源",
+        "sources": {
+          "securecrt": "SecureCRT session 文件",
+          "xshell": "Xshell .xsh 文件",
+          "termius": "Termius 导出"
+        },
+        "paths": "文件或文件夹",
+        "choose_files": "选择文件",
+        "choose_directory": "选择文件夹",
+        "preview": "预览",
+        "previewing": "预览中...",
+        "no_paths": "未选择文件",
+        "preview_failed": "预览失败：{{error}}",
+        "apply_failed": "导入失败：{{error}}",
+        "imported_count": "已导入 {{count}} 个",
+        "skipped_count": "已跳过 {{count}} 个",
+        "renamed_count": "已重命名 {{count}} 个",
+        "error_count": "{{count}} 个错误",
+        "no_changes": "没有导入连接",
+        "select_all": "全选",
+        "deselect_all": "取消全选",
+        "duplicate_skip": "跳过重复项",
+        "duplicate_rename": "重命名重复项",
+        "target_group": "目标分组（可选）",
+        "importing": "导入中...",
+        "import_selected": "导入所选 ({{count}})",
+        "duplicate": "重复",
+        "no_drafts": "未找到可导入连接"
+      },
       "idle_timeout": {
         "title": "连接池",
         "description": "配置空闲 SSH 连接的管理策略。",

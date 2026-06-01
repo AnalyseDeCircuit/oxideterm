@@ -60,9 +60,11 @@ use oxideterm_ai::{
     take_provider_key_secret as ai_take_provider_key_secret,
 };
 use oxideterm_connections::{
-    ManagedSshKeyInfo, ManagedSshKeyOrigin, ManagedSshKeyUsage, SecretString, SshConfigHost,
-    list_available_ssh_keys, list_ssh_config_hosts, resolve_ssh_config_alias,
-    saved_connection_from_ssh_host,
+    ConnectionImportApplyRequest, ConnectionImportDuplicateStrategy, ConnectionImportPreview,
+    ConnectionImportSource, ImportedConnectionAuthType, ManagedSshKeyInfo, ManagedSshKeyOrigin,
+    ManagedSshKeyUsage, SecretString, SshConfigHost, apply_connection_import,
+    list_available_ssh_keys, list_ssh_config_hosts, preview_connection_import,
+    resolve_ssh_config_alias, saved_connection_from_ssh_host,
 };
 use oxideterm_gpui_settings_view::*;
 use oxideterm_gpui_ui::{

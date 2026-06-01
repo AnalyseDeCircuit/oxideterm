@@ -64,6 +64,7 @@ pub fn persisted_settings_input_value(
             .unwrap_or_default(),
         SettingsInput::ConnectionDefaultUsername => settings.connection_defaults.username.clone(),
         SettingsInput::ConnectionDefaultPort => settings.connection_defaults.port.to_string(),
+        SettingsInput::ConnectionImportTargetGroup => return None,
         SettingsInput::SftpSpeedLimitKbps => settings.sftp.speed_limit_kbps.to_string(),
         SettingsInput::InBandTransferMaxChunkBytes => settings
             .terminal
@@ -260,6 +261,7 @@ pub fn apply_persisted_settings_input_draft(
         SettingsInput::ConnectionDefaultPort => parse_i64(draft)
             .map(|value| settings.connection_defaults.port = value.clamp(1, 65_535))
             .into(),
+        SettingsInput::ConnectionImportTargetGroup => SettingsInputDraftApply::Unhandled,
         SettingsInput::SftpSpeedLimitKbps => parse_i64(draft)
             .map(|value| settings.sftp.speed_limit_kbps = value.max(0))
             .into(),

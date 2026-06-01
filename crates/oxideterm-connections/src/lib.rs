@@ -1,3 +1,4 @@
+mod connection_import;
 mod draft;
 mod keychain;
 pub mod oxide_file;
@@ -6,6 +7,12 @@ mod ssh_config;
 mod ssh_keys;
 mod store;
 
+pub use connection_import::{
+    ConnectionImportApplyRequest, ConnectionImportApplyResult, ConnectionImportDuplicateStrategy,
+    ConnectionImportErrorInfo, ConnectionImportPreview, ConnectionImportSource,
+    ImportedConnectionAuthType, ImportedConnectionDraft, ImportedProxyHopDraft,
+    apply_connection_import, preview_connection_import,
+};
 pub use draft::{
     ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, IMPORTED_GROUP, ProxyHopDraft,
     SSH_CONFIG_TAG, first_available_default_key_path, save_request_from_draft,

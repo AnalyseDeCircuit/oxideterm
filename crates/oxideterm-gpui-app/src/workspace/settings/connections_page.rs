@@ -23,6 +23,7 @@ impl WorkspaceApp {
                 let ssh_hosts = list_ssh_config_hosts(&existing_names).unwrap_or_default();
                 self.ssh_config_import_section(ssh_hosts, cx)
             }
+            4 => self.connection_importers_section(cx),
             _ => div().into_any_element(),
         }
     }
@@ -640,6 +641,549 @@ impl WorkspaceApp {
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(self.i18n.t("settings_view.connections.ssh_config.no_hosts"))
+            .into_any_element()
+    }
+
+    fn connection_importers_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mut rows = vec![
+            self.connection_import_source_picker(cx),
+            self.connection_import_path_toolbar(cx),
+            self.connection_import_path_summary(),
+        ];
+
+        if let Some(preview) = self.settings_connection_import_preview.clone() {
+            rows.push(self.connection_import_preview_toolbar(&preview, cx));
+            rows.push(self.connection_import_preview_list(preview, cx));
+        }
+        if let Some(status) = self.settings_page.settings_connection_status.clone() {
+            rows.push(self.connection_status_row(status));
+        }
+
+        self.connection_section(
+            "settings_view.connections.importers.title",
+            "settings_view.connections.importers.description",
+            rows,
+        )
+    }
+
+    fn connection_import_source_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .w_full()
+            .max_w(px(672.0))
+            .grid()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t("settings_view.connections.importers.source")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(8.0))
+                    .children(
+                        connection_import_source_options()
+                            .iter()
+                            .map(|source| self.connection_import_source_button(*source, cx)),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn connection_import_source_button(
+        &self,
+        source: ConnectionImportSource,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let active = self.settings_connection_import_source == source;
+        self.workspace_toolbar_action_button(
+            connection_import_source_label(source, &self.i18n),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: if active {
+                        ButtonVariant::Default
+                    } else {
+                        ButtonVariant::Outline
+                    },
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                background: (!active).then(|| self.settings_panel_background(self.tokens.ui.bg_panel)),
+                border: (!active).then(|| rgb(self.tokens.ui.border)),
+                text_color: Some(rgb(if active {
+                    self.tokens.ui.bg
+                } else {
+                    self.tokens.ui.text
+                })),
+                hover_background: (!active).then(|| rgb(self.tokens.ui.bg_hover)),
+                height: Some(34.0),
+                padding_x: Some(12.0),
+                font_size: Some(self.tokens.metrics.ui_text_sm),
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(move |this, _event, _window, cx| {
+                this.set_connection_import_source(source, cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn connection_import_path_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let has_paths = !self.settings_connection_import_paths.is_empty();
+        div()
+            .w_full()
+            .max_w(px(896.0))
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap(px(8.0))
+            .child(self.connection_import_pick_files_button(cx))
+            .when(self.settings_connection_import_source != ConnectionImportSource::Termius, |row| {
+                row.child(self.connection_import_pick_directory_button(cx))
+            })
+            .child(self.connection_import_preview_button(has_paths, cx))
+            .into_any_element()
+    }
+
+    fn connection_import_pick_files_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.workspace_toolbar_action_button(
+            self.i18n.t("settings_view.connections.importers.choose_files"),
+            Some(Self::render_lucide_icon(
+                LucideIcon::FolderInput,
+                16.0,
+                rgb(self.tokens.ui.text),
+            )),
+            self.connection_import_secondary_button_options(false),
+            cx.listener(|this, _event, _window, cx| {
+                this.pick_connection_import_paths(false, cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn connection_import_pick_directory_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.workspace_toolbar_action_button(
+            self.i18n.t("settings_view.connections.importers.choose_directory"),
+            Some(Self::render_lucide_icon(
+                LucideIcon::FolderOpen,
+                16.0,
+                rgb(self.tokens.ui.text),
+            )),
+            self.connection_import_secondary_button_options(false),
+            cx.listener(|this, _event, _window, cx| {
+                this.pick_connection_import_paths(true, cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn connection_import_preview_button(
+        &self,
+        has_paths: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.workspace_toolbar_action_button(
+            self.i18n.t("settings_view.connections.importers.preview"),
+            Some(Self::render_lucide_icon(
+                LucideIcon::RefreshCw,
+                16.0,
+                rgb(if has_paths {
+                    self.tokens.ui.bg
+                } else {
+                    self.tokens.ui.text_muted
+                }),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Default,
+                    size: ButtonSize::Default,
+                    radius: ButtonRadius::Md,
+                    disabled: !has_paths,
+                },
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.preview_settings_connection_import(cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn connection_import_secondary_button_options(
+        &self,
+        disabled: bool,
+    ) -> ToolbarButtonOptions {
+        ToolbarButtonOptions {
+            button: ButtonOptions {
+                variant: ButtonVariant::Outline,
+                size: ButtonSize::Default,
+                radius: ButtonRadius::Md,
+                disabled,
+            },
+            background: Some(self.settings_panel_background(self.tokens.ui.bg_panel)),
+            border: Some(rgb(self.tokens.ui.border)),
+            text_color: Some(rgb(self.tokens.ui.text)),
+            hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+            height: Some(36.0),
+            padding_x: Some(12.0),
+            font_size: Some(self.tokens.metrics.ui_text_sm),
+            ..ToolbarButtonOptions::default()
+        }
+    }
+
+    fn connection_import_path_summary(&self) -> AnyElement {
+        let summary = if self.settings_connection_import_paths.is_empty() {
+            self.i18n.t("settings_view.connections.importers.no_paths")
+        } else {
+            self.settings_connection_import_paths.join(" · ")
+        };
+        div()
+            .max_w(px(896.0))
+            .truncate()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(summary)
+            .into_any_element()
+    }
+
+    fn connection_import_preview_toolbar(
+        &self,
+        preview: &ConnectionImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let importable = preview.drafts.iter().filter(|draft| draft.importable).count();
+        let all_selected = importable > 0
+            && preview
+                .drafts
+                .iter()
+                .filter(|draft| draft.importable)
+                .all(|draft| {
+                    self.settings_selected_connection_import_drafts
+                        .contains(&draft.id)
+                });
+        div()
+            .w_full()
+            .max_w(px(896.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap(px(8.0))
+            .child(self.connection_import_toggle_all_button(all_selected, importable, cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .child(self.connection_import_duplicate_strategy_picker(cx))
+                    .child(
+                        self.settings_text_input_control(
+                            SettingsInput::ConnectionImportTargetGroup,
+                            self.settings_connection_import_target_group.clone(),
+                            self.i18n.t("settings_view.connections.importers.target_group"),
+                            192.0,
+                            cx,
+                        )
+                        .into_any_element(),
+                    )
+                    .child(self.connection_import_apply_button(cx)),
+            )
+            .into_any_element()
+    }
+
+    fn connection_import_toggle_all_button(
+        &self,
+        all_selected: bool,
+        importable_count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let disabled = importable_count == 0;
+        let label = if all_selected {
+            self.i18n.t("settings_view.connections.importers.deselect_all")
+        } else {
+            self.i18n.t("settings_view.connections.importers.select_all")
+        };
+        div()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(self.tokens.ui.accent))
+            .opacity(if disabled { 0.45 } else { 1.0 })
+            .cursor_pointer()
+            .hover(|style| style.text_color(rgb(self.tokens.ui.accent_hover)))
+            .child(label)
+            .when(!disabled, |button| {
+                button.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.toggle_all_settings_connection_import_drafts(all_selected, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn connection_import_duplicate_strategy_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_row()
+            .gap(px(6.0))
+            .child(self.connection_import_duplicate_strategy_button(
+                ConnectionImportDuplicateStrategy::Skip,
+                cx,
+            ))
+            .child(self.connection_import_duplicate_strategy_button(
+                ConnectionImportDuplicateStrategy::Rename,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn connection_import_duplicate_strategy_button(
+        &self,
+        strategy: ConnectionImportDuplicateStrategy,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let active = self.settings_connection_import_duplicate_strategy == strategy;
+        self.workspace_toolbar_action_button(
+            connection_import_duplicate_strategy_label(strategy, &self.i18n),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: if active {
+                        ButtonVariant::Default
+                    } else {
+                        ButtonVariant::Outline
+                    },
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                background: (!active).then(|| self.settings_panel_background(self.tokens.ui.bg_panel)),
+                border: (!active).then(|| rgb(self.tokens.ui.border)),
+                text_color: Some(rgb(if active {
+                    self.tokens.ui.bg
+                } else {
+                    self.tokens.ui.text
+                })),
+                hover_background: (!active).then(|| rgb(self.tokens.ui.bg_hover)),
+                height: Some(32.0),
+                padding_x: Some(10.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(move |this, _event, _window, cx| {
+                this.settings_connection_import_duplicate_strategy = strategy;
+                cx.notify();
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn connection_import_apply_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let selected_count = self.settings_selected_connection_import_drafts.len();
+        let label = self
+            .i18n
+            .t("settings_view.connections.importers.import_selected")
+            .replace("{{count}}", &selected_count.to_string());
+        self.workspace_toolbar_action_button(
+            label,
+            Some(Self::render_lucide_icon(
+                LucideIcon::Upload,
+                16.0,
+                rgb(if selected_count == 0 {
+                    self.tokens.ui.text_muted
+                } else {
+                    self.tokens.ui.bg
+                }),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Default,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: selected_count == 0,
+                },
+                height: Some(32.0),
+                padding_x: Some(10.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.apply_settings_connection_import(cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn connection_import_preview_list(
+        &self,
+        preview: ConnectionImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if preview.drafts.is_empty() {
+            return div()
+                .w_full()
+                .max_w(px(896.0))
+                .h(px(288.0))
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(rgb(self.tokens.ui.border))
+                .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(self.i18n.t("settings_view.connections.importers.no_drafts"))
+                .into_any_element();
+        }
+
+        let mut list = div()
+            .id("settings-connection-import-scroll")
+            .w_full()
+            .max_w(px(896.0))
+            .h(px(288.0))
+            .selectable_overflow_y_scroll(
+                &self.selectable_text_scroll_handle("settings-connection-import-scroll"),
+            )
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.settings_panel_background(self.tokens.ui.bg_panel));
+        for draft in preview.drafts {
+            list = list.child(self.connection_import_preview_row(draft, cx));
+        }
+        list.into_any_element()
+    }
+
+    fn connection_import_preview_row(
+        &self,
+        draft: oxideterm_connections::ImportedConnectionDraft,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .settings_selected_connection_import_drafts
+            .contains(&draft.id);
+        let disabled = !draft.importable;
+        let detail = format!("{}@{}:{}", draft.username, draft.host, draft.port);
+        let origin_detail = [
+            draft.group.clone(),
+            Some(connection_import_source_label(draft.source, &self.i18n)),
+            Some(draft.source_path.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let warnings = draft
+            .warnings
+            .iter()
+            .chain(draft.unsupported_fields.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let draft_id = draft.id.clone();
+        div()
+            .grid()
+            .grid_cols(3)
+            .gap(px(8.0))
+            .border_b_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
+            .p(px(12.0))
+            .opacity(if disabled { 0.5 } else { 1.0 })
+            .child(self.ssh_config_checkbox(checked))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(draft.name),
+                            )
+                            .when(draft.duplicate, |row| {
+                                row.child(self.connection_import_duplicate_badge())
+                            }),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(detail),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(origin_detail),
+                    )
+                    .when(!warnings.is_empty(), |column| {
+                        column.child(
+                            div()
+                                .truncate()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(self.tokens.ui.warning))
+                                .child(warnings),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .text_align(gpui::TextAlign::Right)
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(imported_auth_label(draft.auth_type, &self.i18n)),
+            )
+            .when(!disabled, |row| {
+                row.cursor_pointer().on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.toggle_settings_connection_import_draft(draft_id.clone(), cx);
+                        cx.stop_propagation();
+                    }),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn connection_import_duplicate_badge(&self) -> AnyElement {
+        div()
+            .px(px(6.0))
+            .py(px(2.0))
+            .rounded(px(self.tokens.radii.sm))
+            .bg(rgba((self.tokens.ui.accent << 8) | 0x20))
+            .text_size(px(10.0))
+            .text_color(rgb(self.tokens.ui.accent))
+            .child(self.i18n.t("settings_view.connections.importers.duplicate"))
             .into_any_element()
     }
 
@@ -1820,6 +2364,199 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn set_connection_import_source(
+        &mut self,
+        source: ConnectionImportSource,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_connection_import_source == source {
+            return;
+        }
+        self.settings_connection_import_source = source;
+        self.clear_connection_import_preview();
+        self.settings_connection_import_paths.clear();
+        self.settings_page.set_connection_status(None);
+        cx.notify();
+    }
+
+    fn pick_connection_import_paths(&mut self, directories: bool, cx: &mut Context<Self>) {
+        let multiple =
+            !directories && self.settings_connection_import_source != ConnectionImportSource::Termius;
+        let prompt_key = if directories {
+            "settings_view.connections.importers.choose_directory"
+        } else {
+            "settings_view.connections.importers.choose_files"
+        };
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: !directories,
+            directories,
+            multiple,
+            prompt: Some(SharedString::from(self.i18n.t(prompt_key))),
+        });
+        cx.spawn(async move |weak, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let selected = paths
+                .into_iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>();
+            if selected.is_empty() {
+                return;
+            }
+            let _ = weak.update(cx, |this, cx| {
+                this.settings_connection_import_paths = selected;
+                this.clear_connection_import_preview();
+                this.settings_page.set_connection_status(None);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn preview_settings_connection_import(&mut self, cx: &mut Context<Self>) {
+        if self.settings_connection_import_paths.is_empty() {
+            return;
+        }
+        let existing_names = self
+            .connection_store
+            .connections()
+            .iter()
+            .map(|conn| conn.name.clone())
+            .collect::<HashSet<_>>();
+        match preview_connection_import(
+            self.settings_connection_import_source,
+            &self.settings_connection_import_paths,
+            &existing_names,
+        ) {
+            Ok(preview) => {
+                self.settings_selected_connection_import_drafts = preview
+                    .drafts
+                    .iter()
+                    .filter(|draft| draft.importable && !draft.duplicate)
+                    .map(|draft| draft.id.clone())
+                    .collect();
+                self.settings_connection_import_preview = Some(preview);
+                self.settings_page.set_connection_status(None);
+            }
+            Err(error) => {
+                self.settings_page.set_connection_status(Some(
+                    self.i18n
+                        .t("settings_view.connections.importers.preview_failed")
+                        .replace("{{error}}", &error.to_string()),
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    fn toggle_settings_connection_import_draft(
+        &mut self,
+        draft_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .settings_selected_connection_import_drafts
+            .insert(draft_id.clone())
+        {
+            self.settings_selected_connection_import_drafts
+                .remove(&draft_id);
+        }
+        cx.notify();
+    }
+
+    fn toggle_all_settings_connection_import_drafts(
+        &mut self,
+        all_selected: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if all_selected {
+            self.settings_selected_connection_import_drafts.clear();
+        } else if let Some(preview) = self.settings_connection_import_preview.as_ref() {
+            self.settings_selected_connection_import_drafts = preview
+                .drafts
+                .iter()
+                .filter(|draft| draft.importable)
+                .map(|draft| draft.id.clone())
+                .collect();
+        }
+        cx.notify();
+    }
+
+    fn apply_settings_connection_import(&mut self, cx: &mut Context<Self>) {
+        if self.settings_selected_connection_import_drafts.is_empty()
+            || self.settings_connection_import_paths.is_empty()
+        {
+            return;
+        }
+        let request = ConnectionImportApplyRequest {
+            source: self.settings_connection_import_source,
+            paths: self.settings_connection_import_paths.clone(),
+            selected_draft_ids: self
+                .settings_selected_connection_import_drafts
+                .iter()
+                .cloned()
+                .collect(),
+            duplicate_strategy: self.settings_connection_import_duplicate_strategy,
+            target_group: non_empty_trimmed(&self.settings_connection_import_target_group),
+        };
+        match apply_connection_import(&mut self.connection_store, request) {
+            Ok(result) => {
+                let mut parts = Vec::new();
+                if result.imported > 0 {
+                    parts.push(
+                        self.i18n
+                            .t("settings_view.connections.importers.imported_count")
+                            .replace("{{count}}", &result.imported.to_string()),
+                    );
+                }
+                if result.skipped > 0 {
+                    parts.push(
+                        self.i18n
+                            .t("settings_view.connections.importers.skipped_count")
+                            .replace("{{count}}", &result.skipped.to_string()),
+                    );
+                }
+                if result.renamed > 0 {
+                    parts.push(
+                        self.i18n
+                            .t("settings_view.connections.importers.renamed_count")
+                            .replace("{{count}}", &result.renamed.to_string()),
+                    );
+                }
+                if !result.errors.is_empty() {
+                    parts.push(
+                        self.i18n
+                            .t("settings_view.connections.importers.error_count")
+                            .replace("{{count}}", &result.errors.len().to_string()),
+                    );
+                }
+                self.settings_page.set_connection_status(Some(if parts.is_empty() {
+                    self.i18n.t("settings_view.connections.importers.no_changes")
+                } else {
+                    parts.join(" · ")
+                }));
+                if result.imported > 0 {
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                }
+                self.preview_settings_connection_import(cx);
+            }
+            Err(error) => {
+                self.settings_page.set_connection_status(Some(
+                    self.i18n
+                        .t("settings_view.connections.importers.apply_failed")
+                        .replace("{{error}}", &error.to_string()),
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    fn clear_connection_import_preview(&mut self) {
+        self.settings_connection_import_preview = None;
+        self.settings_selected_connection_import_drafts.clear();
+    }
+
 }
 
 fn connection_idle_timeout_options(i18n: &I18n) -> Vec<(i64, String)> {
@@ -1855,4 +2592,55 @@ fn import_ssh_config_alias(
     let connection = saved_connection_from_ssh_host(host)?;
     store.import_ssh_connection(connection)?;
     Ok(true)
+}
+
+fn connection_import_source_options() -> &'static [ConnectionImportSource] {
+    &[
+        ConnectionImportSource::SecureCrt,
+        ConnectionImportSource::Xshell,
+        ConnectionImportSource::Termius,
+    ]
+}
+
+fn connection_import_source_label(source: ConnectionImportSource, i18n: &I18n) -> String {
+    match source {
+        ConnectionImportSource::SecureCrt => {
+            i18n.t("settings_view.connections.importers.sources.securecrt")
+        }
+        ConnectionImportSource::Xshell => {
+            i18n.t("settings_view.connections.importers.sources.xshell")
+        }
+        ConnectionImportSource::Termius => {
+            i18n.t("settings_view.connections.importers.sources.termius")
+        }
+    }
+}
+
+fn connection_import_duplicate_strategy_label(
+    strategy: ConnectionImportDuplicateStrategy,
+    i18n: &I18n,
+) -> String {
+    match strategy {
+        ConnectionImportDuplicateStrategy::Skip => {
+            i18n.t("settings_view.connections.importers.duplicate_skip")
+        }
+        ConnectionImportDuplicateStrategy::Rename => {
+            i18n.t("settings_view.connections.importers.duplicate_rename")
+        }
+    }
+}
+
+fn imported_auth_label(auth_type: ImportedConnectionAuthType, _i18n: &I18n) -> String {
+    match auth_type {
+        ImportedConnectionAuthType::Password => "password",
+        ImportedConnectionAuthType::Key => "key",
+        ImportedConnectionAuthType::Certificate => "certificate",
+        ImportedConnectionAuthType::Agent => "agent",
+    }
+    .to_string()
+}
+
+fn non_empty_trimmed(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }

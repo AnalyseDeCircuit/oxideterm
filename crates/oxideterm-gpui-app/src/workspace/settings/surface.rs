@@ -333,6 +333,16 @@ impl WorkspaceApp {
                 self.connection_store.connections().len().hash(&mut hasher);
                 self.settings_connection_groups_signature().hash(&mut hasher);
                 self.settings_page.settings_connection_status.is_some().hash(&mut hasher);
+                self.settings_connection_import_source.tag().hash(&mut hasher);
+                self.settings_connection_import_paths.len().hash(&mut hasher);
+                self.settings_connection_import_preview
+                    .as_ref()
+                    .map(|preview| preview.drafts.len())
+                    .hash(&mut hasher);
+                self.settings_selected_connection_import_drafts.len().hash(&mut hasher);
+                self.settings_connection_import_duplicate_strategy
+                    .tag()
+                    .hash(&mut hasher);
             }
             SettingsTab::Portable => {
                 self.portable_settings_refresh_pending.hash(&mut hasher);

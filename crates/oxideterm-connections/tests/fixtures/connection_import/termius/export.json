@@ -1,0 +1,23 @@
+{
+  "groups": [
+    {
+      "name": "GPU",
+      "hosts": [
+        {
+          "label": "Inference A",
+          "address": "gpu-a.example.com",
+          "username": "root",
+          "port": 22,
+          "identityFile": "/Users/root/.ssh/id_ed25519"
+        },
+        {
+          "label": "Inference B",
+          "hostname": "gpu-b.example.com",
+          "user": "ubuntu",
+          "port": "2200",
+          "encryptedPassword": "redacted-encrypted-value"
+        }
+      ]
+    }
+  ]
+}
