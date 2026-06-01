@@ -5,16 +5,11 @@
 <h1 align="center">⚡ OxideTerm</h1>
 
 <p align="center">
-  <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">
-    <img src="https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social" alt="GitHub stars">
-  </a>
+  <strong>Un workspace SSH local-first per chi vive nel terminale.</strong>
   <br>
-  <em>Se vuoi un workspace SSH local-first senza Electron, telemetria o abbonamenti, metti una stella a OxideTerm per aiutare altri utenti SSH a trovarlo.</em>
-</p>
-
-
-<p align="center">
-  <strong>Workspace SSH local-first: shell, SFTP, port forwarding, trzsz, editing leggero e AI BYOK attorno a un nodo remoto.</strong>
+  Connettiti una volta a una macchina remota e lavora con shell, file, porte, trasferimenti, editor leggero e BYOK AI da un unico posto.
+  <br>
+  App Tauri nativa · SSH puro in Rust · nessun account per i workflow SSH principali
   <br>
   <strong>Zero Electron. Zero OpenSSL. Zero telemetria. Zero abbonamento. BYOK-first. SSH puro in Rust.</strong>
 </p>
@@ -47,34 +42,40 @@
 
 <div align="center">
 
-https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
+<a href="../../docs/media/ai-terminal-demo.mp4">
+  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideTerm AI opening a terminal demo" width="920">
+</a>
 
-*🤖 OxideSens AI — controlla terminali live e strumenti del workspace da un unico assistente.*
+*Guarda OxideSens seguire una richiesta dell’utente e aprire un terminale dentro OxideTerm.*
 
 </div>
 
 ---
 
+## Cosa puoi fare
+
+- Gestire affiancati terminali SSH, SFTP, port forwarding, trasferimenti nel terminale e shell locali
+- Continuare a lavorare durante piccoli problemi di rete con Grace Period reconnect
+- Usare il tuo provider AI per ispezionare sessioni live ed eseguire azioni approvate
+
+---
+
 ## Perché OxideTerm?
 
-| Problema | La risposta di OxideTerm |
+| Se ti interessa... | OxideTerm offre... |
 |---|---|
-| Workspace SSH, non solo shell | **Workspace per nodi remoti**: terminali, SFTP, port forwarding, trzsz, IDE leggero, monitoraggio e contesto AI restano sotto lo stesso nodo |
-| Vuoi anche shell locali e console seriali | **Shell locale integrata**: zsh/bash/fish/pwsh/WSL2 e terminali seriali locali affiancati alle sessioni SSH, così attività locali e remote convivono nella stessa UI |
-| Riconnessione = perdere tutto | **Riconnessione con periodo di grazia**: sonda la vecchia connessione per 30 s prima di chiuderla — i tuoi vim/htop/yazi sopravvivono |
-| Non vuoi installare un IDE remoto pesante | **Editing leggero integrato**: CodeMirror 6 su SFTP, più un agente Linux opzionale (~1 MB) quando servono operazioni file più veloci |
-| Nessun riutilizzo delle connessioni SSH | **Multiplexing**: terminale, SFTP, inoltri, IDE condividono una singola connessione SSH tramite pool con conteggio dei riferimenti |
-| Le librerie SSH dipendono da OpenSSL | **russh 0.59**: SSH puro in Rust compilato con `ring` — zero dipendenze C |
-| Non vuoi Electron | **Tauri 2.0**: backend Rust nativo, binario da 25–40 MB |
-| Non vuoi telemetria o abbonamento app | **Zero tracking, zero abbonamento per i workflow SSH core**: SSH/SFTP/port forwarding/shell locale non richiedono account o abbonamenti; i dati restano sul tuo dispositivo per impostazione predefinita; la sincronizzazione cloud è opzionale tramite [plugin ufficiale](#plugin-ufficiali) |
-| Vuoi AI senza account della piattaforma | **BYOK-first OxideSens**: usa la tua chiave OpenAI/Ollama/DeepSeek/compatibile; OxideTerm non vende crediti AI o piani cloud |
-| Credenziali in file di configurazione in chiaro | **Cifratura a riposo**: password e chiavi API restano nel portachiavi del sistema operativo, i metadati delle connessioni salvate vengono sigillati localmente e i file `.oxide` sono cifrati con ChaCha20-Poly1305 + Argon2id |
+| Un nodo remoto, molti strumenti | Terminale, SFTP, port forwarding, trzsz, mini IDE, monitoraggio e contesto AI restano legati allo stesso workspace SSH |
+| Workflow SSH local-first | SSH, SFTP, forwarding, shell locale e configurazione funzionano senza registrazione; la sincronizzazione cloud è opzionale via [plugin ufficiale](#plugin-ufficiali) |
+| BYOK AI invece di crediti piattaforma | OxideSens usa il tuo endpoint OpenAI/Ollama/DeepSeek/OpenAI-compatible con supporto MCP e RAG |
+| Riconnessione stabile | Grace Period prova la vecchia connessione per 30 s prima di sostituirla, così vim/htop/yazi possono sopravvivere a brevi interruzioni |
+| App nativa in Rust puro | App nativa Tauri 2.0, russh 0.59 compilato con `ring`, niente Electron, niente OpenSSL/libssh2 |
+| Sicurezza credenziali | Password e chiavi API restano nel portachiavi OS, i metadati sono sigillati localmente e `.oxide` usa ChaCha20-Poly1305 + Argon2id |
 
-## Che cos'è / Che cosa non è
+## Che cos’è / cosa non è
 
-OxideTerm è un **workspace SSH local-first**: apri una volta un nodo remoto e lavori nello stesso posto con shell, file, porte, trasferimenti integrati, editing leggero e contesto AI.
+OxideTerm si concentra sui **workflow SSH local-first**. È pensato per chi vuole tenere terminale, file, porte, trasferimenti, editing leggero e contesto AI attorno alle proprie macchine e ai propri nodi remoti.
 
-OxideTerm **non è** una piattaforma AI cloud, un servizio agent ospitato, una cassetta degli attrezzi per ogni protocollo remoto, né un progetto che mette al centro i benchmark di rendering del terminale. Molti terminali moderni stanno evolvendo attorno a shell locali, pannelli AI o piattaforme agent cloud; OxideTerm si concentra sul workspace SSH local-first.
+Non vuole essere una piattaforma cloud Agent né un progetto centrato solo sui benchmark di rendering del terminale. La direzione è più stretta: far sembrare il lavoro remoto un workspace locale, senza account OxideTerm.
 
 ---
 
@@ -117,6 +118,12 @@ Scarica l'ultima versione da [GitHub Releases](https://github.com/AnalyseDeCircu
 ---
 
 ## Sotto il cofano
+
+OxideTerm mantiene una superficie local-first, ma internamente è costruito per workflow SSH intensivi. I dettagli completi sono conservati sotto.
+
+<details>
+<summary><strong>Architettura, internals SSH, riconnessione, AI, forwarding, plugin e altro</strong></summary>
+<br>
 
 ### Architettura — Comunicazione a doppio piano
 
@@ -280,7 +287,9 @@ Shell locale multipiattaforma tramite `portable-pty 0.8`, protetto dal feature g
 - **Companion CLI** (`oxt`): binario di ~1 MB, JSON-RPC 2.0 tramite Unix Socket / Named Pipe, status/health/list/forward/config/connect/focus/attach/SFTP/import/AI con output leggibile o `--json`
 - **WSL Graphics** ⚠️ sperimentale: visualizzatore VNC integrato — 9 ambienti desktop + modalità singola applicazione, rilevamento WSLg, Xtigervnc + noVNC
 
-#### Plugin ufficiali
+</details>
+
+### Plugin ufficiali
 
 | Plugin | Descrizione | Repository |
 |---|---|---|
