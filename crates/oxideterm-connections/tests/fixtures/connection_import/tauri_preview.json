@@ -1,0 +1,29 @@
+{
+  "source": "securecrt",
+  "total": 1,
+  "importable": 1,
+  "duplicates": 0,
+  "warnings": 1,
+  "errors": [],
+  "drafts": [
+    {
+      "id": "tauri-preview-fixture",
+      "source": "securecrt",
+      "sourcePath": "/Users/example/Sessions/GPU/basic.ini",
+      "name": "basic",
+      "group": "GPU",
+      "host": "gpu.example.com",
+      "port": 2222,
+      "username": "alice",
+      "authType": "key",
+      "keyPath": "/Users/alice/.ssh/id_ed25519",
+      "certPath": null,
+      "proxyChain": [],
+      "tags": ["securecrt"],
+      "warnings": ["Password was not imported"],
+      "unsupportedFields": ["Password V2"],
+      "duplicate": false,
+      "importable": true
+    }
+  ]
+}
