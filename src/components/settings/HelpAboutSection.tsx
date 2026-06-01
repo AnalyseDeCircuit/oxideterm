@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { marked } from 'marked';
@@ -17,6 +17,7 @@ import { api } from '@/lib/api';
 import { platform } from '@/lib/platform';
 import { getShortcutCategories } from '@/lib/shortcuts';
 import { APP_AUTHOR, APP_GITHUB } from '@/lib/identity';
+import { safeOpenUrl } from '@/lib/safeUrl';
 import { MemoryDiagnosticsPanel } from './MemoryDiagnosticsPanel';
 
 type HelpAboutSectionProps = {
@@ -41,6 +42,21 @@ const formatEta = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
     const remainderSeconds = Math.round(seconds % 60);
     return remainderSeconds > 0 ? `~${minutes}m ${remainderSeconds}s` : `~${minutes}m`;
+};
+
+export const handleReleaseNotesLinkClick = (event: MouseEvent<HTMLElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    const link = target.closest<HTMLAnchorElement>('a[href]');
+    const href = link?.getAttribute('href');
+    if (!href) return;
+
+    // Release notes are rendered from remote Markdown. Keep links out of the
+    // WebView so clicking changelog entries cannot navigate away from the app.
+    event.preventDefault();
+    event.stopPropagation();
+    void safeOpenUrl(href);
 };
 
 export const HelpAboutSection = ({ isPortableMode = null }: HelpAboutSectionProps) => {
@@ -206,6 +222,7 @@ export const HelpAboutSection = ({ isPortableMode = null }: HelpAboutSectionProp
                                     </h5>
                                     <div
                                         className="prose prose-sm prose-invert max-w-none text-sm text-theme-text leading-relaxed [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 [&_ul]:my-1 [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1 [&_code]:text-xs [&_code]:bg-theme-bg-hover [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-theme-bg-hover [&_pre]:p-2 [&_pre]:rounded [&_pre]:my-2 [&_pre]:overflow-x-auto [&_a]:text-theme-accent [&_a]:underline"
+                                        onClick={handleReleaseNotesLinkClick}
                                         dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(String(marked.parse(updater.releaseBody, { async: false }))) }}
                                     />
                                 </div>
