@@ -1,13 +1,15 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <em>If you want a local-first SSH workspace without Electron, WebView, telemetry, or subscriptions — star OxideTerm so more SSH users can find it.</em>
+  <strong>Local-first SSH workspace for people who want the OxideTerm workflow without WebView.</strong>
+  <br>
+  Connect to a remote machine once, then work with its shell, files, ports, transfers, lightweight editor, serial consoles, and BYOK AI from one native Rust workspace.
+  <br>
+  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust — all the way down.</strong>
 </p>
 
 <p align="center">
-  <strong>Local-first SSH workspace: shell, SFTP, port forwarding, trzsz, remote editing, and BYOK AI around one remote node.</strong>
-  <br>
-  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust — all the way down.</strong>
+  <em>If you want a local-first SSH workspace without Electron, WebView, telemetry, or subscriptions — star OxideTerm so more SSH users can find it.</em>
 </p>
 
 <p align="center">
@@ -19,7 +21,7 @@
 </p>
 
 <p align="center">
-  <sub>Native Rust rewrite of <a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> — GPU-rendered, zero-WebView, using <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a> (Zed's rendering framework)</sub>
+  <sub>Next major native edition of <a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> — GPU-rendered, zero-WebView, using <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a> (Zed's rendering framework)</sub>
 </p>
 
 <p align="center">
@@ -27,6 +29,8 @@
 </p>
 
 ---
+
+> **Release status:** OxideTerm Native is being prepared as the next major OxideTerm release. Public installers are not published yet; run from source for now. Current packaged releases remain on the Tauri line until native installers are ready.
 
 ## Why OxideTerm Native?
 
@@ -45,7 +49,7 @@
 
 ## What It Is / Is Not
 
-OxideTerm Native is a **pure-Rust native desktop SSH workspace**. The full feature set of the Tauri version — terminal, SFTP, forwarding, editing, AI, cloud sync, plugins, and CLI — is reimplemented in Rust with a GPUI UI layer and zero browser runtime.
+OxideTerm Native is a **pure-Rust native desktop SSH workspace** and the next major edition of OxideTerm. It carries the same product idea — terminal, SFTP, forwarding, editing, AI, cloud sync, plugins, and CLI around one remote node — into a GPUI UI layer with zero browser runtime.
 
 It is not an Electron app, a Tauri app, a web-based terminal, or a hosted service. There is no Chromium, no WebView, no JavaScript, no CSS. Every UI surface is drawn by GPUI directly onto a GPU surface.
 
@@ -191,7 +195,9 @@ Same cryptography as Tauri:
 
 ---
 
-## Quick Start
+## Run From Source
+
+Public native installers are not published yet. Until packaged builds are ready, run the native edition from source.
 
 **Requirements:** Rust toolchain (Edition 2024), desktop environment capable of running GPUI.
 
@@ -282,16 +288,17 @@ Prefer scoped crate checks while iterating. Broaden to `--workspace` when a chan
 
 ---
 
-## Roadmap
+## Release Status
 
 - [x] SSH Agent forwarding
 - [x] Grace Period reconnect
 - [x] GPUI desktop shell
 - [x] In-process terminal data flow (no WebSocket)
 - [x] SFTP, port forwarding, IDE, AI, cloud sync, plugins, CLI
+- [x] Local serial terminals
+- [ ] Public packaged installers
 - [ ] Full ProxyCommand support
 - [ ] Audit logging
-- [ ] Packaged release builds
 
 ---
 

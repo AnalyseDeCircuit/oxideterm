@@ -1,13 +1,15 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <em>如果你想要一個沒有 Electron、WebView、遙測或訂閱的本地優先 SSH 工作區，請給 OxideTerm 一顆 Star，讓更多 SSH 使用者發現它。</em>
+  <strong>面向想要 OxideTerm 工作流、但不想要 WebView 的使用者的本地優先 SSH 工作區。</strong>
+  <br>
+  連線一次遠端機器，然後在同一個原生 Rust 工作區裡處理 shell、檔案、連接埠、傳輸、輕量編輯器、序列埠主控台和 BYOK AI。
+  <br>
+  <strong>零 WebView。零 OpenSSL。零遙測。零訂閱。BYOK 優先。全棧純 Rust。</strong>
 </p>
 
 <p align="center">
-  <strong>本地優先 SSH 工作區：圍繞一個遠端節點整合 shell、SFTP、連接埠轉發、trzsz、遠端編輯和 BYOK AI。</strong>
-  <br>
-  <strong>零 WebView。零 OpenSSL。零遙測。零訂閱。BYOK 優先。全棧純 Rust。</strong>
+  <em>如果你想要一個沒有 Electron、WebView、遙測或訂閱的本地優先 SSH 工作區，請給 OxideTerm 一顆 Star，讓更多 SSH 使用者發現它。</em>
 </p>
 
 <p align="center">
@@ -19,7 +21,7 @@
 </p>
 
 <p align="center">
-  <sub><a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> 的原生 Rust 重寫 —— GPU 渲染、零 WebView，使用 <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a>（Zed 的渲染框架）</sub>
+  <sub><a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> 的下一代原生版本 —— GPU 渲染、零 WebView，使用 <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a>（Zed 的渲染框架）</sub>
 </p>
 
 <p align="center">
@@ -27,6 +29,8 @@
 </p>
 
 ---
+
+> **發布狀態：** OxideTerm Native 正在作為 OxideTerm 的下一代主版本準備中。公開安裝包尚未發布，目前請從原始碼執行；在 native 安裝包準備好之前，當前打包發布仍在 Tauri 版本線上。
 
 ## 為什麼選擇 Native？
 
@@ -45,7 +49,7 @@
 
 ## 它是什麼 / 不是什麼
 
-OxideTerm Native 是一個**純 Rust 原生桌面 SSH 工作區**。Tauri 版本中的終端、SFTP、轉發、編輯、AI、雲同步、外掛和 CLI 都在 Rust 與 GPUI UI 層中重新實作。
+OxideTerm Native 是一個**純 Rust 原生桌面 SSH 工作區**，也是 OxideTerm 的下一代主版本。它把同一個產品方向 —— 圍繞一個遠端節點組織終端、SFTP、轉發、編輯、AI、雲同步、外掛和 CLI —— 帶到沒有瀏覽器執行環境的 GPUI UI 層。
 
 它不是 Electron、Tauri、網頁終端或託管服務。沒有 Chromium、WebView、JavaScript 或 CSS；所有介面都由 GPUI 直接繪製到 GPU surface。
 
@@ -94,7 +98,9 @@ UI 與 SSH/終端後端之間沒有序列化邊界。終端位元組直接修改
 
 原生版本直接連結與 Tauri 版本同源的 `russh` stack：無 C/OpenSSL 依賴，支援 SSH2、SFTP、轉發、Agent、ProxyJump 和多種金鑰演算法。重連流程會快照終端、SFTP、轉發和 IDE 狀態，先給舊連線 30 秒 Grace Period，再必要時重建並恢復工作區。
 
-## 快速開始
+## 從原始碼執行
+
+公開 native 安裝包尚未發布。在打包構建準備好之前，請從原始碼執行 native 版本。
 
 ```sh
 cargo run
@@ -124,12 +130,16 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 | CLI 寫入 | dry-run plan、`--yes` 保護和 rollback backup |
 | 外掛 | wasmtime 隔離與 capability-based host API |
 
-## 路線圖與貢獻
+## 發布狀態
 
 - [x] SSH Agent 轉發、Grace Period 重連、GPUI 桌面 shell
 - [x] 無 WebSocket 的進程內終端資料流
 - [x] SFTP、轉發、IDE、AI、雲同步、外掛、CLI
-- [ ] 完整 ProxyCommand、審計日誌、打包發布構建
+- [x] 本地序列埠終端
+- [ ] 公開打包安裝包
+- [ ] 完整 ProxyCommand、審計日誌
+
+## 貢獻
 
 ## Provider 中立性
 

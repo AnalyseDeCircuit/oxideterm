@@ -1,13 +1,15 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <em>如果你想要一个没有 Electron、WebView、遥测或订阅的本地优先 SSH 工作区，请给 OxideTerm 点个 Star，让更多 SSH 用户发现它。</em>
+  <strong>面向想要 OxideTerm 工作流、但不想要 WebView 的用户的本地优先 SSH 工作区。</strong>
+  <br>
+  连接一次远程机器，然后在同一个原生 Rust 工作区里处理 shell、文件、端口、传输、轻量编辑器、串口控制台和 BYOK AI。
+  <br>
+  <strong>零 WebView。零 OpenSSL。零遥测。零订阅。BYOK 优先。全栈纯 Rust。</strong>
 </p>
 
 <p align="center">
-  <strong>本地优先 SSH 工作区：围绕一个远程节点整合 shell、SFTP、端口转发、trzsz、远程编辑和 BYOK AI。</strong>
-  <br>
-  <strong>零 WebView。零 OpenSSL。零遥测。零订阅。BYOK 优先。全栈纯 Rust。</strong>
+  <em>如果你想要一个没有 Electron、WebView、遥测或订阅的本地优先 SSH 工作区，请给 OxideTerm 点个 Star，让更多 SSH 用户发现它。</em>
 </p>
 
 <p align="center">
@@ -19,7 +21,7 @@
 </p>
 
 <p align="center">
-  <sub><a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> 的原生 Rust 重写 —— GPU 渲染、零 WebView，使用 <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a>（Zed 的渲染框架）</sub>
+  <sub><a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> 的下一代原生版本 —— GPU 渲染、零 WebView，使用 <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a>（Zed 的渲染框架）</sub>
 </p>
 
 <p align="center">
@@ -27,6 +29,8 @@
 </p>
 
 ---
+
+> **发布状态：** OxideTerm Native 正在作为 OxideTerm 的下一代主版本准备中。公开安装包尚未发布，目前请从源码运行；在 native 安装包准备好之前，当前打包发布仍在 Tauri 版本线上。
 
 ## 为什么选择 Native？
 
@@ -45,7 +49,7 @@
 
 ## 它是什么 / 不是什么
 
-OxideTerm Native 是一个**纯 Rust 原生桌面 SSH 工作区**。Tauri 版本中的终端、SFTP、转发、编辑、AI、云同步、插件和 CLI 都在 Rust 与 GPUI UI 层中重新实现。
+OxideTerm Native 是一个**纯 Rust 原生桌面 SSH 工作区**，也是 OxideTerm 的下一代主版本。它把同一个产品方向 —— 围绕一个远程节点组织终端、SFTP、转发、编辑、AI、云同步、插件和 CLI —— 带到没有浏览器运行时的 GPUI UI 层。
 
 它不是 Electron、Tauri、网页终端或托管服务。没有 Chromium、WebView、JavaScript 或 CSS；所有界面都由 GPUI 直接绘制到 GPU surface。
 
@@ -94,7 +98,9 @@ UI 与 SSH/终端后端之间没有序列化边界。终端字节直接修改 `T
 
 原生版本直接链接与 Tauri 版本同源的 `russh` 栈：无 C/OpenSSL 依赖，支持 SSH2、SFTP、端口转发、Agent、ProxyJump 和多种密钥算法。重连流程会快照终端、SFTP、转发和 IDE 状态，先给旧连接 30 秒 Grace Period，再必要时重建并恢复工作区。
 
-## 快速开始
+## 从源码运行
+
+公开 native 安装包尚未发布。在打包构建准备好之前，请从源码运行 native 版本。
 
 ```sh
 cargo run
@@ -127,12 +133,14 @@ cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 | CLI 写操作 | dry-run plan、`--yes` 保护和 rollback backup |
 | 插件 | wasmtime 隔离与 capability-based host API |
 
-## 路线图
+## 发布状态
 
 - [x] SSH Agent 转发、Grace Period 重连、GPUI 桌面 shell
 - [x] 无 WebSocket 的进程内终端数据流
 - [x] SFTP、端口转发、IDE、AI、云同步、插件、CLI
-- [ ] 完整 ProxyCommand、审计日志、打包发布构建
+- [x] 本地串口终端
+- [ ] 公开打包安装包
+- [ ] 完整 ProxyCommand、审计日志
 
 ## Provider 中立性
 
