@@ -63,7 +63,7 @@ import {
 import { installPreserveScrollbackEd3Handler } from '../../lib/terminal/preserveScrollback';
 import { onMapleRegularLoaded, ensureCJKFallback, prepareTerminalFontForOpen } from '../../lib/fontLoader';
 import { api } from '../../lib/api';
-import { installTerminalClipboardSupport, readSystemClipboardText } from '../../lib/clipboardSupport';
+import { installTerminalClipboardSupport, readSystemClipboardText, writeSystemClipboardText } from '../../lib/clipboardSupport';
 import {
   armTerminalPasteShortcutSuppression,
   createTerminalPasteShortcutSuppressionState,
@@ -80,6 +80,7 @@ import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
 import { TerminalCommandBar } from './TerminalCommandBar';
 import { ScrollbackViewer } from './ScrollbackViewer';
+import { TerminalContextMenu, type TerminalContextMenuState } from './TerminalContextMenu';
 import { useToastStore } from '../../hooks/useToast';
 import { HighlightEngine } from '../../lib/terminal/highlightEngine';
 import {
@@ -169,6 +170,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const isActiveRef = useRef(isActive);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [terminalContextMenu, setTerminalContextMenu] = useState<TerminalContextMenuState | null>(null);
   const [scrollbackOpen, setScrollbackOpen] = useState(false);
   const [aiCursorPosition, setAiCursorPosition] = useState<CursorPosition | null>(null);
   const [isRunning, setIsRunning] = useState(true);
@@ -1603,6 +1605,34 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     });
   }, [processTerminalPaste]);
 
+  const handleTerminalContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const term = terminalRef.current;
+    if (!term || !containerRef.current?.contains(event.target as Node)) return;
+
+    // Keep terminal copy/paste available without exposing WebView browser
+    // actions such as Refresh, which can reset running terminal state.
+    event.preventDefault();
+    event.stopPropagation();
+    setTerminalContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      canCopy: term.getSelection().length > 0,
+    });
+  }, []);
+
+  const handleContextCopy = useCallback(() => {
+    const selection = terminalRef.current?.getSelection();
+    if (selection) {
+      void writeSystemClipboardText(selection);
+    }
+  }, []);
+
+  const handleContextPaste = useCallback(() => {
+    void readSystemClipboardText().then((text) => {
+      processTerminalPaste(text, false);
+    });
+  }, [processTerminalPaste]);
+
   const handleHighlightRulesAutoDisabled = useCallback((ruleIds: string[], reason: 'timeout' | 'error') => {
     markRuntimeDisabledHighlightRules(
       runtimeDisabledHighlightRulesRef.current,
@@ -1832,6 +1862,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       <div 
         ref={containerRef}
         className="flex-1 w-full"
+        onContextMenu={handleTerminalContextMenu}
         style={{
           minHeight: 0,
           position: 'relative',
@@ -1839,6 +1870,14 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
           contain: 'strict',
           isolation: 'isolate',
         }}
+      />
+      <TerminalContextMenu
+        menu={terminalContextMenu}
+        copyLabel={t('terminal.command_selection.copy')}
+        pasteLabel={t('terminal.paste.paste')}
+        onCopy={handleContextCopy}
+        onPaste={handleContextPaste}
+        onClose={() => setTerminalContextMenu(null)}
       />
       {!scrollbackOpen && (
         <button

@@ -76,7 +76,7 @@ import {
   MSG_TYPE_DATA, MSG_TYPE_HEARTBEAT, MSG_TYPE_ERROR,
   HEADER_SIZE, encodeHeartbeatFrame,
 } from '../../lib/wireProtocol';
-import { installTerminalClipboardSupport, readSystemClipboardText } from '../../lib/clipboardSupport';
+import { installTerminalClipboardSupport, readSystemClipboardText, writeSystemClipboardText } from '../../lib/clipboardSupport';
 import {
   armTerminalPasteShortcutSuppression,
   createTerminalPasteShortcutSuppressionState,
@@ -92,6 +92,7 @@ import { observeCliAgentTerminalInput } from '../../lib/ai/orchestrator/cliAgent
 import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
 import { TerminalCommandBar } from './TerminalCommandBar';
+import { TerminalContextMenu, type TerminalContextMenuState } from './TerminalContextMenu';
 import { ScrollbackViewer } from './ScrollbackViewer';
 import { useToastStore, type ToastVariant } from '../../hooks/useToast';
 import { HighlightEngine } from '../../lib/terminal/highlightEngine';
@@ -218,6 +219,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [terminalContextMenu, setTerminalContextMenu] = useState<TerminalContextMenuState | null>(null);
   const [scrollbackOpen, setScrollbackOpen] = useState(false);
   const [scrollbackInitialMatch, setScrollbackInitialMatch] = useState<HistorySearchMatch | null>(null);
   const [aiCursorPosition, setAiCursorPosition] = useState<CursorPosition | null>(null);
@@ -3034,6 +3036,34 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     });
   }, [processTerminalPaste]);
 
+  const handleTerminalContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const term = terminalRef.current;
+    if (!term || !containerRef.current?.contains(event.target as Node)) return;
+
+    // Replace the WebView native menu with app-owned terminal actions. The
+    // native menu includes browser refresh, which can reload the whole app.
+    event.preventDefault();
+    event.stopPropagation();
+    setTerminalContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      canCopy: term.getSelection().length > 0,
+    });
+  }, []);
+
+  const handleContextCopy = useCallback(() => {
+    const selection = terminalRef.current?.getSelection();
+    if (selection) {
+      void writeSystemClipboardText(selection);
+    }
+  }, []);
+
+  const handleContextPaste = useCallback(() => {
+    void readSystemClipboardText().then((text) => {
+      processTerminalPaste(text, false);
+    });
+  }, [processTerminalPaste]);
+
   const handleHighlightRulesAutoDisabled = useCallback((ruleIds: string[], reason: 'timeout' | 'error') => {
     markRuntimeDisabledHighlightRules(
       runtimeDisabledHighlightRulesRef.current,
@@ -3161,12 +3191,21 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
        <div 
          ref={containerRef} 
          className="min-h-0 flex-1 w-full"
+         onContextMenu={handleTerminalContextMenu}
          style={{
            contain: 'strict',
            isolation: 'isolate',
            position: 'relative',
            zIndex: 1,
          }}
+       />
+       <TerminalContextMenu
+         menu={terminalContextMenu}
+         copyLabel={t('terminal.command_selection.copy')}
+         pasteLabel={t('terminal.paste.paste')}
+         onCopy={handleContextCopy}
+         onPaste={handleContextPaste}
+         onClose={() => setTerminalContextMenu(null)}
        />
 
        {!scrollbackOpen && (
