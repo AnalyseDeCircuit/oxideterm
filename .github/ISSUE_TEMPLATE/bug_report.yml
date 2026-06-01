@@ -35,6 +35,25 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area / 问题领域
+      options:
+        - SSH / authentication / compatibility
+        - Terminal / local terminal / serial
+        - SFTP / file manager
+        - IDE mode / remote agent
+        - Port forwarding / reconnect / ProxyJump
+        - AI / OxideSens / MCP / RAG
+        - Plugins
+        - Import / export / connection migration
+        - Install / update / portable mode
+        - UI / settings / themes
+        - Other
+    validations:
+      required: true
+
   - type: textarea
     id: summary
     attributes:
@@ -81,14 +100,14 @@ body:
   - type: textarea
     id: environment
     attributes:
-      label: Environment details / 环境信息
+      label: Additional environment details / 其他相关环境信息
       description: |
-        OS version, architecture, remote server OS, SSH server version, etc.
-        操作系统版本、架构、远程服务器系统、SSH 服务端版本等。
+        Optional. Add only details that are relevant to this bug, such as remote server OS, SSH server version, shell, WSL, GPU/WebGL, or terminal renderer.
+        可选。只填写与本 bug 相关的信息，例如远程服务器系统、SSH 服务端版本、shell、WSL、GPU/WebGL 或终端渲染器。
       placeholder: |
-        - OS: macOS 15.3 (Apple Silicon) / Windows 11 23H2 / Ubuntu 24.04
         - Remote: Ubuntu 22.04, OpenSSH 9.6
-        - Terminal: built-in / external
+        - Shell: zsh / bash / PowerShell
+        - Context: WSL / GPU rendering / external terminal
     validations:
       required: false
 
