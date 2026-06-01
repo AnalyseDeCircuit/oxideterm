@@ -369,6 +369,11 @@ fn parse_securecrt_file(
             unsupported_fields.push(key);
             continue;
         }
+        if looks_like_proxy_key(&normalized) {
+            warnings.push("Proxy/jump setting was not imported".to_string());
+            unsupported_fields.push(key);
+            continue;
+        }
         fields.insert(normalized, value);
     }
 
@@ -398,6 +403,11 @@ fn parse_xshell_file(
         let normalized = normalize_key(&key);
         if looks_like_secret_key(&normalized) {
             warnings.push("Password was not imported".to_string());
+            unsupported_fields.push(key);
+            continue;
+        }
+        if looks_like_proxy_key(&normalized) {
+            warnings.push("Proxy/jump setting was not imported".to_string());
             unsupported_fields.push(key);
             continue;
         }
@@ -741,6 +751,16 @@ fn looks_like_secret_key(key: &str) -> bool {
         || key.contains("secret")
 }
 
+fn looks_like_proxy_key(key: &str) -> bool {
+    key.contains("proxy")
+        || key.contains("firewall")
+        || key.contains("jumphost")
+        || key.contains("jumpserver")
+        || key.contains("bastion")
+        || key.contains("gateway")
+        || key.contains("socks")
+}
+
 fn pick_field(fields: &BTreeMap<String, String>, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| fields.get(*key).filter(|value| !value.trim().is_empty()))
@@ -1027,6 +1047,31 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_proxy_fields_warn_instead_of_silent_import() {
+        let path = temp_import_file(
+            "xsh",
+            "Host=gpu.invalid\nUserName=alice\nProxyServer=jump.example.com\n",
+        );
+        let preview = preview_connection_import(
+            ConnectionImportSource::Xshell,
+            &[path.display().to_string()],
+            &HashSet::new(),
+        )
+        .unwrap();
+
+        let draft = &preview.drafts[0];
+        assert!(draft.proxy_chain.is_empty());
+        assert!(
+            draft
+                .warnings
+                .iter()
+                .any(|warning| warning == "Proxy/jump setting was not imported")
+        );
+        assert_eq!(draft.unsupported_fields, vec!["ProxyServer".to_string()]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn records_malformed_termius_json_as_preview_error() {
         let path = temp_import_file("json", "{");
         let preview = preview_connection_import(
@@ -1039,5 +1084,19 @@ mod tests {
         assert!(preview.drafts.is_empty());
         assert_eq!(preview.errors.len(), 1);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn native_model_deserializes_tauri_preview_payload() {
+        let json = fs::read_to_string(fixture_path("tauri_preview.json")).unwrap();
+        let preview: ConnectionImportPreview = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(preview.source, ConnectionImportSource::SecureCrt);
+        assert_eq!(preview.total, 1);
+        assert_eq!(preview.importable, 1);
+        let draft = &preview.drafts[0];
+        assert_eq!(draft.source_path, "/Users/example/Sessions/GPU/basic.ini");
+        assert_eq!(draft.auth_type, ImportedConnectionAuthType::Key);
+        assert_eq!(draft.unsupported_fields, vec!["Password V2".to_string()]);
     }
 }
