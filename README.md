@@ -1,15 +1,13 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Local-first SSH workspace for people who want the OxideTerm workflow without WebView.</strong>
+  <strong>The next zero-WebView edition of OxideTerm.</strong>
   <br>
   Connect to a remote machine once, then work with its shell, files, ports, transfers, lightweight editor, serial consoles, and BYOK AI from one native Rust workspace.
   <br>
+  Native GPUI app · Pure Rust SSH · No account required for core SSH workflows
+  <br>
   <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust — all the way down.</strong>
-</p>
-
-<p align="center">
-  <em>If you want a local-first SSH workspace without Electron, WebView, telemetry, or subscriptions — star OxideTerm so more SSH users can find it.</em>
 </p>
 
 <p align="center">
@@ -28,30 +26,61 @@
   <a href="README.md">English</a> | <a href="docs/readme/README.zh-Hans.md">简体中文</a> | <a href="docs/readme/README.zh-Hant.md">繁體中文</a> | <a href="docs/readme/README.ja.md">日本語</a> | <a href="docs/readme/README.ko.md">한국어</a> | <a href="docs/readme/README.fr.md">Français</a> | <a href="docs/readme/README.de.md">Deutsch</a> | <a href="docs/readme/README.es.md">Español</a> | <a href="docs/readme/README.it.md">Italiano</a> | <a href="docs/readme/README.pt-BR.md">Português</a> | <a href="docs/readme/README.vi.md">Tiếng Việt</a>
 </p>
 
+<div align="center">
+
+<a href="docs/media/ai-terminal-demo.mp4">
+  <img src="docs/media/ai-terminal-demo.gif" alt="OxideSens opening a terminal inside OxideTerm" width="920">
+</a>
+
+*Watch OxideSens follow a user request and open a terminal inside OxideTerm.*
+
+</div>
+
 ---
 
 > **Release status:** OxideTerm Native is being prepared as the next major OxideTerm release. Public installers are not published yet; run from source for now. Current packaged releases remain on the Tauri line until native installers are ready.
+
+## What You Can Do
+
+- Manage SSH terminals, SFTP, port forwards, serial consoles, local shells, and lightweight editing in one native workspace
+- Keep remote work alive through network hiccups with Grace Period reconnect
+- Use your own AI provider to inspect live sessions and perform approved workspace actions
+
+---
 
 ## Why OxideTerm Native?
 
 | If you care about... | OxideTerm Native gives you... |
 |---|---|
-| SSH workspace, not just a shell | **Remote-node workspace**: one node with terminal, SFTP, port forwarding, trzsz, mini IDE, monitoring, and AI context around it |
-| Local shells and serial consoles in the same workflow | **Hybrid engine**: local PTY (zsh/bash/fish/pwsh/WSL2), local serial terminals, and remote SSH live side by side |
-| No cloud account for SSH workflows | **Local-first core**: SSH, SFTP, forwarding, local shell, and config work without signup |
-| BYOK AI instead of platform credits | **OxideSens**: bring your own OpenAI/Anthropic/Gemini/Ollama endpoint with MCP and RAG support |
-| No WebView at all | **Pure GPUI**: GPU-backed immediate-mode rendering in Rust — not a WebView wrapper |
-| No JSON serialization on the hot path | **In-process data plane**: terminal bytes flow as Rust struct mutations, zero serialization, zero WebSocket overhead |
-| No OpenSSL baggage | **russh (ring)**: pure Rust SSH compiled against `ring` — zero OpenSSL/libssh2 dependency |
-| Reconnect stability | **Grace Period reconnect**: probes old connection 30 s before killing it — TUI apps survive network hiccups |
-| Remote file work | **Built-in SFTP + native IDE**: browse, preview, transfer, and edit remote files in the same workspace |
-| Credential safety | **Encrypted at rest**: passwords and API keys in OS keychain; `.oxide` bundles use ChaCha20-Poly1305 + Argon2id |
+| One remote node, many tools | Terminal, SFTP, port forwarding, trzsz, native IDE, monitoring, and AI context stay attached to the same SSH workspace |
+| Zero WebView native shell | GPUI draws the desktop UI directly on a GPU surface — no DOM, CSS, JavaScript, Chromium, or WebKit runtime |
+| Local-first SSH workflows | SSH, SFTP, forwarding, local shell, serial terminals, and config work without signup |
+| BYOK AI instead of platform credits | OxideSens uses your OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint with MCP and RAG support |
+| Reconnect stability | Grace Period probes the old connection for 30s before replacing it, so TUI apps can survive short network drops |
+| Pure Rust SSH and credential safety | `russh` + `ring`, no OpenSSL/libssh2; passwords and API keys stay in OS keychain, and `.oxide` bundles use ChaCha20-Poly1305 + Argon2id |
 
 ## What It Is / Is Not
 
-OxideTerm Native is a **pure-Rust native desktop SSH workspace** and the next major edition of OxideTerm. It carries the same product idea — terminal, SFTP, forwarding, editing, AI, cloud sync, plugins, and CLI around one remote node — into a GPUI UI layer with zero browser runtime.
+OxideTerm Native focuses on the same **local-first SSH workspace** as OxideTerm, rebuilt as a pure Rust GPUI desktop app. It is for users who want terminal, files, ports, transfers, lightweight editing, serial consoles, and AI context centered around their own machines and remote nodes.
 
-It is not an Electron app, a Tauri app, a web-based terminal, or a hosted service. There is no Chromium, no WebView, no JavaScript, no CSS. Every UI surface is drawn by GPUI directly onto a GPU surface.
+It is not the current stable download line yet, and it is not a hosted cloud agent platform. It is also not an Electron app, a Tauri app, or a web-based terminal: no Chromium, no WebView, no JavaScript, no CSS.
+
+---
+
+## Screenshots
+
+The native UI follows the same OxideTerm workspace model and visual language as the current Tauri line.
+
+<table>
+<tr>
+<td align="center"><strong>SSH Terminal + OxideSens AI</strong><br/><br/><img src="docs/screenshots/terminal/SSHTERMINAL.png" alt="SSH Terminal with OxideSens AI sidebar" /></td>
+<td align="center"><strong>SFTP File Manager</strong><br/><br/><img src="docs/screenshots/sftp/sftp.png" alt="SFTP dual-pane file manager with transfer queue" /></td>
+</tr>
+<tr>
+<td align="center"><strong>Built-in IDE</strong><br/><br/><img src="docs/screenshots/miniIDE/miniide.png" alt="Built-in IDE mode" /></td>
+<td align="center"><strong>Smart Port Forwarding</strong><br/><br/><img src="docs/screenshots/PORTFORWARD/PORTFORWARD.png" alt="Smart port forwarding with auto-detection" /></td>
+</tr>
+</table>
 
 ---
 
@@ -94,6 +123,12 @@ OxideTerm started there too (the Tauri version). The native branch removes the b
 ---
 
 ## Under the Hood
+
+OxideTerm Native removes the WebView bridge and keeps terminal, SSH, SFTP, forwarding, IDE, AI, plugins, and CLI in one Rust-native architecture. The full implementation notes are preserved below for readers who want the engineering details.
+
+<details>
+<summary><strong>Architecture, SSH internals, GPUI shell, reconnect, AI, plugins, and more</strong></summary>
+<br>
 
 ### Architecture — Single-Process, Zero-Bridge
 
@@ -192,6 +227,8 @@ Same cryptography as Tauri:
 - **ChaCha20-Poly1305 AEAD** authenticated encryption
 - **Argon2id KDF**: 256 MB memory cost, 4 iterations — GPU brute-force resistant
 - Covers: connections, forwards, settings, quick commands, plugin settings, portable secrets
+
+</details>
 
 ---
 
@@ -323,6 +360,20 @@ Bug reports are most useful with a redacted CLI bundle:
 ```sh
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 ```
+
+---
+
+## Support and Maintenance
+
+OxideTerm Native is maintained on a **best-effort basis** while it is prepared as the next major OxideTerm release. Bug reports with reproducible steps and redacted diagnostics are prioritized; feature requests may not always be implemented.
+
+<p align="center">
+  <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">
+    <img src="https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social" alt="GitHub stars">
+  </a>
+</p>
+
+If OxideTerm helps your workflow, a GitHub star, issue reproduction, translation fix, plugin, or pull request all make the project easier to keep moving.
 
 ---
 

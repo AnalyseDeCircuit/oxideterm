@@ -1,16 +1,15 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Workspace SSH local-first para quem quer o fluxo do OxideTerm sem WebView.</strong>
+  <strong>A próxima edição zero-WebView do OxideTerm.</strong>
   <br>
-  Conecte-se uma vez a uma máquina remota e trabalhe com shell, arquivos, portas, transferências, editor leve, consoles seriais e AI BYOK em um workspace Rust nativo.
+  Conecte-se uma vez a uma máquina remota e trabalhe com shell, arquivos, portas, transferências, editor leve, consoles seriais e BYOK AI em um workspace Rust nativo.
   <br>
-  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Rust puro de ponta a ponta.</strong>
+  App GPUI nativo · SSH puro em Rust · sem conta para os workflows SSH principais
+  <br>
+  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust all the way down.</strong>
 </p>
 
-<p align="center">
-  <em>Se você quer um workspace SSH local-first sem Electron, WebView, telemetria ou assinatura, dê uma estrela ao OxideTerm para que mais usuários de SSH possam encontrá-lo.</em>
-</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Versão">
@@ -28,30 +27,63 @@
   <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
+<div align="center">
+
+<a href="../../docs/media/ai-terminal-demo.mp4">
+  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens abre um terminal dentro do OxideTerm" width="920">
+</a>
+
+*OxideSens segue um pedido do usuário e abre um terminal dentro do OxideTerm.*
+
+</div>
+
 ---
 
 > **Status da release:** OxideTerm Native está sendo preparado como a próxima grande versão do OxideTerm. Os instaladores públicos ainda não foram publicados; por enquanto, execute pelo código-fonte. As releases empacotadas atuais continuam na linha Tauri até que os instaladores native estejam prontos.
 
+## O que você pode fazer
+
+- Gerenciar terminais SSH, SFTP, port forwards, consoles seriais, shells locais e edição leve em um workspace nativo
+- Manter o trabalho remoto vivo durante instabilidades de rede com Grace Period reconnect
+- Usar seu próprio provedor de IA para inspecionar sessões ao vivo e executar ações aprovadas do workspace
+
+---
+
 ## Por que OxideTerm Native?
 
-| Se você se importa com... | OxideTerm Native entrega... |
+| Se você se importa com... | OxideTerm Native oferece... |
 |---|---|
-| Workspace SSH, não só shell | Terminal, SFTP, forwarding, trzsz, mini IDE, monitoring e contexto AI em torno de um nó |
-| Shell local, consoles seriais e SSH remoto | zsh/bash/fish/pwsh/WSL2, terminais seriais locais e SSH no mesmo fluxo |
-| Sem conta cloud | SSH, SFTP, forwarding, shell local e config funcionam local-first |
-| AI BYOK | Seus próprios endpoints OpenAI, Anthropic, Gemini, Ollama ou compatíveis |
-| Sem WebView | GPUI desenha direto em uma GPU surface, sem DOM, CSS ou JavaScript |
-| Sem serialização no hot path | Bytes do terminal alteram estado Rust direto, sem WebSocket/JSON/Base64 |
-| Sem OpenSSL | SSH puro Rust com `russh` + `ring` |
-| Reconnect estável | Grace Period testa a conexão antiga antes de matar apps TUI |
-| Arquivos remotos | SFTP integrado e IDE nativa para navegar, pré-visualizar, transferir e editar |
-| Segurança de credenciais | Keychain do SO; `.oxide` com ChaCha20-Poly1305 + Argon2id |
+| Um nó remoto, muitas ferramentas | Terminal, SFTP, port forwarding, trzsz, IDE nativo, monitoramento e contexto de IA ficam no mesmo workspace SSH |
+| Shell nativo zero-WebView | GPUI desenha a UI desktop diretamente numa superfície GPU, sem DOM, CSS, JavaScript, Chromium ou runtime WebKit |
+| Workflows SSH local-first | SSH, SFTP, forwarding, shell local, terminais seriais e configuração funcionam sem cadastro |
+| BYOK AI em vez de créditos de plataforma | OxideSens usa seu endpoint OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible com suporte MCP e RAG |
+| Reconexão estável | Grace Period sonda a conexão antiga por 30 s antes de substituí-la, para que TUIs sobrevivam a quedas curtas |
+| SSH puro em Rust e credenciais seguras | `russh` + `ring`, sem OpenSSL/libssh2; senhas e chaves API ficam no keychain do OS, `.oxide` usa ChaCha20-Poly1305 + Argon2id |
 
 ## O que é / o que não é
 
-OxideTerm Native é um **workspace SSH desktop nativo em Rust puro** e a próxima grande edição do OxideTerm. Ele leva a mesma ideia de produto — terminal, SFTP, forwarding, edição, AI, cloud sync, plugins e CLI em torno de um nó remoto — para uma UI GPUI sem runtime de navegador.
+OxideTerm Native foca no mesmo **workspace SSH local-first** do OxideTerm, reconstruído como app desktop GPUI em Rust puro. Ele é feito para usuários que querem terminal, arquivos, portas, transferências, edição leve, consoles seriais e contexto de IA ao redor de suas próprias máquinas e nós remotos.
 
-Não é Electron, Tauri, terminal web ou serviço hospedado. Não há Chromium, WebView, JavaScript ou CSS.
+Ainda não é a linha estável de download atual, nem uma plataforma cloud de agentes. Também não é Electron, Tauri ou terminal web: sem Chromium, sem WebView, sem JavaScript, sem CSS.
+
+---
+
+## Capturas de tela
+
+A UI nativa segue o mesmo modelo de workspace e linguagem visual do OxideTerm da linha Tauri atual.
+
+<table>
+<tr>
+<td align="center"><strong>Terminal SSH + OxideSens AI</strong><br/><br/><img src="../../docs/screenshots/terminal/SSHTERMINAL.png" alt="Terminal SSH com barra lateral OxideSens AI" /></td>
+<td align="center"><strong>Gerenciador de arquivos SFTP</strong><br/><br/><img src="../../docs/screenshots/sftp/sftp.png" alt="Gerenciador de arquivos SFTP de painel duplo com fila de transferência" /></td>
+</tr>
+<tr>
+<td align="center"><strong>IDE integrado</strong><br/><br/><img src="../../docs/screenshots/miniIDE/miniide.png" alt="Modo IDE integrado" /></td>
+<td align="center"><strong>Encaminhamento de portas inteligente</strong><br/><br/><img src="../../docs/screenshots/PORTFORWARD/PORTFORWARD.png" alt="Encaminhamento de portas inteligente com detecção automática" /></td>
+</tr>
+</table>
+
+---
 
 ## Diferenças em relação ao WebView/Tauri
 
@@ -79,6 +111,12 @@ Não é Electron, Tauri, terminal web ou serviço hospedado. Não há Chromium, 
 
 ## Arquitetura
 
+OxideTerm Native remove a ponte WebView e mantém terminal, SSH, SFTP, forwarding, IDE, IA, plugins e CLI em uma arquitetura Rust-native. Os detalhes completos ficam preservados abaixo.
+
+<details>
+<summary><strong>Arquitetura, internals SSH, shell GPUI, reconexão, IA, plugins e mais</strong></summary>
+<br>
+
 ```text
 GPUI Render Loop
   WorkspaceApp / Tab surfaces / GPUI views
@@ -91,6 +129,10 @@ Domain Crates
 ```
 
 Não existe fronteira de serialização entre UI e backend SSH/terminal. Os bytes do terminal modificam `TerminalState` diretamente; GPUI lê o estado e emite draw calls GPU.
+
+</details>
+
+---
 
 ## Executar pelo código-fonte
 
@@ -144,6 +186,20 @@ Integrações de providers existem para ajudar usuários a conectar as ferrament
 Compatibilidade, manutenibilidade, segurança e valor real para usuários decidem o que entra na documentação. Visibilidade segue utilidade, não entusiasmo.
 
 Quando uma função já existir na versão Tauri, mantenha comportamento, textos, estados de interação e workflows alinhados. Cada crate novo precisa ter responsabilidade real, não apenas re-export.
+
+## Suporte e manutenção
+
+OxideTerm Native está sendo preparado como a próxima versão major do OxideTerm e é mantido best-effort. Bugs com passos reproduzíveis e diagnósticos redigidos são priorizados; requests de funcionalidade podem não ser implementados.
+
+<p align="center">
+  <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">
+    <img src="https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social" alt="GitHub stars">
+  </a>
+</p>
+
+Se OxideTerm ajuda seu workflow, uma estrela no GitHub, reprodução de issue, correção de tradução, plugin ou pull request ajudam o projeto a continuar.
+
+---
 
 ## Licença / Agradecimentos
 
