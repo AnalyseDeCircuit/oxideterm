@@ -7,7 +7,7 @@ use gpui::{
 };
 use oxideterm_terminal::{TerminalCommandMark, TerminalSnapshot};
 
-use super::TerminalPane;
+use super::{TerminalContextMenu, TerminalPane};
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
@@ -15,6 +15,10 @@ const PASTE_PREVIEW_TEXT_RADIUS: f32 = 4.0;
 const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
 const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
 const TERMINAL_KEY_HINT_RADIUS: f32 = 4.0;
+const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 176.0;
+const TERMINAL_CONTEXT_MENU_ITEM_HEIGHT: f32 = 34.0;
+const TERMINAL_CONTEXT_MENU_MARGIN: f32 = 8.0;
+const TERMINAL_CONTEXT_MENU_RADIUS: f32 = 6.0;
 
 impl Focusable for TerminalPane {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -107,11 +111,15 @@ impl Render for TerminalPane {
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                    // Tauri's terminal surface does not install a custom
-                    // context menu; right-click remains xterm mouse input when
-                    // mouse tracking asks for it.
-                    this.handle_mouse_down(event, cx);
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle);
+                    let mode = this.terminal.lock().mode();
+                    if mouse_mode(mode, event.modifiers.shift) {
+                        this.handle_mouse_down(event, cx);
+                    } else {
+                        window.prevent_default();
+                        this.open_terminal_context_menu(event, cx);
+                    }
                 }),
             )
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
@@ -157,6 +165,9 @@ impl Render for TerminalPane {
             .when_some(self.pending_paste.clone(), |pane, paste| {
                 pane.child(self.render_paste_confirm_overlay(&paste, cx))
             })
+            .when_some(self.context_menu, |pane, menu| {
+                pane.child(self.render_terminal_context_menu(menu, cx))
+            })
             .when(self.preferences.show_fps_overlay, |pane| {
                 pane.child(self.render_fps_overlay())
             })
@@ -173,6 +184,136 @@ impl Render for TerminalPane {
 }
 
 impl TerminalPane {
+    fn render_terminal_context_menu(
+        &self,
+        menu: TerminalContextMenu,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (left, top) = self.clamped_terminal_context_menu_position(menu);
+        let copy_label = self.preferences.command_selection_labels.copy.clone();
+        let paste_label = self.preferences.paste_labels.paste.clone();
+
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
+                    this.dismiss_terminal_context_menu(cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    this.dismiss_terminal_context_menu(cx);
+                }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(left))
+                    .top(px(top))
+                    .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
+                    .rounded(px(TERMINAL_CONTEXT_MENU_RADIUS))
+                    .border_1()
+                    .border_color(rgba(0x2f343ddd))
+                    .bg(rgba(0x111827f2))
+                    .p(px(4.0))
+                    .shadow_lg()
+                    .child(self.render_terminal_context_menu_item(
+                        copy_label,
+                        !menu.can_copy,
+                        |this, _event, _window, cx| {
+                            this.copy_selection_from_context_menu(cx);
+                        },
+                        cx,
+                    ))
+                    .child(self.render_terminal_context_menu_item(
+                        paste_label,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.paste_from_clipboard(cx);
+                        },
+                        cx,
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_terminal_context_menu_item(
+        &self,
+        label: String,
+        disabled: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .h(px(TERMINAL_CONTEXT_MENU_ITEM_HEIGHT))
+            .w_full()
+            .rounded(px(PASTE_CONFIRM_BUTTON_RADIUS))
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .text_size(px(13.0))
+            .text_color(if disabled {
+                rgba(0xe5e7eb73)
+            } else {
+                rgb(0xe5e7eb)
+            })
+            .when(!disabled, |item| {
+                item.cursor_pointer()
+                    .hover(|item| item.bg(rgba(0x37415199)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            listener(this, event, window, cx);
+                        }),
+                    )
+            })
+            .child(label)
+            .into_any_element()
+    }
+
+    fn clamped_terminal_context_menu_position(&self, menu: TerminalContextMenu) -> (f32, f32) {
+        let bounds = self.bounds.map(|bounds| bounds.size);
+        let max_x = bounds
+            .map(|size| {
+                f32::from(size.width) - TERMINAL_CONTEXT_MENU_WIDTH - TERMINAL_CONTEXT_MENU_MARGIN
+            })
+            .unwrap_or(menu.x);
+        let menu_height = TERMINAL_CONTEXT_MENU_ITEM_HEIGHT * 2.0 + 8.0;
+        let max_y = bounds
+            .map(|size| f32::from(size.height) - menu_height - TERMINAL_CONTEXT_MENU_MARGIN)
+            .unwrap_or(menu.y);
+
+        (
+            menu.x
+                .max(TERMINAL_CONTEXT_MENU_MARGIN)
+                .min(max_x.max(TERMINAL_CONTEXT_MENU_MARGIN)),
+            menu.y
+                .max(TERMINAL_CONTEXT_MENU_MARGIN)
+                .min(max_y.max(TERMINAL_CONTEXT_MENU_MARGIN)),
+        )
+    }
+
+    fn copy_selection_from_context_menu(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_context_menu(cx);
+        let _copied = self.copy_selection_to_clipboard_if_present(cx);
+    }
+
+    fn dismiss_terminal_context_menu(&mut self, cx: &mut Context<Self>) {
+        if self.context_menu.take().is_some() {
+            cx.notify();
+        }
+    }
+
     fn selected_command_mark(&self) -> Option<TerminalCommandMark> {
         let selected_id = self.selected_command_mark_id.as_deref()?;
         self.command_marks

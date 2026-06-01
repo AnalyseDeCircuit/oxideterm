@@ -7,7 +7,7 @@ use gpui::{
 use oxideterm_terminal::{TermMode, TerminalSearchMatch};
 use oxideterm_terminal_unicode::visual_line_for_row;
 
-use super::{ScrollbarDrag, ScrollbarGeometry, TerminalPane};
+use super::{ScrollbarDrag, ScrollbarGeometry, TerminalContextMenu, TerminalPane};
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
@@ -15,6 +15,13 @@ impl TerminalPane {
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+
+        if self.context_menu.take().is_some() {
+            cx.notify();
+            if key == "escape" {
+                return;
+            }
+        }
 
         if self.pending_paste.is_some() && !modifiers.platform && !modifiers.control {
             match key {
@@ -253,7 +260,10 @@ impl TerminalPane {
         self.selected_text().filter(|text| !text.is_empty())
     }
 
-    fn copy_selection_to_clipboard_if_present(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(super) fn copy_selection_to_clipboard_if_present(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(text) = self.selected_text().filter(|text| !text.is_empty()) else {
             return false;
         };
@@ -476,6 +486,10 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        if self.context_menu.take().is_some() {
+            cx.notify();
+        }
+
         if event.button == MouseButton::Left
             && event.modifiers.platform
             && let Some(link) = self.link_at_position(event.position)
@@ -541,6 +555,27 @@ impl TerminalPane {
             self.selecting = false;
             self.selection = None;
         }
+    }
+
+    pub(crate) fn open_terminal_context_menu(
+        &mut self,
+        event: &MouseDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(bounds) = self.bounds else {
+            return;
+        };
+
+        // The Tauri/Web terminal now owns a copy/paste context menu instead of
+        // exposing the WebView menu. Store pane-local coordinates so the GPUI
+        // overlay tracks the same terminal surface without affecting TUI mouse mode.
+        self.context_menu = Some(TerminalContextMenu {
+            x: f32::from(event.position.x - bounds.origin.x),
+            y: f32::from(event.position.y - bounds.origin.y),
+            can_copy: self.selected_text_snapshot().is_some(),
+        });
+        self.selecting = false;
+        cx.notify();
     }
 
     pub(crate) fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {

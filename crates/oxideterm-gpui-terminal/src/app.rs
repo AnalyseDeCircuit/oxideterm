@@ -80,6 +80,7 @@ pub struct TerminalPane {
     metrics: TerminalMetrics,
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
+    context_menu: Option<TerminalContextMenu>,
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
     input_locked: bool,
     marked_text: Option<String>,
@@ -125,6 +126,13 @@ pub struct TerminalPane {
     trzsz_prompt_active: bool,
     trzsz_connection_lost: bool,
     _subscriptions: Vec<Subscription>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TerminalContextMenu {
+    pub x: f32,
+    pub y: f32,
+    pub can_copy: bool,
 }
 
 const PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
@@ -322,6 +330,7 @@ impl TerminalPane {
             metrics,
             selection: None,
             pending_paste: None,
+            context_menu: None,
             plugin_input_interceptor: None,
             input_locked: false,
             marked_text: None,
