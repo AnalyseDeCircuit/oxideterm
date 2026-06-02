@@ -3658,7 +3658,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm"
-version = "1.5.2"
+version = "1.5.3"
 dependencies = [
  "anyhow",
  "argon2",
