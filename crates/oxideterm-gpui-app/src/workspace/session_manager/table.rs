@@ -1,3 +1,19 @@
+fn manager_table_min_width_for_metrics(metrics: TauriTableMetrics) -> f32 {
+    // Tauri ConnectionTable columns: px-2 wrapper plus w-8, w-[140px],
+    // w-[130px], w-[50px], w-[90px], w-[72px], w-[100px], w-[90px],
+    // and sticky w-[84px] actions.
+    metrics.padding_x * 2.0
+        + MANAGER_COL_CHECKBOX
+        + MANAGER_COL_NAME_BASIS
+        + MANAGER_COL_HOST
+        + MANAGER_COL_PORT
+        + MANAGER_COL_USERNAME
+        + MANAGER_COL_AUTH
+        + MANAGER_COL_GROUP
+        + MANAGER_COL_LAST_USED
+        + MANAGER_COL_ACTIONS
+}
+
 impl WorkspaceApp {
     fn render_session_manager_table(
         &self,
@@ -21,6 +37,8 @@ impl WorkspaceApp {
         let virtual_rows = Arc::new(rows.clone());
         let workspace = cx.entity();
         let table_scroll = self.session_manager.table_scroll_handle.clone();
+        let table_axis_scroll = table_scroll.0.borrow().base_handle.clone();
+        let table_min_width = self.manager_table_min_width();
         let virtual_spec = TauriVirtualListSpec::new(
             px(MANAGER_TABLE_VIRTUAL_ROW_HEIGHT),
             MANAGER_TABLE_VIRTUAL_OVERSCAN,
@@ -43,7 +61,27 @@ impl WorkspaceApp {
                     cx,
                 ))
             })
-            .child(self.render_connection_table_header(has_background, all_selected, cx))
+            .child(
+                // Header and rows share the uniform-list base scroll handle so
+                // horizontal wheel/trackpad movement keeps the Tauri table
+                // columns aligned. Do not split this into independent scrollers.
+                div()
+                    .id("session-manager-table-header-scroll")
+                    .flex_none()
+                    .min_w(px(0.0))
+                    .overflow_x_scroll()
+                    .track_scroll(&table_axis_scroll)
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w(px(table_min_width))
+                            .child(self.render_connection_table_header(
+                                has_background,
+                                all_selected,
+                                cx,
+                            )),
+                    ),
+            )
             .child(
                 div()
                     .id("session-manager-table-scroll")
@@ -51,91 +89,123 @@ impl WorkspaceApp {
                     .min_h(px(0.0))
                     .overflow_hidden()
                     .when(is_empty, |body| {
-                        body.flex().items_center().justify_center().child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .gap(px(16.0))
-                                .py(px(64.0))
-                                .text_color(rgb(theme.text_muted))
-                                .child(Self::render_lucide_icon(
-                                    LucideIcon::Server,
-                                    48.0,
-                                    rgba((theme.text_muted << 8) | 0x4d),
-                                ))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .items_center()
-                                        .child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .child(self.render_selectable_display_text(
-                                                    "session-manager-table-empty",
-                                                    &self.session_manager.search_query,
-                                                    empty_message,
-                                                    theme.text_muted,
-                                                    cx,
-                                                )),
-                                        )
-                                        .child(
-                                            div()
-                                                .mt_1()
-                                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                .child(self.render_selectable_display_text(
-                                                    "session-manager-table-empty-hint",
-                                                    "no-connections-hint",
-                                                    self.i18n.t(
-                                                        "sessionManager.table.no_connections_hint",
+                        body.overflow_x_scroll()
+                            .track_scroll(&table_axis_scroll)
+                            .child(
+                                div()
+                                    .size_full()
+                                    .min_w(px(table_min_width))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .items_center()
+                                            .gap(px(16.0))
+                                            .py(px(64.0))
+                                            .text_color(rgb(theme.text_muted))
+                                            .child(Self::render_lucide_icon(
+                                                LucideIcon::Server,
+                                                48.0,
+                                                rgba((theme.text_muted << 8) | 0x4d),
+                                            ))
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .items_center()
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(
+                                                                self.tokens.metrics.ui_text_sm,
+                                                            ))
+                                                            .font_weight(
+                                                                gpui::FontWeight::MEDIUM,
+                                                            )
+                                                            .child(
+                                                                self.render_selectable_display_text(
+                                                                    "session-manager-table-empty",
+                                                                    &self
+                                                                        .session_manager
+                                                                        .search_query,
+                                                                    empty_message,
+                                                                    theme.text_muted,
+                                                                    cx,
+                                                                ),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .mt_1()
+                                                            .text_size(px(
+                                                                self.tokens.metrics.ui_text_xs,
+                                                            ))
+                                                            .child(
+                                                                self.render_selectable_display_text(
+                                                                    "session-manager-table-empty-hint",
+                                                                    "no-connections-hint",
+                                                                    self.i18n.t(
+                                                                        "sessionManager.table.no_connections_hint",
+                                                                    ),
+                                                                    theme.text_muted,
+                                                                    cx,
+                                                                ),
+                                                            ),
                                                     ),
-                                                    theme.text_muted,
-                                                    cx,
-                                                ),
-                                                ),
-                                        ),
-                                )
-                                .child(
-                                    self.render_toolbar_button(
-                                        LucideIcon::Plus,
-                                        self.i18n.t("sessionManager.toolbar.new_connection"),
-                                        ButtonVariant::Default,
-                                        has_background,
-                                        true,
-                                        cx.listener(|this, _event, window, cx| {
-                                            this.open_new_connection_form(window, cx);
-                                            cx.stop_propagation();
-                                        }),
+                                            )
+                                            .child(self.render_toolbar_button(
+                                                LucideIcon::Plus,
+                                                self.i18n
+                                                    .t("sessionManager.toolbar.new_connection"),
+                                                ButtonVariant::Default,
+                                                has_background,
+                                                true,
+                                                cx.listener(|this, _event, window, cx| {
+                                                    this.open_new_connection_form(window, cx);
+                                                    cx.stop_propagation();
+                                                }),
+                                            )),
                                     ),
-                                ),
-                        )
+                            )
                     })
                     .when(!rows.is_empty(), |body| {
-                        body.child(tauri_virtual_uniform_list(
-                            "session-manager-table-virtual",
-                            row_count,
-                            table_scroll,
-                            virtual_spec,
-                            move |range, _window, app| {
-                                let mut rendered = Vec::new();
-                                let rows = virtual_rows.clone();
-                                let _ = workspace.update(app, |this, cx| {
-                                    for index in range {
-                                        let Some(conn) = rows.get(index).cloned() else {
-                                            continue;
-                                        };
-                                        rendered.push(this.render_connection_table_row(
-                                            conn,
-                                            has_background,
-                                            cx,
-                                        ));
-                                    }
-                                });
-                                rendered
-                            },
-                        ))
+                        // Tauri keeps ConnectionTable inside one browser
+                        // overflow-auto owner around a min-w-fit table. GPUI's
+                        // uniform_list owns the vertical scroll here, so the
+                        // list must also opt into horizontal unconstrained
+                        // sizing. Replacing this with overflow_hidden regresses
+                        // narrow-panel horizontal scrolling and clipped row
+                        // divider lines.
+                        body.child(
+                            tauri_virtual_uniform_list(
+                                "session-manager-table-virtual",
+                                row_count,
+                                table_scroll,
+                                virtual_spec,
+                                move |range, _window, app| {
+                                    let mut rendered = Vec::new();
+                                    let rows = virtual_rows.clone();
+                                    let _ = workspace.update(app, |this, cx| {
+                                        for index in range {
+                                            let Some(conn) = rows.get(index).cloned() else {
+                                                continue;
+                                            };
+                                            rendered.push(this.render_connection_table_row(
+                                                conn,
+                                                has_background,
+                                                cx,
+                                            ));
+                                        }
+                                    });
+                                    rendered
+                                },
+                            )
+                            .with_horizontal_sizing_behavior(
+                                gpui::ListHorizontalSizingBehavior::Unconstrained,
+                            ),
+                        )
                     })
             )
             .into_any_element()
@@ -499,6 +569,7 @@ impl WorkspaceApp {
                     .bg(rgb(color)),
             )
         })
+        .child(self.render_connection_table_row_width_lock(has_background))
         .child(tauri_table_checkbox_cell(
             MANAGER_COL_CHECKBOX,
             checkbox(&self.tokens, String::new(), selected).on_mouse_down(
@@ -658,6 +729,10 @@ impl WorkspaceApp {
         }
     }
 
+    fn manager_table_min_width(&self) -> f32 {
+        manager_table_min_width_for_metrics(self.manager_table_metrics())
+    }
+
     fn manager_table_cell_options(&self, width: f32, flexible: bool) -> TauriTableCellOptions {
         TauriTableCellOptions {
             width,
@@ -692,6 +767,21 @@ impl WorkspaceApp {
                 bg,
                 fg,
             ))
+            .into_any_element()
+    }
+
+    fn render_connection_table_row_width_lock(&self, has_background: bool) -> AnyElement {
+        // Keep this explicit row-width line in sync with Tauri ConnectionTable's
+        // min-w-fit column contract. The visible GPUI row itself must stay
+        // viewport-sized so the absolute action strip behaves like Tauri's
+        // sticky right-0 action cell while uniform_list scrolls horizontally.
+        div()
+            .absolute()
+            .left_0()
+            .bottom_0()
+            .h(px(1.0))
+            .w(px(self.manager_table_min_width()))
+            .bg(theme_border_half(self.tokens.ui.border, has_background))
             .into_any_element()
     }
 

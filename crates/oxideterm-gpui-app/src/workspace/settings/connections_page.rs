@@ -1851,9 +1851,10 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_start()
-            .gap(px(2.0))
+            .gap(px(0.0))
             .cursor(CursorStyle::IBeam)
             .text_size(px(self.tokens.metrics.ui_text_sm))
+            .line_height(px(line_height))
             .font_family(settings_mono_font_family(self.settings_store.settings()))
             .text_color(rgb(theme.text))
             .on_mouse_down(

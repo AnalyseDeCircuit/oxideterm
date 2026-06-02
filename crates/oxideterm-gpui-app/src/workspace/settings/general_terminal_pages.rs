@@ -5,7 +5,6 @@ enum TerminalCommandSpecsAction {
     Save,
 }
 
-const SETTINGS_TERMINAL_TEXTAREA_LINE_GAP: f32 = 2.0; // Existing GPUI visual gap between rendered textarea rows.
 const SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH: f32 = 300.0; // Tauri TerminalTab custom font input w-[300px].
 
 impl WorkspaceApp {
@@ -742,9 +741,10 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_start()
-            .gap(px(2.0))
+            .gap(px(0.0))
             .cursor(CursorStyle::IBeam)
             .text_size(px(self.tokens.metrics.ui_text_sm))
+            .line_height(px(line_height))
             .font_family(settings_mono_font_family(self.settings_store.settings()))
             .text_color(rgb(theme.text))
             .on_mouse_down(
@@ -858,9 +858,10 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_start()
-            .gap(px(2.0))
+            .gap(px(0.0))
             .cursor(CursorStyle::IBeam)
             .text_size(px(self.tokens.metrics.ui_text_sm))
+            .line_height(px(line_height))
             .font_family(settings_mono_font_family(self.settings_store.settings()))
             .text_color(rgb(theme.text))
             .on_mouse_down(
@@ -982,8 +983,10 @@ impl WorkspaceApp {
         for (line_range, line_text) in settings_multiline_line_ranges(value) {
             let (selection_range, caret_offset) =
                 settings_multiline_line_selection(selection.as_ref(), &line_range);
-            let line_box_height = (line_height - SETTINGS_TERMINAL_TEXTAREA_LINE_GAP).max(1.0);
-            let mut line = div().min_h(px(line_box_height));
+            // Browser textareas hit-test contiguous line boxes. Keep the
+            // manually rendered GPUI lines at the same height used by IME
+            // y-to-line mapping so pointer selection cannot drift vertically.
+            let mut line = div().h(px(line_height)).min_h(px(line_height));
             if placeholder {
                 // Browser placeholder text is not part of the editable value;
                 // keep it muted and do not feed it through selection segments.

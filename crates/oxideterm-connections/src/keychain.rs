@@ -16,6 +16,8 @@ pub(crate) struct ConnectionKeychain {
     service: String,
     #[cfg(test)]
     test_store: Option<Arc<Mutex<HashMap<String, SecretString>>>>,
+    #[cfg(test)]
+    test_max_secret_bytes: Option<usize>,
 }
 
 impl Default for ConnectionKeychain {
@@ -24,6 +26,8 @@ impl Default for ConnectionKeychain {
             service: SERVICE_NAME.to_string(),
             #[cfg(test)]
             test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
+            #[cfg(test)]
+            test_max_secret_bytes: None,
         }
     }
 }
@@ -34,12 +38,34 @@ impl ConnectionKeychain {
             service: service.into(),
             #[cfg(test)]
             test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
+            #[cfg(test)]
+            test_max_secret_bytes: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_max_secret_bytes_for_tests(
+        service: impl Into<String>,
+        max_secret_bytes: usize,
+    ) -> Self {
+        Self {
+            service: service.into(),
+            test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
+            test_max_secret_bytes: Some(max_secret_bytes),
         }
     }
 
     pub(crate) fn store(&self, id: &str, secret: &SecretString) -> Result<()> {
         #[cfg(test)]
         if let Some(store) = &self.test_store {
+            if self
+                .test_max_secret_bytes
+                .is_some_and(|limit| secret.expose_secret().len() > limit)
+            {
+                // Tests use this to emulate OS credential backends that reject
+                // large managed SSH keys, such as RSA private-key blobs.
+                bail!("test keychain secret exceeds configured byte limit");
+            }
             store
                 .lock()
                 .map_err(|error| anyhow::anyhow!("failed to lock test keychain: {error}"))?

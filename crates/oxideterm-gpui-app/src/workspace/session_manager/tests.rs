@@ -14,6 +14,16 @@ mod tests {
     }
 
     #[test]
+    fn session_manager_table_width_matches_tauri_connection_table_columns() {
+        // This locks the Tauri ConnectionTable min-w-fit contract that keeps
+        // horizontal scrolling, row dividers, and the sticky actions column aligned.
+        assert_eq!(
+            manager_table_min_width_for_metrics(TauriTableMetrics::default()),
+            804.0
+        );
+    }
+
+    #[test]
     fn new_connection_save_password_false_does_not_request_keychain_storage() {
         let form = NewConnectionForm {
             password: "secret".to_string(),

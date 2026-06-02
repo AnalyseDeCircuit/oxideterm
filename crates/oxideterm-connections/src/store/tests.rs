@@ -2,7 +2,7 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use rand::rngs::OsRng;
-    use russh::keys::ssh_key::LineEnding;
+    use russh::keys::ssh_key::{HashAlg, LineEnding};
     use russh::keys::{Algorithm, PrivateKey};
 
     use super::*;
@@ -43,6 +43,22 @@ mod tests {
             Some(passphrase) => key.encrypt(&mut rng, passphrase).unwrap(),
             None => key,
         };
+        key.write_openssh_file(&key_path, LineEnding::LF).unwrap();
+        let private_key = fs::read_to_string(&key_path).unwrap();
+        let _ = fs::remove_file(key_path);
+        private_key
+    }
+
+    fn generated_large_rsa_private_key_text() -> String {
+        let key_path = temp_store_path("managed-key-large-rsa-source").with_extension("key");
+        let mut rng = OsRng;
+        let key = PrivateKey::random(
+            &mut rng,
+            Algorithm::Rsa {
+                hash: Some(HashAlg::Sha256),
+            },
+        )
+        .unwrap();
         key.write_openssh_file(&key_path, LineEnding::LF).unwrap();
         let private_key = fs::read_to_string(&key_path).unwrap();
         let _ = fs::remove_file(key_path);
@@ -954,6 +970,42 @@ mod tests {
         assert_eq!(restored, private_key);
 
         let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn managed_key_create_falls_back_to_secret_file_for_large_rsa_keychain_failure() {
+        let _config_key = with_config_encryption_key_for_tests([43u8; CONFIG_ENCRYPTION_KEY_LEN]);
+        let mut store = load_empty_store("managed-key-large-rsa-fallback");
+        store.managed_keychain = ConnectionKeychain::with_max_secret_bytes_for_tests(
+            "com.oxideterm.managed-test",
+            256,
+        );
+        let private_key = generated_large_rsa_private_key_text();
+
+        let info = store
+            .create_managed_ssh_key_from_text(
+                SecretString::from(private_key.clone()),
+                Some("Large RSA Key".to_string()),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(info.name, "Large RSA Key");
+        assert!(info.public_key.starts_with("ssh-rsa "));
+        assert_eq!(store.data.managed_ssh_keys.len(), 1);
+
+        let secret_id = &store.data.managed_ssh_keys[0].secret_id;
+        assert!(store.managed_keychain.get(secret_id).is_err());
+
+        let secret_path = managed_ssh_key_secret_file_path(store.data_dir().unwrap(), secret_id)
+            .expect("fallback secret path should be valid");
+        let secret_file = fs::read_to_string(secret_path).unwrap();
+        assert!(!secret_file.contains(&private_key));
+
+        let restored = store
+            .resolve_managed_ssh_key_private_key(&info.id)
+            .expect("fallback secret file should restore the managed key");
+        assert_eq!(restored, private_key.as_str());
     }
 
     #[test]

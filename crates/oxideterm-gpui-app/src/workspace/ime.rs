@@ -19,7 +19,9 @@ use super::sftp::SftpInput;
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::{
     tauri_ui_font_family,
-    text_input::{TextInputAnchor, TextInputAnchorId, text_input_secret_mask},
+    text_input::{
+        TextInputAnchor, TextInputAnchorId, TextInputContentAlign, text_input_secret_mask,
+    },
 };
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
@@ -855,7 +857,14 @@ impl WorkspaceApp {
             return Some(text_len);
         }
 
-        let relative_x = (position.x - left).clamp(px(0.0), width);
+        let relative_x = if Self::ime_target_content_align(target) == TextInputContentAlign::Center
+        {
+            let text_width = self.shape_ime_text(target, &text, window).width;
+            Self::ime_target_relative_x_for_hit_test(target, position.x, left, width, text_width)
+        } else {
+            position.x - left
+        }
+        .clamp(px(0.0), width);
         if ime_target_accepts_newline(target) {
             return Some(self.multiline_ime_index_for_position(
                 target, &text, bounds, position, relative_x, window,
@@ -942,6 +951,35 @@ impl WorkspaceApp {
             }
             _ => px(0.0),
         }
+    }
+
+    fn ime_target_content_align(target: WorkspaceImeTarget) -> TextInputContentAlign {
+        match target {
+            WorkspaceImeTarget::Settings(
+                SettingsInput::TerminalFontSize
+                | SettingsInput::TerminalLineHeight
+                | SettingsInput::IdeFontSize
+                | SettingsInput::IdeLineHeight,
+            ) => TextInputContentAlign::Center,
+            _ => TextInputContentAlign::Start,
+        }
+    }
+
+    fn ime_target_relative_x_for_hit_test(
+        target: WorkspaceImeTarget,
+        position_x: Pixels,
+        content_left: Pixels,
+        content_width: Pixels,
+        text_width: Pixels,
+    ) -> Pixels {
+        if Self::ime_target_content_align(target) != TextInputContentAlign::Center {
+            return position_x - content_left;
+        }
+        // Browser centered inputs hit-test against the painted text box, not
+        // the left edge of the padded control. Mirror that geometry so caret
+        // placement follows the visible value.
+        let centered_text_left = content_left + (content_width - text_width).max(px(0.0)) * 0.5;
+        position_x - centered_text_left
     }
 
     fn active_ime_text(&self) -> Option<String> {
@@ -2490,9 +2528,10 @@ mod tests {
     use gpui::{Keystroke, Modifiers, px};
 
     use super::{
-        CopyShortcutOwner, PendingPlatformTextCommit, WorkspaceApp, WorkspaceImeTarget,
-        active_ime_should_defer_printable_key, collapsed_copy_shortcut_is_owned_by_target,
-        control_k_delete_end, copy_shortcut_owner_for_target, ime_target_should_blink_caret,
+        CopyShortcutOwner, PendingPlatformTextCommit, SettingsInput, TextInputContentAlign,
+        WorkspaceApp, WorkspaceImeTarget, active_ime_should_defer_printable_key,
+        collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
+        copy_shortcut_owner_for_target, ime_target_should_blink_caret,
         keystroke_commits_platform_text, line_end_for_utf16_offset, line_range_for_utf16_offset,
         line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
         platform_text_commit_is_duplicate, previous_utf16_boundary, previous_word_boundary,
@@ -2601,6 +2640,35 @@ mod tests {
         assert_eq!(
             WorkspaceApp::ime_target_horizontal_padding(WorkspaceImeTarget::CommandPalette, 12.0),
             px(12.0)
+        );
+    }
+
+    #[test]
+    fn centered_settings_inputs_hit_test_against_centered_text_box() {
+        let target = WorkspaceImeTarget::Settings(SettingsInput::TerminalFontSize);
+        assert_eq!(
+            WorkspaceApp::ime_target_content_align(target),
+            TextInputContentAlign::Center
+        );
+        assert_eq!(
+            WorkspaceApp::ime_target_relative_x_for_hit_test(
+                target,
+                px(50.0),
+                px(0.0),
+                px(100.0),
+                px(40.0),
+            ),
+            px(20.0)
+        );
+        assert_eq!(
+            WorkspaceApp::ime_target_relative_x_for_hit_test(
+                WorkspaceImeTarget::Settings(SettingsInput::TerminalCustomFontFamily),
+                px(50.0),
+                px(0.0),
+                px(100.0),
+                px(40.0),
+            ),
+            px(50.0)
         );
     }
 

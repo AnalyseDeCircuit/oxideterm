@@ -705,7 +705,11 @@ impl WorkspaceApp {
                 self.tokens.ui.text
             }))
             .child(self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
+                // Shortcut chips live inside clickable controls. Browser buttons
+                // do not start document text selection from their label, and
+                // keeping these chips non-selectable avoids extra anchor probes
+                // while the settings page scrolls.
+                SelectableTextRole::NonSelectable,
                 "settings-keybinding-chip",
                 (value, accent),
                 value.to_string(),

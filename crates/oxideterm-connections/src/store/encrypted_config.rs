@@ -699,6 +699,27 @@ fn decode_connection_store_data_for_tests(
 }
 
 #[cfg(test)]
+struct ConfigEncryptionKeyGuardForTests;
+
+#[cfg(test)]
+impl Drop for ConfigEncryptionKeyGuardForTests {
+    fn drop(&mut self) {
+        clear_cached_config_encryption_key();
+    }
+}
+
+#[cfg(test)]
+fn with_config_encryption_key_for_tests(
+    key: [u8; CONFIG_ENCRYPTION_KEY_LEN],
+) -> ConfigEncryptionKeyGuardForTests {
+    clear_cached_config_encryption_key();
+    // Tests inject the cached key to exercise encrypted fallback paths without
+    // touching the real OS keychain or portable keystore.
+    remember_config_encryption_key(&zeroize::Zeroizing::new(key));
+    ConfigEncryptionKeyGuardForTests
+}
+
+#[cfg(test)]
 mod encrypted_config_tests {
     use super::*;
 

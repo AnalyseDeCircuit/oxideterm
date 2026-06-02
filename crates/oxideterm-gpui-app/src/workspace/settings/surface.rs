@@ -487,9 +487,9 @@ impl WorkspaceApp {
         }
         // Browser caret blinking is compositor-local. Native blinking repaints
         // the workspace, so keep the caret visible while a settings scroll is
-        // active and let blinking resume shortly after scrolling stops.
+        // active and let blinking resume shortly after inertial scrolling stops.
         self.settings_caret_blink_pause_until =
-            Some(Instant::now() + Duration::from_millis(180));
+            Some(Instant::now() + Duration::from_millis(SETTINGS_SCROLL_CARET_PAUSE_MS));
         self.new_connection_caret_visible = true;
     }
 
