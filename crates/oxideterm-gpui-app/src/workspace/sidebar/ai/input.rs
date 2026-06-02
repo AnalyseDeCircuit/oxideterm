@@ -1267,7 +1267,6 @@ fn ai_input_line_segments(
                 .when(!before.is_empty(), |row| row.child(before))
                 .child(
                     div()
-                        .rounded(px(tokens.radii.xs))
                         .bg(rgba((tokens.ui.accent << 8) | AI_INPUT_SELECTION_BG_ALPHA))
                         .text_color(rgb(tokens.ui.text))
                         .child(selected),
@@ -1280,10 +1279,21 @@ fn ai_input_line_segments(
         let offset = offset.min(len);
         let before = ai_utf16_slice(line, 0..offset);
         let after = ai_utf16_slice(line, offset..len);
-        return base
-            .when(!before.is_empty(), |row| row.child(before))
-            .child(text_caret(tokens, caret_visible))
-            .when(!after.is_empty(), |row| row.child(after));
+        let before_empty = before.is_empty();
+        let row = base.when(!before_empty, |row| {
+            row.child(
+                div()
+                    .relative()
+                    .child(before)
+                    .child(text_caret_overlay_at_text_end(tokens, caret_visible)),
+            )
+        });
+        return if before_empty {
+            row.child(text_caret(tokens, caret_visible))
+                .when(!after.is_empty(), |row| row.child(after))
+        } else {
+            row.when(!after.is_empty(), |row| row.child(after))
+        };
     }
 
     base.child(line.to_string())

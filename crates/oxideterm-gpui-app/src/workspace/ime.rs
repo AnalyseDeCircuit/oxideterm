@@ -975,16 +975,17 @@ impl WorkspaceApp {
         }
 
         if self.ime_target_is_secret(target) {
-            return self.secret_ime_index_for_relative_x(text, relative_x, window);
+            return self.secret_ime_index_for_relative_x(target, text, relative_x, window);
         }
 
-        let shaped = self.shape_ime_text(text, window);
+        let shaped = self.shape_ime_text(target, text, window);
         let byte_index = shaped.closest_index_for_x(relative_x.clamp(px(0.0), shaped.width));
         utf16_offset_for_byte_index(text, byte_index)
     }
 
     fn secret_ime_index_for_relative_x(
         &self,
+        target: WorkspaceImeTarget,
         text: &str,
         relative_x: Pixels,
         window: &mut Window,
@@ -993,7 +994,7 @@ impl WorkspaceApp {
         if display.is_empty() {
             return 0;
         }
-        let shaped = self.shape_ime_text(&display, window);
+        let shaped = self.shape_ime_text(target, &display, window);
         let display_byte_index =
             shaped.closest_index_for_x(relative_x.clamp(px(0.0), shaped.width));
         let display_byte_index =
@@ -1002,10 +1003,13 @@ impl WorkspaceApp {
         utf16_offset_for_char_index(text, display_chars)
     }
 
-    fn shape_ime_text(&self, text: &str, window: &mut Window) -> gpui::ShapedLine {
-        let font = font(tauri_ui_font_family(
-            &self.settings_store.settings().appearance.ui_font_family,
-        ));
+    fn shape_ime_text(
+        &self,
+        target: WorkspaceImeTarget,
+        text: &str,
+        window: &mut Window,
+    ) -> gpui::ShapedLine {
+        let font = font(self.ime_target_font_family(target));
         let shared = SharedString::from(text.to_string());
         let run = TextRun {
             len: shared.len(),
@@ -1018,6 +1022,24 @@ impl WorkspaceApp {
         window
             .text_system()
             .shape_line(shared, px(self.tokens.metrics.ui_text_sm), &[run], None)
+    }
+
+    fn ime_target_font_family(&self, target: WorkspaceImeTarget) -> SharedString {
+        match target {
+            WorkspaceImeTarget::TerminalCommandBar
+            | WorkspaceImeTarget::Settings(
+                SettingsInput::TerminalCommandBarFocusHandoff
+                | SettingsInput::TerminalCommandSpecsJson
+                | SettingsInput::AiMcpArgs
+                | SettingsInput::ManagedKeyPastePrivateKey,
+            ) => {
+                // These controls are painted with the terminal/settings mono
+                // family. Hit-testing with the UI font shifts caret placement
+                // across long JSON and command lines.
+                super::settings_mono_font_family(self.settings_store.settings())
+            }
+            _ => tauri_ui_font_family(&self.settings_store.settings().appearance.ui_font_family),
+        }
     }
 
     fn ime_target_is_secret(&self, target: WorkspaceImeTarget) -> bool {

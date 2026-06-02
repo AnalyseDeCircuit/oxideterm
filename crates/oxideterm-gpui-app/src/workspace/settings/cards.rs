@@ -772,7 +772,7 @@ impl WorkspaceApp {
         }
         match input {
             SettingsInput::TerminalCommandSpecsJson => {
-                self.load_terminal_command_specs_editor_value()
+                self.terminal_command_specs_editor_initial_value()
             }
             SettingsInput::NativePluginInstallUrl => self.plugin_manager_install_url_draft.clone(),
             SettingsInput::NativePluginInstallChecksum => {

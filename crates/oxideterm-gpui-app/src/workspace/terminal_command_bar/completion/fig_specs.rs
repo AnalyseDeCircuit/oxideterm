@@ -221,6 +221,17 @@ pub(in crate::workspace) fn terminal_command_specs_example_json() -> String {
     .unwrap_or_else(|_| "{\n  \"specs\": []\n}".to_string())
 }
 
+pub(in crate::workspace) fn terminal_command_specs_editor_initial_json(value: &str) -> String {
+    // The native settings editor paints the example as real editable content
+    // when no custom spec file exists; keep hit-testing and button actions tied
+    // to the same text the user sees.
+    if value.trim().is_empty() {
+        terminal_command_specs_example_json()
+    } else {
+        value.to_string()
+    }
+}
+
 pub(in crate::workspace) fn normalize_terminal_command_specs_json(
     value: &str,
 ) -> Result<String, String> {
@@ -1394,6 +1405,15 @@ mod terminal_fig_registry_tests {
             .unwrap();
         assert_eq!(run.options[0].name, "--profile");
         assert_eq!(run.options[0].args, TerminalFigArgType::Value);
+    }
+
+    #[test]
+    fn terminal_command_specs_editor_initial_value_matches_visible_text() {
+        let example = terminal_command_specs_editor_initial_json("   \n");
+        assert!(example.contains("\"name\": \"demo\""));
+
+        let custom = "{\n  \"specs\": []\n}";
+        assert_eq!(terminal_command_specs_editor_initial_json(custom), custom);
     }
 
     #[test]

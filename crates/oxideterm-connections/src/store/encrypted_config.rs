@@ -489,7 +489,6 @@ fn load_system_config_key_secret() -> Result<Option<zeroize::Zeroizing<String>>>
         let secret = String::from_utf8(output.stdout)
             .context("local config key from macOS keychain is not UTF-8")?;
         let secret = zeroize::Zeroizing::new(secret.trim_end_matches(['\r', '\n']).to_string());
-        let _ = store_system_config_key_secret(secret.as_str());
         return Ok(Some(secret));
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -644,9 +643,9 @@ fn authenticate_macos_keychain_access(reason: &str) -> Result<()> {
             }
         });
 
-        // This is an app-level identity gate matching Tauri's model. The
-        // keychain item itself is migrated to `security -A` after a successful
-        // read so future access does not depend on per-binary ACL prompts.
+        // This is an app-level identity gate matching Tauri's model. Reads must
+        // not rewrite the keychain item because macOS treats ACL updates as a
+        // separate password-protected permission change.
         let _: () = msg_send![
             ctx,
             evaluatePolicy: LA_POLICY_DEVICE_OWNER,

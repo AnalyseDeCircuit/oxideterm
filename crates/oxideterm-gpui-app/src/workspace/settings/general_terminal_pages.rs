@@ -833,7 +833,7 @@ impl WorkspaceApp {
         let value = if focused {
             self.settings_input_draft.clone()
         } else {
-            self.load_terminal_command_specs_editor_value()
+            self.terminal_command_specs_editor_initial_value()
         };
         let path = super::terminal_command_bar::completion::terminal_command_specs_path(
             self.settings_store.path(),
@@ -880,13 +880,8 @@ impl WorkspaceApp {
                 }),
             );
 
-        let display = if value.trim().is_empty() {
-            super::terminal_command_bar::completion::terminal_command_specs_example_json()
-        } else {
-            value
-        };
         textarea =
-            self.render_settings_multiline_textarea_lines(textarea, target, &display, false, line_height);
+            self.render_settings_multiline_textarea_lines(textarea, target, &value, false, line_height);
         if let Some(marked) = self.marked_text_for_target(target) {
             textarea = textarea.child(
                 div()
@@ -1051,6 +1046,12 @@ impl WorkspaceApp {
         std::fs::read_to_string(path).unwrap_or_default()
     }
 
+    fn terminal_command_specs_editor_initial_value(&self) -> String {
+        super::terminal_command_bar::completion::terminal_command_specs_editor_initial_json(
+            &self.load_terminal_command_specs_editor_value(),
+        )
+    }
+
     fn terminal_command_specs_summary(&self) -> String {
         let built_in_count =
             super::terminal_command_bar::completion::built_in_terminal_fig_specs().len();
@@ -1067,7 +1068,7 @@ impl WorkspaceApp {
         if self.focused_settings_input == Some(SettingsInput::TerminalCommandSpecsJson) {
             self.settings_input_draft.clone()
         } else {
-            self.load_terminal_command_specs_editor_value()
+            self.terminal_command_specs_editor_initial_value()
         }
     }
 

@@ -236,6 +236,7 @@ pub fn text_input_with_content_align(
 pub fn text_caret(tokens: &ThemeTokens, visible: bool) -> Div {
     div()
         .relative()
+        .flex_none()
         .w(px(0.0))
         .h(px(tokens.metrics.form_caret_height))
         // Browser carets are painted over the text flow. The zero-width anchor
@@ -250,6 +251,20 @@ pub fn text_caret(tokens: &ThemeTokens, visible: bool) -> Div {
                 .bg(rgb(tokens.ui.accent))
                 .opacity(if visible { 1.0 } else { 0.0 }),
         )
+}
+
+pub fn text_caret_overlay_at_text_end(tokens: &ThemeTokens, visible: bool) -> Div {
+    // Browser carets are a paint overlay at the text insertion point. This
+    // helper anchors the bar to the end of an already-laid-out text segment so
+    // the caret itself never changes the text row's measured width.
+    div()
+        .absolute()
+        .top_0()
+        .right(px(0.0))
+        .w(px(tokens.metrics.form_caret_width))
+        .h(px(tokens.metrics.form_caret_height))
+        .bg(rgb(tokens.ui.accent))
+        .opacity(if visible { 1.0 } else { 0.0 })
 }
 
 pub fn text_input_value_segments(
@@ -311,7 +326,6 @@ pub fn text_input_value_segments_with_color(
         .when(!before.is_empty(), |row| row.child(before))
         .child(
             div()
-                .rounded(px(tokens.radii.xs))
                 .bg(rgba((theme.accent << 8) | TEXT_INPUT_SELECTION_BG_ALPHA))
                 .text_color(rgb(theme.text))
                 .child(selected),
@@ -330,13 +344,27 @@ fn text_input_value_with_caret(
     let offset = offset.min(len);
     let before = utf16_slice(display, 0..offset);
     let after = utf16_slice(display, offset..len);
+    let before_empty = before.is_empty();
 
-    base.flex()
+    let row = base
+        .flex()
         .flex_row()
         .items_center()
-        .when(!before.is_empty(), |row| row.child(before))
-        .child(text_caret(tokens, caret_visible))
-        .when(!after.is_empty(), |row| row.child(after))
+        .when(!before_empty, |row| {
+            row.child(
+                div()
+                    .relative()
+                    .child(before)
+                    .child(text_caret_overlay_at_text_end(tokens, caret_visible)),
+            )
+        });
+
+    if before_empty {
+        row.child(text_caret(tokens, caret_visible))
+            .when(!after.is_empty(), |row| row.child(after))
+    } else {
+        row.when(!after.is_empty(), |row| row.child(after))
+    }
 }
 
 fn utf16_slice(value: &str, range: Range<usize>) -> String {
