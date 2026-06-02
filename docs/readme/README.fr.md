@@ -15,7 +15,7 @@
 
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.0.0--gpui--preview.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Plateforme">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licence">
   <img src="https://img.shields.io/badge/rust-2024%20edition-orange" alt="Rust 2024">
