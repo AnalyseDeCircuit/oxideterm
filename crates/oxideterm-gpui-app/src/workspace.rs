@@ -141,7 +141,7 @@ use oxideterm_theme::{
 use oxideterm_workspace::{
     ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
     PaneNode, SplitDirection, Tab, TabId, TabKind, TabTitleSource, TerminalSessionId,
-    adjusted_split_sizes, balanced_sizes, sort_active_session_nodes,
+    adjusted_split_sizes, balanced_sizes,
 };
 
 use self::actions::SearchBarState;

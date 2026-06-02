@@ -23,7 +23,7 @@ impl WorkspaceApp {
     fn check_native_update(&mut self, cx: &mut Context<Self>) {
         if matches!(
             self.native_update_state,
-                NativeUpdateUiState::Checking
+            NativeUpdateUiState::Checking
                 | NativeUpdateUiState::Downloading(_)
                 | NativeUpdateUiState::Verifying(_)
                 | NativeUpdateUiState::Installing(_)
@@ -134,6 +134,8 @@ impl WorkspaceApp {
         self.schedule_native_update_delivery_poll(cx);
 
         let runtime = self.forwarding_runtime.clone();
+        let cleanup_directory = self.native_update_download_directory();
+        let cleanup_version = download.package.version.clone();
         cx.spawn(async move |_weak, _cx| {
             runtime.spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {
@@ -144,6 +146,13 @@ impl WorkspaceApp {
                 .await
                 .map_err(|error| error.to_string())
                 .and_then(|result| result.map_err(|error| error.to_string()));
+                if result.is_ok() {
+                    let _ = oxideterm_update::prune_resumable_update_cache(
+                        &cleanup_directory,
+                        Some(&cleanup_version),
+                    )
+                    .await;
+                }
                 let _ = tx.send(NativeUpdateDelivery::InstallFinished(result));
             });
         })

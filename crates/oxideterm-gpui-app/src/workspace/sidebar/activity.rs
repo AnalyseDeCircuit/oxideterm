@@ -192,27 +192,31 @@ impl WorkspaceApp {
         } else {
             theme.accent
         };
-        div()
+
+        // Tauri renders activity entries through the shared Button primitive:
+        // active rows use `variant="secondary"` and inactive rows use `ghost`.
+        // Keep native activity icons on the shared icon-button path so dynamic
+        // radius settings affect this surface the same way as browser buttons.
+        let button = oxideterm_gpui_ui::button::icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, self.tokens.metrics.activity_icon_glyph_size, rgb(theme.text)),
+            oxideterm_gpui_ui::button::IconButtonOptions {
+                size: self.tokens.metrics.activity_icon_size,
+                radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
+                has_background: active,
+                background: active.then(|| rgb(theme.bg_panel)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                idle_opacity: 1.0,
+                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
+                    self.tokens.metrics.activity_icon_size,
+                )
+            },
+        );
+
+        button
             .id(("activity-icon", section as u64))
             .relative()
-            .size(px(self.tokens.metrics.activity_icon_size))
             .mb(px(self.tokens.spacing.icon_gap))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .bg(if active {
-                rgb(theme.bg_active)
-            } else {
-                rgb(theme.bg)
-            })
-            .border_1()
-            .border_color(if active {
-                rgb(theme.border)
-            } else {
-                rgb(theme.bg)
-            })
-            .cursor_pointer()
             .when(active, |icon_el| {
                 icon_el.child(
                     div()
@@ -225,21 +229,15 @@ impl WorkspaceApp {
                         .bg(rgb(theme.accent)),
                 )
             })
-            .child(Self::render_lucide_icon(
-                icon,
-                self.tokens.metrics.activity_icon_glyph_size,
-                if active {
-                    rgb(theme.text_heading)
-                } else {
-                    rgb(theme.text)
-                },
-            ))
             .when(badge_count > 0, |icon_el| {
                 icon_el.child(
                     div()
                         .absolute()
-                        .right(px(1.0))
-                        .top(px(1.0))
+                        // Tauri badges sit outside the `h-9 w-9` Button
+                        // (`-top-1 -right-1`) so the active button chrome and
+                        // numeric pill do not visually collide.
+                        .right(px(-4.0))
+                        .top(px(-4.0))
                         .min_w(px(14.0))
                         .h(px(14.0))
                         .px(px(3.0))
@@ -369,30 +367,29 @@ impl WorkspaceApp {
         let tooltip_id_for_move = tooltip_id.clone();
         let icon = native_plugin_sidebar_icon(&panel.icon);
 
-        div()
+        let button = oxideterm_gpui_ui::button::icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(icon, self.tokens.metrics.activity_icon_glyph_size, rgb(theme.text)),
+            oxideterm_gpui_ui::button::IconButtonOptions {
+                size: self.tokens.metrics.activity_icon_size,
+                radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
+                has_background: active,
+                background: active.then(|| rgb(theme.bg_panel)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                idle_opacity: 1.0,
+                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
+                    self.tokens.metrics.activity_icon_size,
+                )
+            },
+        );
+
+        button
             .id((
                 "activity-plugin-icon",
                 native_plugin_sidebar_activity_id(&panel),
             ))
             .relative()
-            .size(px(self.tokens.metrics.activity_icon_size))
             .mb(px(self.tokens.spacing.icon_gap))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .bg(if active {
-                rgb(theme.bg_active)
-            } else {
-                rgb(theme.bg)
-            })
-            .border_1()
-            .border_color(if active {
-                rgb(theme.border)
-            } else {
-                rgb(theme.bg)
-            })
-            .cursor_pointer()
             .when(active, |icon_el| {
                 icon_el.child(
                     div()
@@ -405,15 +402,6 @@ impl WorkspaceApp {
                         .bg(rgb(theme.accent)),
                 )
             })
-            .child(Self::render_lucide_icon(
-                icon,
-                self.tokens.metrics.activity_icon_glyph_size,
-                if active {
-                    rgb(theme.text_heading)
-                } else {
-                    rgb(theme.text)
-                },
-            ))
             .on_mouse_move(cx.listener({
                 let tooltip = tooltip.clone();
                 move |this, event: &MouseMoveEvent, _window, cx| {

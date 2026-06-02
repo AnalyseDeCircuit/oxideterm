@@ -24,7 +24,7 @@ pub use channel::{
 };
 pub use download::{
     DownloadProgress, NativeUpdateClient, NativeUpdateDownload, NativeUpdateError,
-    NativeUpdateRequest, NativeUpdateStatus,
+    NativeUpdateRequest, NativeUpdateStatus, prune_resumable_update_cache,
 };
 pub use install::{
     InstallActionKind, InstallPackageKind, InstallStrategy, NativeInstallContext,

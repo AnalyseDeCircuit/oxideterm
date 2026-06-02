@@ -60,11 +60,33 @@
         "reconnect": "Reconectar",
         "cancel_reconnect": "Cancelar reconexão",
         "port_forwarding": "Encaminhamento de portas",
-        "drill_in": "Navegar (próximo salto)"
+        "drill_in": "Navegar (próximo salto)",
+        "connect": "Conectar"
       }
     },
     "focused_list": {
-      "terminal": "Terminal #{{number}}"
+      "all_servers": "Todos os servidores",
+      "child": "filho",
+      "children": "filhos",
+      "no_child_nodes": "Este nó não tem nós filhos",
+      "no_servers": "Ainda não há servidores",
+      "add_by_drilling": "Você pode navegar para adicionar nós filhos",
+      "click_to_add": "Clique em + para adicionar uma nova conexão",
+      "terminal": "Terminal #{{number}}",
+      "close_terminal": "Fechar terminal"
+    },
+    "actions": {
+      "connect": "Conectar",
+      "new_terminal": "Novo terminal",
+      "sftp_explorer": "Explorador SFTP",
+      "port_forwarding": "Encaminhamento de portas",
+      "disconnect": "Desconectar",
+      "reconnect": "Reconectar",
+      "drill_in": "Navegar (próximo salto)"
+    },
+    "breadcrumb": {
+      "back_to_root": "Voltar à visualização raiz",
+      "all_servers": "Todos os servidores"
     }
   }
 }

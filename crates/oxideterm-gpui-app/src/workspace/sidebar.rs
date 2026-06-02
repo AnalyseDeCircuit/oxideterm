@@ -23,6 +23,13 @@ const SESSION_FOCUS_TERMINAL_BADGE_HOVER_ALPHA: u32 = 0x4d;
 const SESSION_FOCUS_ACTION_BG_ALPHA: u32 = 0x1a;
 const SESSION_FOCUS_ACTION_HOVER_ALPHA: u32 = 0x26;
 const SESSION_FOCUS_DIVIDER_ALPHA: u32 = 0x4d;
+// Tauri FocusedNodeList empty state uses `w-8 h-8 opacity-30`,
+// `text-sm`, `text-xs`, and `opacity-60` for the helper text.
+const SESSION_FOCUS_EMPTY_ICON_SIZE: f32 = 32.0;
+const SESSION_FOCUS_EMPTY_ICON_ALPHA: u32 = 0x4d;
+const SESSION_FOCUS_EMPTY_TITLE_TEXT_SIZE: f32 = 14.0;
+const SESSION_FOCUS_EMPTY_SUBTITLE_TEXT_SIZE: f32 = 12.0;
+const SESSION_FOCUS_EMPTY_SUBTITLE_ALPHA: f32 = 0.6;
 const SESSION_FOCUS_EMERALD: u32 = 0x10b981;
 // Tauri EventLogPanel rows use `min-h-[24px]` with `px-3 py-1`; keep the
 // native estimate next to the shared virtual-list call so scroll-to-index and

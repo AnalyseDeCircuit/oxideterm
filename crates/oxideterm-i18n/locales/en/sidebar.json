@@ -60,11 +60,33 @@
         "disconnect": "Disconnect",
         "reconnect": "Reconnect",
         "cancel_reconnect": "Cancel Reconnect",
-        "drill_in": "Drill In (Next Hop)"
+        "drill_in": "Drill In (Next Hop)",
+        "connect": "Connect"
       }
     },
     "focused_list": {
-      "terminal": "Terminal #{{number}}"
+      "all_servers": "All Servers",
+      "child": "child",
+      "children": "children",
+      "no_child_nodes": "This node has no child nodes",
+      "no_servers": "No servers yet",
+      "add_by_drilling": "You can add child nodes by drilling down",
+      "click_to_add": "Click + to add a new connection",
+      "terminal": "Terminal #{{number}}",
+      "close_terminal": "Close terminal"
+    },
+    "actions": {
+      "connect": "Connect",
+      "new_terminal": "New Terminal",
+      "sftp_explorer": "SFTP Explorer",
+      "port_forwarding": "Port Forwarding",
+      "disconnect": "Disconnect",
+      "reconnect": "Reconnect",
+      "drill_in": "Drill In (Next Hop)"
+    },
+    "breadcrumb": {
+      "back_to_root": "Back to root view",
+      "all_servers": "All Servers"
     }
   }
 }

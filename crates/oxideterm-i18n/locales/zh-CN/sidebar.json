@@ -60,11 +60,33 @@
         "disconnect": "断开",
         "reconnect": "重新连接",
         "cancel_reconnect": "取消重连",
-        "drill_in": "钻入 (下一跳)"
+        "drill_in": "钻入 (下一跳)",
+        "connect": "连接"
       }
     },
     "focused_list": {
-      "terminal": "终端 #{{number}}"
+      "all_servers": "全部服务器",
+      "child": "子节点",
+      "children": "子节点",
+      "no_child_nodes": "此节点没有子节点",
+      "no_servers": "暂无服务器",
+      "add_by_drilling": "您可以通过钻取添加子节点",
+      "click_to_add": "点击 + 添加新连接",
+      "terminal": "终端 #{{number}}",
+      "close_terminal": "关闭终端"
+    },
+    "actions": {
+      "connect": "连接",
+      "new_terminal": "新建终端",
+      "sftp_explorer": "SFTP 文件管理器",
+      "port_forwarding": "端口转发",
+      "disconnect": "断开连接",
+      "reconnect": "重新连接",
+      "drill_in": "钻入 (下一跳)"
+    },
+    "breadcrumb": {
+      "back_to_root": "返回根视图",
+      "all_servers": "全部服务器"
     }
   }
 }

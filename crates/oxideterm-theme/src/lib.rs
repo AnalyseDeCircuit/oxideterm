@@ -244,8 +244,9 @@ impl UiMetrics {
             traffic_light_gap: 10.0,
             titlebar_height: 30.0,
             titlebar_label_font_size: 13.0,
-            window_min_width: 420.0,
-            window_min_height: 280.0,
+            // Tauri declares the main window minimum size as 800x600.
+            window_min_width: 800.0,
+            window_min_height: 600.0,
             tabbar_height: 36.0,
             tabbar_leading_offset: 0.0,
             tab_min_width: 120.0,

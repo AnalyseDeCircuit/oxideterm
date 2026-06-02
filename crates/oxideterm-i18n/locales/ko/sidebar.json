@@ -60,11 +60,33 @@
         "reconnect": "다시 연결",
         "cancel_reconnect": "재연결 취소",
         "port_forwarding": "포트 포워딩",
-        "drill_in": "드릴 인 (다음 홉)"
+        "drill_in": "드릴 인 (다음 홉)",
+        "connect": "연결"
       }
     },
     "focused_list": {
-      "terminal": "터미널 #{{number}}"
+      "all_servers": "모든 서버",
+      "child": "하위",
+      "children": "하위",
+      "no_child_nodes": "이 노드에 하위 노드가 없습니다",
+      "no_servers": "서버가 없습니다",
+      "add_by_drilling": "드릴 다운으로 하위 노드를 추가할 수 있습니다",
+      "click_to_add": "+ 를 클릭하여 새 연결 추가",
+      "terminal": "터미널 #{{number}}",
+      "close_terminal": "터미널 닫기"
+    },
+    "actions": {
+      "connect": "연결",
+      "new_terminal": "새 터미널",
+      "sftp_explorer": "SFTP 탐색기",
+      "port_forwarding": "포트 포워딩",
+      "disconnect": "연결 해제",
+      "reconnect": "재연결",
+      "drill_in": "드릴 인 (다음 홉)"
+    },
+    "breadcrumb": {
+      "back_to_root": "루트 뷰로 돌아가기",
+      "all_servers": "모든 서버"
     }
   }
 }

@@ -60,11 +60,33 @@
         "reconnect": "Kết nối lại",
         "cancel_reconnect": "Hủy kết nối lại",
         "port_forwarding": "Chuyển tiếp cổng",
-        "drill_in": "Drill In (Bước tiếp)"
+        "drill_in": "Drill In (Bước tiếp)",
+        "connect": "Kết nối"
       }
     },
     "focused_list": {
-      "terminal": "Terminal #{{number}}"
+      "all_servers": "Tất cả máy chủ",
+      "child": "con",
+      "children": "con",
+      "no_child_nodes": "Nút này không có nút con",
+      "no_servers": "Chưa có máy chủ",
+      "add_by_drilling": "Bạn có thể thêm nút con bằng cách drill down",
+      "click_to_add": "Nhấn + để thêm kết nối mới",
+      "terminal": "Terminal #{{number}}",
+      "close_terminal": "Đóng terminal"
+    },
+    "actions": {
+      "connect": "Kết nối",
+      "new_terminal": "Terminal mới",
+      "sftp_explorer": "Trình duyệt SFTP",
+      "port_forwarding": "Chuyển tiếp cổng",
+      "disconnect": "Ngắt kết nối",
+      "reconnect": "Kết nối lại",
+      "drill_in": "Drill In (Bước tiếp)"
+    },
+    "breadcrumb": {
+      "back_to_root": "Quay lại chế độ xem gốc",
+      "all_servers": "Tất cả máy chủ"
     }
   }
 }

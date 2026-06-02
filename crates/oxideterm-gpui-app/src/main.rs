@@ -15,6 +15,11 @@ use oxideterm_settings::SettingsStore;
 use crate::assets::NativeAssets;
 use crate::workspace::WorkspaceApp;
 
+// Tauri's `tauri.conf.json` opens the main window at 1200x800. Keeping the
+// native default the same preserves first-launch sidebar proportions.
+const TAURI_DEFAULT_WINDOW_WIDTH: f32 = 1200.0;
+const TAURI_DEFAULT_WINDOW_HEIGHT: f32 = 800.0;
+
 actions!(
     oxideterm,
     [
@@ -136,7 +141,14 @@ fn main() {
             cx.bind_keys(platform::app_key_bindings(&startup_settings));
             cx.set_menus(platform::app_menus(&I18n::default()));
 
-            let bounds = Bounds::centered(None, size(px(1120.0), px(760.0)), cx);
+            let bounds = Bounds::centered(
+                None,
+                size(
+                    px(TAURI_DEFAULT_WINDOW_WIDTH),
+                    px(TAURI_DEFAULT_WINDOW_HEIGHT),
+                ),
+                cx,
+            );
 
             if let Err(err) = cx.open_window(platform::window_options(bounds), |window, cx| {
                 let workspace = cx.new(|cx| {

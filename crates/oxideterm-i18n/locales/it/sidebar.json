@@ -60,11 +60,33 @@
         "reconnect": "Riconnetti",
         "cancel_reconnect": "Annulla riconnessione",
         "port_forwarding": "Port Forwarding",
-        "drill_in": "Drill In (Prossimo Hop)"
+        "drill_in": "Drill In (Prossimo Hop)",
+        "connect": "Connetti"
       }
     },
     "focused_list": {
-      "terminal": "Terminale #{{number}}"
+      "all_servers": "Tutti i Server",
+      "child": "figlio",
+      "children": "figli",
+      "no_child_nodes": "Questo nodo non ha nodi figli",
+      "no_servers": "Nessun server ancora",
+      "add_by_drilling": "Puoi aggiungere nodi figli tramite drill down",
+      "click_to_add": "Clicca + per aggiungere una nuova connessione",
+      "terminal": "Terminale #{{number}}",
+      "close_terminal": "Chiudi terminale"
+    },
+    "actions": {
+      "connect": "Connetti",
+      "new_terminal": "Nuovo Terminale",
+      "sftp_explorer": "Esplora SFTP",
+      "port_forwarding": "Port Forwarding",
+      "disconnect": "Disconnetti",
+      "reconnect": "Riconnetti",
+      "drill_in": "Drill In (Prossimo Hop)"
+    },
+    "breadcrumb": {
+      "back_to_root": "Torna alla vista radice",
+      "all_servers": "Tutti i Server"
     }
   }
 }

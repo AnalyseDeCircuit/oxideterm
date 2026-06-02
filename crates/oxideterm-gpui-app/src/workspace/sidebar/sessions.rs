@@ -46,10 +46,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let rows = self.active_session_sidebar_rows();
-        if rows.is_empty() {
-            return self.render_empty_sessions_sidebar_content(cx);
-        }
-
         let focused_node_id = self.effective_active_session_focus_node_id(&rows);
         self.active_session_sidebar_focused_node_id = focused_node_id.clone();
         let visible_rows = self.active_session_focus_rows(&rows, focused_node_id.as_ref());
@@ -69,12 +65,19 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .child(self.render_active_session_focus_breadcrumb(&rows, focused_node_id.as_ref(), cx))
+            .child(self.render_active_session_focus_location_header(
+                &rows,
+                focused_node_id.as_ref(),
+                visible_rows.len(),
+                cx,
+            ))
             .child(
                 div()
                     .id("active-sessions-focus-list")
                     .flex_1()
                     .min_h(px(0.0))
                     .w_full()
+                    .py_2()
                     .child(if visible_rows.is_empty() {
                         self.render_active_session_focus_empty(focused_node_id.as_ref(), cx)
                     } else {
@@ -95,23 +98,6 @@ impl WorkspaceApp {
 
     fn active_session_sidebar_rows(&self) -> Vec<ActiveSessionSidebarRow> {
         let mut tree_nodes = self.node_router.flatten_tree();
-        let tree_node_ids = tree_nodes
-            .iter()
-            .map(|node| NodeId::new(node.id.clone()))
-            .collect::<std::collections::HashSet<_>>();
-        let mut orphan_node_views = self
-            .ssh_nodes
-            .iter()
-            .filter(|(node_id, _)| !tree_node_ids.contains(*node_id))
-            .map(|(node_id, node)| ActiveSessionNode {
-                id: node_id.0.clone(),
-                title: node.title.clone(),
-                port: node.config.port,
-                terminal_ids: node.terminal_ids.clone(),
-                readiness: active_session_readiness(&node.readiness),
-            })
-            .collect::<Vec<_>>();
-        sort_active_session_nodes(&mut orphan_node_views);
         let flat_node_child_counts = tree_nodes
             .iter()
             .filter_map(|node| node.parent_id.as_ref())
@@ -120,7 +106,7 @@ impl WorkspaceApp {
                 counts
             });
 
-        let mut rows = tree_nodes
+        let rows = tree_nodes
             .drain(..)
             .filter_map(|flat_node| {
                 let flat_node_id = flat_node.id.clone();
@@ -146,25 +132,6 @@ impl WorkspaceApp {
                 })
             })
             .collect::<Vec<_>>();
-        let orphan_count = orphan_node_views.len();
-        rows.extend(
-            orphan_node_views
-                .into_iter()
-                .enumerate()
-                .filter_map(|(index, node_view)| {
-                    let node_id = NodeId::new(node_view.id.clone());
-                    let node = self.ssh_nodes.get(&node_id)?.clone();
-                    Some(ActiveSessionSidebarRow {
-                        node_id,
-                        parent_id: None,
-                        node,
-                        node_view,
-                        depth: 0,
-                        is_last: index + 1 == orphan_count,
-                        has_children: false,
-                    })
-                }),
-        );
         rows
     }
 
@@ -360,8 +327,8 @@ impl WorkspaceApp {
                     button.child(self.render_display_text_with_role(
                         SelectableTextRole::PlainDocument,
                         "session-focus-breadcrumb-root",
-                        "sidebar.panels.sessions",
-                        self.i18n.t("sidebar.panels.sessions"),
+                        "sessions.breadcrumb.all_servers",
+                        self.i18n.t("sessions.breadcrumb.all_servers"),
                         root_color,
                         cx,
                     ))
@@ -438,28 +405,139 @@ impl WorkspaceApp {
         breadcrumb.into_any_element()
     }
 
+    fn render_active_session_focus_location_header(
+        &self,
+        rows: &[ActiveSessionSidebarRow],
+        focused_node_id: Option<&NodeId>,
+        visible_count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let focused_row = focused_node_id
+            .and_then(|node_id| rows.iter().find(|row| row.node_id == *node_id));
+        let title = focused_row
+            .map(|row| row.node_view.title.clone())
+            .unwrap_or_else(|| self.i18n.t("sessions.focused_list.all_servers"));
+        let title = title.to_uppercase();
+        let count_label_key = if visible_count == 1 {
+            "sessions.focused_list.child"
+        } else {
+            "sessions.focused_list.children"
+        };
+        let count_text = if focused_node_id.is_some() {
+            format!("({} {})", visible_count, self.i18n.t(count_label_key))
+        } else {
+            format!("({})", visible_count)
+        }
+        .to_uppercase();
+
+        // Tauri FocusedNodeList renders this compact location strip below the
+        // breadcrumb (`🏠 All Servers (n)` or `📍 node (n children)`), separate
+        // from the sidebar section title above the scroll area.
+        div()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | SESSION_FOCUS_DIVIDER_ALPHA))
+            .text_size(px(SESSION_TREE_META_TEXT_SIZE))
+            .text_color(rgb(theme.text_muted))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .child(if focused_node_id.is_some() { "📍" } else { "🏠" })
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "session-focus-location-title",
+                        if focused_node_id.is_some() {
+                            "session-focus-location-node"
+                        } else {
+                            "sessions.focused_list.all_servers"
+                        },
+                        title,
+                        theme.text_muted,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(rgba((theme.text_muted << 8) | 0x80))
+                    .child(count_text),
+            )
+            .into_any_element()
+    }
+
     fn render_active_session_focus_empty(
         &self,
         focused_node_id: Option<&NodeId>,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let message_key = if focused_node_id.is_some() {
-            "sessions.tree.no_sessions"
+        let title_key = if focused_node_id.is_some() {
+            "sessions.focused_list.no_child_nodes"
         } else {
-            "sidebar.panels.no_active_sessions"
+            "sessions.focused_list.no_servers"
+        };
+        let subtitle_key = if focused_node_id.is_some() {
+            "sessions.focused_list.add_by_drilling"
+        } else {
+            "sessions.focused_list.click_to_add"
         };
         div()
-            .h_full()
             .w_full()
             .flex()
+            .flex_col()
             .items_center()
             .justify_center()
+            .py(px(32.0))
             .px_4()
             .text_center()
-            .text_size(px(12.0))
             .text_color(rgb(theme.text_muted))
-            .child(self.i18n.t(message_key))
+            .child(
+                div()
+                    .mb_2()
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Server,
+                        SESSION_FOCUS_EMPTY_ICON_SIZE,
+                        rgba((theme.text_muted << 8) | SESSION_FOCUS_EMPTY_ICON_ALPHA),
+                    )),
+            )
+            .child(
+                div()
+                    .text_size(px(SESSION_FOCUS_EMPTY_TITLE_TEXT_SIZE))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "session-focus-empty-title",
+                        title_key,
+                        self.i18n.t(title_key),
+                        theme.text_muted,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .mt_1()
+                    .text_size(px(SESSION_FOCUS_EMPTY_SUBTITLE_TEXT_SIZE))
+                    .text_color(rgba(
+                        (theme.text_muted << 8)
+                            | (SESSION_FOCUS_EMPTY_SUBTITLE_ALPHA * 255.0).round() as u32,
+                    ))
+                    .child(self.render_display_text_with_role_and_alpha(
+                        SelectableTextRole::PlainDocument,
+                        "session-focus-empty-subtitle",
+                        subtitle_key,
+                        self.i18n.t(subtitle_key),
+                        theme.text_muted,
+                        SESSION_FOCUS_EMPTY_SUBTITLE_ALPHA,
+                        cx,
+                    )),
+            )
             .into_any_element()
     }
 
@@ -499,6 +577,7 @@ impl WorkspaceApp {
         );
         let terminal_count = row.node_view.terminal_ids.len();
         let has_children = row.has_children;
+        let action_label = self.i18n.t("sessions.actions.connect");
         let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
             "session-focus-card",
             &row.node_id,
@@ -647,7 +726,7 @@ impl WorkspaceApp {
                                             | SESSION_FOCUS_TERMINAL_BADGE_HOVER_ALPHA,
                                     ))
                                 })
-                                .child(self.i18n.t("sessions.tree.actions.reconnect"))
+                                .child(action_label)
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, _event, window, cx| {
@@ -1019,10 +1098,7 @@ impl WorkspaceApp {
                     listener,
                     cx,
                 ));
-            } else if matches!(
-                node_view.status(),
-                ActiveSessionStatus::Error | ActiveSessionStatus::Idle
-            ) {
+            } else if matches!(node_view.status(), ActiveSessionStatus::Error) {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
                     let config = node.config.clone();
@@ -1043,8 +1119,35 @@ impl WorkspaceApp {
                 children.push(self.render_session_action_item(
                     node_depth + 1,
                     is_last,
-                    LucideIcon::Play,
-                    self.i18n.t("sessions.tree.actions.reconnect"),
+                    LucideIcon::RefreshCw,
+                    self.i18n.t("sessions.actions.reconnect"),
+                    SessionActionVariant::Primary,
+                    listener,
+                    cx,
+                ));
+            } else if matches!(node_view.status(), ActiveSessionStatus::Idle) {
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    let config = node.config.clone();
+                    let title = node.title.clone();
+                    let saved_connection_id = node.saved_connection_id.clone();
+                    move |this, _event, window, cx| {
+                        let _ = this.queue_ssh_terminal_tab_for_node(
+                            node_id.clone(),
+                            config.clone(),
+                            title.clone(),
+                            saved_connection_id.clone(),
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }
+                });
+                children.push(self.render_session_action_item(
+                    node_depth + 1,
+                    is_last,
+                    LucideIcon::Power,
+                    self.i18n.t("sessions.actions.connect"),
                     SessionActionVariant::Primary,
                     listener,
                     cx,

@@ -36,6 +36,7 @@ const BASE_RETRY_DELAY_MS: u64 = 1_500;
 const MAX_RETRY_DELAY_MS: u64 = 12_000;
 const DOWNLOAD_TIMEOUT_MS: u64 = 120_000;
 const SAVE_STATE_INTERVAL_BYTES: u64 = 256 * 1024;
+const MAX_RETAINED_RESUMABLE_UPDATE_DIRS: usize = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum NativeUpdateError {
@@ -268,6 +269,7 @@ impl NativeUpdateClient {
         set_stage(&mut persisted.status, NativeUpdateStage::Ready);
         save_state_file(&version_dir, &persisted).await?;
         emit_progress(&mut progress, TauriUpdaterEvent::Ready, &persisted.status);
+        let _ = prune_resumable_update_cache(cache_root, Some(&package.version)).await;
 
         Ok(NativeUpdateDownload {
             package,
@@ -631,6 +633,67 @@ async fn clear_version_cache(version_dir: &Path) -> Result<(), NativeUpdateError
             NativeUpdateError::State(format!("remove state file failed: {error}"))
         })?;
     }
+    Ok(())
+}
+
+pub async fn prune_resumable_update_cache(
+    cache_root: &Path,
+    keep_version: Option<&str>,
+) -> Result<(), NativeUpdateError> {
+    if !cache_root.exists() {
+        return Ok(());
+    }
+
+    let keep_segment = keep_version.map(sanitize_path_segment);
+    let mut resumable_dirs: Vec<(i64, PathBuf)> = Vec::new();
+    let mut removable_dirs = Vec::new();
+    let mut entries = tokio::fs::read_dir(cache_root)
+        .await
+        .map_err(|error| NativeUpdateError::State(format!("read updates dir failed: {error}")))?;
+
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|error| NativeUpdateError::State(format!("scan updates dir failed: {error}")))?
+    {
+        let file_type = entry.file_type().await.map_err(|error| {
+            NativeUpdateError::State(format!("read update entry type failed: {error}"))
+        })?;
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let path = entry.path();
+        if keep_segment.as_ref().is_some_and(|segment| {
+            path.file_name().and_then(|name| name.to_str()) == Some(segment.as_str())
+        }) {
+            continue;
+        }
+
+        // Match Tauri's cache contract: only non-terminal downloads are useful
+        // for resume; completed/cancelled/error/no-state directories are stale.
+        match load_state_file(&path).await {
+            Ok(Some(state)) if !state.status.stage.is_terminal() => {
+                resumable_dirs.push((state.status.timestamp, path));
+            }
+            _ => removable_dirs.push(path),
+        }
+    }
+
+    resumable_dirs.sort_by(|left, right| right.0.cmp(&left.0));
+    removable_dirs.extend(
+        resumable_dirs
+            .into_iter()
+            .skip(MAX_RETAINED_RESUMABLE_UPDATE_DIRS)
+            .map(|(_, path)| path),
+    );
+
+    for dir in removable_dirs {
+        tokio::fs::remove_dir_all(&dir).await.map_err(|error| {
+            NativeUpdateError::State(format!("remove update cache dir failed: {error}"))
+        })?;
+    }
+
     Ok(())
 }
 

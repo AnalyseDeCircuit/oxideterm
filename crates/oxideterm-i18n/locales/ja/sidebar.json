@@ -60,11 +60,33 @@
         "reconnect": "再接続",
         "cancel_reconnect": "再接続をキャンセル",
         "port_forwarding": "ポートフォワーディング",
-        "drill_in": "ドリルイン（次のホップ）"
+        "drill_in": "ドリルイン（次のホップ）",
+        "connect": "接続"
       }
     },
     "focused_list": {
-      "terminal": "ターミナル #{{number}}"
+      "all_servers": "すべてのサーバー",
+      "child": "子",
+      "children": "子",
+      "no_child_nodes": "このノードには子ノードがありません",
+      "no_servers": "サーバーがまだありません",
+      "add_by_drilling": "ドリルダウンして子ノードを追加できます",
+      "click_to_add": "+をクリックして新しい接続を追加",
+      "terminal": "ターミナル #{{number}}",
+      "close_terminal": "ターミナルを閉じる"
+    },
+    "actions": {
+      "connect": "接続",
+      "new_terminal": "新規ターミナル",
+      "sftp_explorer": "SFTPエクスプローラー",
+      "port_forwarding": "ポートフォワーディング",
+      "disconnect": "切断",
+      "reconnect": "再接続",
+      "drill_in": "ドリルイン（次のホップ）"
+    },
+    "breadcrumb": {
+      "back_to_root": "ルートビューに戻る",
+      "all_servers": "すべてのサーバー"
     }
   }
 }
