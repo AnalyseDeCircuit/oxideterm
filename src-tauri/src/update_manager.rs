@@ -77,6 +77,7 @@ const MAX_RETRY_DELAY_MS: u64 = 12_000;
 const DOWNLOAD_TIMEOUT_MS: u64 = 120_000;
 const SAVE_STATE_INTERVAL_BYTES: u64 = 256 * 1024;
 const LOCK_PROFILE_ENV: &str = "OXIDETERM_PROFILE_LOCKS";
+const MAX_RETAINED_RESUMABLE_UPDATE_DIRS: usize = 2;
 
 // ── Data types ──────────────────────────────────────────────
 
@@ -611,6 +612,13 @@ async fn run_update_task(
     )
     .await?;
 
+    if let Err(err) = remove_part_file(&version_dir).await {
+        tracing::warn!("Failed to remove completed update package cache: {err}");
+    }
+    if let Err(err) = prune_update_cache(&app, Some(&persisted.status.version)).await {
+        tracing::warn!("Failed to prune stale update cache: {err}");
+    }
+
     clear_active_task_if_needed(runtime_state, &persisted.status.task_id).await;
     Ok(())
 }
@@ -1075,16 +1083,84 @@ async fn clear_version_cache(version_dir: &Path) -> Result<(), UpdateError> {
     if !version_dir.exists() {
         return Ok(());
     }
-    if version_dir.join(PART_FILE_NAME).exists() {
-        tokio::fs::remove_file(version_dir.join(PART_FILE_NAME))
-            .await
-            .map_err(|err| UpdateError::State(format!("remove part file failed: {err}")))?;
-    }
+    remove_part_file(version_dir).await?;
     if version_dir.join(STATE_FILE_NAME).exists() {
         tokio::fs::remove_file(version_dir.join(STATE_FILE_NAME))
             .await
             .map_err(|err| UpdateError::State(format!("remove state file failed: {err}")))?;
     }
+    Ok(())
+}
+
+async fn remove_part_file(version_dir: &Path) -> Result<(), UpdateError> {
+    let part_path = version_dir.join(PART_FILE_NAME);
+    if part_path.exists() {
+        tokio::fs::remove_file(part_path)
+            .await
+            .map_err(|err| UpdateError::State(format!("remove part file failed: {err}")))?;
+    }
+    Ok(())
+}
+
+async fn prune_update_cache(
+    app: &AppHandle,
+    keep_version: Option<&str>,
+) -> Result<(), UpdateError> {
+    let root = updates_root(app)?;
+    if !root.exists() {
+        return Ok(());
+    }
+
+    let keep_segment = keep_version.map(sanitize_path_segment);
+    let mut resumable_dirs: Vec<(i64, PathBuf)> = Vec::new();
+    let mut removable_dirs = Vec::new();
+    let mut entries = tokio::fs::read_dir(&root)
+        .await
+        .map_err(|err| UpdateError::State(format!("read updates directory failed: {err}")))?;
+
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|err| UpdateError::State(format!("scan updates directory failed: {err}")))?
+    {
+        let file_type = entry.file_type().await.map_err(|err| {
+            UpdateError::State(format!("read directory entry type failed: {err}"))
+        })?;
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let path = entry.path();
+        if keep_segment.as_ref().is_some_and(|segment| {
+            path.file_name().and_then(|name| name.to_str()) == Some(segment.as_str())
+        }) {
+            continue;
+        }
+
+        // Only non-terminal downloads can be resumed after restart; terminal
+        // states and no-state directories are stale update payload cache.
+        match load_state_file(&path).await {
+            Ok(Some(state)) if !state.status.stage.is_terminal() => {
+                resumable_dirs.push((state.status.timestamp, path));
+            }
+            _ => removable_dirs.push(path),
+        }
+    }
+
+    resumable_dirs.sort_by(|left, right| right.0.cmp(&left.0));
+    removable_dirs.extend(
+        resumable_dirs
+            .into_iter()
+            .skip(MAX_RETAINED_RESUMABLE_UPDATE_DIRS)
+            .map(|(_, path)| path),
+    );
+
+    for dir in removable_dirs {
+        tokio::fs::remove_dir_all(&dir)
+            .await
+            .map_err(|err| UpdateError::State(format!("remove cache dir failed: {err}")))?;
+    }
+
     Ok(())
 }
 
