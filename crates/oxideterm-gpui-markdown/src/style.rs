@@ -40,6 +40,32 @@ pub fn code_bg_color(tokens: &ThemeTokens) -> Hsla {
     hex_to_hsla(tokens.ui.bg_elevated)
 }
 
+pub fn code_block_bg_color(tokens: &ThemeTokens) -> Hsla {
+    hex_to_hsla(tokens.ui.bg_panel)
+}
+
+pub fn code_block_border_color(tokens: &ThemeTokens) -> Hsla {
+    let mut c = hex_to_hsla(tokens.ui.border);
+    c.a = 0.2;
+    c
+}
+
+pub fn code_block_header_bg_color(tokens: &ThemeTokens) -> Hsla {
+    hex_to_hsla(tokens.ui.bg_panel)
+}
+
+pub fn code_block_header_border_color(tokens: &ThemeTokens) -> Hsla {
+    let mut c = hex_to_hsla(tokens.ui.border);
+    c.a = 0.05;
+    c
+}
+
+pub fn code_action_color(tokens: &ThemeTokens) -> Hsla {
+    let mut c = hex_to_hsla(tokens.ui.text_muted);
+    c.a = 0.5;
+    c
+}
+
 pub fn divider_color(tokens: &ThemeTokens) -> Hsla {
     hex_to_hsla(tokens.ui.divider)
 }

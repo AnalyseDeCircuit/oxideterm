@@ -19,6 +19,9 @@ impl Render for WorkspaceApp {
         self.poll_ai_compaction_results(cx);
         self.poll_ai_model_selector_probe_results(cx);
         self.poll_ai_model_refresh_results(cx);
+        if self.ai_sidebar_visible() || self.ai_inline_panel.open {
+            self.ensure_ai_model_selector_mount_statuses(cx);
+        }
         self.observe_active_tab_for_history();
         let title = self
             .active_tab()

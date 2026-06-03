@@ -312,11 +312,7 @@ impl WorkspaceApp {
                                                 ))
                                             },
                                         ),
-                                    move |anchor, _window, cx| {
-                                        let _ = workspace.update(cx, |this, cx| {
-                                            this.update_text_input_anchor(anchor, cx);
-                                        });
-                                    },
+                                    Self::deferred_ai_text_input_anchor_update(workspace.clone()),
                                 ),
                             )
                             .child(self.render_terminal_ai_inline_hints(cx))

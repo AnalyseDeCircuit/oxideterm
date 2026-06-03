@@ -149,7 +149,13 @@ pub fn confirm_dialog_with_focus(
                 )
                 .child(
                     div()
+                        .w_full()
                         .flex()
+                        // Tauri clips split footer button backgrounds through
+                        // DialogContent's rounded overflow-hidden surface.
+                        // GPUI needs the footer row to own that bottom clip too.
+                        .rounded_b(px(tokens.radii.lg))
+                        .overflow_hidden()
                         .border_t_1()
                         .border_color(rgba((theme.border << 8) | CONFIRM_DIVIDER_ALPHA))
                         .child(

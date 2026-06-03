@@ -215,6 +215,9 @@ impl WorkspaceApp {
             .border_color(rgb(self.tokens.ui.border))
             .bg(rgb(self.tokens.ui.bg_elevated))
             .shadow_lg()
+            // Tauri uses a rounded `overflow-y-auto` popover; clipping keeps
+            // active row borders/backgrounds inside the rounded dropdown edge.
+            .overflow_hidden()
             // Conversation dropdown mirrors a browser popover list: wheel input
             // stays with the overlay and cannot scroll the message/sidebar body.
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
@@ -236,8 +239,14 @@ impl WorkspaceApp {
                     )),
             );
         } else {
-            for conversation in &self.ai_chat.conversations {
-                list = list.child(self.render_ai_conversation_item(conversation, cx));
+            let conversation_count = self.ai_chat.conversations.len();
+            for (index, conversation) in self.ai_chat.conversations.iter().enumerate() {
+                list = list.child(self.render_ai_conversation_item(
+                    conversation,
+                    index == 0,
+                    index + 1 == conversation_count,
+                    cx,
+                ));
             }
         }
         list.into_any_element()
@@ -246,6 +255,8 @@ impl WorkspaceApp {
     fn render_ai_conversation_item(
         &self,
         conversation: &AiConversation,
+        is_first: bool,
+        is_last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = conversation.id.clone();
@@ -281,8 +292,15 @@ impl WorkspaceApp {
             } else {
                 rgba(0x00000000)
             })
+            // Tauri relies on the rounded overflow-y-auto popover to clip the
+            // active row background and border-left. GPUI needs the edge rows to
+            // own matching corners so the highlight follows the popover radius.
+            .when(is_first, |row| row.rounded_t(px(self.tokens.radii.md)))
+            .when(is_last, |row| row.rounded_b(px(self.tokens.radii.md)))
             .cursor_pointer()
-            .hover(|style| style.bg(rgba((self.tokens.ui.bg_panel << 8) | 0x66)))
+            .when(!is_active, |row| {
+                row.hover(|style| style.bg(rgba((self.tokens.ui.bg_panel << 8) | 0x66)))
+            })
             .child(
                 div()
                     .min_w_0()
@@ -455,7 +473,7 @@ impl WorkspaceApp {
             } else {
                 rgba((self.tokens.ui.border << 8) | 0x1a)
             }),
-            cx.listener(move |this, _event, window, cx| {
+            move |this, _event, window, cx| {
                 match action {
                     AiHeaderAction::Settings => this.open_ai_settings(window, cx),
                     AiHeaderAction::NewChat => {
@@ -463,7 +481,7 @@ impl WorkspaceApp {
                         this.reset_standard_confirm_focus();
                     }
                 }
-            }),
+            },
             cx,
         )
         .into_any_element()

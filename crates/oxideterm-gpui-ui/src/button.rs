@@ -402,9 +402,11 @@ pub fn split_footer_button(
     let disabled = options.disabled || options.loading;
     let button = div()
         .flex_1()
+        .min_w_0()
         .flex()
         .items_center()
         .justify_center()
+        .overflow_hidden()
         .text_align(gpui::TextAlign::Center)
         .font_weight(options.font_weight)
         .text_color(options.text_color)

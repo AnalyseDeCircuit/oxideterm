@@ -1,31 +1,39 @@
 use gpui::StatefulInteractiveElement;
 
 impl WorkspaceApp {
-    pub(super) fn render_tab_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_tab_bar(&self, _window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let scroll_x = self.tabbar_effective_scroll_x(window);
-        let mut bar = div()
+        let bar = div()
             .h(px(self.tokens.metrics.tabbar_height))
+            .flex()
+            .flex_row()
+            .items_center()
+            .overflow_hidden()
+            .border_b_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg));
+
+        // Tauri's scroll container measures the full inline-flex tab row as
+        // scrollWidth. GPUI's ScrollHandle computes max_offset from direct
+        // child bounds, so tab items must stay direct children of this viewport;
+        // reintroducing a wrapper row can make max_offset stay zero while the
+        // visible strip overflows.
+        let mut scroll_viewport = div()
+            .id("workspace-tab-scroll-viewport")
+            .h_full()
+            .flex_1()
+            .min_w(px(0.0))
+            .relative()
             .flex()
             .flex_row()
             .items_center()
             .pl(px(self.tokens.metrics.tabbar_leading_offset))
             .overflow_hidden()
-            .border_b_1()
-            .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg))
+            .overflow_x_scroll()
+            .track_scroll(&self.tab_scroll_handle)
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
                 this.handle_tabbar_scroll(event, window, cx);
             }));
-
-        let mut tabs_row = div()
-            .h_full()
-            .flex()
-            .flex_row()
-            .items_center()
-            .flex_none()
-            .relative()
-            .left(px(-scroll_x));
 
         for (tab_index, tab) in self.tabs.iter().enumerate() {
             let tab_id = tab.id;
@@ -68,7 +76,7 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.text_muted)
             };
-            tabs_row = tabs_row.child(
+            scroll_viewport = scroll_viewport.child(
                 div()
                     .id(("workspace-tab", tab_id.0))
                     .h_full()
@@ -182,13 +190,11 @@ impl WorkspaceApp {
             );
         }
 
-        bar = bar
-            .child(tabs_row)
-            .child(div().flex_1().min_w(px(0.0)))
+        bar.child(scroll_viewport)
             .when_some(self.render_legacy_terminal_actions(cx), |bar, actions| {
                 bar.child(actions)
-            });
-        bar.into_any_element()
+            })
+            .into_any_element()
     }
 
     pub(super) fn render_tab_close_confirm_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -402,14 +408,7 @@ impl WorkspaceApp {
     }
 
     fn render_legacy_terminal_actions(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let active_tab = self.active_tab()?;
-        if !matches!(active_tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal) {
-            return None;
-        }
-        let command_bar = &self.settings_store.settings().terminal.command_bar;
-        if command_bar.enabled && !command_bar.show_legacy_toolbar {
-            return None;
-        }
+        let active_tab = self.legacy_terminal_actions_tab()?;
 
         let theme = self.tokens.ui;
         let is_local_terminal = active_tab.kind == TabKind::LocalTerminal;
@@ -424,18 +423,7 @@ impl WorkspaceApp {
             .as_ref()
             .map(|root| root.pane_count())
             .unwrap_or(1);
-        let active_pane_id = self.active_pane_id();
-        let broadcast_targets =
-            self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)));
-        let broadcast_label = if self.terminal_broadcast_enabled {
-            if self.terminal_broadcast_targets.is_empty() {
-                self.i18n.t("terminal.command_bar.all_targets")
-            } else {
-                broadcast_targets.len().to_string()
-            }
-        } else {
-            String::new()
-        };
+        let broadcast_label = self.terminal_broadcast_toolbar_label();
 
         Some(
             div()
@@ -443,33 +431,33 @@ impl WorkspaceApp {
                 .flex_none()
                 .flex()
                 .items_center()
-                .gap(px(4.0))
-                .px(px(8.0))
+                .gap(px(TABBAR_LEGACY_ACTION_GAP))
+                .px(px(TABBAR_LEGACY_ACTION_PADDING_X))
                 .border_l_1()
                 .border_color(rgb(theme.border))
                 .bg(rgb(theme.bg))
                 .when(
-                    self.terminal_broadcast_enabled && !broadcast_label.is_empty(),
+                    broadcast_label.is_some(),
                     |actions| {
                         actions.child(
                             div()
-                                .h(px(20.0))
-                                .px(px(6.0))
+                                .h(px(TABBAR_LEGACY_BROADCAST_BADGE_HEIGHT))
+                                .px(px(TABBAR_LEGACY_BROADCAST_BADGE_PADDING_X))
                                 .flex()
                                 .items_center()
-                                .gap(px(4.0))
+                                .gap(px(TABBAR_LEGACY_BROADCAST_BADGE_GAP))
                                 .rounded_md()
                                 .border_1()
                                 .border_color(rgba(0xf973164d))
                                 .bg(rgba(0xf973161a))
-                                .text_size(px(11.0))
+                                .text_size(px(TABBAR_LEGACY_BROADCAST_FONT_SIZE))
                                 .text_color(rgba(0xfdba74ff))
                                 .child(Self::render_lucide_icon(
                                     LucideIcon::Radio,
-                                    12.0,
+                                    TABBAR_LEGACY_BROADCAST_ICON_SIZE,
                                     rgba(0xfdba74ff),
                                 ))
-                                .child(broadcast_label),
+                                .child(broadcast_label.unwrap_or_default()),
                         )
                     },
                 )
@@ -501,7 +489,7 @@ impl WorkspaceApp {
                             actions.child(
                                 div()
                                     .h(px(20.0))
-                                    .min_w(px(20.0))
+                                    .min_w(px(TABBAR_LEGACY_PANE_BADGE_MIN_WIDTH))
                                     .px(px(5.0))
                                     .flex()
                                     .items_center()

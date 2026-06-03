@@ -137,7 +137,7 @@ impl WorkspaceApp {
             tab_drag: None,
             tab_close_confirm: None,
             panes: HashMap::new(),
-            tab_scroll_x: 0.0,
+            tab_scroll_handle: ScrollHandle::new(),
             next_tab_id: 1,
             next_pane_id: 1,
             next_session_id: 1,
@@ -356,6 +356,7 @@ impl WorkspaceApp {
             ai_model_selector_highlighted_model: None,
             ai_model_selector_provider_online: HashMap::new(),
             ai_model_selector_probe_generations: HashMap::new(),
+            ai_model_selector_status_signature: 0,
             ai_chat,
             ai_chat_list_state: tauri_virtual_list_state(
                 0,

@@ -1,4 +1,16 @@
 impl WorkspaceApp {
+    pub(super) fn ensure_ai_model_selector_mount_statuses(&mut self, cx: &mut Context<Self>) {
+        let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
+        let signature = ai_model_selector_status_signature(&providers);
+        if self.ai_model_selector_status_signature == signature {
+            return;
+        }
+        self.ai_model_selector_status_signature = signature;
+        // Mirrors Tauri ModelSelector's mount/provider-change checkAllKeys
+        // effect: the trigger indicator starts probing before the user opens it.
+        self.refresh_ai_model_selector_provider_statuses(cx);
+    }
+
     fn toggle_ai_model_selector(
         &mut self,
         scope: AiModelSelectorScope,
@@ -380,4 +392,56 @@ pub(super) struct AiModelSelectorProbeDelivery {
     pub(super) provider_id: String,
     pub(super) generation: u64,
     pub(super) online: bool,
+}
+
+fn ai_model_selector_status_signature(providers: &[AiProviderView]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    providers.len().hash(&mut hasher);
+    for provider in providers {
+        provider.id.hash(&mut hasher);
+        provider.enabled.hash(&mut hasher);
+        provider.provider_type.hash(&mut hasher);
+        provider.base_url.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+#[cfg(test)]
+mod model_selector_status_signature_tests {
+    use super::*;
+
+    fn provider(id: &str, provider_type: &str, base_url: &str, enabled: bool) -> AiProviderView {
+        AiProviderView {
+            id: id.to_string(),
+            provider_type: provider_type.to_string(),
+            name: id.to_string(),
+            base_url: base_url.to_string(),
+            default_model: "model-a".to_string(),
+            models: vec!["model-a".to_string()],
+            enabled,
+            custom: false,
+        }
+    }
+
+    #[test]
+    fn model_selector_status_signature_tracks_provider_probe_inputs() {
+        let base = vec![provider("openai", "openai", "https://api.openai.com/v1", true)];
+        let changed_base_url = vec![provider("openai", "openai", "http://localhost:11434", true)];
+        let disabled = vec![provider("openai", "openai", "https://api.openai.com/v1", false)];
+        let mut model_only_change = base.clone();
+        model_only_change[0].models.push("model-b".to_string());
+
+        assert_ne!(
+            ai_model_selector_status_signature(&base),
+            ai_model_selector_status_signature(&changed_base_url)
+        );
+        assert_ne!(
+            ai_model_selector_status_signature(&base),
+            ai_model_selector_status_signature(&disabled)
+        );
+        assert_eq!(
+            ai_model_selector_status_signature(&base),
+            ai_model_selector_status_signature(&model_only_change)
+        );
+    }
 }
