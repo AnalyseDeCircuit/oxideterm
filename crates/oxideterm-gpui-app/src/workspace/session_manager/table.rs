@@ -509,6 +509,12 @@ impl WorkspaceApp {
             self.manager_table_metrics(),
             selected,
         )
+        // Tauri's row actions are `sticky right-0` inside the table scroller:
+        // short tables pin actions to the visible right edge, narrow tables
+        // still scroll at the column min-width. Mirror that with full width
+        // plus the same min-width used by the header.
+        .w_full()
+        .min_w(px(self.manager_table_min_width()))
         .id((
             gpui::ElementId::from("session-manager-table-row"),
             conn.id.clone(),

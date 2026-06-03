@@ -48,11 +48,7 @@ impl WorkspaceApp {
             .child(select_anchor_probe(
                 SelectAnchorId::AiPanelRoot,
                 panel,
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
-                    });
-                },
+                Self::deferred_ai_select_anchor_update(workspace),
             ))
             .into_any_element()
     }

@@ -475,9 +475,20 @@ impl WorkspaceApp {
                         this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                     }),
                 ),
-            move |anchor, _window: &mut Window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_selectable_text_anchor(id, value_for_anchor, layout, anchor, cx);
+            move |anchor, window: &mut Window, cx| {
+                // Read-only text anchors are render caches. Writing them from
+                // prepaint can re-enter WorkspaceApp while a menu/modal click is
+                // already updating it, so commit the cache after the frame.
+                window.defer(cx, move |_window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.update_selectable_text_anchor(
+                            id,
+                            value_for_anchor,
+                            layout,
+                            anchor,
+                            cx,
+                        );
+                    });
                 });
             },
         )
@@ -606,17 +617,22 @@ impl WorkspaceApp {
                             },
                         ))
                 }),
-            move |anchor, _window: &mut Window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_selectable_text_group_fragment(
-                        group_id,
-                        fragment_id,
-                        order,
-                        value_for_anchor,
-                        layout,
-                        anchor,
-                        cx,
-                    );
+            move |anchor, window: &mut Window, cx| {
+                // Read-only text anchors are render caches. Writing them from
+                // prepaint can re-enter WorkspaceApp while a menu/modal click is
+                // already updating it, so commit the cache after the frame.
+                window.defer(cx, move |_window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.update_selectable_text_group_fragment(
+                            group_id,
+                            fragment_id,
+                            order,
+                            value_for_anchor,
+                            layout,
+                            anchor,
+                            cx,
+                        );
+                    });
                 });
             },
         )
@@ -930,17 +946,22 @@ impl SelectableTextRenderState {
                         }
                     },
                 ),
-            move |anchor, _window: &mut Window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_selectable_text_group_fragment(
-                        group_id,
-                        fragment_id,
-                        order,
-                        value_for_anchor,
-                        layout,
-                        anchor,
-                        cx,
-                    );
+            move |anchor, window: &mut Window, cx| {
+                // Read-only text anchors are render caches. Writing them from
+                // prepaint can re-enter WorkspaceApp while a menu/modal click is
+                // already updating it, so commit the cache after the frame.
+                window.defer(cx, move |_window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.update_selectable_text_group_fragment(
+                            group_id,
+                            fragment_id,
+                            order,
+                            value_for_anchor,
+                            layout,
+                            anchor,
+                            cx,
+                        );
+                    });
                 });
             },
         )

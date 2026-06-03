@@ -1,6 +1,6 @@
 use gpui::{
-    Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, Stateful,
-    StatefulInteractiveElement, Styled, div, prelude::*, px, rgb, rgba,
+    Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
+    Stateful, StatefulInteractiveElement, Styled, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -252,6 +252,7 @@ pub fn ai_tool_pre(
     id: impl Into<ElementId>,
     content: impl Into<String>,
     max_height: f32,
+    mono_font_family: SharedString,
 ) -> Stateful<Div> {
     div()
         .id(id)
@@ -263,7 +264,8 @@ pub fn ai_tool_pre(
         .px(px(tokens.spacing.one + tokens.spacing.one / 2.0))
         .py(px(tokens.spacing.one))
         .text_size(px(AI_TEXT_10))
-        .font_family(ai_font_family())
+        // Tauri maps tool argument/output <pre> blocks to var(--terminal-font-family).
+        .font_family(mono_font_family)
         .text_color(muted_text(tokens, AI_MUTED_TEXT_60_ALPHA))
         .whitespace_normal()
         .child(content.into())
@@ -273,22 +275,43 @@ pub fn ai_tool_args_pre(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
     content: impl Into<String>,
+    mono_font_family: SharedString,
 ) -> Stateful<Div> {
-    ai_tool_pre(tokens, id, content, AI_TOOL_ARGS_MAX_HEIGHT)
+    ai_tool_pre(
+        tokens,
+        id,
+        content,
+        AI_TOOL_ARGS_MAX_HEIGHT,
+        mono_font_family,
+    )
 }
 
 pub fn ai_tool_structured_pre(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
     content: impl Into<String>,
+    mono_font_family: SharedString,
 ) -> Stateful<Div> {
-    ai_tool_pre(tokens, id, content, AI_TOOL_STRUCTURED_MAX_HEIGHT)
+    ai_tool_pre(
+        tokens,
+        id,
+        content,
+        AI_TOOL_STRUCTURED_MAX_HEIGHT,
+        mono_font_family,
+    )
 }
 
 pub fn ai_tool_output_pre(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
     content: impl Into<String>,
+    mono_font_family: SharedString,
 ) -> Stateful<Div> {
-    ai_tool_pre(tokens, id, content, AI_TOOL_OUTPUT_MAX_HEIGHT)
+    ai_tool_pre(
+        tokens,
+        id,
+        content,
+        AI_TOOL_OUTPUT_MAX_HEIGHT,
+        mono_font_family,
+    )
 }

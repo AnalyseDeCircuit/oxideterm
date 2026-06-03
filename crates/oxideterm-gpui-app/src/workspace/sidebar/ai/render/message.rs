@@ -513,6 +513,20 @@ impl WorkspaceApp {
             "ai-markdown-message",
             &message.id,
         );
+        let workspace = cx.entity();
+        let code_actions = markdown_render::MarkdownCodeBlockActions {
+            on_run: Some(Arc::new(move |command, window, cx| {
+                let workspace = workspace.clone();
+                // Markdown action callbacks are plain event callbacks, not
+                // WorkspaceApp listeners. Defer the entity write so code block
+                // buttons cannot nest a WorkspaceApp update inside another one.
+                window.defer(cx, move |_window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.insert_ai_code_block_command(command, cx);
+                    });
+                });
+            })),
+        };
         let mut text_order = 0usize;
         let mut render_text = |key: String,
                                text: gpui::SharedString,
@@ -535,7 +549,7 @@ impl WorkspaceApp {
         let rendered = viewport
             .filter(|_| !message.is_streaming)
             .map(|viewport| {
-                markdown_render::render_document_windowed_selectable(
+                markdown_render::render_document_windowed_selectable_with_code_actions(
                     &cached.document,
                     &cached.layout,
                     &self.tokens,
@@ -543,14 +557,16 @@ impl WorkspaceApp {
                     viewport.top,
                     viewport.height,
                     AI_MARKDOWN_WINDOW_OVERDRAW_PX,
+                    Some(&code_actions),
                     &mut render_text,
                 )
             })
             .unwrap_or_else(|| {
-                markdown_render::render_document_selectable(
+                markdown_render::render_document_selectable_with_code_actions(
                     &cached.document,
                     &self.tokens,
                     &options,
+                    Some(&code_actions),
                     &mut render_text,
                 )
             });
@@ -560,6 +576,18 @@ impl WorkspaceApp {
             .text_color(rgb(self.tokens.ui.text))
             .child(rendered)
             .into_any_element()
+    }
+
+    fn insert_ai_code_block_command(&mut self, command: String, cx: &mut Context<Self>) {
+        if command.trim().is_empty() {
+            return;
+        }
+        if let Some(pane) = self.active_pane() {
+            let _ = pane.update(cx, |pane, cx| {
+                // Tauri's ai-insert-command writes programmatic terminal input without submitting it.
+                pane.send_ai_input_bytes(command.as_bytes(), cx);
+            });
+        }
     }
 
     fn render_ai_follow_up_suggestions(
@@ -1116,6 +1144,7 @@ impl WorkspaceApp {
                 pending_denied_command: risk == AiToolRisk::Destructive,
                 bypass_approval,
             };
+            let tool_mono_font = settings_mono_font_family(self.settings_store.settings());
             let expansion_key = format!("{}:{id}", message.id);
             let expanded = self.ai_tool_call_expansion_state.contains(&expansion_key);
             let header_key = expansion_key.clone();
@@ -1167,6 +1196,7 @@ impl WorkspaceApp {
                             &self.tokens,
                             ("ai-tool-args", ai_message_element_seed(&id)),
                             pretty_tool_json_or_raw(&arguments),
+                            tool_mono_font.clone(),
                         )),
                 );
             if let Some(result) = result {
@@ -1182,6 +1212,7 @@ impl WorkspaceApp {
                                 &self.tokens,
                                 ("ai-tool-policy", ai_message_element_seed(&id)),
                                 ai_tool_policy_decision_summary(policy_decision),
+                                tool_mono_font.clone(),
                             )),
                     );
                 }
@@ -1205,6 +1236,7 @@ impl WorkspaceApp {
                             &self.tokens,
                             ("ai-tool-output", ai_message_element_seed(&id)),
                             output,
+                            tool_mono_font.clone(),
                         )),
                 );
             }
@@ -1324,12 +1356,11 @@ impl WorkspaceApp {
                 this.update_ime_selection_drag_from_mouse_move(event, window, cx);
             }),
         );
-        let workspace = cx.entity();
-        let input = text_input_anchor_probe(target.anchor_id(), input, move |anchor, _window, cx| {
-            let _ = workspace.update(cx, |this, cx| {
-                this.update_text_input_anchor(anchor, cx);
-            });
-        });
+        let input = text_input_anchor_probe(
+            target.anchor_id(),
+            input,
+            Self::deferred_ai_text_input_anchor_update(cx.entity()),
+        );
 
         div()
             .flex()
@@ -1474,11 +1505,7 @@ impl WorkspaceApp {
                                             cx.notify();
                                         }),
                                     ),
-                                move |anchor, _window, cx| {
-                                    let _ = workspace.update(cx, |this, cx| {
-                                        this.update_select_anchor(anchor, cx);
-                                    });
-                                },
+                                Self::deferred_ai_select_anchor_update(workspace),
                             ),
                         )
                     }),
@@ -1555,11 +1582,7 @@ impl WorkspaceApp {
             select_anchor_probe(
                 SelectAnchorId::AiChatMenu,
                 button,
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
-                    });
-                },
+                Self::deferred_ai_select_anchor_update(workspace),
             )
             .into_any_element()
         } else {

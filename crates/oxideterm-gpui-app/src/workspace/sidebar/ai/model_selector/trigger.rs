@@ -76,11 +76,7 @@ impl WorkspaceApp {
             .child(select_anchor_probe(
                 anchor_id,
                 trigger,
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
-                    });
-                },
+                Self::deferred_ai_select_anchor_update(workspace),
             ))
             .into_any_element()
     }
@@ -171,15 +167,10 @@ impl WorkspaceApp {
                     this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                 }),
             );
-        let workspace = cx.entity();
         let input = text_input_anchor_probe(
             target.anchor_id(),
             input,
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
-            },
+            Self::deferred_ai_text_input_anchor_update(cx.entity()),
         );
         let clear = (!self.ai_model_selector_search_query.is_empty()).then(|| {
             div()

@@ -154,12 +154,11 @@ impl WorkspaceApp {
                 this.update_ime_selection_drag_from_mouse_move(event, window, cx);
             }),
         );
-        let workspace = cx.entity();
-        let input = text_input_anchor_probe(target.anchor_id(), input, move |anchor, _window, cx| {
-            let _ = workspace.update(cx, |this, cx| {
-                this.update_text_input_anchor(anchor, cx);
-            });
-        });
+        let input = text_input_anchor_probe(
+            target.anchor_id(),
+            input,
+            Self::deferred_ai_text_input_anchor_update(cx.entity()),
+        );
         let send_disabled = !enabled || self.ai_chat_draft.trim().is_empty();
         let action_focused = self.ai_chat_footer_focus == Some(AiChatFooterAction::Submit)
             && (self.ai_chat_loading || !send_disabled);
@@ -292,11 +291,7 @@ impl WorkspaceApp {
                                 cx.notify();
                             }),
                         ),
-                        move |anchor, _window, cx| {
-                            let _ = workspace.update(cx, |this, cx| {
-                                this.update_select_anchor(anchor, cx);
-                            });
-                        },
+                        Self::deferred_ai_select_anchor_update(workspace),
                     ),
                 )
             .into_any_element(),
@@ -343,14 +338,7 @@ impl WorkspaceApp {
                             cx.notify();
                         }),
                     ),
-                    {
-                        let workspace = cx.entity();
-                        move |anchor, _window, cx| {
-                            let _ = workspace.update(cx, |this, cx| {
-                                this.update_select_anchor(anchor, cx);
-                            });
-                        }
-                    },
+                    Self::deferred_ai_select_anchor_update(cx.entity()),
                 ),
             )
             .into_any_element()
@@ -510,7 +498,7 @@ impl WorkspaceApp {
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
+                        SelectableTextRole::NonSelectable,
                         "ai-safety-menu",
                         "title",
                         self.i18n.t("ai.safety_mode.menu_title"),
@@ -561,9 +549,9 @@ impl WorkspaceApp {
                 false,
                 false,
                 Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-                cx.listener(|this, _event, window, cx| {
+                |this, _event, window, cx| {
                     this.open_ai_settings(window, cx);
-                }),
+                },
                 cx,
             ))
             .into_any_element()
@@ -642,17 +630,28 @@ impl WorkspaceApp {
             false,
             false,
             Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-            cx.listener(move |this, _event, _window, cx| {
+            move |this, _event, window, cx| {
                 match mode {
                     AiSafetyMode::Default => this.set_ai_safety_mode_default(cx),
                     AiSafetyMode::Bypass => {
                         if this.active_ai_safety_mode() != AiSafetyMode::Bypass {
-                            this.ai_safety_confirm_open = true;
-                            this.reset_standard_confirm_focus();
+                            // The safety menu is itself a floating overlay.
+                            // Open the confirm dialog after this click/update
+                            // cycle so GPUI does not re-enter WorkspaceApp while
+                            // the old menu frame is still being processed.
+                            cx.defer_in(window, |this, _window, cx| {
+                                this.ai_safety_confirm_open = true;
+                                // Tauri useConfirm does not paint a footer focus
+                                // state when the dialog is opened from a pointer
+                                // menu action; focus-visible appears only after
+                                // keyboard navigation enters the footer.
+                                this.clear_standard_confirm_focus();
+                                cx.notify();
+                            });
                         }
                     }
                 }
-            }),
+            },
             cx,
         )
         .into_any_element()
@@ -668,7 +667,7 @@ impl WorkspaceApp {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
                     .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
+                        SelectableTextRole::NonSelectable,
                         "ai-safety-confirm",
                         "title",
                         self.i18n.t("ai.safety_mode.confirm_title"),
@@ -679,7 +678,7 @@ impl WorkspaceApp {
                 description: Some(
                     div()
                         .child(self.render_display_text_with_role(
-                            SelectableTextRole::PlainDocument,
+                            SelectableTextRole::NonSelectable,
                             "ai-safety-confirm",
                             "description",
                             self.i18n.t("ai.safety_mode.confirm_description"),
@@ -709,7 +708,7 @@ impl WorkspaceApp {
                     ))
                     .into_any_element(),
             },
-            self.standard_confirm_focus(),
+            self.standard_confirm_focus_owner(),
             cx.listener(|this, _event, _window, cx| {
                 this.ai_safety_confirm_open = false;
                 this.clear_standard_confirm_focus();
@@ -812,11 +811,7 @@ impl WorkspaceApp {
         select_anchor_probe(
             SelectAnchorId::AiContextPopover,
             indicator,
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
-            },
+            Self::deferred_ai_select_anchor_update(workspace),
         )
         .into_any_element()
     }

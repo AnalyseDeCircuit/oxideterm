@@ -1,5 +1,21 @@
 const TAB_DRAG_THRESHOLD_PX: f32 = 10.0;
 
+fn tab_drag_is_horizontal_reorder(delta_x: f32, delta_y: f32) -> bool {
+    let horizontal = delta_x.abs();
+    let vertical = delta_y.abs();
+    horizontal > TAB_DRAG_THRESHOLD_PX && horizontal >= vertical
+}
+
+fn tabbar_tauri_wheel_scroll_delta(delta_x: f32, delta_y: f32) -> f32 {
+    if delta_y != 0.0 { delta_y } else { delta_x }
+}
+
+// GPUI wheel deltas are applied to negative scroll offsets. The tab bar keeps a
+// browser-like positive scrollLeft value, so advancing the strip subtracts delta.
+fn tabbar_scroll_x_after_wheel(current_scroll_x: f32, wheel_delta: f32, max_scroll: f32) -> f32 {
+    (current_scroll_x - wheel_delta).clamp(0.0, max_scroll)
+}
+
 impl WorkspaceApp {
     pub(super) fn observe_active_tab_for_history(&mut self) {
         let active_tab_id = self.active_tab_id;
@@ -792,7 +808,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn tabbar_viewport_width(&self, window: &Window) -> f32 {
+    fn tabbar_outer_width(&self, window: &Window) -> f32 {
         let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
         let sidebar_width = if self.sidebar_collapsed {
             self.tokens.metrics.activity_bar_width
@@ -805,6 +821,17 @@ impl WorkspaceApp {
             0.0
         };
         (window_width - sidebar_width - ai_sidebar_width).max(0.0)
+    }
+
+    fn tabbar_scroll_viewport_width(&self, window: &Window) -> f32 {
+        let measured_width = f32::from(self.tab_scroll_handle.bounds().size.width);
+        if measured_width > 1.0 {
+            return measured_width;
+        }
+        // Tauri places terminal-specific actions outside the scroll container,
+        // so reveal/clamp math must subtract that fixed right toolbar from the
+        // outer tab bar width before GPUI has measured the scroll viewport.
+        (self.tabbar_outer_width(window) - self.tabbar_legacy_actions_width()).max(0.0)
     }
 
     fn tabbar_left_x(&self) -> f32 {
@@ -825,11 +852,16 @@ impl WorkspaceApp {
     }
 
     fn tabbar_max_scroll(&self, window: &Window) -> f32 {
-        (self.tabbar_content_width() - self.tabbar_viewport_width(window)).max(0.0)
+        let measured_width = f32::from(self.tab_scroll_handle.bounds().size.width);
+        if measured_width > 1.0 {
+            return f32::from(self.tab_scroll_handle.max_offset().width);
+        }
+        (self.tabbar_content_width() - self.tabbar_scroll_viewport_width(window)).max(0.0)
     }
 
     fn clamp_tab_scroll(&mut self, window: &Window) {
-        self.tab_scroll_x = self.tab_scroll_x.clamp(0.0, self.tabbar_max_scroll(window));
+        let scroll_x = self.tabbar_effective_scroll_x(window);
+        self.set_tabbar_scroll_x(scroll_x, window);
     }
 
     fn tabbar_has_overflow(&self, window: &Window) -> bool {
@@ -838,10 +870,63 @@ impl WorkspaceApp {
 
     pub(super) fn tabbar_effective_scroll_x(&self, window: &Window) -> f32 {
         if self.tabbar_has_overflow(window) {
-            self.tab_scroll_x.clamp(0.0, self.tabbar_max_scroll(window))
+            f32::from(-self.tab_scroll_handle.offset().x).clamp(0.0, self.tabbar_max_scroll(window))
         } else {
             0.0
         }
+    }
+
+    fn set_tabbar_scroll_x(&mut self, scroll_x: f32, window: &Window) {
+        let next = scroll_x.clamp(0.0, self.tabbar_max_scroll(window));
+        self.tab_scroll_handle
+            .set_offset(Point::new(px(-next), px(0.0)));
+    }
+
+    pub(super) fn handle_tabbar_scroll(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let max_scroll = self.tabbar_max_scroll(window);
+        if max_scroll <= 1.0 {
+            let had_offset = self.tab_scroll_handle.offset().x != px(0.0);
+            self.set_tabbar_scroll_x(0.0, window);
+            if had_offset {
+                cx.notify();
+            }
+            cx.stop_propagation();
+            return;
+        }
+
+        let delta = event
+            .delta
+            .pixel_delta(px(self.tokens.metrics.tabbar_height));
+        // Tauri TabBar intercepts vertical wheel movement and applies it to
+        // scrollLeft. Keep ScrollHandle as the measured clamp, but make this
+        // the only wheel adapter so GPUI's default listener cannot double-scroll.
+        let scroll_delta =
+            tabbar_tauri_wheel_scroll_delta(f32::from(delta.x), f32::from(delta.y));
+        if scroll_delta == 0.0 {
+            return;
+        }
+
+        let current_scroll_x = self.tabbar_effective_scroll_x(window);
+        let next_scroll_x =
+            tabbar_scroll_x_after_wheel(current_scroll_x, scroll_delta, max_scroll);
+        if (next_scroll_x - current_scroll_x).abs() < 0.01 {
+            cx.stop_propagation();
+            return;
+        }
+
+        // Avoid calling set_tabbar_scroll_x here: max_scroll was already read
+        // for this wheel event, and re-reading it on every trackpad frame causes
+        // unnecessary work. The handle owns the measured clamp, so write the
+        // matching negative GPUI offset directly.
+        self.tab_scroll_handle
+            .set_offset(Point::new(px(-next_scroll_x), px(0.0)));
+        cx.notify();
+        cx.stop_propagation();
     }
 
     pub(super) fn reveal_active_tab(&mut self, window: &Window) {
@@ -857,14 +942,16 @@ impl WorkspaceApp {
                 .map(|tab| self.tab_visual_width(tab))
                 .sum::<f32>();
         let tab_right = tab_left + self.tab_visual_width(&self.tabs[index]);
-        let viewport_width = self.tabbar_viewport_width(window);
+        let viewport_width = self.tabbar_scroll_viewport_width(window);
 
-        if tab_left < self.tab_scroll_x {
-            self.tab_scroll_x = tab_left;
-        } else if tab_right > self.tab_scroll_x + viewport_width {
-            self.tab_scroll_x = tab_right - viewport_width;
+        let current_scroll_x = self.tabbar_effective_scroll_x(window);
+        let mut next_scroll_x = current_scroll_x;
+        if tab_left < current_scroll_x {
+            next_scroll_x = tab_left;
+        } else if tab_right > current_scroll_x + viewport_width {
+            next_scroll_x = tab_right - viewport_width;
         }
-        self.clamp_tab_scroll(window);
+        self.set_tabbar_scroll_x(next_scroll_x, window);
     }
 
     pub(super) fn tab_display_title(&self, tab: &Tab) -> String {
@@ -902,6 +989,51 @@ impl WorkspaceApp {
         (title_width + fixed_width).clamp(metrics.tab_min_width, metrics.tab_max_width)
     }
 
+    fn legacy_terminal_actions_tab(&self) -> Option<&Tab> {
+        let active_tab = self.active_tab()?;
+        if !matches!(active_tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal) {
+            return None;
+        }
+        let command_bar = &self.settings_store.settings().terminal.command_bar;
+        if command_bar.enabled && !command_bar.show_legacy_toolbar {
+            return None;
+        }
+        Some(active_tab)
+    }
+
+    fn terminal_broadcast_toolbar_label(&self) -> Option<String> {
+        if !self.terminal_broadcast_enabled {
+            return None;
+        }
+        let active_pane_id = self.active_pane_id();
+        let broadcast_targets =
+            self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)));
+        Some(if self.terminal_broadcast_targets.is_empty() {
+            self.i18n.t("terminal.command_bar.all_targets")
+        } else {
+            broadcast_targets.len().to_string()
+        })
+    }
+
+    fn tabbar_legacy_actions_width(&self) -> f32 {
+        let Some(active_tab) = self.legacy_terminal_actions_tab() else {
+            return 0.0;
+        };
+
+        let pane_count = active_tab
+            .root_pane
+            .as_ref()
+            .map(|root| root.pane_count())
+            .unwrap_or(1);
+
+        tabbar_legacy_actions_width_for_state(
+            active_tab.kind == TabKind::LocalTerminal,
+            pane_count,
+            self.terminal_broadcast_toolbar_label().as_deref(),
+            self.tokens.metrics.tab_title_width_ratio,
+        )
+    }
+
     fn tab_drop_target_index_for_x(
         &self,
         client_x: f32,
@@ -936,6 +1068,7 @@ impl WorkspaceApp {
             return;
         }
         let start_x = f32::from(event.position.x);
+        let start_y = f32::from(event.position.y);
         let tab_widths = self
             .tabs
             .iter()
@@ -946,7 +1079,9 @@ impl WorkspaceApp {
             tab_id,
             from_index: index,
             start_x,
+            start_y,
             current_x: start_x,
+            current_y: start_y,
             tab_widths,
             active: false,
             drop_target_index,
@@ -966,10 +1101,13 @@ impl WorkspaceApp {
         // Browser tab drags keep pointer capture after leaving the tab label;
         // the root mouse-up is responsible for finishing or cancelling.
         drag.current_x = f32::from(event.position.x);
-        let delta = (drag.current_x - drag.start_x).abs();
-        // Tauri TabBar uses a 10px pointer threshold before a pointer gesture
-        // becomes a reorder; below that threshold the later mouse-up is a click.
-        if delta > TAB_DRAG_THRESHOLD_PX {
+        drag.current_y = f32::from(event.position.y);
+        let delta_x = drag.current_x - drag.start_x;
+        let delta_y = drag.current_y - drag.start_y;
+        // Tauri uses a 10px pointer threshold for reorder. GPUI also needs the
+        // browser strip axis check here so vertical drags do not become tab
+        // reorders just because the root view is acting as pointer capture.
+        if tab_drag_is_horizontal_reorder(delta_x, delta_y) {
             drag.active = true;
             drag.drop_target_index =
                 self.tab_drop_target_index_for_x(drag.current_x, window, &drag.tab_widths);
@@ -1017,37 +1155,55 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn handle_tabbar_scroll(
-        &mut self,
-        event: &ScrollWheelEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.tabbar_has_overflow(window) {
-            if self.tab_scroll_x != 0.0 {
-                self.tab_scroll_x = 0.0;
-                cx.notify();
-            }
-            cx.stop_propagation();
-            return;
-        }
-        let delta = event
-            .delta
-            .pixel_delta(px(self.tokens.metrics.tabbar_height));
-        let horizontal = if f32::from(delta.x).abs() > f32::from(delta.y).abs() {
-            f32::from(delta.x)
-        } else {
-            f32::from(delta.y)
-        };
-        if horizontal == 0.0 {
-            return;
-        }
+}
 
-        self.tab_scroll_x += horizontal;
-        self.clamp_tab_scroll(window);
-        cx.stop_propagation();
-        cx.notify();
+fn tabbar_legacy_actions_width_for_state(
+    is_local_terminal: bool,
+    pane_count: usize,
+    broadcast_label: Option<&str>,
+    ascii_width_ratio: f32,
+) -> f32 {
+    let mut children: usize = 3;
+    let mut width = TABBAR_LEGACY_ACTION_BUTTON_SIZE * 3.0;
+
+    if is_local_terminal {
+        children += 2;
+        width += TABBAR_LEGACY_ACTION_BUTTON_SIZE * 2.0;
+
+        if pane_count > 1 {
+            children += 1;
+            width += TABBAR_LEGACY_PANE_BADGE_MIN_WIDTH;
+        }
     }
+
+    if let Some(label) = broadcast_label {
+        children += 1;
+        width += tabbar_broadcast_badge_width(label, ascii_width_ratio);
+    }
+
+    width
+        + TABBAR_LEGACY_ACTION_PADDING_X * 2.0
+        + TABBAR_LEGACY_ACTION_GAP * (children.saturating_sub(1) as f32)
+        + TABBAR_LEGACY_ACTION_BORDER_WIDTH
+}
+
+fn tabbar_broadcast_badge_width(label: &str, ascii_width_ratio: f32) -> f32 {
+    let text_width = label
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii() {
+                TABBAR_LEGACY_BROADCAST_FONT_SIZE * ascii_width_ratio
+            } else {
+                TABBAR_LEGACY_BROADCAST_FONT_SIZE
+            }
+        })
+        .sum::<f32>();
+
+    (TABBAR_LEGACY_BROADCAST_BADGE_PADDING_X * 2.0
+        + TABBAR_LEGACY_BROADCAST_ICON_SIZE
+        + TABBAR_LEGACY_BROADCAST_BADGE_GAP
+        + text_width)
+        .max(TABBAR_LEGACY_BROADCAST_BADGE_HEIGHT)
 }
 
 fn terminal_process_info_has_foreground_child_process(
@@ -1089,5 +1245,47 @@ mod tests {
         assert!(terminal_process_info_has_foreground_child_process(
             &foreground_child
         ));
+    }
+
+    #[test]
+    fn tabbar_fixed_actions_width_is_reserved_outside_scroll_viewport() {
+        let ratio = 0.62;
+        let ssh_actions = tabbar_legacy_actions_width_for_state(false, 1, None, ratio);
+        assert_eq!(ssh_actions, 97.0);
+
+        let local_actions = tabbar_legacy_actions_width_for_state(true, 1, None, ratio);
+        assert_eq!(local_actions, 153.0);
+
+        let split_local_actions = tabbar_legacy_actions_width_for_state(true, 2, None, ratio);
+        assert_eq!(split_local_actions, 177.0);
+
+        let broadcast_actions =
+            tabbar_legacy_actions_width_for_state(false, 1, Some("All"), ratio);
+        assert!(broadcast_actions > ssh_actions);
+    }
+
+    #[test]
+    fn tab_drag_reorder_requires_horizontal_browser_axis() {
+        assert!(!tab_drag_is_horizontal_reorder(9.0, 0.0));
+        assert!(!tab_drag_is_horizontal_reorder(0.0, 18.0));
+        assert!(!tab_drag_is_horizontal_reorder(12.0, 24.0));
+        assert!(tab_drag_is_horizontal_reorder(12.0, 8.0));
+        assert!(tab_drag_is_horizontal_reorder(-18.0, 4.0));
+    }
+
+    #[test]
+    fn tabbar_wheel_matches_tauri_delta_y_adapter() {
+        assert_eq!(tabbar_tauri_wheel_scroll_delta(0.0, 24.0), 24.0);
+        assert_eq!(tabbar_tauri_wheel_scroll_delta(18.0, 24.0), 24.0);
+        assert_eq!(tabbar_tauri_wheel_scroll_delta(-18.0, 0.0), -18.0);
+    }
+
+    #[test]
+    fn tabbar_wheel_delta_maps_to_gpui_negative_scroll_offset() {
+        assert_eq!(tabbar_scroll_x_after_wheel(0.0, -24.0, 120.0), 24.0);
+        assert_eq!(tabbar_scroll_x_after_wheel(0.0, 24.0, 120.0), 0.0);
+        assert_eq!(tabbar_scroll_x_after_wheel(24.0, 24.0, 120.0), 0.0);
+        assert_eq!(tabbar_scroll_x_after_wheel(110.0, -24.0, 120.0), 120.0);
+        assert_eq!(tabbar_scroll_x_after_wheel(120.0, -24.0, 120.0), 120.0);
     }
 }

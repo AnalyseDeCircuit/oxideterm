@@ -6,12 +6,13 @@
 //! This module converts OxideTerm-owned markdown model nodes into composed
 //! GPUI `Div` / `AnyElement` trees using only semantic theme tokens.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use gpui::{
-    AnyElement, ElementId, Entity, Font, FontStyle, FontWeight, Hsla, IntoElement, ParentElement,
-    Render, SharedString, StrikethroughStyle, Styled, StyledText, TextRun, UnderlineStyle, div,
-    image_cache, img, px, relative, retain_all,
+    AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontStyle, FontWeight, Hsla,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
+    StrikethroughStyle, Styled, StyledText, TextRun, UnderlineStyle, Window, div, image_cache, img,
+    px, relative, retain_all,
 };
 use gpui_component::{VirtualListScrollHandle, v_virtual_list};
 use oxideterm_theme::ThemeTokens;
@@ -24,6 +25,13 @@ use crate::options::MarkdownOptions;
 use crate::style;
 
 const WINDOWED_MARKDOWN_MIN_ITEMS: usize = 24;
+
+pub type MarkdownCodeRunHandler = Arc<dyn Fn(String, &mut Window, &mut App) + 'static>;
+
+#[derive(Clone, Default)]
+pub struct MarkdownCodeBlockActions {
+    pub on_run: Option<MarkdownCodeRunHandler>,
+}
 
 /// Render a complete markdown document into a vertical GPUI container.
 pub fn render_document(
@@ -152,6 +160,16 @@ pub fn render_document_selectable(
     opts: &MarkdownOptions,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
+    render_document_selectable_with_code_actions(document, tokens, opts, None, render_text)
+}
+
+pub fn render_document_selectable_with_code_actions(
+    document: &MarkdownDocument,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
     let mut content = div()
         .w_full()
         .min_w_0()
@@ -162,6 +180,7 @@ pub fn render_document_selectable(
             &document.blocks,
             tokens,
             opts,
+            code_actions,
             "b",
             render_text,
         ));
@@ -189,15 +208,51 @@ pub fn render_document_windowed_selectable(
     overdraw: f32,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
+    render_document_windowed_selectable_with_code_actions(
+        document,
+        layout,
+        tokens,
+        opts,
+        viewport_top,
+        viewport_height,
+        overdraw,
+        None,
+        render_text,
+    )
+}
+
+pub fn render_document_windowed_selectable_with_code_actions(
+    document: &MarkdownDocument,
+    layout: &MarkdownBlockLayout,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    viewport_top: f32,
+    viewport_height: f32,
+    overdraw: f32,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
     let items = layout.items();
     if items.len() < WINDOWED_MARKDOWN_MIN_ITEMS || viewport_height <= 0.0 {
-        return render_document_selectable(document, tokens, opts, render_text);
+        return render_document_selectable_with_code_actions(
+            document,
+            tokens,
+            opts,
+            code_actions,
+            render_text,
+        );
     }
 
     let item_sizes = layout.item_sizes();
     let total_height = estimated_markdown_height(&item_sizes, opts.block_gap);
     if total_height <= viewport_height + overdraw * 2.0 {
-        return render_document_selectable(document, tokens, opts, render_text);
+        return render_document_selectable_with_code_actions(
+            document,
+            tokens,
+            opts,
+            code_actions,
+            render_text,
+        );
     }
 
     let window_top = (viewport_top - overdraw).max(0.0);
@@ -224,6 +279,7 @@ pub fn render_document_windowed_selectable(
                         block,
                         tokens,
                         opts,
+                        code_actions,
                         &format!("w:{index}"),
                         render_text,
                     ));
@@ -344,6 +400,7 @@ fn render_selectable_blocks(
     blocks: &[Block],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
@@ -354,7 +411,14 @@ fn render_selectable_blocks(
         .flex_col()
         .gap(px(opts.block_gap))
         .children(blocks.iter().enumerate().map(|(index, block)| {
-            render_selectable_block(block, tokens, opts, &format!("{path}:{index}"), render_text)
+            render_selectable_block(
+                block,
+                tokens,
+                opts,
+                code_actions,
+                &format!("{path}:{index}"),
+                render_text,
+            )
         }))
         .into_any_element()
 }
@@ -382,6 +446,7 @@ fn render_selectable_block(
     block: &Block,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
@@ -392,18 +457,30 @@ fn render_selectable_block(
         Block::Paragraph { inlines } => {
             render_selectable_paragraph(inlines, tokens, opts, path, render_text)
         }
-        Block::CodeBlock { language, code } => {
-            render_selectable_code_block(language.as_deref(), code, tokens, opts, path, render_text)
-        }
+        Block::CodeBlock { language, code } => render_selectable_code_block(
+            language.as_deref(),
+            code,
+            tokens,
+            opts,
+            code_actions,
+            path,
+            render_text,
+        ),
         Block::UnorderedList { items } => {
-            render_selectable_unordered_list(items, tokens, opts, path, render_text)
+            render_selectable_unordered_list(items, tokens, opts, code_actions, path, render_text)
         }
-        Block::OrderedList { start, items } => {
-            render_selectable_ordered_list(*start, items, tokens, opts, path, render_text)
-        }
+        Block::OrderedList { start, items } => render_selectable_ordered_list(
+            *start,
+            items,
+            tokens,
+            opts,
+            code_actions,
+            path,
+            render_text,
+        ),
         Block::HorizontalRule => render_hr(tokens),
         Block::Blockquote { blocks } => {
-            render_selectable_blockquote(blocks, tokens, opts, path, render_text)
+            render_selectable_blockquote(blocks, tokens, opts, code_actions, path, render_text)
         }
         Block::Table { headers, rows, .. } => {
             render_selectable_table(headers, rows, tokens, opts, path, render_text)
@@ -517,28 +594,6 @@ fn render_code_block(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
 ) -> AnyElement {
-    let mut container = div()
-        .w_full()
-        .min_w_0()
-        .bg(style::code_bg_color(tokens))
-        .rounded(px(tokens.radii.sm))
-        .p(px(opts.code_block_padding))
-        .text_size(style::code_font_size(opts))
-        .text_color(style::text_color(tokens));
-
-    // If a language hint is present, render a small muted label at the top-right.
-    if let Some(lang) = language {
-        container = container.child(
-            div()
-                .flex()
-                .flex_row()
-                .justify_end()
-                .text_size(style::code_label_font_size(opts))
-                .text_color(style::muted_color(tokens))
-                .child(SharedString::from(lang.to_string())),
-        );
-    }
-
     // Attempt syntax highlighting; fall back to plain monospace text.
     let code_element: AnyElement = if let Some(lang) = language {
         if let Some(runs) = highlight::highlight_code(lang, code, opts) {
@@ -553,7 +608,7 @@ fn render_code_block(
         SharedString::from(code.to_string()).into_any_element()
     };
 
-    container.child(code_element).into_any_element()
+    render_code_block_shell(language, code, tokens, opts, None, code_element).into_any_element()
 }
 
 fn render_selectable_code_block(
@@ -561,30 +616,10 @@ fn render_selectable_code_block(
     code: &str,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
-    let mut container = div()
-        .w_full()
-        .min_w_0()
-        .bg(style::code_bg_color(tokens))
-        .rounded(px(tokens.radii.sm))
-        .p(px(opts.code_block_padding))
-        .text_size(style::code_font_size(opts))
-        .text_color(style::text_color(tokens));
-
-    if let Some(lang) = language {
-        container = container.child(
-            div()
-                .flex()
-                .flex_row()
-                .justify_end()
-                .text_size(style::code_label_font_size(opts))
-                .text_color(style::muted_color(tokens))
-                .child(SharedString::from(lang.to_string())),
-        );
-    }
-
     let code_element: AnyElement = if let Some(lang) = language {
         if let Some(runs) = highlight::highlight_code(lang, code, opts) {
             let (text, text_runs) = highlight::highlighted_runs_to_text_runs(&runs);
@@ -604,7 +639,185 @@ fn render_selectable_code_block(
         )
     };
 
-    container.child(code_element).into_any_element()
+    render_code_block_shell(language, code, tokens, opts, code_actions, code_element)
+        .into_any_element()
+}
+
+fn render_code_block_shell(
+    language: Option<&str>,
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+    code_element: AnyElement,
+) -> gpui::Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .overflow_hidden()
+        .border_1()
+        .border_color(style::code_block_border_color(tokens))
+        .bg(style::code_block_bg_color(tokens))
+        .rounded(px(tokens.radii.md))
+        .child(render_code_block_header(
+            language,
+            code,
+            tokens,
+            opts,
+            code_actions,
+        ))
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .p(px(opts.code_block_padding))
+                .text_size(style::code_font_size(opts))
+                .text_color(style::text_color(tokens))
+                .font(style::code_font(opts))
+                .child(code_element),
+        )
+}
+
+fn render_code_block_header(
+    language: Option<&str>,
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .px(px(8.0))
+        .py(px(4.0))
+        .border_b_1()
+        .border_color(style::code_block_header_border_color(tokens))
+        .bg(style::code_block_header_bg_color(tokens))
+        // GPUI does not always clip child backgrounds to the parent radius;
+        // Tauri relies on md-code-block overflow-hidden, so mirror that by
+        // rounding the painted header corners explicitly.
+        .rounded_t(px(tokens.radii.md))
+        .child(
+            div()
+                .text_size(style::code_label_font_size(opts))
+                .text_color(style::muted_color(tokens))
+                .font(style::code_font(opts))
+                .child(SharedString::from(code_block_language_label(language))),
+        )
+        .child(render_code_actions(
+            language,
+            code,
+            tokens,
+            opts,
+            code_actions,
+        ))
+        .into_any_element()
+}
+
+fn render_code_actions(
+    language: Option<&str>,
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement {
+    let mut actions = div().flex().flex_row().items_center().gap(px(10.0));
+
+    if is_shell_language(language)
+        && let Some(on_run) = code_actions.and_then(|actions| actions.on_run.clone())
+    {
+        actions = actions.child(render_code_run_action(code, tokens, opts, on_run));
+    }
+
+    actions
+        .child(render_code_copy_action(code, tokens, opts))
+        .into_any_element()
+}
+
+fn render_code_run_action(
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    on_run: MarkdownCodeRunHandler,
+) -> AnyElement {
+    let code = code.to_string();
+    let hover_color = style::accent_color(tokens);
+
+    render_code_action_label("RUN", tokens, opts, hover_color)
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            // Tauri emits ai-insert-command; the caller maps that to the active terminal surface.
+            on_run(code.clone(), window, cx);
+            cx.stop_propagation();
+        })
+        .into_any_element()
+}
+
+fn render_code_copy_action(code: &str, tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
+    let code = code.to_string();
+    let hover_color = style::text_color(tokens);
+
+    render_code_action_label("COPY", tokens, opts, hover_color)
+        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+            // Keep COPY local to the markdown renderer; command insertion belongs to the AI workspace.
+            cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
+            cx.stop_propagation();
+        })
+        .into_any_element()
+}
+
+fn render_code_action_label(
+    label: &'static str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    hover_color: Hsla,
+) -> gpui::Div {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(4.0))
+        .py(px(2.0))
+        .cursor_pointer()
+        .text_size(style::code_label_font_size(opts))
+        .text_color(style::code_action_color(tokens))
+        .font(Font {
+            weight: FontWeight::BOLD,
+            ..style::code_font(opts)
+        })
+        .hover(move |style| style.text_color(hover_color))
+        .child(SharedString::from(label))
+}
+
+fn code_block_language_label(language: Option<&str>) -> String {
+    let label = language
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .unwrap_or("text");
+    label.to_ascii_uppercase()
+}
+
+fn is_shell_language(language: Option<&str>) -> bool {
+    let normalized = language
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "" | "bash"
+            | "sh"
+            | "zsh"
+            | "shell"
+            | "console"
+            | "terminal"
+            | "powershell"
+            | "ps1"
+            | "cmd"
+    )
 }
 
 // ─── blockquote ─────────────────────────────────────────────────────────
@@ -636,6 +849,7 @@ fn render_selectable_blockquote(
     blocks: &[Block],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
@@ -659,6 +873,7 @@ fn render_selectable_blockquote(
                     blocks,
                     tokens,
                     opts,
+                    code_actions,
                     &format!("{path}:quote"),
                     render_text,
                 )),
@@ -826,6 +1041,7 @@ fn render_selectable_unordered_list(
     items: &[ListItem],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
@@ -842,6 +1058,7 @@ fn render_selectable_unordered_list(
                 item,
                 tokens,
                 opts,
+                code_actions,
                 &format!("{path}:li:{index}"),
                 render_text,
             )
@@ -854,6 +1071,7 @@ fn render_selectable_ordered_list(
     items: &[ListItem],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
@@ -871,6 +1089,7 @@ fn render_selectable_ordered_list(
                 item,
                 tokens,
                 opts,
+                code_actions,
                 &format!("{path}:li:{index}"),
                 render_text,
             )
@@ -940,6 +1159,7 @@ fn render_selectable_list_item(
     item: &ListItem,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
@@ -992,6 +1212,7 @@ fn render_selectable_list_item(
                     block,
                     tokens,
                     opts,
+                    code_actions,
                     &format!("{path}:child:{index}"),
                     render_text,
                 )

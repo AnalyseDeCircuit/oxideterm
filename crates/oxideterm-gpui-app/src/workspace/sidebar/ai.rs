@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-use gpui::{App, Div, MouseDownEvent, Rgba, Window};
+use gpui::{Context, Div, MouseDownEvent, Rgba, Window};
 use oxideterm_ai::{
     AiAutocompleteCandidate, AiAutocompleteKind, AiChatMessage, AiChatMessageMetadata,
     AiChatRole, AiChatStreamConfig, AiConversation, AiMessageBranches, AiProviderView,
@@ -48,7 +48,9 @@ use oxideterm_gpui_ui::{
         ai_tool_section_label,
     },
     button::{ButtonRadius, ButtonVariant, IconButtonOptions, ToolbarButtonOptions},
-    context_menu::ContextMenuActionableStyle,
+    context_menu::{
+        ContextMenuActionableStyle, context_menu_action, context_menu_actionable_row,
+    },
     modal::overlay_content_boundary,
     tauri_ui_font_family as settings_ui_font_family,
     text_input::{
@@ -79,13 +81,14 @@ impl WorkspaceApp {
         disabled: bool,
         loading: bool,
         hover_bg: Option<Rgba>,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> Div {
         // AI safety/chat menus are Radix dropdown-style command rows in Tauri.
-        // Native keeps hover, cursor, and invocation blocking tied to the same
-        // shared menu action guard used by file/session/terminal menus.
-        self.workspace_context_menu_styled_action(
+        // Keep this as a single WorkspaceApp listener. Passing a cx.listener
+        // through another cx.listener re-enters the same entity and trips GPUI's
+        // update guard on menu clicks.
+        let item = context_menu_actionable_row(
             item,
             disabled,
             loading,
@@ -93,13 +96,19 @@ impl WorkspaceApp {
                 hover_background: hover_bg,
                 hover_text_color: None,
             },
-            |this| {
+        );
+        context_menu_action(
+            item,
+            disabled,
+            loading,
+            cx.listener(move |this, event, window, cx| {
                 this.ai_chat_menu_open = false;
                 this.ai_conversation_list_open = false;
                 this.ai_safety_menu_open = false;
-            },
-            move |_this, event, window, cx| listener(event, window, cx),
-            cx,
+                listener(this, event, window, cx);
+                cx.stop_propagation();
+                cx.notify();
+            }),
         )
     }
 }
