@@ -53,7 +53,7 @@
 
 | 如果你在意... | OxideTerm Native 提供... |
 |---|---|
-| 一个远程节点，多种工具 | 终端、SFTP、端口转发、trzsz、原生 IDE、监控和 AI 上下文都挂在同一个 SSH 工作区上 |
+| 一个远程节点，多种工具 | 终端、SFTP、端口转发、trzsz、原生 IDE、监控和 autonomous OxideSens 侧边栏都挂在同一个 SSH 工作区上 |
 | 零 WebView 原生外壳 | GPUI 直接在 GPU surface 上绘制桌面 UI，没有 DOM、CSS、JavaScript、Chromium 或 WebKit 运行时 |
 | 本地优先 SSH 工作流 | SSH、SFTP、端口转发、本地 Shell、串口终端和配置管理都无需注册 |
 | BYOK autonomous AI，而不是平台点数 | OxideSens 使用你自己的 OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible 端点，支持 MCP、RAG 和经过批准的工作区操作 |
