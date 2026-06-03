@@ -4,6 +4,8 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
+use crate::modal::rounded_shell_child_radius;
+
 use super::tokens::*;
 
 const AI_INLINE_PANEL_WIDTH: f32 = 520.0; // Tauri AiInlinePanel w-[520px].
@@ -42,6 +44,10 @@ pub fn ai_inline_loading_bar(tokens: &ThemeTokens) -> Div {
         .right_0()
         .h(px(AI_INLINE_LOADING_BAR_HEIGHT))
         .overflow_hidden()
+        // The loading strip is absolutely positioned against the rounded
+        // inline panel edge; own the top corners instead of relying on parent
+        // masking to hide square accent pixels.
+        .rounded_t(px(rounded_shell_child_radius(tokens.radii.md)))
         // Tauri uses an animated transparent/accent/transparent shimmer. GPUI
         // keeps the same 2px loading affordance; animation belongs in the owner.
         .child(div().h_full().w_full().bg(rgb(tokens.ui.accent)))

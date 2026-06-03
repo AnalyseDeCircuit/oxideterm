@@ -411,6 +411,7 @@ impl WorkspaceApp {
         let active_tab = self.legacy_terminal_actions_tab()?;
 
         let theme = self.tokens.ui;
+        let workspace = cx.entity();
         let is_local_terminal = active_tab.kind == TabKind::LocalTerminal;
         let can_split = is_local_terminal
             && !self.active_tab_has_serial_terminal()
@@ -502,23 +503,34 @@ impl WorkspaceApp {
                             )
                         })
                 })
-                .child(
-                    self.terminal_legacy_icon_button(
-                        LucideIcon::Radio,
-                        true,
-                        |this, _event, _window, cx| {
-                            this.toggle_terminal_broadcast_menu();
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                        cx,
-                    )
-                        .bg(if self.terminal_broadcast_enabled {
+                .child(select_anchor_probe(
+                    SelectAnchorId::TerminalBroadcastMenu,
+                    {
+                        let button = self.terminal_legacy_icon_button(
+                            LucideIcon::Radio,
+                            true,
+                            |this, _event, _window, cx| {
+                                this.toggle_terminal_broadcast_menu();
+                                cx.stop_propagation();
+                                cx.notify();
+                            },
+                            cx,
+                        );
+                        button.bg(if self.terminal_broadcast_enabled {
                             rgba(0xf9731626)
                         } else {
                             rgba(0x00000000)
-                        }),
-                )
+                        })
+                    },
+                    {
+                        let workspace = workspace.clone();
+                        move |anchor, _window, cx| {
+                            let _ = workspace.update(cx, |this, cx| {
+                                this.update_select_anchor(anchor, cx);
+                            });
+                        }
+                    },
+                ))
                 .child(self.terminal_legacy_icon_button(
                     LucideIcon::Square,
                     false,

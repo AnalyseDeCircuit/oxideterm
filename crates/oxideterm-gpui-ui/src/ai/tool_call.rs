@@ -4,6 +4,8 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
+use crate::modal::rounded_shell_child_radius;
+
 use super::tokens::*;
 
 pub fn ai_tool_block(tokens: &ThemeTokens) -> Div {
@@ -85,6 +87,7 @@ pub fn ai_tool_item(tokens: &ThemeTokens, call: &AiToolCallView) -> Div {
 pub fn ai_tool_item_header(
     tokens: &ThemeTokens,
     call: &AiToolCallView,
+    expanded: bool,
     status_icon: impl IntoElement,
     tool_icon: impl IntoElement,
     chevron_icon: impl IntoElement,
@@ -96,6 +99,15 @@ pub fn ai_tool_item_header(
         .gap(px(tokens.spacing.one + tokens.spacing.one / 2.0))
         .px(px(tokens.spacing.two))
         .py(px(tokens.spacing.one + tokens.spacing.one / 2.0))
+        // The header hover background touches the tool-call card edge. When
+        // collapsed it is the whole card; when expanded it only owns the top
+        // edge, matching browser overflow clipping without square remnants.
+        .when(expanded, |header| {
+            header.rounded_t(px(rounded_shell_child_radius(tokens.radii.md)))
+        })
+        .when(!expanded, |header| {
+            header.rounded(px(rounded_shell_child_radius(tokens.radii.md)))
+        })
         .text_size(px(AI_TEXT_11))
         .cursor_pointer()
         .hover(|style| style.bg(bg_alpha(tokens, tokens.ui.bg_hover, AI_HOVER_BG_ALPHA)))

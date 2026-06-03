@@ -75,7 +75,7 @@ impl WorkspaceApp {
             ),
             SftpDialog::EditorCloseConfirm { .. } => unreachable!(),
         };
-        let width = match dialog {
+        let width = match &dialog {
             SftpDialog::Drives => SFTP_DIALOG_WIDTH_XS,
             SftpDialog::Rename { .. } | SftpDialog::NewFolder { .. } | SftpDialog::Delete { .. } => {
                 SFTP_DIALOG_WIDTH_SM
@@ -86,18 +86,23 @@ impl WorkspaceApp {
             SftpDialog::Editor { .. } => SFTP_EDITOR_DIALOG_WIDTH_6XL,
             SftpDialog::EditorCloseConfirm { .. } => unreachable!(),
         };
-        let height_ratio = match dialog {
+        let height_ratio = match &dialog {
             SftpDialog::Diff { .. } => Some(SFTP_DIFF_DIALOG_HEIGHT_RATIO),
             SftpDialog::Preview { .. } | SftpDialog::Editor { .. } => {
                 Some(SFTP_PREVIEW_DIALOG_HEIGHT_RATIO)
             }
             _ => None,
         };
-        let header_py = match dialog {
+        let header_py = match &dialog {
             SftpDialog::Preview { .. } => 8.0,
             _ => 12.0,
         };
-        let show_description = !description.is_empty() && !matches!(dialog, SftpDialog::Preview { .. });
+        let show_description =
+            !description.is_empty() && !matches!(&dialog, SftpDialog::Preview { .. });
+        let edge_owned_dialog = matches!(
+            &dialog,
+            SftpDialog::Preview { .. } | SftpDialog::Editor { .. } | SftpDialog::Diff { .. }
+        );
 
         let outside_dialog = dialog.clone();
         dismissible_dialog_backdrop()
@@ -128,8 +133,13 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.md))
                     .border_1()
                     .border_color(rgb(theme.border))
-                    // Tauri DialogContent stays opaque; only the overlay is translucent.
-                    .bg(rgb(theme.bg_elevated))
+                    .when(!edge_owned_dialog, |dialog| {
+                        // Compact dialogs rely on DialogContent's background behind
+                        // padded body content. Full-height preview/editor/diff shells
+                        // let header, body, and footer own every edge so GPUI's
+                        // rectangular overflow mask cannot expose a second corner color.
+                        dialog.bg(rgb(theme.bg_elevated))
+                    })
                     .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation();
@@ -149,7 +159,7 @@ impl WorkspaceApp {
                             // Browser DialogContent clips this painted header
                             // into the rounded shell. GPUI needs the edge child
                             // to own the top corners to avoid rectangular leaks.
-                            .rounded_t(px(self.tokens.radii.md))
+                            .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
                             // Mirrors DialogHeader bg-theme-bg-panel, not the tab background alpha path.
                             .bg(rgb(theme.bg_panel))
                             .child(
@@ -160,21 +170,21 @@ impl WorkspaceApp {
                                     .text_size(px(SFTP_TEXT_SM))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text_heading))
-                                    .when(matches!(dialog, SftpDialog::Conflict), |row| {
+                                    .when(matches!(&dialog, SftpDialog::Conflict), |row| {
                                         row.child(Self::render_lucide_icon(
                                             LucideIcon::AlertTriangle,
                                             20.0,
                                             rgb(SFTP_YELLOW),
                                         ))
                                     })
-                                    .when(matches!(dialog, SftpDialog::Diff { .. }), |row| {
+                                    .when(matches!(&dialog, SftpDialog::Diff { .. }), |row| {
                                         row.child(Self::render_lucide_icon(
                                             LucideIcon::ArrowLeftRight,
                                             16.0,
                                             rgb(theme.accent),
                                         ))
                                     })
-                                    .when(matches!(dialog, SftpDialog::Preview { .. }), |row| {
+                                    .when(matches!(&dialog, SftpDialog::Preview { .. }), |row| {
                                         row.font_family(settings_mono_font_family(
                                             self.settings_store.settings(),
                                         ))
@@ -191,13 +201,13 @@ impl WorkspaceApp {
                                 header.child(
                                     div()
                                         .mt(px(6.0))
-                                        .text_size(px(if matches!(dialog, SftpDialog::Diff { .. }) {
+                                        .text_size(px(if matches!(&dialog, SftpDialog::Diff { .. }) {
                                             SFTP_TEXT_XS
                                         } else {
                                             SFTP_TEXT_SM
                                         }))
                                         .text_color(rgb(theme.text_muted))
-                                        .when(matches!(dialog, SftpDialog::Conflict), |desc| {
+                                        .when(matches!(&dialog, SftpDialog::Conflict), |desc| {
                                             let remaining = self.sftp_conflict_remaining_count();
                                             desc.flex()
                                                 .items_center()
@@ -228,7 +238,7 @@ impl WorkspaceApp {
                                                     )
                                                 })
                                         })
-                                        .when(!matches!(dialog, SftpDialog::Conflict), |desc| {
+                                        .when(!matches!(&dialog, SftpDialog::Conflict), |desc| {
                                             desc.child(self.render_selectable_text_scoped(
                                                 "sftp-dialog-description",
                                                 &title,
@@ -272,7 +282,7 @@ impl WorkspaceApp {
             .border_color(rgb(theme.border))
             // Keep the footer background inside the dialog shell radius just
             // like Tauri's overflow-hidden DialogContent clipping.
-            .rounded_b(px(self.tokens.radii.md))
+            .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
             // Mirrors DialogFooter bg-theme-bg-panel, not the tab background alpha path.
             .bg(rgb(theme.bg_panel))
             .flex()

@@ -5,6 +5,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let drives = local_drives();
+        let drive_count = drives.len();
         div()
             .px(px(16.0))
             .py(px(12.0))
@@ -14,8 +16,10 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(rgb(theme.border))
                     .overflow_hidden()
-                    .children(local_drives().into_iter().map(|drive| {
+                    .children(drives.into_iter().enumerate().map(|(index, drive)| {
                         let path = drive.path.clone();
+                        let is_first = index == 0;
+                        let is_last = index + 1 == drive_count;
                         div()
                             .w_full()
                             .flex()
@@ -25,6 +29,15 @@ impl WorkspaceApp {
                             .py(px(10.0))
                             .border_b_1()
                             .border_color(rgba((theme.border << 8) | SFTP_DIALOG_BORDER_HALF_ALPHA))
+                            // Browser overflow clips the first and last painted
+                            // rows into the rounded drive list; GPUI needs the
+                            // edge rows to own those corners explicitly.
+                            .when(is_first, |row| {
+                                row.rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
+                            })
+                            .when(is_last, |row| {
+                                row.rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
+                            })
                             .bg(rgb(theme.bg_panel))
                             .hover(move |row| row.bg(rgb(theme.bg_hover)))
                             .cursor_pointer()

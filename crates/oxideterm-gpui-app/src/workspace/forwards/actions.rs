@@ -945,9 +945,13 @@ impl WorkspaceApp {
                 true
             }
             "backspace" => {
-                self.forward_input_value_mut(input).pop();
-                self.forwarding_view.error = None;
-                cx.notify();
+                let changed = self.forward_input_value_mut(input).pop().is_some()
+                    || self.forwarding_view.error.take().is_some();
+                if changed {
+                    // Empty Backspace is only visible if it also clears an
+                    // existing validation error.
+                    cx.notify();
+                }
                 true
             }
             _ => false,

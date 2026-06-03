@@ -75,6 +75,13 @@ impl WorkspaceApp {
                         .border_b_1()
                         .border_color(rgba((theme.border << 8) | 0x80))
                         .bg(rgba((theme.bg << 8) | SUGGESTIONS_HEADER_BG_ALPHA))
+                        // The first group header paints directly against the
+                        // rounded suggestion popover edge; match the shell's
+                        // inner curve so GPUI cannot expose square pixels.
+                        .when(index == 0, |header| {
+                            header
+                                .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
+                        })
                         .px(px(12.0))
                         .py(px(4.0))
                         .text_size(px(10.0))

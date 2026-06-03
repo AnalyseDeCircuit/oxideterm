@@ -1,4 +1,5 @@
 use super::*;
+use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
 
 const DETACHED_TERMINAL_POPOVER_WIDTH: f32 = 256.0; // Tauri w-64.
 const DETACHED_TERMINAL_POPOVER_MAX_HEIGHT: f32 = 192.0; // Tauri max-h-48.
@@ -268,6 +269,9 @@ impl WorkspaceApp {
                         .justify_between()
                         .border_b_1()
                         .border_color(rgb(theme.border))
+                        // Browser popovers clip the painted header through the
+                        // parent radius; GPUI must align to the inner border curve.
+                        .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                         .bg(rgba((theme.bg << 8) | DETACHED_TERMINAL_HEADER_ALPHA))
                         .px(px(12.0))
                         .py(px(8.0))

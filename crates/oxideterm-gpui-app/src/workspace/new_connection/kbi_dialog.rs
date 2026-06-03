@@ -14,7 +14,7 @@ use oxideterm_gpui_ui::{
     TextInputView,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
     form_field,
-    modal::dismissible_dialog_backdrop,
+    modal::{dismissible_dialog_backdrop, rounded_shell_child_radius},
     text_input, text_input_anchor_probe,
 };
 
@@ -169,11 +169,11 @@ impl WorkspaceApp {
             "backspace" => {
                 if !challenge.timed_out()
                     && let Some(response) = challenge.responses.get_mut(challenge.focused_prompt)
+                    && response.pop().is_some()
                 {
-                    response.pop();
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
                 }
-                self.new_connection_caret_visible = true;
-                cx.notify();
                 true
             }
             _ => true,
@@ -302,7 +302,6 @@ impl WorkspaceApp {
                             window.focus(&this.focus_handle);
                             this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     )
                     .on_mouse_move(cx.listener(
@@ -345,6 +344,10 @@ impl WorkspaceApp {
                             .px(px(self.tokens.metrics.modal_header_padding_x))
                             .py(px(self.tokens.metrics.modal_header_padding_y))
                             .bg(rgb(theme.bg_panel))
+                            // Browser DialogContent clips the painted header
+                            // into the shell radius; keep native KBI prompts
+                            // from exposing square top-corner pixels.
+                            .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
                             .border_b_1()
                             .border_color(rgb(theme.border))
                             .child(
@@ -421,6 +424,9 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgb(theme.border))
                             .bg(rgb(theme.bg_panel))
+                            // Footer chrome is flush with the dialog bottom,
+                            // so it owns the inner bottom corners too.
+                            .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
                             .child(self.render_keyboard_interactive_button(
                                 self.i18n.t("ssh.form.cancel"),
                                 false,

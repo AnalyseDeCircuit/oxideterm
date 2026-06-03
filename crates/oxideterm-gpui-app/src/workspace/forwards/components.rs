@@ -426,7 +426,7 @@ impl WorkspaceApp {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded_b(px(self.tokens.radii.lg))
+                                .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                                 .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .text_color(rgb(theme.text_muted))
                                 .child(if self.forwarding_view.port_scan_pending {
@@ -592,10 +592,10 @@ impl WorkspaceApp {
             .items_center()
             .bg(bg)
             .when(matches!(corners, ForwardRowCorners::Top), |row| {
-                row.rounded_t(px(self.tokens.radii.lg))
+                row.rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
             })
             .when(matches!(corners, ForwardRowCorners::Bottom), |row| {
-                row.rounded_b(px(self.tokens.radii.lg))
+                row.rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
             })
     }
 

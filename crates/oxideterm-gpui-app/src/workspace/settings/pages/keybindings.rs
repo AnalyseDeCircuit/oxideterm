@@ -395,7 +395,7 @@ impl WorkspaceApp {
                     // Tauri relies on `overflow-hidden` on the rounded table.
                     // GPUI can leave child paint visible at the mask edge, so
                     // round the header explicitly to preserve the browser clip.
-                    .rounded_t(px(self.tokens.radii.lg))
+                    .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                     .bg(self.keybinding_header_background())
                     .border_b_1()
                     .border_color(self.keybinding_surface_border())
@@ -484,7 +484,9 @@ impl WorkspaceApp {
                 row.border_b_1()
                     .border_color(self.keybinding_row_divider())
             })
-            .when(is_last, |row| row.rounded_b(px(self.tokens.radii.lg)))
+            .when(is_last, |row| {
+                row.rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
+            })
             .when(recording, |row| row.bg(rgba((theme.accent << 8) | 0x0d)))
             .child(
                 div()

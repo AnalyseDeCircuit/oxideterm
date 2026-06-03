@@ -522,13 +522,20 @@ impl WorkspaceApp {
         .on_hover(cx.listener({
             let id = conn.id.clone();
             move |this, is_hovered: &bool, _window, cx| {
+                let mut changed = false;
                 if *is_hovered {
-                    this.session_manager.hovered_connection_id = Some(id.clone());
+                    if this.session_manager.hovered_connection_id.as_deref() != Some(id.as_str()) {
+                        this.session_manager.hovered_connection_id = Some(id.clone());
+                        changed = true;
+                    }
                 } else if this.session_manager.hovered_connection_id.as_deref() == Some(id.as_str())
                 {
                     this.session_manager.hovered_connection_id = None;
+                    changed = true;
                 }
-                cx.notify();
+                if changed {
+                    cx.notify();
+                }
             }
         }))
         .on_mouse_down(

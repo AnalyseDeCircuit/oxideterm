@@ -374,9 +374,13 @@ impl WorkspaceApp {
                 true
             }
             "backspace" => {
-                self.graphics.app_command.pop();
-                self.ime_marked_text = None;
-                cx.notify();
+                let changed = self.graphics.app_command.pop().is_some()
+                    || self.ime_marked_text.take().is_some();
+                if changed {
+                    // Empty Backspace should not repaint unless it clears IME
+                    // composition state.
+                    cx.notify();
+                }
                 true
             }
             _ => true,
@@ -921,7 +925,6 @@ impl WorkspaceApp {
                         this.new_connection_caret_visible = true;
                         window.focus(&this.focus_handle);
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        cx.notify();
                     }),
                 )
                 .on_mouse_move(cx.listener(

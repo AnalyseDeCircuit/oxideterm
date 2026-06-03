@@ -1,3 +1,5 @@
+use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
+
 impl WorkspaceApp {
     pub(super) fn render_topology_surface(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
@@ -408,10 +410,12 @@ impl WorkspaceApp {
                 CursorStyle::OpenHand
             })
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
-                this.zoom_topology_graph(event);
-                this.connection_monitor.dismiss_topology_menu();
+                let zoom_changed = this.zoom_topology_graph(event);
+                let menu_changed = this.connection_monitor.dismiss_topology_menu();
                 cx.stop_propagation();
-                cx.notify();
+                if zoom_changed || menu_changed {
+                    cx.notify();
+                }
             }))
             .on_mouse_down(
                 MouseButton::Left,
@@ -824,6 +828,9 @@ impl WorkspaceApp {
                     .py_2()
                     .border_b_1()
                     .border_color(rgba((theme.border << 8) | TOPOLOGY_PANEL_BORDER_ALPHA_50))
+                    // Match Tauri menu clipping: the header paints at the top
+                    // edge but must still follow the rounded shell.
+                    .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                     .bg(rgba((theme.bg << 8) | 0x80))
                     .child(
                         div()
@@ -863,6 +870,9 @@ impl WorkspaceApp {
                     .py(px(6.0))
                     .border_t_1()
                     .border_color(rgba((theme.border << 8) | TOPOLOGY_PANEL_BORDER_ALPHA_50))
+                    // Footer paint is flush with the popover bottom; keep it
+                    // inside the same rounded menu boundary as the browser UI.
+                    .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                     .bg(rgba((theme.bg << 8) | 0x4d))
                     .text_align(gpui::TextAlign::Center)
                     .text_size(px(10.0))
@@ -928,18 +938,18 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent) {
+    fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent) -> bool {
         let delta = event.delta.pixel_delta(px(16.0));
         let vertical = f32::from(delta.y);
         if vertical == 0.0 {
-            return;
+            return false;
         }
 
         let old = self.connection_monitor.topology_transform;
         let wheel_factor = (1.0 - vertical * 0.001).clamp(0.85, 1.15);
         let next_k = (old.k * wheel_factor).clamp(TOPOLOGY_ZOOM_MIN, TOPOLOGY_ZOOM_MAX);
         if (next_k - old.k).abs() < f32::EPSILON {
-            return;
+            return false;
         }
 
         let cursor_x = f32::from(event.position.x);
@@ -951,6 +961,7 @@ impl WorkspaceApp {
             y: cursor_y - graph_y * next_k,
             k: next_k,
         };
+        true
     }
 
     fn pan_topology_graph(&mut self, event: &MouseMoveEvent) -> bool {
@@ -965,6 +976,9 @@ impl WorkspaceApp {
         let y = f32::from(event.position.y);
         let dx = x - drag.last_x;
         let dy = y - drag.last_y;
+        if dx == 0.0 && dy == 0.0 {
+            return false;
+        }
         self.connection_monitor.topology_transform.x += dx;
         self.connection_monitor.topology_transform.y += dy;
         self.connection_monitor.topology_drag = Some(TopologyDragState {

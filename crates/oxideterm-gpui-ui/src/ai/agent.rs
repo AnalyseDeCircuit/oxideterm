@@ -4,6 +4,8 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
+use crate::modal::rounded_shell_child_radius;
+
 use super::tokens::*;
 
 const AI_AGENT_HEADER_PX: f32 = 16.0; // Tauri AgentPanel px-4.
@@ -314,6 +316,9 @@ pub fn ai_agent_panel_header(
         .flex()
         .items_center()
         .gap(px(tokens.spacing.two))
+        // Browser disclosure panels clip the painted header into the parent
+        // radius. Keep the native header from leaving square corner pixels.
+        .rounded_t(px(rounded_shell_child_radius(tokens.radii.lg)))
         .bg(rgb(tokens.ui.bg_hover))
         .px(px(tokens.spacing.three))
         .py(px(tokens.spacing.two))

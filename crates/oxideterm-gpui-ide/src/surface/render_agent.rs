@@ -1,3 +1,5 @@
+use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
+
 impl IdeSurface {
     fn render_status_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let dirty_count = self
@@ -552,6 +554,11 @@ impl IdeSurface {
             .child(
                 div()
                     .flex()
+                    // Footer hover fills touch the dialog bottom edge; align
+                    // the clip to the inner border curve, like browser
+                    // DialogContent overflow clipping.
+                    .rounded_b(px(rounded_shell_child_radius(tokens.radii.lg)))
+                    .overflow_hidden()
                     .border_t_1()
                     .border_color(rgba((tokens.ui.border << 8) | IDE_HOVER_ALPHA))
                     .child(

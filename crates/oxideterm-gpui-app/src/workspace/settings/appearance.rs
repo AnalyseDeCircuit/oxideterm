@@ -531,7 +531,9 @@ impl WorkspaceApp {
             .overflow_hidden()
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_elevated))
+            // Header/footer/body each paint to the rounded shell edge. Keeping
+            // the shell itself background-free avoids a second corner color
+            // when GPUI clips overflow with a rectangular mask.
             .flex()
             .flex_col()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -542,6 +544,9 @@ impl WorkspaceApp {
                     .py(px(THEME_EDITOR_HEADER_PADDING_Y))
                     .border_b_1()
                     .border_color(rgb(self.tokens.ui.border))
+                    // Tauri's DialogContent clips this painted header through
+                    // the modal radius; mirror that edge ownership in GPUI.
+                    .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
                     .bg(rgb(self.tokens.ui.bg_panel))
                     .flex()
                     .flex_col()
@@ -570,6 +575,7 @@ impl WorkspaceApp {
                     )
                     .px(px(THEME_EDITOR_BODY_PADDING_X))
                     .py(px(THEME_EDITOR_BODY_PADDING_Y))
+                    .bg(rgb(self.tokens.ui.bg_elevated))
                     .flex()
                     .flex_col()
                     .gap(px(THEME_EDITOR_BODY_GAP))
@@ -585,6 +591,9 @@ impl WorkspaceApp {
                     .py(px(THEME_EDITOR_HEADER_PADDING_Y))
                     .border_t_1()
                     .border_color(rgb(self.tokens.ui.border))
+                    // The footer background sits on the shell edge, so it must
+                    // own the bottom corners instead of relying on rectangular clipping.
+                    .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
                     .flex()
                     .flex_row()
                     .items_center()

@@ -960,7 +960,6 @@ impl WorkspaceApp {
                         this.ime_marked_text = None;
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
                 .on_mouse_move(cx.listener(

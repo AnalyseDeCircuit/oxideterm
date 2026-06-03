@@ -316,7 +316,6 @@ impl WorkspaceApp {
                                 this.new_connection_caret_visible = true;
                                 window.focus(&this.focus_handle);
                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                                cx.notify();
                             }),
                         )
                         .on_mouse_move(cx.listener(
@@ -512,8 +511,12 @@ impl WorkspaceApp {
             .on_mouse_move(cx.listener({
                 let distro_name = distro_name.clone();
                 move |this, _event: &MouseMoveEvent, _window, cx| {
-                    this.launcher.hovered_wsl_distro = Some(distro_name.clone());
-                    cx.notify();
+                    // Pointer movement within the same row should not repaint
+                    // the launcher unless the hover target actually changes.
+                    if this.launcher.hovered_wsl_distro.as_deref() != Some(distro_name.as_str()) {
+                        this.launcher.hovered_wsl_distro = Some(distro_name.clone());
+                        cx.notify();
+                    }
                 }
             }))
             .on_hover(cx.listener({
@@ -578,9 +581,13 @@ impl WorkspaceApp {
                 true
             }
             "backspace" => {
-                self.launcher.core.search_query.pop();
-                self.ime_marked_text = None;
-                cx.notify();
+                let changed = self.launcher.core.search_query.pop().is_some()
+                    || self.ime_marked_text.take().is_some();
+                if changed {
+                    // Empty Backspace is only visible if it also clears an IME
+                    // composition marker.
+                    cx.notify();
+                }
                 true
             }
             _ => true,
@@ -810,7 +817,6 @@ impl WorkspaceApp {
                                 this.new_connection_caret_visible = true;
                                 window.focus(&this.focus_handle);
                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                                cx.notify();
                             }),
                         )
                         .on_mouse_move(cx.listener(
@@ -1213,29 +1219,47 @@ impl WorkspaceApp {
                 let app_path = app_path.clone();
                 let tooltip_name = tooltip_name.clone();
                 move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.launcher.hovered_app_path = Some(app_path.clone());
+                    let tooltip_id = format!("launcher-app-{app_path}");
+                    let hover_changed =
+                        this.launcher.hovered_app_path.as_deref() != Some(app_path.as_str());
+                    if hover_changed {
+                        this.launcher.hovered_app_path = Some(app_path.clone());
+                    }
                     this.queue_workspace_tooltip(
-                        format!("launcher-app-{app_path}"),
+                        tooltip_id,
                         tooltip_name.clone(),
                         f32::from(event.position.x) + 12.0,
                         f32::from(event.position.y) + 16.0,
                         cx,
                     );
-                    cx.notify();
+                    // Pending tooltip movement is not visible until the delay
+                    // timer fires; visible tooltip movement is repainted by
+                    // queue_workspace_tooltip itself.
+                    if hover_changed {
+                        cx.notify();
+                    }
                 }
             }))
             .on_hover(cx.listener({
                 let app_path = app_path.clone();
                 move |this, hovered: &bool, _window, cx| {
                     if !*hovered {
+                        let mut changed = false;
                         if this.launcher.hovered_app_path.as_deref() == Some(app_path.as_str()) {
                             this.launcher.hovered_app_path = None;
+                            changed = true;
                         }
                         if this.launcher.pressed_app_path.as_deref() == Some(app_path.as_str()) {
                             this.launcher.pressed_app_path = None;
+                            changed = true;
                         }
-                        this.clear_workspace_tooltip(&format!("launcher-app-{app_path}"), cx);
-                        cx.notify();
+                        let tooltip_changed =
+                            this.clear_workspace_tooltip_state(&format!("launcher-app-{app_path}"));
+                        // Combine tooltip and tile chrome changes so one leave
+                        // event produces at most one repaint.
+                        if changed || tooltip_changed {
+                            cx.notify();
+                        }
                     }
                 }
             }))

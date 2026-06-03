@@ -593,10 +593,14 @@ impl WorkspaceApp {
             .cloned()
     }
 
-    pub(super) fn clear_ime_selection(&mut self) {
+    pub(super) fn clear_ime_selection(&mut self) -> bool {
+        let changed = self.selected_ime_target.is_some()
+            || self.selected_ime_range.is_some()
+            || self.ime_drag_selection.is_some();
         self.selected_ime_target = None;
         self.selected_ime_range = None;
         self.ime_drag_selection = None;
+        changed
     }
 
     pub(super) fn clear_read_only_ime_selection(&mut self, cx: &mut Context<Self>) {
@@ -630,8 +634,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let Some(index) = self.ime_index_for_position(target, position, window) else {
-            self.clear_ime_selection();
-            cx.notify();
+            if self.clear_ime_selection() {
+                cx.notify();
+            }
             return;
         };
 
@@ -663,19 +668,23 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // This helper owns the repaint notification for all mouse-down
+        // selection paths, so callers must not issue a second cx.notify().
         if event.click_count <= 1 || event.modifiers.shift {
             self.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
             return;
         }
 
         let Some(index) = self.ime_index_for_position(target, event.position, window) else {
-            self.clear_ime_selection();
-            cx.notify();
+            if self.clear_ime_selection() {
+                cx.notify();
+            }
             return;
         };
         let Some(text) = self.text_for_ime_target(target) else {
-            self.clear_ime_selection();
-            cx.notify();
+            if self.clear_ime_selection() {
+                cx.notify();
+            }
             return;
         };
         let text_len = text.encode_utf16().count();
@@ -711,8 +720,9 @@ impl WorkspaceApp {
         let Some(index) = self.ime_index_for_position(drag.target, position, window) else {
             return;
         };
-        self.set_ime_selection_from_anchor(drag.target, drag.anchor, index);
-        cx.notify();
+        if self.set_ime_selection_from_anchor(drag.target, drag.anchor, index) {
+            cx.notify();
+        }
     }
 
     pub(super) fn update_read_only_selection_drag_at_position(
@@ -740,8 +750,9 @@ impl WorkspaceApp {
                 .unwrap_or(text_len)
                 .min(text_len)
         };
-        self.set_ime_selection_from_anchor(drag.target, drag.anchor, index);
-        cx.notify();
+        if self.set_ime_selection_from_anchor(drag.target, drag.anchor, index) {
+            cx.notify();
+        }
     }
 
     pub(super) fn update_ime_selection_drag_from_mouse_move(
@@ -779,27 +790,16 @@ impl WorkspaceApp {
         target: WorkspaceImeTarget,
         anchor: usize,
         index: usize,
-    ) {
+    ) -> bool {
+        let next = selection_from_anchor(target, anchor, index);
+        let changed =
+            self.selected_ime_target.is_some() || self.selected_ime_range.as_ref() != Some(&next);
+        // MouseMove selection events can fire many times within the same text
+        // index. Return whether the browser-visible selection range actually
+        // changed so drag paths do not repaint on no-op movement.
         self.selected_ime_target = None;
-        if anchor == index {
-            self.selected_ime_range = Some(WorkspaceImeSelection {
-                target,
-                range: index..index,
-                reversed: false,
-            });
-        } else if index < anchor {
-            self.selected_ime_range = Some(WorkspaceImeSelection {
-                target,
-                range: index..anchor,
-                reversed: true,
-            });
-        } else {
-            self.selected_ime_range = Some(WorkspaceImeSelection {
-                target,
-                range: anchor..index,
-                reversed: false,
-            });
-        }
+        self.selected_ime_range = Some(next);
+        changed
     }
 
     fn ime_index_for_position(
@@ -1298,6 +1298,11 @@ impl WorkspaceApp {
         } else {
             return false;
         };
+        if range.start == range.end {
+            // Browser inputs still consume boundary Backspace/Delete, but they do
+            // not repaint because neither text nor selection changes.
+            return true;
+        }
         let caret = range.start;
         self.clear_ime_selection();
         self.replace_ime_target_text(target, Some(range), "", cx);
@@ -1360,12 +1365,22 @@ impl WorkspaceApp {
             return false;
         };
 
-        if keystroke.modifiers.shift {
-            let anchor = selection_anchor(&selection);
-            self.set_ime_selection_from_anchor(target, anchor, next);
+        let (anchor, index) = if keystroke.modifiers.shift {
+            (selection_anchor(&selection), next)
         } else {
-            self.set_ime_selection_from_anchor(target, next, next);
+            (next, next)
+        };
+        let desired_selection = selection_from_anchor(target, anchor, index);
+        if desired_selection == selection
+            && self.selected_ime_target.is_none()
+            && self.ime_marked_text.is_none()
+            && self.ime_drag_selection.is_none()
+        {
+            // Boundary navigation is a consumed browser input event, but an
+            // unchanged caret/selection must not repaint the whole workspace.
+            return true;
         }
+        self.set_ime_selection_from_anchor(target, anchor, index);
         self.ime_marked_text = None;
         self.ime_drag_selection = None;
         self.new_connection_caret_visible = true;
@@ -2213,6 +2228,33 @@ fn next_utf16_boundary(value: &str, offset: usize) -> usize {
         utf16_count = next;
     }
     value.encode_utf16().count()
+}
+
+// Mirrors the browser selection shape used by Shift+navigation and mouse drag.
+fn selection_from_anchor(
+    target: WorkspaceImeTarget,
+    anchor: usize,
+    index: usize,
+) -> WorkspaceImeSelection {
+    if anchor == index {
+        WorkspaceImeSelection {
+            target,
+            range: index..index,
+            reversed: false,
+        }
+    } else if index < anchor {
+        WorkspaceImeSelection {
+            target,
+            range: index..anchor,
+            reversed: true,
+        }
+    } else {
+        WorkspaceImeSelection {
+            target,
+            range: anchor..index,
+            reversed: false,
+        }
+    }
 }
 
 fn selection_focus(selection: &WorkspaceImeSelection) -> usize {

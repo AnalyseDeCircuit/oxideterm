@@ -518,9 +518,12 @@ impl IdeSurface {
             "escape" => self.close_project_search(cx),
             "enter" => self.run_project_search(cx),
             "backspace" => {
-                self.search.query.pop();
-                self.schedule_project_search(cx);
-                cx.notify();
+                if self.search.query.pop().is_some() {
+                    // Do not schedule or repaint a search for empty-query
+                    // Backspace; the visible query and results stay unchanged.
+                    self.schedule_project_search(cx);
+                    cx.notify();
+                }
             }
             _ => {
                 if let Some(text) = event.keystroke.key_char.as_deref()
@@ -993,8 +996,8 @@ impl IdeSurface {
             "backspace" => {
                 if let Some(input) = self.tree_name_input.as_mut()
                     && !input.submitting
+                    && input.value.pop().is_some()
                 {
-                    input.value.pop();
                     input.error = validate_file_name(input.value.trim());
                     cx.notify();
                 }
@@ -1122,10 +1125,15 @@ impl IdeSurface {
         if !drag.activated && distance < IDE_TAB_REORDER_ACTIVATION_PX {
             return;
         }
+        let changed = !drag.activated || drag.over_tab_id != target_tab_id;
         drag.activated = true;
         drag.over_tab_id = target_tab_id;
         self.tab_drag = Some(drag);
-        cx.notify();
+        if changed {
+            // Drag move events can repeat over the same target tab; only the
+            // activation boundary or a new drop target changes visible chrome.
+            cx.notify();
+        }
     }
 
     fn finish_tab_drag(&mut self, cx: &mut Context<Self>) {

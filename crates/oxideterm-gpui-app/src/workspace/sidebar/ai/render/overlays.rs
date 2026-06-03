@@ -1,3 +1,5 @@
+use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
+
 const AI_CONVERSATION_ROW_HEIGHT: f32 = 46.0; // Tauri ConversationItem: px-3 py-1.5, title + mono meta.
 const AI_CONVERSATION_EMPTY_HEIGHT: f32 = 52.0; // Tauri empty row p-4 text-center.
 const AI_CONVERSATION_MAX_HEIGHT: f32 = 256.0; // Tauri max-h-64.
@@ -295,8 +297,12 @@ impl WorkspaceApp {
             // Tauri relies on the rounded overflow-y-auto popover to clip the
             // active row background and border-left. GPUI needs the edge rows to
             // own matching corners so the highlight follows the popover radius.
-            .when(is_first, |row| row.rounded_t(px(self.tokens.radii.md)))
-            .when(is_last, |row| row.rounded_b(px(self.tokens.radii.md)))
+            .when(is_first, |row| {
+                row.rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
+            })
+            .when(is_last, |row| {
+                row.rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
+            })
             .cursor_pointer()
             .when(!is_active, |row| {
                 row.hover(|style| style.bg(rgba((self.tokens.ui.bg_panel << 8) | 0x66)))

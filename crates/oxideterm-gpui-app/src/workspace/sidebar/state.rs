@@ -35,17 +35,28 @@ impl WorkspaceApp {
         (self.sidebar_width - self.tokens.metrics.activity_bar_width).max(0.0)
     }
 
-    pub(super) fn set_sidebar_width(&mut self, width: f32, cx: &mut Context<Self>) {
-        self.sidebar_width = width.clamp(
+    pub(super) fn set_sidebar_width(&mut self, width: f32, cx: &mut Context<Self>) -> bool {
+        let next_width = width.clamp(
             self.tokens.metrics.sidebar_min_width,
             self.tokens.metrics.sidebar_max_width,
         );
+        if (next_width - self.sidebar_width).abs() < f32::EPSILON {
+            return false;
+        }
+        // Resize mousemove is a high-frequency root-capture path. Repaint only
+        // when the clamped browser-style sidebar width actually changes.
+        self.sidebar_width = next_width;
         cx.notify();
+        true
     }
 
     pub(super) fn start_sidebar_resize(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let was_resizing = self.sidebar_resizing;
         self.sidebar_resizing = true;
-        self.set_sidebar_width(f32::from(event.position.x), cx);
+        let width_changed = self.set_sidebar_width(f32::from(event.position.x), cx);
+        if !was_resizing && !width_changed {
+            cx.notify();
+        }
     }
 
     pub(super) fn update_sidebar_resize(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -90,9 +101,16 @@ impl WorkspaceApp {
         true
     }
 
-    pub(super) fn set_ai_sidebar_width(&mut self, width: f32, cx: &mut Context<Self>) {
-        self.ai_sidebar_width = width.clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);
+    pub(super) fn set_ai_sidebar_width(&mut self, width: f32, cx: &mut Context<Self>) -> bool {
+        let next_width = width.clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);
+        if (next_width - self.ai_sidebar_width).abs() < f32::EPSILON {
+            return false;
+        }
+        // Same repaint contract as the main sidebar: pointer capture may keep
+        // sending moves after the width is clamped at a boundary.
+        self.ai_sidebar_width = next_width;
         cx.notify();
+        true
     }
 
     pub(super) fn start_ai_sidebar_resize(
@@ -101,8 +119,10 @@ impl WorkspaceApp {
         _window: &Window,
         cx: &mut Context<Self>,
     ) {
-        self.ai_sidebar_resizing = true;
-        cx.notify();
+        if !self.ai_sidebar_resizing {
+            self.ai_sidebar_resizing = true;
+            cx.notify();
+        }
     }
 
     pub(super) fn update_ai_sidebar_resize(

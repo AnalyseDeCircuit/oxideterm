@@ -495,6 +495,10 @@ impl WorkspaceApp {
                     | SelectAnchorId::AiSafetyMenu
                     | SelectAnchorId::AiContextPopover
             ) && self.has_ai_sidebar_floating_overlay())
+            || (anchor.id == SelectAnchorId::TerminalBroadcastMenu
+                && self.terminal_broadcast_menu_open)
+            || (anchor.id == SelectAnchorId::TerminalCommandBar
+                && self.terminal_quick_commands_open)
             || self
                 .settings_slider_drag
                 .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
@@ -606,8 +610,10 @@ impl WorkspaceApp {
                 true
             }
             "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
-                self.settings_input_draft.pop();
-                self.apply_settings_input_draft(input, cx);
+                if self.settings_input_draft.pop().is_some() {
+                    // Empty Backspace/Delete does not change the draft value.
+                    self.apply_settings_input_draft(input, cx);
+                }
                 true
             }
             _ => true,
@@ -741,26 +747,32 @@ impl WorkspaceApp {
                 self.set_font_size_from_position(x, cx);
             }
             SettingsSlider::AppearanceBorderRadius => {
-                self.set_settings_slider_from_position(
+                let Some(value) = self.settings_slider_value_from_position(
                     SelectAnchorId::SettingsAppearanceBorderRadiusSlider,
                     x,
                     0.0,
                     24.0,
-                    |settings, value| settings.appearance.border_radius = value.round() as i64,
-                    cx,
-                );
+                ) else {
+                    return;
+                };
+                let value = value.round() as i64;
+                if self.settings_store.settings().appearance.border_radius != value {
+                    self.edit_settings(|settings| settings.appearance.border_radius = value, cx);
+                }
             }
             SettingsSlider::AppearanceBackgroundOpacity => {
-                self.set_settings_slider_from_position(
+                let Some(value) = self.settings_slider_value_from_position(
                     SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider,
                     x,
                     3.0,
                     50.0,
-                    |settings, value| {
-                        settings.terminal.background_opacity = value.round() as f64 / 100.0
-                    },
-                    cx,
-                );
+                ) else {
+                    return;
+                };
+                let value = value.round() as f64 / 100.0;
+                if self.settings_store.settings().terminal.background_opacity != value {
+                    self.edit_settings(|settings| settings.terminal.background_opacity = value, cx);
+                }
             }
             SettingsSlider::AppearanceBackgroundBlur => {
                 self.set_background_blur_preview_from_position(x, cx);
@@ -1110,23 +1122,22 @@ impl WorkspaceApp {
         }
     }
 
-    fn set_settings_slider_from_position(
-        &mut self,
+    fn settings_slider_value_from_position(
+        &self,
         anchor_id: SelectAnchorId,
         x: f32,
         min: f32,
         max: f32,
-        apply: fn(&mut PersistedSettings, f32),
-        cx: &mut Context<Self>,
-    ) {
+    ) -> Option<f32> {
         let Some(anchor) = self.select_anchors.get(&anchor_id).copied() else {
-            return;
+            return None;
         };
         let left = f32::from(anchor.bounds.left());
         let width = f32::from(anchor.bounds.size.width).max(1.0);
         let percent = ((x - left) / width).clamp(0.0, 1.0);
-        let value = min + percent * (max - min);
-        self.edit_settings(|settings| apply(settings, value), cx);
+        // Slider mousemove can fire many times inside one rounded setting step.
+        // Callers compare the resulting persisted value before notifying.
+        Some(min + percent * (max - min))
     }
 
     fn set_background_blur_preview_from_position(&mut self, x: f32, cx: &mut Context<Self>) {
@@ -1205,6 +1216,15 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             | SelectAnchorId::NewConnectionSerialParity
             | SelectAnchorId::NewConnectionSerialFlowControl
             | SelectAnchorId::IdeAgentStatus
+            // Broadcast targets are rendered through the root backdrop, but
+            // Tauri/Radix positions them from the trigger button. Keep the
+            // closed trigger rect warm so the first pointer-down opens at the
+            // command-bar/tabbar button even when the AI sidebar changes root width.
+            | SelectAnchorId::TerminalBroadcastMenu
+            // Quick Commands uses Tauri's `min(860px, calc(100% - 1.5rem))`
+            // width against the command bar. Keep the bar rect warm so the
+            // first open and later resizes can compute the same adaptive width.
+            | SelectAnchorId::TerminalCommandBar
             | SelectAnchorId::TerminalCastSeekbar
     )
 }

@@ -78,6 +78,7 @@ use oxideterm_gpui_ui::{
     modal::{
         dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
         dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop,
+        rounded_shell_child_radius,
     },
     select::{
         OverlayAnchor, SelectAnchorId, select_anchor_probe, select_label, select_option,

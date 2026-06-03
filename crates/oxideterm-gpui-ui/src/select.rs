@@ -103,6 +103,8 @@ pub enum SelectAnchorId {
     SettingsConnectionImportSource,
     SettingsConnectionImportDuplicateStrategy,
     IdeAgentStatus,
+    TerminalBroadcastMenu,
+    TerminalCommandBar,
     TerminalCastSeekbar,
 }
 

@@ -117,8 +117,10 @@ impl WorkspaceApp {
                     return true;
                 }
                 "backspace" => {
-                    self.file_manager_input_value_mut(input).pop();
-                    cx.notify();
+                    if self.file_manager_input_value_mut(input).pop().is_some() {
+                        // Empty Backspace keeps the input and file list unchanged.
+                        cx.notify();
+                    }
                     return true;
                 }
                 _ => {}

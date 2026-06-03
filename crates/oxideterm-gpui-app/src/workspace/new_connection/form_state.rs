@@ -640,13 +640,23 @@ pub(in crate::workspace) fn insert_text_into_current_connection_field(
     form.selected_field = None;
 }
 
-pub(in crate::workspace) fn backspace_current_connection_field(form: &mut NewConnectionForm) {
+pub(in crate::workspace) fn backspace_current_connection_field(
+    form: &mut NewConnectionForm,
+) -> bool {
+    let selection_was_visible = form.selected_field.is_some();
     if form.selected_field == Some(form.focused_field) {
-        current_connection_field_mut(form).clear();
+        // Clearing a selected field also clears visible selection state. Track
+        // text separately so empty selected fields still report a UI change.
+        let field = current_connection_field_mut(form);
+        let text_changed = !field.is_empty();
+        field.clear();
+        form.selected_field = None;
+        text_changed || selection_was_visible
     } else {
-        current_connection_field_mut(form).pop();
+        let text_changed = current_connection_field_mut(form).pop().is_some();
+        form.selected_field = None;
+        text_changed || selection_was_visible
     }
-    form.selected_field = None;
 }
 
 pub(in crate::workspace) fn clear_current_connection_field(form: &mut NewConnectionForm) {
@@ -750,8 +760,44 @@ mod tests {
             ..NewConnectionForm::default()
         };
         select_current_connection_field(&mut form);
-        backspace_current_connection_field(&mut form);
+        assert!(backspace_current_connection_field(&mut form));
         assert!(form.username.is_empty());
+        assert_eq!(form.selected_field, None);
+    }
+
+    #[test]
+    fn backspace_reports_text_changes_without_selection() {
+        let mut form = NewConnectionForm {
+            username: "root".to_string(),
+            focused_field: NewConnectionField::Username,
+            ..NewConnectionForm::default()
+        };
+
+        assert!(backspace_current_connection_field(&mut form));
+        assert_eq!(form.username, "roo");
+        assert_eq!(form.selected_field, None);
+    }
+
+    #[test]
+    fn backspace_reports_false_for_empty_unselected_field() {
+        let mut form = NewConnectionForm {
+            focused_field: NewConnectionField::Name,
+            ..NewConnectionForm::default()
+        };
+
+        assert!(!backspace_current_connection_field(&mut form));
+        assert_eq!(form.selected_field, None);
+    }
+
+    #[test]
+    fn backspace_clears_stale_selection_state() {
+        let mut form = NewConnectionForm {
+            focused_field: NewConnectionField::Username,
+            selected_field: Some(NewConnectionField::Host),
+            ..NewConnectionForm::default()
+        };
+
+        assert!(backspace_current_connection_field(&mut form));
         assert_eq!(form.selected_field, None);
     }
 

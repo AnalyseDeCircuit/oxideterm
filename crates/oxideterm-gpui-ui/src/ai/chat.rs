@@ -4,7 +4,7 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
-use crate::button::tauri_focus_visible_ring;
+use crate::{button::tauri_focus_visible_ring, modal::rounded_shell_child_radius};
 
 use super::tokens::*;
 
@@ -542,6 +542,9 @@ pub fn ai_thinking_header(
         .gap(px(tokens.spacing.two))
         .px(px(tokens.spacing.three))
         .py(px(tokens.spacing.one + tokens.spacing.one / 2.0))
+        // The thinking header can paint a hover background flush to the top of
+        // a rounded block; own the top radius like CSS overflow clipping would.
+        .rounded_t(px(rounded_shell_child_radius(tokens.radii.md)))
         .text_size(px(AI_TEXT_11))
         .font_weight(FontWeight::MEDIUM)
         .text_color(muted_text(tokens, AI_MUTED_TEXT_70_ALPHA))

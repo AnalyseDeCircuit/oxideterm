@@ -11,6 +11,8 @@ const COMMAND_PALETTE_BACKDROP_ALPHA: u32 = 0x66; // Tauri CommandPalette overla
 const QUICKLOOK_BACKDROP_ALPHA: u32 = 0xcc; // Tauri QuickLook bg-black/80.
 const TRANSPARENT_BACKDROP_ALPHA: u32 = 0x00; // Radix popover outside-hit-test layer.
 const TAILWIND_BACKDROP_BLUR_SM_PX: f32 = 4.0; // Tailwind backdrop-blur-sm.
+const GPUI_BORDER_1_WIDTH: f32 = 1.0; // GPUI border_1() occupies one logical pixel inside rounded shells.
+const GPUI_EDGE_CHILD_OVERDRAW_PX: f32 = 1.0; // Covers GPUI's rectangular overflow mask edge.
 static TAURI_BACKDROP_BLUR_ALLOWED: AtomicBool = AtomicBool::new(true);
 
 // Tauri/Radix portals use z-50 for dialog/select/popover surfaces; GPUI uses
@@ -235,6 +237,13 @@ pub fn modal_container(tokens: &ThemeTokens) -> Div {
     dialog_content(tokens)
 }
 
+pub fn rounded_shell_child_radius(radius: f32) -> f32 {
+    // Browser border-radius clips child backgrounds through the border box.
+    // GPUI 0.2.2 only applies a rectangular overflow mask, so edge children
+    // need a one-pixel inner overdraw to avoid parent-color seams at corners.
+    (radius - GPUI_BORDER_1_WIDTH - GPUI_EDGE_CHILD_OVERDRAW_PX).max(0.0)
+}
+
 pub fn dialog_content(tokens: &ThemeTokens) -> Div {
     let theme = tokens.ui;
     div()
@@ -265,7 +274,7 @@ pub fn dialog_header(tokens: &ThemeTokens) -> Div {
         // Tauri DialogContent uses rounded + overflow-hidden; GPUI edge
         // children need matching corners so painted header backgrounds cannot
         // show rectangular pixels outside the shell radius.
-        .rounded_t(px(tokens.radii.md))
+        .rounded_t(px(rounded_shell_child_radius(tokens.radii.md)))
         .bg(rgb(theme.bg_panel))
         .border_b_1()
         .border_color(rgb(theme.border))
@@ -314,7 +323,7 @@ pub fn dialog_footer(tokens: &ThemeTokens) -> Div {
         .border_color(rgb(theme.border))
         // Mirrors browser clipping for the footer background at the bottom
         // edge of shared DialogContent surfaces.
-        .rounded_b(px(tokens.radii.md))
+        .rounded_b(px(rounded_shell_child_radius(tokens.radii.md)))
         .bg(rgb(theme.bg_panel))
 }
 
@@ -387,6 +396,15 @@ mod tests {
             backdrop_effect_with_blur_allowed(TauriBackdropRole::CommandPalette, true).blur_px,
             Some(TAILWIND_BACKDROP_BLUR_SM_PX)
         );
+    }
+
+    #[test]
+    fn rounded_shell_child_radius_overdraws_rectangular_gpui_masks() {
+        // The source web UI relies on border-radius clipping. GPUI child
+        // backgrounds are independent, so the shared child radius intentionally
+        // leaves a small painted overdraw inside the shell.
+        assert_eq!(rounded_shell_child_radius(12.0), 10.0);
+        assert_eq!(rounded_shell_child_radius(1.0), 0.0);
     }
 
     #[test]

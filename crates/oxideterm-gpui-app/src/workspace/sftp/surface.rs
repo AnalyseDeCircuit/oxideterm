@@ -31,8 +31,12 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
                     window.focus(&this.focus_handle);
-                    this.sftp_view.dismiss_context_menu();
-                    cx.notify();
+                    if this.sftp_view.dismiss_context_menu() {
+                        // Ordinary pane clicks already repaint through their
+                        // own state changes; the root only owns context-menu
+                        // dismissal, so skip a no-op background repaint.
+                        cx.notify();
+                    }
                 }),
             )
             .when_some(self.sftp_view.init_error.as_ref(), |root, error| {
@@ -152,8 +156,10 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
                     window.focus(&this.focus_handle);
-                    this.sftp_view.active_pane = pane;
-                    cx.notify();
+                    if this.sftp_view.active_pane != pane {
+                        this.sftp_view.active_pane = pane;
+                        cx.notify();
+                    }
                 }),
             )
             .child(self.render_sftp_pane_header(
@@ -395,23 +401,45 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    this.sftp_view.active_pane = pane;
+                    let mut changed = false;
+                    if this.sftp_view.active_pane != pane {
+                        this.sftp_view.active_pane = pane;
+                        changed = true;
+                    }
                     if editing || event.click_count >= 2 {
                         match pane {
                             SftpPane::Local => {
-                                this.sftp_view.editing_local_path = true;
-                                this.sftp_view.local_path_input = this.sftp_view.local_path.clone();
+                                if !this.sftp_view.editing_local_path {
+                                    this.sftp_view.editing_local_path = true;
+                                    changed = true;
+                                }
+                                if this.sftp_view.local_path_input != this.sftp_view.local_path {
+                                    this.sftp_view.local_path_input =
+                                        this.sftp_view.local_path.clone();
+                                    changed = true;
+                                }
                             }
                             SftpPane::Remote => {
-                                this.sftp_view.editing_remote_path = true;
-                                this.sftp_view.remote_path_input =
-                                    this.sftp_view.remote_path.clone();
+                                if !this.sftp_view.editing_remote_path {
+                                    this.sftp_view.editing_remote_path = true;
+                                    changed = true;
+                                }
+                                if this.sftp_view.remote_path_input != this.sftp_view.remote_path {
+                                    this.sftp_view.remote_path_input =
+                                        this.sftp_view.remote_path.clone();
+                                    changed = true;
+                                }
                             }
                         }
-                        this.sftp_view.focused_input = Some(input);
+                        if this.sftp_view.focused_input != Some(input) {
+                            this.sftp_view.focused_input = Some(input);
+                            changed = true;
+                        }
                     }
                     cx.stop_propagation();
-                    cx.notify();
+                    if changed {
+                        cx.notify();
+                    }
                 }),
             );
 
@@ -732,10 +760,19 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.sftp_view.active_pane = pane;
-                    this.sftp_view.focused_input = Some(input);
+                    let mut changed = false;
+                    if this.sftp_view.active_pane != pane {
+                        this.sftp_view.active_pane = pane;
+                        changed = true;
+                    }
+                    if this.sftp_view.focused_input != Some(input) {
+                        this.sftp_view.focused_input = Some(input);
+                        changed = true;
+                    }
                     cx.stop_propagation();
-                    cx.notify();
+                    if changed {
+                        cx.notify();
+                    }
                 }),
             )
             .into_any_element()

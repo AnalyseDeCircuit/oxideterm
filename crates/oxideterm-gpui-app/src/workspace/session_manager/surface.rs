@@ -264,48 +264,57 @@ impl WorkspaceApp {
                 true
             }
             "backspace" => {
-                match input {
+                let changed = match input {
                     SessionManagerInput::Search => {
-                        self.session_manager.search_query.pop();
+                        self.session_manager.search_query.pop().is_some()
                     }
                     SessionManagerInput::SavedSearch => {
-                        self.session_manager.saved_search_query.pop();
+                        self.session_manager.saved_search_query.pop().is_some()
                     }
                     SessionManagerInput::NewGroup => {
-                        self.session_manager.new_group_name.pop();
+                        self.session_manager.new_group_name.pop().is_some()
                     }
                     SessionManagerInput::AutoRouteDisplayName => {
-                        self.auto_route_modal.display_name.pop();
+                        self.auto_route_modal.display_name.pop().is_some()
                     }
                     SessionManagerInput::OxideImportPassword => {
                         if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
-                            dialog.password.pop();
-                            dialog.error = None;
+                            dialog.password.pop().is_some() || dialog.error.take().is_some()
+                        } else {
+                            false
                         }
                     }
                     SessionManagerInput::OxideExportPassword => {
                         if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                            dialog.password.pop();
-                            dialog.error = None;
+                            dialog.password.pop().is_some() || dialog.error.take().is_some()
+                        } else {
+                            false
                         }
                     }
                     SessionManagerInput::OxideExportConfirmPassword => {
                         if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                            dialog.confirm_password.pop();
-                            dialog.error = None;
+                            dialog.confirm_password.pop().is_some()
+                                || dialog.error.take().is_some()
+                        } else {
+                            false
                         }
                     }
                     SessionManagerInput::OxideExportDescription => {
                         if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                            dialog.description.pop();
-                            dialog.error = None;
+                            dialog.description.pop().is_some() || dialog.error.take().is_some()
+                        } else {
+                            false
                         }
                     }
                 };
-                if input == SessionManagerInput::Search {
+                if changed && input == SessionManagerInput::Search {
                     self.clear_session_selection_for_invisible_rows();
                 }
-                cx.notify();
+                if changed {
+                    // Empty Backspace should not repaint session-manager inputs
+                    // unless it deletes text or clears a visible validation error.
+                    cx.notify();
+                }
                 true
             }
             _ => false,

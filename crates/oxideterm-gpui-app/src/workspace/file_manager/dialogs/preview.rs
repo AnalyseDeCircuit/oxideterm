@@ -17,6 +17,7 @@ impl WorkspaceApp {
     pub(super) fn render_file_manager_preview_dialog(
         &self,
         entry: LocalFileEntry,
+        shell_radius: f32,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -59,6 +60,12 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .size_full()
+            // Tauri QuickLook is one rounded panel whose direct children are
+            // visually clipped together. Keep this root paint-free: it only
+            // owns the native clip so header/body/footer backgrounds cannot
+            // leave square pixels at any corner.
+            .rounded(px(shell_radius))
+            .overflow_hidden()
             .child(
                 div()
                     .h(px(48.0))
@@ -66,11 +73,10 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(10.0))
-                    // Tauri QuickLook relies on CSS overflow clipping the
-                    // painted header into the rounded outer panel. GPUI can let
-                    // child backgrounds leak, so the edge child owns the same
-                    // top radius explicitly.
-                    .rounded_t(px(self.tokens.radii.lg))
+                    // Tauri QuickLook clips this header through the panel's
+                    // border-box. The caller passes the inset shell radius so
+                    // the painted child does not fight the outer border curve.
+                    .rounded_t(px(shell_radius))
                     .border_b_1()
                     .border_color(file_manager_border(theme.border, has_background))
                     .bg(file_manager_panel_bg(
@@ -250,7 +256,7 @@ impl WorkspaceApp {
                     // the rounded QuickLook shell; it is not an independent
                     // card and must not paint a rectangular shadow at the edge.
                     .bg(file_manager_panel_bg(theme.bg_card, has_background, 0xff))
-                    .rounded_b(px(self.tokens.radii.lg))
+                    .rounded_b(px(shell_radius))
                     .text_size(px(FILE_MANAGER_TEXT_XS))
                     .text_color(rgb(theme.text_muted))
                     .child(if can_navigate {

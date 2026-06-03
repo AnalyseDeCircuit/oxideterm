@@ -251,7 +251,6 @@ impl WorkspaceApp {
                         this.needs_active_pane_focus = false;
                         window.focus(&this.focus_handle);
                         this.begin_ime_selection_from_mouse_down(WorkspaceImeTarget::SessionManager(target), event, window, cx);
-                        cx.notify();
                         cx.stop_propagation();
                     }),
                 )

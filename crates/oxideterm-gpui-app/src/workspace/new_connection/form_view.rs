@@ -218,10 +218,16 @@ impl WorkspaceApp {
                 true
             }
             "backspace" => {
-                backspace_current_connection_field(form);
-                form.error = None;
-                self.new_connection_caret_visible = true;
-                cx.notify();
+                let changed = backspace_current_connection_field(form)
+                    || form.error.take().is_some()
+                    || !self.new_connection_caret_visible;
+                if changed {
+                    // Empty Backspace in an unchanged field is a browser no-op;
+                    // only repaint when text, selection, error, or caret state
+                    // actually changes.
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
                 true
             }
             "space" => {

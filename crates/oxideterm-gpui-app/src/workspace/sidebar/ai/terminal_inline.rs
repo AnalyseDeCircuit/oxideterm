@@ -208,6 +208,10 @@ impl WorkspaceApp {
                     .relative()
                     .w(px(AI_INLINE_PANEL_WIDTH))
                     .rounded(px(self.tokens.radii.md))
+                    // Tauri inline panels clip loading strips and action bars
+                    // through the rounded shell; GPUI needs the same explicit
+                    // panel clipping before any edge child paints.
+                    .overflow_hidden()
                     .border_1()
                     .border_color(rgb(theme.border))
                     .bg(rgb(theme.bg_elevated))
@@ -220,6 +224,11 @@ impl WorkspaceApp {
                                 .left(px(0.0))
                                 .right(px(0.0))
                                 .h(px(AI_INLINE_PANEL_LOADING_BAR_HEIGHT))
+                                .rounded_t(px(
+                                    oxideterm_gpui_ui::modal::rounded_shell_child_radius(
+                                        self.tokens.radii.md,
+                                    ),
+                                ))
                                 .bg(rgb(theme.accent)),
                         )
                     })
@@ -267,7 +276,6 @@ impl WorkspaceApp {
                                                 window.focus(&this.focus_handle);
                                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                                                 cx.stop_propagation();
-                                                cx.notify();
                                             }),
                                         )
                                         .on_mouse_move(
@@ -390,6 +398,11 @@ impl WorkspaceApp {
                                                     .border_t_1()
                                                     .border_color(rgb(theme.border))
                                                     .bg(rgb(theme.bg_elevated))
+                                                    .rounded_b(px(
+                                                        oxideterm_gpui_ui::modal::rounded_shell_child_radius(
+                                                            self.tokens.radii.md,
+                                                        ),
+                                                    ))
                                                     .px(px(8.0))
                                                     .py(px(6.0))
                                                     .child(self.render_terminal_ai_inline_action(

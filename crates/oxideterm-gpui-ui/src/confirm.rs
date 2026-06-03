@@ -6,7 +6,7 @@ use oxideterm_theme::ThemeTokens;
 use std::rc::Rc;
 
 use crate::button::{SplitFooterButtonOptions, split_footer_button};
-use crate::modal::dismissible_dialog_backdrop;
+use crate::modal::{dismissible_dialog_backdrop, rounded_shell_child_radius};
 
 const CONFIRM_DIALOG_WIDTH: f32 = 384.0; // Tauri useConfirm max-w-sm
 const CONFIRM_BORDER_ALPHA: u32 = 0x99; // Tauri border-theme-border/60
@@ -154,7 +154,7 @@ pub fn confirm_dialog_with_focus(
                         // Tauri clips split footer button backgrounds through
                         // DialogContent's rounded overflow-hidden surface.
                         // GPUI needs the footer row to own that bottom clip too.
-                        .rounded_b(px(tokens.radii.lg))
+                        .rounded_b(px(rounded_shell_child_radius(tokens.radii.lg)))
                         .overflow_hidden()
                         .border_t_1()
                         .border_color(rgba((theme.border << 8) | CONFIRM_DIVIDER_ALPHA))

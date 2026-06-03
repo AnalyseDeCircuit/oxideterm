@@ -21,18 +21,23 @@ impl WorkspaceApp {
                 sftp_bg(theme.bg, has_background)
             })
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                this.update_sftp_drag(
+                if this.update_sftp_drag(
                     pane,
                     f32::from(event.position.x),
                     f32::from(event.position.y),
-                );
-                cx.notify();
+                ) {
+                    cx.notify();
+                }
             }))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.finish_sftp_drag(pane);
-                    cx.notify();
+                    if this.finish_sftp_drag(pane) {
+                        // Mouse-up also fires for ordinary list clicks. Only
+                        // repaint when it actually clears drag chrome or starts
+                        // a cross-pane transfer.
+                        cx.notify();
+                    }
                 }),
             )
             .when(pane == SftpPane::Remote, |list| {
@@ -57,11 +62,15 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
                     window.focus(&this.focus_handle);
-                    this.sftp_view.dismiss_context_menu();
-                    this.sftp_view.drag_state = None;
-                    this.sftp_view.drag_over_pane = None;
-                    this.clear_sftp_selection(pane);
-                    cx.notify();
+                    let menu_changed = this.sftp_view.dismiss_context_menu();
+                    let drag_changed = this.cancel_sftp_drag_capture();
+                    let selection_changed = this.clear_sftp_selection(pane);
+                    if menu_changed || drag_changed || selection_changed {
+                        // Blank-list clicks can happen repeatedly while no
+                        // row/menu/drag state exists; repaint only when the
+                        // click actually cleared visible SFTP chrome.
+                        cx.notify();
+                    }
                 }),
             )
             .on_mouse_down(

@@ -606,7 +606,6 @@ impl WorkspaceApp {
             .min(FILE_MANAGER_QUICKLOOK_HEIGHT)
             .max(min_height)
             .min(max_height);
-
         quicklook_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
@@ -624,20 +623,24 @@ impl WorkspaceApp {
                     .flex_col()
                     .rounded(px(self.tokens.radii.lg))
                     .overflow_hidden()
+                    // Tauri QuickLook is a single rounded border-box, but GPUI's
+                    // overflow mask is rectangular. Keep this outer shell
+                    // background-free so edge children own the visible color at
+                    // every corner instead of exposing a second alpha layer.
                     .border_1()
                     .border_color(rgba(
                         (self.tokens.ui.border << 8) | FILE_MANAGER_DIALOG_BORDER_ALPHA,
-                    ))
-                    .bg(file_manager_panel_bg(
-                        self.tokens.ui.bg_panel,
-                        has_background,
-                        0xf2,
                     ))
                     .shadow_lg()
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation();
                     })
-                    .child(self.render_file_manager_preview_dialog(entry, has_background, cx)),
+                    .child(self.render_file_manager_preview_dialog(
+                        entry,
+                        rounded_shell_child_radius(self.tokens.radii.lg),
+                        has_background,
+                        cx,
+                    )),
             )
             .into_any_element()
     }
@@ -756,7 +759,7 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(file_manager_border(theme.border, has_background))
                             .bg(file_manager_panel_bg(theme.bg_panel, has_background, 0xff))
-                            .rounded_b(px(self.tokens.radii.lg))
+                            .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                             .flex()
                             .justify_end()
                             .child(self.workspace_toolbar_action_button(
@@ -833,7 +836,6 @@ impl WorkspaceApp {
                         this.ime_marked_text = None;
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
                 .on_mouse_move(cx.listener(
@@ -902,7 +904,6 @@ impl WorkspaceApp {
                         this.ime_marked_text = None;
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
                 .on_mouse_move(cx.listener(

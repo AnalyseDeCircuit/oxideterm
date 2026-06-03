@@ -1098,6 +1098,8 @@ impl WorkspaceApp {
         let Some(mut drag) = self.tab_drag.clone() else {
             return;
         };
+        let was_active = drag.active;
+        let previous_drop_target_index = drag.drop_target_index;
         // Browser tab drags keep pointer capture after leaving the tab label;
         // the root mouse-up is responsible for finishing or cancelling.
         drag.current_x = f32::from(event.position.x);
@@ -1114,8 +1116,14 @@ impl WorkspaceApp {
         } else {
             drag.drop_target_index = drag.from_index;
         }
+        let changed =
+            drag.active != was_active || drag.drop_target_index != previous_drop_target_index;
         self.tab_drag = Some(drag);
-        cx.notify();
+        if changed {
+            // The tab strip renders activation and drop-target changes, not raw
+            // pointer coordinates. Avoid repainting every captured mouse move.
+            cx.notify();
+        }
     }
 
     pub(super) fn finish_tab_drag(

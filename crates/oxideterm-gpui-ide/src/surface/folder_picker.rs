@@ -154,8 +154,10 @@ impl IdeSurface {
             "escape" => self.close_folder_picker(cx),
             "enter" => self.submit_folder_picker_path(cx),
             "backspace" if self.folder_picker.path_input_focused => {
-                self.folder_picker.path_input.pop();
-                cx.notify();
+                if self.folder_picker.path_input.pop().is_some() {
+                    // Empty Backspace keeps the browser input unchanged.
+                    cx.notify();
+                }
             }
             _ if self.folder_picker.path_input_focused => {
                 if let Some(text) = event.keystroke.key_char.as_deref()

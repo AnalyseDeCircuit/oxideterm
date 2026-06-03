@@ -19,6 +19,7 @@ use oxideterm_gpui_ui::{
         IconButtonOptions, ToolbarButtonOptions,
     },
     confirm_dialog,
+    modal::rounded_shell_child_radius,
     surface::{
         color_for_background, color_for_background_or_alpha, color_with_alpha,
         tauri_glass_surface_shadow,

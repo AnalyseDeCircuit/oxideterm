@@ -8,6 +8,9 @@ pub(super) fn quick_command_lucide_icon(icon: QuickCommandIcon) -> LucideIcon {
     }
 }
 
+const QUICK_COMMANDS_POPOVER_MAX_WIDTH: f32 = 860.0;
+const QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN: f32 = 12.0;
+
 pub(super) fn quick_command_icon_label_key(icon: QuickCommandIcon) -> String {
     format!("terminal.quick_commands.icon_{}", icon.as_source_id())
 }
@@ -49,6 +52,26 @@ fn quick_command_draft_can_save(draft: &QuickCommandDraft) -> bool {
 
 fn quick_command_category_draft_can_save(draft: &QuickCommandCategoryDraft) -> bool {
     !draft.name.trim().is_empty()
+}
+
+fn quick_commands_popover_width_for_bar(command_bar_width: f32) -> f32 {
+    let available_width = command_bar_width - QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN * 2.0;
+    available_width.max(0.0).min(QUICK_COMMANDS_POPOVER_MAX_WIDTH)
+}
+
+fn select_quick_command_category_state(
+    active_category: &mut String,
+    command_editor: &mut Option<QuickCommandDraft>,
+    category_editor: &mut Option<QuickCommandCategoryDraft>,
+    focused_input: &mut Option<QuickCommandInput>,
+    highlighted_command: &mut Option<String>,
+    category_id: &str,
+) {
+    *active_category = category_id.to_string();
+    *command_editor = None;
+    *category_editor = None;
+    *focused_input = None;
+    *highlighted_command = None;
 }
 
 fn quick_command_editor_tab_target(
@@ -273,11 +296,14 @@ impl WorkspaceApp {
                 self.save_quick_command_editor(cx);
             }
             "backspace" if !modifiers.platform && !modifiers.control => {
-                self.quick_command_input_value_mut(input).pop();
-                if input == QuickCommandInput::Search {
-                    self.quick_commands.highlighted_command = None;
+                if self.quick_command_input_value_mut(input).pop().is_some() {
+                    // Empty Backspace does not change the active field or the
+                    // filtered command list, so skip a redundant repaint.
+                    if input == QuickCommandInput::Search {
+                        self.quick_commands.highlighted_command = None;
+                    }
+                    cx.notify();
                 }
-                cx.notify();
             }
             _ => {}
         }
@@ -366,16 +392,25 @@ impl WorkspaceApp {
     pub(super) fn render_quick_commands_popover(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let visible_commands = self.visible_quick_commands_for_active_terminal();
+        let popover_width = self
+            .select_anchors
+            .get(&SelectAnchorId::TerminalCommandBar)
+            .map(|anchor| quick_commands_popover_width_for_bar(f32::from(anchor.bounds.size.width)))
+            .unwrap_or(QUICK_COMMANDS_POPOVER_MAX_WIDTH);
         let mut popover = div()
             .absolute()
             .bottom(px(56.0))
-            .right(px(12.0))
+            .right(px(QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN))
             // The popover sits inside an occluding outside-dismiss backdrop.
             // Mark the panel itself as occluding too, so category-row clicks
             // are hit-tested against this event island instead of the backdrop.
             .occlude()
-            .w(px(860.0))
-            .max_w(px(860.0))
+            // Tauri uses `w-[min(860px,calc(100%-1.5rem))]` on a child of
+            // TerminalCommandBar. Compute against the cached command-bar
+            // bounds so AI sidebar and window-width changes shrink the panel
+            // instead of clipping its left edge.
+            .w(px(popover_width))
+            .max_w(px(QUICK_COMMANDS_POPOVER_MAX_WIDTH))
             .max_h(px(520.0))
             .overflow_hidden()
             .rounded(px(self.tokens.radii.lg))
@@ -411,7 +446,7 @@ impl WorkspaceApp {
             .w(px(160.0))
             .flex_none()
             .overflow_hidden()
-            .rounded_l(px(self.tokens.radii.lg))
+            .rounded_l(px(rounded_shell_child_radius(self.tokens.radii.lg)))
             .border_r_1()
             .border_color(rgba((theme.border << 8) | 0x99))
             .bg(rgba((theme.bg << 8) | 0x73))
@@ -503,11 +538,14 @@ impl WorkspaceApp {
                         cx.listener({
                             let category_id = category_id.clone();
                             move |this, _event, _window, cx| {
-                                this.quick_commands.active_category = category_id.clone();
-                                this.quick_commands.command_editor = None;
-                                this.quick_commands.category_editor = None;
-                                this.quick_commands.focused_input = None;
-                                this.quick_commands.highlighted_command = None;
+                                select_quick_command_category_state(
+                                    &mut this.quick_commands.active_category,
+                                    &mut this.quick_commands.command_editor,
+                                    &mut this.quick_commands.category_editor,
+                                    &mut this.quick_commands.focused_input,
+                                    &mut this.quick_commands.highlighted_command,
+                                    &category_id,
+                                );
                                 cx.stop_propagation();
                                 cx.notify();
                             }
@@ -530,17 +568,16 @@ impl WorkspaceApp {
                                 },
                             ))
                             .child(div().flex_1().truncate().child(
-                                self.render_row_safe_selectable_display_text_in_group(
-                                    crate::workspace::selectable_text::selectable_text_id(
-                                        "quick-command-category-row",
-                                        &category.id,
-                                    ),
+                                // Tauri renders category labels as plain spans inside
+                                // a button. Do not attach selectable-text mouse
+                                // handlers here; category clicks must stay inside
+                                // the popover instead of reaching outside-dismiss.
+                                self.render_display_text_with_role(
+                                    SelectableTextRole::NonSelectable,
                                     "quick-command-category-cell",
                                     ("name", category.id.as_str()),
-                                    0,
                                     category.name.clone(),
                                     if active { theme.accent } else { theme.text_muted },
-                                    None,
                                     cx,
                                 ),
                             ))
@@ -622,7 +659,7 @@ impl WorkspaceApp {
             .flex_1()
             .min_w(px(0.0))
             .overflow_hidden()
-            .rounded_r(px(self.tokens.radii.lg))
+            .rounded_r(px(rounded_shell_child_radius(self.tokens.radii.lg)))
             .flex()
             .flex_col()
             .child(
@@ -1273,7 +1310,6 @@ impl WorkspaceApp {
                     window.focus(&this.focus_handle);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .on_mouse_move(
@@ -1515,6 +1551,50 @@ mod terminal_command_bar_quick_command_tests {
             quick_command_editor_tab_target(QuickCommandInput::Search, true),
             None
         );
+    }
+
+    #[test]
+    fn quick_command_popover_width_matches_tauri_min_calc() {
+        assert_eq!(quick_commands_popover_width_for_bar(1200.0), 860.0);
+        assert_eq!(quick_commands_popover_width_for_bar(600.0), 576.0);
+        assert_eq!(quick_commands_popover_width_for_bar(240.0), 216.0);
+    }
+
+    #[test]
+    fn quick_command_category_switch_keeps_popover_open() {
+        let open = true;
+        let mut active_category = "files".to_string();
+        let mut command_editor = Some(QuickCommandDraft {
+            id: Some("command".to_string()),
+            name: "List".to_string(),
+            command: "ls".to_string(),
+            category: "files".to_string(),
+            description: String::new(),
+            host_pattern: String::new(),
+        });
+        let mut category_editor = Some(QuickCommandCategoryDraft {
+            id: Some("files".to_string()),
+            name: "Files".to_string(),
+            icon: QuickCommandIcon::Folder,
+        });
+        let mut focused_input = Some(QuickCommandInput::CommandName);
+        let mut highlighted_command = Some("list".to_string());
+
+        select_quick_command_category_state(
+            &mut active_category,
+            &mut command_editor,
+            &mut category_editor,
+            &mut focused_input,
+            &mut highlighted_command,
+            "docker",
+        );
+
+        assert!(open);
+        assert_eq!(active_category, "docker");
+        assert!(command_editor.is_none());
+        assert!(category_editor.is_none());
+        assert!(focused_input.is_none());
+        assert!(highlighted_command.is_none());
     }
 
     #[test]

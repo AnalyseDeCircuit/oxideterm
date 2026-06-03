@@ -2,6 +2,7 @@ use super::actions::classify_command_risk;
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use crate::assets::LucideIcon;
+use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
 use std::{
     collections::{HashMap, HashSet, hash_map::DefaultHasher},

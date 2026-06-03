@@ -521,8 +521,9 @@ impl WorkspaceApp {
                 "escape" => self.close_search(window, cx),
                 "enter" => self.search_next(!modifiers.shift, cx),
                 "backspace" => {
-                    self.search.query.pop();
-                    self.update_search_query(cx);
+                    if self.search.query.pop().is_some() {
+                        self.update_search_query(cx);
+                    }
                 }
                 _ => {}
             }
@@ -1231,11 +1232,19 @@ impl WorkspaceApp {
                 self.submit_terminal_command_bar(window, cx)
             }
             "backspace" => {
-                self.terminal_command_bar_draft.pop();
+                let changed = self.terminal_command_bar_draft.pop().is_some()
+                    || self.terminal_command_suggestions_open
+                    || self
+                        .terminal_command_suggestion_highlighted
+                        .take()
+                        .is_some()
+                    || self.ime_marked_text.take().is_some();
                 self.terminal_command_suggestions_open = false;
-                self.terminal_command_suggestion_highlighted = None;
-                self.ime_marked_text = None;
-                cx.notify();
+                if changed {
+                    // Backspace with an empty command and no open suggestions
+                    // leaves the command bar visually unchanged.
+                    cx.notify();
+                }
             }
             _ => {}
         }
@@ -1260,10 +1269,11 @@ impl WorkspaceApp {
             }
             "backspace" => {
                 if let Some(player) = self.terminal_cast_player.as_mut() {
-                    player.search_query.pop();
+                    if player.search_query.pop().is_some() {
+                        self.update_terminal_cast_search(cx);
+                        cx.notify();
+                    }
                 }
-                self.update_terminal_cast_search(cx);
-                cx.notify();
             }
             _ => {}
         }

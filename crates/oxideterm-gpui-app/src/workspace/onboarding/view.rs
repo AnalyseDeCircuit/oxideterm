@@ -163,6 +163,11 @@ impl WorkspaceApp {
             .border_t_1()
             .border_color(rgb(theme.border))
             .bg(rgba((theme.bg_card << 8) | ONBOARDING_CARD_ALPHA))
+            // The onboarding footer is the rounded shell's bottom painted
+            // child; keep its background clipped to the browser panel curve.
+            .rounded_b(px(oxideterm_gpui_ui::modal::rounded_shell_child_radius(
+                self.tokens.radii.lg,
+            )))
             .child(if can_go_back {
                 self.onboarding_button(
                     self.i18n.t("onboarding.back"),

@@ -18,7 +18,7 @@ use oxideterm_gpui_ui::{
         ToolbarButtonOptions,
     },
     context_menu::{ContextMenuActionableStyle, context_menu_event_boundary},
-    modal::{dismissible_dialog_backdrop, overlay_content_boundary},
+    modal::{dismissible_dialog_backdrop, overlay_content_boundary, rounded_shell_child_radius},
     surface::{
         color_for_background, color_with_background_scaled_alpha, tauri_glass_surface_shadow,
     },

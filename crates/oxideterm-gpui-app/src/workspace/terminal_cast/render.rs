@@ -407,7 +407,6 @@ impl WorkspaceApp {
                                                                 window.focus(&this.focus_handle);
                                                                 this.begin_ime_selection_from_mouse_down(search_target, event, window, cx);
                                                                 cx.stop_propagation();
-                                                                cx.notify();
                                                             },
                                                         ),
                                                     )

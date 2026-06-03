@@ -6,7 +6,7 @@ use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_ox
 use oxideterm_gpui_ui::{
     modal::{
         dialog_content, dismissible_command_palette_backdrop, dismissible_dialog_backdrop,
-        overlay_content_boundary,
+        overlay_content_boundary, rounded_shell_child_radius,
     },
     text_input::{text_input_anchor_probe, text_input_value_segments},
 };
@@ -214,49 +214,67 @@ impl WorkspaceApp {
             "arrowdown" | "down" => {
                 let count = self.filtered_command_palette_items().len();
                 if count > 0 {
-                    self.command_palette.selected_index =
-                        (self.command_palette.selected_index + 1).min(count - 1);
+                    let next = (self.command_palette.selected_index + 1).min(count - 1);
+                    if self.command_palette.selected_index != next {
+                        // Boundary navigation is a no-op; avoid repainting the
+                        // whole palette when the browser selection would stay put.
+                        self.command_palette.selected_index = next;
+                        self.scroll_selected_command_palette_item_into_view();
+                        cx.notify();
+                    }
+                }
+            }
+            "arrowup" | "up" => {
+                let next = self.command_palette.selected_index.saturating_sub(1);
+                if self.command_palette.selected_index != next {
+                    self.command_palette.selected_index = next;
                     self.scroll_selected_command_palette_item_into_view();
                     cx.notify();
                 }
             }
-            "arrowup" | "up" => {
-                self.command_palette.selected_index =
-                    self.command_palette.selected_index.saturating_sub(1);
-                self.scroll_selected_command_palette_item_into_view();
-                cx.notify();
-            }
             "pagedown" => {
                 let count = self.filtered_command_palette_items().len();
                 if count > 0 {
-                    self.command_palette.selected_index =
-                        (self.command_palette.selected_index + 8).min(count - 1);
-                    self.scroll_selected_command_palette_item_into_view();
+                    let next = (self.command_palette.selected_index + 8).min(count - 1);
+                    if self.command_palette.selected_index != next {
+                        self.command_palette.selected_index = next;
+                        self.scroll_selected_command_palette_item_into_view();
+                        cx.notify();
+                    }
                 }
-                cx.notify();
             }
             "pageup" => {
-                self.command_palette.selected_index =
-                    self.command_palette.selected_index.saturating_sub(8);
-                self.scroll_selected_command_palette_item_into_view();
-                cx.notify();
+                let next = self.command_palette.selected_index.saturating_sub(8);
+                if self.command_palette.selected_index != next {
+                    self.command_palette.selected_index = next;
+                    self.scroll_selected_command_palette_item_into_view();
+                    cx.notify();
+                }
             }
             "home" => {
-                self.command_palette.selected_index = 0;
-                self.scroll_selected_command_palette_item_into_view();
-                cx.notify();
+                if self.command_palette.selected_index != 0 {
+                    self.command_palette.selected_index = 0;
+                    self.scroll_selected_command_palette_item_into_view();
+                    cx.notify();
+                }
             }
             "end" => {
                 let count = self.filtered_command_palette_items().len();
                 if count > 0 {
-                    self.command_palette.selected_index = count - 1;
-                    self.scroll_selected_command_palette_item_into_view();
+                    let next = count - 1;
+                    if self.command_palette.selected_index != next {
+                        self.command_palette.selected_index = next;
+                        self.scroll_selected_command_palette_item_into_view();
+                        cx.notify();
+                    }
                 }
-                cx.notify();
             }
             "backspace" if !event.keystroke.modifiers.platform => {
-                self.command_palette.raw_query.pop();
-                self.update_command_palette_mode_from_query(cx);
+                if self.command_palette.raw_query.pop().is_some() {
+                    // Empty-query Backspace does not change the visible input
+                    // or mode, so the palette should not repaint.
+                    self.update_command_palette_mode_from_query(cx);
+                }
             }
             _ => {
                 if let Some(text) = event.keystroke.key_char.as_deref()
@@ -388,9 +406,12 @@ impl WorkspaceApp {
         match key {
             "escape" if !event.keystroke.modifiers.platform => self.close_shortcuts_modal(cx),
             "backspace" if !event.keystroke.modifiers.platform => {
-                self.shortcuts_modal.query.pop();
-                self.shortcuts_modal.scroll_handle = UniformListScrollHandle::new();
-                cx.notify();
+                if self.shortcuts_modal.query.pop().is_some() {
+                    // Empty-query Backspace is a browser no-op; only repaint
+                    // after the visible filter text actually changes.
+                    self.shortcuts_modal.scroll_handle = UniformListScrollHandle::new();
+                    cx.notify();
+                }
             }
             _ => {
                 if let Some(text) = event.keystroke.key_char.as_deref()
@@ -1157,6 +1178,10 @@ impl WorkspaceApp {
                             .items_center()
                             .border_b_1()
                             .border_color(rgb(self.tokens.ui.border))
+                            // The search row is the first painted child inside
+                            // the rounded command palette shell; match the
+                            // shell's inner curve instead of the outer border.
+                            .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
                             .when(mode != PaletteMode::All, |row| {
                                 row.child(self.render_command_palette_mode_badge(mode))
                             })
@@ -1608,6 +1633,10 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(rgb(self.tokens.ui.border))
                             .bg(rgb(self.tokens.ui.bg_panel))
+                            // This footer paints against the shared DialogContent
+                            // bottom edge, so it must own the same clipped inner
+                            // corners as Tauri's rounded dialog shell.
+                            .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
                             .text_size(px(11.0))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.i18n.t("shortcuts_modal.footer_hint"))

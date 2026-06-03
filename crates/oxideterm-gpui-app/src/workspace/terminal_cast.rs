@@ -165,9 +165,17 @@ impl WorkspaceApp {
     }
 
     pub(super) fn seek_terminal_cast(&mut self, ratio: f64, cx: &mut Context<Self>) {
-        if let Some(player) = self.terminal_cast_player.as_mut() {
-            player.seek(ratio);
+        let Some(player) = self.terminal_cast_player.as_mut() else {
+            return;
+        };
+        let target_position =
+            (player.playback.recording().duration * ratio.clamp(0.0, 1.0)).max(0.0);
+        if (player.playback.position() - target_position).abs() <= f64::EPSILON {
+            // Seekbar drags can repeat inside one playback timestamp. Rebuilding
+            // the terminal replay is expensive, so skip unchanged seeks.
+            return;
         }
+        player.seek(ratio);
         self.rebuild_terminal_cast_playback(cx);
         cx.notify();
     }

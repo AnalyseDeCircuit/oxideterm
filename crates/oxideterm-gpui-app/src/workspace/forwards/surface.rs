@@ -517,7 +517,7 @@ impl WorkspaceApp {
                                 .items_center()
                                 .justify_center()
                                 .gap(px(12.0))
-                                .rounded_b(px(self.tokens.radii.lg))
+                                .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .text_color(rgb(theme.text_muted))
                                 .child(Self::render_lucide_icon(

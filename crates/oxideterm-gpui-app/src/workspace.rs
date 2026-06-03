@@ -81,7 +81,7 @@ use oxideterm_gpui_terminal::{
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,
-    modal::{overlay_content_boundary, popover_backdrop, set_tauri_backdrop_blur_allowed},
+    modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
     toast::{ToastVariant, ToastView},
     toaster::toaster,
     tooltip::tooltip_content,

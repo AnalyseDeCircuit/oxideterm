@@ -111,8 +111,10 @@ impl WorkspaceApp {
                     return true;
                 }
                 "backspace" => {
-                    self.sftp_input_value_mut(input).pop();
-                    cx.notify();
+                    if self.sftp_input_value_mut(input).pop().is_some() {
+                        // Empty Backspace keeps the SFTP input unchanged.
+                        cx.notify();
+                    }
                     return true;
                 }
                 _ => {}
@@ -191,13 +193,15 @@ impl WorkspaceApp {
                 false
             }
             "up" | "arrowup" => {
-                self.move_sftp_selection(self.sftp_view.active_pane, -1);
-                cx.notify();
+                if self.move_sftp_selection(self.sftp_view.active_pane, -1) {
+                    cx.notify();
+                }
                 true
             }
             "down" | "arrowdown" => {
-                self.move_sftp_selection(self.sftp_view.active_pane, 1);
-                cx.notify();
+                if self.move_sftp_selection(self.sftp_view.active_pane, 1) {
+                    cx.notify();
+                }
                 true
             }
             _ => false,
@@ -351,7 +355,12 @@ impl WorkspaceApp {
             SftpPane::Local => &mut self.sftp_view.local_path_scroll_x,
             SftpPane::Remote => &mut self.sftp_view.remote_path_scroll_x,
         };
-        *scroll = (*scroll + horizontal).clamp(0.0, max_scroll);
+        let next_scroll = (*scroll + horizontal).clamp(0.0, max_scroll);
+        if (next_scroll - *scroll).abs() < f32::EPSILON {
+            cx.stop_propagation();
+            return;
+        }
+        *scroll = next_scroll;
         cx.stop_propagation();
         cx.notify();
     }
@@ -460,10 +469,21 @@ impl WorkspaceApp {
         self.stop_sftp_drag_autoscroll();
     }
 
-    fn update_sftp_drag(&mut self, pane: SftpPane, x: f32, y: f32) {
-        if self.update_sftp_drag_activation(x, y) {
+    fn update_sftp_drag(&mut self, pane: SftpPane, x: f32, y: f32) -> bool {
+        // Mouse move fires continuously over file lists. Notify only when the
+        // drag actually activates or the nominated drop pane changes.
+        let Some(was_active) = self.sftp_view.drag_state.as_ref().map(|drag| drag.active) else {
+            return false;
+        };
+        if !self.update_sftp_drag_activation(x, y) {
+            return false;
+        }
+        let active_changed = !was_active;
+        let pane_changed = self.sftp_view.drag_over_pane != Some(pane);
+        if pane_changed {
             self.sftp_view.drag_over_pane = Some(pane);
         }
+        active_changed || pane_changed
     }
 
     pub(in crate::workspace) fn update_sftp_drag_capture(
@@ -497,16 +517,16 @@ impl WorkspaceApp {
         drag.active
     }
 
-    fn finish_sftp_drag(&mut self, pane: SftpPane) {
+    fn finish_sftp_drag(&mut self, pane: SftpPane) -> bool {
         let Some(drag) = self.sftp_view.drag_state.take() else {
-            self.sftp_view.drag_over_pane = None;
+            let had_target = self.sftp_view.drag_over_pane.take().is_some();
             self.stop_sftp_drag_autoscroll();
-            return;
+            return had_target;
         };
-        self.sftp_view.drag_over_pane = None;
+        let had_target = self.sftp_view.drag_over_pane.take().is_some();
         self.stop_sftp_drag_autoscroll();
         if !drag.active || drag.source_pane == pane {
-            return;
+            return had_target || drag.active;
         }
         match (drag.source_pane, pane) {
             (SftpPane::Local, SftpPane::Remote) => {
@@ -525,6 +545,7 @@ impl WorkspaceApp {
             }
             _ => {}
         }
+        true
     }
 
     pub(in crate::workspace) fn cancel_sftp_drag_capture(&mut self) -> bool {
@@ -580,15 +601,21 @@ impl WorkspaceApp {
         self.sftp_view.drag_autoscroll_scheduled = false;
     }
 
-    fn clear_sftp_selection(&mut self, pane: SftpPane) {
+    fn clear_sftp_selection(&mut self, pane: SftpPane) -> bool {
         match pane {
             SftpPane::Local => {
+                let changed = !self.sftp_view.local_selected.is_empty()
+                    || self.sftp_view.local_last_selected.is_some();
                 self.sftp_view.local_selected.clear();
                 self.sftp_view.local_last_selected = None;
+                changed
             }
             SftpPane::Remote => {
+                let changed = !self.sftp_view.remote_selected.is_empty()
+                    || self.sftp_view.remote_last_selected.is_some();
                 self.sftp_view.remote_selected.clear();
                 self.sftp_view.remote_last_selected = None;
+                changed
             }
         }
     }
@@ -607,10 +634,10 @@ impl WorkspaceApp {
         }
     }
 
-    fn move_sftp_selection(&mut self, pane: SftpPane, delta: isize) {
+    fn move_sftp_selection(&mut self, pane: SftpPane, delta: isize) -> bool {
         let names = self.sftp_ordered_file_names(pane);
         if names.is_empty() {
-            return;
+            return false;
         }
         let current = self
             .sftp_selected_names(pane)
@@ -625,6 +652,19 @@ impl WorkspaceApp {
             current - 1
         };
         let name = names[next].clone();
+        let selected_names = self.sftp_selected_names(pane);
+        let last_selected = match pane {
+            SftpPane::Local => self.sftp_view.local_last_selected.as_ref(),
+            SftpPane::Remote => self.sftp_view.remote_last_selected.as_ref(),
+        };
+        if selected_names.len() == 1
+            && selected_names.first() == Some(&name)
+            && last_selected == Some(&name)
+        {
+            // A single-row list can receive repeated ArrowUp/ArrowDown events.
+            // Consume them like the browser list does, but do not repaint.
+            return false;
+        }
         match pane {
             SftpPane::Local => {
                 self.sftp_view.local_selected.clear();
@@ -654,6 +694,7 @@ impl WorkspaceApp {
                 TauriVirtualScrollAlign::Nearest,
             ),
         }
+        true
     }
 
     fn sftp_ordered_file_names(&self, pane: SftpPane) -> Vec<String> {

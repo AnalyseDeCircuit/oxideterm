@@ -47,10 +47,14 @@ impl WorkspaceApp {
                     true
                 }
                 "backspace" => {
-                    self.ai_model_selector_search_query.pop();
-                    self.ai_model_selector_highlighted_model = None;
-                    self.ime_marked_text = None;
-                    cx.notify();
+                    let changed = self.ai_model_selector_search_query.pop().is_some()
+                        || self.ai_model_selector_highlighted_model.take().is_some()
+                        || self.ime_marked_text.take().is_some();
+                    if changed {
+                        // Empty Backspace should not repaint the selector when
+                        // query, highlight, and IME state are already unchanged.
+                        cx.notify();
+                    }
                     true
                 }
                 _ => true,
@@ -65,9 +69,11 @@ impl WorkspaceApp {
                     true
                 }
                 "backspace" => {
-                    self.ai_editing_message_draft.pop();
-                    self.ime_marked_text = None;
-                    cx.notify();
+                    let changed = self.ai_editing_message_draft.pop().is_some()
+                        || self.ime_marked_text.take().is_some();
+                    if changed {
+                        cx.notify();
+                    }
                     true
                 }
                 "enter" if !event.keystroke.modifiers.shift => {
@@ -160,11 +166,15 @@ impl WorkspaceApp {
             }
             match event.keystroke.key.as_str() {
                 "backspace" => {
-                    self.ai_chat_draft.pop();
+                    let changed = self.ai_chat_draft.pop().is_some()
+                        || self.ai_chat_autocomplete_suppressed
+                        || self.ai_chat_autocomplete_index != 0
+                        || self.ime_marked_text.take().is_some();
                     self.ai_chat_autocomplete_suppressed = false;
                     self.ai_chat_autocomplete_index = 0;
-                    self.ime_marked_text = None;
-                    cx.notify();
+                    if changed {
+                        cx.notify();
+                    }
                     true
                 }
                 "enter" if !event.keystroke.modifiers.shift && !self.ai_chat_loading => {

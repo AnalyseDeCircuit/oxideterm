@@ -390,10 +390,11 @@ impl Render for WorkspaceApp {
                     this.stop_selectable_text_autoscroll();
                     this.finish_tab_drag(event, window, cx);
                     let cancelled_sftp_drag = this.cancel_sftp_drag_capture();
-                    if this.launcher.pressed_app_path.take().is_some() {
-                        cx.notify();
-                    }
-                    if cancelled_sftp_drag {
+                    let cleared_launcher_press = this.launcher.pressed_app_path.take().is_some();
+                    if cleared_launcher_press || cancelled_sftp_drag {
+                        // A single mouse-up can clear both transient states;
+                        // repaint once after composing those no-longer-visible
+                        // captures instead of notifying per flag.
                         cx.notify();
                     }
                     if capture_owner.is_some() || was_read_only_dragging || cancelled_sftp_drag {
@@ -741,40 +742,6 @@ impl Render for WorkspaceApp {
                     )
                 },
             )
-            .when(
-                self.settings_store
-                    .settings()
-                    .terminal
-                    .command_bar
-                    .quick_commands_enabled
-                    && self.terminal_quick_commands_open,
-                |root| {
-                    root.child(
-                        popover_backdrop()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, window, cx| {
-                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
-                                        window, cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Right,
-                                cx.listener(|this, _event, window, cx| {
-                                    this.dismiss_transient_workspace_overlays_from_outside_pointer(
-                                        window, cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .child(overlay_content_boundary(
-                                div().child(self.render_terminal_quick_commands_popover(cx)),
-                            )),
-                    )
-                },
-            )
             .when_some(self.render_terminal_cast_player(cx), |root, player| {
                 root.child(player)
             })
@@ -855,9 +822,13 @@ impl WorkspaceApp {
             // Once visible, a tooltip tracks pointer movement immediately like
             // Tauri/Radix TooltipContent. Re-queueing it would restart the
             // delay on every mouse move and leave stale text behind.
+            let changed = tooltip.label != label || tooltip.x != x || tooltip.y != y;
             tooltip.label = label;
             tooltip.x = x;
             tooltip.y = y;
+            if changed {
+                cx.notify();
+            }
             return;
         }
         if let Some(pending) = self.workspace_tooltip_pending.as_mut()
@@ -899,7 +870,7 @@ impl WorkspaceApp {
         .detach();
     }
 
-    pub(super) fn clear_workspace_tooltip(&mut self, id: &str, cx: &mut Context<Self>) {
+    pub(super) fn clear_workspace_tooltip_state(&mut self, id: &str) -> bool {
         let mut changed = false;
         if self
             .workspace_tooltip_pending
@@ -918,6 +889,11 @@ impl WorkspaceApp {
             self.workspace_tooltip = None;
             changed = true;
         }
+        changed
+    }
+
+    pub(super) fn clear_workspace_tooltip(&mut self, id: &str, cx: &mut Context<Self>) {
+        let changed = self.clear_workspace_tooltip_state(id);
         if changed {
             cx.notify();
         }

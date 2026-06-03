@@ -3,12 +3,15 @@ use super::ime::WorkspaceImeTarget;
 use super::*;
 use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_event_boundary};
+use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
 use oxideterm_gpui_ui::text_input::{
     text_caret, text_input_anchor_probe, text_input_value_segments_with_color,
 };
 use oxideterm_terminal_recording::format_recording_elapsed;
 
 pub(in crate::workspace) mod completion;
+
+const TERMINAL_BROADCAST_MENU_WIDTH: f32 = 260.0;
 
 impl WorkspaceApp {
     fn terminal_command_action_button(
@@ -147,7 +150,7 @@ impl WorkspaceApp {
         let recording_status = self.active_terminal_recording_status(cx);
         let recording_active = recording_status.state != TerminalRecordingState::Idle;
 
-        div()
+        let bar = div()
             .relative()
             .flex_none()
             .border_t_1()
@@ -161,6 +164,17 @@ impl WorkspaceApp {
                     && self.terminal_command_suggestions_open
                     && !command_suggestions.is_empty(),
                 |bar| bar.child(self.render_terminal_command_suggestions(&command_suggestions, cx)),
+            )
+            .when(
+                quick_commands_enabled && self.terminal_quick_commands_open,
+                |bar| {
+                    // Tauri renders QuickCommandsPopover as a child of the relative
+                    // TerminalCommandBar (`absolute bottom-full right-3`). Keep the
+                    // native popover on the same local coordinate owner; routing it
+                    // through the root backdrop makes the existing bottom/right
+                    // placement resolve against the wrong box.
+                    bar.child(self.render_terminal_quick_commands_popover(cx))
+                },
             )
             .child(
                 div()
@@ -239,7 +253,8 @@ impl WorkspaceApp {
                                         cx,
                                     ))
                             })
-                            .child(
+                            .child(select_anchor_probe(
+                                SelectAnchorId::TerminalBroadcastMenu,
                                 self.terminal_command_action_button(
                                     LucideIcon::Radio,
                                     if self.terminal_broadcast_enabled {
@@ -261,7 +276,15 @@ impl WorkspaceApp {
                                     cx,
                                 )
                                 .relative(),
-                            )
+                                {
+                                    let workspace = workspace.clone();
+                                    move |anchor, _window, cx| {
+                                        let _ = workspace.update(cx, |this, cx| {
+                                            this.update_select_anchor(anchor, cx);
+                                        });
+                                    }
+                                },
+                            ))
                             .when(recording_active, |actions| {
                                 actions.child(
                                     div()
@@ -367,105 +390,126 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .cursor_text()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                            this.terminal_command_bar_focused = true;
-                            this.ime_marked_text = None;
-                            window.focus(&this.focus_handle);
-                            this.begin_ime_selection_from_mouse_down(
-                                WorkspaceImeTarget::TerminalCommandBar,
-                                event,
-                                window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_move(
-                        cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
-                            this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                        }),
-                    )
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::ChevronRight,
-                        16.0,
-                        rgb(theme.text_muted),
-                    ))
-                    .child(text_input_anchor_probe(
-                        target.anchor_id(),
+                    .child(
                         div()
-                            .h(px(24.0))
                             .flex_1()
+                            .min_w(px(0.0))
                             .flex()
                             .items_center()
-                            .overflow_hidden()
-                            .text_size(px(13.0))
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_color(if showing_placeholder {
-                                rgb(theme.text_muted)
-                            } else {
-                                rgb(theme.text)
-                            })
-                            .when(focused && showing_placeholder, |input| {
-                                input.child(text_caret(
-                                    &self.tokens,
-                                    self.new_connection_caret_visible,
-                                ))
-                            })
-                            // Tauri uses a real textarea, so the painted caret
-                            // follows selectionStart instead of always sitting
-                            // at the end of the value. Keep native rendering
-                            // tied to the shared IME range for click/arrow parity.
-                            .child(if showing_placeholder {
-                                div().child(command_text).into_any_element()
-                            } else {
-                                text_input_value_segments_with_color(
-                                    &self.tokens,
-                                    &command_text,
-                                    false,
-                                    selection_range,
-                                    caret_offset,
-                                    self.new_connection_caret_visible,
-                                    Some(theme.text),
-                                )
-                                .into_any_element()
-                            })
-                            .when_some(marked_text, |input, marked| {
-                                input.child(
-                                    div()
-                                        .underline()
-                                        .text_color(rgb(theme.text))
-                                        .child(marked.to_string()),
-                                )
-                            })
-                            .when(
-                                focused
-                                    && !showing_placeholder
-                                    && !shows_selection
-                                    && !shows_positioned_caret,
-                                |input| {
-                                    input.child(text_caret(
-                                        &self.tokens,
-                                        self.new_connection_caret_visible,
-                                    ))
-                                },
+                            .gap(px(8.0))
+                            .cursor_text()
+                            // Tauri only focuses the command textarea when the
+                            // row background or textarea area receives the
+                            // pointer. Keep the quick-command button outside
+                            // this hit region so its click cannot be captured
+                            // by IME selection before the toggle handler runs.
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(
+                                    move |this, event: &gpui::MouseDownEvent, window, cx| {
+                                        this.terminal_command_bar_focused = true;
+                                        this.ime_marked_text = None;
+                                        window.focus(&this.focus_handle);
+                                        this.begin_ime_selection_from_mouse_down(
+                                            WorkspaceImeTarget::TerminalCommandBar,
+                                            event,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    },
+                                ),
                             )
-                            .when_some(ghost_text, |input, ghost| {
-                                input.child(
-                                    div()
-                                        .text_color(rgba((theme.text_muted << 8) | 0x99))
-                                        .child(ghost),
-                                )
-                            }),
-                        move |anchor, _window, cx| {
-                            let _ = workspace.update(cx, |this, cx| {
-                                this.update_text_input_anchor(anchor, cx);
-                            });
-                        },
-                    ))
+                            .on_mouse_move(cx.listener(
+                                |this, event: &gpui::MouseMoveEvent, window, cx| {
+                                    this.update_ime_selection_drag_from_mouse_move(
+                                        event, window, cx,
+                                    );
+                                },
+                            ))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::ChevronRight,
+                                16.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .child(text_input_anchor_probe(
+                                target.anchor_id(),
+                                div()
+                                    .h(px(24.0))
+                                    .flex_1()
+                                    .flex()
+                                    .items_center()
+                                    .overflow_hidden()
+                                    .text_size(px(13.0))
+                                    .font_family(settings_mono_font_family(
+                                        self.settings_store.settings(),
+                                    ))
+                                    .text_color(if showing_placeholder {
+                                        rgb(theme.text_muted)
+                                    } else {
+                                        rgb(theme.text)
+                                    })
+                                    .when(focused && showing_placeholder, |input| {
+                                        input.child(text_caret(
+                                            &self.tokens,
+                                            self.new_connection_caret_visible,
+                                        ))
+                                    })
+                                    // Tauri uses a real textarea, so the painted caret
+                                    // follows selectionStart instead of always sitting
+                                    // at the end of the value. Keep native rendering
+                                    // tied to the shared IME range for click/arrow parity.
+                                    .child(if showing_placeholder {
+                                        div().child(command_text).into_any_element()
+                                    } else {
+                                        text_input_value_segments_with_color(
+                                            &self.tokens,
+                                            &command_text,
+                                            false,
+                                            selection_range,
+                                            caret_offset,
+                                            self.new_connection_caret_visible,
+                                            Some(theme.text),
+                                        )
+                                        .into_any_element()
+                                    })
+                                    .when_some(marked_text, |input, marked| {
+                                        input.child(
+                                            div()
+                                                .underline()
+                                                .text_color(rgb(theme.text))
+                                                .child(marked.to_string()),
+                                        )
+                                    })
+                                    .when(
+                                        focused
+                                            && !showing_placeholder
+                                            && !shows_selection
+                                            && !shows_positioned_caret,
+                                        |input| {
+                                            input.child(text_caret(
+                                                &self.tokens,
+                                                self.new_connection_caret_visible,
+                                            ))
+                                        },
+                                    )
+                                    .when_some(ghost_text, |input, ghost| {
+                                        input.child(
+                                            div()
+                                                .text_color(rgba((theme.text_muted << 8) | 0x99))
+                                                .child(ghost),
+                                        )
+                                    }),
+                                {
+                                    let workspace = workspace.clone();
+                                    move |anchor, _window, cx| {
+                                        let _ = workspace.update(cx, |this, cx| {
+                                            this.update_text_input_anchor(anchor, cx);
+                                        });
+                                    }
+                                },
+                            )),
+                    )
                     .when(quick_commands_enabled, |input_row| {
                         input_row.child(
                             div()
@@ -510,8 +554,17 @@ impl WorkspaceApp {
                                 )),
                         )
                     }),
-            )
-            .into_any_element()
+            );
+        select_anchor_probe(
+            SelectAnchorId::TerminalCommandBar,
+            bar,
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_select_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
     }
 
     pub(in crate::workspace) fn render_terminal_quick_commands_popover(
@@ -538,12 +591,21 @@ impl WorkspaceApp {
             && selectable
                 .iter()
                 .all(|pane_id| self.terminal_broadcast_targets.contains(pane_id));
+        let anchor_left = self
+            .select_anchors
+            .get(&SelectAnchorId::TerminalBroadcastMenu)
+            .map(|anchor| {
+                // Tauri uses Radix DropdownMenuContent with `align="end"`.
+                // Align to the trigger instead of the workspace root, because
+                // the AI sidebar changes the root width but not the terminal
+                // command-bar button's visual anchor.
+                terminal_broadcast_menu_left_for_trigger_right(f32::from(anchor.bounds.right()))
+            });
 
-        let mut menu = context_menu_event_boundary(
-            div()
+        let mut menu = context_menu_event_boundary({
+            let menu = div()
                 .absolute()
-                .right(px(12.0))
-                .w(px(260.0))
+                .w(px(TERMINAL_BROADCAST_MENU_WIDTH))
                 .max_h(px(320.0))
                 .overflow_hidden()
                 .rounded(px(self.tokens.radii.lg))
@@ -552,8 +614,13 @@ impl WorkspaceApp {
                 .bg(rgba((theme.bg_elevated << 8) | 0xf2))
                 .shadow_lg()
                 .p(px(6.0))
-                .text_size(px(12.0)),
-        )
+                .text_size(px(12.0));
+            if let Some(left) = anchor_left {
+                menu.left(px(left))
+            } else {
+                menu.right(px(12.0))
+            }
+        })
         .child(
             div()
                 .px(px(6.0))
@@ -735,5 +802,24 @@ impl WorkspaceApp {
             move |_this, event, window, cx| listener(event, window, cx),
             cx,
         )
+    }
+}
+
+fn terminal_broadcast_menu_left_for_trigger_right(trigger_right: f32) -> f32 {
+    (trigger_right - TERMINAL_BROADCAST_MENU_WIDTH).max(12.0)
+}
+
+#[cfg(test)]
+mod terminal_broadcast_menu_tests {
+    use super::*;
+
+    #[test]
+    fn broadcast_menu_aligns_end_to_trigger_not_workspace_root() {
+        assert_eq!(terminal_broadcast_menu_left_for_trigger_right(700.0), 440.0);
+    }
+
+    #[test]
+    fn broadcast_menu_keeps_left_viewport_margin_when_trigger_is_narrow() {
+        assert_eq!(terminal_broadcast_menu_left_for_trigger_right(120.0), 12.0);
     }
 }
