@@ -58,7 +58,6 @@ const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
 const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
 const TAURI_SERIAL_PROFILE_NAME_INDENT: f32 = 24.0; // Tauri serial profile pl-6
 const TAURI_SERIAL_PANEL_BG_ALPHA: u32 = 0x66; // Tauri serial bg-theme-bg/40
-const TAURI_SERIAL_SELECTED_BG_ALPHA: u32 = 0x1a; // Tauri selected serial option accent/10
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConnectionButtonAction {

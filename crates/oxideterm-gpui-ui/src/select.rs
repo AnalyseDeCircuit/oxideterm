@@ -95,6 +95,13 @@ pub enum SelectAnchorId {
     NewConnectionGroup,
     NewConnectionManagedKey,
     NewConnectionJumpManagedKey,
+    NewConnectionSerialPort,
+    NewConnectionSerialDataBits,
+    NewConnectionSerialStopBits,
+    NewConnectionSerialParity,
+    NewConnectionSerialFlowControl,
+    SettingsConnectionImportSource,
+    SettingsConnectionImportDuplicateStrategy,
     IdeAgentStatus,
     TerminalCastSeekbar,
 }
@@ -143,6 +150,8 @@ impl SelectAnchorId {
                 | Self::SettingsSftpConflict
                 | Self::SettingsHighlightPreset
                 | Self::SettingsHighlightRenderMode(_)
+                | Self::SettingsConnectionImportSource
+                | Self::SettingsConnectionImportDuplicateStrategy
         )
     }
 }
@@ -642,6 +651,10 @@ mod tests {
         assert!(SelectAnchorId::SettingsAiProfileProvider(2).is_settings_select_trigger());
         assert!(SelectAnchorId::SettingsAiModelReasoning(1, 3).is_settings_select_trigger());
         assert!(SelectAnchorId::SettingsSftpConflict.is_settings_select_trigger());
+        assert!(SelectAnchorId::SettingsConnectionImportSource.is_settings_select_trigger());
+        assert!(
+            SelectAnchorId::SettingsConnectionImportDuplicateStrategy.is_settings_select_trigger()
+        );
 
         assert!(!SelectAnchorId::SettingsTerminalFontSizeSlider.is_settings_select_trigger());
         assert!(!SelectAnchorId::AiModelSelector.is_settings_select_trigger());

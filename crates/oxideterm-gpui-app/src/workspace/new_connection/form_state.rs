@@ -62,6 +62,11 @@ pub(in crate::workspace) enum NewConnectionSelect {
     Group,
     ManagedKey,
     JumpManagedKey,
+    SerialPort,
+    SerialDataBits,
+    SerialStopBits,
+    SerialParity,
+    SerialFlowControl,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

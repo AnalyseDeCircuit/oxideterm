@@ -146,6 +146,10 @@ impl WorkspaceApp {
                             .py(px(header_py))
                             .border_b_1()
                             .border_color(rgb(theme.border))
+                            // Browser DialogContent clips this painted header
+                            // into the rounded shell. GPUI needs the edge child
+                            // to own the top corners to avoid rectangular leaks.
+                            .rounded_t(px(self.tokens.radii.md))
                             // Mirrors DialogHeader bg-theme-bg-panel, not the tab background alpha path.
                             .bg(rgb(theme.bg_panel))
                             .child(
@@ -266,6 +270,9 @@ impl WorkspaceApp {
             .py(px(footer_py))
             .border_t_1()
             .border_color(rgb(theme.border))
+            // Keep the footer background inside the dialog shell radius just
+            // like Tauri's overflow-hidden DialogContent clipping.
+            .rounded_b(px(self.tokens.radii.md))
             // Mirrors DialogFooter bg-theme-bg-panel, not the tab background alpha path.
             .bg(rgb(theme.bg_panel))
             .flex()

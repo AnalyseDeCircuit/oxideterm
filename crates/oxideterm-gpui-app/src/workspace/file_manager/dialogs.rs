@@ -505,6 +505,10 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .rounded(px(self.tokens.radii.lg))
+                    // Tauri DialogContent clips all child paint to the rounded
+                    // shell. Keep the local file-manager modal on the same
+                    // contract so body/footer backgrounds cannot leak.
+                    .overflow_hidden()
                     .border_1()
                     .border_color(rgba(
                         (self.tokens.ui.border << 8) | FILE_MANAGER_DIALOG_BORDER_ALPHA,
@@ -673,6 +677,10 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .rounded(px(self.tokens.radii.lg))
+                    // Tauri property dialogs inherit DialogContent
+                    // overflow-hidden; GPUI needs the same explicit clipping
+                    // plus footer corner ownership below.
+                    .overflow_hidden()
                     .border_1()
                     .border_color(rgba((theme.border << 8) | FILE_MANAGER_DIALOG_BORDER_ALPHA))
                     // Mirrors browser DialogContent bubbling: property fields
@@ -748,6 +756,7 @@ impl WorkspaceApp {
                             .border_t_1()
                             .border_color(file_manager_border(theme.border, has_background))
                             .bg(file_manager_panel_bg(theme.bg_panel, has_background, 0xff))
+                            .rounded_b(px(self.tokens.radii.lg))
                             .flex()
                             .justify_end()
                             .child(self.workspace_toolbar_action_button(

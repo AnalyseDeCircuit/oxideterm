@@ -262,6 +262,10 @@ pub fn dialog_header(tokens: &ThemeTokens) -> Div {
         .justify_center()
         .px(px(tokens.metrics.modal_header_padding_x))
         .py(px(tokens.metrics.modal_header_padding_y))
+        // Tauri DialogContent uses rounded + overflow-hidden; GPUI edge
+        // children need matching corners so painted header backgrounds cannot
+        // show rectangular pixels outside the shell radius.
+        .rounded_t(px(tokens.radii.md))
         .bg(rgb(theme.bg_panel))
         .border_b_1()
         .border_color(rgb(theme.border))
@@ -308,6 +312,9 @@ pub fn dialog_footer(tokens: &ThemeTokens) -> Div {
         .gap_2()
         .border_t_1()
         .border_color(rgb(theme.border))
+        // Mirrors browser clipping for the footer background at the bottom
+        // edge of shared DialogContent surfaces.
+        .rounded_b(px(tokens.radii.md))
         .bg(rgb(theme.bg_panel))
 }
 

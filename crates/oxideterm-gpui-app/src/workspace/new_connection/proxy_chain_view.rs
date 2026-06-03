@@ -5,11 +5,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let select_id = self.open_new_connection_select?;
-        let anchor_id = match select_id {
-            NewConnectionSelect::Group => SelectAnchorId::NewConnectionGroup,
-            NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
-            NewConnectionSelect::JumpManagedKey => SelectAnchorId::NewConnectionJumpManagedKey,
-        };
+        let anchor_id = Self::new_connection_select_anchor_id(select_id);
         let anchor = *self.select_anchors.get(&anchor_id)?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
@@ -23,88 +19,195 @@ impl WorkspaceApp {
             .min(self.tokens.metrics.ui_select_max_height);
 
         let mut popup = select_overlay_popup_with_max_height(&self.tokens, width, max_height);
-        if select_id == NewConnectionSelect::Group {
-            let current_group = self
-                .new_connection_form
-                .as_ref()
-                .map(|form| form.group.as_str())
-                .unwrap_or_default();
-            let ungrouped_label = self.connection_form_ungrouped_label();
-            popup = popup.child(
-                select_option_action(
-                    select_option(
-                        &self.tokens,
-                        ungrouped_label.clone(),
-                        self.connection_form_group_is_ungrouped(current_group),
+        match select_id {
+            NewConnectionSelect::Group => {
+                let current_group = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.group.as_str())
+                    .unwrap_or_default();
+                let ungrouped_label = self.connection_form_ungrouped_label();
+                popup = popup.child(
+                    select_option_action(
+                        select_option(
+                            &self.tokens,
+                            ungrouped_label.clone(),
+                            self.connection_form_group_is_ungrouped(current_group),
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.set_new_connection_group(ungrouped_label.clone(), cx);
+                            cx.stop_propagation();
+                        }),
                     ),
-                    false,
-                    false,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.set_new_connection_group(ungrouped_label.clone(), cx);
-                        cx.stop_propagation();
-                    }),
-                ),
-            );
+                );
 
-            let groups = self.connection_form_group_options(current_group);
-            for group in groups.iter().cloned() {
-                let selected = group == current_group;
-                popup = popup.child(
-                    select_option_action(
-                        select_option(&self.tokens, group.clone(), selected),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.set_new_connection_group(group.clone(), cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-                );
+                let groups = self.connection_form_group_options(current_group);
+                for group in groups.iter().cloned() {
+                    let selected = group == current_group;
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, group.clone(), selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_group(group.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                if groups.is_empty() {
+                    popup = popup.child(
+                        div()
+                            .relative()
+                            .flex()
+                            .w_full()
+                            .items_center()
+                            .rounded(px(self.tokens.radii.xs))
+                            .py(px(self.tokens.metrics.ui_menu_item_padding_y))
+                            .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .opacity(0.65)
+                            .child(self.i18n.t("ssh.form.create_groups_hint")),
+                    );
+                }
             }
-            if groups.is_empty() {
-                popup = popup.child(
-                    div()
-                        .relative()
-                        .flex()
-                        .w_full()
-                        .items_center()
-                        .rounded(px(self.tokens.radii.xs))
-                        .py(px(self.tokens.metrics.ui_menu_item_padding_y))
-                        .px(px(self.tokens.metrics.ui_menu_item_padding_x))
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .opacity(0.65)
-                        .child(self.i18n.t("ssh.form.create_groups_hint")),
-                );
+            NewConnectionSelect::ManagedKey | NewConnectionSelect::JumpManagedKey => {
+                let current_key_id = self
+                    .new_connection_form
+                    .as_ref()
+                    .and_then(|form| match select_id {
+                        NewConnectionSelect::ManagedKey => Some(form.managed_key_id.as_str()),
+                        NewConnectionSelect::JumpManagedKey => form
+                            .jump_server_form
+                            .as_ref()
+                            .map(|jump_form| jump_form.managed_key_id.as_str()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                for key in self.connection_store.managed_ssh_keys() {
+                    let selected = key.id == current_key_id;
+                    let key_id = key.id.clone();
+                    let label = format!("{} · {}", key.name, key.fingerprint);
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, label, selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_managed_key(select_id, key_id.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
             }
-        } else {
-            let current_key_id = self
-                .new_connection_form
-                .as_ref()
-                .and_then(|form| match select_id {
-                    NewConnectionSelect::ManagedKey => Some(form.managed_key_id.as_str()),
-                    NewConnectionSelect::JumpManagedKey => form
-                        .jump_server_form
-                        .as_ref()
-                        .map(|jump_form| jump_form.managed_key_id.as_str()),
-                    NewConnectionSelect::Group => None,
-                })
-                .unwrap_or_default();
-            for key in self.connection_store.managed_ssh_keys() {
-                let selected = key.id == current_key_id;
-                let key_id = key.id.clone();
-                let label = format!("{} · {}", key.name, key.fingerprint);
-                popup = popup.child(
-                    select_option_action(
-                        select_option(&self.tokens, label, selected),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.set_new_connection_managed_key(select_id, key_id.clone(), cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-                );
+            NewConnectionSelect::SerialPort => {
+                let selected_port = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.serial_port_path.as_str())
+                    .unwrap_or_default();
+                let ports = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.serial_ports.clone())
+                    .unwrap_or_default();
+                for port in ports {
+                    let selected = port.port_path == selected_port;
+                    let port_path = port.port_path.clone();
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, serial_port_display_label(&port), selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_serial_port(port_path.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
+            NewConnectionSelect::SerialDataBits | NewConnectionSelect::SerialStopBits => {
+                let selected = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| match select_id {
+                        NewConnectionSelect::SerialDataBits => form.serial_data_bits,
+                        NewConnectionSelect::SerialStopBits => form.serial_stop_bits,
+                        _ => 0,
+                    })
+                    .unwrap_or_default();
+                let choices: &[(u8, &str)] = match select_id {
+                    NewConnectionSelect::SerialDataBits => &[(5, "5"), (6, "6"), (7, "7"), (8, "8")],
+                    NewConnectionSelect::SerialStopBits => &[(1, "1"), (2, "2")],
+                    _ => &[],
+                };
+                for (value, label) in choices.iter().copied() {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, label.to_string(), value == selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_serial_u8(select_id, value, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
+            NewConnectionSelect::SerialParity => {
+                let selected = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.serial_parity)
+                    .unwrap_or(oxideterm_terminal::SerialParity::None);
+                for parity in [
+                    oxideterm_terminal::SerialParity::None,
+                    oxideterm_terminal::SerialParity::Odd,
+                    oxideterm_terminal::SerialParity::Even,
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, self.serial_parity_label(parity), parity == selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_serial_parity(parity, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
+            NewConnectionSelect::SerialFlowControl => {
+                let selected = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.serial_flow_control)
+                    .unwrap_or(oxideterm_terminal::SerialFlowControl::None);
+                for flow in [
+                    oxideterm_terminal::SerialFlowControl::None,
+                    oxideterm_terminal::SerialFlowControl::Software,
+                    oxideterm_terminal::SerialFlowControl::Hardware,
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, self.serial_flow_control_label(flow), flow == selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_serial_flow_control(flow, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
             }
         }
 

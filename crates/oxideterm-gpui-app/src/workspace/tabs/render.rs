@@ -15,9 +15,10 @@ impl WorkspaceApp {
 
         // Tauri's scroll container measures the full inline-flex tab row as
         // scrollWidth. GPUI's ScrollHandle computes max_offset from direct
-        // child bounds, so tab items must stay direct children of this viewport;
-        // reintroducing a wrapper row can make max_offset stay zero while the
-        // visible strip overflows.
+        // child bounds, so tab items must stay direct children of this viewport.
+        // Keep overflow hidden instead of overflow_x_scroll: the custom wheel
+        // adapter owns browser-style scrollLeft clamping, while track_scroll
+        // still measures and applies the offset without GPUI boundary overscroll.
         let mut scroll_viewport = div()
             .id("workspace-tab-scroll-viewport")
             .h_full()
@@ -29,7 +30,6 @@ impl WorkspaceApp {
             .items_center()
             .pl(px(self.tokens.metrics.tabbar_leading_offset))
             .overflow_hidden()
-            .overflow_x_scroll()
             .track_scroll(&self.tab_scroll_handle)
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
                 this.handle_tabbar_scroll(event, window, cx);

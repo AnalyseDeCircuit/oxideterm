@@ -540,6 +540,54 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Connections, SettingsSelect::ConnectionImportSource) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for source in connection_import_source_options().iter().copied() {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                connection_import_source_label(source, &self.i18n),
+                                source == self.settings_connection_import_source,
+                            ),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.set_connection_import_source(source, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Connections, SettingsSelect::ConnectionImportDuplicateStrategy) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for strategy in [
+                    ConnectionImportDuplicateStrategy::Skip,
+                    ConnectionImportDuplicateStrategy::Rename,
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                connection_import_duplicate_strategy_label(strategy, &self.i18n),
+                                strategy == self.settings_connection_import_duplicate_strategy,
+                            ),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.settings_connection_import_duplicate_strategy = strategy;
+                                cx.notify();
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             (SettingsTab::Reconnect, SettingsSelect::ReconnectMaxAttempts) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for attempts in reconnect_max_attempt_options() {

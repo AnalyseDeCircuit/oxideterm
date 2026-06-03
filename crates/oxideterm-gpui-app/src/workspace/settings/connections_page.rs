@@ -667,9 +667,11 @@ impl WorkspaceApp {
     }
 
     fn connection_import_source_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let selected_label =
+            connection_import_source_label(self.settings_connection_import_source, &self.i18n);
         div()
             .w_full()
-            .max_w(px(672.0))
+            .max_w(px(220.0))
             .grid()
             .gap(px(8.0))
             .child(
@@ -680,58 +682,15 @@ impl WorkspaceApp {
                     .child(self.i18n.t("settings_view.connections.importers.source")),
             )
             .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(8.0))
-                    .children(
-                        connection_import_source_options()
-                            .iter()
-                            .map(|source| self.connection_import_source_button(*source, cx)),
-                    ),
+                self.settings_select_control(
+                    SettingsSelect::ConnectionImportSource,
+                    selected_label,
+                    false,
+                    None,
+                    cx,
+                ),
             )
             .into_any_element()
-    }
-
-    fn connection_import_source_button(
-        &self,
-        source: ConnectionImportSource,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let active = self.settings_connection_import_source == source;
-        self.workspace_toolbar_action_button(
-            connection_import_source_label(source, &self.i18n),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: if active {
-                        ButtonVariant::Default
-                    } else {
-                        ButtonVariant::Outline
-                    },
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                background: (!active).then(|| self.settings_panel_background(self.tokens.ui.bg_panel)),
-                border: (!active).then(|| rgb(self.tokens.ui.border)),
-                text_color: Some(rgb(if active {
-                    self.tokens.ui.bg
-                } else {
-                    self.tokens.ui.text
-                })),
-                hover_background: (!active).then(|| rgb(self.tokens.ui.bg_hover)),
-                height: Some(34.0),
-                padding_x: Some(12.0),
-                font_size: Some(self.tokens.metrics.ui_text_sm),
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(move |this, _event, _window, cx| {
-                this.set_connection_import_source(source, cx);
-                cx.stop_propagation();
-            }),
-        )
-        .into_any_element()
     }
 
     fn connection_import_path_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -935,61 +894,24 @@ impl WorkspaceApp {
     }
 
     fn connection_import_duplicate_strategy_picker(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .flex_row()
-            .gap(px(6.0))
-            .child(self.connection_import_duplicate_strategy_button(
-                ConnectionImportDuplicateStrategy::Skip,
-                cx,
-            ))
-            .child(self.connection_import_duplicate_strategy_button(
-                ConnectionImportDuplicateStrategy::Rename,
-                cx,
-            ))
-            .into_any_element()
-    }
-
-    fn connection_import_duplicate_strategy_button(
-        &self,
-        strategy: ConnectionImportDuplicateStrategy,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let active = self.settings_connection_import_duplicate_strategy == strategy;
-        self.workspace_toolbar_action_button(
-            connection_import_duplicate_strategy_label(strategy, &self.i18n),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: if active {
-                        ButtonVariant::Default
-                    } else {
-                        ButtonVariant::Outline
-                    },
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                background: (!active).then(|| self.settings_panel_background(self.tokens.ui.bg_panel)),
-                border: (!active).then(|| rgb(self.tokens.ui.border)),
-                text_color: Some(rgb(if active {
-                    self.tokens.ui.bg
-                } else {
-                    self.tokens.ui.text
-                })),
-                hover_background: (!active).then(|| rgb(self.tokens.ui.bg_hover)),
-                height: Some(32.0),
-                padding_x: Some(10.0),
-                font_size: Some(self.tokens.metrics.ui_text_xs),
-                ..ToolbarButtonOptions::default()
+        let selected_label = connection_import_duplicate_strategy_label(
+            self.settings_connection_import_duplicate_strategy,
+            &self.i18n,
+        );
+        // Tauri renders duplicate strategy as a compact SelectTrigger (w-36 h-8)
+        // in the import preview toolbar, not as adjacent action buttons.
+        self.settings_select_control_with_trigger_style(
+            SettingsSelect::ConnectionImportDuplicateStrategy,
+            selected_label,
+            false,
+            Some(144.0),
+            |trigger| {
+                trigger
+                    .h(px(32.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
             },
-            cx.listener(move |this, _event, _window, cx| {
-                this.settings_connection_import_duplicate_strategy = strategy;
-                cx.notify();
-                cx.stop_propagation();
-            }),
+            cx,
         )
-        .into_any_element()
     }
 
     fn connection_import_apply_button(&self, cx: &mut Context<Self>) -> AnyElement {

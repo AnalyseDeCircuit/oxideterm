@@ -463,6 +463,26 @@ impl WorkspaceApp {
                         Some(NewConnectionSelect::JumpManagedKey),
                         SelectAnchorId::NewConnectionJumpManagedKey
                     )
+                    | (
+                        Some(NewConnectionSelect::SerialPort),
+                        SelectAnchorId::NewConnectionSerialPort
+                    )
+                    | (
+                        Some(NewConnectionSelect::SerialDataBits),
+                        SelectAnchorId::NewConnectionSerialDataBits
+                    )
+                    | (
+                        Some(NewConnectionSelect::SerialStopBits),
+                        SelectAnchorId::NewConnectionSerialStopBits
+                    )
+                    | (
+                        Some(NewConnectionSelect::SerialParity),
+                        SelectAnchorId::NewConnectionSerialParity
+                    )
+                    | (
+                        Some(NewConnectionSelect::SerialFlowControl),
+                        SelectAnchorId::NewConnectionSerialFlowControl
+                    )
             )
             || (matches!(
                 anchor.id,
@@ -1177,6 +1197,13 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             | SelectAnchorId::AiSafetyMenu
             | SelectAnchorId::AiContextPopover
             | SelectAnchorId::NewConnectionGroup
+            | SelectAnchorId::NewConnectionManagedKey
+            | SelectAnchorId::NewConnectionJumpManagedKey
+            | SelectAnchorId::NewConnectionSerialPort
+            | SelectAnchorId::NewConnectionSerialDataBits
+            | SelectAnchorId::NewConnectionSerialStopBits
+            | SelectAnchorId::NewConnectionSerialParity
+            | SelectAnchorId::NewConnectionSerialFlowControl
             | SelectAnchorId::IdeAgentStatus
             | SelectAnchorId::TerminalCastSeekbar
     )

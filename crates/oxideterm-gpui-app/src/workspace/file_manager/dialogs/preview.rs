@@ -66,6 +66,11 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(10.0))
+                    // Tauri QuickLook relies on CSS overflow clipping the
+                    // painted header into the rounded outer panel. GPUI can let
+                    // child backgrounds leak, so the edge child owns the same
+                    // top radius explicitly.
+                    .rounded_t(px(self.tokens.radii.lg))
                     .border_b_1()
                     .border_color(file_manager_border(theme.border, has_background))
                     .bg(file_manager_panel_bg(
@@ -236,22 +241,23 @@ impl WorkspaceApp {
                 dialog.child(self.render_file_manager_preview_metadata(has_background, cx))
             })
             .child(
-                file_manager_card_surface(
-                    div()
-                        .px(px(16.0))
-                        .py(px(8.0))
-                        .border_t_1()
-                        .border_color(file_manager_border(theme.border, has_background))
-                        .bg(file_manager_panel_bg(theme.bg_card, has_background, 0xff)),
-                    theme.bg_card,
-                )
-                .text_size(px(FILE_MANAGER_TEXT_XS))
-                .text_color(rgb(theme.text_muted))
-                .child(if can_navigate {
-                    self.i18n.t("fileManager.quickLookHintNav")
-                } else {
-                    self.i18n.t("fileManager.quickLookHint")
-                }),
+                div()
+                    .px(px(16.0))
+                    .py(px(8.0))
+                    .border_t_1()
+                    .border_color(file_manager_border(theme.border, has_background))
+                    // Tauri footer is only bg-theme-bg-card text chrome inside
+                    // the rounded QuickLook shell; it is not an independent
+                    // card and must not paint a rectangular shadow at the edge.
+                    .bg(file_manager_panel_bg(theme.bg_card, has_background, 0xff))
+                    .rounded_b(px(self.tokens.radii.lg))
+                    .text_size(px(FILE_MANAGER_TEXT_XS))
+                    .text_color(rgb(theme.text_muted))
+                    .child(if can_navigate {
+                        self.i18n.t("fileManager.quickLookHintNav")
+                    } else {
+                        self.i18n.t("fileManager.quickLookHint")
+                    }),
             )
             .into_any_element()
     }

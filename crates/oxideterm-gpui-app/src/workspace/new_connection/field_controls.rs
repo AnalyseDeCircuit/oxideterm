@@ -1,4 +1,17 @@
 impl WorkspaceApp {
+    fn new_connection_select_anchor_id(select_id: NewConnectionSelect) -> SelectAnchorId {
+        match select_id {
+            NewConnectionSelect::Group => SelectAnchorId::NewConnectionGroup,
+            NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
+            NewConnectionSelect::JumpManagedKey => SelectAnchorId::NewConnectionJumpManagedKey,
+            NewConnectionSelect::SerialPort => SelectAnchorId::NewConnectionSerialPort,
+            NewConnectionSelect::SerialDataBits => SelectAnchorId::NewConnectionSerialDataBits,
+            NewConnectionSelect::SerialStopBits => SelectAnchorId::NewConnectionSerialStopBits,
+            NewConnectionSelect::SerialParity => SelectAnchorId::NewConnectionSerialParity,
+            NewConnectionSelect::SerialFlowControl => SelectAnchorId::NewConnectionSerialFlowControl,
+        }
+    }
+
     fn new_connection_select_trigger(
         &self,
         select_id: NewConnectionSelect,
@@ -46,6 +59,16 @@ impl WorkspaceApp {
             .remove(&SelectAnchorId::NewConnectionManagedKey);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionJumpManagedKey);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionSerialPort);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionSerialDataBits);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionSerialStopBits);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionSerialParity);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionSerialFlowControl);
     }
 
     fn render_connection_hint(&self, text: String) -> AnyElement {
@@ -359,7 +382,12 @@ impl WorkspaceApp {
                     jump_form.managed_key_id = key_id;
                     form.focused_field = NewConnectionField::JumpManagedKeyId;
                 }
-                NewConnectionSelect::Group => return,
+                NewConnectionSelect::Group
+                | NewConnectionSelect::SerialPort
+                | NewConnectionSelect::SerialDataBits
+                | NewConnectionSelect::SerialStopBits
+                | NewConnectionSelect::SerialParity
+                | NewConnectionSelect::SerialFlowControl => return,
             }
             form.field_focused = false;
             form.selected_field = None;
@@ -964,11 +992,11 @@ impl WorkspaceApp {
                                 ))
                             }),
                     )
-                    .child(self.render_serial_u8_tabs(
+                    .child(self.render_serial_u8_select(
                         self.i18n.t("modals.new_connection.serial_data_bits"),
+                        NewConnectionSelect::SerialDataBits,
                         &[(5, "5"), (6, "6"), (7, "7"), (8, "8")],
                         form.serial_data_bits,
-                        |form, value| form.serial_data_bits = value,
                         cx,
                     )),
             )
@@ -977,15 +1005,15 @@ impl WorkspaceApp {
                     .grid()
                     .grid_cols(3)
                     .gap(px(TAURI_SERIAL_GRID_GAP))
-                    .child(self.render_serial_u8_tabs(
+                    .child(self.render_serial_u8_select(
                         self.i18n.t("modals.new_connection.serial_stop_bits"),
+                        NewConnectionSelect::SerialStopBits,
                         &[(1, "1"), (2, "2")],
                         form.serial_stop_bits,
-                        |form, value| form.serial_stop_bits = value,
                         cx,
                     ))
-                    .child(self.render_serial_parity_tabs(form.serial_parity, cx))
-                    .child(self.render_serial_flow_tabs(form.serial_flow_control, cx)),
+                    .child(self.render_serial_parity_select(form.serial_parity, cx))
+                    .child(self.render_serial_flow_select(form.serial_flow_control, cx)),
             )
             .child(
                 div()
@@ -1031,74 +1059,35 @@ impl WorkspaceApp {
         };
         let loading = form.serial_ports_loading;
         let selected_port = form.serial_port_path.clone();
-        let mut port_list = div().flex().flex_col().gap(px(self.tokens.spacing.two));
-        if ports.is_empty() {
-            port_list = port_list.child(self.render_connection_hint(if loading {
+        let port_selector = if ports.is_empty() {
+            self.render_connection_hint(if loading {
                 self.i18n.t("modals.new_connection.serial_loading_ports")
             } else {
                 self.i18n.t("modals.new_connection.serial_no_ports")
-            }));
+            })
         } else {
-            for port in ports.iter().cloned() {
-                let active = port.port_path == selected_port;
-                let meta = [port.manufacturer.clone(), port.product.clone()]
-                    .into_iter()
-                    .flatten()
-                    .filter(|part| !part.trim().is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" · ");
-                let port_path = port.port_path.clone();
-                port_list = port_list.child(
-                    div()
-                        .rounded(px(self.tokens.radii.md))
-                        .border_1()
-                        .border_color(if active {
-                            rgb(self.tokens.ui.accent)
-                        } else {
-                            rgb(self.tokens.ui.border)
-                        })
-                        .bg(if active {
-                            rgba(
-                                (self.tokens.ui.accent << 8) | TAURI_SERIAL_SELECTED_BG_ALPHA,
-                            )
-                        } else {
-                            rgba(
-                                (self.tokens.ui.bg_secondary << 8) | TAURI_SERIAL_PANEL_BG_ALPHA,
-                            )
-                        })
-                        .px(px(self.tokens.spacing.three))
-                        .py(px(self.tokens.spacing.two))
-                        .cursor_pointer()
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .text_color(rgb(self.tokens.ui.text))
-                                .child(port.display_name.clone()),
-                        )
-                        .when(!meta.is_empty(), |row| {
-                            row.child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(meta),
-                            )
-                        })
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Some(form) = this.new_connection_form.as_mut() {
-                                    form.serial_port_path = port_path.clone();
-                                    form.focused_field = NewConnectionField::SerialPortPath;
-                                    form.field_focused = false;
-                                    clear_connection_selection(form);
-                                }
-                                this.close_new_connection_select();
-                                cx.notify();
-                            }),
-                        ),
-                );
-            }
-        }
+            let selected_label = ports
+                .iter()
+                .find(|port| port.port_path == selected_port)
+                .map(serial_port_display_label)
+                .unwrap_or_else(|| {
+                    if selected_port.trim().is_empty() {
+                        self.i18n
+                            .t("modals.new_connection.serial_select_detected_port")
+                    } else {
+                        selected_port.clone()
+                    }
+                });
+            // Tauri renders detected serial ports as a Radix Select below the
+            // editable path input; keep manual entry and detected-choice paths separate.
+            self.render_new_connection_select_control(
+                NewConnectionSelect::SerialPort,
+                selected_label,
+                selected_port.trim().is_empty(),
+                false,
+                cx,
+            )
+        };
 
         div()
             .flex()
@@ -1155,122 +1144,199 @@ impl WorkspaceApp {
                 false,
                 cx,
             ))
-            .child(port_list)
+            .child(port_selector)
             .into_any_element()
     }
 
-    fn render_serial_u8_tabs(
+    fn render_new_connection_select_control(
         &self,
-        label: String,
-        choices: &[(u8, &'static str)],
-        selected: u8,
-        update: fn(&mut NewConnectionForm, u8),
+        select_id: NewConnectionSelect,
+        value: String,
+        placeholder: bool,
+        disabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut row = segmented_tabs(&self.tokens);
-        for (value, option_label) in choices.iter().copied() {
-            row = row.child(
-                segmented_tab(&self.tokens, option_label.to_string(), value == selected)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            if let Some(form) = this.new_connection_form.as_mut() {
-                                update(form, value);
-                                clear_connection_selection(form);
-                            }
-                            this.close_new_connection_select();
-                            cx.notify();
-                        }),
-                    ),
-            );
-        }
-        form_field(&self.tokens, label, row).into_any_element()
+        let anchor_id = Self::new_connection_select_anchor_id(select_id);
+        let workspace = cx.entity();
+        let trigger = self
+            .new_connection_select_trigger(select_id, value, placeholder, disabled)
+            .when(!disabled, |trigger| {
+                trigger.cursor_pointer().on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, window, cx| {
+                        if let Some(form) = this.new_connection_form.as_mut() {
+                            form.field_focused = false;
+                            form.selected_field = None;
+                        }
+                        this.ime_marked_text = None;
+                        this.open_new_connection_select_from_pointer(select_id);
+                        window.focus(&this.focus_handle);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+            });
+
+        select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
+            let _ = workspace.update(cx, |this, cx| {
+                this.update_select_anchor(anchor, cx);
+            });
+        })
+        .into_any_element()
     }
 
-    fn render_serial_parity_tabs(
+    fn render_serial_u8_select(
+        &self,
+        label: String,
+        select_id: NewConnectionSelect,
+        choices: &[(u8, &'static str)],
+        selected: u8,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected_label = choices
+            .iter()
+            .find(|(value, _)| *value == selected)
+            .map(|(_, option_label)| (*option_label).to_string())
+            .unwrap_or_else(|| selected.to_string());
+        // Tauri serial numeric choices are Select controls, not segmented tabs.
+        form_field(
+            &self.tokens,
+            label,
+            self.render_new_connection_select_control(select_id, selected_label, false, false, cx),
+        )
+        .into_any_element()
+    }
+
+    fn render_serial_parity_select(
         &self,
         selected: oxideterm_terminal::SerialParity,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let choices = [
-            (
-                oxideterm_terminal::SerialParity::None,
-                self.i18n.t("modals.new_connection.serial_parity_none"),
-            ),
-            (
-                oxideterm_terminal::SerialParity::Odd,
-                self.i18n.t("modals.new_connection.serial_parity_odd"),
-            ),
-            (
-                oxideterm_terminal::SerialParity::Even,
-                self.i18n.t("modals.new_connection.serial_parity_even"),
-            ),
-        ];
-        let mut row = segmented_tabs(&self.tokens);
-        for (value, label) in choices {
-            row = row.child(
-                segmented_tab(&self.tokens, label, value == selected).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if let Some(form) = this.new_connection_form.as_mut() {
-                            form.serial_parity = value;
-                            clear_connection_selection(form);
-                        }
-                        this.close_new_connection_select();
-                        cx.notify();
-                    }),
-                ),
-            );
-        }
         form_field(
             &self.tokens,
             self.i18n.t("modals.new_connection.serial_parity"),
-            row,
+            self.render_new_connection_select_control(
+                NewConnectionSelect::SerialParity,
+                self.serial_parity_label(selected),
+                false,
+                false,
+                cx,
+            ),
         )
         .into_any_element()
     }
 
-    fn render_serial_flow_tabs(
+    fn render_serial_flow_select(
         &self,
         selected: oxideterm_terminal::SerialFlowControl,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let choices = [
-            (
-                oxideterm_terminal::SerialFlowControl::None,
-                self.i18n.t("modals.new_connection.serial_flow_none"),
-            ),
-            (
-                oxideterm_terminal::SerialFlowControl::Software,
-                self.i18n.t("modals.new_connection.serial_flow_software"),
-            ),
-            (
-                oxideterm_terminal::SerialFlowControl::Hardware,
-                self.i18n.t("modals.new_connection.serial_flow_hardware"),
-            ),
-        ];
-        let mut row = segmented_tabs(&self.tokens);
-        for (value, label) in choices {
-            row = row.child(
-                segmented_tab(&self.tokens, label, value == selected).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if let Some(form) = this.new_connection_form.as_mut() {
-                            form.serial_flow_control = value;
-                            clear_connection_selection(form);
-                        }
-                        this.close_new_connection_select();
-                        cx.notify();
-                    }),
-                ),
-            );
-        }
         form_field(
             &self.tokens,
             self.i18n.t("modals.new_connection.serial_flow_control"),
-            row,
+            self.render_new_connection_select_control(
+                NewConnectionSelect::SerialFlowControl,
+                self.serial_flow_control_label(selected),
+                false,
+                false,
+                cx,
+            ),
         )
         .into_any_element()
+    }
+
+    fn serial_parity_label(&self, parity: oxideterm_terminal::SerialParity) -> String {
+        match parity {
+            oxideterm_terminal::SerialParity::None => {
+                self.i18n.t("modals.new_connection.serial_parity_none")
+            }
+            oxideterm_terminal::SerialParity::Odd => {
+                self.i18n.t("modals.new_connection.serial_parity_odd")
+            }
+            oxideterm_terminal::SerialParity::Even => {
+                self.i18n.t("modals.new_connection.serial_parity_even")
+            }
+        }
+    }
+
+    fn serial_flow_control_label(&self, flow: oxideterm_terminal::SerialFlowControl) -> String {
+        match flow {
+            oxideterm_terminal::SerialFlowControl::None => {
+                self.i18n.t("modals.new_connection.serial_flow_none")
+            }
+            oxideterm_terminal::SerialFlowControl::Software => {
+                self.i18n.t("modals.new_connection.serial_flow_software")
+            }
+            oxideterm_terminal::SerialFlowControl::Hardware => {
+                self.i18n.t("modals.new_connection.serial_flow_hardware")
+            }
+        }
+    }
+
+    fn set_new_connection_serial_port(&mut self, port_path: String, cx: &mut Context<Self>) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.serial_port_path = port_path;
+            form.focused_field = NewConnectionField::SerialPortPath;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_serial_u8(
+        &mut self,
+        select_id: NewConnectionSelect,
+        value: u8,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            match select_id {
+                NewConnectionSelect::SerialDataBits => form.serial_data_bits = value,
+                NewConnectionSelect::SerialStopBits => form.serial_stop_bits = value,
+                _ => return,
+            }
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_serial_parity(
+        &mut self,
+        parity: oxideterm_terminal::SerialParity,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.serial_parity = parity;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_serial_flow_control(
+        &mut self,
+        flow: oxideterm_terminal::SerialFlowControl,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.serial_flow_control = flow;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
     }
 
     fn render_connection_checkbox(
@@ -1336,6 +1402,14 @@ impl WorkspaceApp {
             }),
         )
             .into_any_element()
+    }
+}
+
+fn serial_port_display_label(port: &oxideterm_terminal::SerialPortInfo) -> String {
+    if port.display_name.trim().is_empty() {
+        port.port_path.clone()
+    } else {
+        port.display_name.clone()
     }
 }
 
