@@ -1,11 +1,11 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>OxideTerm 的下一代零 WebView 版本。</strong>
+  <strong>面向远程服务器的 AI-native 工作区。</strong>
   <br>
-  连接一次远程机器，就能在一个原生 Rust 工作区里处理它的 Shell、文件、端口、传输、轻量编辑器、串口控制台和 BYOK AI。
+  通过 SSH 连接你的服务器，然后在一个本地优先的原生应用里使用终端、文件、端口、传输、轻量编辑、串口控制台和 autonomous OxideSens 侧边栏。
   <br>
-  原生 GPUI 应用 · 纯 Rust SSH · 核心 SSH 工作流无需账号
+  原生 GPUI 应用 · 纯 Rust SSH · BYOK autonomous AI · 核心 SSH 工作流无需账号
   <br>
   <strong>零 WebView。零 OpenSSL。零遥测。零订阅。BYOK 优先。全栈纯 Rust。</strong>
 </p>
@@ -45,7 +45,7 @@
 
 - 在一个原生工作区里管理 SSH 终端、SFTP、端口转发、串口控制台、本地 Shell 和轻量编辑
 - 通过宽限期重连，让远程工作更能扛住网络抖动
-- 使用你自己的 AI 提供商检查实时会话，并执行经过批准的工作区操作
+- 让 autonomous OxideSens 侧边栏通过你自己的 AI 提供商检查实时会话，并执行经过批准的工作区操作
 
 ---
 
@@ -56,13 +56,13 @@
 | 一个远程节点，多种工具 | 终端、SFTP、端口转发、trzsz、原生 IDE、监控和 AI 上下文都挂在同一个 SSH 工作区上 |
 | 零 WebView 原生外壳 | GPUI 直接在 GPU surface 上绘制桌面 UI，没有 DOM、CSS、JavaScript、Chromium 或 WebKit 运行时 |
 | 本地优先 SSH 工作流 | SSH、SFTP、端口转发、本地 Shell、串口终端和配置管理都无需注册 |
-| BYOK AI，而不是平台点数 | OxideSens 使用你自己的 OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible 端点，并支持 MCP 与 RAG |
+| BYOK autonomous AI，而不是平台点数 | OxideSens 使用你自己的 OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible 端点，支持 MCP、RAG 和经过批准的工作区操作 |
 | 重连稳定性 | 宽限期会先探测旧连接 30 秒再替换它，短暂网络中断时 TUI 应用仍有机会存活 |
 | 纯 Rust SSH 与凭证安全 | `russh` + `ring`，无 OpenSSL/libssh2；密码和 API 密钥保存在 OS Keychain，`.oxide` 使用 ChaCha20-Poly1305 + Argon2id |
 
 ## 它是什么 / 不是什么
 
-OxideTerm Native 专注于和 OxideTerm 相同的**本地优先 SSH 工作区**，只是重建为纯 Rust GPUI 桌面应用。它面向希望终端、文件、端口、传输、轻量编辑、串口控制台和 AI 上下文围绕自己的机器与远程节点展开的用户。
+OxideTerm Native 专注于**面向远程服务器的本地优先 AI 工作区**，并重建为纯 Rust GPUI 桌面应用。它面向希望终端、文件、端口、传输、轻量编辑、串口控制台和 autonomous BYOK AI 侧边栏围绕自己的机器与远程节点展开的用户。
 
 它还不是当前稳定下载线，也不是托管云端 Agent 平台。它也不是 Electron、Tauri 或网页终端：没有 Chromium、WebView、JavaScript 或 CSS。
 

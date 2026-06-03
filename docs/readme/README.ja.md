@@ -1,14 +1,11 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>OxideTerm の次期ゼロ WebView edition。</strong>
+  <strong>リモートサーバー向けの AI-native ワークスペース。</strong>
   <br>
-
-### Architecture — Single-Process, Zero-Bridge
-
-  リモートマシンへ一度接続すれば、shell、ファイル、ポート、転送、軽量エディタ、シリアルコンソール、BYOK AI を 1 つのネイティブ Rust ワークスペースで扱えます。
+  SSH でサーバーに接続し、terminal、ファイル、ポート、転送、軽量編集、serial console、自律型 OxideSens サイドバーを local-first なネイティブアプリで扱えます。
   <br>
-  ネイティブ GPUI アプリ · 純粋な Rust SSH · コア SSH ワークフローにアカウント不要
+  ネイティブ GPUI アプリ · 純粋な Rust SSH · BYOK 自律 AI · コア SSH ワークフローにアカウント不要
   <br>
   <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. 徹底して Pure Rust。</strong>
 </p>
@@ -48,7 +45,7 @@
 
 - SSH terminal、SFTP、port forwarding、serial console、local shell、軽量編集を 1 つの native workspace で管理
 - Grace Period reconnect により、ネットワークが揺れてもリモート作業を維持
-- 自分の AI provider で live session を確認し、承認済みの workspace action を実行
+- autonomous OxideSens サイドバーに、自分の AI provider 経由で live session の確認と承認済み workspace action の実行を任せる
 
 ---
 
@@ -56,16 +53,16 @@
 
 | 重視すること | OxideTerm Native が提供するもの |
 |---|---|
-| 1 つの remote node、多数のツール | Terminal、SFTP、port forwarding、trzsz、native IDE、monitoring、AI context が同じ SSH workspace に結び付きます |
+| 1 つの remote node、多数のツール | Terminal、SFTP、port forwarding、trzsz、native IDE、monitoring、autonomous OxideSens サイドバーが同じ SSH workspace に結び付きます |
 | ゼロ WebView の native shell | GPUI が GPU surface に desktop UI を直接描画し、DOM、CSS、JavaScript、Chromium、WebKit runtime はありません |
 | Local-first SSH workflow | SSH、SFTP、forwarding、local shell、serial terminals、設定管理はサインアップ不要です |
-| Platform credit ではなく BYOK AI | OxideSens は OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint を使い、MCP と RAG に対応します |
+| Platform credit ではなく BYOK autonomous AI | OxideSens は OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint を使い、MCP、RAG、承認済み workspace action に対応します |
 | 再接続の安定性 | Grace Period が旧接続を 30 秒 probe してから置き換えるため、短いネットワーク断でも TUI が生き残れます |
 | 純粋な Rust SSH と認証情報の安全性 | `russh` + `ring`、OpenSSL/libssh2 なし。パスワードと API key は OS keychain、`.oxide` は ChaCha20-Poly1305 + Argon2id |
 
 ## これは何か / 何ではないか
 
-OxideTerm Native は OxideTerm と同じ **local-first SSH workspace** に集中し、それを pure Rust GPUI desktop app として作り直したものです。Terminal、file、port、transfer、軽量編集、serial console、AI context を自分の machine と remote node 中心に扱いたいユーザー向けです。
+OxideTerm Native は **リモートサーバー向け local-first AI workspace** に集中し、それを pure Rust GPUI desktop app として作り直したものです。Terminal、file、port、transfer、軽量編集、serial console、autonomous BYOK AI サイドバーを自分の machine と remote node 中心に扱いたいユーザー向けです。
 
 これはまだ現在の stable download line ではなく、hosted cloud agent platform でもありません。また Electron、Tauri、web terminal でもありません。Chromium、WebView、JavaScript、CSS はありません。
 

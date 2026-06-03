@@ -11,8 +11,8 @@ use std::{path::PathBuf, sync::Arc};
 use gpui::{
     AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontStyle, FontWeight, Hsla,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
-    StrikethroughStyle, Styled, StyledText, TextRun, UnderlineStyle, Window, div, image_cache, img,
-    px, relative, retain_all,
+    StrikethroughStyle, Styled, StyledText, TextAlign, TextRun, UnderlineStyle, Window, div,
+    image_cache, img, px, relative, retain_all,
 };
 use gpui_component::{VirtualListScrollHandle, v_virtual_list};
 use oxideterm_theme::ThemeTokens;
@@ -20,7 +20,7 @@ use oxideterm_theme::ThemeTokens;
 use crate::highlight;
 use crate::layout::{MarkdownBlockLayout, MarkdownLayoutItem};
 use crate::math;
-use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument};
+use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment};
 use crate::options::MarkdownOptions;
 use crate::style;
 
@@ -427,6 +427,7 @@ fn render_block(block: &Block, tokens: &ThemeTokens, opts: &MarkdownOptions) -> 
     match block {
         Block::Heading { level, inlines } => render_heading(*level, inlines, tokens, opts),
         Block::Paragraph { inlines } => render_paragraph(inlines, tokens, opts),
+        Block::Html(html) => render_html_block(html, tokens, opts),
         Block::CodeBlock { language, code } => {
             render_code_block(language.as_deref(), code, tokens, opts)
         }
@@ -436,9 +437,9 @@ fn render_block(block: &Block, tokens: &ThemeTokens, opts: &MarkdownOptions) -> 
         Block::Blockquote { blocks } => render_blockquote(blocks, tokens, opts),
         Block::Table {
             headers,
-            alignments: _,
+            alignments,
             rows,
-        } => render_table(headers, rows, tokens, opts),
+        } => render_table(headers, alignments, rows, tokens, opts),
     }
 }
 
@@ -457,6 +458,7 @@ fn render_selectable_block(
         Block::Paragraph { inlines } => {
             render_selectable_paragraph(inlines, tokens, opts, path, render_text)
         }
+        Block::Html(html) => render_selectable_html_block(html, tokens, opts, path, render_text),
         Block::CodeBlock { language, code } => render_selectable_code_block(
             language.as_deref(),
             code,
@@ -482,9 +484,11 @@ fn render_selectable_block(
         Block::Blockquote { blocks } => {
             render_selectable_blockquote(blocks, tokens, opts, code_actions, path, render_text)
         }
-        Block::Table { headers, rows, .. } => {
-            render_selectable_table(headers, rows, tokens, opts, path, render_text)
-        }
+        Block::Table {
+            headers,
+            alignments,
+            rows,
+        } => render_selectable_table(headers, alignments, rows, tokens, opts, path, render_text),
     }
 }
 
@@ -584,6 +588,28 @@ fn render_selectable_paragraph(
             render_text,
         ))
         .into_any_element()
+}
+
+fn render_html_block(html: &str, tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
+    // Raw HTML stays visible as inert text; GPUI native markdown intentionally
+    // does not execute or interpret embedded HTML.
+    render_paragraph(&[Inline::Html(html.to_string())], tokens, opts)
+}
+
+fn render_selectable_html_block(
+    html: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    render_selectable_paragraph(
+        &[Inline::Html(html.to_string())],
+        tokens,
+        opts,
+        path,
+        render_text,
+    )
 }
 
 // ─── code blocks ────────────────────────────────────────────────────────
@@ -885,6 +911,7 @@ fn render_selectable_blockquote(
 
 fn render_table(
     headers: &[Vec<Inline>],
+    alignments: &[TableAlignment],
     rows: &[Vec<Vec<Inline>>],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
@@ -897,10 +924,13 @@ fn render_table(
         .bg(style::table_header_bg(tokens))
         .border_b_1()
         .border_color(style::table_border_color(tokens))
-        .children(headers.iter().map(|cell| {
+        .children(headers.iter().enumerate().map(|(ci, cell)| {
             div()
                 .flex_1()
                 .p(px(tokens.spacing.two))
+                .text_align(table_alignment_text_align(alignment_for_column(
+                    alignments, ci,
+                )))
                 .font_weight(FontWeight::BOLD)
                 .text_color(style::heading_color(tokens))
                 .child(render_styled_inlines(cell, tokens, opts))
@@ -917,6 +947,9 @@ fn render_table(
                 div()
                     .flex_1()
                     .p(px(tokens.spacing.two))
+                    .text_align(table_alignment_text_align(alignment_for_column(
+                        alignments, ci,
+                    )))
                     .text_color(style::text_color(tokens))
                     .child(render_styled_inlines(cell, tokens, opts))
             }))
@@ -934,6 +967,7 @@ fn render_table(
 
 fn render_selectable_table(
     headers: &[Vec<Inline>],
+    alignments: &[TableAlignment],
     rows: &[Vec<Vec<Inline>>],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
@@ -952,6 +986,9 @@ fn render_selectable_table(
             div()
                 .flex_1()
                 .p(px(tokens.spacing.two))
+                .text_align(table_alignment_text_align(alignment_for_column(
+                    alignments, ci,
+                )))
                 .font_weight(FontWeight::BOLD)
                 .text_color(style::heading_color(tokens))
                 .child(render_selectable_inlines(
@@ -974,6 +1011,9 @@ fn render_selectable_table(
                 div()
                     .flex_1()
                     .p(px(tokens.spacing.two))
+                    .text_align(table_alignment_text_align(alignment_for_column(
+                        alignments, ci,
+                    )))
                     .text_color(style::text_color(tokens))
                     .child(render_selectable_inlines(
                         &format!("{path}:td:{ri}:{ci}"),
@@ -993,6 +1033,21 @@ fn render_selectable_table(
         .child(header_row)
         .children(body_rows)
         .into_any_element()
+}
+
+fn alignment_for_column(alignments: &[TableAlignment], column: usize) -> TableAlignment {
+    alignments
+        .get(column)
+        .copied()
+        .unwrap_or(TableAlignment::None)
+}
+
+fn table_alignment_text_align(alignment: TableAlignment) -> TextAlign {
+    match alignment {
+        TableAlignment::None | TableAlignment::Left => TextAlign::Left,
+        TableAlignment::Center => TextAlign::Center,
+        TableAlignment::Right => TextAlign::Right,
+    }
 }
 
 // ─── lists ──────────────────────────────────────────────────────────────
@@ -1296,11 +1351,11 @@ fn render_styled_inlines(
     }
 
     // If any run contains an image, use a container with mixed children.
-    let has_images_or_math = flat
+    let has_images_math_or_links = flat
         .iter()
-        .any(|r| r.image_url.is_some() || r.math_latex.is_some());
+        .any(|r| r.image_url.is_some() || r.math_latex.is_some() || r.link_url.is_some());
 
-    if has_images_or_math {
+    if has_images_math_or_links {
         return render_mixed_inlines(&flat, tokens, opts);
     }
 
@@ -1337,10 +1392,10 @@ fn render_selectable_inlines(
         return div().into_any_element();
     }
 
-    let has_images_or_math = flat
+    let has_images_math_or_links = flat
         .iter()
-        .any(|run| run.image_url.is_some() || run.math_latex.is_some());
-    if has_images_or_math {
+        .any(|run| run.image_url.is_some() || run.math_latex.is_some() || run.link_url.is_some());
+    if has_images_math_or_links {
         return render_selectable_mixed_inlines(key, &flat, tokens, opts, render_text);
     }
 
@@ -1393,6 +1448,9 @@ fn render_mixed_inlines(
         } else if let Some(ref latex) = run.math_latex {
             flush_text(&mut text_buf, &mut run_buf, &mut children);
             children.push(render_math(latex, false, tokens, opts));
+        } else if let Some(ref url) = run.link_url {
+            flush_text(&mut text_buf, &mut run_buf, &mut children);
+            children.push(render_link_run(run, url, tokens, opts));
         } else {
             let start = text_buf.len();
             text_buf.push_str(&run.text);
@@ -1410,7 +1468,7 @@ fn render_mixed_inlines(
         .flex_row()
         .flex_wrap()
         .items_center()
-        .gap(px(opts.block_gap * 0.35))
+        .gap(px(0.0))
         .children(children)
         .into_any_element()
 }
@@ -1448,6 +1506,9 @@ fn render_selectable_mixed_inlines(
         } else if let Some(ref latex) = run.math_latex {
             flush_text(&mut text_buf, &mut run_buf, &mut children);
             children.push(render_math(latex, false, tokens, opts));
+        } else if let Some(ref url) = run.link_url {
+            flush_text(&mut text_buf, &mut run_buf, &mut children);
+            children.push(render_link_run(run, url, tokens, opts));
         } else {
             let start = text_buf.len();
             text_buf.push_str(&run.text);
@@ -1465,7 +1526,7 @@ fn render_selectable_mixed_inlines(
         .flex_row()
         .flex_wrap()
         .items_center()
-        .gap(px(opts.block_gap * 0.35))
+        .gap(px(0.0))
         .children(children)
         .into_any_element()
 }
@@ -1505,6 +1566,9 @@ fn render_display_mixed_inlines(
         } else if let Some(ref url) = run.image_url {
             flush_text(&mut text_buf, &mut run_buf, &mut children);
             children.push(render_image(url, opts));
+        } else if let Some(ref url) = run.link_url {
+            flush_text(&mut text_buf, &mut run_buf, &mut children);
+            children.push(render_link_run(run, url, tokens, opts));
         } else {
             let start = text_buf.len();
             text_buf.push_str(&run.text);
@@ -1523,6 +1587,27 @@ fn render_display_mixed_inlines(
         .flex_col()
         .gap(px(opts.block_gap * 0.5))
         .children(children)
+        .into_any_element()
+}
+
+fn render_link_run(
+    run: &FlatRun,
+    url: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) -> AnyElement {
+    let text_len = run.text.len();
+    let text = SharedString::from(run.text.clone());
+    let link_url = url.to_string();
+    let run = text_run_for_flat(run, text_len, tokens, opts);
+
+    div()
+        .cursor_pointer()
+        .child(StyledText::new(text).with_runs(vec![run]))
+        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+            cx.open_url(&link_url);
+            cx.stop_propagation();
+        })
         .into_any_element()
 }
 
@@ -1676,6 +1761,7 @@ struct FlatRun {
     italic: bool,
     code: bool,
     link: bool,
+    link_url: Option<String>,
     strikethrough: bool,
     /// If set, this run represents an image and should be rendered via `img()`.
     image_url: Option<String>,
@@ -1701,6 +1787,7 @@ fn collect_runs(
                     italic,
                     code,
                     link,
+                    link_url: None,
                     strikethrough,
                     image_url: None,
                     math_latex: None,
@@ -1720,14 +1807,22 @@ fn collect_runs(
                     italic,
                     code: true,
                     link,
+                    link_url: None,
                     strikethrough,
                     image_url: None,
                     math_latex: None,
                     math_display: false,
                 });
             }
-            Inline::Link { text: children, .. } => {
+            Inline::Link {
+                text: children,
+                url,
+            } => {
+                let start = out.len();
                 collect_runs(children, bold, italic, code, true, strikethrough, out);
+                for run in &mut out[start..] {
+                    run.link_url = Some(url.clone());
+                }
             }
             Inline::Strikethrough(children) => {
                 collect_runs(children, bold, italic, code, link, true, out);
@@ -1739,6 +1834,7 @@ fn collect_runs(
                     italic: false,
                     code: false,
                     link: false,
+                    link_url: None,
                     strikethrough: false,
                     image_url: Some(url.clone()),
                     math_latex: None,
@@ -1752,6 +1848,7 @@ fn collect_runs(
                     italic: false,
                     code: false,
                     link: false,
+                    link_url: None,
                     strikethrough: false,
                     image_url: None,
                     math_latex: Some(latex.clone()),
@@ -1765,6 +1862,7 @@ fn collect_runs(
                     italic,
                     code,
                     link: true,
+                    link_url: None,
                     strikethrough,
                     image_url: None,
                     math_latex: None,
@@ -1778,6 +1876,21 @@ fn collect_runs(
                     italic,
                     code,
                     link,
+                    link_url: None,
+                    strikethrough,
+                    image_url: None,
+                    math_latex: None,
+                    math_display: false,
+                });
+            }
+            Inline::Html(html) => {
+                out.push(FlatRun {
+                    text: html.clone(),
+                    bold,
+                    italic,
+                    code,
+                    link,
+                    link_url: None,
                     strikethrough,
                     image_url: None,
                     math_latex: None,
@@ -1809,5 +1922,70 @@ mod tests {
         assert_eq!(image_path_from_url("https://example.com/logo.png"), None);
         assert_eq!(image_path_from_url("http://example.com/logo.png"), None);
         assert_eq!(image_path_from_url("data:image/png;base64,AAAA"), None);
+    }
+
+    #[test]
+    fn maps_table_alignments_to_gpui_text_alignments() {
+        assert_eq!(
+            table_alignment_text_align(TableAlignment::None),
+            TextAlign::Left
+        );
+        assert_eq!(
+            table_alignment_text_align(TableAlignment::Left),
+            TextAlign::Left
+        );
+        assert_eq!(
+            table_alignment_text_align(TableAlignment::Center),
+            TextAlign::Center
+        );
+        assert_eq!(
+            table_alignment_text_align(TableAlignment::Right),
+            TextAlign::Right
+        );
+    }
+
+    #[test]
+    fn flat_runs_preserve_link_targets_for_click_rendering() {
+        let mut runs = Vec::new();
+        collect_runs(
+            &[Inline::Link {
+                text: vec![Inline::Text("docs".into())],
+                url: "https://example.com/docs".into(),
+            }],
+            false,
+            false,
+            false,
+            false,
+            false,
+            &mut runs,
+        );
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "docs");
+        assert!(runs[0].link);
+        assert_eq!(
+            runs[0].link_url.as_deref(),
+            Some("https://example.com/docs")
+        );
+    }
+
+    #[test]
+    fn flat_runs_preserve_html_as_plain_text() {
+        let mut runs = Vec::new();
+        collect_runs(
+            &[Inline::Html("<kbd>Esc</kbd>".into())],
+            false,
+            false,
+            false,
+            false,
+            false,
+            &mut runs,
+        );
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "<kbd>Esc</kbd>");
+        assert!(runs[0].link_url.is_none());
+        assert!(runs[0].image_url.is_none());
+        assert!(runs[0].math_latex.is_none());
     }
 }

@@ -1,14 +1,11 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>La próxima edición zero-WebView de OxideTerm.</strong>
+  <strong>Workspace AI-native para servidores remotos.</strong>
   <br>
-
-### Arquitectura — proceso único, cero bridge
-
-  Conéctate una vez a una máquina remota y trabaja con shell, archivos, puertos, transferencias, editor ligero, consolas serie y BYOK AI desde un workspace Rust nativo.
+  Conéctate a tus servidores por SSH y trabaja con terminales, archivos, puertos, transferencias, edición ligera, consolas serie y la barra lateral autónoma OxideSens en una app nativa local-first.
   <br>
-  App GPUI nativa · SSH puro en Rust · sin cuenta para los workflows SSH principales
+  App GPUI nativa · SSH puro en Rust · AI autónoma BYOK · sin cuenta para los workflows SSH principales
   <br>
   <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust all the way down.</strong>
 </p>
@@ -48,7 +45,7 @@
 
 - Gestionar terminales SSH, SFTP, port forwards, consolas serie, shells locales y edición ligera en un workspace nativo
 - Mantener vivo el trabajo remoto ante cortes de red con Grace Period reconnect
-- Usar tu propio proveedor de IA para inspeccionar sesiones en vivo y ejecutar acciones aprobadas del workspace
+- Pedir a la barra lateral autónoma OxideSens que inspeccione sesiones en vivo y ejecute acciones aprobadas del workspace mediante tu propio proveedor de IA
 
 ---
 
@@ -56,16 +53,16 @@
 
 | Si te importa... | OxideTerm Native te da... |
 |---|---|
-| Un nodo remoto, muchas herramientas | Terminal, SFTP, port forwarding, trzsz, IDE nativo, monitorización y contexto de IA permanecen unidos al mismo workspace SSH |
+| Un nodo remoto, muchas herramientas | Terminal, SFTP, port forwarding, trzsz, IDE nativo, monitorización y la barra lateral autónoma OxideSens permanecen unidos al mismo workspace SSH |
 | Shell nativa zero-WebView | GPUI dibuja la UI directamente sobre una superficie GPU, sin DOM, CSS, JavaScript, Chromium ni WebKit runtime |
 | Workflows SSH local-first | SSH, SFTP, forwarding, shell local, terminales serie y configuración funcionan sin registro |
-| BYOK AI en vez de créditos de plataforma | OxideSens usa tu endpoint OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible con soporte MCP y RAG |
+| AI autónoma BYOK en vez de créditos de plataforma | OxideSens usa tu endpoint OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible con MCP, RAG y acciones aprobadas del workspace |
 | Reconexión estable | Grace Period sondea la conexión anterior durante 30 s antes de reemplazarla, para que las TUI sobrevivan a cortes breves |
 | SSH puro en Rust y credenciales seguras | `russh` + `ring`, sin OpenSSL/libssh2; contraseñas y claves API quedan en el llavero del sistema, `.oxide` usa ChaCha20-Poly1305 + Argon2id |
 
 ## Qué es / qué no es
 
-OxideTerm Native se centra en el mismo **workspace SSH local-first** que OxideTerm, reconstruido como app de escritorio GPUI en Rust puro. Está pensado para usuarios que quieren mantener terminal, archivos, puertos, transferencias, edición ligera, consolas serie y contexto de IA alrededor de sus propias máquinas y nodos remotos.
+OxideTerm Native se centra en un **workspace AI local-first para servidores remotos**, reconstruido como app de escritorio GPUI en Rust puro. Está pensado para usuarios que quieren mantener terminal, archivos, puertos, transferencias, edición ligera, consolas serie y una barra lateral AI BYOK autónoma alrededor de sus propias máquinas y nodos remotos.
 
 Todavía no es la línea estable de descarga actual, ni una plataforma cloud de agentes. Tampoco es Electron, Tauri ni una terminal web: sin Chromium, sin WebView, sin JavaScript, sin CSS.
 

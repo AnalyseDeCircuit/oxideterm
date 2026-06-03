@@ -1,14 +1,11 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Phiên bản zero-WebView tiếp theo của OxideTerm.</strong>
+  <strong>Workspace AI-native cho máy chủ từ xa.</strong>
   <br>
-
-### Architecture — Single-Process, Zero-Bridge
-
-  Kết nối tới máy từ xa một lần, rồi làm việc với shell, tệp, cổng, truyền tải, editor nhẹ, serial console và BYOK AI trong một workspace Rust native.
+  Kết nối tới server của bạn qua SSH, rồi làm việc với terminal, tệp, cổng, truyền tải, chỉnh sửa nhẹ, serial console và sidebar OxideSens tự chủ trong một app native local-first.
   <br>
-  Ứng dụng GPUI native · SSH thuần Rust · không cần tài khoản cho workflow SSH chính
+  Ứng dụng GPUI native · SSH thuần Rust · BYOK AI tự chủ · không cần tài khoản cho workflow SSH chính
   <br>
   <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust all the way down.</strong>
 </p>
@@ -48,7 +45,7 @@
 
 - Quản lý SSH terminal, SFTP, port forward, serial console, local shell và chỉnh sửa nhẹ trong một native workspace
 - Giữ công việc từ xa sống qua mạng chập chờn với Grace Period reconnect
-- Dùng nhà cung cấp AI của bạn để xem live session và chạy các workspace action đã được phê duyệt
+- Yêu cầu sidebar OxideSens tự chủ kiểm tra live session và chạy các workspace action đã được phê duyệt qua nhà cung cấp AI của bạn
 
 ---
 
@@ -56,16 +53,16 @@
 
 | Nếu bạn quan tâm đến... | OxideTerm Native mang lại... |
 |---|---|
-| Một remote node, nhiều công cụ | Terminal, SFTP, port forwarding, trzsz, native IDE, monitoring và ngữ cảnh AI cùng gắn với một SSH workspace |
+| Một remote node, nhiều công cụ | Terminal, SFTP, port forwarding, trzsz, native IDE, monitoring và sidebar OxideSens tự chủ cùng gắn với một SSH workspace |
 | Native shell zero-WebView | GPUI vẽ desktop UI trực tiếp lên GPU surface, không DOM, CSS, JavaScript, Chromium hay WebKit runtime |
 | Workflow SSH local-first | SSH, SFTP, forwarding, local shell, serial terminal và cấu hình hoạt động không cần đăng ký |
-| BYOK AI thay vì credit nền tảng | OxideSens dùng endpoint OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible của bạn với hỗ trợ MCP và RAG |
+| BYOK AI tự chủ thay vì credit nền tảng | OxideSens dùng endpoint OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible của bạn với MCP, RAG và workspace action đã được phê duyệt |
 | Reconnect ổn định | Grace Period thăm dò kết nối cũ 30 giây trước khi thay thế, giúp TUI sống sót qua mất mạng ngắn |
 | SSH thuần Rust và an toàn credential | `russh` + `ring`, không OpenSSL/libssh2; mật khẩu và API key ở OS keychain, `.oxide` dùng ChaCha20-Poly1305 + Argon2id |
 
 ## Nó là gì / không phải gì
 
-OxideTerm Native tập trung vào cùng **local-first SSH workspace** như OxideTerm, được xây lại thành app desktop GPUI thuần Rust. Nó dành cho người dùng muốn terminal, tệp, cổng, truyền tải, chỉnh sửa nhẹ, serial console và ngữ cảnh AI xoay quanh máy của họ và các node từ xa.
+OxideTerm Native tập trung vào **workspace AI local-first cho máy chủ từ xa**, được xây lại thành app desktop GPUI thuần Rust. Nó dành cho người dùng muốn terminal, tệp, cổng, truyền tải, chỉnh sửa nhẹ, serial console và sidebar BYOK AI tự chủ xoay quanh máy của họ và các node từ xa.
 
 Nó chưa phải stable download line hiện tại, và không phải nền tảng cloud agent được host. Nó cũng không phải Electron, Tauri hay web terminal: không Chromium, không WebView, không JavaScript, không CSS.
 

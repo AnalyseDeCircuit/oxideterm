@@ -226,6 +226,8 @@ mod tests {
         let needle = format!(r#"{name}=""#);
         let start = svg.find(&needle)? + needle.len();
         let end = svg[start..].find('"')? + start;
-        svg[start..end].parse().ok()
+        // ratex-svg 0.1.8 emits physical SVG dimensions with a `pt` suffix.
+        // The scale assertion only needs the numeric part.
+        svg[start..end].trim_end_matches("pt").parse().ok()
     }
 }

@@ -31,6 +31,9 @@ pub enum Block {
     /// A normal paragraph.
     Paragraph { inlines: Vec<Inline> },
 
+    /// Raw block HTML preserved as inert text.
+    Html(String),
+
     /// Fenced or indented code block with an optional language hint.
     CodeBlock {
         language: Option<String>,
@@ -94,6 +97,9 @@ pub enum Inline {
 
     /// `[text](url)`.
     Link { text: Vec<Inline>, url: String },
+
+    /// Raw inline HTML preserved as inert text.
+    Html(String),
 
     /// `~~strikethrough~~`.
     Strikethrough(Vec<Inline>),

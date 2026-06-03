@@ -107,6 +107,16 @@ pub fn parse(source: &str) -> MarkdownDocument {
                     ctx.push_inline(Inline::Text(text.to_string()));
                 }
             }
+            Event::InlineHtml(html) => {
+                // Preserve inline HTML for readability without executing or
+                // interpreting it as native UI markup.
+                ctx.push_inline(Inline::Html(html.to_string()));
+            }
+            Event::Html(html) => {
+                // Raw block HTML is an inert markdown block in native GPUI so
+                // previews keep source content without introducing an HTML runtime.
+                ctx.push_block(Block::Html(html.to_string()));
+            }
             Event::Code(code) => {
                 ctx.push_inline(Inline::Code(code.to_string()));
             }
@@ -416,6 +426,7 @@ fn inlines_to_plain_text(inlines: &[Inline]) -> String {
     for inline in inlines {
         match inline {
             Inline::Text(t) => out.push_str(t),
+            Inline::Html(html) => out.push_str(html),
             Inline::Code(c) => out.push_str(c),
             Inline::Bold(inner)
             | Inline::Italic(inner)
@@ -758,5 +769,27 @@ mod tests {
             }
             other => panic!("expected CodeBlock, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn preserves_inline_html_as_inert_text() {
+        let doc = parse("Text <span class=\"x\">inline</span> html");
+        match &doc.blocks[0] {
+            Block::Paragraph { inlines } => {
+                assert!(inlines.iter().any(|inline| matches!(
+                    inline,
+                    Inline::Html(html) if html.contains("<span")
+                )));
+            }
+            other => panic!("expected Paragraph, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn preserves_block_html_as_inert_block() {
+        let doc = parse("<div>raw</div>\n\nAfter");
+
+        assert!(matches!(&doc.blocks[0], Block::Html(html) if html.contains("<div>raw</div>")));
+        assert!(matches!(&doc.blocks[1], Block::Paragraph { .. }));
     }
 }

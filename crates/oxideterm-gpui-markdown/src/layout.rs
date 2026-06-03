@@ -124,6 +124,13 @@ fn estimate_block_height(block: &Block, opts: &MarkdownOptions) -> f32 {
             ) * opts.base_font_size
                 * BODY_LINE_HEIGHT
         }
+        Block::Html(html) => {
+            estimate_wrapped_lines(
+                html.chars().count(),
+                chars_per_line(opts.base_font_size, false),
+            ) * opts.base_font_size
+                * BODY_LINE_HEIGHT
+        }
         Block::CodeBlock { language, code } => {
             let code_size = opts.base_font_size * opts.code_font_scale;
             let label_height = language
@@ -217,7 +224,7 @@ fn inlines_text_len(inlines: &[Inline]) -> usize {
 
 fn inline_text_len(inline: &Inline) -> usize {
     match inline {
-        Inline::Text(text) | Inline::Code(text) => text.chars().count(),
+        Inline::Text(text) | Inline::Code(text) | Inline::Html(text) => text.chars().count(),
         Inline::Bold(children) | Inline::Italic(children) | Inline::Strikethrough(children) => {
             inlines_text_len(children)
         }
