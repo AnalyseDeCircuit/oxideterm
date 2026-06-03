@@ -754,6 +754,9 @@ impl Render for WorkspaceApp {
             .when(self.shortcuts_modal.open, |root| {
                 root.child(self.render_shortcuts_modal(cx))
             })
+            .when(self.mermaid_zoom.is_some(), |root| {
+                root.child(self.render_mermaid_zoom_modal(window, cx))
+            })
             .when_some(self.workspace_tooltip.clone(), |root, tooltip| {
                 root.child(self.render_workspace_tooltip(tooltip))
             })
@@ -771,6 +774,81 @@ impl Render for WorkspaceApp {
 }
 
 impl WorkspaceApp {
+    fn render_mermaid_zoom_modal(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(state) = self.mermaid_zoom.as_ref() else {
+            return div().into_any_element();
+        };
+        let viewport = window.viewport_size();
+        let max_width = f32::from(viewport.width) * 0.92;
+        let max_height = f32::from(viewport.height) * 0.86;
+        let title = self.i18n.t("markdown.mermaid_expand");
+        let subtitle = state
+            .source
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .map(|line| line.trim().to_string())
+            .unwrap_or_else(|| "Mermaid".to_string());
+
+        deferred(
+            oxideterm_gpui_ui::modal::dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.mermaid_zoom = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .child(
+                    oxideterm_gpui_ui::modal_container(&self.tokens)
+                        .w(px(max_width.min(state.width + 48.0).max(360.0)))
+                        .max_h(px(max_height))
+                        .flex()
+                        .flex_col()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
+                        .child(oxideterm_gpui_ui::modal_header(
+                            &self.tokens,
+                            title,
+                            subtitle,
+                        ))
+                        .child(
+                            oxideterm_gpui_ui::modal_body(&self.tokens)
+                                .id("mermaid-zoom-modal-body-scroll")
+                                .flex_1()
+                                .min_h(px(0.0))
+                                .selectable_overflow_y_scroll(
+                                    &self.selectable_text_scroll_handle(
+                                        "mermaid-zoom-modal-body-scroll",
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .overflow_x_scrollbar()
+                                        .child(
+                                            div()
+                                                .w(px(state.width.max(1.0)))
+                                                .h(px(state.height.max(1.0)))
+                                                .child(
+                                                    gpui::img(state.image.clone())
+                                                        .w(px(state.width.max(1.0)))
+                                                        .h(px(state.height.max(1.0))),
+                                                ),
+                                        ),
+                                ),
+                        ),
+                ),
+        )
+        .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
+        .into_any_element()
+    }
+
     fn render_zen_mode_hint(&self) -> AnyElement {
         let key = if cfg!(target_os = "macos") {
             "zen_mode.hint"

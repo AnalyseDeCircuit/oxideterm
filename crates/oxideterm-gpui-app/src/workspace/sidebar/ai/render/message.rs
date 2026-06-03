@@ -504,7 +504,7 @@ impl WorkspaceApp {
                 .into_any_element();
         }
 
-        let mut options = MarkdownOptions::from_theme(&self.tokens);
+        let mut options = self.localized_markdown_options();
         options.base_font_size = 13.0;
         options.block_gap = 8.0;
         let content = ai_visible_suggestion_content(&message.content);
@@ -514,8 +514,8 @@ impl WorkspaceApp {
             &message.id,
         );
         let workspace = cx.entity();
-        let code_actions = markdown_render::MarkdownCodeBlockActions {
-            on_run: Some(Arc::new(move |command, window, cx| {
+        let mut code_actions = self.markdown_mermaid_actions(cx);
+        code_actions.on_run = Some(Arc::new(move |command, window, cx| {
                 let workspace = workspace.clone();
                 // Markdown action callbacks are plain event callbacks, not
                 // WorkspaceApp listeners. Defer the entity write so code block
@@ -525,8 +525,7 @@ impl WorkspaceApp {
                         this.insert_ai_code_block_command(command, cx);
                     });
                 });
-            })),
-        };
+            }));
         let mut text_order = 0usize;
         let mut render_text = |key: String,
                                text: gpui::SharedString,

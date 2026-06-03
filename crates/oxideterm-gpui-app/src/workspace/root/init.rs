@@ -445,6 +445,7 @@ impl WorkspaceApp {
             selectable_text_autoscroll_position: None,
             selectable_text_autoscroll_scheduled: false,
             selectable_text_scroll_handles: RefCell::new(HashMap::new()),
+            mermaid_zoom: None,
             ime_marked_text: None,
             pending_platform_text_commit: None,
             next_platform_text_commit_generation: 0,

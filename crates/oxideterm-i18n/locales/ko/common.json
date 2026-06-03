@@ -16,6 +16,10 @@
     "portuguese_brazil": "Português (Brasil)",
     "vietnamese": "Tiếng Việt"
   },
+  "markdown": {
+    "mermaid_unsupported": "지원되지 않는 Mermaid 다이어그램",
+    "mermaid_expand": "확대"
+  },
   "layout": {
     "empty": {
       "title": "OxideTerm",

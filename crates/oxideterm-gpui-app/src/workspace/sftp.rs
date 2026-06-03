@@ -10,7 +10,7 @@ use oxideterm_code_editor::backend::input::{
     InputState as CodeEditorInputState,
 };
 use oxideterm_gpui_markdown::{
-    MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
+    MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_code_actions,
 };
 use oxideterm_gpui_ui::{
     button::{

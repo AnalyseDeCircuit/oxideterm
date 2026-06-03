@@ -48,12 +48,13 @@ use self::settings::SettingsManagedKeyDialog;
 use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, CursorStyle,
-    FocusHandle, Focusable, IntoElement, KeyDownEvent, ListAlignment, ListState, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions,
-    Pixels, Point, Render, RenderImage, Rgba, ScrollHandle, ScrollWheelEvent, SharedString, Styled,
-    StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle, Window, anchored,
-    deferred, div, prelude::*, px, relative, rgb, rgba, svg,
+    FocusHandle, Focusable, Image, IntoElement, KeyDownEvent, ListAlignment, ListState,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement,
+    PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollHandle, ScrollWheelEvent,
+    SharedString, Styled, StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle,
+    Window, anchored, deferred, div, prelude::*, px, relative, rgb, rgba, svg,
 };
+use gpui_component::scroll::ScrollableElement;
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
     ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
@@ -182,7 +183,12 @@ use crate::{
     ToggleSidebar, ZenMode,
 };
 use crate::{assets::LucideIcon, bundled_fonts};
-use oxideterm_gpui_markdown::{MarkdownBlockLayout, MarkdownDocument};
+use oxideterm_gpui_markdown::{
+    MarkdownBlockLayout, MarkdownCodeBlockActions, MarkdownDocument, MarkdownMermaidZoomHandler,
+    MarkdownOptions,
+};
+
+const MERMAID_MODAL_RASTER_SCALE: f32 = 3.0;
 use oxideterm_gpui_settings_view::{
     ActiveSurface, SettingsInput, SettingsSelect, SettingsSlider, SettingsTab,
 };
@@ -692,6 +698,7 @@ pub(crate) struct WorkspaceApp {
     selectable_text_autoscroll_position: Option<Point<Pixels>>,
     selectable_text_autoscroll_scheduled: bool,
     selectable_text_scroll_handles: RefCell<HashMap<String, ScrollHandle>>,
+    mermaid_zoom: Option<MermaidZoomState>,
     ime_marked_text: Option<String>,
     pending_platform_text_commit: Option<ime::PendingPlatformTextCommit>,
     next_platform_text_commit_generation: u64,
@@ -910,6 +917,64 @@ pub(crate) struct WorkspaceApp {
     workspace_tooltip: Option<WorkspaceTooltip>,
     workspace_tooltip_pending: Option<WorkspaceTooltipPending>,
     workspace_tooltip_generation: u64,
+}
+
+#[derive(Clone)]
+struct MermaidZoomState {
+    source: String,
+    image: Arc<Image>,
+    width: f32,
+    height: f32,
+}
+
+impl WorkspaceApp {
+    fn localized_markdown_options(&self) -> MarkdownOptions {
+        let mut options = MarkdownOptions::from_theme(&self.tokens);
+        options.mermaid_error_prefix = self.i18n.t("markdown.mermaid_unsupported");
+        options.mermaid_expand_label = self.i18n.t("markdown.mermaid_expand");
+        options
+    }
+
+    fn mermaid_zoom_handler(&self, cx: &mut Context<Self>) -> MarkdownMermaidZoomHandler {
+        let workspace = cx.entity();
+        Arc::new(move |source, image, width, height, window, cx| {
+            let workspace = workspace.clone();
+            window.defer(cx, move |_window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    let rendered = oxideterm_gpui_markdown::mermaid::render_mermaid_svg_scaled(
+                        &source,
+                        &this.tokens,
+                        &this.localized_markdown_options(),
+                        MERMAID_MODAL_RASTER_SCALE,
+                    )
+                    .ok();
+                    this.mermaid_zoom = Some(MermaidZoomState {
+                        source,
+                        image: rendered
+                            .as_ref()
+                            .map(|rendered| rendered.image.clone())
+                            .unwrap_or(image),
+                        width: rendered
+                            .as_ref()
+                            .map(|rendered| rendered.display_width)
+                            .unwrap_or(width),
+                        height: rendered
+                            .as_ref()
+                            .map(|rendered| rendered.display_height)
+                            .unwrap_or(height),
+                    });
+                    cx.notify();
+                });
+            });
+        })
+    }
+
+    fn markdown_mermaid_actions(&self, cx: &mut Context<Self>) -> MarkdownCodeBlockActions {
+        MarkdownCodeBlockActions {
+            on_run: None,
+            on_mermaid_zoom: Some(self.mermaid_zoom_handler(cx)),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

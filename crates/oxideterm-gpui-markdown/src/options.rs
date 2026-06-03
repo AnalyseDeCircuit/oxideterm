@@ -79,6 +79,12 @@ pub struct MarkdownOptions {
 
     /// Stroke width for vector math paths, in pixels.
     pub math_stroke_width: f32,
+
+    /// Localized prefix shown before Mermaid parse/layout/render errors.
+    pub mermaid_error_prefix: String,
+
+    /// Localized action label for opening Mermaid diagrams in a larger view.
+    pub mermaid_expand_label: String,
 }
 
 impl Default for MarkdownOptions {
@@ -126,6 +132,8 @@ impl MarkdownOptions {
             math_inline_padding: 1.0,
             math_display_padding: 6.0,
             math_stroke_width: 1.5,
+            mermaid_error_prefix: "Unsupported Mermaid diagram".to_string(),
+            mermaid_expand_label: "EXPAND".to_string(),
         }
     }
 }

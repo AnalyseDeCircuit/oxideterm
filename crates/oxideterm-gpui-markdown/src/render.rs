@@ -9,7 +9,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use gpui::{
-    AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontStyle, FontWeight, Hsla,
+    AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontStyle, FontWeight, Hsla, Image,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
     StrikethroughStyle, Styled, StyledText, TextAlign, TextRun, UnderlineStyle, Window, div,
     image_cache, img, px, relative, retain_all,
@@ -20,6 +20,7 @@ use oxideterm_theme::ThemeTokens;
 use crate::highlight;
 use crate::layout::{MarkdownBlockLayout, MarkdownLayoutItem};
 use crate::math;
+use crate::mermaid;
 use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment};
 use crate::options::MarkdownOptions;
 use crate::style;
@@ -27,10 +28,13 @@ use crate::style;
 const WINDOWED_MARKDOWN_MIN_ITEMS: usize = 24;
 
 pub type MarkdownCodeRunHandler = Arc<dyn Fn(String, &mut Window, &mut App) + 'static>;
+pub type MarkdownMermaidZoomHandler =
+    Arc<dyn Fn(String, Arc<Image>, f32, f32, &mut Window, &mut App) + 'static>;
 
 #[derive(Clone, Default)]
 pub struct MarkdownCodeBlockActions {
     pub on_run: Option<MarkdownCodeRunHandler>,
+    pub on_mermaid_zoom: Option<MarkdownMermaidZoomHandler>,
 }
 
 /// Render a complete markdown document into a vertical GPUI container.
@@ -346,11 +350,27 @@ pub fn render_document_virtual<V>(
 where
     V: Render,
 {
+    render_document_virtual_with_code_actions(view, id, document, tokens, opts, scroll_handle, None)
+}
+
+pub fn render_document_virtual_with_code_actions<V>(
+    view: Entity<V>,
+    id: impl Into<ElementId>,
+    document: &MarkdownDocument,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    scroll_handle: &VirtualListScrollHandle,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement
+where
+    V: Render,
+{
     let layout = MarkdownBlockLayout::from_document(document, opts);
     let items = layout.items();
     let item_sizes = layout.item_sizes();
     let tokens = *tokens;
     let opts = opts.clone();
+    let code_actions = code_actions.cloned();
     let block_gap = opts.block_gap;
     let enable_async_images = opts.enable_async_images;
     let image_cache_id = opts.image_cache_id;
@@ -358,7 +378,12 @@ where
     let content = v_virtual_list(view, id, item_sizes, move |_this, range, _window, _cx| {
         range
             .filter_map(|index| match items.get(index) {
-                Some(MarkdownLayoutItem::Block(block)) => Some(render_block(block, &tokens, &opts)),
+                Some(MarkdownLayoutItem::Block(block)) => Some(render_block_with_code_actions(
+                    block,
+                    &tokens,
+                    &opts,
+                    code_actions.as_ref(),
+                )),
                 Some(MarkdownLayoutItem::Footnotes(footnotes)) => {
                     Some(render_footnotes(footnotes, &tokens, &opts))
                 }
@@ -386,13 +411,26 @@ fn estimated_markdown_height(item_sizes: &[gpui::Size<gpui::Pixels>], block_gap:
 
 /// Render a list of blocks into a vertical GPUI container.
 pub fn render_blocks(blocks: &[Block], tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
+    render_blocks_with_code_actions(blocks, tokens, opts, None)
+}
+
+fn render_blocks_with_code_actions(
+    blocks: &[Block],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement {
     div()
         .w_full()
         .min_w_0()
         .flex()
         .flex_col()
         .gap(px(opts.block_gap))
-        .children(blocks.iter().map(|block| render_block(block, tokens, opts)))
+        .children(
+            blocks
+                .iter()
+                .map(|block| render_block_with_code_actions(block, tokens, opts, code_actions)),
+        )
         .into_any_element()
 }
 
@@ -424,17 +462,28 @@ fn render_selectable_blocks(
 }
 
 fn render_block(block: &Block, tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
+    render_block_with_code_actions(block, tokens, opts, None)
+}
+
+fn render_block_with_code_actions(
+    block: &Block,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement {
     match block {
         Block::Heading { level, inlines } => render_heading(*level, inlines, tokens, opts),
         Block::Paragraph { inlines } => render_paragraph(inlines, tokens, opts),
         Block::Html(html) => render_html_block(html, tokens, opts),
         Block::CodeBlock { language, code } => {
-            render_code_block(language.as_deref(), code, tokens, opts)
+            render_code_block(language.as_deref(), code, tokens, opts, code_actions)
         }
         Block::UnorderedList { items } => render_unordered_list(items, tokens, opts),
         Block::OrderedList { start, items } => render_ordered_list(*start, items, tokens, opts),
         Block::HorizontalRule => render_hr(tokens),
-        Block::Blockquote { blocks } => render_blockquote(blocks, tokens, opts),
+        Block::Blockquote { blocks } => {
+            render_blockquote_with_code_actions(blocks, tokens, opts, code_actions)
+        }
         Block::Table {
             headers,
             alignments,
@@ -619,7 +668,12 @@ fn render_code_block(
     code: &str,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
+    if should_render_mermaid_block(language, code) {
+        return render_mermaid_block(code, tokens, opts, code_actions);
+    }
+
     // Attempt syntax highlighting; fall back to plain monospace text.
     let code_element: AnyElement = if let Some(lang) = language {
         if let Some(runs) = highlight::highlight_code(lang, code, opts) {
@@ -646,6 +700,10 @@ fn render_selectable_code_block(
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
+    if should_render_mermaid_block(language, code) {
+        return render_mermaid_block(code, tokens, opts, code_actions);
+    }
+
     let code_element: AnyElement = if let Some(lang) = language {
         if let Some(runs) = highlight::highlight_code(lang, code, opts) {
             let (text, text_runs) = highlight::highlighted_runs_to_text_runs(&runs);
@@ -667,6 +725,169 @@ fn render_selectable_code_block(
 
     render_code_block_shell(language, code, tokens, opts, code_actions, code_element)
         .into_any_element()
+}
+
+fn render_mermaid_block(
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement {
+    let rendered = mermaid::render_mermaid_svg(code, tokens, opts);
+    div()
+        .w_full()
+        .min_w_0()
+        .overflow_hidden()
+        .border_1()
+        .border_color(style::code_block_border_color(tokens))
+        .bg(style::code_block_bg_color(tokens))
+        .rounded(px(tokens.radii.md))
+        .child(render_mermaid_header(
+            code,
+            tokens,
+            opts,
+            code_actions,
+            rendered.as_ref().ok(),
+        ))
+        .child(render_mermaid_body(code, tokens, opts, rendered))
+        .into_any_element()
+}
+
+fn render_mermaid_header(
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+    rendered: Option<&mermaid::RenderedMermaidImage>,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .px(px(8.0))
+        .py(px(4.0))
+        .border_b_1()
+        .border_color(style::code_block_header_border_color(tokens))
+        .bg(style::code_block_header_bg_color(tokens))
+        // Mermaid uses the same painted shell as code blocks; the header owns
+        // its top radius so GPUI cannot leak rectangular child backgrounds.
+        .rounded_t(px(tokens.radii.md))
+        .child(
+            div()
+                .text_size(style::code_label_font_size(opts))
+                .text_color(style::muted_color(tokens))
+                .font(style::code_font(opts))
+                .child(SharedString::from("MERMAID")),
+        )
+        .child(render_mermaid_actions(
+            code,
+            tokens,
+            opts,
+            code_actions,
+            rendered,
+        ))
+        .into_any_element()
+}
+
+fn render_mermaid_actions(
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+    rendered: Option<&mermaid::RenderedMermaidImage>,
+) -> AnyElement {
+    let mut actions = div().flex().flex_row().items_center().gap(px(10.0));
+    if let (Some(rendered), Some(on_zoom)) = (
+        rendered,
+        code_actions.and_then(|actions| actions.on_mermaid_zoom.clone()),
+    ) {
+        actions = actions.child(render_mermaid_zoom_action(
+            code, tokens, opts, rendered, on_zoom,
+        ));
+    }
+
+    actions.into_any_element()
+}
+
+fn render_mermaid_zoom_action(
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    rendered: &mermaid::RenderedMermaidImage,
+    on_zoom: MarkdownMermaidZoomHandler,
+) -> AnyElement {
+    let code = code.to_string();
+    let image = rendered.image.clone();
+    let width = rendered.display_width;
+    let height = rendered.display_height;
+    let hover_color = style::accent_color(tokens);
+
+    render_code_action_label(opts.mermaid_expand_label.clone(), tokens, opts, hover_color)
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            // The app owns modal state; markdown only passes the already-rendered SVG image.
+            on_zoom(code.clone(), image.clone(), width, height, window, cx);
+            cx.stop_propagation();
+        })
+        .into_any_element()
+}
+
+fn render_mermaid_body(
+    code: &str,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    rendered: Result<mermaid::RenderedMermaidImage, String>,
+) -> AnyElement {
+    match rendered {
+        Ok(rendered) => div()
+            .w_full()
+            .min_w_0()
+            .p(px(opts.code_block_padding))
+            .flex()
+            .justify_center()
+            .child(
+                img(rendered.image)
+                    .w(px(rendered.display_width))
+                    .max_w(relative(1.0)),
+            )
+            .into_any_element(),
+        Err(error) => div()
+            .w_full()
+            .min_w_0()
+            .p(px(opts.code_block_padding))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .rounded(px(tokens.radii.sm))
+                    .border_1()
+                    .border_color(style::code_block_border_color(tokens))
+                    .bg(style::code_bg_color(tokens))
+                    .p(px(8.0))
+                    .text_size(style::code_font_size(opts))
+                    .text_color(style::muted_color(tokens))
+                    .font(style::code_font(opts))
+                    .child(SharedString::from(format!(
+                        "{}: {error}",
+                        opts.mermaid_error_prefix
+                    ))),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .text_size(style::code_font_size(opts))
+                    .text_color(style::text_color(tokens))
+                    .font(style::code_font(opts))
+                    .child(SharedString::from(code.to_string())),
+            )
+            .into_any_element(),
+    }
 }
 
 fn render_code_block_shell(
@@ -796,11 +1017,12 @@ fn render_code_copy_action(code: &str, tokens: &ThemeTokens, opts: &MarkdownOpti
 }
 
 fn render_code_action_label(
-    label: &'static str,
+    label: impl Into<SharedString>,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     hover_color: Hsla,
 ) -> gpui::Div {
+    let label = label.into();
     div()
         .flex()
         .flex_row()
@@ -815,7 +1037,7 @@ fn render_code_action_label(
             ..style::code_font(opts)
         })
         .hover(move |style| style.text_color(hover_color))
-        .child(SharedString::from(label))
+        .child(label)
 }
 
 fn code_block_language_label(language: Option<&str>) -> String {
@@ -830,25 +1052,39 @@ fn is_shell_language(language: Option<&str>) -> bool {
     let normalized = language
         .map(str::trim)
         .filter(|label| !label.is_empty())
-        .unwrap_or("")
+        .unwrap_or("text")
         .to_ascii_lowercase();
     matches!(
         normalized.as_str(),
-        "" | "bash"
-            | "sh"
-            | "zsh"
-            | "shell"
-            | "console"
-            | "terminal"
-            | "powershell"
-            | "ps1"
-            | "cmd"
+        "bash" | "sh" | "zsh" | "shell" | "console" | "terminal" | "powershell" | "ps1" | "cmd"
     )
+}
+
+fn should_render_mermaid_block(language: Option<&str>, code: &str) -> bool {
+    if mermaid::is_mermaid_language(language) {
+        return true;
+    }
+    if !is_plain_text_code_language(language) {
+        return false;
+    }
+    mermaid::is_mermaid_source_candidate(code)
+}
+
+fn is_plain_text_code_language(language: Option<&str>) -> bool {
+    match language.map(str::trim).filter(|label| !label.is_empty()) {
+        None => true,
+        Some(label) => label.eq_ignore_ascii_case("text"),
+    }
 }
 
 // ─── blockquote ─────────────────────────────────────────────────────────
 
-fn render_blockquote(blocks: &[Block], tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
+fn render_blockquote_with_code_actions(
+    blocks: &[Block],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement {
     div()
         .flex()
         .flex_row()
@@ -866,7 +1102,12 @@ fn render_blockquote(blocks: &[Block], tokens: &ThemeTokens, opts: &MarkdownOpti
                 .pl(px(opts.list_indent))
                 .bg(style::code_bg_color(tokens))
                 .rounded(px(tokens.radii.sm))
-                .child(render_blocks(blocks, tokens, opts)),
+                .child(render_blocks_with_code_actions(
+                    blocks,
+                    tokens,
+                    opts,
+                    code_actions,
+                )),
         )
         .into_any_element()
 }
@@ -1942,6 +2183,29 @@ mod tests {
             table_alignment_text_align(TableAlignment::Right),
             TextAlign::Right
         );
+    }
+
+    #[test]
+    fn detects_mermaid_for_plain_text_code_blocks_only() {
+        assert!(should_render_mermaid_block(None, "graph TD\nA --> B"));
+        assert!(should_render_mermaid_block(
+            Some("text"),
+            "sequenceDiagram\nA->B: hi"
+        ));
+        assert!(should_render_mermaid_block(Some("mermaid"), "graph TD\nA"));
+        assert!(!should_render_mermaid_block(
+            Some("rust"),
+            "graph TD\nA --> B"
+        ));
+        assert!(!should_render_mermaid_block(None, "echo graph TD"));
+    }
+
+    #[test]
+    fn unlabeled_code_blocks_are_not_shell_runnable() {
+        assert!(!is_shell_language(None));
+        assert!(!is_shell_language(Some("text")));
+        assert!(is_shell_language(Some("bash")));
+        assert!(is_shell_language(Some("zsh")));
     }
 
     #[test]

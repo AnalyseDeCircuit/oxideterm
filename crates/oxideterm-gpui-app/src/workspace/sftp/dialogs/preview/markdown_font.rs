@@ -1,16 +1,18 @@
 impl WorkspaceApp {
     fn render_sftp_preview_markdown(&self, source: &str, cx: &mut Context<Self>) -> AnyElement {
-        let opts = MarkdownOptions::from_theme(&self.tokens);
+        let opts = self.localized_markdown_options();
+        let code_actions = self.markdown_mermaid_actions(cx);
         div()
             .size_full()
             .p(px(16.0))
-            .child(markdown_virtual_with_options(
+            .child(markdown_virtual_with_code_actions(
                 cx.entity(),
                 "sftp-preview-markdown-virtual",
                 &self.tokens,
                 source,
                 &opts,
                 &self.sftp_view.preview_markdown_scroll,
+                &code_actions,
             ))
             .into_any_element()
     }

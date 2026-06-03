@@ -5,7 +5,7 @@ use super::*;
 use gpui::{AnchoredPositionMode, Corner, UniformListScrollHandle, anchored, deferred, prelude::*};
 use gpui_component::scroll::ScrollableElement;
 use oxideterm_gpui_markdown::{
-    MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
+    MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_code_actions,
 };
 use oxideterm_gpui_ui::{
     button::{ButtonRadius, ButtonVariant, IconButtonOptions, ToolbarButtonOptions},
