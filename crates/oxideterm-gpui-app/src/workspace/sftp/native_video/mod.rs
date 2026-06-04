@@ -124,11 +124,8 @@ mod linux;
 mod macos;
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 mod unsupported;
-// FIXME: windows crate version conflict across GPUI / gpui-component / webview2
-// dependencies pulls in 4 incompatible windows_core copies.  Temporarily route
-// Windows through the unsupported stub until the dependency tree is unified.
-// #[cfg(target_os = "windows")]
-// mod windows;
+#[cfg(target_os = "windows")]
+mod windows;
 
 #[cfg(target_os = "linux")]
 pub(super) use linux::SftpNativeVideoSurface;
@@ -137,4 +134,4 @@ pub(super) use macos::SftpNativeVideoSurface;
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub(super) use unsupported::SftpNativeVideoSurface;
 #[cfg(target_os = "windows")]
-pub(super) use unsupported::SftpNativeVideoSurface;
+pub(super) use windows::SftpNativeVideoSurface;
