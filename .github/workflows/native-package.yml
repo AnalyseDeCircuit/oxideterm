@@ -14,11 +14,12 @@ on:
         type: boolean
   push:
     tags:
+      - 'v*'
       - 'native-v*'
       - 'gpui-v*'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: native-package-${{ github.ref }}
@@ -216,7 +217,7 @@ jobs:
             pkg-config
 
       - name: Validate manual release input
-        if: github.ref_type != 'tag' && inputs.upload_release && inputs.version == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_release && inputs.version == ''
         run: python -c "import sys; print('Manual release upload requires the version input.', file=sys.stderr); sys.exit(1)"
 
       - name: Package native app
@@ -235,15 +236,332 @@ jobs:
             dist/*.zip
           if-no-files-found: error
 
+  release:
+    name: Publish release assets
+    needs: package
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.upload_release)
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release_meta.outputs.tag }}
+      version: ${{ steps.release_meta.outputs.version }}
+      prerelease: ${{ steps.release_meta.outputs.prerelease }}
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: OxideTerm-*
+          path: dist-release
+          merge-multiple: true
+
+      - name: Resolve release metadata
+        id: release_meta
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="native-v${INPUT_VERSION}"
+          fi
+
+          version="${tag#native-v}"
+          version="${version#gpui-v}"
+          version="${version#v}"
+
+          prerelease=false
+          if [[ "${tag}" == native-v* || "${tag}" == gpui-v* || "${version}" == *-* ]]; then
+            prerelease=true
+          fi
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "prerelease=${prerelease}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign release assets
+        shell: bash
+        env:
+          MINISIGN_PRIVATE_KEY_B64: ${{ secrets.MINISIGN_PRIVATE_KEY_B64 }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VERSION: ${{ steps.release_meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${MINISIGN_PRIVATE_KEY_B64}" ]]; then
+            echo "MINISIGN_PRIVATE_KEY_B64 is required for native updater releases." >&2
+            exit 1
+          fi
+
+          sudo apt-get update
+          sudo apt-get install -y minisign
+
+          key_path="$(mktemp)"
+          trap 'rm -f "${key_path}"' EXIT
+          printf '%s' "${MINISIGN_PRIVATE_KEY_B64}" | base64 --decode > "${key_path}"
+          chmod 600 "${key_path}"
+
+          # Native and Tauri channel updaters both reject unsigned assets.
+          mapfile -t assets < <(find dist-release -maxdepth 1 -type f \( \
+            -name '*.app.zip' -o \
+            -name '*.dmg' -o \
+            -name '*.tar.gz' -o \
+            -name '*.zip' \
+          \) | sort -u)
+
+          if [[ "${#assets[@]}" -eq 0 ]]; then
+            echo "No native release assets found to sign." >&2
+            exit 1
+          fi
+
+          for asset in "${assets[@]}"; do
+            sig="${asset}.sig"
+            trusted_comment="OxideTerm ${VERSION} $(basename "${asset}")"
+            if [[ -n "${MINISIGN_PASSWORD:-}" ]]; then
+              printf '%s\n' "${MINISIGN_PASSWORD}" \
+                | minisign -S -s "${key_path}" -m "${asset}" -x "${sig}" -t "${trusted_comment}"
+            else
+              minisign -S -W -s "${key_path}" -m "${asset}" -x "${sig}" -t "${trusted_comment}"
+            fi
+          done
+
       - name: Upload release assets
-        if: startsWith(github.ref, 'refs/tags/') || inputs.upload_release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.app.zip
-            dist/*.dmg
-            dist/*.tar.gz
-            dist/*.zip
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('native-v{0}', inputs.version) }}
-          name: OxideTerm Native ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
-          prerelease: true
+            dist-release/*.app.zip
+            dist-release/*.dmg
+            dist-release/*.tar.gz
+            dist-release/*.zip
+            dist-release/*.sig
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: OxideTerm Native ${{ steps.release_meta.outputs.version }}
+          prerelease: ${{ steps.release_meta.outputs.prerelease }}
+          make_latest: ${{ steps.release_meta.outputs.prerelease == 'false' }}
+
+  publish-updater:
+    name: Generate updater manifest
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.upload_release)
+    permissions:
+      contents: write
+    steps:
+      - name: Build and upload latest.json
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const version = process.env.RELEASE_VERSION;
+
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag,
+            });
+
+            const assets = new Map(release.assets.map((asset) => [asset.name, asset]));
+            const platforms = {};
+
+            async function addAsset(keys, assetName) {
+              const binaryAsset = assets.get(assetName);
+              const sigAsset = assets.get(`${assetName}.sig`);
+              if (!binaryAsset || !sigAsset) {
+                core.warning(`Skipping ${assetName}: missing binary or signature asset`);
+                return;
+              }
+
+              const sigResponse = await fetch(sigAsset.browser_download_url);
+              if (!sigResponse.ok) {
+                throw new Error(`failed to download ${sigAsset.name}: HTTP ${sigResponse.status}`);
+              }
+
+              // The updater manifest stores base64-encoded minisign text, matching
+              // Tauri's update_manager.rs and the native oxideterm-update crate.
+              const signatureText = (await sigResponse.text()).trim();
+              const signature = Buffer.from(signatureText, 'utf8').toString('base64');
+              for (const key of keys) {
+                platforms[key] = {
+                  signature,
+                  url: binaryAsset.browser_download_url,
+                };
+              }
+            }
+
+            await addAsset(
+              ['darwin-aarch64', 'darwin-aarch64-app', 'macos-aarch64', 'aarch64-apple-darwin'],
+              `OxideTerm_${version}_macos_arm64.app.zip`,
+            );
+            await addAsset(
+              ['darwin-x86_64', 'darwin-x86_64-app', 'macos-x86_64', 'x86_64-apple-darwin'],
+              `OxideTerm_${version}_macos_x64.app.zip`,
+            );
+            await addAsset(
+              ['linux-aarch64', 'aarch64-unknown-linux-gnu'],
+              `OxideTerm_${version}_linux_arm64_portable.tar.gz`,
+            );
+            await addAsset(
+              ['linux-x86_64', 'x86_64-unknown-linux-gnu'],
+              `OxideTerm_${version}_linux_x64_portable.tar.gz`,
+            );
+            await addAsset(
+              ['windows-aarch64', 'aarch64-pc-windows-msvc'],
+              `OxideTerm_${version}_windows_arm64_portable.zip`,
+            );
+            await addAsset(
+              ['windows-x86_64', 'x86_64-pc-windows-msvc'],
+              `OxideTerm_${version}_windows_x64_portable.zip`,
+            );
+
+            if (Object.keys(platforms).length === 0) {
+              throw new Error('latest.json would contain no updater platforms');
+            }
+
+            const latestJson = {
+              version,
+              notes: release.body || '',
+              pub_date: release.published_at || new Date().toISOString(),
+              platforms,
+            };
+
+            const existing = release.assets.find((asset) => asset.name === 'latest.json');
+            if (existing) {
+              await github.rest.repos.deleteReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                asset_id: existing.id,
+              });
+            }
+
+            const content = JSON.stringify(latestJson, null, 2);
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.id,
+              name: 'latest.json',
+              data: content,
+              headers: {
+                'content-type': 'application/json',
+                'content-length': Buffer.byteLength(content),
+              },
+            });
+
+            core.info(`Uploaded latest.json for ${tag} with ${Object.keys(platforms).length} platform key(s).`);
+
+  publish-gpui-preview-updater:
+    name: Publish GPUI preview updater manifest
+    needs:
+      - release
+      - publish-updater
+    runs-on: ubuntu-latest
+    if: needs.release.outputs.prerelease == 'true' && (startsWith(needs.release.outputs.tag, 'gpui-v') || contains(needs.release.outputs.version, 'gpui-preview') || contains(needs.release.outputs.version, 'native-preview') || contains(needs.release.outputs.version, 'rustnative-preview'))
+    permissions:
+      contents: write
+    steps:
+      - name: Upload latest.json to updater-gpui-preview release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+        with:
+          script: |
+            const sourceTag = process.env.RELEASE_TAG;
+            const channelTag = 'updater-gpui-preview';
+
+            const { data: sourceRelease } = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: sourceTag,
+            });
+
+            const latestAsset = sourceRelease.assets.find((asset) => asset.name === 'latest.json');
+            if (!latestAsset) {
+              throw new Error(`No latest.json found on ${sourceTag}`);
+            }
+
+            const manifestResponse = await fetch(latestAsset.browser_download_url);
+            if (!manifestResponse.ok) {
+              throw new Error(`failed to download latest.json: HTTP ${manifestResponse.status}`);
+            }
+            const content = await manifestResponse.text();
+
+            let channelRelease;
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: channelTag,
+              });
+              channelRelease = data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              const { data } = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: channelTag,
+                name: 'GPUI Preview Updater Manifest',
+                body: 'This release hosts latest.json for the GPUI preview update channel. Do not delete.',
+                prerelease: true,
+                draft: false,
+              });
+              channelRelease = data;
+            }
+
+            const existing = channelRelease.assets.find((asset) => asset.name === 'latest.json');
+            if (existing) {
+              await github.rest.repos.deleteReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                asset_id: existing.id,
+              });
+            }
+
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: channelRelease.id,
+              name: 'latest.json',
+              data: content,
+              headers: {
+                'content-type': 'application/json',
+                'content-length': Buffer.byteLength(content),
+              },
+            });
+
+            core.info(`Uploaded ${sourceTag} latest.json to ${channelTag}.`);
+
+  cleanup-sigs:
+    name: Remove signature helper assets
+    needs:
+      - release
+      - publish-updater
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.upload_release)
+    permissions:
+      contents: write
+    steps:
+      - name: Delete .sig assets from release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag,
+            });
+            const sigAssets = release.assets.filter((asset) => asset.name.endsWith('.sig'));
+            for (const asset of sigAssets) {
+              await github.rest.repos.deleteReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                asset_id: asset.id,
+              });
+            }
+            core.info(`Deleted ${sigAssets.length} signature helper asset(s).`);
