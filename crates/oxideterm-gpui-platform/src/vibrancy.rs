@@ -107,9 +107,9 @@ mod imp {
     }
 
     fn set_system_backdrop(window: &Window, backdrop: i32) -> Result<(), &'static str> {
-        use raw_window_handle::HasWindowHandle;
-        let handle = window
-            .window_handle()
+        // GPUI's Window has its own window_handle() → AnyWindowHandle, which
+        // shadows the raw-window-handle trait.  Use UFCS to call the trait.
+        let handle = raw_window_handle::HasWindowHandle::window_handle(window)
             .map_err(|_| "window handle is unavailable")?;
         let RawWindowHandle::Win32(handle) = handle.as_raw() else {
             return Err("window is not a Win32 window");
