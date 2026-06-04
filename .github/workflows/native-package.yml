@@ -83,6 +83,11 @@ jobs:
         with:
           extra_packages: 'curl file patchelf'
 
+      - name: Install Windows system dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
       - name: Package native app
         env:
           OXIDETERM_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
@@ -97,6 +102,7 @@ jobs:
             dist/*.dmg
             dist/*.tar.gz
             dist/*.zip
+            dist/*.exe
           if-no-files-found: error
 
   release:
@@ -165,7 +171,8 @@ jobs:
             -name '*.app.zip' -o \
             -name '*.dmg' -o \
             -name '*.tar.gz' -o \
-            -name '*.zip' \
+            -name '*.zip' -o \
+            -name '*.exe' \
           \) | sort -u)
 
           if [[ "${#assets[@]}" -eq 0 ]]; then
@@ -192,6 +199,7 @@ jobs:
             dist-release/*.dmg
             dist-release/*.tar.gz
             dist-release/*.zip
+            dist-release/*.exe
             dist-release/*.sig
           tag_name: ${{ steps.release_meta.outputs.tag }}
           target_commitish: ${{ github.sha }}
@@ -269,11 +277,11 @@ jobs:
             );
             await addAsset(
               ['windows-aarch64', 'aarch64-pc-windows-msvc'],
-              `OxideTerm_${version}_windows_arm64_portable.zip`,
+              `OxideTerm_${version}_windows_arm64-setup.exe`,
             );
             await addAsset(
               ['windows-x86_64', 'x86_64-pc-windows-msvc'],
-              `OxideTerm_${version}_windows_x64_portable.zip`,
+              `OxideTerm_${version}_windows_x64-setup.exe`,
             );
 
             if (Object.keys(platforms).length === 0) {

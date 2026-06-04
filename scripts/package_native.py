@@ -107,6 +107,32 @@ def copy_runtime_resources(dst: Path, target: str) -> None:
     copy_tree(cli_source, dst / "cli-bin" / target)
 
 
+def windows_program_files_dir() -> str:
+    return r"$LOCALAPPDATA\Programs\OxideTerm"
+
+
+def nsis_path(path: Path) -> str:
+    return str(path.resolve()).replace("\\", "\\\\")
+
+
+def nsis_string(value: str) -> str:
+    return value.replace("$", "$$").replace('"', "$\\\"")
+
+
+def find_makensis() -> str | None:
+    found = shutil.which("makensis")
+    if found:
+        return found
+    for env_name in ("ProgramFiles(x86)", "ProgramFiles"):
+        root = os.environ.get(env_name)
+        if not root:
+            continue
+        candidate = Path(root) / "NSIS" / "makensis.exe"
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
 def build_cli(target: str, target_was_explicit: bool) -> Path:
     args = ["cargo", "build", "-p", "oxideterm-cli", "--release"]
     if target_was_explicit:
@@ -182,6 +208,79 @@ def create_portable_package(binary: Path, target: str, version: str, label: str)
         with tarfile.open(archive_path, "w:gz") as archive:
             archive.add(package_root, arcname=package_root.name)
     shutil.rmtree(package_root)
+
+
+def stage_windows_installer_root(binary: Path, target: str, version: str, label: str) -> Path:
+    installer_root = DIST_DIR / f"nsis-{label}"
+    if installer_root.exists():
+        shutil.rmtree(installer_root)
+    (installer_root / "resources").mkdir(parents=True)
+
+    shutil.copy2(binary, installer_root / binary.name)
+    copy_runtime_resources(installer_root / "resources", target)
+    for name in ("LICENSE", "NOTICE", "README.md"):
+        shutil.copy2(ROOT_DIR / name, installer_root / name)
+    return installer_root
+
+
+def create_windows_installer(binary: Path, target: str, version: str, label: str) -> None:
+    makensis = find_makensis()
+    if not makensis:
+        raise RuntimeError("makensis not found; install NSIS before packaging Windows installers")
+
+    installer_root = stage_windows_installer_root(binary, target, version, label)
+    installer_path = DIST_DIR / f"OxideTerm_{version}_{label}-setup.exe"
+    script_path = DIST_DIR / f"OxideTerm_{version}_{label}.nsi"
+    icon_path = RESOURCE_DIR / "icons" / "icon.ico"
+
+    # The NSIS package mirrors Tauri's current-user install mode while keeping
+    # the native resource layout intact under the installed application folder.
+    script = f"""
+Unicode true
+RequestExecutionLevel user
+!include MUI2.nsh
+
+Name "{APP_NAME}"
+OutFile "{nsis_path(installer_path)}"
+InstallDir "{windows_program_files_dir()}"
+InstallDirRegKey HKCU "Software\\{APP_NAME}" "InstallDir"
+Icon "{nsis_path(icon_path)}"
+UninstallIcon "{nsis_path(icon_path)}"
+BrandingText "{APP_NAME}"
+
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_LANGUAGE "English"
+
+Section "Install"
+  SetOutPath "$INSTDIR"
+  File /r "{nsis_path(installer_root)}\\*"
+  WriteUninstaller "$INSTDIR\\Uninstall.exe"
+  WriteRegStr HKCU "Software\\{APP_NAME}" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "DisplayName" "{APP_NAME}"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "DisplayVersion" "{nsis_string(version)}"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "Publisher" "AnalyseDeCircuit"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "UninstallString" "$INSTDIR\\Uninstall.exe"
+  CreateDirectory "$SMPROGRAMS\\{APP_NAME}"
+  CreateShortcut "$SMPROGRAMS\\{APP_NAME}\\{APP_NAME}.lnk" "$INSTDIR\\{binary.name}"
+SectionEnd
+
+Section "Uninstall"
+  Delete "$SMPROGRAMS\\{APP_NAME}\\{APP_NAME}.lnk"
+  RMDir "$SMPROGRAMS\\{APP_NAME}"
+  DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}"
+  DeleteRegKey HKCU "Software\\{APP_NAME}"
+  RMDir /r "$INSTDIR"
+SectionEnd
+""".strip()
+    script_path.write_text(script + "\n", encoding="utf-8")
+    run([makensis, str(script_path)])
+    shutil.rmtree(installer_root)
+    script_path.unlink(missing_ok=True)
 
 
 def create_macos_app(binary: Path, target: str, version: str, label: str) -> None:
@@ -262,7 +361,10 @@ def main() -> None:
     print(f"==> Packaging {APP_NAME} {version} for {target}", flush=True)
     build_cli(target, target_was_explicit)
     app_binary = build_app(target, target_was_explicit)
-    create_portable_package(app_binary, target, version, label)
+    if "windows" in target:
+        create_windows_installer(app_binary, target, version, label)
+    else:
+        create_portable_package(app_binary, target, version, label)
     if "apple-darwin" in target:
         create_macos_app(app_binary, target, version, label)
 
