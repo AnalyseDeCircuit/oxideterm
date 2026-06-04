@@ -91,12 +91,20 @@ def copy_tree(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst)
 
 
-def copy_runtime_resources(dst: Path) -> None:
+def copy_runtime_resources(dst: Path, target: str) -> None:
     dst.mkdir(parents=True, exist_ok=True)
-    # Keep the app bundle layout aligned with Tauri's resource contract: agents and
-    # the target-specific CLI live under resources instead of being discovered by PATH.
-    for name in ("agents", "cli-bin", "icons"):
+    # Keep the app bundle layout aligned with Tauri's resource contract: agents
+    # and the target-specific CLI live under resources instead of PATH.
+    for name in ("agents", "icons"):
         copy_tree(RESOURCE_DIR / name, dst / name)
+
+    # Do not copy stale CLI binaries for other platforms. The app resolves the
+    # host-specific subdirectory first and only falls back to scanning when it is
+    # missing, so release packages must contain exactly the current target CLI.
+    cli_source = RESOURCE_DIR / "cli-bin" / target
+    if not cli_source.exists():
+        raise FileNotFoundError(f"target CLI resource directory not found: {cli_source}")
+    copy_tree(cli_source, dst / "cli-bin" / target)
 
 
 def build_cli(target: str, target_was_explicit: bool) -> Path:
@@ -161,7 +169,7 @@ def create_portable_package(binary: Path, target: str, version: str, label: str)
     binary_dest = package_root / binary.name
     shutil.copy2(binary, binary_dest)
     make_executable(binary_dest)
-    copy_runtime_resources(package_root / "resources")
+    copy_runtime_resources(package_root / "resources", target)
     for name in ("LICENSE", "NOTICE", "README.md"):
         shutil.copy2(ROOT_DIR / name, package_root / name)
 
@@ -176,7 +184,7 @@ def create_portable_package(binary: Path, target: str, version: str, label: str)
     shutil.rmtree(package_root)
 
 
-def create_macos_app(binary: Path, version: str, label: str) -> None:
+def create_macos_app(binary: Path, target: str, version: str, label: str) -> None:
     app_dir = DIST_DIR / f"{APP_NAME}.app"
     if app_dir.exists():
         shutil.rmtree(app_dir)
@@ -191,7 +199,7 @@ def create_macos_app(binary: Path, version: str, label: str) -> None:
     shutil.copy2(binary, app_binary)
     make_executable(app_binary)
     shutil.copy2(RESOURCE_DIR / "icons" / "icon.icns", resources / "icon.icns")
-    copy_runtime_resources(resources)
+    copy_runtime_resources(resources, target)
 
     plist = {
         "CFBundleDevelopmentRegion": "en",
@@ -256,7 +264,7 @@ def main() -> None:
     app_binary = build_app(target, target_was_explicit)
     create_portable_package(app_binary, target, version, label)
     if "apple-darwin" in target:
-        create_macos_app(app_binary, version, label)
+        create_macos_app(app_binary, target, version, label)
 
     print("==> Package artifacts", flush=True)
     for path in sorted(DIST_DIR.iterdir()):
