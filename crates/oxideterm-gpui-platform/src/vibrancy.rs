@@ -107,7 +107,10 @@ mod imp {
     }
 
     fn set_system_backdrop(window: &Window, backdrop: i32) -> Result<(), &'static str> {
-        let handle = window.window_handle();
+        use raw_window_handle::HasWindowHandle;
+        let handle = window
+            .window_handle()
+            .map_err(|_| "window handle is unavailable")?;
         let RawWindowHandle::Win32(handle) = handle.as_raw() else {
             return Err("window is not a Win32 window");
         };
