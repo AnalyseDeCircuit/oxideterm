@@ -3,9 +3,9 @@
 <p align="center">
   <strong>リモートサーバー向けの AI-native ワークスペース。</strong>
   <br>
-  SSH でサーバーに接続し、terminal、ファイル、ポート、転送、軽量編集、serial console、自律型 OxideSens サイドバーを local-first なネイティブアプリで扱えます。
+  SSH でサーバーに接続し、terminal、ファイル、ポート、転送、軽量編集、serial console、OxideSens AIを local-first なネイティブアプリで扱えます。
   <br>
-  ネイティブ GPUI アプリ · 純粋な Rust SSH · BYOK 自律 AI · コア SSH ワークフローにアカウント不要
+  ネイティブ GPUI アプリ · 純粋な Rust SSH · BYOK OxideSens AI · コア SSH ワークフローにアカウント不要
   <br>
   <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. 徹底して Pure Rust。</strong>
 </p>
@@ -45,7 +45,7 @@
 
 - SSH terminal、SFTP、port forwarding、serial console、local shell、軽量編集を 1 つの native workspace で管理
 - Grace Period reconnect により、ネットワークが揺れてもリモート作業を維持
-- autonomous OxideSens サイドバーに、自分の AI provider 経由で live session の確認と承認済み workspace action の実行を任せる
+- OxideSens AIに、自分の AI provider 経由で live session の確認と承認済み workspace action の実行を任せる
 
 ---
 
@@ -53,16 +53,16 @@
 
 | 重視すること | OxideTerm Native が提供するもの |
 |---|---|
-| 1 つの remote node、多数のツール | Terminal、SFTP、port forwarding、trzsz、native IDE、monitoring、autonomous OxideSens サイドバーが同じ SSH workspace に結び付きます |
+| 1 つの remote node、多数のツール | Terminal、SFTP、port forwarding、trzsz、native IDE、monitoring、OxideSens AIが同じ SSH workspace に結び付きます |
 | ゼロ WebView の native shell | GPUI が GPU surface に desktop UI を直接描画し、DOM、CSS、JavaScript、Chromium、WebKit runtime はありません |
 | Local-first SSH workflow | SSH、SFTP、forwarding、local shell、serial terminals、設定管理はサインアップ不要です |
-| Platform credit ではなく BYOK autonomous AI | OxideSens は OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint を使い、MCP、RAG、承認済み workspace action に対応します |
+| Platform credit ではなく BYOK OxideSens AI | OxideSens は OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint を使い、MCP、RAG、承認済み workspace action に対応します |
 | 再接続の安定性 | Grace Period が旧接続を 30 秒 probe してから置き換えるため、短いネットワーク断でも TUI が生き残れます |
 | 純粋な Rust SSH と認証情報の安全性 | `russh` + `ring`、OpenSSL/libssh2 なし。パスワードと API key は OS keychain、`.oxide` は ChaCha20-Poly1305 + Argon2id |
 
 ## これは何か / 何ではないか
 
-OxideTerm Native は **リモートサーバー向け local-first AI workspace** に集中し、それを pure Rust GPUI desktop app として作り直したものです。Terminal、file、port、transfer、軽量編集、serial console、autonomous BYOK AI サイドバーを自分の machine と remote node 中心に扱いたいユーザー向けです。
+OxideTerm Native は **リモートサーバー向け local-first AI workspace** に集中し、それを pure Rust GPUI desktop app として作り直したものです。Terminal、file、port、transfer、軽量編集、serial console、OxideSens AIを自分の machine と remote node 中心に扱いたいユーザー向けです。
 
 これはまだ現在の stable download line ではなく、hosted cloud agent platform でもありません。また Electron、Tauri、web terminal でもありません。Chromium、WebView、JavaScript、CSS はありません。
 
@@ -74,7 +74,7 @@ Native UI は現在の Tauri line と同じ OxideTerm workspace model と visual
 
 <table>
 <tr>
-<td align="center"><strong>SSH ターミナル + OxideSens AI</strong><br/><br/><img src="../../docs/screenshots/terminal/SSHTERMINAL.png" alt="OxideSens AI サイドバー付き SSH ターミナル" /></td>
+<td align="center"><strong>SSH ターミナル + OxideSens AI</strong><br/><br/><img src="../../docs/screenshots/terminal/SSHTERMINAL.png" alt="OxideSens AI 付き SSH ターミナル" /></td>
 <td align="center"><strong>SFTP ファイルマネージャー</strong><br/><br/><img src="../../docs/screenshots/sftp/sftp.png" alt="転送キュー付き SFTP デュアルペインファイルマネージャー" /></td>
 </tr>
 <tr>

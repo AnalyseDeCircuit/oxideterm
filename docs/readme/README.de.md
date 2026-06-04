@@ -3,9 +3,9 @@
 <p align="center">
   <strong>AI-native Workspace für Remote-Server.</strong>
   <br>
-  Verbinden Sie sich per SSH mit Ihren Servern und arbeiten Sie dann mit Terminals, Dateien, Ports, Transfers, schlanker Bearbeitung, seriellen Konsolen und der autonomen OxideSens-Seitenleiste in einer local-first nativen App.
+  Verbinden Sie sich per SSH mit Ihren Servern und arbeiten Sie dann mit Terminals, Dateien, Ports, Transfers, schlanker Bearbeitung, seriellen Konsolen und der OxideSens AI in einer local-first nativen App.
   <br>
-  Native GPUI-App · reines Rust-SSH · autonome BYOK-KI · kein Konto für zentrale SSH-Workflows erforderlich
+  Native GPUI-App · reines Rust-SSH · BYOK OxideSens AI · kein Konto für zentrale SSH-Workflows erforderlich
   <br>
   <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust — bis ganz nach unten.</strong>
 </p>
@@ -45,7 +45,7 @@
 
 - SSH-Terminals, SFTP, Portweiterleitungen, serielle Konsolen, lokale Shells und leichtes Editieren in einem nativen Workspace verwalten
 - Remote-Arbeit mit Grace-Period-Reconnect bei kurzen Netzwerkaussetzern am Leben halten
-- Die autonome OxideSens-Seitenleiste kann mit Ihrem eigenen KI-Anbieter Live-Sessions prüfen und genehmigte Workspace-Aktionen ausführen
+- OxideSens AI kann mit Ihrem eigenen KI-Anbieter Live-Sessions prüfen und genehmigte Workspace-Aktionen ausführen
 
 ---
 
@@ -53,16 +53,16 @@
 
 | Wenn Ihnen wichtig ist... | OxideTerm Native bietet... |
 |---|---|
-| Ein Remote-Node, viele Werkzeuge | Terminal, SFTP, Portweiterleitung, trzsz, native IDE, Monitoring und die autonome OxideSens-Seitenleiste bleiben am selben SSH-Workspace |
+| Ein Remote-Node, viele Werkzeuge | Terminal, SFTP, Portweiterleitung, trzsz, native IDE, Monitoring und OxideSens AI bleiben am selben SSH-Workspace |
 | Zero-WebView native Shell | GPUI zeichnet die Desktop-UI direkt auf eine GPU-Surface — ohne DOM, CSS, JavaScript, Chromium oder WebKit-Runtime |
 | Local-first SSH-Workflows | SSH, SFTP, Forwarding, lokale Shell, serielle Terminals und Konfiguration funktionieren ohne Registrierung |
-| Autonome BYOK-KI statt Plattform-Credits | OxideSens nutzt Ihren OpenAI/Anthropic/Gemini/Ollama/OpenAI-kompatiblen Endpoint mit MCP, RAG und genehmigten Workspace-Aktionen |
+| Autonome OxideSens AI statt Plattform-Credits | OxideSens nutzt Ihren OpenAI/Anthropic/Gemini/Ollama/OpenAI-kompatiblen Endpoint mit MCP, RAG und genehmigten Workspace-Aktionen |
 | Stabile Wiederverbindung | Grace Period prüft die alte Verbindung 30 s lang, bevor sie ersetzt wird, damit TUI-Apps kurze Aussetzer überstehen können |
 | Reines Rust-SSH und sichere Zugangsdaten | `russh` + `ring`, kein OpenSSL/libssh2; Passwörter und API-Schlüssel bleiben im OS-Keychain, `.oxide` nutzt ChaCha20-Poly1305 + Argon2id |
 
 ## Was es ist / was es nicht ist
 
-OxideTerm Native konzentriert sich auf einen **local-first KI-Workspace für Remote-Server**, neu aufgebaut als pure Rust GPUI desktop app. Es richtet sich an Nutzer, die Terminal, Dateien, Ports, Transfers, leichtes Editieren, serielle Konsolen und eine autonome BYOK-KI-Seitenleiste um ihre eigenen Maschinen und Remote-Nodes herum halten wollen.
+OxideTerm Native konzentriert sich auf einen **local-first KI-Workspace für Remote-Server**, neu aufgebaut als pure Rust GPUI desktop app. Es richtet sich an Nutzer, die Terminal, Dateien, Ports, Transfers, leichtes Editieren, serielle Konsolen und eine OxideSens AI um ihre eigenen Maschinen und Remote-Nodes herum halten wollen.
 
 Es ist noch nicht die aktuelle stabile Download-Linie und keine gehostete Cloud-Agent-Plattform. Es ist auch keine Electron-App, keine Tauri-App und kein Web-Terminal: kein Chromium, kein WebView, kein JavaScript, kein CSS.
 
@@ -74,7 +74,7 @@ Die native UI folgt demselben OxideTerm-Workspace-Modell und derselben visuellen
 
 <table>
 <tr>
-<td align="center"><strong>SSH-Terminal + OxideSens AI</strong><br/><br/><img src="../../docs/screenshots/terminal/SSHTERMINAL.png" alt="SSH-Terminal mit OxideSens AI-Seitenleiste" /></td>
+<td align="center"><strong>SSH-Terminal + OxideSens AI</strong><br/><br/><img src="../../docs/screenshots/terminal/SSHTERMINAL.png" alt="SSH-Terminal mit OxideSens AI" /></td>
 <td align="center"><strong>SFTP-Dateimanager</strong><br/><br/><img src="../../docs/screenshots/sftp/sftp.png" alt="SFTP Dual-Pane-Dateimanager mit Transfer-Warteschlange" /></td>
 </tr>
 <tr>
