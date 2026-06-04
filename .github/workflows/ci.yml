@@ -46,6 +46,15 @@ jobs:
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
+          # GitHub's Ubuntu 22.04 image can preinstall LLVM libunwind-*-dev
+          # packages. They conflict with libunwind-dev, which GStreamer dev
+          # packages require, so remove the LLVM dev variants before apt solves.
+          sudo apt-get remove -y \
+            libunwind-14-dev \
+            libunwind-15-dev \
+            libunwind-16-dev \
+            libunwind-17-dev \
+            libunwind-18-dev || true
           sudo apt-get install -y \
             build-essential \
             libasound2-dev \
@@ -57,6 +66,7 @@ jobs:
             libjavascriptcoregtk-4.1-dev \
             libssl-dev \
             libsoup-3.0-dev \
+            libunwind-dev \
             libwebkit2gtk-4.1-dev \
             libx11-dev \
             libxcb-cursor-dev \
