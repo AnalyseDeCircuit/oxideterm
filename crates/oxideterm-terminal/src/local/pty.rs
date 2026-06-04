@@ -130,8 +130,14 @@ impl LocalPtySession {
             0,
         )
         .context("failed to spawn local shell PTY")?;
+        #[cfg(not(target_os = "windows"))]
         let shell_pid = Some(pty.child().id());
+        #[cfg(target_os = "windows")]
+        let shell_pid = None;
+        #[cfg(not(target_os = "windows"))]
         let pty_master = pty.file().try_clone().ok();
+        #[cfg(target_os = "windows")]
+        let pty_master = None;
         let process = ProcessState::new(shell_pid, pty_master, cwd);
         let event_loop = LocalGraphicsEventLoop::new(
             term.clone(),

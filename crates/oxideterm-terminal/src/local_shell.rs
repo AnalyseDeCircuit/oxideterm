@@ -1,12 +1,12 @@
 use std::{
     collections::HashMap,
     env,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Command,
 };
 
 #[cfg(unix)]
-use std::fs;
+use std::{fs, path::Path};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
