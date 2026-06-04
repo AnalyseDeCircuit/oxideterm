@@ -366,6 +366,16 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settings.general.updateChannel).toBe('stable');
   });
 
+  it('preserves the gpui preview update channel', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      general: { language: 'en', updateChannel: 'gpui-preview' },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.general.updateChannel).toBe('gpui-preview');
+  });
+
   it('uses layered scrollback defaults', async () => {
     const useSettingsStore = await loadSettingsStore();
 

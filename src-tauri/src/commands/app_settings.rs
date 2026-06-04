@@ -638,7 +638,7 @@ fn sanitize_settings(raw: Value) -> SanitizedSettings {
     sanitize_enum(
         &mut settings,
         &["general", "updateChannel"],
-        &["stable", "beta"],
+        &["stable", "beta", "gpui-preview"],
         "beta",
         &mut validation_warnings,
     );
@@ -1366,6 +1366,19 @@ mod tests {
         assert_eq!(sanitized.settings["terminal"]["scrollback"], json!(1000));
         assert_eq!(sanitized.settings["buffer"]["maxLines"], json!(10000));
         assert!(!sanitized.migration_warnings.is_empty());
+    }
+
+    #[test]
+    fn preserves_gpui_preview_update_channel() {
+        let sanitized = sanitize_settings(json!({
+            "version": SETTINGS_SCHEMA_VERSION,
+            "general": { "updateChannel": "gpui-preview" }
+        }));
+        assert_eq!(
+            sanitized.settings["general"]["updateChannel"],
+            json!("gpui-preview")
+        );
+        assert!(sanitized.validation_warnings.is_empty());
     }
 
     #[test]
