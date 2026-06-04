@@ -48,7 +48,7 @@ mod imp {
 mod imp {
     use std::{ffi::c_void, mem};
 
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use raw_window_handle::RawWindowHandle;
     use windows::Win32::{
         Foundation::HWND,
         Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute},
@@ -107,9 +107,7 @@ mod imp {
     }
 
     fn set_system_backdrop(window: &Window, backdrop: i32) -> Result<(), &'static str> {
-        let handle = window
-            .window_handle()
-            .map_err(|_| "window handle is unavailable")?;
+        let handle = window.window_handle();
         let RawWindowHandle::Win32(handle) = handle.as_raw() else {
             return Err("window is not a Win32 window");
         };
