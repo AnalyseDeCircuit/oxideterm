@@ -286,11 +286,16 @@ jobs:
         env:
           MINISIGN_PRIVATE_KEY_B64: ${{ secrets.MINISIGN_PRIVATE_KEY_B64 }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VERSION: ${{ steps.release_meta.outputs.version }}
         run: |
           set -euo pipefail
-          if [[ -z "${MINISIGN_PRIVATE_KEY_B64}" ]]; then
-            echo "MINISIGN_PRIVATE_KEY_B64 is required for native updater releases." >&2
+          signing_key_b64="${MINISIGN_PRIVATE_KEY_B64:-${TAURI_SIGNING_PRIVATE_KEY:-}}"
+          signing_password="${MINISIGN_PASSWORD:-${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}}"
+
+          if [[ -z "${signing_key_b64}" ]]; then
+            echo "MINISIGN_PRIVATE_KEY_B64 or TAURI_SIGNING_PRIVATE_KEY is required for native updater releases." >&2
             exit 1
           fi
 
@@ -299,7 +304,7 @@ jobs:
 
           key_path="$(mktemp)"
           trap 'rm -f "${key_path}"' EXIT
-          printf '%s' "${MINISIGN_PRIVATE_KEY_B64}" | base64 --decode > "${key_path}"
+          printf '%s' "${signing_key_b64}" | base64 --decode > "${key_path}"
           chmod 600 "${key_path}"
 
           # Native and Tauri channel updaters both reject unsigned assets.
@@ -318,8 +323,8 @@ jobs:
           for asset in "${assets[@]}"; do
             sig="${asset}.sig"
             trusted_comment="OxideTerm ${VERSION} $(basename "${asset}")"
-            if [[ -n "${MINISIGN_PASSWORD:-}" ]]; then
-              printf '%s\n' "${MINISIGN_PASSWORD}" \
+            if [[ -n "${signing_password:-}" ]]; then
+              printf '%s\n' "${signing_password}" \
                 | minisign -S -s "${key_path}" -m "${asset}" -x "${sig}" -t "${trusted_comment}"
             else
               minisign -S -W -s "${key_path}" -m "${asset}" -x "${sig}" -t "${trusted_comment}"
