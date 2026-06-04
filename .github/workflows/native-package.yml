@@ -25,8 +25,97 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preflight:
+    name: Preflight checks
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          cache-on-failure: false
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libasound2-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer1.0-dev \
+            libgtk-3-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libssl-dev \
+            libsoup-3.0-dev \
+            libwebkit2gtk-4.1-dev \
+            libx11-dev \
+            libxcb-cursor-dev \
+            libxcb-icccm4-dev \
+            libxcb-image0-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xinerama0-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            mesa-vulkan-drivers \
+            pkg-config
+
+      # Keep release packaging gated on the same native checks as PR/main CI.
+      - name: cargo check
+        run: cargo check --workspace --all-targets
+
+      - name: cargo fmt
+        run: cargo fmt --check
+
+      - name: cargo test
+        run: cargo test --workspace
+
+      - name: Remote agent check
+        run: cargo check --manifest-path agent/Cargo.toml
+
+      - name: Remote agent fmt
+        run: cargo fmt --manifest-path agent/Cargo.toml --check
+
+      - name: Remote agent test
+        run: cargo test --manifest-path agent/Cargo.toml
+
+      - name: Audit native locale catalogs
+        run: python scripts/audit_i18n.py
+
+      - name: cargo deny (workspace)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: Cargo.toml
+          command: check
+          command-arguments: licenses bans
+
+      - name: cargo deny (agent)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: agent/Cargo.toml
+          command: check
+          command-arguments: --config agent/deny.toml licenses bans
+
   package:
     name: Package ${{ matrix.label }}
+    needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
