@@ -71,6 +71,7 @@ zeroize.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"] }
+windows-core.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gstreamer = "0.24.5"

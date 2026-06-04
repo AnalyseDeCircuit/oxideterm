@@ -142,6 +142,7 @@ unicode-normalization = "0.1"
 unicode-segmentation = "1.12"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 windows = "0.61"
+windows-core = "0.61"
 whoami = "1.6"
 wry = { package = "lb-wry", version = "0.53.3" }
 zeroize = { version = "1.8", features = ["serde"] }

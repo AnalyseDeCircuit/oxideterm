@@ -7,25 +7,29 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use windows::{
+use ::windows::{
     Win32::{
         Foundation::{HWND, RECT},
         Media::MediaFoundation::{
             IMFPMediaPlayer, IMFPMediaPlayerCallback, IMFPMediaPlayerCallback_Impl,
             MFP_EVENT_HEADER, MFP_EVENT_TYPE_ERROR, MFP_EVENT_TYPE_MEDIAITEM_CREATED,
             MFP_EVENT_TYPE_MEDIAITEM_SET, MFP_EVENT_TYPE_PAUSE, MFP_EVENT_TYPE_PLAY,
-            MFP_EVENT_TYPE_PLAYBACK_ENDED, MFP_EVENT_TYPE_STOP, MFP_MEDIAPLAYER_STATE_EMPTY,
-            MFP_MEDIAPLAYER_STATE_PAUSED, MFP_MEDIAPLAYER_STATE_PLAYING,
-            MFP_MEDIAPLAYER_STATE_STOPPED, MFP_OPTION_NONE, MFPCreateMediaPlayer,
+            MFP_EVENT_TYPE_PLAYBACK_ENDED, MFP_EVENT_TYPE_STOP, MFP_MEDIAPLAYER_STATE,
+            MFP_MEDIAPLAYER_STATE_EMPTY, MFP_MEDIAPLAYER_STATE_PAUSED,
+            MFP_MEDIAPLAYER_STATE_PLAYING, MFP_MEDIAPLAYER_STATE_STOPPED, MFP_OPTION_NONE,
+            MFPCreateMediaPlayer,
         },
         UI::WindowsAndMessaging::{
             CreateWindowExW, DestroyWindow, SWP_NOACTIVATE, SWP_NOZORDER, SetFocus, SetWindowPos,
             WINDOW_EX_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_VISIBLE,
         },
     },
-    core::{PCWSTR, implement, w},
+    core::{PCWSTR, w},
 };
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+// The COM implementation macro expands against the direct windows-core crate;
+// importing it explicitly prevents mixed windows-core versions from binding.
+use windows_core::implement;
 
 use super::*;
 
@@ -334,9 +338,7 @@ impl IMFPMediaPlayerCallback_Impl for MediaPlayerCallback_Impl {
     }
 }
 
-fn media_player_state(
-    state: windows::Win32::Media::MediaFoundation::MFP_MEDIAPLAYER_STATE,
-) -> PlatformVideoState {
+fn media_player_state(state: MFP_MEDIAPLAYER_STATE) -> PlatformVideoState {
     if state == MFP_MEDIAPLAYER_STATE_PLAYING {
         PlatformVideoState::Playing
     } else if state == MFP_MEDIAPLAYER_STATE_PAUSED {
