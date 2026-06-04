@@ -26,118 +26,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  preflight:
-    name: Preflight checks
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          cache-on-failure: false
-
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          # GitHub's Ubuntu 22.04 image can preinstall LLVM libunwind-*-dev
-          # packages. They conflict with libunwind-dev, which GStreamer dev
-          # packages require, so remove the LLVM dev variants before apt solves.
-          sudo apt-get remove -y \
-            libunwind-14-dev \
-            libunwind-15-dev \
-            libunwind-16-dev \
-            libunwind-17-dev \
-            libunwind-18-dev || true
-          sudo apt-get install -y \
-            build-essential \
-            libasound2-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer1.0-dev \
-            libgtk-3-dev \
-            libjavascriptcoregtk-4.1-dev \
-            libssl-dev \
-            libsoup-3.0-dev \
-            libunwind-dev \
-            libwebkit2gtk-4.1-dev \
-            libx11-dev \
-            libxcb-cursor-dev \
-            libxcb-icccm4-dev \
-            libxcb-image0-dev \
-            libxcb-keysyms1-dev \
-            libxcb-randr0-dev \
-            libxcb-render0-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libxcb-xinerama0-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            mesa-vulkan-drivers \
-            pkg-config
-
-      # Keep release packaging gated on the same native checks as PR/main CI.
-      - name: cargo check
-        run: cargo check --workspace --all-targets
-
-      - name: cargo fmt
-        run: cargo fmt --check
-
-      - name: cargo test
-        run: cargo test --workspace
-
-      - name: Remote agent check
-        run: cargo check --manifest-path agent/Cargo.toml
-
-      - name: Remote agent fmt
-        run: cargo fmt --manifest-path agent/Cargo.toml --check
-
-      - name: Remote agent test
-        run: cargo test --manifest-path agent/Cargo.toml
-
-      - name: Build bundled remote agents
-        run: ./scripts/build-agent.sh
-
-      - name: Upload bundled remote agents
-        uses: actions/upload-artifact@v4
-        with:
-          name: bundled-remote-agents
-          path: crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-*
-          if-no-files-found: error
-
-      - name: Audit native locale catalogs
-        run: python scripts/audit_i18n.py
-
-      - name: cargo deny (workspace)
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          manifest-path: Cargo.toml
-          command: check
-          command-arguments: licenses bans
-
-      - name: cargo deny (agent)
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          manifest-path: agent/Cargo.toml
-          command: check
-          command-arguments: --config agent/deny.toml licenses bans
-
+  # ── Six-platform matrix (macOS / Linux / Windows, arm64 + x64) ─────────
   package:
     name: Package ${{ matrix.label }}
-    needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -166,6 +57,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Validate manual release input
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_release && inputs.version == ''
+        run: python3 -c "import sys; print('Manual release upload requires the version input.', file=sys.stderr); sys.exit(1)"
+
       - name: Install Python
         uses: actions/setup-python@v5
         with:
@@ -182,63 +77,11 @@ jobs:
           key: native-package-${{ matrix.target }}
           cache-on-failure: false
 
-      - name: Download bundled remote agents
-        uses: actions/download-artifact@v4
-        with:
-          name: bundled-remote-agents
-          path: crates/oxideterm-gpui-app/resources/agents
-
-      - name: Restore bundled agent executable bits
-        if: runner.os != 'Windows'
-        run: chmod +x crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-*
-
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          # GitHub's Ubuntu 22.04 image can preinstall LLVM libunwind-*-dev
-          # packages. They conflict with libunwind-dev, which GStreamer dev
-          # packages require, so remove the LLVM dev variants before apt solves.
-          sudo apt-get remove -y \
-            libunwind-14-dev \
-            libunwind-15-dev \
-            libunwind-16-dev \
-            libunwind-17-dev \
-            libunwind-18-dev || true
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            file \
-            libasound2-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer1.0-dev \
-            libgtk-3-dev \
-            libjavascriptcoregtk-4.1-dev \
-            libssl-dev \
-            libsoup-3.0-dev \
-            libunwind-dev \
-            libwebkit2gtk-4.1-dev \
-            libx11-dev \
-            libxcb-cursor-dev \
-            libxcb-icccm4-dev \
-            libxcb-image0-dev \
-            libxcb-keysyms1-dev \
-            libxcb-randr0-dev \
-            libxcb-render0-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libxcb-xinerama0-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            mesa-vulkan-drivers \
-            patchelf \
-            pkg-config
-
-      - name: Validate manual release input
-        if: github.event_name == 'workflow_dispatch' && inputs.upload_release && inputs.version == ''
-        run: python -c "import sys; print('Manual release upload requires the version input.', file=sys.stderr); sys.exit(1)"
+        uses: ./.github/actions/install-linux-deps
+        with:
+          extra_packages: 'curl file patchelf'
 
       - name: Package native app
         env:
@@ -304,27 +147,17 @@ jobs:
       - name: Sign release assets
         shell: bash
         env:
-          MINISIGN_PRIVATE_KEY_B64: ${{ secrets.MINISIGN_PRIVATE_KEY_B64 }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VERSION: ${{ steps.release_meta.outputs.version }}
         run: |
           set -euo pipefail
-          signing_key_b64="${MINISIGN_PRIVATE_KEY_B64:-${TAURI_SIGNING_PRIVATE_KEY:-}}"
-          signing_password="${MINISIGN_PASSWORD:-${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}}"
-
-          if [[ -z "${signing_key_b64}" ]]; then
-            echo "MINISIGN_PRIVATE_KEY_B64 or TAURI_SIGNING_PRIVATE_KEY is required for native updater releases." >&2
-            exit 1
-          fi
-
           sudo apt-get update
           sudo apt-get install -y minisign
 
           key_path="$(mktemp)"
           trap 'rm -f "${key_path}"' EXIT
-          printf '%s' "${signing_key_b64}" | base64 --decode > "${key_path}"
+          printf '%s' "${TAURI_SIGNING_PRIVATE_KEY}" | base64 --decode > "${key_path}"
           chmod 600 "${key_path}"
 
           # Native and Tauri channel updaters both reject unsigned assets.
@@ -343,8 +176,8 @@ jobs:
           for asset in "${assets[@]}"; do
             sig="${asset}.sig"
             trusted_comment="OxideTerm ${VERSION} $(basename "${asset}")"
-            if [[ -n "${signing_password:-}" ]]; then
-              printf '%s\n' "${signing_password}" \
+            if [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]]; then
+              printf '%s\n' "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD}" \
                 | minisign -S -s "${key_path}" -m "${asset}" -x "${sig}" -t "${trusted_comment}"
             else
               minisign -S -W -s "${key_path}" -m "${asset}" -x "${sig}" -t "${trusted_comment}"

@@ -6,12 +6,11 @@ on:
     paths:
       - 'agent/**'
       - 'crates/**'
-      - 'scripts/audit_i18n.py'
-      - 'scripts/build-agent.sh'
-      - 'scripts/package_native.py'
+      - 'scripts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'deny.toml'
+      - 'rustfmt.toml'
       - '.github/workflows/ci.yml'
       - '.github/workflows/native-package.yml'
   pull_request:
@@ -44,44 +43,7 @@ jobs:
           cache-on-failure: false
 
       - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          # GitHub's Ubuntu 22.04 image can preinstall LLVM libunwind-*-dev
-          # packages. They conflict with libunwind-dev, which GStreamer dev
-          # packages require, so remove the LLVM dev variants before apt solves.
-          sudo apt-get remove -y \
-            libunwind-14-dev \
-            libunwind-15-dev \
-            libunwind-16-dev \
-            libunwind-17-dev \
-            libunwind-18-dev || true
-          sudo apt-get install -y \
-            build-essential \
-            libasound2-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer1.0-dev \
-            libgtk-3-dev \
-            libjavascriptcoregtk-4.1-dev \
-            libssl-dev \
-            libsoup-3.0-dev \
-            libunwind-dev \
-            libwebkit2gtk-4.1-dev \
-            libx11-dev \
-            libxcb-cursor-dev \
-            libxcb-icccm4-dev \
-            libxcb-image0-dev \
-            libxcb-keysyms1-dev \
-            libxcb-randr0-dev \
-            libxcb-render0-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libxcb-xinerama0-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            mesa-vulkan-drivers \
-            pkg-config
+        uses: ./.github/actions/install-linux-deps
 
       - name: cargo check
         run: cargo check --workspace --all-targets

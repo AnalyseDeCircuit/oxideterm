@@ -1,0 +1,24 @@
+# ---------------------------------------------------------------------------
+# install-linux-deps — reusable composite action for OxideTerm CI workflows.
+#
+# Installs every system library that GPUI, GStreamer, GTK, and the native
+# Rust crates need on Linux.  Callers append extra packages via:
+#   env:
+#     EXTRA_PACKAGES: "patchelf curl file"
+# ---------------------------------------------------------------------------
+name: Install Linux system dependencies
+
+inputs:
+  extra_packages:
+    description: 'Space-separated list of additional apt packages'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install Linux system dependencies
+      shell: bash
+      env:
+        EXTRA_PACKAGES: ${{ inputs.extra_packages }}
+      run: ${GITHUB_ACTION_PATH}/../../../scripts/install-linux-deps.sh
