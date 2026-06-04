@@ -19,9 +19,12 @@ use ::windows::{
             MFP_MEDIAPLAYER_STATE_PLAYING, MFP_MEDIAPLAYER_STATE_STOPPED, MFP_OPTION_NONE,
             MFPCreateMediaPlayer,
         },
-        UI::WindowsAndMessaging::{
-            CreateWindowExW, DestroyWindow, SWP_NOACTIVATE, SWP_NOZORDER, SetFocus, SetWindowPos,
-            WINDOW_EX_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_VISIBLE,
+        UI::{
+            Input::KeyboardAndMouse::SetFocus,
+            WindowsAndMessaging::{
+                CreateWindowExW, DestroyWindow, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
+                WINDOW_EX_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_VISIBLE,
+            },
         },
     },
     core::{PCWSTR, w},
@@ -131,7 +134,7 @@ impl SftpNativeVideoSurface {
                     Some(&mut player),
                 )
                 .map_err(|error| format!("failed to create Media Foundation player: {error}"))?;
-                SetFocus(parent);
+                let _ = SetFocus(Some(parent));
             }
             self.path = Some(path.to_string());
             self.hwnd = Some(hwnd);
