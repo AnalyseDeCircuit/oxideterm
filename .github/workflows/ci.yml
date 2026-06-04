@@ -7,10 +7,13 @@ on:
       - 'agent/**'
       - 'crates/**'
       - 'scripts/audit_i18n.py'
+      - 'scripts/build-agent.sh'
+      - 'scripts/package_native.py'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'deny.toml'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/native-package.yml'
   pull_request:
     branches: [main]
 
@@ -34,6 +37,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -105,6 +109,10 @@ jobs:
 
       - name: cargo test
         run: cargo test --manifest-path agent/Cargo.toml
+
+      # CI builds the same bundled Linux agent binaries that release packages ship.
+      - name: Build bundled remote agents
+        run: ./scripts/build-agent.sh
 
   i18n:
     name: i18n completeness

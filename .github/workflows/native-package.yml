@@ -41,6 +41,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -95,6 +96,16 @@ jobs:
 
       - name: Remote agent test
         run: cargo test --manifest-path agent/Cargo.toml
+
+      - name: Build bundled remote agents
+        run: ./scripts/build-agent.sh
+
+      - name: Upload bundled remote agents
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundled-remote-agents
+          path: crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-*
+          if-no-files-found: error
 
       - name: Audit native locale catalogs
         run: python scripts/audit_i18n.py
@@ -159,6 +170,16 @@ jobs:
         with:
           key: native-package-${{ matrix.target }}
           cache-on-failure: false
+
+      - name: Download bundled remote agents
+        uses: actions/download-artifact@v4
+        with:
+          name: bundled-remote-agents
+          path: crates/oxideterm-gpui-app/resources/agents
+
+      - name: Restore bundled agent executable bits
+        if: runner.os != 'Windows'
+        run: chmod +x crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-*
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
