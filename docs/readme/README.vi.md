@@ -39,8 +39,6 @@
 
 ---
 
-> **Release status:** OxideTerm Native đang được chuẩn bị làm next major release của OxideTerm. Public installer chưa được phát hành; hiện tại hãy chạy từ source. Các packaged release hiện tại vẫn ở Tauri line cho đến khi native installer sẵn sàng.
-
 ## Bạn có thể làm gì
 
 - Quản lý SSH terminal, SFTP, port forward, serial console, local shell và chỉnh sửa nhẹ trong một native workspace
@@ -240,8 +238,6 @@ Encrypted bundle format khớp với Tauri line:
 
 ## Chạy từ source
 
-Public native installer chưa được phát hành. Cho đến khi packaged build sẵn sàng, hãy chạy native edition từ source.
-
 ```sh
 cargo run
 OXIDETERM_RENDER_PROFILE=compatibility cargo run
@@ -276,7 +272,6 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] In-process terminal data flow without WebSocket
 - [x] SFTP, forwarding, IDE, AI, cloud sync, plugins, CLI
 - [x] Local serial terminals
-- [ ] Public packaged installers
 - [ ] Full ProxyCommand, audit logging
 
 ## Contributing

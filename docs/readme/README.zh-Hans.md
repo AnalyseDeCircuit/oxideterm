@@ -39,8 +39,6 @@
 
 ---
 
-> **发布状态：** OxideTerm Native 正在作为 OxideTerm 的下一代主版本准备中。公开安装包尚未发布，目前请从源码运行；在 native 安装包准备好之前，当前打包发布仍在 Tauri 版本线上。
-
 ## 你可以做什么
 
 - 在一个原生工作区里管理 SSH 终端、SFTP、端口转发、串口控制台、本地 Shell 和轻量编辑
@@ -240,8 +238,6 @@ trzsz 继续走终端数据流，不需要额外端口或远端 agent：
 
 ## 从源码运行
 
-公开 native 安装包尚未发布。在打包构建准备好之前，请从源码运行 native 版本。
-
 ```sh
 cargo run
 OXIDETERM_RENDER_PROFILE=compatibility cargo run
@@ -279,7 +275,6 @@ cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 - [x] 无 WebSocket 的进程内终端数据流
 - [x] SFTP、端口转发、IDE、AI、云同步、插件、CLI
 - [x] 本地串口终端
-- [ ] 公开打包安装包
 - [ ] 完整 ProxyCommand、审计日志
 
 ## Provider 中立性

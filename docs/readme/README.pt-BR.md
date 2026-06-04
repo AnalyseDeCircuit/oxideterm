@@ -39,8 +39,6 @@
 
 ---
 
-> **Status da release:** OxideTerm Native está sendo preparado como a próxima grande versão do OxideTerm. Os instaladores públicos ainda não foram publicados; por enquanto, execute pelo código-fonte. As releases empacotadas atuais continuam na linha Tauri até que os instaladores native estejam prontos.
-
 ## O que você pode fazer
 
 - Gerenciar terminais SSH, SFTP, port forwards, consoles seriais, shells locais e edição leve em um workspace nativo
@@ -240,8 +238,6 @@ O formato de bundle criptografado corresponde à linha Tauri:
 
 ## Executar pelo código-fonte
 
-Os instaladores native públicos ainda não foram publicados. Até que os builds empacotados estejam prontos, execute a edição native pelo código-fonte.
-
 ```sh
 cargo run
 OXIDETERM_RENDER_PROFILE=compatibility cargo run
@@ -276,7 +272,6 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] Fluxo terminal in-process sem WebSocket
 - [x] SFTP, forwarding, IDE, AI, cloud sync, plugins, CLI
 - [x] Terminais seriais locais
-- [ ] Instaladores públicos empacotados
 - [ ] Full ProxyCommand, audit logging
 
 ## Contribuição

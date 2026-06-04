@@ -39,8 +39,6 @@
 
 ---
 
-> **發布狀態：** OxideTerm Native 正在作為 OxideTerm 的下一代主版本準備中。公開安裝包尚未發布，目前請從原始碼執行；在 native 安裝包準備好之前，當前打包發布仍在 Tauri 版本線上。
-
 ## 你可以做什麼
 
 - 在一個原生工作區裡管理 SSH 終端、SFTP、連接埠轉發、序列埠主控台、本地 Shell 和輕量編輯
@@ -240,8 +238,6 @@ trzsz 繼續走 terminal stream，不需要額外 port 或 remote agent：
 
 ## 從原始碼執行
 
-公開 native 安裝包尚未發布。在打包構建準備好之前，請從原始碼執行 native 版本。
-
 ```sh
 cargo run
 OXIDETERM_RENDER_PROFILE=compatibility cargo run
@@ -276,7 +272,6 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] 無 WebSocket 的進程內終端資料流
 - [x] SFTP、轉發、IDE、AI、雲同步、外掛、CLI
 - [x] 本地序列埠終端
-- [ ] 公開打包安裝包
 - [ ] 完整 ProxyCommand、審計日誌
 
 ## 貢獻

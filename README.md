@@ -38,8 +38,6 @@
 
 ---
 
-> **Release status:** OxideTerm Native is being prepared as the next major OxideTerm release. Public installers are not published yet; run from source for now. Current packaged releases remain on the Tauri line until native installers are ready.
-
 ## What You Can Do
 
 - Manage SSH terminals, SFTP, port forwards, serial consoles, local shells, and lightweight editing in one native workspace
@@ -261,8 +259,6 @@ Same cryptography as Tauri:
 
 ## Run From Source
 
-Public native installers are not published yet. Until packaged builds are ready, run the native edition from source.
-
 **Requirements:** Rust toolchain (Edition 2024), desktop environment capable of running GPUI.
 
 ```sh
@@ -360,7 +356,6 @@ Prefer scoped crate checks while iterating. Broaden to `--workspace` when a chan
 - [x] In-process terminal data flow (no WebSocket)
 - [x] SFTP, port forwarding, IDE, AI, cloud sync, plugins, CLI
 - [x] Local serial terminals
-- [ ] Public packaged installers
 - [ ] Full ProxyCommand support
 - [ ] Audit logging
 

@@ -39,8 +39,6 @@
 
 ---
 
-> **リリース状況:** OxideTerm Native は OxideTerm の次期メジャーリリースとして準備中です。公開インストーラはまだ提供されていないため、現時点ではソースから実行してください。native インストーラが準備できるまで、現在のパッケージ版リリースは Tauri 系列のままです。
-
 ## できること
 
 - SSH terminal、SFTP、port forwarding、serial console、local shell、軽量編集を 1 つの native workspace で管理
@@ -240,8 +238,6 @@ Encrypted bundle format は Tauri line と同じです。
 
 ## ソースから実行
 
-公開 native インストーラはまだ提供されていません。パッケージ版 build が準備できるまでは、native edition をソースから実行してください。
-
 ```sh
 cargo run
 OXIDETERM_RENDER_PROFILE=compatibility cargo run
@@ -276,7 +272,6 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] in-process terminal data flow without WebSocket
 - [x] SFTP、port forwarding、IDE、AI、cloud sync、plugins、CLI
 - [x] ローカルシリアル端末
-- [ ] 公開パッケージ版インストーラ
 - [ ] Full ProxyCommand、audit logging
 
 ## Contributing
