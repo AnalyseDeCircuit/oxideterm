@@ -55,12 +55,12 @@ impl WorkspaceApp {
                     self.i18n.t("fileManager.open"),
                     false,
                     has_background,
-                    cx.listener({
+                    {
                         let file = file.clone();
                         move |this, _event, _window, _cx| {
                             this.set_file_manager_path(file.path.clone());
                         }
-                    }),
+                    },
                     cx,
                 ))
             } else {
@@ -70,7 +70,7 @@ impl WorkspaceApp {
                         self.i18n.t("fileManager.openExternal"),
                         false,
                         has_background,
-                        cx.listener({
+                        {
                             let file = file.clone();
                             move |this, _event, _window, _cx| {
                                 if let Err(error) = open_path_external(&file.path) {
@@ -81,7 +81,7 @@ impl WorkspaceApp {
                                     );
                                 }
                             }
-                        }),
+                        },
                         cx,
                     ))
                     .child(self.render_file_manager_context_menu_item(
@@ -89,12 +89,12 @@ impl WorkspaceApp {
                         self.i18n.t("fileManager.preview"),
                         false,
                         has_background,
-                        cx.listener({
+                        {
                             let file = file.clone();
                             move |this, _event, _window, cx| {
                                 this.open_file_manager_preview(file.clone(), cx);
                             }
-                        }),
+                        },
                         cx,
                     ))
             }
@@ -105,7 +105,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.revealInFileManager"),
                 false,
                 has_background,
-                cx.listener({
+                {
                     let file = menu.file.clone();
                     move |this, _event, _window, _cx| {
                         if let Some(file) = file.as_ref()
@@ -118,7 +118,7 @@ impl WorkspaceApp {
                             );
                         }
                     }
-                }),
+                },
                 cx,
             ))
         })
@@ -132,9 +132,9 @@ impl WorkspaceApp {
                     false,
                     menu_loading,
                     has_background,
-                    cx.listener(|this, _event, _window, cx| {
+                    |this, _event, _window, cx| {
                         this.copy_file_manager_selection(false, cx);
-                    }),
+                    },
                     cx,
                 ))
                 .child(self.render_file_manager_context_menu_guarded_item(
@@ -144,9 +144,9 @@ impl WorkspaceApp {
                     false,
                     menu_loading,
                     has_background,
-                    cx.listener(|this, _event, _window, cx| {
+                    |this, _event, _window, cx| {
                         this.copy_file_manager_selection(true, cx);
-                    }),
+                    },
                     cx,
                 ))
                 .child(self.render_file_manager_context_menu_guarded_item(
@@ -156,9 +156,9 @@ impl WorkspaceApp {
                     false,
                     menu_loading,
                     has_background,
-                    cx.listener(|this, _event, _window, cx| {
+                    |this, _event, _window, cx| {
                         this.duplicate_file_manager_selection(cx);
-                    }),
+                    },
                     cx,
                 ))
                 .child(self.render_file_manager_context_menu_guarded_item(
@@ -168,9 +168,9 @@ impl WorkspaceApp {
                     false,
                     menu_loading,
                     has_background,
-                    cx.listener(|this, _event, _window, cx| {
+                    |this, _event, _window, cx| {
                         this.compress_file_manager_selection(cx);
-                    }),
+                    },
                     cx,
                 ))
         })
@@ -188,9 +188,9 @@ impl WorkspaceApp {
                     false,
                     menu_loading,
                     has_background,
-                    cx.listener(|this, _event, _window, cx| {
+                    |this, _event, _window, cx| {
                         this.extract_selected_file_manager_archive(cx);
-                    }),
+                    },
                     cx,
                 ))
             },
@@ -203,9 +203,9 @@ impl WorkspaceApp {
                 false,
                 menu_loading,
                 has_background,
-                cx.listener(|this, _event, _window, cx| {
+                |this, _event, _window, cx| {
                     this.paste_file_manager_clipboard(cx);
-                }),
+                },
                 cx,
             ))
         })
@@ -218,14 +218,14 @@ impl WorkspaceApp {
                     false,
                     menu_loading,
                     has_background,
-                    cx.listener({
+                    {
                         let file = menu.file.clone();
                         move |this, _event, _window, _cx| {
                             if let Some(file) = file.as_ref() {
                                 this.open_file_manager_rename_dialog(file.name.clone());
                             }
                         }
-                    }),
+                    },
                     cx,
                 ))
                 .child(self.render_file_manager_context_menu_item(
@@ -233,9 +233,9 @@ impl WorkspaceApp {
                     self.i18n.t("fileManager.copyPath"),
                     false,
                     has_background,
-                    cx.listener(|this, _event, _window, cx| {
+                    |this, _event, _window, cx| {
                         this.copy_file_manager_path_to_clipboard(false, cx);
-                    }),
+                    },
                     cx,
                 ))
                 .child(self.render_file_manager_context_menu_item(
@@ -243,9 +243,9 @@ impl WorkspaceApp {
                     self.i18n.t("fileManager.copyName"),
                     false,
                     has_background,
-                    cx.listener(|this, _event, _window, cx| {
+                    |this, _event, _window, cx| {
                         this.copy_file_manager_path_to_clipboard(true, cx);
-                    }),
+                    },
                     cx,
                 ))
         })
@@ -256,7 +256,7 @@ impl WorkspaceApp {
                     self.i18n.t("fileManager.properties"),
                     false,
                     has_background,
-                    cx.listener({
+                    {
                         let file = menu.file.clone();
                         move |this, _event, _window, _cx| {
                             if let Some(file) = file
@@ -266,7 +266,7 @@ impl WorkspaceApp {
                                 this.open_file_manager_properties(file);
                             }
                         }
-                    }),
+                    },
                     cx,
                 ))
                 .child(self.render_file_manager_context_menu_guarded_item(
@@ -276,9 +276,9 @@ impl WorkspaceApp {
                     false,
                     menu_loading,
                     has_background,
-                    cx.listener(|this, _event, _window, _cx| {
+                    |this, _event, _window, _cx| {
                         this.open_file_manager_delete_dialog();
-                    }),
+                    },
                     cx,
                 ))
         })
@@ -290,9 +290,9 @@ impl WorkspaceApp {
             false,
             menu_loading,
             has_background,
-            cx.listener(|this, _event, _window, _cx| {
+            |this, _event, _window, _cx| {
                 this.open_file_manager_new_folder_dialog();
-            }),
+            },
             cx,
         ))
         .child(self.render_file_manager_context_menu_guarded_item(
@@ -302,9 +302,9 @@ impl WorkspaceApp {
             false,
             menu_loading,
             has_background,
-            cx.listener(|this, _event, _window, _cx| {
+            |this, _event, _window, _cx| {
                 this.open_file_manager_new_file_dialog();
-            }),
+            },
             cx,
         ))
         .child(self.render_file_manager_context_menu_item(
@@ -312,9 +312,9 @@ impl WorkspaceApp {
             self.i18n.t("fileManager.selectAll"),
             false,
             has_background,
-            cx.listener(|this, _event, _window, _cx| {
+            |this, _event, _window, _cx| {
                 this.select_all_file_manager_files();
-            }),
+            },
             cx,
         ))
         .child(self.render_file_manager_context_menu_item(
@@ -322,9 +322,9 @@ impl WorkspaceApp {
             self.i18n.t("fileManager.refresh"),
             false,
             has_background,
-            cx.listener(|this, _event, _window, _cx| {
+            |this, _event, _window, _cx| {
                 this.refresh_file_manager();
-            }),
+            },
             cx,
         ));
 
@@ -348,7 +348,7 @@ impl WorkspaceApp {
         label: String,
         danger: bool,
         has_background: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.render_file_manager_context_menu_guarded_item(
@@ -371,7 +371,7 @@ impl WorkspaceApp {
         disabled: bool,
         loading: bool,
         has_background: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -403,6 +403,8 @@ impl WorkspaceApp {
         // File manager uses conditional rendering for most unavailable items,
         // but long-running local operations should leave visible menu rows inert
         // like disabled browser/Radix menu items.
+        // The shared workspace menu helper owns cx.listener wrapping, so callers
+        // pass plain WorkspaceApp closures and avoid nested same-entity updates.
         self.workspace_context_menu_styled_action(
             item,
             disabled,
@@ -414,7 +416,7 @@ impl WorkspaceApp {
             |this| {
                 this.dismiss_file_manager_context_menu();
             },
-            move |_this, event, window, cx| listener(event, window, cx),
+            listener,
             cx,
         )
         .into_any_element()

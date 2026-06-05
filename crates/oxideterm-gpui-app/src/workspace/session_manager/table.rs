@@ -928,14 +928,14 @@ impl WorkspaceApp {
                 false,
                 false,
                 has_background,
-                cx.listener({
+                {
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
                         this.test_connection(&id, window, cx);
                     }
-                }),
+                },
                 cx,
-                ),
+            ),
             )
             .child(
                 self.render_session_manager_menu_action(
@@ -951,14 +951,14 @@ impl WorkspaceApp {
                 false,
                 false,
                 has_background,
-                cx.listener({
+                {
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
                         this.duplicate_connection(&id, window, cx);
                     }
-                }),
+                },
                 cx,
-                ),
+            ),
             )
             .child(
                 div()
@@ -980,14 +980,14 @@ impl WorkspaceApp {
                 false,
                 false,
                 has_background,
-                cx.listener({
+                {
                     let id = conn.id.clone();
                     move |this, _event, _window, cx| {
                         this.request_delete_connection(&id, cx);
                     }
-                }),
+                },
                 cx,
-                ),
+            ),
             )
             .into_any_element()
     }
@@ -1036,14 +1036,14 @@ impl WorkspaceApp {
                 false,
                 false,
                 has_background,
-                cx.listener({
+                {
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
                         this.open_saved_connection(&id, window, cx);
                     }
-                }),
+                },
                 cx,
-                ),
+            ),
             )
             .child(
                 self.render_session_manager_menu_action(
@@ -1060,14 +1060,14 @@ impl WorkspaceApp {
                 false,
                 false,
                 has_background,
-                cx.listener({
+                {
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
                         this.test_connection(&id, window, cx);
                     }
-                }),
+                },
                 cx,
-                ),
+            ),
             )
             .child(
                 self.render_session_manager_menu_action(
@@ -1084,14 +1084,14 @@ impl WorkspaceApp {
                 false,
                 false,
                 has_background,
-                cx.listener({
+                {
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
                         this.open_saved_connection_editor(&id, None, window, cx);
                     }
-                }),
+                },
                 cx,
-                ),
+            ),
             )
             .child(
                 self.render_session_manager_menu_action(
@@ -1108,14 +1108,14 @@ impl WorkspaceApp {
                 false,
                 false,
                 has_background,
-                cx.listener({
+                {
                     let id = conn.id.clone();
                     move |this, _event, window, cx| {
                         this.duplicate_connection(&id, window, cx);
                     }
-                }),
+                },
                 cx,
-                ),
+            ),
             )
             .child(
                 div()
@@ -1138,14 +1138,14 @@ impl WorkspaceApp {
                 false,
                 false,
                 has_background,
-                cx.listener({
+                {
                     let id = conn.id.clone();
                     move |this, _event, _window, cx| {
                         this.request_delete_connection(&id, cx);
                     }
-                }),
+                },
                 cx,
-                ),
+            ),
             )
             .into_any_element()
     }
@@ -1219,12 +1219,14 @@ impl WorkspaceApp {
         disabled: bool,
         loading: bool,
         has_background: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         // SessionManager has both inline "..." menus and row context menus.
         // Tauri routes both through Radix ContextMenuItem semantics, so native
         // keeps invocation, close, and disabled/loading guards in one path.
+        // The shared workspace menu helper owns cx.listener wrapping, which
+        // prevents nested WorkspaceApp updates during one mouse event.
         self.workspace_context_menu_styled_action(
             item,
             disabled,
@@ -1236,7 +1238,7 @@ impl WorkspaceApp {
             |this| {
                 this.close_session_row_menus();
             },
-            move |_this, event, window, cx| listener(event, window, cx),
+            listener,
             cx,
         )
     }

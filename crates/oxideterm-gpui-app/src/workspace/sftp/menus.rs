@@ -51,9 +51,9 @@ impl WorkspaceApp {
                     false,
                     transfer_loading,
                     has_background,
-                    cx.listener(move |this, _event, _window, _cx| {
+                    move |this, _event, _window, _cx| {
                         this.queue_sftp_transfers(menu.pane, direction);
-                    }),
+                    },
                     cx,
                 ))
             })
@@ -68,12 +68,12 @@ impl WorkspaceApp {
                         false,
                         pane_loading,
                         has_background,
-                        cx.listener({
+                        {
                             let file = file.clone();
                             move |this, _event, _window, _cx| {
                                 this.open_or_preview_sftp_file(menu.pane, &file);
                             }
-                        }),
+                        },
                         cx,
                     ))
                 }
@@ -86,14 +86,14 @@ impl WorkspaceApp {
                     false,
                     pane_loading,
                     has_background,
-                    cx.listener({
+                    {
                         let file = menu.file.clone();
                         move |this, _event, _window, _cx| {
                             if let Some(file) = file.as_ref() {
                                 this.open_sftp_rename_dialog(menu.pane, file.name.clone());
                             }
                         }
-                    }),
+                    },
                     cx,
                 ))
             })
@@ -105,7 +105,7 @@ impl WorkspaceApp {
                     false,
                     pane_loading,
                     has_background,
-                    cx.listener(move |this, _event, _window, cx| {
+                    move |this, _event, _window, cx| {
                         let base = match menu.pane {
                             SftpPane::Local => &this.sftp_view.local_path,
                             SftpPane::Remote => &this.sftp_view.remote_path,
@@ -113,7 +113,7 @@ impl WorkspaceApp {
                         cx.write_to_clipboard(ClipboardItem::new_string(join_sftp_path(
                             base, &file.name,
                         )));
-                    }),
+                    },
                     cx,
                 ))
             })
@@ -125,13 +125,13 @@ impl WorkspaceApp {
                     false,
                     pane_loading,
                     has_background,
-                    cx.listener(move |this, _event, _window, _cx| {
+                    move |this, _event, _window, _cx| {
                         let files = this.sftp_selected_names(menu.pane);
                         this.sftp_view.dialog = Some(SftpDialog::Delete {
                             pane: menu.pane,
                             files,
                         });
-                    }),
+                    },
                     cx,
                 ))
             })
@@ -148,9 +148,9 @@ impl WorkspaceApp {
                 false,
                 pane_loading,
                 has_background,
-                cx.listener(move |this, _event, _window, _cx| {
+                move |this, _event, _window, _cx| {
                     this.open_sftp_new_folder_dialog(menu.pane);
-                }),
+                },
                 cx,
             ));
 
@@ -176,7 +176,7 @@ impl WorkspaceApp {
         disabled: bool,
         loading: bool,
         has_background: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -216,7 +216,10 @@ impl WorkspaceApp {
             |this| {
                 this.sftp_view.dismiss_context_menu();
             },
-            move |_this, event, window, cx| listener(event, window, cx),
+            // The shared workspace menu helper already wraps this closure in
+            // `cx.listener`. Passing another listener here re-enters WorkspaceApp
+            // during the same mouse event and panics on menu actions like Preview.
+            listener,
             cx,
         )
         .into_any_element()

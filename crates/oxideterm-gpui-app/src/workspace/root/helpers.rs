@@ -416,7 +416,7 @@ impl WorkspaceApp {
         disabled: bool,
         loading: bool,
         close_menu: impl Fn(&mut Self) + 'static,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         self.workspace_context_menu_action_with_dismissal(
@@ -437,13 +437,13 @@ impl WorkspaceApp {
         loading: bool,
         style: oxideterm_gpui_ui::context_menu::ContextMenuActionableStyle,
         close_menu: impl Fn(&mut Self) + 'static,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         // Closing Radix menu items share the same row hover/disabled/loading
         // state as persistent checkbox-style items, but run a close callback
         // before the action. Keep that two-step behavior centralized so file,
-        // SFTP, session, and terminal menus do not compose guards manually.
+        // SFTP, session, topology, and terminal menus do not compose guards manually.
         let item = oxideterm_gpui_ui::context_menu::context_menu_actionable_row(
             item, disabled, loading, style,
         );
@@ -455,7 +455,7 @@ impl WorkspaceApp {
         item: gpui::Div,
         disabled: bool,
         loading: bool,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         self.workspace_context_menu_action_with_dismissal(
@@ -475,7 +475,7 @@ impl WorkspaceApp {
         disabled: bool,
         loading: bool,
         style: oxideterm_gpui_ui::context_menu::ContextMenuActionableStyle,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         // Checkbox-like Radix menu rows, such as terminal broadcast targets,
@@ -494,7 +494,7 @@ impl WorkspaceApp {
         loading: bool,
         dismissal: WorkspaceContextMenuDismissal,
         close_menu: impl Fn(&mut Self) + 'static,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         // Browser/Radix context-menu item activation has a common sequence:

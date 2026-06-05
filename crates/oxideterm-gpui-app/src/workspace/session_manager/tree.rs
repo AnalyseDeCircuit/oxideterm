@@ -405,13 +405,13 @@ impl WorkspaceApp {
                         false,
                         false,
                         false,
-                        cx.listener(|this, _event, _window, _cx| {
+                        |this, _event, _window, _cx| {
                             this.session_manager.show_new_group = true;
                             this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
                             this.session_manager.focused_basic_dialog_footer_action = None;
                             this.session_manager.new_group_name.clear();
                             this.needs_active_pane_focus = false;
-                        }),
+                        },
                         cx,
                     )
                 });

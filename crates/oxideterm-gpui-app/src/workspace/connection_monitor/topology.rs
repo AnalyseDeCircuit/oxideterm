@@ -754,7 +754,7 @@ impl WorkspaceApp {
             self.i18n.t("topology.menu.navigate_session"),
             false,
             false,
-            cx.listener({
+            {
                 let node_id = node_id.clone();
                 move |this, _event, _window, _cx| {
                     if let Some(node_id) = node_id.clone() {
@@ -762,7 +762,7 @@ impl WorkspaceApp {
                         this.active_sidebar_section = SidebarSection::Sessions;
                     }
                 }
-            }),
+            },
             cx,
         ));
 
@@ -774,7 +774,7 @@ impl WorkspaceApp {
                     self.i18n.t("topology.menu.new_terminal"),
                     false,
                     false,
-                    cx.listener({
+                    {
                         let node_id = node_id.clone();
                         move |this, _event, window, cx| {
                             if let Some(node_id) = node_id.clone()
@@ -790,7 +790,7 @@ impl WorkspaceApp {
                                 );
                             }
                         }
-                    }),
+                    },
                     cx,
                 ))
                 .child(self.render_topology_menu_action(
@@ -799,14 +799,14 @@ impl WorkspaceApp {
                     self.i18n.t("topology.menu.open_sftp"),
                     false,
                     false,
-                    cx.listener({
+                    {
                         let node_id = node_id.clone();
                         move |this, _event, window, _cx| {
                             if let Some(node_id) = node_id.clone() {
                                 this.open_sftp_tab(node_id, window, _cx);
                             }
                         }
-                    }),
+                    },
                     cx,
                 ));
         }
@@ -896,7 +896,7 @@ impl WorkspaceApp {
         label: String,
         disabled: bool,
         loading: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -921,6 +921,8 @@ impl WorkspaceApp {
             ));
         // Topology node actions are menu items; route invocation, close, and
         // disabled/loading behavior through the workspace shared menu action.
+        // The shared helper applies cx.listener once; nested listener closures
+        // would re-enter WorkspaceApp while GPUI is already updating it.
         self.workspace_context_menu_styled_action(
             item,
             disabled,
@@ -932,7 +934,7 @@ impl WorkspaceApp {
             |this| {
                 this.connection_monitor.dismiss_topology_menu();
             },
-            move |_this, event, window, cx| listener(event, window, cx),
+            listener,
             cx,
         )
         .into_any_element()

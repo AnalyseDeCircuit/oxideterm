@@ -1125,7 +1125,7 @@ impl WorkspaceApp {
                     is_current,
                     false,
                     Some(rgb(theme.bg_hover)),
-                    cx.listener(move |this, _event, _window, _cx| {
+                    move |this, _event, _window, _cx| {
                         if this.terminal_broadcast_targets.remove(&pane_id) {
                             if this.terminal_broadcast_targets.is_empty() {
                                 this.terminal_broadcast_enabled = false;
@@ -1135,7 +1135,7 @@ impl WorkspaceApp {
                             this.terminal_broadcast_enabled = true;
                         }
                         this.keep_terminal_broadcast_menu_open();
-                    }),
+                    },
                     cx,
                 );
                 menu = menu.child(row);
@@ -1202,12 +1202,14 @@ impl WorkspaceApp {
         disabled: bool,
         loading: bool,
         hover_bg: Option<gpui::Rgba>,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         // Tauri broadcast target rows are Radix menu items with a disabled
         // current-terminal row. Keep native hover/cursor and action blocking
         // coupled to the shared context-menu guard.
+        // Persistent menu rows still use one shared cx.listener wrapper so
+        // toggling targets cannot re-enter WorkspaceApp during the click.
         self.workspace_context_menu_persistent_styled_action(
             item,
             disabled,
@@ -1216,7 +1218,7 @@ impl WorkspaceApp {
                 hover_background: hover_bg,
                 hover_text_color: None,
             },
-            move |_this, event, window, cx| listener(event, window, cx),
+            listener,
             cx,
         )
     }
