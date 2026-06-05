@@ -13,13 +13,23 @@ impl WorkspaceApp {
             .flex()
             .flex_row()
             .items_center()
-            .window_control_area(gpui::WindowControlArea::Drag)
             .bg(rgb(titlebar_bg))
             .border_b_1()
             .border_color(rgb(titlebar_border))
             .text_size(px(self.tokens.metrics.titlebar_label_font_size))
             .text_color(rgb(text_color))
-            .child(div().flex_1().h_full().min_w(px(0.0)))
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .min_w(px(0.0))
+                    // Keep drag hitboxes away from Windows caption buttons; GPUI
+                    // returns the first matching window-control area by paint order.
+                    .window_control_area(gpui::WindowControlArea::Drag)
+                    // The drag filler is visually empty, so force a concrete
+                    // mouse hitbox for Windows non-client hit testing.
+                    .occlude(),
+            )
             .when(cfg!(target_os = "windows"), |bar| {
                 bar.child(self.render_windows_titlebar_controls(titlebar_bg, text_color))
             })
@@ -31,7 +41,6 @@ impl WorkspaceApp {
             .h_full()
             .flex()
             .flex_row()
-            .window_control_area(gpui::WindowControlArea::Drag)
             .child(self.windows_titlebar_button(
                 "−",
                 gpui::WindowControlArea::Min,
