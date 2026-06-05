@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -18,15 +19,29 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 APP_MANIFEST = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "Cargo.toml"
 RESOURCE_DIR = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "resources"
 DIST_DIR = ROOT_DIR / "dist"
-APP_NAME = "OxideTerm"
-APP_IDENTIFIER = "com.analysecircuit.OxideTerm"
+BASE_APP_NAME = "OxideTerm"
+STABLE_APP_IDENTIFIER = "com.oxideterm.app"
 APP_BIN = "oxideterm-native"
 CLI_BIN = "oxideterm"
 
 
-def run(command: list[str], *, cwd: Path = ROOT_DIR) -> None:
+@dataclass(frozen=True)
+class ReleaseIdentity:
+    channel: str
+    app_name: str
+    app_identifier: str
+    windows_install_dir: str
+    windows_registry_key: str
+    windows_uninstall_key: str
+    linux_package_name: str
+    linux_install_dir: str
+    linux_desktop_id: str
+    linux_icon_name: str
+
+
+def run(command: list[str], *, cwd: Path = ROOT_DIR, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(command), flush=True)
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd, env=env, check=True)
 
 
 def host_triple() -> str:
@@ -51,12 +66,74 @@ def workspace_version() -> str:
     raise RuntimeError("workspace.package version not found")
 
 
-def normalized_version() -> str:
-    raw = os.environ.get("OXIDETERM_VERSION") or workspace_version()
+def raw_release_version() -> str:
+    return os.environ.get("OXIDETERM_VERSION") or workspace_version()
+
+
+def normalized_version(raw: str) -> str:
     for prefix in ("refs/tags/", "native-v", "gpui-v", "v"):
         if raw.startswith(prefix):
             raw = raw[len(prefix) :]
     return raw
+
+
+def release_channel(raw: str, version: str) -> str:
+    raw_lower = raw.lower()
+    version_lower = version.lower()
+    if raw_lower.startswith("gpui-v") or "gpui-preview" in version_lower:
+        return "gpui-preview"
+    if raw_lower.startswith("native-v") or "native-preview" in version_lower or "rustnative-preview" in version_lower:
+        return "native-preview"
+    if "-" in version:
+        return "preview"
+    return "stable"
+
+
+def release_identity(raw: str, version: str) -> ReleaseIdentity:
+    channel = release_channel(raw, version)
+    if channel == "stable":
+        return ReleaseIdentity(
+            channel=channel,
+            app_name=BASE_APP_NAME,
+            app_identifier=STABLE_APP_IDENTIFIER,
+            windows_install_dir=rf"$LOCALAPPDATA\Programs\{BASE_APP_NAME}",
+            windows_registry_key=BASE_APP_NAME,
+            windows_uninstall_key=BASE_APP_NAME,
+            linux_package_name="oxideterm",
+            linux_install_dir="oxideterm",
+            linux_desktop_id=STABLE_APP_IDENTIFIER,
+            linux_icon_name="oxideterm",
+        )
+
+    if channel == "gpui-preview":
+        suffix = "GPUI Preview"
+        app_name = f"{BASE_APP_NAME} {suffix}"
+        return ReleaseIdentity(
+            channel=channel,
+            app_name=app_name,
+            app_identifier="com.oxideterm.gpuiPreview",
+            windows_install_dir=rf"$LOCALAPPDATA\Programs\{app_name}",
+            windows_registry_key=app_name,
+            windows_uninstall_key=app_name,
+            linux_package_name="oxideterm-gpui-preview",
+            linux_install_dir="oxideterm-gpui-preview",
+            linux_desktop_id="com.oxideterm.gpuiPreview",
+            linux_icon_name="oxideterm-gpui-preview",
+        )
+
+    app_name = f"{BASE_APP_NAME} Preview"
+    return ReleaseIdentity(
+        channel=channel,
+        app_name=app_name,
+        app_identifier="com.oxideterm.preview",
+        windows_install_dir=rf"$LOCALAPPDATA\Programs\{app_name}",
+        windows_registry_key=app_name,
+        windows_uninstall_key=app_name,
+        linux_package_name="oxideterm-preview",
+        linux_install_dir="oxideterm-preview",
+        linux_desktop_id="com.oxideterm.preview",
+        linux_icon_name="oxideterm-preview",
+    )
 
 
 def target_label(triple: str) -> str:
@@ -105,10 +182,6 @@ def copy_runtime_resources(dst: Path, target: str) -> None:
     if not cli_source.exists():
         raise FileNotFoundError(f"target CLI resource directory not found: {cli_source}")
     copy_tree(cli_source, dst / "cli-bin" / target)
-
-
-def windows_program_files_dir() -> str:
-    return r"$LOCALAPPDATA\Programs\OxideTerm"
 
 
 def nsis_path(path: Path) -> str:
@@ -223,7 +296,9 @@ def stage_windows_installer_root(binary: Path, target: str, version: str, label:
     return installer_root
 
 
-def create_windows_installer(binary: Path, target: str, version: str, label: str) -> None:
+def create_windows_installer(
+    binary: Path, target: str, version: str, label: str, identity: ReleaseIdentity
+) -> None:
     makensis = find_makensis()
     if not makensis:
         raise RuntimeError("makensis not found; install NSIS before packaging Windows installers")
@@ -234,19 +309,19 @@ def create_windows_installer(binary: Path, target: str, version: str, label: str
     icon_path = RESOURCE_DIR / "icons" / "icon.ico"
 
     # The NSIS package mirrors Tauri's current-user install mode while keeping
-    # the native resource layout intact under the installed application folder.
+    # each native release channel isolated in its own registry/install scope.
     script = f"""
 Unicode true
 RequestExecutionLevel user
 !include MUI2.nsh
 
-Name "{APP_NAME}"
+Name "{identity.app_name}"
 OutFile "{nsis_path(installer_path)}"
-InstallDir "{windows_program_files_dir()}"
-InstallDirRegKey HKCU "Software\\{APP_NAME}" "InstallDir"
+InstallDir "{identity.windows_install_dir}"
+InstallDirRegKey HKCU "Software\\{identity.windows_registry_key}" "InstallDir"
 Icon "{nsis_path(icon_path)}"
 UninstallIcon "{nsis_path(icon_path)}"
-BrandingText "{APP_NAME}"
+BrandingText "{identity.app_name}"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -260,20 +335,20 @@ Section "Install"
   SetOutPath "$INSTDIR"
   File /r "{nsis_path(installer_root)}\\*"
   WriteUninstaller "$INSTDIR\\Uninstall.exe"
-  WriteRegStr HKCU "Software\\{APP_NAME}" "InstallDir" "$INSTDIR"
-  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "DisplayName" "{APP_NAME}"
-  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "DisplayVersion" "{nsis_string(version)}"
-  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "Publisher" "AnalyseDeCircuit"
-  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}" "UninstallString" "$INSTDIR\\Uninstall.exe"
-  CreateDirectory "$SMPROGRAMS\\{APP_NAME}"
-  CreateShortcut "$SMPROGRAMS\\{APP_NAME}\\{APP_NAME}.lnk" "$INSTDIR\\{binary.name}"
+  WriteRegStr HKCU "Software\\{identity.windows_registry_key}" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "DisplayName" "{identity.app_name}"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "DisplayVersion" "{nsis_string(version)}"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "Publisher" "AnalyseDeCircuit"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "UninstallString" "$INSTDIR\\Uninstall.exe"
+  CreateDirectory "$SMPROGRAMS\\{identity.app_name}"
+  CreateShortcut "$SMPROGRAMS\\{identity.app_name}\\{identity.app_name}.lnk" "$INSTDIR\\{binary.name}" "" "$INSTDIR\\resources\\icons\\icon.ico"
 SectionEnd
 
 Section "Uninstall"
-  Delete "$SMPROGRAMS\\{APP_NAME}\\{APP_NAME}.lnk"
-  RMDir "$SMPROGRAMS\\{APP_NAME}"
-  DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{APP_NAME}"
-  DeleteRegKey HKCU "Software\\{APP_NAME}"
+  Delete "$SMPROGRAMS\\{identity.app_name}\\{identity.app_name}.lnk"
+  RMDir "$SMPROGRAMS\\{identity.app_name}"
+  DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}"
+  DeleteRegKey HKCU "Software\\{identity.windows_registry_key}"
   RMDir /r "$INSTDIR"
 SectionEnd
 """.strip()
@@ -283,8 +358,10 @@ SectionEnd
     script_path.unlink(missing_ok=True)
 
 
-def create_macos_app(binary: Path, target: str, version: str, label: str) -> None:
-    app_dir = DIST_DIR / f"{APP_NAME}.app"
+def create_macos_app(
+    binary: Path, target: str, version: str, label: str, identity: ReleaseIdentity
+) -> None:
+    app_dir = DIST_DIR / f"{identity.app_name}.app"
     if app_dir.exists():
         shutil.rmtree(app_dir)
 
@@ -302,12 +379,12 @@ def create_macos_app(binary: Path, target: str, version: str, label: str) -> Non
 
     plist = {
         "CFBundleDevelopmentRegion": "en",
-        "CFBundleDisplayName": APP_NAME,
+        "CFBundleDisplayName": identity.app_name,
         "CFBundleExecutable": APP_BIN,
         "CFBundleIconFile": "icon.icns",
-        "CFBundleIdentifier": APP_IDENTIFIER,
+        "CFBundleIdentifier": identity.app_identifier,
         "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleName": APP_NAME,
+        "CFBundleName": identity.app_name,
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": version,
         "CFBundleVersion": version,
@@ -324,14 +401,14 @@ def create_macos_app(binary: Path, target: str, version: str, label: str) -> Non
         if dmg_root.exists():
             shutil.rmtree(dmg_root)
         dmg_root.mkdir()
-        shutil.copytree(app_dir, dmg_root / f"{APP_NAME}.app")
+        shutil.copytree(app_dir, dmg_root / f"{identity.app_name}.app")
         (dmg_root / "Applications").symlink_to("/Applications")
         run(
             [
                 "hdiutil",
                 "create",
                 "-volname",
-                APP_NAME,
+                identity.app_name,
                 "-srcfolder",
                 str(dmg_root),
                 "-ov",
@@ -345,10 +422,179 @@ def create_macos_app(binary: Path, target: str, version: str, label: str) -> Non
     shutil.rmtree(app_dir)
 
 
+def linux_deb_arch(target: str) -> str:
+    mapping = {
+        "x86_64-unknown-linux-gnu": "amd64",
+        "aarch64-unknown-linux-gnu": "arm64",
+    }
+    if target not in mapping:
+        raise RuntimeError(f"unsupported Linux deb target: {target}")
+    return mapping[target]
+
+
+def linux_deb_version(version: str) -> str:
+    # Debian treats '-' as the Debian revision separator. Preview semver tags
+    # use '-' inside the upstream version, so store them as '~' for valid
+    # package metadata while keeping release asset filenames unchanged.
+    return version.replace("-", "~")
+
+
+def linux_appimage_arch(target: str) -> str:
+    mapping = {
+        "x86_64-unknown-linux-gnu": "x86_64",
+        "aarch64-unknown-linux-gnu": "aarch64",
+    }
+    if target not in mapping:
+        raise RuntimeError(f"unsupported Linux AppImage target: {target}")
+    return mapping[target]
+
+
+def write_linux_desktop_file(path: Path, identity: ReleaseIdentity, exec_value: str) -> None:
+    # The desktop id and icon name are channel-specific so preview installs do
+    # not overwrite the future stable Linux desktop entry.
+    path.write_text(
+        "\n".join(
+            [
+                "[Desktop Entry]",
+                "Type=Application",
+                f"Name={identity.app_name}",
+                f"Exec={exec_value} %U",
+                f"Icon={identity.linux_icon_name}",
+                "Terminal=false",
+                "Categories=Development;TerminalEmulator;Network;",
+                "StartupNotify=true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def copy_linux_icons(root: Path, identity: ReleaseIdentity) -> None:
+    icon_sources = {
+        "32x32": "32x32.png",
+        "64x64": "64x64.png",
+        "128x128": "128x128.png",
+        "256x256": "128x128@2x.png",
+    }
+    for size, source_name in icon_sources.items():
+        icon_dir = root / "usr" / "share" / "icons" / "hicolor" / size / "apps"
+        icon_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(
+            RESOURCE_DIR / "icons" / source_name,
+            icon_dir / f"{identity.linux_icon_name}.png",
+        )
+
+
+def create_linux_appimage(
+    binary: Path, target: str, version: str, label: str, identity: ReleaseIdentity
+) -> None:
+    appimagetool = shutil.which("appimagetool")
+    if not appimagetool:
+        raise RuntimeError("appimagetool not found; install AppImage tooling before packaging Linux")
+
+    appdir = DIST_DIR / f"appimage-{label}"
+    if appdir.exists():
+        shutil.rmtree(appdir)
+
+    usr_bin = appdir / "usr" / "bin"
+    usr_bin.mkdir(parents=True)
+    app_binary = usr_bin / APP_BIN
+    shutil.copy2(binary, app_binary)
+    make_executable(app_binary)
+    copy_runtime_resources(usr_bin / "resources", target)
+
+    applications_dir = appdir / "usr" / "share" / "applications"
+    applications_dir.mkdir(parents=True)
+    desktop_name = f"{identity.linux_desktop_id}.desktop"
+    write_linux_desktop_file(applications_dir / desktop_name, identity, APP_BIN)
+    shutil.copy2(applications_dir / desktop_name, appdir / desktop_name)
+
+    shutil.copy2(
+        RESOURCE_DIR / "icons" / "128x128.png",
+        appdir / f"{identity.linux_icon_name}.png",
+    )
+    copy_linux_icons(appdir, identity)
+
+    apprun = appdir / "AppRun"
+    # AppImage launches from a mounted runtime, so resources must stay adjacent
+    # to the binary under usr/bin for the native resource resolvers.
+    apprun.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                'APPDIR="${APPDIR:-$(dirname "$(readlink -f "$0")")}"',
+                f'exec "$APPDIR/usr/bin/{APP_BIN}" "$@"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    make_executable(apprun)
+
+    output = DIST_DIR / f"OxideTerm_{version}_{label}.AppImage"
+    env = os.environ.copy()
+    env["ARCH"] = linux_appimage_arch(target)
+    env.setdefault("APPIMAGE_EXTRACT_AND_RUN", "1")
+    run([appimagetool, str(appdir), str(output)], env=env)
+    shutil.rmtree(appdir)
+
+
+def create_linux_deb(
+    binary: Path, target: str, version: str, label: str, identity: ReleaseIdentity
+) -> None:
+    if not shutil.which("dpkg-deb"):
+        raise RuntimeError("dpkg-deb not found; install dpkg before packaging Linux deb")
+
+    deb_root = DIST_DIR / f"deb-{label}"
+    if deb_root.exists():
+        shutil.rmtree(deb_root)
+
+    app_root = deb_root / "opt" / identity.linux_install_dir
+    app_root.mkdir(parents=True)
+    app_binary = app_root / APP_BIN
+    shutil.copy2(binary, app_binary)
+    make_executable(app_binary)
+    copy_runtime_resources(app_root / "resources", target)
+    for name in ("LICENSE", "NOTICE", "README.md"):
+        shutil.copy2(ROOT_DIR / name, app_root / name)
+
+    applications_dir = deb_root / "usr" / "share" / "applications"
+    applications_dir.mkdir(parents=True)
+    write_linux_desktop_file(
+        applications_dir / f"{identity.linux_desktop_id}.desktop",
+        identity,
+        f"/opt/{identity.linux_install_dir}/{APP_BIN}",
+    )
+    copy_linux_icons(deb_root, identity)
+
+    control_dir = deb_root / "DEBIAN"
+    control_dir.mkdir(parents=True)
+    # Keep dependencies intentionally small; GPUI links the native libraries
+    # through the CI image while the application resources stay self-contained.
+    control = f"""Package: {identity.linux_package_name}
+Version: {linux_deb_version(version)}
+Section: utils
+Priority: optional
+Architecture: {linux_deb_arch(target)}
+Maintainer: AnalyseDeCircuit <noreply@oxideterm.app>
+Depends: libc6 (>= 2.31), libgcc-s1
+Description: OxideTerm native SSH workspace
+ Local-first SSH workspace with terminal, SFTP, port forwarding, and AI context.
+"""
+    (control_dir / "control").write_text(control, encoding="utf-8")
+
+    output = DIST_DIR / f"OxideTerm_{version}_{label}.deb"
+    run(["dpkg-deb", "--build", "--root-owner-group", str(deb_root), str(output)])
+    shutil.rmtree(deb_root)
+
+
 def main() -> None:
     target_was_explicit = len(sys.argv) > 1 and sys.argv[1] != ""
     target = sys.argv[1] if target_was_explicit else host_triple()
-    version = normalized_version()
+    raw_version = raw_release_version()
+    version = normalized_version(raw_version)
+    identity = release_identity(raw_version, version)
     label = target_label(target)
 
     os.environ.setdefault("CLANG_MODULE_CACHE_PATH", str(ROOT_DIR / "target" / "clang-module-cache"))
@@ -358,15 +604,21 @@ def main() -> None:
         shutil.rmtree(DIST_DIR)
     DIST_DIR.mkdir()
 
-    print(f"==> Packaging {APP_NAME} {version} for {target}", flush=True)
+    print(
+        f"==> Packaging {identity.app_name} {version} ({identity.channel}) for {target}",
+        flush=True,
+    )
     build_cli(target, target_was_explicit)
     app_binary = build_app(target, target_was_explicit)
     if "windows" in target:
-        create_windows_installer(app_binary, target, version, label)
+        create_windows_installer(app_binary, target, version, label, identity)
     else:
         create_portable_package(app_binary, target, version, label)
     if "apple-darwin" in target:
-        create_macos_app(app_binary, target, version, label)
+        create_macos_app(app_binary, target, version, label, identity)
+    if "linux" in target:
+        create_linux_appimage(app_binary, target, version, label, identity)
+        create_linux_deb(app_binary, target, version, label, identity)
 
     print("==> Package artifacts", flush=True)
     for path in sorted(DIST_DIR.iterdir()):

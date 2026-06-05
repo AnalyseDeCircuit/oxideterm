@@ -81,7 +81,23 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/install-linux-deps
         with:
-          extra_packages: 'curl file patchelf'
+          extra_packages: 'curl file patchelf desktop-file-utils'
+
+      - name: Install Linux AppImage tooling
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu) appimage_arch="x86_64" ;;
+            aarch64-unknown-linux-gnu) appimage_arch="aarch64" ;;
+            *) echo "Unsupported AppImage target: ${{ matrix.target }}" >&2; exit 1 ;;
+          esac
+          curl -L --retry 3 \
+            -o appimagetool \
+            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${appimage_arch}.AppImage"
+          chmod +x appimagetool
+          sudo mv appimagetool /usr/local/bin/appimagetool
 
       - name: Install Windows system dependencies
         if: runner.os == 'Windows'
@@ -91,6 +107,7 @@ jobs:
       - name: Package native app
         env:
           OXIDETERM_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+          APPIMAGE_EXTRACT_AND_RUN: ${{ runner.os == 'Linux' && '1' || '' }}
         run: python scripts/package_native.py ${{ matrix.target }}
 
       - name: Upload workflow artifact
@@ -103,6 +120,8 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
           if-no-files-found: error
 
   release:
@@ -172,7 +191,9 @@ jobs:
             -name '*.dmg' -o \
             -name '*.tar.gz' -o \
             -name '*.zip' -o \
-            -name '*.exe' \
+            -name '*.exe' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' \
           \) | sort -u)
 
           if [[ "${#assets[@]}" -eq 0 ]]; then
@@ -191,6 +212,27 @@ jobs:
             fi
           done
 
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t checksum_assets < <(find dist-release -maxdepth 1 -type f \( \
+            -name '*.app.zip' -o \
+            -name '*.dmg' -o \
+            -name '*.tar.gz' -o \
+            -name '*.zip' -o \
+            -name '*.exe' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' \
+          \) | sort -u)
+
+          if [[ "${#checksum_assets[@]}" -eq 0 ]]; then
+            echo "No native release assets found for checksum generation." >&2
+            exit 1
+          fi
+
+          (cd dist-release && sha256sum "${checksum_assets[@]/#dist-release\//}" > sha256sums.txt)
+
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -200,7 +242,10 @@ jobs:
             dist-release/*.tar.gz
             dist-release/*.zip
             dist-release/*.exe
+            dist-release/*.AppImage
+            dist-release/*.deb
             dist-release/*.sig
+            dist-release/sha256sums.txt
           tag_name: ${{ steps.release_meta.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: OxideTerm Native ${{ steps.release_meta.outputs.version }}
@@ -268,12 +313,28 @@ jobs:
               `OxideTerm_${version}_macos_x64.app.zip`,
             );
             await addAsset(
-              ['linux-aarch64', 'aarch64-unknown-linux-gnu'],
+              ['linux-aarch64', 'linux-aarch64-appimage', 'aarch64-unknown-linux-gnu'],
+              `OxideTerm_${version}_linux_arm64.AppImage`,
+            );
+            await addAsset(
+              ['linux-x86_64', 'linux-x86_64-appimage', 'x86_64-unknown-linux-gnu'],
+              `OxideTerm_${version}_linux_x64.AppImage`,
+            );
+            await addAsset(
+              ['linux-aarch64-portable'],
               `OxideTerm_${version}_linux_arm64_portable.tar.gz`,
             );
             await addAsset(
-              ['linux-x86_64', 'x86_64-unknown-linux-gnu'],
+              ['linux-x86_64-portable'],
               `OxideTerm_${version}_linux_x64_portable.tar.gz`,
+            );
+            await addAsset(
+              ['linux-aarch64-deb'],
+              `OxideTerm_${version}_linux_arm64.deb`,
+            );
+            await addAsset(
+              ['linux-x86_64-deb'],
+              `OxideTerm_${version}_linux_x64.deb`,
             );
             await addAsset(
               ['windows-aarch64', 'aarch64-pc-windows-msvc'],
@@ -431,3 +492,75 @@ jobs:
               });
             }
             core.info(`Deleted ${sigAssets.length} signature helper asset(s).`);
+
+  validate-release-assets:
+    name: Validate release assets
+    needs:
+      - release
+      - publish-updater
+      - cleanup-sigs
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.upload_release)
+    permissions:
+      contents: read
+    steps:
+      - name: Check final release asset set
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const version = process.env.RELEASE_VERSION;
+
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag,
+            });
+
+            const names = new Set(release.assets.map((asset) => asset.name));
+            const expected = [
+              'latest.json',
+              'sha256sums.txt',
+              `OxideTerm_${version}_macos_arm64.app.zip`,
+              `OxideTerm_${version}_macos_arm64.dmg`,
+              `OxideTerm_${version}_macos_arm64_portable.tar.gz`,
+              `OxideTerm_${version}_macos_x64.app.zip`,
+              `OxideTerm_${version}_macos_x64.dmg`,
+              `OxideTerm_${version}_macos_x64_portable.tar.gz`,
+              `OxideTerm_${version}_linux_arm64.AppImage`,
+              `OxideTerm_${version}_linux_arm64.deb`,
+              `OxideTerm_${version}_linux_arm64_portable.tar.gz`,
+              `OxideTerm_${version}_linux_x64.AppImage`,
+              `OxideTerm_${version}_linux_x64.deb`,
+              `OxideTerm_${version}_linux_x64_portable.tar.gz`,
+              `OxideTerm_${version}_windows_arm64-setup.exe`,
+              `OxideTerm_${version}_windows_x64-setup.exe`,
+            ];
+
+            const missing = expected.filter((name) => !names.has(name));
+            if (missing.length > 0) {
+              throw new Error(`Release ${tag} is missing asset(s): ${missing.join(', ')}`);
+            }
+
+            const leakedSigs = [...names].filter((name) => name.endsWith('.sig'));
+            if (leakedSigs.length > 0) {
+              throw new Error(`Release ${tag} still exposes signature helper asset(s): ${leakedSigs.join(', ')}`);
+            }
+
+            const checksumAsset = release.assets.find((asset) => asset.name === 'sha256sums.txt');
+            const response = await fetch(checksumAsset.browser_download_url);
+            if (!response.ok) {
+              throw new Error(`failed to download sha256sums.txt: HTTP ${response.status}`);
+            }
+            const checksumText = await response.text();
+            const checksumMissing = expected
+              .filter((name) => name !== 'latest.json' && name !== 'sha256sums.txt')
+              .filter((name) => !checksumText.includes(`  ${name}`));
+            if (checksumMissing.length > 0) {
+              throw new Error(`sha256sums.txt is missing asset checksum(s): ${checksumMissing.join(', ')}`);
+            }
+
+            core.info(`Validated ${expected.length} release asset(s) for ${tag}.`);
