@@ -14,6 +14,9 @@ pub enum PrivilegePromptMatch {
         credential_id: String,
         prompt_text: String,
     },
+    GenericPassword {
+        prompt_text: String,
+    },
 }
 
 pub fn detect_privilege_prompt(text: &str) -> Option<PrivilegePromptMatch> {
@@ -42,28 +45,16 @@ pub fn detect_privilege_prompt(text: &str) -> Option<PrivilegePromptMatch> {
         });
     }
 
-    if is_generic_password_prompt(line)
-        && let Some(command) = recent_privilege_command(tail)
-    {
-        return Some(match command {
-            RecentPrivilegeCommand::Sudo => PrivilegePromptMatch::Sudo {
-                username: None,
-                prompt_text: line.to_string(),
-            },
-            RecentPrivilegeCommand::Su => PrivilegePromptMatch::Su {
-                target_user: None,
-                prompt_text: line.to_string(),
-            },
+    if is_generic_password_prompt(line) {
+        // Plain terminal output has no trustworthy command metadata. Treat a
+        // bare password prompt as a sensitive-input opportunity, but leave
+        // credential selection to explicit user clicks in the scoped UI.
+        return Some(PrivilegePromptMatch::GenericPassword {
+            prompt_text: line.to_string(),
         });
     }
 
     None
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RecentPrivilegeCommand {
-    Sudo,
-    Su,
 }
 
 fn tail_chars(text: &str, max_chars: usize) -> &str {
@@ -127,26 +118,6 @@ fn looks_like_password_result(line: &str) -> bool {
     has_password && has_result
 }
 
-fn recent_privilege_command(tail: &str) -> Option<RecentPrivilegeCommand> {
-    tail.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .rev()
-        .skip(1)
-        .take(5)
-        .find_map(line_privilege_command)
-}
-
-fn line_privilege_command(line: &str) -> Option<RecentPrivilegeCommand> {
-    // Prompt-themed shells often prefix commands with glyphs. Scan tokens in
-    // order so `sudo su` is treated as the sudo prompt that asked first.
-    line.split_whitespace().find_map(|token| match token {
-        "sudo" => Some(RecentPrivilegeCommand::Sudo),
-        "su" => Some(RecentPrivilegeCommand::Su),
-        _ => None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,36 +169,37 @@ mod tests {
     }
 
     #[test]
-    fn detects_generic_password_prompt_only_after_privilege_command() {
+    fn detects_generic_password_prompts_without_command_guessing() {
         assert_eq!(
             detect_privilege_prompt("❯ sudo yazi\nPassword:"),
-            Some(PrivilegePromptMatch::Sudo {
-                username: None,
+            Some(PrivilegePromptMatch::GenericPassword {
                 prompt_text: "Password:".to_string(),
             })
         );
         assert_eq!(
             detect_privilege_prompt("❯ sudo yazi\n密码："),
-            Some(PrivilegePromptMatch::Sudo {
-                username: None,
+            Some(PrivilegePromptMatch::GenericPassword {
                 prompt_text: "密码：".to_string(),
             })
         );
         assert_eq!(
             detect_privilege_prompt("su - root\nPassword:"),
-            Some(PrivilegePromptMatch::Su {
-                target_user: None,
+            Some(PrivilegePromptMatch::GenericPassword {
                 prompt_text: "Password:".to_string(),
             })
         );
         assert_eq!(
             detect_privilege_prompt("su - root\n密码："),
-            Some(PrivilegePromptMatch::Su {
-                target_user: None,
+            Some(PrivilegePromptMatch::GenericPassword {
                 prompt_text: "密码：".to_string(),
             })
         );
-        assert_eq!(detect_privilege_prompt("mysql login\nPassword:"), None);
+        assert_eq!(
+            detect_privilege_prompt("mysql login\nPassword:"),
+            Some(PrivilegePromptMatch::GenericPassword {
+                prompt_text: "Password:".to_string(),
+            })
+        );
     }
 
     #[test]

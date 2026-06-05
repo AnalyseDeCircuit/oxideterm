@@ -78,6 +78,14 @@ fn privilege_credential_matches_prompt(
                 || privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
         }
         PrivilegePromptMatch::Custom { credential_id, .. } => credential.id == *credential_id,
+        PrivilegePromptMatch::GenericPassword { .. } => match credential.kind {
+            // Bare `Password:` carries no reliable sudo/su identity. Offer only
+            // scoped, click-to-send candidates and never infer a command kind.
+            PrivilegeCredentialKind::SudoPassword | PrivilegeCredentialKind::SuPassword => true,
+            PrivilegeCredentialKind::CustomPrompt => {
+                privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
+            }
+        },
     }
 }
 
@@ -88,7 +96,8 @@ fn privilege_prompt_matches_custom_patterns(
     let prompt_text = match prompt {
         PrivilegePromptMatch::Sudo { prompt_text, .. }
         | PrivilegePromptMatch::Su { prompt_text, .. }
-        | PrivilegePromptMatch::Custom { prompt_text, .. } => prompt_text,
+        | PrivilegePromptMatch::Custom { prompt_text, .. }
+        | PrivilegePromptMatch::GenericPassword { prompt_text } => prompt_text,
     }
     .to_ascii_lowercase();
     patterns
@@ -1322,23 +1331,36 @@ mod privilege_prompt_helper_tests {
     }
 
     #[test]
-    fn generic_sudo_prompt_matches_username_hinted_credential() {
-        let credentials = vec![saved_privilege_credential(
-            "local-sudo",
-            PrivilegeCredentialKind::SudoPassword,
-            Some("dominical"),
-        )];
-        let state =
-            build_privilege_prompt_helper_state("local-shell:default".to_string(), &credentials, "❯ sudo yazi\nPassword:")
-                .expect("macOS sudo prompt should create fill matches");
+    fn generic_password_prompt_offers_scoped_click_only_candidates() {
+        let credentials = vec![
+            saved_privilege_credential(
+                "local-sudo",
+                PrivilegeCredentialKind::SudoPassword,
+                Some("dominical"),
+            ),
+            saved_privilege_credential("local-su", PrivilegeCredentialKind::SuPassword, None),
+        ];
+        let state = build_privilege_prompt_helper_state(
+            "local-shell:default".to_string(),
+            &credentials,
+            "mysql login\nPassword:",
+        )
+        .expect("generic password prompt should create explicit-click matches");
 
         assert_eq!(
             state.matches,
-            vec![MatchedPrivilegeCredential {
-                connection_id: "local-shell:default".to_string(),
-                credential_id: "local-sudo".to_string(),
-                label: "local-sudo".to_string(),
-            }]
+            vec![
+                MatchedPrivilegeCredential {
+                    connection_id: "local-shell:default".to_string(),
+                    credential_id: "local-sudo".to_string(),
+                    label: "local-sudo".to_string(),
+                },
+                MatchedPrivilegeCredential {
+                    connection_id: "local-shell:default".to_string(),
+                    credential_id: "local-su".to_string(),
+                    label: "local-su".to_string(),
+                },
+            ]
         );
     }
 }
