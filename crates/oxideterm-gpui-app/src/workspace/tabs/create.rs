@@ -302,10 +302,12 @@ impl WorkspaceApp {
                         && snapshot.config.port == connection.port
                         && snapshot.config.username == connection.username
                 });
-            (matching_root
-                && node.readiness == NodeReadiness::Ready
-                && !node.terminal_ids.is_empty())
-            .then_some(node.terminal_ids[0])
+            // `then_some` evaluates its argument eagerly. Use `first()` so a
+            // ready node without attached terminals can be skipped instead of
+            // indexing an empty terminal list during startup/event handling.
+            (matching_root && node.readiness == NodeReadiness::Ready)
+                .then(|| node.terminal_ids.first().copied())
+                .flatten()
         }) else {
             return false;
         };

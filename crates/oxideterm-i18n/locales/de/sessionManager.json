@@ -154,6 +154,34 @@
       "open_failed": "Failed to open serial profile",
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
+    },
+    "privilege_credentials": {
+      "title": "Privileg-Anmeldedaten",
+      "description": "Separate Anmeldedaten für sudo/su-Prompts speichern. Secrets bleiben im System-Schlüsselbund und werden erst nach Klick auf die Terminal-Hilfe gelesen.",
+      "duplicate_hint": "Privileg-Anmeldedaten werden beim Duplizieren einer Verbindung nicht kopiert. Speichere die Kopie zuerst und füge sie danach hinzu.",
+      "new": "Neu",
+      "empty": "Keine Privileg-Anmeldedaten gespeichert.",
+      "edit": "Bearbeiten",
+      "delete": "Löschen",
+      "label": "Label",
+      "label_placeholder": "sudo-Passwort",
+      "kind_label": "Typ",
+      "username_hint": "Benutzerhinweis",
+      "secret": "Secret",
+      "secret_placeholder": "Zu speicherndes Passwort eingeben",
+      "secret_keep_placeholder": "Leer lassen, um das vorhandene Secret zu behalten",
+      "prompt_patterns": "Prompt-Muster",
+      "prompt_patterns_placeholder": "Ein Muster pro Zeile",
+      "prompt_patterns_hint": "Benutzerdefinierte Prompts passen auf diese Textfragmente. Eingebaute sudo/su-Prompts verwenden sichere Standardwerte.",
+      "enabled": "Aktiviert",
+      "cancel_edit": "Bearbeitung abbrechen",
+      "saving": "Speichert...",
+      "save": "Anmeldedaten speichern",
+      "kind": {
+        "sudo_password": "sudo-Passwort",
+        "su_password": "su-Passwort",
+        "custom_prompt": "Benutzerdefinierter Prompt"
+      }
     }
   }
 }

@@ -213,6 +213,14 @@ fn collect_connection_keychain_ids(connection: &SavedConnection) -> Vec<String> 
     collect_keychain_ids_for_parts(&connection.auth, &connection.proxy_chain)
 }
 
+fn collect_privilege_keychain_ids(connection: &SavedConnection) -> Vec<String> {
+    connection
+        .privilege_credentials
+        .iter()
+        .filter_map(|credential| credential.keychain_id.clone())
+        .collect()
+}
+
 fn collect_keychain_ids_for_parts(auth: &SavedAuth, proxy_chain: &[SavedProxyHop]) -> Vec<String> {
     let mut ids = collect_keychain_ids_for_auth(auth);
     for hop in proxy_chain {
@@ -249,6 +257,23 @@ fn new_password_keychain_id() -> String {
 
 fn new_key_passphrase_keychain_id() -> String {
     format!("oxide_conn_key_{}", Uuid::new_v4())
+}
+
+fn privilege_keychain_id(connection_id: &str, credential_id: &str) -> String {
+    format!("privilege:v1:{connection_id}:{credential_id}")
+}
+
+fn default_privilege_prompt_patterns(kind: PrivilegeCredentialKind) -> Vec<String> {
+    match kind {
+        PrivilegeCredentialKind::SudoPassword => vec![
+            "[sudo] password for".to_string(),
+            "sudo password".to_string(),
+        ],
+        PrivilegeCredentialKind::SuPassword => {
+            vec!["Password:".to_string(), "su: Password:".to_string()]
+        }
+        PrivilegeCredentialKind::CustomPrompt => Vec::new(),
+    }
 }
 
 fn matching_key_passphrase_id(auth: Option<&SavedAuth>, key_path: &str) -> Option<String> {

@@ -128,6 +128,7 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
         color: None,
         tags: vec![SSH_CONFIG_TAG.to_string()],
         post_connect_command: None,
+        privilege_credentials: Vec::new(),
     })
 }
 

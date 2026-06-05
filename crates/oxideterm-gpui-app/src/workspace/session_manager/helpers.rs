@@ -385,6 +385,7 @@ pub(super) fn form_from_saved_connection(
         color: conn.color.clone().unwrap_or_default(),
         tags: conn.tags.clone(),
         post_connect_command: conn.post_connect_command().unwrap_or_default().to_string(),
+        privilege_credentials: conn.privilege_credentials.clone(),
         agent_forwarding: conn.options.agent_forwarding,
         save_connection: true,
         error,

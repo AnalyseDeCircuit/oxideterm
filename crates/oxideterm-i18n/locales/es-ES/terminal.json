@@ -150,7 +150,16 @@
       "target_count": "Difusión activa"
     },
     "typeLocal": "LOCAL",
-    "typeSsh": "SSH"
+    "typeSsh": "SSH",
+    "privilege_helper": {
+      "fill": "Rellenar contraseña",
+      "filling": "Rellenando...",
+      "fill_title": "Rellenar {{label}}",
+      "load_failed": "No se pudo cargar la credencial de privilegios",
+      "send_failed": "No se pudo enviar la credencial de privilegios",
+      "manage": "Guardar credencial",
+      "manage_title": "Guardar una credencial privilegiada para esta conexión"
+    }
   },
   "search": {
     "placeholder": "Buscar",

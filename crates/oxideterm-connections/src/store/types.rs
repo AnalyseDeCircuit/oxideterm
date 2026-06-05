@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::{SecretString, keychain::ConnectionKeychain};
 
 pub const CONFIG_VERSION: u32 = 1;
@@ -123,6 +125,34 @@ pub struct SavedProxyHop {
     pub agent_forwarding: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivilegeCredentialKind {
+    SudoPassword,
+    SuPassword,
+    CustomPrompt,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SavedPrivilegeCredential {
+    pub id: String,
+    pub connection_id: String,
+    pub label: String,
+    pub kind: PrivilegeCredentialKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompt_patterns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keychain_id: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub require_click_to_send: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProxyHopInfo {
     pub host: String,
@@ -180,10 +210,18 @@ pub struct SavedConnection {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
+    /// Privilege helper metadata is persisted with the connection, but the
+    /// secret value lives only in the dedicated keychain namespace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub privilege_credentials: Vec<SavedPrivilegeCredential>,
 }
 
 fn default_port() -> u16 {
     22
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_config_version() -> u32 {
@@ -225,6 +263,41 @@ pub struct ConnectionInfo {
     pub agent_forwarding: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct SavePrivilegeCredentialRequest {
+    pub connection_id: String,
+    pub credential_id: Option<String>,
+    pub label: String,
+    pub kind: PrivilegeCredentialKind,
+    pub username_hint: Option<String>,
+    pub prompt_patterns: Vec<String>,
+    /// UI drafts become SecretString at the store boundary. The value is stored
+    /// in keychain and never serialized into SavedConnection.
+    pub secret: Option<SecretString>,
+    pub enabled: bool,
+    pub require_click_to_send: bool,
+}
+
+impl fmt::Debug for SavePrivilegeCredentialRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // This request crosses the UI-to-store secret boundary. Keep Debug
+        // useful for metadata while never depending on SecretString internals
+        // to redact the cleartext privilege credential.
+        formatter
+            .debug_struct("SavePrivilegeCredentialRequest")
+            .field("connection_id", &self.connection_id)
+            .field("credential_id", &self.credential_id)
+            .field("label", &self.label)
+            .field("kind", &self.kind)
+            .field("username_hint", &self.username_hint)
+            .field("prompt_patterns", &self.prompt_patterns)
+            .field("secret", &self.secret.as_ref().map(|_| "[redacted secret]"))
+            .field("enabled", &self.enabled)
+            .field("require_click_to_send", &self.require_click_to_send)
+            .finish()
+    }
 }
 
 impl From<&SavedConnection> for ConnectionInfo {
@@ -500,6 +573,7 @@ pub struct ConnectionStore {
     storage_format: ConnectionStoreStorageFormat,
     keychain: ConnectionKeychain,
     managed_keychain: ConnectionKeychain,
+    privilege_keychain: ConnectionKeychain,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

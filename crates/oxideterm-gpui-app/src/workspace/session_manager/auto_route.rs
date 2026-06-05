@@ -1213,6 +1213,7 @@ mod auto_route_tests {
             color: None,
             tags: Vec::new(),
             post_connect_command: None,
+            privilege_credentials: Vec::new(),
         }
     }
 }

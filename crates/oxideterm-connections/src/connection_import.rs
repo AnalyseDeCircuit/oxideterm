@@ -681,6 +681,7 @@ fn imported_draft_to_saved_connection(
         color: None,
         tags: draft.tags.clone(),
         post_connect_command: None,
+        privilege_credentials: Vec::new(),
     }
 }
 

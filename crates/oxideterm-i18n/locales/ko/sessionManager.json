@@ -154,6 +154,34 @@
       "open_failed": "Failed to open serial profile",
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
+    },
+    "privilege_credentials": {
+      "title": "권한 자격 증명",
+      "description": "sudo/su 프롬프트용 자격 증명을 별도로 저장합니다. 비밀 값은 시스템 키체인에 남아 있으며 터미널 도우미를 클릭한 후에만 읽습니다.",
+      "duplicate_hint": "연결을 복제할 때 권한 자격 증명은 복사되지 않습니다. 먼저 복제본을 저장한 뒤 추가하세요.",
+      "new": "새로 만들기",
+      "empty": "저장된 권한 자격 증명이 없습니다.",
+      "edit": "편집",
+      "delete": "삭제",
+      "label": "라벨",
+      "label_placeholder": "sudo 비밀번호",
+      "kind_label": "유형",
+      "username_hint": "사용자 힌트",
+      "secret": "비밀 값",
+      "secret_placeholder": "저장할 비밀번호 입력",
+      "secret_keep_placeholder": "기존 비밀 값을 유지하려면 비워 두세요",
+      "prompt_patterns": "프롬프트 패턴",
+      "prompt_patterns_placeholder": "한 줄에 하나의 패턴",
+      "prompt_patterns_hint": "사용자 지정 프롬프트는 이 텍스트 조각과 일치합니다. 내장 sudo/su 프롬프트도 안전한 기본값을 사용합니다.",
+      "enabled": "사용",
+      "cancel_edit": "편집 취소",
+      "saving": "저장 중...",
+      "save": "자격 증명 저장",
+      "kind": {
+        "sudo_password": "sudo 비밀번호",
+        "su_password": "su 비밀번호",
+        "custom_prompt": "사용자 지정 프롬프트"
+      }
     }
   }
 }

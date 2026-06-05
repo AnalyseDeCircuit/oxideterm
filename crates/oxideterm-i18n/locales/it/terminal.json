@@ -150,7 +150,16 @@
       "target_count": "Broadcast attivo"
     },
     "typeLocal": "LOCALE",
-    "typeSsh": "SSH"
+    "typeSsh": "SSH",
+    "privilege_helper": {
+      "fill": "Inserisci password",
+      "filling": "Inserimento...",
+      "fill_title": "Inserisci {{label}}",
+      "load_failed": "Impossibile caricare la credenziale privilegiata",
+      "send_failed": "Impossibile inviare la credenziale privilegiata",
+      "manage": "Salva credenziale",
+      "manage_title": "Salva una credenziale privilegiata per questa connessione"
+    }
   },
   "search": {
     "placeholder": "Cerca",

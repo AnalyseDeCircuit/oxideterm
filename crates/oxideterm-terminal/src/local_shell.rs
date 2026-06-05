@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    env,
-    path::PathBuf,
-    process::Command,
-};
+use std::{collections::HashMap, env, path::PathBuf, process::Command};
 
 #[cfg(unix)]
 use std::{fs, path::Path};

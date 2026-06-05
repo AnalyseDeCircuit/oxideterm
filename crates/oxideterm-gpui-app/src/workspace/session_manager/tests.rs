@@ -322,6 +322,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             post_connect_command: None,
+            privilege_credentials: Vec::new(),
         };
 
         let config = ssh_config_from_saved_connection(&store, &conn).unwrap();
@@ -366,6 +367,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             post_connect_command: None,
+            privilege_credentials: Vec::new(),
         };
 
         let config = ssh_config_from_saved_connection(&store, &conn).unwrap();

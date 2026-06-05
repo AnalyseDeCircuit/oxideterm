@@ -150,7 +150,16 @@
       "target_count": "Transmissão ativa"
     },
     "typeLocal": "LOCAL",
-    "typeSsh": "SSH"
+    "typeSsh": "SSH",
+    "privilege_helper": {
+      "fill": "Preencher senha",
+      "filling": "Preenchendo...",
+      "fill_title": "Preencher {{label}}",
+      "load_failed": "Não foi possível carregar a credencial de privilégio",
+      "send_failed": "Não foi possível enviar a credencial de privilégio",
+      "manage": "Salvar credencial",
+      "manage_title": "Salvar uma credencial privilegiada para esta conexão"
+    }
   },
   "search": {
     "placeholder": "Buscar",

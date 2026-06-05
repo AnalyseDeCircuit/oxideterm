@@ -556,6 +556,27 @@ impl TerminalPane {
         self.send_user_protocol_bytes(bytes, cx);
     }
 
+    pub fn send_privilege_secret_input_bytes(
+        &mut self,
+        bytes: &[u8],
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if bytes.is_empty() || !self.terminal_accepts_input() {
+            return false;
+        }
+
+        // Privilege Prompt Helper writes an explicitly user-confirmed secret
+        // directly to the PTY. It must not pass through plugin interception,
+        // autosuggest/history observation, AI context, or terminal recording.
+        if self.terminal.lock().write_protocol_bytes(bytes).is_ok() {
+            self.last_terminal_input = Instant::now();
+            self.reset_cursor_blink();
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
     pub fn ai_accepts_input(&self) -> bool {
         // AI terminal tools mirror Tauri's readiness gate before reporting a
         // successful send, instead of letting a closed/non-interactive pane

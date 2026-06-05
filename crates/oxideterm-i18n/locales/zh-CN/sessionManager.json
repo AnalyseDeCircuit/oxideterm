@@ -154,6 +154,34 @@
       "open_failed": "打开串口配置失败",
       "delete_failed": "删除串口配置失败",
       "confirm_delete": "删除串口配置“{{name}}”？"
+    },
+    "privilege_credentials": {
+      "title": "提权凭据",
+      "description": "为 sudo/su 提示单独保存凭据。密码保存在系统钥匙串中，只有点击终端辅助按钮时才会读取。",
+      "duplicate_hint": "复制连接时不会复制提权凭据。请先保存副本，再添加凭据。",
+      "new": "新建",
+      "empty": "尚未保存提权凭据。",
+      "edit": "编辑",
+      "delete": "删除",
+      "label": "标签",
+      "label_placeholder": "sudo 密码",
+      "kind_label": "类型",
+      "username_hint": "用户提示",
+      "secret": "密码",
+      "secret_placeholder": "输入要保存的密码",
+      "secret_keep_placeholder": "留空以保留现有密码",
+      "prompt_patterns": "提示匹配",
+      "prompt_patterns_placeholder": "每行一个匹配片段",
+      "prompt_patterns_hint": "自定义提示会匹配这些文本片段。内置 sudo/su 提示也会使用安全默认值。",
+      "enabled": "启用",
+      "cancel_edit": "取消编辑",
+      "saving": "保存中...",
+      "save": "保存凭据",
+      "kind": {
+        "sudo_password": "sudo 密码",
+        "su_password": "su 密码",
+        "custom_prompt": "自定义提示"
+      }
     }
   }
 }

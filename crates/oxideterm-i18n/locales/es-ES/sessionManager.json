@@ -154,6 +154,34 @@
       "open_failed": "Failed to open serial profile",
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
+    },
+    "privilege_credentials": {
+      "title": "Credenciales de privilegios",
+      "description": "Guarda credenciales separadas para prompts sudo/su. Los secretos permanecen en el llavero del sistema y solo se leen tras hacer clic en el asistente del terminal.",
+      "duplicate_hint": "Las credenciales de privilegios no se copian al duplicar una conexión. Guarda el duplicado primero y añade las credenciales después.",
+      "new": "Nueva",
+      "empty": "No hay credenciales de privilegios guardadas.",
+      "edit": "Editar",
+      "delete": "Eliminar",
+      "label": "Etiqueta",
+      "label_placeholder": "contraseña sudo",
+      "kind_label": "Tipo",
+      "username_hint": "Pista de usuario",
+      "secret": "Secreto",
+      "secret_placeholder": "Introduce la contraseña a guardar",
+      "secret_keep_placeholder": "Déjalo vacío para conservar el secreto existente",
+      "prompt_patterns": "Patrones de prompt",
+      "prompt_patterns_placeholder": "Un patrón por línea",
+      "prompt_patterns_hint": "Los prompts personalizados coinciden con estos fragmentos. Los prompts sudo/su integrados usan valores seguros por defecto.",
+      "enabled": "Activado",
+      "cancel_edit": "Cancelar edición",
+      "saving": "Guardando...",
+      "save": "Guardar credencial",
+      "kind": {
+        "sudo_password": "contraseña sudo",
+        "su_password": "contraseña su",
+        "custom_prompt": "Prompt personalizado"
+      }
     }
   }
 }

@@ -4,6 +4,7 @@ impl WorkspaceApp {
             NewConnectionSelect::Group => SelectAnchorId::NewConnectionGroup,
             NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
             NewConnectionSelect::JumpManagedKey => SelectAnchorId::NewConnectionJumpManagedKey,
+            NewConnectionSelect::PrivilegeKind => SelectAnchorId::NewConnectionPrivilegeKind,
             NewConnectionSelect::SerialPort => SelectAnchorId::NewConnectionSerialPort,
             NewConnectionSelect::SerialDataBits => SelectAnchorId::NewConnectionSerialDataBits,
             NewConnectionSelect::SerialStopBits => SelectAnchorId::NewConnectionSerialStopBits,
@@ -59,6 +60,8 @@ impl WorkspaceApp {
             .remove(&SelectAnchorId::NewConnectionManagedKey);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionJumpManagedKey);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionPrivilegeKind);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionSerialPort);
         self.select_anchors
@@ -130,6 +133,21 @@ impl WorkspaceApp {
             &self.tokens,
             label,
             self.render_connection_input(value, placeholder, field, secret, cx),
+        )
+    }
+
+    fn render_connection_textarea(
+        &self,
+        label: String,
+        value: &str,
+        placeholder: String,
+        field: NewConnectionField,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            label,
+            self.render_connection_textarea_input(value, placeholder, field, cx),
         )
     }
 
@@ -285,6 +303,488 @@ impl WorkspaceApp {
         )
     }
 
+    fn privilege_kind_label(&self, kind: PrivilegeCredentialKind) -> String {
+        let key = match kind {
+            PrivilegeCredentialKind::SudoPassword => {
+                "sessionManager.privilege_credentials.kind.sudo_password"
+            }
+            PrivilegeCredentialKind::SuPassword => {
+                "sessionManager.privilege_credentials.kind.su_password"
+            }
+            PrivilegeCredentialKind::CustomPrompt => {
+                "sessionManager.privilege_credentials.kind.custom_prompt"
+            }
+        };
+        self.i18n.t(key)
+    }
+
+    fn render_privilege_kind_select(
+        &self,
+        kind: PrivilegeCredentialKind,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            self.i18n
+                .t("sessionManager.privilege_credentials.kind_label"),
+            self.render_new_connection_select_control(
+                NewConnectionSelect::PrivilegeKind,
+                self.privilege_kind_label(kind),
+                false,
+                false,
+                cx,
+            ),
+        )
+    }
+
+    fn reset_privilege_credential_draft(&mut self, cx: &mut Context<Self>) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.privilege_draft = Default::default();
+            form.privilege_error = None;
+            form.focused_field = NewConnectionField::PrivilegeLabel;
+            form.field_focused = true;
+            form.selected_field = None;
+        }
+        self.close_new_connection_select();
+        cx.notify();
+    }
+
+    fn edit_privilege_credential(&mut self, credential: SavedPrivilegeCredential, cx: &mut Context<Self>) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.privilege_draft.credential_id = Some(credential.id);
+            form.privilege_draft.label = credential.label;
+            form.privilege_draft.kind = credential.kind;
+            form.privilege_draft.username_hint = credential.username_hint.unwrap_or_default();
+            form.privilege_draft.prompt_patterns = credential.prompt_patterns.join("\n");
+            form.privilege_draft.secret.clear();
+            form.privilege_draft.enabled = credential.enabled;
+            form.privilege_error = None;
+            form.focused_field = NewConnectionField::PrivilegeLabel;
+            form.field_focused = true;
+            form.selected_field = None;
+        }
+        self.close_new_connection_select();
+        cx.notify();
+    }
+
+    fn set_privilege_credential_kind(
+        &mut self,
+        kind: PrivilegeCredentialKind,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.privilege_draft.kind = kind;
+            form.privilege_error = None;
+        }
+        self.close_new_connection_select();
+        cx.notify();
+    }
+
+    fn save_privilege_credential_from_form(&mut self, cx: &mut Context<Self>) {
+        let Some(connection_id) = self.editing_saved_connection_id.clone() else {
+            return;
+        };
+        if self.duplicating_saved_connection_id.is_some() {
+            return;
+        }
+        let Some(draft) = self.new_connection_form.as_ref().map(|form| form.privilege_draft.clone()) else {
+            return;
+        };
+        let label = draft.label.trim().to_string();
+        if label.is_empty() {
+            return;
+        }
+        let prompt_patterns = draft
+            .prompt_patterns
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        // UI drafts necessarily live as String for GPUI text editing. The
+        // save action is the store boundary where the cleartext moves into
+        // SecretString's Zeroizing owner before keychain persistence.
+        let secret = (!draft.secret.is_empty()).then(|| {
+            SecretString::from(zeroize::Zeroizing::new(draft.secret.clone()))
+        });
+        let request = SavePrivilegeCredentialRequest {
+            connection_id: connection_id.clone(),
+            credential_id: draft.credential_id.clone(),
+            label,
+            kind: draft.kind,
+            username_hint: draft
+                .username_hint
+                .trim()
+                .is_empty()
+                .then_some(None)
+                .unwrap_or_else(|| Some(draft.username_hint.trim().to_string())),
+            prompt_patterns,
+            secret,
+            enabled: draft.enabled,
+            require_click_to_send: true,
+        };
+        match self.connection_store.save_privilege_credential(request) {
+            Ok(saved) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    if let Some(index) = form
+                        .privilege_credentials
+                        .iter()
+                        .position(|credential| credential.id == saved.id)
+                    {
+                        form.privilege_credentials[index] = saved;
+                    } else {
+                        form.privilege_credentials.push(saved);
+                    }
+                    form.privilege_draft = Default::default();
+                    form.privilege_error = None;
+                }
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.privilege_error = Some(error.to_string());
+                }
+            }
+        }
+        self.close_new_connection_select();
+        cx.notify();
+    }
+
+    fn delete_privilege_credential_from_form(&mut self, credential_id: String, cx: &mut Context<Self>) {
+        let Some(connection_id) = self.editing_saved_connection_id.clone() else {
+            return;
+        };
+        match self
+            .connection_store
+            .delete_privilege_credential(&connection_id, &credential_id)
+        {
+            Ok(_) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.privilege_credentials
+                        .retain(|credential| credential.id != credential_id);
+                    if form.privilege_draft.credential_id.as_deref() == Some(&credential_id) {
+                        form.privilege_draft = Default::default();
+                    }
+                    form.privilege_error = None;
+                }
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.privilege_error = Some(error.to_string());
+                }
+            }
+        }
+        self.close_new_connection_select();
+        cx.notify();
+    }
+
+    fn render_privilege_credentials_section(
+        &self,
+        form: &NewConnectionForm,
+        duplicate_mode: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        // Tauri EditConnectionPropertiesModal uses rounded-lg,
+        // border-theme-border/60, bg-theme-bg-panel/45, p-3.
+        let mut list = div().flex().flex_col().gap(px(8.0));
+        if form.privilege_credentials.is_empty() {
+            list = list.child(
+                div()
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | 0x80))
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n.t("sessionManager.privilege_credentials.empty")),
+            );
+        } else {
+            for credential in form.privilege_credentials.iter().cloned() {
+                let edit_credential = credential.clone();
+                let delete_id = credential.id.clone();
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .rounded(px(self.tokens.radii.md))
+                        .border_1()
+                        .border_color(rgba((theme.border << 8) | 0x80))
+                        .bg(rgba((theme.bg << 8) | 0x73))
+                        .px(px(8.0))
+                        .py(px(6.0))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::KeyRound,
+                            16.0,
+                            rgba(0xfde68aff),
+                        ))
+                        .child(
+                            div()
+                                .min_w(px(0.0))
+                                .flex_1()
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                                        .text_color(rgb(theme.text))
+                                        .child(credential.label.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(theme.text_muted))
+                                        .child(self.privilege_kind_label(credential.kind)),
+                                ),
+                        )
+                        .child(self.workspace_toolbar_action_button(
+                            self.i18n.t("sessionManager.privilege_credentials.edit"),
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Ghost,
+                                    size: ButtonSize::Sm,
+                                    ..ButtonOptions::default()
+                                },
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.edit_privilege_credential(edit_credential.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        ))
+                        .child(self.workspace_icon_action_button(
+                            LucideIcon::Trash2,
+                            14.0,
+                            rgb(theme.text_muted),
+                            IconButtonOptions {
+                                hover_background: Some(rgb(theme.bg_hover)),
+                                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+                            },
+                            move |this, _event, _window, cx| {
+                                this.delete_privilege_credential_from_form(delete_id.clone(), cx);
+                                cx.stop_propagation();
+                            },
+                            cx,
+                        )),
+                );
+            }
+        }
+
+        let description = if duplicate_mode {
+            self.i18n
+                .t("sessionManager.privilege_credentials.duplicate_hint")
+        } else {
+            self.i18n
+                .t("sessionManager.privilege_credentials.description")
+        };
+        let mut section = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x99))
+            .bg(rgba((theme.bg_panel << 8) | 0x73))
+            .p(px(12.0))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text))
+                                    .child(Self::render_lucide_icon(
+                                        LucideIcon::KeyRound,
+                                        16.0,
+                                        rgb(theme.text_muted),
+                                    ))
+                                    .child(
+                                        self.i18n
+                                            .t("sessionManager.privilege_credentials.title"),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(description),
+                            ),
+                    )
+                    .when(!duplicate_mode, |header| {
+                        header.child(self.workspace_toolbar_action_button(
+                            self.i18n.t("sessionManager.privilege_credentials.new"),
+                            Some(
+                                Self::render_lucide_icon(
+                                    LucideIcon::Plus,
+                                    14.0,
+                                    rgb(theme.text_muted),
+                                )
+                                .into_any_element(),
+                            ),
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    ..ButtonOptions::default()
+                                },
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(|this, _event, _window, cx| {
+                                this.reset_privilege_credential_draft(cx);
+                                cx.stop_propagation();
+                            }),
+                        ))
+                    }),
+            );
+        if !duplicate_mode {
+            section = section.child(list).child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | 0x80))
+                    .bg(rgba((theme.bg << 8) | 0x80))
+                    .p(px(12.0))
+                    .child(self.render_connection_field(
+                        self.i18n.t("sessionManager.privilege_credentials.label"),
+                        &form.privilege_draft.label,
+                        self.i18n
+                            .t("sessionManager.privilege_credentials.label_placeholder"),
+                        NewConnectionField::PrivilegeLabel,
+                        false,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .grid()
+                            .grid_cols(2)
+                            .gap(px(12.0))
+                            .child(self.render_privilege_kind_select(
+                                form.privilege_draft.kind,
+                                cx,
+                            ))
+                            .child(self.render_connection_field(
+                                self.i18n
+                                    .t("sessionManager.privilege_credentials.username_hint"),
+                                &form.privilege_draft.username_hint,
+                                form.username.clone(),
+                                NewConnectionField::PrivilegeUsernameHint,
+                                false,
+                                cx,
+                            )),
+                    )
+                    .child(self.render_connection_field(
+                        self.i18n.t("sessionManager.privilege_credentials.secret"),
+                        &form.privilege_draft.secret,
+                        if form.privilege_draft.credential_id.is_some() {
+                            self.i18n
+                                .t("sessionManager.privilege_credentials.secret_keep_placeholder")
+                        } else {
+                            self.i18n
+                                .t("sessionManager.privilege_credentials.secret_placeholder")
+                        },
+                        NewConnectionField::PrivilegeSecret,
+                        true,
+                        cx,
+                    ))
+                    .child(self.render_connection_textarea(
+                        self.i18n
+                            .t("sessionManager.privilege_credentials.prompt_patterns"),
+                        &form.privilege_draft.prompt_patterns,
+                        self.i18n
+                            .t("sessionManager.privilege_credentials.prompt_patterns_placeholder"),
+                        NewConnectionField::PrivilegePromptPatterns,
+                        cx,
+                    ))
+                    .child(self.render_connection_hint(
+                        self.i18n
+                            .t("sessionManager.privilege_credentials.prompt_patterns_hint"),
+                    ))
+                    .child(self.render_connection_checkbox(
+                        self.i18n.t("sessionManager.privilege_credentials.enabled"),
+                        form.privilege_draft.enabled,
+                        |form| form.privilege_draft.enabled = !form.privilege_draft.enabled,
+                        cx,
+                    ))
+                    .when_some(form.privilege_error.clone(), |panel, error| {
+                        panel.child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(theme.error))
+                                .child(error),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap(px(8.0))
+                            .when(form.privilege_draft.credential_id.is_some(), |row| {
+                                row.child(self.workspace_toolbar_action_button(
+                                    self.i18n
+                                        .t("sessionManager.privilege_credentials.cancel_edit"),
+                                    None,
+                                    ToolbarButtonOptions {
+                                        button: ButtonOptions {
+                                            variant: ButtonVariant::Ghost,
+                                            size: ButtonSize::Sm,
+                                            ..ButtonOptions::default()
+                                        },
+                                        ..ToolbarButtonOptions::default()
+                                    },
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.reset_privilege_credential_draft(cx);
+                                        cx.stop_propagation();
+                                    }),
+                                ))
+                            })
+                            .child(self.workspace_toolbar_action_button(
+                                self.i18n.t("sessionManager.privilege_credentials.save"),
+                                Some(
+                                    Self::render_lucide_icon(
+                                        LucideIcon::Save,
+                                        14.0,
+                                        rgb(theme.text_muted),
+                                    )
+                                    .into_any_element(),
+                                ),
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Default,
+                                        size: ButtonSize::Sm,
+                                        disabled: form.privilege_draft.label.trim().is_empty(),
+                                        ..ButtonOptions::default()
+                                    },
+                                    ..ToolbarButtonOptions::default()
+                                },
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.save_privilege_credential_from_form(cx);
+                                    cx.stop_propagation();
+                                }),
+                            )),
+                    ),
+            );
+        }
+        section.into_any_element()
+    }
+
     fn set_new_connection_group(&mut self, group: String, cx: &mut Context<Self>) {
         if let Some(form) = self.new_connection_form.as_mut() {
             form.group = group;
@@ -383,6 +883,7 @@ impl WorkspaceApp {
                     form.focused_field = NewConnectionField::JumpManagedKeyId;
                 }
                 NewConnectionSelect::Group
+                | NewConnectionSelect::PrivilegeKind
                 | NewConnectionSelect::SerialPort
                 | NewConnectionSelect::SerialDataBits
                 | NewConnectionSelect::SerialStopBits
@@ -593,6 +1094,121 @@ impl WorkspaceApp {
                     this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                 }),
             ),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_connection_textarea_input(
+        &self,
+        value: &str,
+        placeholder: String,
+        field: NewConnectionField,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let focused = self
+            .new_connection_form
+            .as_ref()
+            .is_some_and(|form| form.field_focused && form.focused_field == field);
+        let selected_all = self
+            .new_connection_form
+            .as_ref()
+            .is_some_and(|form| connection_field_is_selected(form, field));
+        let target = WorkspaceImeTarget::NewConnection(field);
+        let workspace = cx.entity();
+        let theme = self.tokens.ui;
+        let visually_empty = value.is_empty();
+        let mut lines = div().flex().flex_col().gap(px(2.0));
+
+        if visually_empty {
+            lines = lines.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .when(focused, |row| {
+                        row.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                    })
+                    .child(placeholder),
+            );
+        } else {
+            let split_lines: Vec<&str> = value.split('\n').collect();
+            let last_index = split_lines.len().saturating_sub(1);
+            for (index, line) in split_lines.into_iter().enumerate() {
+                let line_selected_range =
+                    selected_all.then_some(0..line.encode_utf16().count());
+                let is_last = index == last_index;
+                let row = div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .min_h(px(self.tokens.metrics.form_caret_height))
+                    .child(text_input_value_segments(
+                        &self.tokens,
+                        line,
+                        false,
+                        line_selected_range,
+                        None,
+                        self.new_connection_caret_visible,
+                    ))
+                    .when(focused && is_last && !selected_all, |row| {
+                        row.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                    });
+                lines = lines.child(row);
+            }
+        }
+
+        text_input_anchor_probe(
+            target.anchor_id(),
+            div()
+                // Tauri uses `<textarea className="min-h-20 resize-y ...">`.
+                // Native keeps the same minimum height and multiline editing
+                // semantics, while leaving all other connection fields single-line.
+                .min_h(px(80.0))
+                .px(px(self.tokens.metrics.ui_control_padding_x))
+                .py(px(self.tokens.spacing.two))
+                .rounded(px(self.tokens.radii.md))
+                .bg(rgba((theme.bg << 8) | 0x80))
+                .border_1()
+                .border_color(if focused {
+                    rgb(theme.accent)
+                } else {
+                    rgb(theme.border)
+                })
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(if visually_empty {
+                    rgb(theme.text_muted)
+                } else {
+                    rgb(theme.text)
+                })
+                .cursor(CursorStyle::IBeam)
+                .overflow_hidden()
+                .child(lines)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                        if let Some(form) = this.new_connection_form.as_mut() {
+                            form.field_focused = true;
+                            form.focused_field = field;
+                            clear_connection_selection(form);
+                        }
+                        this.close_new_connection_select();
+                        this.ime_marked_text = None;
+                        this.new_connection_caret_visible = true;
+                        window.focus(&this.focus_handle);
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_move(
+                    cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    }),
+                ),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_text_input_anchor(anchor, cx);

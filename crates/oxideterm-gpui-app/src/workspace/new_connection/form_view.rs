@@ -1,7 +1,7 @@
 use gpui::{
-    AnchoredPositionMode, AnyElement, ClipboardItem, Context, Corner, KeyDownEvent, MouseButton,
-    MouseMoveEvent, ParentElement, PathPromptOptions, SharedString, Styled, Window, anchored,
-    deferred, div, point, prelude::*, px, rgb, rgba,
+    AnchoredPositionMode, AnyElement, ClipboardItem, Context, Corner, CursorStyle, KeyDownEvent,
+    MouseButton, MouseMoveEvent, ParentElement, PathPromptOptions, SharedString, Styled, Window,
+    anchored, deferred, div, point, prelude::*, px, rgb, rgba,
 };
 
 use super::{
@@ -20,6 +20,9 @@ use crate::workspace::SelectableTextScrollExt;
 use crate::workspace::WorkspaceApp;
 use crate::workspace::{browser_behavior, ime::WorkspaceImeTarget};
 use gpui::Div;
+use oxideterm_connections::{
+    PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SavedPrivilegeCredential, SecretString,
+};
 use oxideterm_gpui_ui::{
     ButtonTone, TextInputView, button,
     button::{
@@ -35,7 +38,9 @@ use oxideterm_gpui_ui::{
         SelectAnchorId, select_anchor_probe, select_option, select_option_action,
         select_overlay_popup_with_max_height, select_trigger_with_focus_visible,
     },
-    text_input, text_input_anchor_probe,
+    text_input,
+    text_input::{text_caret, text_input_value_segments},
+    text_input_anchor_probe,
 };
 
 const TAURI_EDIT_MODAL_WIDTH: f32 = 500.0; // Tauri sm:max-w-[500px]
@@ -189,6 +194,16 @@ impl WorkspaceApp {
                 true
             }
             "enter" => {
+                if form.focused_field == NewConnectionField::PrivilegePromptPatterns {
+                    // Tauri uses a real textarea for custom privilege prompt
+                    // patterns, so Enter edits the field instead of submitting
+                    // the connection form.
+                    insert_text_into_current_connection_field(form, "\n");
+                    form.error = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                    return true;
+                }
                 if form.jump_server_form.is_some() {
                     self.add_pending_jump_server(cx);
                     return true;
@@ -272,8 +287,15 @@ impl WorkspaceApp {
             return;
         }
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-        let single_line = normalized.lines().collect::<Vec<_>>().join(" ");
-        insert_text_into_current_connection_field(form, &single_line);
+        if form.focused_field == NewConnectionField::PrivilegePromptPatterns {
+            // Keep textarea paste semantics for the one GPUI field that maps to
+            // Tauri's multiline prompt-pattern editor. Other connection fields
+            // remain browser-like single-line inputs.
+            insert_text_into_current_connection_field(form, &normalized);
+        } else {
+            let single_line = normalized.lines().collect::<Vec<_>>().join(" ");
+            insert_text_into_current_connection_field(form, &single_line);
+        }
         form.error = None;
         self.new_connection_caret_visible = true;
         cx.notify();

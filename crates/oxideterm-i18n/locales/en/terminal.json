@@ -150,6 +150,15 @@
       "insert": "Insert",
       "execute": "Run",
       "regenerate": "Retry"
+    },
+    "privilege_helper": {
+      "fill": "Fill password",
+      "filling": "Filling...",
+      "fill_title": "Fill {{label}}",
+      "load_failed": "Could not load privilege credential",
+      "send_failed": "Could not send privilege credential",
+      "manage": "Save credential",
+      "manage_title": "Save a privilege credential for this connection"
     }
   },
   "search": {

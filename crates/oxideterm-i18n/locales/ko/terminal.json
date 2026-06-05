@@ -150,7 +150,16 @@
       "target_count": "브로드캐스트 중"
     },
     "typeLocal": "로컬",
-    "typeSsh": "SSH"
+    "typeSsh": "SSH",
+    "privilege_helper": {
+      "fill": "비밀번호 입력",
+      "filling": "입력 중...",
+      "fill_title": "{{label}} 입력",
+      "load_failed": "권한 자격 증명을 불러올 수 없습니다",
+      "send_failed": "권한 자격 증명을 보낼 수 없습니다",
+      "manage": "자격 증명 저장",
+      "manage_title": "이 연결의 권한 자격 증명 저장"
+    }
   },
   "search": {
     "placeholder": "검색",

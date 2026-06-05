@@ -150,7 +150,16 @@
       "target_count": "ブロードキャスト中"
     },
     "typeLocal": "ローカル",
-    "typeSsh": "SSH"
+    "typeSsh": "SSH",
+    "privilege_helper": {
+      "fill": "パスワード入力",
+      "filling": "入力中...",
+      "fill_title": "{{label}} を入力",
+      "load_failed": "権限昇格用の認証情報を読み込めませんでした",
+      "send_failed": "権限昇格用の認証情報を送信できませんでした",
+      "manage": "認証情報を保存",
+      "manage_title": "この接続の昇格認証情報を保存"
+    }
   },
   "search": {
     "placeholder": "検索",

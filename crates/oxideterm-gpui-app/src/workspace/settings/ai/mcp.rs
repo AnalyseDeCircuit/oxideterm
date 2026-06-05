@@ -12,6 +12,7 @@ const AI_MCP_CARD_ACTION_PX: f32 = 8.0; // Tauri px-2.
 const AI_MCP_CARD_ICON_BUTTON: f32 = 28.0; // Tauri h-7 w-7 p-0.
 const AI_MCP_ACTION_ICON: f32 = 14.0; // Tauri w-3.5 h-3.5.
 const AI_MCP_STATUS_ICON: f32 = 12.0; // Tauri status icons w-3 h-3.
+const AI_MCP_ARGS_TEXTAREA_MIN_H: f32 = 84.0; // Tauri textarea-sized MCP args field.
 
 impl WorkspaceApp {
     fn ai_mcp_servers_section(
@@ -691,10 +692,13 @@ impl WorkspaceApp {
                     "npx -y @modelcontextprotocol/server-example".to_string(),
                     cx,
                 ),
-                self.ai_mcp_labeled_input(
-                    "settings_view.mcp.args",
+                self.ai_textarea_row(
                     SettingsInput::AiMcpArgs,
+                    self.i18n.t("settings_view.mcp.args"),
+                    String::new(),
                     "--flag value".to_string(),
+                    self.current_settings_input_value(SettingsInput::AiMcpArgs),
+                    AI_MCP_ARGS_TEXTAREA_MIN_H,
                     cx,
                 ),
                 self.ai_mcp_key_value_editor(true, cx),

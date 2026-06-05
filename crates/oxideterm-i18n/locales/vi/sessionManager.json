@@ -154,6 +154,34 @@
       "open_failed": "Failed to open serial profile",
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
+    },
+    "privilege_credentials": {
+      "title": "Thông tin xác thực đặc quyền",
+      "description": "Lưu riêng thông tin xác thực cho lời nhắc sudo/su. Bí mật nằm trong keychain hệ thống và chỉ được đọc sau khi bạn bấm nút hỗ trợ terminal.",
+      "duplicate_hint": "Thông tin xác thực đặc quyền không được sao chép khi nhân đôi kết nối. Hãy lưu bản sao trước rồi thêm thông tin xác thực.",
+      "new": "Mới",
+      "empty": "Chưa lưu thông tin xác thực đặc quyền.",
+      "edit": "Sửa",
+      "delete": "Xóa",
+      "label": "Nhãn",
+      "label_placeholder": "mật khẩu sudo",
+      "kind_label": "Loại",
+      "username_hint": "Gợi ý người dùng",
+      "secret": "Bí mật",
+      "secret_placeholder": "Nhập mật khẩu để lưu",
+      "secret_keep_placeholder": "Để trống để giữ bí mật hiện có",
+      "prompt_patterns": "Mẫu lời nhắc",
+      "prompt_patterns_placeholder": "Mỗi dòng một mẫu",
+      "prompt_patterns_hint": "Lời nhắc tùy chỉnh khớp với các đoạn văn bản này. Lời nhắc sudo/su tích hợp cũng dùng mặc định an toàn.",
+      "enabled": "Bật",
+      "cancel_edit": "Hủy sửa",
+      "saving": "Đang lưu...",
+      "save": "Lưu thông tin xác thực",
+      "kind": {
+        "sudo_password": "mật khẩu sudo",
+        "su_password": "mật khẩu su",
+        "custom_prompt": "Lời nhắc tùy chỉnh"
+      }
     }
   }
 }

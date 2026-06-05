@@ -62,7 +62,7 @@ use oxideterm_connection_monitor::{
 };
 use oxideterm_connections::{
     ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
-    ConnectionStore, SaveConnectionRequest,
+    ConnectionStore, PrivilegeCredentialKind, SaveConnectionRequest, SavedPrivilegeCredential,
 };
 use oxideterm_forwarding::{
     ForwardEvent, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry, SavedForwardStore,
@@ -73,12 +73,12 @@ use oxideterm_gpui_platform::{
     vibrancy::{NativeVibrancyMode, apply_window_vibrancy},
 };
 use oxideterm_gpui_terminal::{
-    BackgroundImageRenderCache, SharedTerminalSession, TerminalBackgroundFit,
+    BackgroundImageRenderCache, PrivilegePromptMatch, SharedTerminalSession, TerminalBackgroundFit,
     TerminalBackgroundPreferences, TerminalCommandSelectionLabels, TerminalHighlightRenderMode,
     TerminalHighlightRule as UiHighlightRule, TerminalInputInterceptor,
     TerminalInputInterceptorResult, TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor,
     TerminalPane, TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus,
-    TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme,
+    TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme, detect_privilege_prompt,
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,

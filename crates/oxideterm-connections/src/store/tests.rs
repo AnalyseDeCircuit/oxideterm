@@ -236,6 +236,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             post_connect_command: None,
+            privilege_credentials: Vec::new(),
         });
 
         let key = [7u8; CONFIG_ENCRYPTION_KEY_LEN];
@@ -614,6 +615,181 @@ mod tests {
     }
 
     #[test]
+    fn privilege_credential_secret_is_stored_outside_connection_json() {
+        let mut store = load_empty_store("privilege-save");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+
+        let credential = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: None,
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: Some("root".to_string()),
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("sudo-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+
+        assert_eq!(
+            store
+                .get_privilege_credential_secret("conn-1", &credential.id)
+                .unwrap(),
+            SecretString::from("sudo-secret")
+        );
+        let saved = fs::read_to_string(store.path()).unwrap();
+        assert!(saved.contains("\"privilege_credentials\""));
+        assert!(!saved.contains("sudo-secret"));
+    }
+
+    #[test]
+    fn sudo_privilege_credential_uses_tauri_default_prompt_fragments() {
+        let mut store = load_empty_store("privilege-default-sudo-patterns");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+
+        let credential = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("sudo-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+
+        // Prompt patterns are substring fragments, not glob patterns. Keep the
+        // defaults broad enough to match Tauri's helper behavior.
+        assert_eq!(
+            credential.prompt_patterns,
+            vec![
+                "[sudo] password for".to_string(),
+                "sudo password".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn privilege_credential_metadata_update_preserves_existing_secret() {
+        let mut store = load_empty_store("privilege-metadata-update");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+
+        let credential = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: Some("deploy".to_string()),
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("sudo-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        let keychain_id = credential.keychain_id.clone();
+
+        let updated = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "renamed sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: Some("deploy".to_string()),
+                prompt_patterns: Vec::new(),
+                secret: None,
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+
+        assert_eq!(updated.keychain_id, keychain_id);
+        assert_eq!(
+            store
+                .get_privilege_credential_secret("conn-1", "cred-1")
+                .unwrap(),
+            SecretString::from("sudo-secret")
+        );
+    }
+
+    #[test]
+    fn privilege_credential_request_debug_redacts_secret() {
+        let request = SavePrivilegeCredentialRequest {
+            connection_id: "conn-1".to_string(),
+            credential_id: Some("cred-1".to_string()),
+            label: "sudo".to_string(),
+            kind: PrivilegeCredentialKind::SudoPassword,
+            username_hint: None,
+            prompt_patterns: Vec::new(),
+            secret: Some(SecretString::from("sudo-secret")),
+            enabled: true,
+            require_click_to_send: true,
+        };
+
+        let debug = format!("{request:?}");
+
+        assert!(debug.contains("[redacted secret]"));
+        assert!(!debug.contains("sudo-secret"));
+    }
+
+    #[test]
+    fn deleting_connection_removes_privilege_keychain_entries() {
+        let mut store = load_empty_store("privilege-delete");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let credential = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("sudo-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        let keychain_id = credential.keychain_id.clone().unwrap();
+
+        assert!(store.delete("conn-1").unwrap());
+        assert!(store.privilege_keychain.get(&keychain_id).is_err());
+    }
+
+    #[test]
+    fn duplicated_connection_does_not_copy_privilege_credentials() {
+        let mut store = load_empty_store("privilege-duplicate");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("sudo-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+
+        let duplicate = store.duplicate("conn-1").unwrap().unwrap();
+
+        assert!(
+            store
+                .get(&duplicate.id)
+                .unwrap()
+                .privilege_credentials
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn explicit_proxy_hop_key_update_without_passphrase_clears_old_keychain_entry() {
         let mut store = load_empty_store("proxy-hop-passphrase-clear");
         let mut req = request("conn-1", SavedAuth::Agent);
@@ -736,6 +912,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             post_connect_command: None,
+            privilege_credentials: Vec::new(),
         };
         let mut bad = good.clone();
         bad.id = "bad".to_string();
@@ -1115,6 +1292,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             post_connect_command: None,
+            privilege_credentials: Vec::new(),
         };
 
         let info = ConnectionInfo::from(&conn);

@@ -28,8 +28,9 @@ pub use store::{
     ApplySavedConnectionsSyncOutcome, ApplySavedConnectionsSyncSnapshotResult, AuthType,
     CONFIG_VERSION, ConnectionInfo, ConnectionOptions, ConnectionStore, ConnectionStoreData,
     DeletedConnectionTombstone, LocalSyncMetadata, ManagedSshKeyInfo, ManagedSshKeyOrigin,
-    ManagedSshKeyUsage, ProxyHopInfo, SaveConnectionRequest, SaveSerialProfileRequest, SavedAuth,
-    SavedConnection, SavedConnectionSyncRecord, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot, SavedProxyHop, SerialFlowControl, SerialParity, SerialProfile,
+    ManagedSshKeyUsage, PrivilegeCredentialKind, ProxyHopInfo, SaveConnectionRequest,
+    SavePrivilegeCredentialRequest, SaveSerialProfileRequest, SavedAuth, SavedConnection,
+    SavedConnectionSyncRecord, SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
+    SavedPrivilegeCredential, SavedProxyHop, SerialFlowControl, SerialParity, SerialProfile,
     validate_group_name,
 };

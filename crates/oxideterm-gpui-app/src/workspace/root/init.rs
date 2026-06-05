@@ -930,6 +930,13 @@ impl WorkspaceApp {
                             if workspace.any_terminal_recording_active(cx) {
                                 cx.notify();
                             }
+                            if workspace.active_privilege_prompt_helper_should_refresh(cx) {
+                                // Tauri TerminalCommandBar polls the visible buffer only
+                                // when an SSH saved connection has privilege metadata.
+                                // Native uses the workspace heartbeat for the same
+                                // scoped refresh so the chip appears as prompts arrive.
+                                cx.notify();
+                            }
                             if workspace.active_ime_target_blinks_caret() {
                                 workspace.new_connection_caret_visible =
                                     !workspace.new_connection_caret_visible;

@@ -475,6 +475,10 @@ impl WorkspaceApp {
                 .iter()
                 .map(|connection| connection.name.as_str()),
         );
+        // Tauri duplicate mode does not copy privilege credentials. Keep the
+        // native draft empty so saved secrets are never silently aliased.
+        form.privilege_credentials.clear();
+        form.privilege_draft = Default::default();
         form.focused_field = NewConnectionField::Name;
         form.field_focused = true;
 

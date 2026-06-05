@@ -154,6 +154,34 @@
       "open_failed": "Failed to open serial profile",
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
+    },
+    "privilege_credentials": {
+      "title": "権限昇格用認証情報",
+      "description": "sudo/su プロンプト用の認証情報を別に保存します。シークレットはシステムキーチェーンに保存され、ターミナル補助ボタンをクリックした時だけ読み込まれます。",
+      "duplicate_hint": "接続を複製しても権限昇格用認証情報はコピーされません。先に複製を保存してから追加してください。",
+      "new": "新規",
+      "empty": "保存済みの権限昇格用認証情報はありません。",
+      "edit": "編集",
+      "delete": "削除",
+      "label": "ラベル",
+      "label_placeholder": "sudo パスワード",
+      "kind_label": "種類",
+      "username_hint": "ユーザーヒント",
+      "secret": "シークレット",
+      "secret_placeholder": "保存するパスワードを入力",
+      "secret_keep_placeholder": "既存のシークレットを保持するには空のままにします",
+      "prompt_patterns": "プロンプトパターン",
+      "prompt_patterns_placeholder": "1 行に 1 パターン",
+      "prompt_patterns_hint": "カスタムプロンプトはこれらの断片に一致します。組み込みの sudo/su プロンプトも安全な既定値を使います。",
+      "enabled": "有効",
+      "cancel_edit": "編集をキャンセル",
+      "saving": "保存中...",
+      "save": "認証情報を保存",
+      "kind": {
+        "sudo_password": "sudo パスワード",
+        "su_password": "su パスワード",
+        "custom_prompt": "カスタムプロンプト"
+      }
     }
   }
 }

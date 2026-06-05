@@ -206,6 +206,9 @@ fn build_saved_connection_from_sync_payload(
         color: payload.color.clone(),
         tags: payload.tags.clone(),
         post_connect_command: None,
+        privilege_credentials: existing
+            .map(|connection| connection.privilege_credentials.clone())
+            .unwrap_or_default(),
     })
 }
 

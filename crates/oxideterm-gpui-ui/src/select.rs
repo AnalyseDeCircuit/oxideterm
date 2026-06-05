@@ -95,6 +95,7 @@ pub enum SelectAnchorId {
     NewConnectionGroup,
     NewConnectionManagedKey,
     NewConnectionJumpManagedKey,
+    NewConnectionPrivilegeKind,
     NewConnectionSerialPort,
     NewConnectionSerialDataBits,
     NewConnectionSerialStopBits,

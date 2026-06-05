@@ -150,7 +150,16 @@
       "target_count": "Đang phát lệnh"
     },
     "typeLocal": "NỘI BỘ",
-    "typeSsh": "SSH"
+    "typeSsh": "SSH",
+    "privilege_helper": {
+      "fill": "Điền mật khẩu",
+      "filling": "Đang điền...",
+      "fill_title": "Điền {{label}}",
+      "load_failed": "Không thể tải thông tin xác thực đặc quyền",
+      "send_failed": "Không thể gửi thông tin xác thực đặc quyền",
+      "manage": "Lưu thông tin xác thực",
+      "manage_title": "Lưu thông tin xác thực đặc quyền cho kết nối này"
+    }
   },
   "search": {
     "placeholder": "Tìm kiếm",

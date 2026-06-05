@@ -154,6 +154,34 @@
       "open_failed": "Failed to open serial profile",
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
+    },
+    "privilege_credentials": {
+      "title": "Credenziali privilegiate",
+      "description": "Salva credenziali separate per prompt sudo/su. I segreti restano nel portachiavi di sistema e vengono letti solo dopo il clic sull’assistente del terminale.",
+      "duplicate_hint": "Le credenziali privilegiate non vengono copiate duplicando una connessione. Salva prima il duplicato, poi aggiungile.",
+      "new": "Nuova",
+      "empty": "Nessuna credenziale privilegiata salvata.",
+      "edit": "Modifica",
+      "delete": "Elimina",
+      "label": "Etichetta",
+      "label_placeholder": "password sudo",
+      "kind_label": "Tipo",
+      "username_hint": "Suggerimento utente",
+      "secret": "Segreto",
+      "secret_placeholder": "Inserisci la password da salvare",
+      "secret_keep_placeholder": "Lascia vuoto per mantenere il segreto esistente",
+      "prompt_patterns": "Pattern prompt",
+      "prompt_patterns_placeholder": "Un pattern per riga",
+      "prompt_patterns_hint": "I prompt personalizzati corrispondono a questi frammenti. I prompt sudo/su integrati usano anche valori predefiniti sicuri.",
+      "enabled": "Abilitato",
+      "cancel_edit": "Annulla modifica",
+      "saving": "Salvataggio...",
+      "save": "Salva credenziale",
+      "kind": {
+        "sudo_password": "password sudo",
+        "su_password": "password su",
+        "custom_prompt": "Prompt personalizzato"
+      }
     }
   }
 }

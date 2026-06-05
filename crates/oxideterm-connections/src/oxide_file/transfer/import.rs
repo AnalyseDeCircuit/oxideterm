@@ -321,6 +321,7 @@ fn encrypted_connection_to_saved(
             color: conn.color,
             tags: conn.tags,
             post_connect_command: None,
+            privilege_credentials: Vec::new(),
         },
         forward_records,
     ))

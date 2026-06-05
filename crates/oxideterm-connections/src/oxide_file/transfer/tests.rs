@@ -62,6 +62,7 @@ mod tests {
             color: Some("#ff6a00".to_string()),
             tags: vec!["prod".to_string()],
             post_connect_command: None,
+            privilege_credentials: Vec::new(),
         }
     }
 

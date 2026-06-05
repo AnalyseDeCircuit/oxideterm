@@ -1,5 +1,7 @@
 use std::fmt;
 
+use oxideterm_connections::{PrivilegeCredentialKind, SavedPrivilegeCredential};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshAuthTab {
     Password,
@@ -62,6 +64,7 @@ pub(in crate::workspace) enum NewConnectionSelect {
     Group,
     ManagedKey,
     JumpManagedKey,
+    PrivilegeKind,
     SerialPort,
     SerialDataBits,
     SerialStopBits,
@@ -91,9 +94,53 @@ pub(in crate::workspace) enum NewConnectionField {
     JumpManagedKeyId,
     JumpCertPath,
     JumpPassphrase,
+    PrivilegeLabel,
+    PrivilegeUsernameHint,
+    PrivilegeSecret,
+    PrivilegePromptPatterns,
     SerialPortPath,
     SerialBaudRate,
     SerialProfileName,
+}
+
+#[derive(Clone)]
+pub(in crate::workspace) struct PrivilegeCredentialDraft {
+    pub(in crate::workspace) credential_id: Option<String>,
+    pub(in crate::workspace) label: String,
+    pub(in crate::workspace) kind: PrivilegeCredentialKind,
+    pub(in crate::workspace) username_hint: String,
+    pub(in crate::workspace) prompt_patterns: String,
+    pub(in crate::workspace) secret: String,
+    pub(in crate::workspace) enabled: bool,
+}
+
+impl fmt::Debug for PrivilegeCredentialDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PrivilegeCredentialDraft")
+            .field("credential_id", &self.credential_id)
+            .field("label", &self.label)
+            .field("kind", &self.kind)
+            .field("username_hint", &self.username_hint)
+            .field("prompt_patterns", &self.prompt_patterns)
+            .field("secret", &"[redacted secret]")
+            .field("enabled", &self.enabled)
+            .finish()
+    }
+}
+
+impl Default for PrivilegeCredentialDraft {
+    fn default() -> Self {
+        Self {
+            credential_id: None,
+            label: String::new(),
+            kind: PrivilegeCredentialKind::SudoPassword,
+            username_hint: String::new(),
+            prompt_patterns: String::new(),
+            secret: String::new(),
+            enabled: true,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -170,6 +217,9 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) group: String,
     pub(in crate::workspace) post_connect_command: String,
+    pub(in crate::workspace) privilege_credentials: Vec<SavedPrivilegeCredential>,
+    pub(in crate::workspace) privilege_draft: PrivilegeCredentialDraft,
+    pub(in crate::workspace) privilege_error: Option<String>,
     pub(in crate::workspace) color: String,
     pub(in crate::workspace) tags: Vec<String>,
     pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
@@ -221,6 +271,9 @@ impl fmt::Debug for NewConnectionForm {
             .field("save_password", &self.save_password)
             .field("group", &self.group)
             .field("post_connect_command", &self.post_connect_command)
+            .field("privilege_credentials", &self.privilege_credentials)
+            .field("privilege_draft", &self.privilege_draft)
+            .field("privilege_error", &self.privilege_error)
             .field("color", &self.color)
             .field("tags", &self.tags)
             .field("proxy_hops", &self.proxy_hops)
@@ -270,6 +323,9 @@ impl Default for NewConnectionForm {
             save_password: false,
             group: String::new(),
             post_connect_command: String::new(),
+            privilege_credentials: Vec::new(),
+            privilege_draft: PrivilegeCredentialDraft::default(),
+            privilege_error: None,
             color: String::new(),
             tags: Vec::new(),
             proxy_hops: Vec::new(),
@@ -470,6 +526,10 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
+        NewConnectionField::PrivilegeLabel => &mut form.privilege_draft.label,
+        NewConnectionField::PrivilegeUsernameHint => &mut form.privilege_draft.username_hint,
+        NewConnectionField::PrivilegeSecret => &mut form.privilege_draft.secret,
+        NewConnectionField::PrivilegePromptPatterns => &mut form.privilege_draft.prompt_patterns,
         NewConnectionField::Color => &mut form.color,
         NewConnectionField::JumpHost => {
             &mut form
@@ -546,6 +606,10 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::Group => &form.group,
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
+        NewConnectionField::PrivilegeLabel => &form.privilege_draft.label,
+        NewConnectionField::PrivilegeUsernameHint => &form.privilege_draft.username_hint,
+        NewConnectionField::PrivilegeSecret => &form.privilege_draft.secret,
+        NewConnectionField::PrivilegePromptPatterns => &form.privilege_draft.prompt_patterns,
         NewConnectionField::Color => &form.color,
         NewConnectionField::JumpHost => {
             &form

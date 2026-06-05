@@ -154,6 +154,34 @@
       "open_failed": "開啟序列埠設定檔失敗",
       "delete_failed": "刪除序列埠設定檔失敗",
       "confirm_delete": "刪除序列埠設定檔「{{name}}」？"
+    },
+    "privilege_credentials": {
+      "title": "提權憑證",
+      "description": "為 sudo/su 提示單獨儲存憑證。密碼保存在系統鑰匙圈中，只有點擊終端輔助按鈕時才會讀取。",
+      "duplicate_hint": "複製連線時不會複製提權憑證。請先儲存副本，再新增憑證。",
+      "new": "新增",
+      "empty": "尚未儲存提權憑證。",
+      "edit": "編輯",
+      "delete": "刪除",
+      "label": "標籤",
+      "label_placeholder": "sudo 密碼",
+      "kind_label": "類型",
+      "username_hint": "使用者提示",
+      "secret": "密碼",
+      "secret_placeholder": "輸入要儲存的密碼",
+      "secret_keep_placeholder": "留空以保留現有密碼",
+      "prompt_patterns": "提示匹配",
+      "prompt_patterns_placeholder": "每行一個匹配片段",
+      "prompt_patterns_hint": "自訂提示會匹配這些文字片段。內建 sudo/su 提示也會使用安全預設值。",
+      "enabled": "啟用",
+      "cancel_edit": "取消編輯",
+      "saving": "儲存中...",
+      "save": "儲存憑證",
+      "kind": {
+        "sudo_password": "sudo 密碼",
+        "su_password": "su 密碼",
+        "custom_prompt": "自訂提示"
+      }
     }
   }
 }

@@ -525,7 +525,25 @@ impl WorkspaceApp {
                                     ))
                                 })
                                 .when(edit_properties_mode, |content| {
-                                    content.child(self.render_edit_color_field(&form.color, cx))
+                                    content
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.post_connect_command"),
+                                            &form.post_connect_command,
+                                            self.i18n
+                                                .t("ssh.form.post_connect_command_placeholder"),
+                                            NewConnectionField::PostConnectCommand,
+                                            false,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.post_connect_command_hint"),
+                                        ))
+                                        .child(self.render_privilege_credentials_section(
+                                            form,
+                                            duplicate_mode,
+                                            cx,
+                                        ))
+                                        .child(self.render_edit_color_field(&form.color, cx))
                                 })
                                 .when(!prompt_mode && !edit_properties_mode, |content| {
                                     content

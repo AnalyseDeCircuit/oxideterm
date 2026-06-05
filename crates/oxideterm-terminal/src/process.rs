@@ -10,9 +10,9 @@ use std::process::Command;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 
-use anyhow::Result;
 #[cfg(unix)]
 use anyhow::Context;
+use anyhow::Result;
 
 const PROCESS_INFO_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 

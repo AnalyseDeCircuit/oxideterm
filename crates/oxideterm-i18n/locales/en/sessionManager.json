@@ -154,6 +154,34 @@
       "open_failed": "Failed to open serial profile",
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
+    },
+    "privilege_credentials": {
+      "title": "Privilege credentials",
+      "description": "Store separate sudo/su prompt credentials. Secrets stay in the system keychain and are only read after you click the terminal helper.",
+      "duplicate_hint": "Privilege credentials are not copied when duplicating a connection. Save the duplicate first, then add credentials.",
+      "new": "New",
+      "empty": "No privilege credentials saved.",
+      "edit": "Edit",
+      "delete": "Delete",
+      "label": "Label",
+      "label_placeholder": "sudo password",
+      "kind_label": "Type",
+      "username_hint": "User hint",
+      "secret": "Secret",
+      "secret_placeholder": "Enter password to save",
+      "secret_keep_placeholder": "Leave blank to keep existing secret",
+      "prompt_patterns": "Prompt patterns",
+      "prompt_patterns_placeholder": "One pattern per line",
+      "prompt_patterns_hint": "Custom prompts match these text fragments. Built-in sudo/su prompts also use safe defaults.",
+      "enabled": "Enabled",
+      "cancel_edit": "Cancel edit",
+      "saving": "Saving...",
+      "save": "Save credential",
+      "kind": {
+        "sudo_password": "sudo password",
+        "su_password": "su password",
+        "custom_prompt": "Custom prompt"
+      }
     }
   }
 }

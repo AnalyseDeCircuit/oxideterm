@@ -12,6 +12,80 @@ use oxideterm_terminal_recording::format_recording_elapsed;
 pub(in crate::workspace) mod completion;
 
 const TERMINAL_BROADCAST_MENU_WIDTH: f32 = 260.0;
+const TAURI_PRIVILEGE_CHIP_BORDER: u32 = 0xfbbf244d; // Tauri border-amber-400/30
+const TAURI_PRIVILEGE_CHIP_BG: u32 = 0xfbbf241a; // Tauri bg-amber-400/10
+const TAURI_PRIVILEGE_CHIP_HOVER_BORDER: u32 = 0xfcd34d80; // Tauri hover:border-amber-300/50
+const TAURI_PRIVILEGE_CHIP_HOVER_BG: u32 = 0xfbbf2426; // Tauri hover:bg-amber-400/15
+const TAURI_PRIVILEGE_CHIP_TEXT: u32 = 0xfde68aff; // Tauri text-amber-200
+
+#[derive(Clone, Debug)]
+struct MatchedPrivilegeCredential {
+    connection_id: String,
+    credential_id: String,
+    label: String,
+}
+
+#[derive(Clone, Debug)]
+struct PrivilegePromptHelperState {
+    connection_id: String,
+    matches: Vec<MatchedPrivilegeCredential>,
+}
+
+fn privilege_credential_matches_prompt(
+    credential: &SavedPrivilegeCredential,
+    prompt: &PrivilegePromptMatch,
+) -> bool {
+    if !credential.enabled {
+        return false;
+    }
+    match prompt {
+        PrivilegePromptMatch::Sudo { username, .. } => {
+            if !matches!(
+                credential.kind,
+                PrivilegeCredentialKind::SudoPassword | PrivilegeCredentialKind::CustomPrompt
+            ) {
+                return false;
+            }
+            if credential.kind == PrivilegeCredentialKind::CustomPrompt {
+                return privilege_prompt_matches_custom_patterns(
+                    prompt,
+                    &credential.prompt_patterns,
+                );
+            }
+            credential
+                .username_hint
+                .as_ref()
+                .is_none_or(|hint| username.as_deref() == Some(hint.as_str()))
+        }
+        PrivilegePromptMatch::Su { .. } => {
+            if !matches!(
+                credential.kind,
+                PrivilegeCredentialKind::SuPassword | PrivilegeCredentialKind::CustomPrompt
+            ) {
+                return false;
+            }
+            credential.kind != PrivilegeCredentialKind::CustomPrompt
+                || privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
+        }
+        PrivilegePromptMatch::Custom { credential_id, .. } => credential.id == *credential_id,
+    }
+}
+
+fn privilege_prompt_matches_custom_patterns(
+    prompt: &PrivilegePromptMatch,
+    patterns: &[String],
+) -> bool {
+    let prompt_text = match prompt {
+        PrivilegePromptMatch::Sudo { prompt_text, .. }
+        | PrivilegePromptMatch::Su { prompt_text, .. }
+        | PrivilegePromptMatch::Custom { prompt_text, .. } => prompt_text,
+    }
+    .to_ascii_lowercase();
+    patterns
+        .iter()
+        .map(|pattern| pattern.trim().to_ascii_lowercase())
+        .any(|pattern| !pattern.is_empty() && prompt_text.contains(&pattern))
+}
 
 impl WorkspaceApp {
     fn terminal_command_action_button(
@@ -40,6 +114,104 @@ impl WorkspaceApp {
             listener,
             cx,
         )
+    }
+
+    fn active_privilege_saved_connection_id(&self) -> Option<String> {
+        let session_id = self.active_terminal_session_id()?;
+        let node_id = self.terminal_ssh_nodes.get(&session_id)?;
+        // Privilege credentials are stored on the saved connection metadata.
+        // Runtime SSH connection ids are short-lived transport handles and do
+        // not match Tauri's persisted SavedConnection lookup.
+        self.ssh_nodes
+            .get(node_id)
+            .and_then(|node| node.saved_connection_id.clone())
+    }
+
+    fn active_privilege_prompt_state(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<PrivilegePromptHelperState> {
+        let connection_id = self.active_privilege_saved_connection_id()?;
+        let connection = self.connection_store.get(&connection_id)?;
+        let visible_text = self.active_pane()?.read(cx).visible_text_snapshot();
+        let prompt = detect_privilege_prompt(&visible_text)?;
+        let matches = connection
+            .privilege_credentials
+            .iter()
+            .filter(|credential| privilege_credential_matches_prompt(credential, &prompt))
+            .map(|credential| MatchedPrivilegeCredential {
+                connection_id: connection_id.clone(),
+                credential_id: credential.id.clone(),
+                label: credential.label.clone(),
+            })
+            .collect();
+        Some(PrivilegePromptHelperState {
+            connection_id,
+            matches,
+        })
+    }
+
+    pub(in crate::workspace) fn active_privilege_prompt_helper_should_refresh(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.settings_store.settings().terminal.command_bar.enabled {
+            return false;
+        }
+        self.active_privilege_prompt_state(cx).is_some()
+    }
+
+    fn fill_privilege_prompt_match(
+        &mut self,
+        matched: MatchedPrivilegeCredential,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let secret = match self
+            .connection_store
+            .get_privilege_credential_secret(&matched.connection_id, &matched.credential_id)
+        {
+            Ok(secret) => secret,
+            Err(error) => {
+                self.push_command_palette_toast(
+                    self.i18n.t("terminal.privilege_helper.load_failed"),
+                    Some(error.to_string()),
+                    TerminalNoticeVariant::Error,
+                );
+                cx.notify();
+                return;
+            }
+        };
+        // The newline-bearing buffer is the only owned cleartext copy in the
+        // GPUI layer. It is zeroized after the PTY write attempt, matching the
+        // Tauri click-only secret handoff without involving command history.
+        let secret_line = zeroize::Zeroizing::new(format!("{}\n", secret.expose_secret()));
+        let sent = self.active_pane().is_some_and(|pane| {
+            pane.update(cx, |pane, cx| {
+                pane.send_privilege_secret_input_bytes(secret_line.as_bytes(), cx)
+            })
+        });
+        if !sent {
+            self.push_command_palette_toast(
+                self.i18n.t("terminal.privilege_helper.send_failed"),
+                None,
+                TerminalNoticeVariant::Error,
+            );
+        }
+        self.focus_active_pane(window, cx);
+        cx.notify();
+    }
+
+    fn manage_active_privilege_prompt_credentials(
+        &mut self,
+        connection_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // The no-credential prompt state is a management affordance only. It
+        // opens the same saved-connection editor as Tauri and never reads a
+        // keychain item until the user explicitly saves and later clicks Fill.
+        self.open_saved_connection_editor(&connection_id, None, window, cx);
     }
 
     pub(in crate::workspace) fn render_terminal_surface(
@@ -149,6 +321,7 @@ impl WorkspaceApp {
             .quick_commands_enabled;
         let recording_status = self.active_terminal_recording_status(cx);
         let recording_active = recording_status.state != TerminalRecordingState::Idle;
+        let privilege_prompt_state = self.active_privilege_prompt_state(cx);
 
         let bar = div()
             .relative()
@@ -220,6 +393,131 @@ impl WorkspaceApp {
                                     )
                                 },
                             )
+                            .when_some(privilege_prompt_state, |mut actions, state| {
+                                for (index, matched) in state.matches.iter().cloned().enumerate() {
+                                    let tooltip_id = format!("terminal-privilege-helper-fill-{index}");
+                                    let title = self.i18n_replace(
+                                        "terminal.privilege_helper.fill_title",
+                                        &[("label", matched.label.clone())],
+                                    );
+                                    actions = actions.child(
+                                        div()
+                                            .h(px(20.0))
+                                            .px(px(6.0))
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(4.0))
+                                            .rounded(px(self.tokens.radii.md))
+                                            .border_1()
+                                            .border_color(rgba(TAURI_PRIVILEGE_CHIP_BORDER))
+                                            .bg(rgba(TAURI_PRIVILEGE_CHIP_BG))
+                                            .text_size(px(11.0))
+                                            .text_color(rgba(TAURI_PRIVILEGE_CHIP_TEXT))
+                                            .id(("terminal-privilege-helper-fill", index))
+                                            .on_mouse_move({
+                                                let title = title.clone();
+                                                let tooltip_id = tooltip_id.clone();
+                                                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                                                    this.queue_workspace_tooltip(
+                                                        tooltip_id.clone(),
+                                                        title.clone(),
+                                                        f32::from(event.position.x) + 12.0,
+                                                        f32::from(event.position.y) + 16.0,
+                                                        cx,
+                                                    );
+                                                })
+                                            })
+                                            .on_hover({
+                                                let tooltip_id = tooltip_id.clone();
+                                                cx.listener(move |this, hovered: &bool, _window, cx| {
+                                                    if !*hovered {
+                                                        this.clear_workspace_tooltip(&tooltip_id, cx);
+                                                    }
+                                                })
+                                            })
+                                            .hover(|style| {
+                                                style
+                                                    .border_color(rgba(TAURI_PRIVILEGE_CHIP_HOVER_BORDER))
+                                                    .bg(rgba(TAURI_PRIVILEGE_CHIP_HOVER_BG))
+                                            })
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(move |this, _event, window, cx| {
+                                                    this.fill_privilege_prompt_match(matched.clone(), window, cx);
+                                                    cx.stop_propagation();
+                                                }),
+                                            )
+                                            .child(Self::render_lucide_icon(
+                                                LucideIcon::KeyRound,
+                                                12.0,
+                                                rgba(TAURI_PRIVILEGE_CHIP_TEXT),
+                                            ))
+                                            .child(self.i18n.t("terminal.privilege_helper.fill")),
+                                    );
+                                }
+                                if state.matches.is_empty() {
+                                    let title = self.i18n.t("terminal.privilege_helper.manage_title");
+                                    let connection_id = state.connection_id.clone();
+                                    actions = actions.child(
+                                        div()
+                                            .h(px(20.0))
+                                            .px(px(6.0))
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(4.0))
+                                            .rounded(px(self.tokens.radii.md))
+                                            .border_1()
+                                            .border_color(rgba(TAURI_PRIVILEGE_CHIP_BORDER))
+                                            .bg(rgba(TAURI_PRIVILEGE_CHIP_BG))
+                                            .text_size(px(11.0))
+                                            .text_color(rgba(TAURI_PRIVILEGE_CHIP_TEXT))
+                                            .id("terminal-privilege-helper-manage")
+                                            .on_mouse_move({
+                                                let title = title.clone();
+                                                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                                                    this.queue_workspace_tooltip(
+                                                        "terminal-privilege-helper-manage",
+                                                        title.clone(),
+                                                        f32::from(event.position.x) + 12.0,
+                                                        f32::from(event.position.y) + 16.0,
+                                                        cx,
+                                                    );
+                                                })
+                                            })
+                                            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                                                if !*hovered {
+                                                    this.clear_workspace_tooltip(
+                                                        "terminal-privilege-helper-manage",
+                                                        cx,
+                                                    );
+                                                }
+                                            }))
+                                            .hover(|style| {
+                                                style
+                                                    .border_color(rgba(TAURI_PRIVILEGE_CHIP_HOVER_BORDER))
+                                                    .bg(rgba(TAURI_PRIVILEGE_CHIP_HOVER_BG))
+                                            })
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(move |this, _event, window, cx| {
+                                                    this.manage_active_privilege_prompt_credentials(
+                                                        connection_id.clone(),
+                                                        window,
+                                                        cx,
+                                                    );
+                                                    cx.stop_propagation();
+                                                }),
+                                            )
+                                            .child(Self::render_lucide_icon(
+                                                LucideIcon::KeyRound,
+                                                12.0,
+                                                rgba(TAURI_PRIVILEGE_CHIP_TEXT),
+                                            ))
+                                            .child(self.i18n.t("terminal.privilege_helper.manage")),
+                                    );
+                                }
+                                actions
+                            })
                             .when(is_local_terminal, |actions| {
                                 actions
                                     .child(self.terminal_command_action_button(

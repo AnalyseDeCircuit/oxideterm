@@ -154,6 +154,34 @@
       "open_failed": "Failed to open serial profile",
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
+    },
+    "privilege_credentials": {
+      "title": "Identifiants de privilège",
+      "description": "Stocke des identifiants séparés pour les invites sudo/su. Les secrets restent dans le trousseau système et ne sont lus qu’après un clic sur l’aide du terminal.",
+      "duplicate_hint": "Les identifiants de privilège ne sont pas copiés lors de la duplication d’une connexion. Enregistrez d’abord la copie, puis ajoutez-les.",
+      "new": "Nouveau",
+      "empty": "Aucun identifiant de privilège enregistré.",
+      "edit": "Modifier",
+      "delete": "Supprimer",
+      "label": "Libellé",
+      "label_placeholder": "mot de passe sudo",
+      "kind_label": "Type",
+      "username_hint": "Indice utilisateur",
+      "secret": "Secret",
+      "secret_placeholder": "Saisir le mot de passe à enregistrer",
+      "secret_keep_placeholder": "Laisser vide pour conserver le secret existant",
+      "prompt_patterns": "Motifs d’invite",
+      "prompt_patterns_placeholder": "Un motif par ligne",
+      "prompt_patterns_hint": "Les invites personnalisées correspondent à ces fragments. Les invites sudo/su intégrées utilisent aussi des valeurs sûres par défaut.",
+      "enabled": "Activé",
+      "cancel_edit": "Annuler la modification",
+      "saving": "Enregistrement...",
+      "save": "Enregistrer l’identifiant",
+      "kind": {
+        "sudo_password": "mot de passe sudo",
+        "su_password": "mot de passe su",
+        "custom_prompt": "Invite personnalisée"
+      }
     }
   }
 }
