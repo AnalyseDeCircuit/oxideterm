@@ -7237,6 +7237,7 @@ dependencies = [
  "anyhow",
  "base64",
  "chrono",
+ "embed-resource",
  "gpui",
  "gpui-component",
  "gstreamer",
