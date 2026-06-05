@@ -4,6 +4,7 @@ use crate::{SecretString, keychain::ConnectionKeychain};
 
 pub const CONFIG_VERSION: u32 = 1;
 pub const CONNECTION_TOMBSTONE_RETENTION_DAYS: i64 = 30;
+pub const LOCAL_SHELL_PRIVILEGE_CONNECTION_ID: &str = "local-shell:default";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -454,6 +455,8 @@ pub struct ConnectionStoreData {
     pub managed_ssh_keys: Vec<ManagedSshKey>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serial_profiles: Vec<SerialProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_privilege_credentials: Vec<SavedPrivilegeCredential>,
 }
 
 impl Default for ConnectionStoreData {
@@ -466,6 +469,7 @@ impl Default for ConnectionStoreData {
             connection_tombstones: Vec::new(),
             managed_ssh_keys: Vec::new(),
             serial_profiles: Vec::new(),
+            local_privilege_credentials: Vec::new(),
         }
     }
 }

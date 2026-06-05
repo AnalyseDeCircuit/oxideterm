@@ -266,6 +266,25 @@ fn privilege_keychain_id(connection_id: &str, credential_id: &str) -> String {
 fn default_privilege_prompt_patterns(kind: PrivilegeCredentialKind) -> Vec<String> {
     match kind {
         PrivilegeCredentialKind::SudoPassword => vec![
+            "[sudo]".to_string(),
+            "password for".to_string(),
+            "的密码".to_string(),
+            "sudo password".to_string(),
+        ],
+        PrivilegeCredentialKind::SuPassword => {
+            vec![
+                "su: password".to_string(),
+                "password:".to_string(),
+                "密码：".to_string(),
+            ]
+        }
+        PrivilegeCredentialKind::CustomPrompt => Vec::new(),
+    }
+}
+
+fn legacy_privilege_prompt_patterns(kind: PrivilegeCredentialKind) -> Vec<String> {
+    match kind {
+        PrivilegeCredentialKind::SudoPassword => vec![
             "[sudo] password for".to_string(),
             "sudo password".to_string(),
         ],
@@ -274,6 +293,36 @@ fn default_privilege_prompt_patterns(kind: PrivilegeCredentialKind) -> Vec<Strin
         }
         PrivilegeCredentialKind::CustomPrompt => Vec::new(),
     }
+}
+
+fn normalize_privilege_prompt_patterns(
+    kind: PrivilegeCredentialKind,
+    patterns: Vec<String>,
+) -> Vec<String> {
+    let patterns = patterns
+        .into_iter()
+        .map(|pattern| pattern.trim().to_string())
+        .filter(|pattern| !pattern.is_empty())
+        .collect::<Vec<_>>();
+    if patterns.is_empty() {
+        return default_privilege_prompt_patterns(kind);
+    }
+    // Older builds stored narrow English-only defaults. Treat only that exact
+    // generated shape as migratable so real custom prompt fragments survive.
+    if kind != PrivilegeCredentialKind::CustomPrompt
+        && patterns == legacy_privilege_prompt_patterns(kind)
+    {
+        return default_privilege_prompt_patterns(kind);
+    }
+    patterns
+}
+
+fn normalize_saved_privilege_credential_for_display(
+    mut credential: SavedPrivilegeCredential,
+) -> SavedPrivilegeCredential {
+    credential.prompt_patterns =
+        normalize_privilege_prompt_patterns(credential.kind, credential.prompt_patterns);
+    credential
 }
 
 fn matching_key_passphrase_id(auth: Option<&SavedAuth>, key_path: &str) -> Option<String> {

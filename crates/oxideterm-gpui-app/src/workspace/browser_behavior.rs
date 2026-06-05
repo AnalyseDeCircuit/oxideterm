@@ -841,6 +841,14 @@ mod tests {
         let actions = ["cancel", "confirm"];
 
         assert_eq!(
+            modal_footer_key_action("enter", false, &actions, None, "cancel"),
+            Some(super::ModalFooterKeyAction::Activate("cancel"))
+        );
+        assert_eq!(
+            modal_footer_key_action("tab", false, &actions, None, "cancel"),
+            Some(super::ModalFooterKeyAction::Focus("cancel"))
+        );
+        assert_eq!(
             modal_footer_key_action("escape", false, &actions, Some("confirm"), "cancel"),
             Some(super::ModalFooterKeyAction::Cancel)
         );

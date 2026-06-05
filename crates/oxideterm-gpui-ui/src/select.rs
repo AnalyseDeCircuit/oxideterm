@@ -62,6 +62,7 @@ pub enum SelectAnchorId {
     SettingsTerminalCursorStyle,
     SettingsIdeAgentMode,
     SettingsLocalShell,
+    SettingsLocalPrivilegeKind,
     SettingsConnectionIdleTimeout,
     SettingsReconnectMaxAttempts,
     SettingsReconnectBaseDelay,
@@ -131,6 +132,7 @@ impl SelectAnchorId {
                 | Self::SettingsTerminalCursorStyle
                 | Self::SettingsIdeAgentMode
                 | Self::SettingsLocalShell
+                | Self::SettingsLocalPrivilegeKind
                 | Self::SettingsConnectionIdleTimeout
                 | Self::SettingsReconnectMaxAttempts
                 | Self::SettingsReconnectBaseDelay

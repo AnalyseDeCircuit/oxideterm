@@ -21,5 +21,12 @@
       "renderer_changed": "Renderer changed",
       "renderer_changed_desc": "Terminal renderer switched to {{renderer}}. New terminals will use this renderer, existing ones are unaffected."
     }
+  },
+  "settings_view": {
+    "local_terminal": {
+      "privilege_credentials": "Privilege Credentials",
+      "privilege_credentials_hint": "Store local sudo/su helper credentials for this device. Secrets stay in the privilege keychain scope and are only sent after an explicit click.",
+      "privilege_username_placeholder": "Current local user"
+    }
   }
 }

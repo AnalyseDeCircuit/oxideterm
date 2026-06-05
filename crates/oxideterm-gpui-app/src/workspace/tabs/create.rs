@@ -396,6 +396,7 @@ impl WorkspaceApp {
         config: SshConfig,
         title: String,
         saved_connection_id: Option<String>,
+        privilege_connection_id: Option<String>,
         node_id: Option<NodeId>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -452,6 +453,7 @@ impl WorkspaceApp {
         self.register_ssh_terminal_session(
             node_id.clone(),
             saved_connection_id,
+            privilege_connection_id,
             config.clone(),
             title.clone(),
             session_id,
@@ -565,6 +567,7 @@ impl WorkspaceApp {
     fn create_ssh_terminal_pane_for_existing_node(
         &mut self,
         node_id: &NodeId,
+        privilege_connection_id: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(PaneId, TerminalSessionId)> {
@@ -601,6 +604,7 @@ impl WorkspaceApp {
         self.register_ssh_terminal_session(
             node_id.clone(),
             node.saved_connection_id.clone(),
+            privilege_connection_id.or_else(|| node.saved_connection_id.clone()),
             node.config.clone(),
             node.title.clone(),
             session_id,
@@ -702,11 +706,15 @@ impl WorkspaceApp {
                 readiness: NodeReadiness::Disconnected,
             });
         if self.node_is_ready_for_terminal(&node_id) {
+            let privilege_connection_id = mark_used_connection_id
+                .clone()
+                .or_else(|| saved_connection_id.clone());
             self.create_ssh_terminal_tab_for_node(
                 post_connect_command,
                 config,
                 title,
                 saved_connection_id,
+                privilege_connection_id,
                 Some(node_id),
                 window,
                 cx,
@@ -728,6 +736,8 @@ impl WorkspaceApp {
             // connection side effects when a later action joins an already
             // pending node connection.
             if (existing.mark_used_connection_id.is_none() && mark_used_connection_id.is_some())
+                || (existing.privilege_connection_id.is_none()
+                    && (mark_used_connection_id.is_some() || saved_connection_id.is_some()))
                 || (existing.save_after_open.is_none() && save_after_open.is_some())
             {
                 if let Some(existing) = self
@@ -735,6 +745,11 @@ impl WorkspaceApp {
                     .iter_mut()
                     .find(|pending| pending.node_id == node_id)
                 {
+                    if existing.privilege_connection_id.is_none() {
+                        existing.privilege_connection_id = mark_used_connection_id
+                            .clone()
+                            .or_else(|| saved_connection_id.clone());
+                    }
                     if existing.mark_used_connection_id.is_none() {
                         existing.mark_used_connection_id = mark_used_connection_id;
                     }
@@ -747,11 +762,15 @@ impl WorkspaceApp {
                 }
             }
         } else {
+            let privilege_connection_id = mark_used_connection_id
+                .clone()
+                .or_else(|| saved_connection_id.clone());
             self.pending_ssh_terminal_opens
                 .push_back(PendingSshTerminalOpen {
                     node_id: node_id.clone(),
                     post_connect_command,
                     saved_connection_id,
+                    privilege_connection_id,
                     mark_used_connection_id,
                     save_after_open,
                     cleanup_node_id: None,
@@ -811,6 +830,7 @@ impl WorkspaceApp {
                     node.config,
                     request.title,
                     request.saved_connection_id,
+                    request.privilege_connection_id,
                     Some(request.node_id),
                     window,
                     cx,

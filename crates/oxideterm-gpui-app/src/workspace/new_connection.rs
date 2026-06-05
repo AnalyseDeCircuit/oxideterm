@@ -7,7 +7,7 @@ mod ssh_flow;
 
 pub(super) use form_state::{
     NewConnectionField, NewConnectionForm, NewConnectionProxyHop, NewConnectionSelect,
-    SavedConnectionPromptAction, SshAuthTab,
+    PrivilegeCredentialDraft, SavedConnectionPromptAction, SshAuthTab,
 };
 pub(super) use host_key_dialog::HostKeyChallenge;
 pub(super) use kbi_dialog::KeyboardInteractiveChallenge;

@@ -158,7 +158,8 @@
       "load_failed": "Impossible de charger l’identifiant de privilège",
       "send_failed": "Impossible d’envoyer l’identifiant de privilège",
       "manage": "Enregistrer l’identifiant",
-      "manage_title": "Enregistrer un identifiant privilégié pour cette connexion"
+      "manage_title": "Enregistrer un identifiant privilégié pour cette connexion",
+      "local_manage_unavailable": "La gestion des identifiants d’élévation du shell local n’est pas encore disponible."
     }
   },
   "search": {

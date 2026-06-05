@@ -64,6 +64,7 @@ pub enum SettingsSelect {
     TerminalCursorStyle,
     IdeAgentMode,
     LocalShell,
+    LocalPrivilegeKind,
     ConnectionIdleTimeout,
     ReconnectMaxAttempts,
     ReconnectBaseDelay,
@@ -101,6 +102,10 @@ pub enum SettingsInput {
     LocalDefaultCwd,
     LocalGitBashPath,
     LocalOhMyPoshTheme,
+    LocalPrivilegeLabel,
+    LocalPrivilegeUsernameHint,
+    LocalPrivilegeSecret,
+    LocalPrivilegePromptPatterns,
     ConnectionDefaultUsername,
     ConnectionDefaultPort,
     ConnectionNewGroup,
@@ -332,6 +337,7 @@ impl SettingsInput {
                 | Self::AiSystemPrompt
                 | Self::AiMemoryContent
                 | Self::AiMcpArgs
+                | Self::LocalPrivilegePromptPatterns
                 | Self::ManagedKeyPastePrivateKey
         )
     }
@@ -342,7 +348,9 @@ impl SettingsInput {
         match self {
             Self::TerminalCommandBarFocusHandoff | Self::TerminalCommandSpecsJson => 20.0,
             Self::AiSystemPrompt | Self::AiMemoryContent => 22.0,
-            Self::AiMcpArgs | Self::ManagedKeyPastePrivateKey => 20.0,
+            Self::AiMcpArgs
+            | Self::LocalPrivilegePromptPatterns
+            | Self::ManagedKeyPastePrivateKey => 20.0,
             _ => DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT,
         }
     }
@@ -358,6 +366,10 @@ impl SettingsInput {
             Self::LocalDefaultCwd => 6,
             Self::LocalGitBashPath => 7,
             Self::LocalOhMyPoshTheme => 8,
+            Self::LocalPrivilegeLabel => 31_000,
+            Self::LocalPrivilegeUsernameHint => 31_001,
+            Self::LocalPrivilegeSecret => 31_002,
+            Self::LocalPrivilegePromptPatterns => 31_003,
             Self::ConnectionDefaultUsername => 9,
             Self::ConnectionDefaultPort => 10,
             Self::ConnectionNewGroup => 11,
@@ -451,6 +463,7 @@ impl SettingsInput {
                 | Self::PortableCurrentPassword
                 | Self::PortableNewPassword
                 | Self::PortableConfirmPassword
+                | Self::LocalPrivilegeSecret
                 | Self::ManagedKeyFilePassphrase
                 | Self::ManagedKeyPastePrivateKey
                 | Self::ManagedKeyPastePassphrase
@@ -523,6 +536,7 @@ mod tests {
         assert!(SettingsInput::PortableCurrentPassword.is_secret());
         assert!(SettingsInput::PortableNewPassword.is_secret());
         assert!(SettingsInput::PortableConfirmPassword.is_secret());
+        assert!(SettingsInput::LocalPrivilegeSecret.is_secret());
         assert!(!SettingsInput::TerminalFontSize.is_secret());
     }
 
@@ -535,6 +549,7 @@ mod tests {
     #[test]
     fn multiline_input_metadata_lives_with_settings_input_identity() {
         assert!(SettingsInput::AiSystemPrompt.accepts_newline());
+        assert!(SettingsInput::LocalPrivilegePromptPatterns.accepts_newline());
         assert!(!SettingsInput::TerminalFontSize.accepts_newline());
         assert_eq!(SettingsInput::AiMemoryContent.textarea_line_height(), 22.0);
     }

@@ -39,6 +39,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::TerminalCursorStyle => SelectAnchorId::SettingsTerminalCursorStyle,
             Self::IdeAgentMode => SelectAnchorId::SettingsIdeAgentMode,
             Self::LocalShell => SelectAnchorId::SettingsLocalShell,
+            Self::LocalPrivilegeKind => SelectAnchorId::SettingsLocalPrivilegeKind,
             Self::ConnectionIdleTimeout => SelectAnchorId::SettingsConnectionIdleTimeout,
             Self::ReconnectMaxAttempts => SelectAnchorId::SettingsReconnectMaxAttempts,
             Self::ReconnectBaseDelay => SelectAnchorId::SettingsReconnectBaseDelay,

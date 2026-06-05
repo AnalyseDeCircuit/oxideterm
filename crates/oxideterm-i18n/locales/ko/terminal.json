@@ -158,7 +158,8 @@
       "load_failed": "권한 자격 증명을 불러올 수 없습니다",
       "send_failed": "권한 자격 증명을 보낼 수 없습니다",
       "manage": "자격 증명 저장",
-      "manage_title": "이 연결의 권한 자격 증명 저장"
+      "manage_title": "이 연결의 권한 자격 증명 저장",
+      "local_manage_unavailable": "로컬 Shell 권한 상승 자격 증명 관리는 아직 사용할 수 없습니다."
     }
   },
   "search": {

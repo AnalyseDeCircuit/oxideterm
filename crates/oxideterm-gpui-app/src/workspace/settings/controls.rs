@@ -513,6 +513,34 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Local, SettingsSelect::LocalPrivilegeKind) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for kind in [
+                    PrivilegeCredentialKind::SudoPassword,
+                    PrivilegeCredentialKind::SuPassword,
+                    PrivilegeCredentialKind::CustomPrompt,
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                self.settings_privilege_kind_label(kind),
+                                self.settings_local_privilege_draft.kind == kind,
+                            ),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.settings_local_privilege_draft.kind = kind;
+                                this.settings_local_privilege_error = None;
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             (SettingsTab::Connections, SettingsSelect::ConnectionIdleTimeout) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for (seconds, label) in connection_idle_timeout_options(&self.i18n) {

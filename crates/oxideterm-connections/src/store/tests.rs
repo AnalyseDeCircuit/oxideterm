@@ -668,10 +668,83 @@ mod tests {
         assert_eq!(
             credential.prompt_patterns,
             vec![
-                "[sudo] password for".to_string(),
+                "[sudo]".to_string(),
+                "password for".to_string(),
+                "的密码".to_string(),
                 "sudo password".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn legacy_sudo_privilege_prompt_fragments_are_displayed_as_current_defaults() {
+        let mut store = load_empty_store("privilege-legacy-sudo-patterns");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let now = Utc::now();
+        store
+            .privilege_credentials_for_scope_mut("conn-1")
+            .unwrap()
+            .push(SavedPrivilegeCredential {
+                id: "cred-legacy".to_string(),
+                connection_id: "conn-1".to_string(),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: vec![
+                    "[sudo] password for".to_string(),
+                    "sudo password".to_string(),
+                ],
+                keychain_id: None,
+                enabled: true,
+                require_click_to_send: true,
+                created_at: now,
+                updated_at: now,
+            });
+
+        let credentials = store.list_privilege_credentials("conn-1").unwrap();
+        assert_eq!(
+            credentials[0].prompt_patterns,
+            vec![
+                "[sudo]".to_string(),
+                "password for".to_string(),
+                "的密码".to_string(),
+                "sudo password".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn local_shell_privilege_credential_uses_dedicated_scope() {
+        let mut store = load_empty_store("privilege-local-shell");
+
+        let credential = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string(),
+                credential_id: Some("local-sudo".to_string()),
+                label: "local sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: Some("deploy".to_string()),
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("local-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+
+        assert_eq!(credential.connection_id, LOCAL_SHELL_PRIVILEGE_CONNECTION_ID);
+        assert_eq!(
+            store
+                .list_privilege_credentials(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID)
+                .unwrap(),
+            vec![credential.clone()]
+        );
+        assert_eq!(
+            store
+                .get_privilege_credential_secret(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID, "local-sudo")
+                .unwrap(),
+            SecretString::from("local-secret")
+        );
+        assert!(store.get("local-shell:default").is_none());
     }
 
     #[test]

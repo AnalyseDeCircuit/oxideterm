@@ -1,6 +1,7 @@
 use super::actions::TerminalBroadcastMenuPlacement;
 use super::ime::WorkspaceImeTarget;
 use super::*;
+use oxideterm_connections::LOCAL_SHELL_PRIVILEGE_CONNECTION_ID;
 use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_event_boundary};
 use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
@@ -18,17 +19,24 @@ const TAURI_PRIVILEGE_CHIP_HOVER_BORDER: u32 = 0xfcd34d80; // Tauri hover:border
 const TAURI_PRIVILEGE_CHIP_HOVER_BG: u32 = 0xfbbf2426; // Tauri hover:bg-amber-400/15
 const TAURI_PRIVILEGE_CHIP_TEXT: u32 = 0xfde68aff; // Tauri text-amber-200
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct MatchedPrivilegeCredential {
     connection_id: String,
     credential_id: String,
     label: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PrivilegePromptHelperState {
     connection_id: String,
     matches: Vec<MatchedPrivilegeCredential>,
+}
+
+fn tab_kind_allows_privilege_prompt_helper(tab_kind: &TabKind) -> bool {
+    // Tauri passes readVisibleBuffer/sendPrivilegeInput through both SSH and
+    // local terminal views. Serial/telnet panes live under LocalTerminal tabs
+    // too, so the caller still filters those transport variants separately.
+    matches!(tab_kind, TabKind::SshTerminal | TabKind::LocalTerminal)
 }
 
 fn privilege_credential_matches_prompt(
@@ -52,10 +60,12 @@ fn privilege_credential_matches_prompt(
                     &credential.prompt_patterns,
                 );
             }
-            credential
-                .username_hint
-                .as_ref()
-                .is_none_or(|hint| username.as_deref() == Some(hint.as_str()))
+            username.as_ref().is_none_or(|prompt_username| {
+                credential
+                    .username_hint
+                    .as_ref()
+                    .is_none_or(|hint| prompt_username == hint)
+            })
         }
         PrivilegePromptMatch::Su { .. } => {
             if !matches!(
@@ -87,7 +97,66 @@ fn privilege_prompt_matches_custom_patterns(
         .any(|pattern| !pattern.is_empty() && prompt_text.contains(&pattern))
 }
 
+fn build_privilege_prompt_helper_state(
+    connection_id: String,
+    credentials: &[SavedPrivilegeCredential],
+    visible_text: &str,
+) -> Option<PrivilegePromptHelperState> {
+    let prompt = detect_privilege_prompt(visible_text)?;
+    let matches = credentials
+        .iter()
+        .filter(|credential| privilege_credential_matches_prompt(credential, &prompt))
+        .map(|credential| MatchedPrivilegeCredential {
+            connection_id: connection_id.clone(),
+            credential_id: credential.id.clone(),
+            label: credential.label.clone(),
+        })
+        .collect();
+    Some(PrivilegePromptHelperState {
+        connection_id,
+        matches,
+    })
+}
+
 impl WorkspaceApp {
+    fn saved_connection_id_for_node_snapshot(
+        &self,
+        node_id: &NodeId,
+        node: Option<&WorkspaceSshNode>,
+    ) -> Option<String> {
+        let config = node.map(|node| node.config.clone()).or_else(|| {
+            self.node_runtime_store
+                .snapshot(node_id)
+                .map(|snapshot| snapshot.config)
+        })?;
+        let title = node.map(|node| node.title.as_str());
+        let candidates = self
+            .connection_store
+            .connections()
+            .iter()
+            .filter(|connection| {
+                connection.host == config.host
+                    && connection.port == config.port
+                    && connection.username == config.username
+            })
+            .collect::<Vec<_>>();
+        if let Some(title) = title
+            && let Some(connection) = candidates
+                .iter()
+                .copied()
+                .find(|connection| connection.name == title)
+        {
+            return Some(connection.id.clone());
+        }
+        // Use a config match as a last resort only when it is unique. Privilege
+        // helper credentials are secrets; ambiguous host aliases must not pick
+        // a saved connection by accident.
+        match candidates.as_slice() {
+            [connection] => Some(connection.id.clone()),
+            _ => None,
+        }
+    }
+
     fn terminal_command_action_button(
         &self,
         icon: LucideIcon,
@@ -116,39 +185,65 @@ impl WorkspaceApp {
         )
     }
 
-    fn active_privilege_saved_connection_id(&self) -> Option<String> {
+    fn active_privilege_connection_id(&self) -> Option<String> {
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == TabKind::LocalTerminal)
+            && !self.active_tab_has_serial_terminal()
+        {
+            // Local shell sudo/su prompts have no SavedConnection owner. Use a
+            // dedicated store scope so secrets are never confused with SSH
+            // connection credentials.
+            return Some(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string());
+        }
+
         let session_id = self.active_terminal_session_id()?;
+        if let Some(connection_id) = self.terminal_privilege_connection_ids.get(&session_id) {
+            return Some(connection_id.clone());
+        }
         let node_id = self.terminal_ssh_nodes.get(&session_id)?;
-        // Privilege credentials are stored on the saved connection metadata.
-        // Runtime SSH connection ids are short-lived transport handles and do
-        // not match Tauri's persisted SavedConnection lookup.
-        self.ssh_nodes
-            .get(node_id)
-            .and_then(|node| node.saved_connection_id.clone())
+        let node = self.ssh_nodes.get(node_id);
+        // Privilege credentials are stored on SavedConnection metadata, not on
+        // transient SSH transport handles. Resolve the owner from every native
+        // session-tree mirror before giving up: restored/expanded nodes may
+        // have their origin in NodeRuntimeStore even when the UI node snapshot
+        // was created before the saved id was attached.
+        node.and_then(|node| node.saved_connection_id.clone())
+            .or_else(|| {
+                self.node_runtime_store
+                    .snapshot(node_id)
+                    .and_then(|snapshot| snapshot.origin.saved_connection_id().map(str::to_string))
+            })
+            .or_else(|| {
+                self.saved_ssh_nodes
+                    .iter()
+                    .find_map(|(saved_connection_id, saved_node_id)| {
+                        (saved_node_id == node_id).then(|| saved_connection_id.clone())
+                    })
+            })
+            .or_else(|| self.saved_connection_id_for_node_snapshot(node_id, node))
     }
 
     fn active_privilege_prompt_state(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<PrivilegePromptHelperState> {
-        let connection_id = self.active_privilege_saved_connection_id()?;
-        let connection = self.connection_store.get(&connection_id)?;
+        let active_tab = self.active_tab()?;
+        if !tab_kind_allows_privilege_prompt_helper(&active_tab.kind) {
+            return None;
+        }
         let visible_text = self.active_pane()?.read(cx).visible_text_snapshot();
-        let prompt = detect_privilege_prompt(&visible_text)?;
-        let matches = connection
-            .privilege_credentials
-            .iter()
-            .filter(|credential| privilege_credential_matches_prompt(credential, &prompt))
-            .map(|credential| MatchedPrivilegeCredential {
-                connection_id: connection_id.clone(),
-                credential_id: credential.id.clone(),
-                label: credential.label.clone(),
-            })
-            .collect();
-        Some(PrivilegePromptHelperState {
-            connection_id,
-            matches,
-        })
+        let _prompt = detect_privilege_prompt(&visible_text)?;
+        let connection_id = self.active_privilege_connection_id()?;
+        // Tauri keeps the prompt state alive even when credential metadata
+        // cannot be loaded; the chip then becomes a management affordance. Do
+        // not let a missing credential row or transient keychain/config error
+        // suppress the detected sudo/su prompt.
+        let credentials = self
+            .connection_store
+            .list_privilege_credentials(&connection_id)
+            .unwrap_or_default();
+        build_privilege_prompt_helper_state(connection_id, &credentials, &visible_text)
     }
 
     pub(in crate::workspace) fn active_privilege_prompt_helper_should_refresh(
@@ -208,6 +303,21 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if connection_id == LOCAL_SHELL_PRIVILEGE_CONNECTION_ID {
+            self.settings_page.set_active_tab(SettingsTab::Local);
+            self.open_settings(window, cx);
+            cx.notify();
+            return;
+        }
+        if self.connection_store.get(&connection_id).is_none() {
+            self.push_command_palette_toast(
+                self.i18n.t("terminal.privilege_helper.load_failed"),
+                Some(format!("Connection not found: {connection_id}")),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        }
         // The no-credential prompt state is a management affordance only. It
         // opens the same saved-connection editor as Tauri and never reads a
         // keychain item until the user explicitly saves and later clicks Fill.
@@ -1119,5 +1229,116 @@ mod terminal_broadcast_menu_tests {
     #[test]
     fn broadcast_menu_keeps_left_viewport_margin_when_trigger_is_narrow() {
         assert_eq!(terminal_broadcast_menu_left_for_trigger_right(120.0), 12.0);
+    }
+}
+
+#[cfg(test)]
+mod privilege_prompt_helper_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn saved_privilege_credential(
+        id: &str,
+        kind: PrivilegeCredentialKind,
+        username_hint: Option<&str>,
+    ) -> SavedPrivilegeCredential {
+        let now = Utc::now();
+        SavedPrivilegeCredential {
+            id: id.to_string(),
+            connection_id: "conn-1".to_string(),
+            label: id.to_string(),
+            kind,
+            username_hint: username_hint.map(str::to_string),
+            prompt_patterns: Vec::new(),
+            keychain_id: Some(format!("privilege:v1:conn-1:{id}")),
+            enabled: true,
+            require_click_to_send: true,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn local_terminal_prompt_helper_is_enabled() {
+        assert!(tab_kind_allows_privilege_prompt_helper(
+            &TabKind::LocalTerminal
+        ));
+    }
+
+    #[test]
+    fn ssh_terminal_prompt_helper_is_enabled() {
+        assert!(tab_kind_allows_privilege_prompt_helper(
+            &TabKind::SshTerminal
+        ));
+    }
+
+    #[test]
+    fn prompt_state_survives_without_loaded_credentials() {
+        let state = build_privilege_prompt_helper_state(
+            "conn-1".to_string(),
+            &[],
+            "sudo yazi\n[sudo] lipsc 的密码:",
+        )
+        .expect("localized sudo prompt should create a management state");
+
+        assert_eq!(
+            state,
+            PrivilegePromptHelperState {
+                connection_id: "conn-1".to_string(),
+                matches: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn prompt_state_matches_enabled_username_hint() {
+        let credentials = vec![
+            saved_privilege_credential(
+                "other-sudo",
+                PrivilegeCredentialKind::SudoPassword,
+                Some("other"),
+            ),
+            saved_privilege_credential(
+                "matching-sudo",
+                PrivilegeCredentialKind::SudoPassword,
+                Some("lipsc"),
+            ),
+        ];
+        let state = build_privilege_prompt_helper_state(
+            "conn-1".to_string(),
+            &credentials,
+            "sudo yazi\n[sudo] lipsc 的密码:",
+        )
+        .expect("localized sudo prompt should create fill matches");
+
+        assert_eq!(
+            state.matches,
+            vec![MatchedPrivilegeCredential {
+                connection_id: "conn-1".to_string(),
+                credential_id: "matching-sudo".to_string(),
+                label: "matching-sudo".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn generic_sudo_prompt_matches_username_hinted_credential() {
+        let credentials = vec![saved_privilege_credential(
+            "local-sudo",
+            PrivilegeCredentialKind::SudoPassword,
+            Some("dominical"),
+        )];
+        let state =
+            build_privilege_prompt_helper_state("local-shell:default".to_string(), &credentials, "❯ sudo yazi\nPassword:")
+                .expect("macOS sudo prompt should create fill matches");
+
+        assert_eq!(
+            state.matches,
+            vec![MatchedPrivilegeCredential {
+                connection_id: "local-shell:default".to_string(),
+                credential_id: "local-sudo".to_string(),
+                label: "local-sudo".to_string(),
+            }]
+        );
     }
 }

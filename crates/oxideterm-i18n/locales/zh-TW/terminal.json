@@ -158,7 +158,8 @@
       "load_failed": "無法載入提權憑證",
       "send_failed": "無法送出提權憑證",
       "manage": "儲存憑證",
-      "manage_title": "為此連線儲存提權憑證"
+      "manage_title": "為此連線儲存提權憑證",
+      "local_manage_unavailable": "本機 Shell 的提權憑證管理尚未開放。"
     }
   },
   "search": {

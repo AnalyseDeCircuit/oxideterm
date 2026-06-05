@@ -42,14 +42,28 @@ pub fn detect_privilege_prompt(text: &str) -> Option<PrivilegePromptMatch> {
         });
     }
 
-    if is_generic_password_prompt(line) && recent_command_looks_like_privilege_request(tail) {
-        return Some(PrivilegePromptMatch::Su {
-            target_user: None,
-            prompt_text: line.to_string(),
+    if is_generic_password_prompt(line)
+        && let Some(command) = recent_privilege_command(tail)
+    {
+        return Some(match command {
+            RecentPrivilegeCommand::Sudo => PrivilegePromptMatch::Sudo {
+                username: None,
+                prompt_text: line.to_string(),
+            },
+            RecentPrivilegeCommand::Su => PrivilegePromptMatch::Su {
+                target_user: None,
+                prompt_text: line.to_string(),
+            },
         });
     }
 
     None
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RecentPrivilegeCommand {
+    Sudo,
+    Su,
 }
 
 fn tail_chars(text: &str, max_chars: usize) -> &str {
@@ -113,19 +127,24 @@ fn looks_like_password_result(line: &str) -> bool {
     has_password && has_result
 }
 
-fn recent_command_looks_like_privilege_request(tail: &str) -> bool {
+fn recent_privilege_command(tail: &str) -> Option<RecentPrivilegeCommand> {
     tail.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .rev()
         .skip(1)
         .take(5)
-        .any(line_contains_privilege_command)
+        .find_map(line_privilege_command)
 }
 
-fn line_contains_privilege_command(line: &str) -> bool {
-    line.split_whitespace()
-        .any(|token| matches!(token, "sudo" | "su"))
+fn line_privilege_command(line: &str) -> Option<RecentPrivilegeCommand> {
+    // Prompt-themed shells often prefix commands with glyphs. Scan tokens in
+    // order so `sudo su` is treated as the sudo prompt that asked first.
+    line.split_whitespace().find_map(|token| match token {
+        "sudo" => Some(RecentPrivilegeCommand::Sudo),
+        "su" => Some(RecentPrivilegeCommand::Su),
+        _ => None,
+    })
 }
 
 #[cfg(test)]
@@ -155,6 +174,19 @@ mod tests {
     }
 
     #[test]
+    fn detects_localized_sudo_prompt_after_retry() {
+        assert_eq!(
+            detect_privilege_prompt(
+                "sudo yazi\n[sudo] lipsc 的密码:\n对不起，请重试。\n[sudo] lipsc 的密码:"
+            ),
+            Some(PrivilegePromptMatch::Sudo {
+                username: Some("lipsc".to_string()),
+                prompt_text: "[sudo] lipsc 的密码:".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn detects_su_prompts_with_explicit_prefix() {
         assert_eq!(
             detect_privilege_prompt("su - root\nsu: Password:"),
@@ -167,6 +199,20 @@ mod tests {
 
     #[test]
     fn detects_generic_password_prompt_only_after_privilege_command() {
+        assert_eq!(
+            detect_privilege_prompt("❯ sudo yazi\nPassword:"),
+            Some(PrivilegePromptMatch::Sudo {
+                username: None,
+                prompt_text: "Password:".to_string(),
+            })
+        );
+        assert_eq!(
+            detect_privilege_prompt("❯ sudo yazi\n密码："),
+            Some(PrivilegePromptMatch::Sudo {
+                username: None,
+                prompt_text: "密码：".to_string(),
+            })
+        );
         assert_eq!(
             detect_privilege_prompt("su - root\nPassword:"),
             Some(PrivilegePromptMatch::Su {

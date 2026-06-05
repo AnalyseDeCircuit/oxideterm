@@ -188,6 +188,8 @@ impl WorkspaceApp {
             settings_selected_connection_import_drafts: HashSet::new(),
             settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy::Skip,
             settings_connection_import_target_group: String::new(),
+            settings_local_privilege_draft: PrivilegeCredentialDraft::default(),
+            settings_local_privilege_error: None,
             quick_commands: QuickCommandsState::load(settings_store.path()),
             // Quick command popovers can contain user-sized command sets; keep
             // their rows on the same variable-height list path as migrated
@@ -535,6 +537,7 @@ impl WorkspaceApp {
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             terminal_ssh_nodes: HashMap::new(),
+            terminal_privilege_connection_ids: HashMap::new(),
             pending_ssh_terminal_opens: VecDeque::new(),
             expanded_ssh_nodes: HashSet::new(),
             active_ssh_node_id: None,

@@ -6,6 +6,8 @@ mod secret;
 mod ssh_config;
 mod ssh_keys;
 mod store;
+#[cfg(target_os = "macos")]
+mod touch_id;
 
 pub use connection_import::{
     ConnectionImportApplyRequest, ConnectionImportApplyResult, ConnectionImportDuplicateStrategy,
@@ -27,10 +29,10 @@ pub use ssh_keys::{SshKeyInfo, list_available_ssh_keys};
 pub use store::{
     ApplySavedConnectionsSyncOutcome, ApplySavedConnectionsSyncSnapshotResult, AuthType,
     CONFIG_VERSION, ConnectionInfo, ConnectionOptions, ConnectionStore, ConnectionStoreData,
-    DeletedConnectionTombstone, LocalSyncMetadata, ManagedSshKeyInfo, ManagedSshKeyOrigin,
-    ManagedSshKeyUsage, PrivilegeCredentialKind, ProxyHopInfo, SaveConnectionRequest,
-    SavePrivilegeCredentialRequest, SaveSerialProfileRequest, SavedAuth, SavedConnection,
-    SavedConnectionSyncRecord, SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
-    SavedPrivilegeCredential, SavedProxyHop, SerialFlowControl, SerialParity, SerialProfile,
-    validate_group_name,
+    DeletedConnectionTombstone, LOCAL_SHELL_PRIVILEGE_CONNECTION_ID, LocalSyncMetadata,
+    ManagedSshKeyInfo, ManagedSshKeyOrigin, ManagedSshKeyUsage, PrivilegeCredentialKind,
+    ProxyHopInfo, SaveConnectionRequest, SavePrivilegeCredentialRequest, SaveSerialProfileRequest,
+    SavedAuth, SavedConnection, SavedConnectionSyncRecord, SavedConnectionsConflictStrategy,
+    SavedConnectionsSyncSnapshot, SavedPrivilegeCredential, SavedProxyHop, SerialFlowControl,
+    SerialParity, SerialProfile, validate_group_name,
 };

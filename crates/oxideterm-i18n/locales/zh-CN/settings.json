@@ -21,5 +21,12 @@
       "renderer_changed": "渲染器已更改",
       "renderer_changed_desc": "终端渲染器已切换到 {{renderer}}。新终端将使用此渲染器，已打开的终端不受影响。"
     }
+  },
+  "settings_view": {
+    "local_terminal": {
+      "privilege_credentials": "提权凭据",
+      "privilege_credentials_hint": "保存这台设备上的本地 sudo/su 助手凭据。密钥只保存在提权钥匙串作用域内，并且只会在你明确点击后发送。",
+      "privilege_username_placeholder": "当前本地用户"
+    }
   }
 }

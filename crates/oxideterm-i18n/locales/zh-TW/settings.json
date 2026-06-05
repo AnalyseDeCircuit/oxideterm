@@ -21,5 +21,12 @@
       "renderer_changed": "渲染器已變更",
       "renderer_changed_desc": "終端機渲染器已切換為 {{renderer}}。新終端機將使用此渲染器，現有終端機不受影響。"
     }
+  },
+  "settings_view": {
+    "local_terminal": {
+      "privilege_credentials": "提權憑證",
+      "privilege_credentials_hint": "保存這台裝置上的本機 sudo/su 助手憑證。祕密只保存在提權鑰匙圈作用域內，且只會在你明確點擊後送出。",
+      "privilege_username_placeholder": "目前本機使用者"
+    }
   }
 }

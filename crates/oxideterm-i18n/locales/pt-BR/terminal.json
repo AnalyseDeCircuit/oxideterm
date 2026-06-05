@@ -158,7 +158,8 @@
       "load_failed": "Não foi possível carregar a credencial de privilégio",
       "send_failed": "Não foi possível enviar a credencial de privilégio",
       "manage": "Salvar credencial",
-      "manage_title": "Salvar uma credencial privilegiada para esta conexão"
+      "manage_title": "Salvar uma credencial privilegiada para esta conexão",
+      "local_manage_unavailable": "O gerenciamento de credenciais de privilégio do shell local ainda não está disponível."
     }
   },
   "search": {

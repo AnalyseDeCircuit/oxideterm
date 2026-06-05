@@ -30,15 +30,22 @@ impl ConnectionStore {
                 format: ConnectionStoreStorageFormat::Missing,
             }
         };
+        #[cfg(target_os = "macos")]
+        let privilege_keychain = ConnectionKeychain::with_macos_biometrics_reason(
+            PRIVILEGE_CREDENTIAL_KEYCHAIN_SERVICE,
+            "OxideTerm needs to access your privilege helper credential",
+        );
+        #[cfg(not(target_os = "macos"))]
+        let privilege_keychain =
+            ConnectionKeychain::with_service(PRIVILEGE_CREDENTIAL_KEYCHAIN_SERVICE);
+
         Ok(Self {
             path,
             data: loaded.data,
             storage_format: loaded.format,
             keychain: ConnectionKeychain::default(),
             managed_keychain: ConnectionKeychain::with_service(MANAGED_SSH_KEYCHAIN_SERVICE),
-            privilege_keychain: ConnectionKeychain::with_service(
-                PRIVILEGE_CREDENTIAL_KEYCHAIN_SERVICE,
-            ),
+            privilege_keychain,
         })
     }
 
@@ -597,11 +604,16 @@ impl ConnectionStore {
         self.get_saved_auth_password(&conn.auth)
     }
 
-    pub fn list_privilege_credentials(&self, connection_id: &str) -> Result<Vec<SavedPrivilegeCredential>> {
-        let connection = self
-            .get(connection_id)
-            .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
-        Ok(connection.privilege_credentials.clone())
+    pub fn list_privilege_credentials(
+        &self,
+        connection_id: &str,
+    ) -> Result<Vec<SavedPrivilegeCredential>> {
+        Ok(self
+            .privilege_credentials_for_scope(connection_id)?
+            .iter()
+            .cloned()
+            .map(normalize_saved_privilege_credential_for_display)
+            .collect())
     }
 
     pub fn save_privilege_credential(
@@ -627,27 +639,13 @@ impl ConnectionStore {
             self.privilege_keychain.store(&keychain_id, secret)?;
         }
 
-        let connection = self
-            .data
-            .connections
-            .iter_mut()
-            .find(|connection| connection.id == connection_id)
-            .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
-        let existing = connection
-            .privilege_credentials
+        let credentials = self.privilege_credentials_for_scope_mut(&connection_id)?;
+        let existing = credentials
             .iter()
             .find(|credential| credential.id == credential_id)
             .cloned();
-        let prompt_patterns = if request.prompt_patterns.is_empty() {
-            default_privilege_prompt_patterns(request.kind)
-        } else {
-            request
-                .prompt_patterns
-                .into_iter()
-                .map(|pattern| pattern.trim().to_string())
-                .filter(|pattern| !pattern.is_empty())
-                .collect()
-        };
+        let prompt_patterns =
+            normalize_privilege_prompt_patterns(request.kind, request.prompt_patterns);
         let keychain_id = if request.secret.is_some() {
             Some(keychain_id)
         } else {
@@ -676,16 +674,15 @@ impl ConnectionStore {
                 .unwrap_or(now),
             updated_at: now,
         };
-        if let Some(index) = connection
-            .privilege_credentials
+        if let Some(index) = credentials
             .iter()
             .position(|candidate| candidate.id == credential_id)
         {
-            connection.privilege_credentials[index] = credential.clone();
+            credentials[index] = credential.clone();
         } else {
-            connection.privilege_credentials.push(credential.clone());
+            credentials.push(credential.clone());
         }
-        connection.updated_at = Some(now);
+        self.touch_privilege_scope(&credential.connection_id);
         self.save()?;
         Ok(credential)
     }
@@ -695,19 +692,13 @@ impl ConnectionStore {
         connection_id: &str,
         credential_id: &str,
     ) -> Result<bool> {
-        let connection = self
-            .data
-            .connections
-            .iter_mut()
-            .find(|connection| connection.id == connection_id)
-            .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
-        let before = connection.privilege_credentials.len();
-        connection
-            .privilege_credentials
+        let credentials = self.privilege_credentials_for_scope_mut(connection_id)?;
+        let before = credentials.len();
+        credentials
             .retain(|credential| credential.id != credential_id);
-        let removed = before != connection.privilege_credentials.len();
+        let removed = before != credentials.len();
         if removed {
-            connection.updated_at = Some(Utc::now());
+            self.touch_privilege_scope(connection_id);
             let keychain_id = privilege_keychain_id(connection_id, credential_id);
             let _ = self.privilege_keychain.delete(&keychain_id);
             self.save()?;
@@ -720,11 +711,8 @@ impl ConnectionStore {
         connection_id: &str,
         credential_id: &str,
     ) -> Result<SecretString> {
-        let connection = self
-            .get(connection_id)
-            .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
-        let credential = connection
-            .privilege_credentials
+        let credential = self
+            .privilege_credentials_for_scope(connection_id)?
             .iter()
             .find(|credential| credential.id == credential_id)
             .ok_or_else(|| anyhow::anyhow!("Privilege credential not found"))?;
@@ -738,6 +726,53 @@ impl ConnectionStore {
         // This read method is only for the UI-confirmed fill path. Callers must
         // immediately write to PTY and drop the returned SecretString.
         self.privilege_keychain.get(keychain_id)
+    }
+
+    fn privilege_credentials_for_scope(
+        &self,
+        connection_id: &str,
+    ) -> Result<&Vec<SavedPrivilegeCredential>> {
+        if connection_id == LOCAL_SHELL_PRIVILEGE_CONNECTION_ID {
+            // Local shell credentials are app-scoped, not tied to a saved SSH
+            // connection. They still reuse the same metadata shape and
+            // keychain-only secret boundary as SSH privilege credentials.
+            return Ok(&self.data.local_privilege_credentials);
+        }
+        self.get(connection_id)
+            .map(|connection| &connection.privilege_credentials)
+            .ok_or_else(|| anyhow::anyhow!("Connection not found"))
+    }
+
+    fn privilege_credentials_for_scope_mut(
+        &mut self,
+        connection_id: &str,
+    ) -> Result<&mut Vec<SavedPrivilegeCredential>> {
+        if connection_id == LOCAL_SHELL_PRIVILEGE_CONNECTION_ID {
+            // Local shell has no SavedConnection row, so edits land in a store
+            // level list while secrets remain in the dedicated privilege
+            // keychain service.
+            return Ok(&mut self.data.local_privilege_credentials);
+        }
+        self.data
+            .connections
+            .iter_mut()
+            .find(|connection| connection.id == connection_id)
+            .map(|connection| &mut connection.privilege_credentials)
+            .ok_or_else(|| anyhow::anyhow!("Connection not found"))
+    }
+
+    fn touch_privilege_scope(&mut self, connection_id: &str) {
+        if connection_id == LOCAL_SHELL_PRIVILEGE_CONNECTION_ID {
+            return;
+        }
+        if let Some(connection) = self
+            .data
+            .connections
+            .iter_mut()
+            .find(|connection| connection.id == connection_id)
+        {
+            connection.updated_at = Some(Utc::now());
+        }
     }
 
     pub fn get_saved_auth_password(&self, auth: &SavedAuth) -> Result<SecretString> {

@@ -158,7 +158,8 @@
       "load_failed": "Could not load privilege credential",
       "send_failed": "Could not send privilege credential",
       "manage": "Save credential",
-      "manage_title": "Save a privilege credential for this connection"
+      "manage_title": "Save a privilege credential for this connection",
+      "local_manage_unavailable": "Local shell privilege credential management is not available yet."
     }
   },
   "search": {

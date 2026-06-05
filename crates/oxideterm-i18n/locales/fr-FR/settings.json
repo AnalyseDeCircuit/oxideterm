@@ -21,5 +21,12 @@
       "renderer_changed": "Moteur de rendu modifié",
       "renderer_changed_desc": "Le moteur de rendu du terminal est passé à {{renderer}}. Les nouveaux terminaux utiliseront ce moteur, les existants ne sont pas affectés."
     }
+  },
+  "settings_view": {
+    "local_terminal": {
+      "privilege_credentials": "Identifiants d’élévation",
+      "privilege_credentials_hint": "Enregistre les identifiants locaux sudo/su de cet appareil. Les secrets restent dans le périmètre du trousseau d’élévation et ne sont envoyés qu’après un clic explicite.",
+      "privilege_username_placeholder": "Utilisateur local actuel"
+    }
   }
 }

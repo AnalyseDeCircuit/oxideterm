@@ -158,7 +158,8 @@
       "load_failed": "Không thể tải thông tin xác thực đặc quyền",
       "send_failed": "Không thể gửi thông tin xác thực đặc quyền",
       "manage": "Lưu thông tin xác thực",
-      "manage_title": "Lưu thông tin xác thực đặc quyền cho kết nối này"
+      "manage_title": "Lưu thông tin xác thực đặc quyền cho kết nối này",
+      "local_manage_unavailable": "Quản lý thông tin xác thực đặc quyền cho shell cục bộ chưa khả dụng."
     }
   },
   "search": {

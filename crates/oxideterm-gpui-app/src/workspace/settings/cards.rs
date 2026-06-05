@@ -862,6 +862,14 @@ impl WorkspaceApp {
             SettingsInput::ConnectionImportTargetGroup => {
                 self.settings_connection_import_target_group.clone()
             }
+            SettingsInput::LocalPrivilegeLabel => self.settings_local_privilege_draft.label.clone(),
+            SettingsInput::LocalPrivilegeUsernameHint => {
+                self.settings_local_privilege_draft.username_hint.clone()
+            }
+            SettingsInput::LocalPrivilegeSecret => self.settings_local_privilege_draft.secret.clone(),
+            SettingsInput::LocalPrivilegePromptPatterns => {
+                self.settings_local_privilege_draft.prompt_patterns.clone()
+            }
             SettingsInput::PluginSetting(index) => self
                 .plugin_registry
                 .contributions()
@@ -993,6 +1001,29 @@ impl WorkspaceApp {
             }
             SettingsInput::ConnectionImportTargetGroup => {
                 self.settings_connection_import_target_group = self.settings_input_draft.clone();
+                cx.notify();
+            }
+            SettingsInput::LocalPrivilegeLabel => {
+                self.settings_local_privilege_draft.label = self.settings_input_draft.clone();
+                self.settings_local_privilege_error = None;
+                cx.notify();
+            }
+            SettingsInput::LocalPrivilegeUsernameHint => {
+                self.settings_local_privilege_draft.username_hint =
+                    self.settings_input_draft.clone();
+                self.settings_local_privilege_error = None;
+                cx.notify();
+            }
+            SettingsInput::LocalPrivilegeSecret => {
+                zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
+                self.settings_local_privilege_draft.secret = self.settings_input_draft.clone();
+                self.settings_local_privilege_error = None;
+                cx.notify();
+            }
+            SettingsInput::LocalPrivilegePromptPatterns => {
+                self.settings_local_privilege_draft.prompt_patterns =
+                    self.settings_input_draft.clone();
+                self.settings_local_privilege_error = None;
                 cx.notify();
             }
             SettingsInput::PluginSetting(index) => {

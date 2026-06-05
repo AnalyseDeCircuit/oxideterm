@@ -158,7 +158,8 @@
       "load_failed": "无法加载提权凭据",
       "send_failed": "无法发送提权凭据",
       "manage": "保存凭据",
-      "manage_title": "为此连接保存提权凭据"
+      "manage_title": "为此连接保存提权凭据",
+      "local_manage_unavailable": "本地 Shell 的提权凭据管理尚未开放。"
     }
   },
   "search": {

@@ -21,5 +21,12 @@
       "renderer_changed": "Renderizador alterado",
       "renderer_changed_desc": "O renderizador do terminal foi alterado para {{renderer}}. Novos terminais usarão este renderizador, os existentes não serão afetados."
     }
+  },
+  "settings_view": {
+    "local_terminal": {
+      "privilege_credentials": "Credenciais de privilégio",
+      "privilege_credentials_hint": "Armazena credenciais locais de ajuda sudo/su para este dispositivo. Os segredos ficam no escopo do chaveiro de privilégios e só são enviados após um clique explícito.",
+      "privilege_username_placeholder": "Usuário local atual"
+    }
   }
 }

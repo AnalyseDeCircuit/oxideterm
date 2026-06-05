@@ -157,7 +157,8 @@ use self::launcher::LauncherState;
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSessionTreeConnectPlan,
     NativeSshPromptHandler, NewConnectionField, NewConnectionForm, NewConnectionSelect,
-    SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent, SshConnectionWorkerResult,
+    PrivilegeCredentialDraft, SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent,
+    SshConnectionWorkerResult,
 };
 use self::onboarding::OnboardingState;
 use self::pane_tree::SplitDrag;
@@ -553,6 +554,8 @@ pub(crate) struct WorkspaceApp {
     settings_selected_connection_import_drafts: HashSet<String>,
     settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy,
     settings_connection_import_target_group: String,
+    settings_local_privilege_draft: PrivilegeCredentialDraft,
+    settings_local_privilege_error: Option<String>,
     quick_commands: QuickCommandsState,
     quick_command_list_state: ListState,
     quick_command_list_cache: RefCell<VirtualListSignatureCache>,
@@ -778,6 +781,7 @@ pub(crate) struct WorkspaceApp {
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
+    terminal_privilege_connection_ids: HashMap<TerminalSessionId, String>,
     pending_ssh_terminal_opens: VecDeque<PendingSshTerminalOpen>,
     expanded_ssh_nodes: HashSet<NodeId>,
     active_ssh_node_id: Option<NodeId>,

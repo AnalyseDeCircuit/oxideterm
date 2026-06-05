@@ -21,5 +21,12 @@
       "renderer_changed": "Renderer geändert",
       "renderer_changed_desc": "Terminal-Renderer auf {{renderer}} umgestellt. Neue Terminals verwenden diesen Renderer, bestehende sind nicht betroffen."
     }
+  },
+  "settings_view": {
+    "local_terminal": {
+      "privilege_credentials": "Privileg-Anmeldedaten",
+      "privilege_credentials_hint": "Speichert lokale sudo/su-Hilfsanmeldedaten für dieses Gerät. Geheimnisse bleiben im Privileg-Keychain-Bereich und werden nur nach einem ausdrücklichen Klick gesendet.",
+      "privilege_username_placeholder": "Aktueller lokaler Benutzer"
+    }
   }
 }

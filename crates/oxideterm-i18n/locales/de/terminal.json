@@ -158,7 +158,8 @@
       "load_failed": "Privileg-Anmeldedaten konnten nicht geladen werden",
       "send_failed": "Privileg-Anmeldedaten konnten nicht gesendet werden",
       "manage": "Zugang speichern",
-      "manage_title": "Privileg-Zugang für diese Verbindung speichern"
+      "manage_title": "Privileg-Zugang für diese Verbindung speichern",
+      "local_manage_unavailable": "Die Verwaltung von Privileg-Anmeldedaten für die lokale Shell ist noch nicht verfügbar."
     }
   },
   "search": {

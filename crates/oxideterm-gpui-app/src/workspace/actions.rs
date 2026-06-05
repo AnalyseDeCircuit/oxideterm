@@ -532,10 +532,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn standard_confirm_focus(&self) -> Option<ConfirmDialogAction> {
-        Some(
-            self.standard_confirm_focused_action
-                .unwrap_or(ConfirmDialogAction::Cancel),
-        )
+        self.standard_confirm_focused_action
     }
 
     pub(super) fn standard_confirm_focus_owner(&self) -> Option<ConfirmDialogAction> {
@@ -543,9 +540,11 @@ impl WorkspaceApp {
     }
 
     pub(super) fn reset_standard_confirm_focus(&mut self) {
-        // Tauri/Radix dialogs focus the first footer button when keyboard focus
-        // enters the action row. Native tracks that owner explicitly.
-        self.standard_confirm_focused_action = Some(ConfirmDialogAction::Cancel);
+        // Tauri useConfirm does not paint a default footer button highlight.
+        // Keyboard activation still falls back to Cancel inside
+        // handle_standard_confirm_key; visible focus appears only after an
+        // explicit Tab/arrow navigation writes an action owner.
+        self.standard_confirm_focused_action = None;
     }
 
     pub(super) fn set_standard_confirm_focus(&mut self, action: ConfirmDialogAction) {

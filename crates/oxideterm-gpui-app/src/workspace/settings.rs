@@ -61,10 +61,11 @@ use oxideterm_ai::{
 };
 use oxideterm_connections::{
     ConnectionImportApplyRequest, ConnectionImportDuplicateStrategy, ConnectionImportPreview,
-    ConnectionImportSource, ImportedConnectionAuthType, ManagedSshKeyInfo, ManagedSshKeyOrigin,
-    ManagedSshKeyUsage, SecretString, SshConfigHost, apply_connection_import,
-    list_available_ssh_keys, list_ssh_config_hosts, preview_connection_import,
-    resolve_ssh_config_alias, saved_connection_from_ssh_host,
+    ConnectionImportSource, ImportedConnectionAuthType, LOCAL_SHELL_PRIVILEGE_CONNECTION_ID,
+    ManagedSshKeyInfo, ManagedSshKeyOrigin, ManagedSshKeyUsage, SavePrivilegeCredentialRequest,
+    SecretString, SshConfigHost, apply_connection_import, list_available_ssh_keys,
+    list_ssh_config_hosts, preview_connection_import, resolve_ssh_config_alias,
+    saved_connection_from_ssh_host,
 };
 use oxideterm_gpui_settings_view::*;
 use oxideterm_gpui_ui::{
@@ -75,6 +76,7 @@ use oxideterm_gpui_ui::{
         split_footer_button,
     },
     checkbox::checkbox,
+    form_field,
     modal::{
         dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
         dismissible_dialog_backdrop, overlay_content_boundary, popover_backdrop,

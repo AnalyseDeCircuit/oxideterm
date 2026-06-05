@@ -158,7 +158,8 @@
       "load_failed": "権限昇格用の認証情報を読み込めませんでした",
       "send_failed": "権限昇格用の認証情報を送信できませんでした",
       "manage": "認証情報を保存",
-      "manage_title": "この接続の昇格認証情報を保存"
+      "manage_title": "この接続の昇格認証情報を保存",
+      "local_manage_unavailable": "ローカル Shell の権限昇格用資格情報管理はまだ利用できません。"
     }
   },
   "search": {

@@ -158,7 +158,8 @@
       "load_failed": "Impossibile caricare la credenziale privilegiata",
       "send_failed": "Impossibile inviare la credenziale privilegiata",
       "manage": "Salva credenziale",
-      "manage_title": "Salva una credenziale privilegiata per questa connessione"
+      "manage_title": "Salva una credenziale privilegiata per questa connessione",
+      "local_manage_unavailable": "La gestione delle credenziali di privilegio della shell locale non è ancora disponibile."
     }
   },
   "search": {

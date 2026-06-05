@@ -208,11 +208,20 @@ impl WorkspaceApp {
         &mut self,
         node_id: NodeId,
         saved_connection_id: Option<String>,
+        privilege_connection_id: Option<String>,
         config: SshConfig,
         title: String,
         session_id: TerminalSessionId,
     ) {
         self.terminal_ssh_nodes.insert(session_id, node_id.clone());
+        if let Some(privilege_connection_id) = privilege_connection_id {
+            // Terminal UI privilege prompts are scoped to the saved connection
+            // that opened this terminal, which can differ from the reused SSH
+            // node owner. Keep that mapping per session instead of rewriting
+            // SessionTree/NodeRouter ownership.
+            self.terminal_privilege_connection_ids
+                .insert(session_id, privilege_connection_id);
+        }
         self.expanded_ssh_nodes.insert(node_id.clone());
         self.active_ssh_node_id = Some(node_id.clone());
         if let Some(saved_connection_id) = saved_connection_id.as_ref() {
@@ -266,6 +275,7 @@ impl WorkspaceApp {
         // Drop the SessionRegistry-shaped owner before unbinding the node
         // endpoint, matching Tauri's terminal close cleanup order: endpoint
         // metadata is removed without touching the node's SSH connection.
+        self.terminal_privilege_connection_ids.remove(&session_id);
         let endpoint_session = self.terminal_endpoint_sessions.remove(&session_id);
         let Some(node_id) = self.terminal_ssh_nodes.remove(&session_id) else {
             return;
