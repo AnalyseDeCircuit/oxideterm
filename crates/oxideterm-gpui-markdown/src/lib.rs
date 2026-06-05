@@ -21,7 +21,7 @@
 //! - Paragraphs
 //! - Bold / italic / inline code / strikethrough
 //! - Fenced code blocks with syntax highlighting (syntect)
-//! - Mermaid subset diagrams (`graph` / `flowchart` TD/BT/LR/RL and `sequenceDiagram`)
+//! - Mermaid subset diagrams (`graph` / `flowchart` TD/BT/LR/RL, `sequenceDiagram`, `pie`, and `gantt`)
 //! - Blockquotes
 //! - GFM tables
 //! - Ordered and unordered lists with task list checkboxes

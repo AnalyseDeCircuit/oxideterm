@@ -6,9 +6,21 @@
 use std::collections::HashMap;
 
 use crate::mermaid::model::{
-    GraphDiagram, GraphDirection, GraphNode, GraphSubgraph, MermaidDiagram, SequenceDiagram,
+    GanttDiagram, GraphDiagram, GraphDirection, GraphNode, GraphSubgraph, MermaidDiagram,
+    SequenceDiagram,
 };
 use crate::options::MarkdownOptions;
+
+const GANTT_MARGIN_X: f32 = 28.0;
+const GANTT_TITLE_HEIGHT: f32 = 34.0;
+const GANTT_AXIS_HEIGHT: f32 = 42.0;
+const GANTT_LABEL_WIDTH: f32 = 172.0;
+const GANTT_ROW_HEIGHT: f32 = 30.0;
+const GANTT_SECTION_HEIGHT: f32 = 28.0;
+const GANTT_DAY_WIDTH_MIN: f32 = 8.0;
+const GANTT_DAY_WIDTH_MEDIUM: f32 = 14.0;
+const GANTT_DAY_WIDTH_DEFAULT: f32 = 24.0;
+const GANTT_MIN_WIDTH: f32 = 620.0;
 
 const GRAPH_MARGIN: f32 = 28.0;
 const GRAPH_NODE_MIN_WIDTH: f32 = 96.0;
@@ -23,6 +35,14 @@ const SEQUENCE_HEADER_HEIGHT: f32 = 38.0;
 const SEQUENCE_MESSAGE_GAP: f32 = 58.0;
 const SEQUENCE_MIN_SPACING: f32 = 150.0;
 
+const PIE_WIDTH: f32 = 560.0;
+const PIE_MARGIN: f32 = 28.0;
+const PIE_TITLE_HEIGHT: f32 = 34.0;
+const PIE_RADIUS: f32 = 126.0;
+const PIE_LEGEND_X: f32 = 332.0;
+const PIE_LEGEND_ROW_HEIGHT: f32 = 24.0;
+const PIE_MIN_HEIGHT: f32 = 300.0;
+
 #[derive(Clone, Debug)]
 pub struct LaidOutDiagram {
     pub width: f32,
@@ -32,8 +52,35 @@ pub struct LaidOutDiagram {
 
 #[derive(Clone, Debug)]
 pub enum LaidOutDiagramKind {
+    Gantt(LaidOutGantt),
     Graph(LaidOutGraph),
+    Pie(LaidOutPie),
     Sequence(LaidOutSequence),
+}
+
+#[derive(Clone, Debug)]
+pub struct LaidOutGantt {
+    pub diagram: GanttDiagram,
+    pub min_day: i32,
+    pub max_day: i32,
+    pub chart_x: f32,
+    pub chart_y: f32,
+    pub day_width: f32,
+    pub task_rows: Vec<GanttTaskRow>,
+    pub section_rows: Vec<GanttSectionRow>,
+}
+
+#[derive(Clone, Debug)]
+pub struct GanttTaskRow {
+    pub section_index: usize,
+    pub task_index: usize,
+    pub y: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct GanttSectionRow {
+    pub section_index: usize,
+    pub y: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -74,10 +121,79 @@ pub struct ParticipantBox {
     pub label_width: f32,
 }
 
+#[derive(Clone, Debug)]
+pub struct LaidOutPie {
+    pub diagram: crate::mermaid::model::PieDiagram,
+    pub center_x: f32,
+    pub center_y: f32,
+    pub radius: f32,
+    pub legend_x: f32,
+    pub legend_y: f32,
+}
+
 pub fn layout(diagram: MermaidDiagram, opts: &MarkdownOptions) -> LaidOutDiagram {
     match diagram {
+        MermaidDiagram::Gantt(gantt) => layout_gantt(gantt),
         MermaidDiagram::Graph(graph) => layout_graph(graph, opts),
+        MermaidDiagram::Pie(pie) => layout_pie(pie),
         MermaidDiagram::Sequence(sequence) => layout_sequence(sequence, opts),
+    }
+}
+
+fn layout_gantt(diagram: GanttDiagram) -> LaidOutDiagram {
+    let mut min_day = i32::MAX;
+    let mut max_day = i32::MIN;
+    for task in diagram.sections.iter().flat_map(|section| &section.tasks) {
+        min_day = min_day.min(task.start_day);
+        max_day = max_day.max(task.end_day);
+    }
+    let span_days = (max_day - min_day).max(1);
+    let day_width = if span_days > 120 {
+        GANTT_DAY_WIDTH_MIN
+    } else if span_days > 60 {
+        GANTT_DAY_WIDTH_MEDIUM
+    } else {
+        GANTT_DAY_WIDTH_DEFAULT
+    };
+
+    let title_height = diagram.title.as_ref().map_or(0.0, |_| GANTT_TITLE_HEIGHT);
+    let chart_x = GANTT_MARGIN_X + GANTT_LABEL_WIDTH;
+    let chart_y = GANTT_MARGIN_X + title_height + GANTT_AXIS_HEIGHT;
+    let mut y = chart_y;
+    let mut task_rows = Vec::new();
+    let mut section_rows = Vec::new();
+    for (section_index, section) in diagram.sections.iter().enumerate() {
+        if !section.label.is_empty() {
+            section_rows.push(GanttSectionRow {
+                section_index,
+                y: y + 18.0,
+            });
+            y += GANTT_SECTION_HEIGHT;
+        }
+        for (task_index, _) in section.tasks.iter().enumerate() {
+            task_rows.push(GanttTaskRow {
+                section_index,
+                task_index,
+                y,
+            });
+            y += GANTT_ROW_HEIGHT;
+        }
+    }
+
+    let chart_width = span_days as f32 * day_width;
+    LaidOutDiagram {
+        width: (chart_x + chart_width + GANTT_MARGIN_X).max(GANTT_MIN_WIDTH),
+        height: y + GANTT_MARGIN_X,
+        kind: LaidOutDiagramKind::Gantt(LaidOutGantt {
+            diagram,
+            min_day,
+            max_day,
+            chart_x,
+            chart_y,
+            day_width,
+            task_rows,
+            section_rows,
+        }),
     }
 }
 
@@ -314,6 +430,27 @@ fn graph_node_width(node: &GraphNode, opts: &MarkdownOptions) -> f32 {
     (text_width + GRAPH_NODE_PADDING_X * 2.0).max(GRAPH_NODE_MIN_WIDTH)
 }
 
+fn layout_pie(diagram: crate::mermaid::model::PieDiagram) -> LaidOutDiagram {
+    let title_height = diagram.title.as_ref().map_or(0.0, |_| PIE_TITLE_HEIGHT);
+    let legend_height = diagram.slices.len() as f32 * PIE_LEGEND_ROW_HEIGHT;
+    let height = (PIE_MARGIN * 2.0 + title_height + PIE_RADIUS * 2.0)
+        .max(PIE_MARGIN * 2.0 + title_height + legend_height)
+        .max(PIE_MIN_HEIGHT);
+
+    LaidOutDiagram {
+        width: PIE_WIDTH,
+        height,
+        kind: LaidOutDiagramKind::Pie(LaidOutPie {
+            diagram,
+            center_x: PIE_MARGIN + PIE_RADIUS,
+            center_y: PIE_MARGIN + title_height + PIE_RADIUS,
+            radius: PIE_RADIUS,
+            legend_x: PIE_LEGEND_X,
+            legend_y: PIE_MARGIN + title_height + 10.0,
+        }),
+    }
+}
+
 fn layout_sequence(diagram: SequenceDiagram, opts: &MarkdownOptions) -> LaidOutDiagram {
     let max_label_width = diagram
         .participants
@@ -388,5 +525,42 @@ mod tests {
         let b = graph.nodes.get("B").expect("B should be placed");
 
         assert!(b.x > a.x + a.width);
+    }
+
+    #[test]
+    fn lays_out_gantt_tasks_by_date_span() {
+        let MermaidDiagram::Gantt(gantt) =
+            parser::parse("gantt\nTask A : a, 2026-01-01, 2d\nTask B : b, after a, 3d")
+                .expect("gantt chart should parse")
+        else {
+            panic!("expected gantt chart");
+        };
+
+        let layout = layout_gantt(gantt);
+        let LaidOutDiagramKind::Gantt(gantt) = layout.kind else {
+            panic!("expected laid out gantt chart");
+        };
+
+        assert_eq!(gantt.task_rows.len(), 2);
+        assert!(gantt.max_day > gantt.min_day);
+        assert!(layout.width >= gantt.chart_x);
+    }
+
+    #[test]
+    fn lays_out_pie_chart_with_legend_space() {
+        let MermaidDiagram::Pie(pie) =
+            parser::parse("pie title Tickets\n\"Open\" : 4\n\"Closed\" : 6")
+                .expect("pie chart should parse")
+        else {
+            panic!("expected pie chart");
+        };
+
+        let layout = layout_pie(pie);
+        let LaidOutDiagramKind::Pie(pie) = layout.kind else {
+            panic!("expected laid out pie chart");
+        };
+
+        assert!(layout.width >= pie.legend_x + 180.0);
+        assert!(layout.height >= pie.center_y + pie.radius);
     }
 }

@@ -3,17 +3,20 @@
 
 //! Line-oriented parser for OxideTerm's Mermaid v0 subset.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashMap};
 
 use crate::mermaid::model::{
-    GraphDiagram, GraphDirection, GraphEdge, GraphEdgeKind, GraphNode, GraphNodeShape,
-    GraphSubgraph, MermaidDiagram, SequenceDiagram, SequenceMessage, SequenceMessageKind,
-    SequenceParticipant, SequenceParticipantKind,
+    GanttDiagram, GanttSection, GanttTask, GanttTaskStatus, GraphDiagram, GraphDirection,
+    GraphEdge, GraphEdgeKind, GraphNode, GraphNodeShape, GraphSubgraph, MermaidDiagram, PieDiagram,
+    PieSlice, SequenceDiagram, SequenceMessage, SequenceMessageKind, SequenceParticipant,
+    SequenceParticipantKind,
 };
 
 const MAX_MERMAID_STATEMENTS: usize = 240;
+const MAX_GANTT_TASKS: usize = 180;
 const MAX_GRAPH_NODES: usize = 180;
 const MAX_GRAPH_EDGES: usize = 320;
+const MAX_PIE_SLICES: usize = 80;
 const MAX_SEQUENCE_PARTICIPANTS: usize = 80;
 const MAX_SEQUENCE_MESSAGES: usize = 240;
 
@@ -25,7 +28,9 @@ pub fn parse(source: &str) -> Result<MermaidDiagram, String> {
 
     let mut words = header.split_whitespace();
     match words.next().unwrap_or_default() {
+        "gantt" => parse_gantt(&statements[1..]),
         "graph" | "flowchart" => parse_graph(header, &statements[1..]),
+        "pie" => parse_pie(header, &statements[1..]),
         "sequenceDiagram" => parse_sequence(&statements[1..]),
         other => Err(format!("unsupported Mermaid diagram type: {other}")),
     }
@@ -52,6 +57,276 @@ fn collect_statements(source: &str) -> Result<Vec<String>, String> {
         }
     }
     Ok(statements)
+}
+
+fn parse_gantt(body: &[String]) -> Result<MermaidDiagram, String> {
+    let mut title = None;
+    let mut date_format = GanttDateFormat::DashYmd;
+    let mut sections = Vec::<GanttSection>::new();
+    let mut task_end_by_id = HashMap::<String, i32>::new();
+    let mut task_count = 0usize;
+
+    for statement in body {
+        if let Some(rest) = statement.strip_prefix("title ") {
+            title = Some(parse_gantt_title(rest)?);
+            continue;
+        }
+        if let Some(rest) = statement.strip_prefix("dateFormat ") {
+            date_format = GanttDateFormat::parse(rest.trim())?;
+            continue;
+        }
+        if statement.starts_with("axisFormat ")
+            || statement.starts_with("tickInterval ")
+            || statement.starts_with("todayMarker ")
+            || statement.starts_with("excludes ")
+            || statement == "inclusiveEndDates"
+        {
+            continue;
+        }
+        if let Some(rest) = statement.strip_prefix("section ") {
+            sections.push(GanttSection {
+                label: parse_gantt_title(rest)?,
+                tasks: Vec::new(),
+            });
+            continue;
+        }
+
+        if sections.is_empty() {
+            sections.push(GanttSection {
+                label: String::new(),
+                tasks: Vec::new(),
+            });
+        }
+        let task = parse_gantt_task(statement, date_format, &task_end_by_id)?;
+        if let Some(id) = &task.id {
+            task_end_by_id.insert(id.clone(), task.end_day);
+        }
+        sections
+            .last_mut()
+            .expect("gantt parser should have a current section")
+            .tasks
+            .push(task);
+        task_count += 1;
+        if task_count > MAX_GANTT_TASKS {
+            return Err("Mermaid gantt chart is too large".to_string());
+        }
+    }
+
+    if task_count == 0 {
+        return Err("gantt chart contains no tasks".to_string());
+    }
+
+    Ok(MermaidDiagram::Gantt(GanttDiagram { title, sections }))
+}
+
+#[derive(Clone, Copy)]
+enum GanttDateFormat {
+    DashYmd,
+    SlashYmd,
+}
+
+impl GanttDateFormat {
+    fn parse(input: &str) -> Result<Self, String> {
+        match input {
+            "YYYY-MM-DD" => Ok(Self::DashYmd),
+            "YYYY/MM/DD" => Ok(Self::SlashYmd),
+            other => Err(format!("unsupported gantt dateFormat: {other}")),
+        }
+    }
+
+    fn delimiter(self) -> char {
+        match self {
+            Self::DashYmd => '-',
+            Self::SlashYmd => '/',
+        }
+    }
+}
+
+fn parse_gantt_title(input: &str) -> Result<String, String> {
+    let title = unquote_mermaid_label(input.trim());
+    if title.is_empty() {
+        return Err("gantt title is empty".to_string());
+    }
+    Ok(title)
+}
+
+fn parse_gantt_task(
+    statement: &str,
+    date_format: GanttDateFormat,
+    task_end_by_id: &HashMap<String, i32>,
+) -> Result<GanttTask, String> {
+    let Some((label, raw_tokens)) = statement.split_once(':') else {
+        return Err(format!("unsupported gantt task: {statement}"));
+    };
+    let label = parse_gantt_title(label)?;
+    let tokens: Vec<_> = raw_tokens
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    if tokens.len() < 2 {
+        return Err(format!("gantt task has too few fields: {statement}"));
+    }
+
+    let mut cursor = 0usize;
+    let mut status = GanttTaskStatus::Normal;
+    while let Some(next_status) = tokens
+        .get(cursor)
+        .and_then(|token| parse_gantt_status(token))
+    {
+        status = merge_gantt_status(status, next_status);
+        cursor += 1;
+    }
+
+    let remaining = tokens.len().saturating_sub(cursor);
+    let id = if remaining >= 3 && !is_gantt_start_token(tokens[cursor], date_format) {
+        let id = tokens[cursor].to_string();
+        validate_identifier(&id, "gantt task")?;
+        cursor += 1;
+        Some(id)
+    } else {
+        None
+    };
+
+    let start_token = tokens
+        .get(cursor)
+        .ok_or_else(|| format!("gantt task is missing start: {statement}"))?;
+    let end_token = tokens
+        .get(cursor + 1)
+        .ok_or_else(|| format!("gantt task is missing end or duration: {statement}"))?;
+    let start_day = parse_gantt_start(start_token, date_format, task_end_by_id)?;
+    let end_day = parse_gantt_end(end_token, date_format, start_day)?;
+
+    Ok(GanttTask {
+        label,
+        id,
+        start_day,
+        end_day: end_day.max(start_day + 1),
+        status,
+    })
+}
+
+fn parse_gantt_status(token: &str) -> Option<GanttTaskStatus> {
+    match token {
+        "active" => Some(GanttTaskStatus::Active),
+        "done" => Some(GanttTaskStatus::Done),
+        "crit" => Some(GanttTaskStatus::Critical),
+        "milestone" => Some(GanttTaskStatus::Milestone),
+        _ => None,
+    }
+}
+
+fn merge_gantt_status(current: GanttTaskStatus, next: GanttTaskStatus) -> GanttTaskStatus {
+    match (current, next) {
+        (_, GanttTaskStatus::Milestone) => GanttTaskStatus::Milestone,
+        (GanttTaskStatus::Milestone, _) => GanttTaskStatus::Milestone,
+        (_, GanttTaskStatus::Done) => GanttTaskStatus::Done,
+        (GanttTaskStatus::Normal, status) => status,
+        (status, _) => status,
+    }
+}
+
+fn is_gantt_start_token(token: &str, date_format: GanttDateFormat) -> bool {
+    token.starts_with("after ")
+        || parse_gantt_date(token, date_format).is_ok()
+        || parse_gantt_duration_days(token).is_ok()
+}
+
+fn parse_gantt_start(
+    token: &str,
+    date_format: GanttDateFormat,
+    task_end_by_id: &HashMap<String, i32>,
+) -> Result<i32, String> {
+    if let Some(rest) = token.strip_prefix("after ") {
+        let mut latest_end = None;
+        for id in rest.split_whitespace() {
+            let Some(end) = task_end_by_id.get(id) else {
+                return Err(format!("unknown gantt dependency: {id}"));
+            };
+            latest_end = Some(latest_end.unwrap_or(*end).max(*end));
+        }
+        return latest_end.ok_or_else(|| "gantt after dependency is empty".to_string());
+    }
+    parse_gantt_date(token, date_format)
+}
+
+fn parse_gantt_end(
+    token: &str,
+    date_format: GanttDateFormat,
+    start_day: i32,
+) -> Result<i32, String> {
+    if let Ok(duration) = parse_gantt_duration_days(token) {
+        return Ok(start_day + duration.max(1));
+    }
+    parse_gantt_date(token, date_format).map(|day| day + 1)
+}
+
+fn parse_gantt_duration_days(token: &str) -> Result<i32, String> {
+    let token = token.trim();
+    let split_at = token
+        .find(|ch: char| !ch.is_ascii_digit())
+        .ok_or_else(|| format!("unsupported gantt duration: {token}"))?;
+    let amount = token[..split_at]
+        .parse::<i32>()
+        .map_err(|_| format!("unsupported gantt duration: {token}"))?;
+    let unit = token[split_at..].trim();
+    let days = match unit {
+        "d" | "day" | "days" => amount,
+        "w" | "week" | "weeks" => amount * 7,
+        _ => return Err(format!("unsupported gantt duration: {token}")),
+    };
+    Ok(days.max(1))
+}
+
+fn parse_gantt_date(token: &str, date_format: GanttDateFormat) -> Result<i32, String> {
+    let delimiter = date_format.delimiter();
+    let parts: Vec<_> = token.split(delimiter).collect();
+    if parts.len() != 3 {
+        return Err(format!("unsupported gantt date: {token}"));
+    }
+    let year = parts[0]
+        .parse::<i32>()
+        .map_err(|_| format!("unsupported gantt date: {token}"))?;
+    let month = parts[1]
+        .parse::<u32>()
+        .map_err(|_| format!("unsupported gantt date: {token}"))?;
+    let day = parts[2]
+        .parse::<u32>()
+        .map_err(|_| format!("unsupported gantt date: {token}"))?;
+    if !valid_gantt_date(year, month, day) {
+        return Err(format!("invalid gantt date: {token}"));
+    }
+    Ok(days_from_civil(year, month, day))
+}
+
+fn valid_gantt_date(year: i32, month: u32, day: u32) -> bool {
+    if !(1..=12).contains(&month) {
+        return false;
+    }
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => unreachable!(),
+    };
+    (1..=days_in_month).contains(&day)
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i32 {
+    // Howard Hinnant's civil calendar transform keeps Gantt date math local to
+    // the markdown crate without adding a time dependency for preview rendering.
+    let year = year - (month <= 2) as i32;
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let month = month as i32;
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i32 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
 }
 
 fn parse_graph(header: &str, body: &[String]) -> Result<MermaidDiagram, String> {
@@ -403,6 +678,105 @@ fn upsert_graph_node(nodes: &mut Vec<GraphNode>, parsed: &ParsedGraphNode) {
     });
 }
 
+fn parse_pie(header: &str, body: &[String]) -> Result<MermaidDiagram, String> {
+    let mut title = None;
+    let mut show_data = false;
+    let mut words = header.split_whitespace();
+    let _kind = words.next();
+    parse_pie_header_tokens(words, &mut title, &mut show_data)?;
+
+    let mut slices = Vec::new();
+    for statement in body {
+        if let Some(rest) = statement.strip_prefix("title ") {
+            if title.is_some() {
+                return Err("pie chart title is duplicated".to_string());
+            }
+            title = Some(parse_pie_title(rest)?);
+            continue;
+        }
+        if statement == "showData" {
+            show_data = true;
+            continue;
+        }
+
+        slices.push(parse_pie_slice(statement)?);
+        if slices.len() > MAX_PIE_SLICES {
+            return Err("Mermaid pie chart is too large".to_string());
+        }
+    }
+
+    if slices.is_empty() {
+        return Err("pie chart contains no slices".to_string());
+    }
+    if !slices.iter().any(|slice| slice.value > 0.0) {
+        return Err("pie chart contains no positive values".to_string());
+    }
+
+    Ok(MermaidDiagram::Pie(PieDiagram {
+        title,
+        show_data,
+        slices,
+    }))
+}
+
+fn parse_pie_header_tokens<'a>(
+    mut words: impl Iterator<Item = &'a str>,
+    title: &mut Option<String>,
+    show_data: &mut bool,
+) -> Result<(), String> {
+    while let Some(token) = words.next() {
+        match token {
+            "showData" => *show_data = true,
+            "title" => {
+                let title_text = words.collect::<Vec<_>>().join(" ");
+                *title = Some(parse_pie_title(&title_text)?);
+                break;
+            }
+            other => return Err(format!("unsupported pie header token: {other}")),
+        }
+    }
+    Ok(())
+}
+
+fn parse_pie_title(input: &str) -> Result<String, String> {
+    let title = input.trim();
+    if title.is_empty() {
+        return Err("pie chart title is empty".to_string());
+    }
+    Ok(unquote_mermaid_label(title))
+}
+
+fn parse_pie_slice(statement: &str) -> Result<PieSlice, String> {
+    let Some((label, value)) = statement.split_once(':') else {
+        return Err(format!("unsupported pie slice: {statement}"));
+    };
+    let label = unquote_mermaid_label(label.trim());
+    if label.is_empty() {
+        return Err("pie slice label is empty".to_string());
+    }
+    let value_text = value.trim();
+    let value = value_text
+        .parse::<f64>()
+        .map_err(|_| format!("pie slice value is not numeric: {value_text}"))?;
+    if !value.is_finite() || value < 0.0 {
+        return Err(format!("pie slice value is invalid: {value_text}"));
+    }
+
+    Ok(PieSlice { label, value })
+}
+
+fn unquote_mermaid_label(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.len() >= 2
+        && ((trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
+    {
+        trimmed[1..trimmed.len() - 1].to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn parse_sequence(body: &[String]) -> Result<MermaidDiagram, String> {
     let mut participants = Vec::new();
     let mut messages = Vec::new();
@@ -610,6 +984,50 @@ mod tests {
     }
 
     #[test]
+    fn parses_gantt_sections_statuses_and_durations() {
+        let MermaidDiagram::Gantt(gantt) = parse(
+            "gantt\n\
+             title Release Plan\n\
+             dateFormat YYYY-MM-DD\n\
+             section Build\n\
+             Compile :active, build, 2026-01-01, 3d\n\
+             Ship :done, ship, after build, 1w",
+        )
+        .expect("gantt chart should parse") else {
+            panic!("expected gantt chart");
+        };
+
+        assert_eq!(gantt.title.as_deref(), Some("Release Plan"));
+        assert_eq!(gantt.sections[0].label, "Build");
+        assert_eq!(gantt.sections[0].tasks.len(), 2);
+        assert_eq!(gantt.sections[0].tasks[0].status, GanttTaskStatus::Active);
+        assert_eq!(gantt.sections[0].tasks[1].status, GanttTaskStatus::Done);
+        assert_eq!(
+            gantt.sections[0].tasks[1].start_day,
+            gantt.sections[0].tasks[0].end_day
+        );
+    }
+
+    #[test]
+    fn parses_gantt_milestone_and_slash_dates() {
+        let MermaidDiagram::Gantt(gantt) = parse(
+            "gantt\n\
+             dateFormat YYYY/MM/DD\n\
+             section Launch\n\
+             Beta :milestone, beta, 2026/02/01, 0d",
+        )
+        .expect("gantt chart should parse") else {
+            panic!("expected gantt chart");
+        };
+
+        assert_eq!(
+            gantt.sections[0].tasks[0].status,
+            GanttTaskStatus::Milestone
+        );
+        assert_eq!(gantt.sections[0].tasks[0].id.as_deref(), Some("beta"));
+    }
+
+    #[test]
     fn parses_one_level_subgraphs() {
         let MermaidDiagram::Graph(graph) =
             parse("flowchart TB\nsubgraph group[Group]\nA --> B\nend\nB --> C")
@@ -655,9 +1073,52 @@ mod tests {
     }
 
     #[test]
+    fn parses_pie_chart_title_show_data_and_slices() {
+        let MermaidDiagram::Pie(pie) =
+            parse("pie showData title Work items\n\"Open\" : 12\nClosed : 8.5")
+                .expect("pie chart should parse")
+        else {
+            panic!("expected pie chart");
+        };
+
+        assert_eq!(pie.title.as_deref(), Some("Work items"));
+        assert!(pie.show_data);
+        assert_eq!(pie.slices.len(), 2);
+        assert_eq!(pie.slices[0].label, "Open");
+        assert_eq!(pie.slices[1].value, 8.5);
+    }
+
+    #[test]
+    fn parses_pie_chart_body_title_and_show_data() {
+        let MermaidDiagram::Pie(pie) =
+            parse("pie\ntitle Tickets\nshowData\n\"Done\" : 3").expect("pie chart should parse")
+        else {
+            panic!("expected pie chart");
+        };
+
+        assert_eq!(pie.title.as_deref(), Some("Tickets"));
+        assert!(pie.show_data);
+        assert_eq!(pie.slices[0].label, "Done");
+    }
+
+    #[test]
     fn rejects_unsupported_syntax() {
         let error = parse("flowchart TD\nclassDef red fill:#f00").unwrap_err();
         assert!(error.contains("unsupported graph statement"));
+    }
+
+    #[test]
+    fn rejects_invalid_pie_chart_values() {
+        let error = parse("pie\nBad : -1").unwrap_err();
+
+        assert!(error.contains("pie slice value is invalid"));
+    }
+
+    #[test]
+    fn rejects_unknown_gantt_dependency() {
+        let error = parse("gantt\nTask : after missing, 2d").unwrap_err();
+
+        assert!(error.contains("unknown gantt dependency"));
     }
 
     #[test]

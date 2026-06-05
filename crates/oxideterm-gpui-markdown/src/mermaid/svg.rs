@@ -3,13 +3,17 @@
 
 //! SVG generation for the supported Mermaid subset.
 
+use std::f32::consts::PI;
+
 use oxideterm_theme::ThemeTokens;
 
 use crate::mermaid::layout::{
-    LaidOutDiagram, LaidOutDiagramKind, LaidOutGraph, LaidOutSequence, NodeBox, SubgraphBox,
+    GanttSectionRow, GanttTaskRow, LaidOutDiagram, LaidOutDiagramKind, LaidOutGantt, LaidOutGraph,
+    LaidOutPie, LaidOutSequence, NodeBox, SubgraphBox,
 };
 use crate::mermaid::model::{
-    GraphEdgeKind, GraphNodeShape, SequenceMessageKind, SequenceParticipantKind,
+    GanttTaskStatus, GraphEdgeKind, GraphNodeShape, PieSlice, SequenceMessageKind,
+    SequenceParticipantKind,
 };
 use crate::options::MarkdownOptions;
 
@@ -25,6 +29,15 @@ const SVG_SYSTEM_FONT_FALLBACKS: &[&str] = &[
     "Noto Sans CJK",
     "sans-serif",
 ];
+
+const PIE_COLORS: &[u32] = &[
+    0x22d3ee, 0xa78bfa, 0x34d399, 0xfb923c, 0xf472b6, 0x60a5fa, 0xfacc15, 0xf87171, 0x818cf8,
+    0x2dd4bf, 0xfbbf24, 0xf97316,
+];
+
+const GANTT_BAR_HEIGHT: f32 = 18.0;
+const GANTT_MILESTONE_SIZE: f32 = 14.0;
+const GANTT_TICK_LABEL_OFFSET: f32 = 18.0;
 
 #[derive(Clone, Debug)]
 pub struct RenderedSvg {
@@ -59,7 +72,9 @@ pub fn render_with_scale(
         opts,
     );
     match &layout.kind {
+        LaidOutDiagramKind::Gantt(gantt) => render_gantt(&mut svg, gantt, tokens, opts),
         LaidOutDiagramKind::Graph(graph) => render_graph(&mut svg, graph, tokens, opts),
+        LaidOutDiagramKind::Pie(pie) => render_pie(&mut svg, pie, tokens, opts),
         LaidOutDiagramKind::Sequence(sequence) => render_sequence(&mut svg, sequence, tokens, opts),
     }
     svg.push_str("</svg>");
@@ -177,6 +192,202 @@ fn render_graph(
         };
         render_graph_node(svg, bounds, node.shape, &node.label, tokens, opts);
     }
+}
+
+fn render_gantt(
+    svg: &mut String,
+    gantt: &LaidOutGantt,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) {
+    let text = hex(tokens.ui.text);
+    let muted = hex(tokens.ui.text_muted);
+    let border = hex(tokens.ui.border);
+    let chart_width = (gantt.max_day - gantt.min_day).max(1) as f32 * gantt.day_width;
+
+    if let Some(title) = &gantt.diagram.title {
+        svg.push_str(&format!(
+            r#"<text x="{:.1}" y="28" text-anchor="middle" fill="{text}" font-size="{:.1}" font-weight="600">{}</text>"#,
+            gantt.chart_x + chart_width * 0.5,
+            opts.base_font_size * 1.05,
+            escape_text(title)
+        ));
+    }
+
+    render_gantt_axis(svg, gantt, chart_width, tokens, opts);
+
+    for section in &gantt.section_rows {
+        render_gantt_section(svg, gantt, section, tokens, opts);
+    }
+    for row in &gantt.task_rows {
+        render_gantt_task(svg, gantt, row, tokens, opts);
+    }
+
+    let bottom = gantt
+        .task_rows
+        .last()
+        .map(|row| row.y + 24.0)
+        .unwrap_or(gantt.chart_y);
+    svg.push_str(&format!(
+        r#"<path d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{border}" stroke-width="1"/>"#,
+        gantt.chart_x,
+        gantt.chart_y - 10.0,
+        gantt.chart_x + chart_width,
+        gantt.chart_y - 10.0
+    ));
+    svg.push_str(&format!(
+        r#"<rect x="{:.1}" y="{:.1}" width="{chart_width:.1}" height="{:.1}" fill="none" stroke="{border}" stroke-opacity="0.6" stroke-width="1"/>"#,
+        gantt.chart_x,
+        gantt.chart_y - 10.0,
+        bottom - gantt.chart_y + 34.0
+    ));
+    svg.push_str(&format!(r#"<g fill="{muted}"></g>"#));
+}
+
+fn render_gantt_axis(
+    svg: &mut String,
+    gantt: &LaidOutGantt,
+    chart_width: f32,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) {
+    let tick_step = gantt_tick_step(gantt.max_day - gantt.min_day);
+    let grid_bottom = gantt
+        .task_rows
+        .last()
+        .map(|row| row.y + 24.0)
+        .unwrap_or(gantt.chart_y);
+    let mut day = gantt.min_day;
+    while day <= gantt.max_day {
+        let x = gantt.chart_x + (day - gantt.min_day) as f32 * gantt.day_width;
+        svg.push_str(&format!(
+            r#"<path d="M{x:.1} {:.1} L{x:.1} {grid_bottom:.1}" stroke="{}" stroke-opacity="0.34" stroke-width="1"/>"#,
+            gantt.chart_y - 10.0,
+            hex(tokens.ui.divider)
+        ));
+        svg.push_str(&format!(
+            r#"<text x="{x:.1}" y="{:.1}" text-anchor="middle" fill="{}" font-size="{:.1}">{}</text>"#,
+            gantt.chart_y - GANTT_TICK_LABEL_OFFSET,
+            hex(tokens.ui.text_muted),
+            opts.base_font_size * 0.72,
+            escape_text(&format_gantt_day(day))
+        ));
+        day += tick_step;
+    }
+    svg.push_str(&format!(
+        r#"<path d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-opacity="0.34" stroke-width="1"/>"#,
+        gantt.chart_x + chart_width,
+        gantt.chart_y - 10.0,
+        gantt.chart_x + chart_width,
+        grid_bottom,
+        hex(tokens.ui.divider)
+    ));
+}
+
+fn render_gantt_section(
+    svg: &mut String,
+    gantt: &LaidOutGantt,
+    row: &GanttSectionRow,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) {
+    let Some(section) = gantt.diagram.sections.get(row.section_index) else {
+        return;
+    };
+    svg.push_str(&format!(
+        r#"<text x="{:.1}" y="{:.1}" fill="{}" font-size="{:.1}" font-weight="600">{}</text>"#,
+        28.0,
+        row.y,
+        hex(tokens.ui.text_muted),
+        opts.base_font_size * 0.86,
+        escape_text(&section.label)
+    ));
+}
+
+fn render_gantt_task(
+    svg: &mut String,
+    gantt: &LaidOutGantt,
+    row: &GanttTaskRow,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) {
+    let Some(task) = gantt
+        .diagram
+        .sections
+        .get(row.section_index)
+        .and_then(|section| section.tasks.get(row.task_index))
+    else {
+        return;
+    };
+    let label_y = row.y + 19.0;
+    svg.push_str(&format!(
+        r#"<text x="28" y="{label_y:.1}" fill="{}" font-size="{:.1}">{}</text>"#,
+        hex(tokens.ui.text),
+        opts.base_font_size * 0.86,
+        escape_text(&task.label)
+    ));
+
+    let x = gantt.chart_x + (task.start_day - gantt.min_day) as f32 * gantt.day_width;
+    let y = row.y + (30.0 - GANTT_BAR_HEIGHT) * 0.5;
+    let width = ((task.end_day - task.start_day).max(1) as f32 * gantt.day_width).max(8.0);
+    let color = hex(gantt_status_color(task.status, tokens));
+    if task.status == GanttTaskStatus::Milestone {
+        let cx = x + width * 0.5;
+        let cy = y + GANTT_BAR_HEIGHT * 0.5;
+        svg.push_str(&format!(
+            r#"<polygon points="{cx:.1},{:.1} {:.1},{cy:.1} {cx:.1},{:.1} {:.1},{cy:.1}" fill="{color}" stroke="{}" stroke-width="1"/>"#,
+            cy - GANTT_MILESTONE_SIZE * 0.5,
+            cx + GANTT_MILESTONE_SIZE * 0.5,
+            cy + GANTT_MILESTONE_SIZE * 0.5,
+            cx - GANTT_MILESTONE_SIZE * 0.5,
+            hex(tokens.ui.bg)
+        ));
+        return;
+    }
+
+    svg.push_str(&format!(
+        r#"<rect x="{x:.1}" y="{y:.1}" width="{width:.1}" height="{GANTT_BAR_HEIGHT:.1}" rx="5" fill="{color}" fill-opacity="0.86" stroke="{}" stroke-width="1"/>"#,
+        hex(tokens.ui.bg)
+    ));
+}
+
+fn gantt_status_color(status: GanttTaskStatus, tokens: &ThemeTokens) -> u32 {
+    match status {
+        GanttTaskStatus::Normal => tokens.ui.info,
+        GanttTaskStatus::Active => tokens.ui.accent,
+        GanttTaskStatus::Done => tokens.ui.success,
+        GanttTaskStatus::Critical => tokens.ui.warning,
+        GanttTaskStatus::Milestone => tokens.terminal.bright_magenta,
+    }
+}
+
+fn gantt_tick_step(span_days: i32) -> i32 {
+    match span_days {
+        0..=21 => 1,
+        22..=75 => 7,
+        76..=180 => 14,
+        _ => 30,
+    }
+}
+
+fn format_gantt_day(day: i32) -> String {
+    let (year, month, day) = civil_from_days(day);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+fn civil_from_days(day: i32) -> (i32, u32, u32) {
+    // Inverse of the parser's civil-day transform; this keeps axis labels
+    // deterministic without depending on locale or wall-clock time.
+    let z = day + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    (y + (m <= 2) as i32, m as u32, d as u32)
 }
 
 fn render_subgraph(
@@ -413,6 +624,128 @@ fn render_sequence(
     svg.push_str(&format!(r#"<g fill="{text}"></g>"#));
 }
 
+fn render_pie(svg: &mut String, pie: &LaidOutPie, tokens: &ThemeTokens, opts: &MarkdownOptions) {
+    let total = pie
+        .diagram
+        .slices
+        .iter()
+        .map(|slice| slice.value)
+        .sum::<f64>() as f32;
+    let stroke = hex(tokens.ui.bg);
+    let text = hex(tokens.ui.text);
+    let muted = hex(tokens.ui.text_muted);
+
+    if let Some(title) = &pie.diagram.title {
+        svg.push_str(&format!(
+            r#"<text x="{:.1}" y="28" text-anchor="middle" fill="{text}" font-size="{:.1}" font-weight="600">{}</text>"#,
+            pie.center_x,
+            opts.base_font_size * 1.05,
+            escape_text(title)
+        ));
+    }
+
+    // Mermaid pie charts remain useful with a compact deterministic renderer:
+    // draw slices from stable palette slots and keep exact values in the legend.
+    let mut start_angle = -PI * 0.5;
+    let positive_count = pie
+        .diagram
+        .slices
+        .iter()
+        .filter(|slice| slice.value > 0.0)
+        .count();
+    for (index, slice) in pie.diagram.slices.iter().enumerate() {
+        if slice.value <= 0.0 {
+            continue;
+        }
+        let color = hex(PIE_COLORS[index % PIE_COLORS.len()]);
+        let fraction = (slice.value as f32 / total).clamp(0.0, 1.0);
+        if positive_count == 1 || fraction >= 0.999 {
+            svg.push_str(&format!(
+                r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="{color}" stroke="{stroke}" stroke-width="2"/>"#,
+                pie.center_x, pie.center_y, pie.radius
+            ));
+            start_angle += PI * 2.0 * fraction;
+            continue;
+        }
+
+        let sweep = PI * 2.0 * fraction;
+        let end_angle = start_angle + sweep;
+        let (start_x, start_y) = polar_point(pie.center_x, pie.center_y, pie.radius, start_angle);
+        let (end_x, end_y) = polar_point(pie.center_x, pie.center_y, pie.radius, end_angle);
+        let large_arc = if sweep > PI { 1 } else { 0 };
+        svg.push_str(&format!(
+            r#"<path d="M{:.1} {:.1} L{start_x:.1} {start_y:.1} A{:.1} {:.1} 0 {large_arc} 1 {end_x:.1} {end_y:.1} Z" fill="{color}" stroke="{stroke}" stroke-width="2"/>"#,
+            pie.center_x, pie.center_y, pie.radius, pie.radius
+        ));
+        start_angle = end_angle;
+    }
+
+    for (index, slice) in pie.diagram.slices.iter().enumerate() {
+        render_pie_legend_row(svg, pie, slice, index, total, tokens, opts);
+    }
+
+    svg.push_str(&format!(
+        r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="none" stroke="{muted}" stroke-opacity="0.26" stroke-width="1"/>"#,
+        pie.center_x, pie.center_y, pie.radius
+    ));
+}
+
+fn render_pie_legend_row(
+    svg: &mut String,
+    pie: &LaidOutPie,
+    slice: &PieSlice,
+    index: usize,
+    total: f32,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) {
+    let y = pie.legend_y + index as f32 * 24.0;
+    let color = hex(PIE_COLORS[index % PIE_COLORS.len()]);
+    svg.push_str(&format!(
+        r#"<rect x="{:.1}" y="{:.1}" width="12" height="12" rx="3" fill="{color}"/>"#,
+        pie.legend_x,
+        y - 10.0
+    ));
+    let value = if pie.diagram.show_data {
+        format_pie_value(slice.value)
+    } else {
+        let percent = if total > 0.0 {
+            slice.value as f32 / total * 100.0
+        } else {
+            0.0
+        };
+        format!("{percent:.1}%")
+    };
+    svg.push_str(&format!(
+        r#"<text x="{:.1}" y="{:.1}" fill="{}" font-size="{:.1}">{}</text><text x="{:.1}" y="{:.1}" text-anchor="end" fill="{}" font-size="{:.1}">{}</text>"#,
+        pie.legend_x + 20.0,
+        y,
+        hex(tokens.ui.text),
+        opts.base_font_size * 0.92,
+        escape_text(&slice.label),
+        pie.legend_x + 188.0,
+        y,
+        hex(tokens.ui.text_muted),
+        opts.base_font_size * 0.86,
+        escape_text(&value)
+    ));
+}
+
+fn polar_point(cx: f32, cy: f32, radius: f32, angle: f32) -> (f32, f32) {
+    (cx + radius * angle.cos(), cy + radius * angle.sin())
+}
+
+fn format_pie_value(value: f64) -> String {
+    if value.fract().abs() < f64::EPSILON {
+        return format!("{value:.0}");
+    }
+    let formatted = format!("{value:.2}");
+    formatted
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
+}
+
 fn render_centered_text(
     svg: &mut String,
     x: f32,
@@ -514,5 +847,42 @@ mod tests {
         assert!(rendered.svg.contains("data-subgraph-id=\"cluster\""));
         assert!(rendered.svg.contains("Cluster"));
         assert!(rendered.svg.contains("<path d=\"M"));
+    }
+
+    #[test]
+    fn renders_pie_chart_svg_with_legend_values() {
+        let tokens = default_tokens();
+        let opts = MarkdownOptions::from_theme(&tokens);
+        let diagram = parser::parse("pie showData title Tickets\n\"Open\" : 4\n\"Closed\" : 6")
+            .expect("pie chart should parse");
+        let layout = layout::layout(diagram, &opts);
+        let rendered = render(&layout, &tokens, &opts);
+
+        assert!(rendered.svg.contains("Tickets"));
+        assert!(rendered.svg.contains("Open"));
+        assert!(rendered.svg.contains(">4<"));
+        assert!(rendered.svg.contains("<path d=\"M") || rendered.svg.contains("<circle"));
+    }
+
+    #[test]
+    fn renders_gantt_chart_svg_with_axis_and_task_bars() {
+        let tokens = default_tokens();
+        let opts = MarkdownOptions::from_theme(&tokens);
+        let diagram = parser::parse(
+            "gantt\n\
+             title Release Plan\n\
+             dateFormat YYYY-MM-DD\n\
+             section Build\n\
+             Compile :active, build, 2026-01-01, 3d\n\
+             Ship :done, ship, after build, 2d",
+        )
+        .expect("gantt chart should parse");
+        let layout = layout::layout(diagram, &opts);
+        let rendered = render(&layout, &tokens, &opts);
+
+        assert!(rendered.svg.contains("Release Plan"));
+        assert!(rendered.svg.contains("Compile"));
+        assert!(rendered.svg.contains("2026-01-01"));
+        assert!(rendered.svg.contains("<rect"));
     }
 }

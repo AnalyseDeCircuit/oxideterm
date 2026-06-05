@@ -5,8 +5,40 @@
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MermaidDiagram {
+    Gantt(GanttDiagram),
     Graph(GraphDiagram),
+    Pie(PieDiagram),
     Sequence(SequenceDiagram),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct GanttDiagram {
+    pub title: Option<String>,
+    pub sections: Vec<GanttSection>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct GanttSection {
+    pub label: String,
+    pub tasks: Vec<GanttTask>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct GanttTask {
+    pub label: String,
+    pub id: Option<String>,
+    pub start_day: i32,
+    pub end_day: i32,
+    pub status: GanttTaskStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GanttTaskStatus {
+    Normal,
+    Active,
+    Done,
+    Critical,
+    Milestone,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +96,19 @@ pub enum GraphEdgeKind {
     Line,
     DottedArrow,
     ThickArrow,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PieDiagram {
+    pub title: Option<String>,
+    pub show_data: bool,
+    pub slices: Vec<PieSlice>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PieSlice {
+    pub label: String,
+    pub value: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]

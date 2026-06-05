@@ -32,10 +32,11 @@ pub fn is_mermaid_source_candidate(source: &str) -> bool {
     };
 
     first_line == "sequenceDiagram"
+        || first_line == "gantt"
         || first_line
             .split_whitespace()
             .next()
-            .is_some_and(|kind| matches!(kind, "graph" | "flowchart"))
+            .is_some_and(|kind| matches!(kind, "graph" | "flowchart" | "pie"))
 }
 
 #[cfg(test)]
@@ -54,6 +55,10 @@ mod tests {
     fn detects_mermaid_like_source() {
         assert!(is_mermaid_source_candidate("graph TD\nA --> B"));
         assert!(is_mermaid_source_candidate("flowchart LR\nA --> B"));
+        assert!(is_mermaid_source_candidate(
+            "pie title Tickets\n\"Open\" : 4"
+        ));
+        assert!(is_mermaid_source_candidate("gantt\nTask : 2026-01-01, 2d"));
         assert!(is_mermaid_source_candidate("sequenceDiagram\nA->B: hi"));
         assert!(!is_mermaid_source_candidate("graphical output"));
         assert!(!is_mermaid_source_candidate("echo graph TD"));

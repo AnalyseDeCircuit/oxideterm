@@ -127,6 +127,22 @@ fn build_privilege_prompt_helper_state(
     })
 }
 
+fn select_remote_privilege_scope(
+    explicit_session_scope: Option<String>,
+    node_saved_connection_id: Option<String>,
+    runtime_origin_saved_connection_id: Option<String>,
+    saved_node_connection_id: Option<String>,
+    unique_config_connection_id: Option<String>,
+    runtime_connection_id: Option<String>,
+) -> Option<String> {
+    explicit_session_scope
+        .or(node_saved_connection_id)
+        .or(runtime_origin_saved_connection_id)
+        .or(saved_node_connection_id)
+        .or(unique_config_connection_id)
+        .or(runtime_connection_id)
+}
+
 impl WorkspaceApp {
     fn saved_connection_id_for_node_snapshot(
         &self,
@@ -207,9 +223,6 @@ impl WorkspaceApp {
         }
 
         let session_id = self.active_terminal_session_id()?;
-        if let Some(connection_id) = self.terminal_privilege_connection_ids.get(&session_id) {
-            return Some(connection_id.clone());
-        }
         let node_id = self.terminal_ssh_nodes.get(&session_id)?;
         let node = self.ssh_nodes.get(node_id);
         // Privilege credentials are stored on SavedConnection metadata, not on
@@ -217,20 +230,35 @@ impl WorkspaceApp {
         // session-tree mirror before giving up: restored/expanded nodes may
         // have their origin in NodeRuntimeStore even when the UI node snapshot
         // was created before the saved id was attached.
-        node.and_then(|node| node.saved_connection_id.clone())
-            .or_else(|| {
-                self.node_runtime_store
-                    .snapshot(node_id)
-                    .and_then(|snapshot| snapshot.origin.saved_connection_id().map(str::to_string))
-            })
-            .or_else(|| {
-                self.saved_ssh_nodes
-                    .iter()
-                    .find_map(|(saved_connection_id, saved_node_id)| {
-                        (saved_node_id == node_id).then(|| saved_connection_id.clone())
-                    })
-            })
-            .or_else(|| self.saved_connection_id_for_node_snapshot(node_id, node))
+        let explicit_session_scope = self
+            .terminal_privilege_connection_ids
+            .get(&session_id)
+            .cloned();
+        let node_saved_connection_id = node.and_then(|node| node.saved_connection_id.clone());
+        let runtime_origin_saved_connection_id = self
+            .node_runtime_store
+            .snapshot(node_id)
+            .and_then(|snapshot| snapshot.origin.saved_connection_id().map(str::to_string));
+        let saved_node_connection_id =
+            self.saved_ssh_nodes
+                .iter()
+                .find_map(|(saved_connection_id, saved_node_id)| {
+                    (saved_node_id == node_id).then(|| saved_connection_id.clone())
+                });
+        let unique_config_connection_id = self.saved_connection_id_for_node_snapshot(node_id, node);
+        let runtime_connection_id = self.node_router.connection_id_for_node(node_id);
+        // Tauri passes `privilegeConnectionId ?? connectionId` to the command bar.
+        // Keep all saved-connection recovery paths ahead of the transient runtime
+        // id so fill chips can only match saved metadata when a safe owner exists,
+        // while direct SSH tabs still surface a detected prompt management chip.
+        select_remote_privilege_scope(
+            explicit_session_scope,
+            node_saved_connection_id,
+            runtime_origin_saved_connection_id,
+            saved_node_connection_id,
+            unique_config_connection_id,
+            runtime_connection_id,
+        )
     }
 
     fn active_privilege_prompt_state(
@@ -1281,6 +1309,36 @@ mod privilege_prompt_helper_tests {
         assert!(tab_kind_allows_privilege_prompt_helper(
             &TabKind::SshTerminal
         ));
+    }
+
+    #[test]
+    fn remote_privilege_scope_prefers_saved_owner_over_runtime_connection() {
+        assert_eq!(
+            select_remote_privilege_scope(
+                Some("saved-session".to_string()),
+                Some("saved-node".to_string()),
+                Some("saved-origin".to_string()),
+                Some("saved-map".to_string()),
+                Some("saved-config".to_string()),
+                Some("runtime-connection".to_string()),
+            ),
+            Some("saved-session".to_string())
+        );
+    }
+
+    #[test]
+    fn remote_privilege_scope_uses_runtime_connection_as_tauri_fallback() {
+        assert_eq!(
+            select_remote_privilege_scope(
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("runtime-connection".to_string()),
+            ),
+            Some("runtime-connection".to_string())
+        );
     }
 
     #[test]
