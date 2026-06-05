@@ -170,6 +170,40 @@ mod tests {
     }
 
     #[test]
+    fn resolves_encoded_appimage_agent_payload() {
+        let temp_dir = unique_agent_test_dir("encoded-resolve");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let encoded_path = temp_dir.join("oxideterm-agent-aarch64-linux-musl.b64");
+        std::fs::write(&encoded_path, "encoded").unwrap();
+
+        let resolved = resolve_agent_binary_in_dirs(
+            "oxideterm-agent-aarch64-linux-musl",
+            vec![temp_dir.clone()],
+        )
+        .unwrap();
+
+        assert_eq!(resolved, encoded_path);
+        std::fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reads_encoded_appimage_agent_payload_as_binary() {
+        use base64::Engine as _;
+
+        let temp_dir = unique_agent_test_dir("encoded-read");
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        let encoded_path = temp_dir.join("oxideterm-agent-x86_64-linux-musl.b64");
+        let agent_bytes = b"\x7fELF bundled remote agent";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(agent_bytes);
+        tokio::fs::write(&encoded_path, encoded).await.unwrap();
+
+        let decoded = read_agent_binary_payload(&encoded_path).await.unwrap();
+
+        assert_eq!(decoded, agent_bytes);
+        tokio::fs::remove_dir_all(temp_dir).await.unwrap();
+    }
+
+    #[test]
     fn agent_deploy_error_labels_match_tauri_bootstrap_classes() {
         assert_eq!(
             AgentError::ArchDetection("boom".into()).to_string(),
@@ -249,6 +283,17 @@ mod tests {
             )),
             "ssh"
         );
+    }
+
+    fn unique_agent_test_dir(label: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "oxideterm-agent-{label}-{}-{unique}",
+            std::process::id()
+        ))
     }
 
     #[tokio::test]

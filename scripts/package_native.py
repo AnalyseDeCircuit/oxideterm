@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import plistlib
 import shutil
@@ -23,6 +24,9 @@ BASE_APP_NAME = "OxideTerm"
 STABLE_APP_IDENTIFIER = "com.oxideterm.app"
 APP_BIN = "oxideterm-native"
 CLI_BIN = "oxideterm"
+AGENT_RESOURCE_DIR = "agents"
+AGENT_BINARY_PREFIX = "oxideterm-agent-"
+ENCODED_AGENT_SUFFIX = ".b64"
 
 
 @dataclass(frozen=True)
@@ -168,12 +172,30 @@ def copy_tree(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst)
 
 
-def copy_runtime_resources(dst: Path, target: str) -> None:
+def copy_agent_resources(dst: Path, *, encode_binaries: bool) -> None:
+    source_dir = RESOURCE_DIR / AGENT_RESOURCE_DIR
+    if dst.exists():
+        shutil.rmtree(dst)
+    dst.mkdir(parents=True)
+    for source in sorted(source_dir.iterdir()):
+        if source.is_dir():
+            copy_tree(source, dst / source.name)
+            continue
+        if encode_binaries and source.name.startswith(AGENT_BINARY_PREFIX):
+            # AppImage tooling scans nested ELF files by architecture; encode
+            # remote-agent payloads as data so both Linux agent targets remain bundled.
+            encoded = base64.b64encode(source.read_bytes()).decode("ascii")
+            (dst / f"{source.name}{ENCODED_AGENT_SUFFIX}").write_text(encoded, encoding="ascii")
+        else:
+            shutil.copy2(source, dst / source.name)
+
+
+def copy_runtime_resources(dst: Path, target: str, *, encode_agent_binaries: bool = False) -> None:
     dst.mkdir(parents=True, exist_ok=True)
     # Keep the app bundle layout aligned with Tauri's resource contract: agents
     # and the target-specific CLI live under resources instead of PATH.
-    for name in ("agents", "icons"):
-        copy_tree(RESOURCE_DIR / name, dst / name)
+    copy_agent_resources(dst / AGENT_RESOURCE_DIR, encode_binaries=encode_agent_binaries)
+    copy_tree(RESOURCE_DIR / "icons", dst / "icons")
 
     # Do not copy stale CLI binaries for other platforms. The app resolves the
     # host-specific subdirectory first and only falls back to scanning when it is
@@ -502,7 +524,7 @@ def create_linux_appimage(
     app_binary = usr_bin / APP_BIN
     shutil.copy2(binary, app_binary)
     make_executable(app_binary)
-    copy_runtime_resources(usr_bin / "resources", target)
+    copy_runtime_resources(usr_bin / "resources", target, encode_agent_binaries=True)
 
     applications_dir = appdir / "usr" / "share" / "applications"
     applications_dir.mkdir(parents=True)

@@ -58,12 +58,25 @@ fn parse_remote_version_output(output: &str) -> RemoteAgentInstallState {
     }
 }
 
+const ENCODED_AGENT_SUFFIX: &str = ".b64";
+
 fn resolve_agent_binary(target: &str) -> Result<PathBuf, AgentError> {
     let file_name = format!("oxideterm-agent-{target}");
-    for dir in agent_resource_dirs() {
-        let candidate = dir.join(&file_name);
+    resolve_agent_binary_in_dirs(&file_name, agent_resource_dirs())
+}
+
+fn resolve_agent_binary_in_dirs(
+    file_name: &str,
+    dirs: impl IntoIterator<Item = PathBuf>,
+) -> Result<PathBuf, AgentError> {
+    for dir in dirs {
+        let candidate = dir.join(file_name);
         if candidate.exists() {
             return Ok(candidate);
+        }
+        let encoded_candidate = dir.join(format!("{file_name}{ENCODED_AGENT_SUFFIX}"));
+        if encoded_candidate.exists() {
+            return Ok(encoded_candidate);
         }
     }
     Err(AgentError::BinaryNotFound(format!(
@@ -115,9 +128,7 @@ async fn upload_agent(
 
     let sftp = router.acquire_sftp(node_id).await?;
     let sftp = sftp.lock().await;
-    let binary = tokio::fs::read(binary_path)
-        .await
-        .map_err(|error| AgentError::LocalIo(error.to_string()))?;
+    let binary = read_agent_binary_payload(binary_path).await?;
     sftp.write_content(remote_path, &binary)
         .await
         .map_err(|error| AgentError::Upload(error.to_string()))?;
@@ -130,6 +141,26 @@ async fn upload_agent(
         .await
         .map_err(|error| AgentError::ExecFailed(error.to_string()))?;
     Ok(())
+}
+
+async fn read_agent_binary_payload(binary_path: &PathBuf) -> Result<Vec<u8>, AgentError> {
+    let payload = tokio::fs::read(binary_path)
+        .await
+        .map_err(|error| AgentError::LocalIo(error.to_string()))?;
+    if binary_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(ENCODED_AGENT_SUFFIX))
+    {
+        // Linux AppImages store remote agents as base64 text so appimagetool
+        // does not reject the package for containing foreign-architecture ELF files.
+        let encoded = String::from_utf8(payload)
+            .map_err(|error| AgentError::LocalIo(format!("decode bundled agent text: {error}")))?;
+        return base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .map_err(|error| AgentError::LocalIo(format!("decode bundled agent payload: {error}")));
+    }
+    Ok(payload)
 }
 
 fn shell_single_quote(value: &str) -> String {
