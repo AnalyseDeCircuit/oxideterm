@@ -20,6 +20,7 @@ impl WorkspaceApp {
         tab_id: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
+        self.bootstrap_native_plugin_runtime(cx);
         let contribution = self
             .plugin_registry
             .contributions()
@@ -63,6 +64,7 @@ impl WorkspaceApp {
         tab_id: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.bootstrap_native_plugin_runtime(cx);
         let theme = self.tokens.ui;
         let contribution = self
             .plugin_registry
@@ -126,6 +128,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.bootstrap_native_plugin_runtime(cx);
         let theme = self.tokens.ui;
         let Some(selection) = self.active_native_plugin_sidebar_panel.as_ref() else {
             return self.render_plugin_sidebar_placeholder();

@@ -1,4 +1,28 @@
 impl WorkspaceApp {
+    pub(super) fn ensure_ai_chat_initialized(&mut self) {
+        if self.ai_chat_initialized {
+            return;
+        }
+        self.ai_chat_initialized = true;
+        match oxideterm_ai::AiChatPersistenceStore::load(default_ai_conversations_path()) {
+            Ok((store, state)) => {
+                self.ai_chat_store = Some(store);
+                self.ai_chat = state;
+                self.ai_chat_initialization_error = None;
+                self.ai_chat_list_state =
+                    tauri_virtual_list_state(0, ListAlignment::Top, ai_chat_virtual_list_spec());
+                self.ai_chat_list_cache
+                    .replace(VirtualListSignatureCache::default());
+            }
+            Err(error) => {
+                eprintln!("failed to load AI chat store: {error}");
+                self.ai_chat = oxideterm_ai::AiChatState::default();
+                self.ai_chat_store = None;
+                self.ai_chat_initialization_error = Some(ai_chat_initialization_error(&error));
+            }
+        }
+    }
+
     pub(super) fn bootstrap_ai_mcp_registry(&self) {
         // Tauri boots the MCP registry from AiChatPanel mount, not from process
         // startup or every settings write. Keep native at the same user-visible
@@ -200,6 +224,7 @@ impl WorkspaceApp {
     }
 
     fn retry_ai_chat_initialization(&mut self, cx: &mut Context<Self>) {
+        self.ai_chat_initialized = true;
         match oxideterm_ai::AiChatPersistenceStore::load(default_ai_conversations_path()) {
             Ok((store, state)) => {
                 self.ai_chat_store = Some(store);

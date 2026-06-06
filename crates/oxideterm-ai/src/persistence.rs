@@ -123,7 +123,7 @@ impl AiChatPersistenceStore {
         let mut messages = Vec::new();
         for message_id in message_ids {
             if let Some(message_bytes) = message_table.get(message_id.as_str())? {
-                let mut persisted: PersistedMessage = rmp_serde::from_slice(message_bytes.value())?;
+                let mut persisted = decode_persisted_message(message_bytes.value())?;
                 if let Some(context) = persisted.context_snapshot.as_mut()
                     && let Some(buffer_tail) = context.buffer_tail.as_ref()
                 {
@@ -534,7 +534,7 @@ fn replace_conversation_messages(
         );
         let should_write = message_table
             .get(persisted.id.as_str())?
-            .map(|bytes| rmp_serde::from_slice::<PersistedMessage>(bytes.value()))
+            .map(|bytes| decode_persisted_message(bytes.value()))
             .transpose()?
             .map(|existing| should_replace_projection(&persisted, &existing))
             .unwrap_or(true);
@@ -1192,6 +1192,42 @@ fn default_origin() -> String {
     "sidebar".to_string()
 }
 
+const TAURI_MESSAGE_FIELD_COUNT: usize = 12;
+const LEGACY_TAURI_MESSAGE_FIELD_COUNT: usize = 11;
+const NATIVE_MESSAGE_FIELD_COUNT: usize = 15;
+
+fn messagepack_array_len(bytes: &[u8]) -> Option<usize> {
+    let first = *bytes.first()?;
+    match first {
+        0x90..=0x9f => Some((first & 0x0f) as usize),
+        0xdc => {
+            let len = bytes.get(1..3)?;
+            Some(u16::from_be_bytes([len[0], len[1]]) as usize)
+        }
+        0xdd => {
+            let len = bytes.get(1..5)?;
+            Some(u32::from_be_bytes([len[0], len[1], len[2], len[3]]) as usize)
+        }
+        _ => None,
+    }
+}
+
+fn decode_persisted_message(
+    bytes: &[u8],
+) -> std::result::Result<PersistedMessage, rmp_serde::decode::Error> {
+    match messagepack_array_len(bytes) {
+        // Tauri historically wrote positional MessagePack without native-only
+        // projection fields. Decode those rows by Tauri order to avoid shifting
+        // context_snapshot into tool_call_id.
+        Some(LEGACY_TAURI_MESSAGE_FIELD_COUNT | TAURI_MESSAGE_FIELD_COUNT) => {
+            rmp_serde::from_slice::<TauriPersistedMessage>(bytes).map(Into::into)
+        }
+        Some(NATIVE_MESSAGE_FIELD_COUNT) | None => rmp_serde::from_slice::<PersistedMessage>(bytes),
+        _ => rmp_serde::from_slice::<PersistedMessage>(bytes)
+            .or_else(|_| rmp_serde::from_slice::<TauriPersistedMessage>(bytes).map(Into::into)),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextSnapshot {
     pub cwd: Option<String>,
@@ -1263,6 +1299,65 @@ pub struct PersistedMessage {
     pub branches: Option<AiMessageBranches>,
     #[serde(default)]
     pub suggestions: Vec<crate::AiFollowUpSuggestion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TauriPersistedMessage {
+    pub id: String,
+    pub conversation_id: String,
+    pub role: String,
+    pub content: String,
+    pub timestamp: i64,
+    #[serde(default)]
+    pub projection_updated_at: i64,
+    #[serde(default)]
+    pub tool_calls: Vec<PersistedToolCall>,
+    pub context_snapshot: Option<ContextSnapshot>,
+    #[serde(default)]
+    pub turn: Option<Value>,
+    #[serde(default)]
+    pub transcript_ref: Option<Value>,
+    #[serde(default)]
+    pub summary_ref: Option<Value>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+impl From<TauriPersistedMessage> for PersistedMessage {
+    fn from(message: TauriPersistedMessage) -> Self {
+        let TauriPersistedMessage {
+            id,
+            conversation_id,
+            role,
+            content,
+            timestamp,
+            projection_updated_at,
+            tool_calls,
+            context_snapshot,
+            turn,
+            transcript_ref,
+            summary_ref,
+            model,
+        } = message;
+
+        Self {
+            id,
+            conversation_id,
+            role,
+            content,
+            timestamp,
+            projection_updated_at,
+            tool_calls,
+            tool_call_id: None,
+            context_snapshot,
+            turn,
+            transcript_ref,
+            summary_ref,
+            model,
+            branches: None,
+            suggestions: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

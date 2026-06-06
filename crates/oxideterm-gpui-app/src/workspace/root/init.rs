@@ -36,35 +36,10 @@ impl WorkspaceApp {
                 ForwardingRegistry::new_with_event_sender(forwarding_event_tx)
             }
         };
-        let ai_chat_path = default_ai_conversations_path();
-        let (ai_chat_store, ai_chat, ai_chat_initialization_error) =
-            match oxideterm_ai::AiChatPersistenceStore::load(&ai_chat_path) {
-                Ok((store, state)) => (Some(store), state, None),
-                Err(error) => {
-                    eprintln!("failed to load AI chat store: {error}");
-                    (
-                        None,
-                        oxideterm_ai::AiChatState::default(),
-                        Some(ai_chat_initialization_error(&error)),
-                    )
-                }
-            };
-        let ai_rag_data_dir = default_rag_data_dir();
-        if let Err(error) = fs::create_dir_all(&ai_rag_data_dir) {
-            eprintln!("failed to create AI RAG data directory: {error}");
-        }
-        let ai_rag_store = match oxideterm_ai::RagStore::new(&ai_rag_data_dir) {
-            Ok(store) => Arc::new(store),
-            Err(error) => {
-                eprintln!("failed to load AI RAG store: {error}");
-                let fallback_dir = std::env::temp_dir().join(format!(
-                    "oxideterm-rag-unavailable-{}",
-                    uuid::Uuid::new_v4()
-                ));
-                fs::create_dir_all(&fallback_dir)?;
-                Arc::new(oxideterm_ai::RagStore::new(&fallback_dir)?)
-            }
-        };
+        let ai_chat_store = None;
+        let ai_chat = oxideterm_ai::AiChatState::default();
+        let ai_chat_initialization_error = None;
+        let ai_rag_store = LazyAiRagStore::default();
         // Mirror Tauri's split between SessionTree runtime state and NodeRouter:
         // the router resolves capabilities from this shared node runtime store
         // instead of owning the node lifecycle itself.
@@ -369,6 +344,7 @@ impl WorkspaceApp {
             ai_markdown_cache: RefCell::new(AiMarkdownDocumentCache::default()),
             ai_context_token_cache: RefCell::new(AiContextTokenBreakdownCache::default()),
             ai_chat_store,
+            ai_chat_initialized: false,
             ai_chat_initialization_error,
             ai_inline_panel: AiInlinePanelState::default(),
             ai_runtime_epoch: uuid::Uuid::new_v4().to_string(),
@@ -733,6 +709,7 @@ impl WorkspaceApp {
             native_plugin_sync_tx,
             native_plugin_sync_rx,
             native_plugin_sync_polling: false,
+            native_plugin_runtime_services_started: false,
             native_plugin_layout_snapshot: serde_json::Value::Null,
             native_plugin_layout_polling: false,
             native_plugin_session_tree_snapshot: serde_json::Value::Null,
@@ -875,32 +852,9 @@ impl WorkspaceApp {
                 }
             }));
         if workspace.ai_sidebar_visible() {
+            workspace.ensure_ai_chat_initialized();
             workspace.bootstrap_ai_mcp_registry();
         }
-        workspace.native_plugin_layout_snapshot = workspace.native_plugin_layout_snapshot();
-        workspace.start_native_plugin_layout_polling(cx);
-        workspace.native_plugin_session_tree_snapshot = workspace.native_plugin_session_tree_snapshot();
-        workspace.start_native_plugin_session_polling(cx);
-        workspace.native_plugin_saved_forwards_snapshot =
-            workspace.native_plugin_saved_forwards_snapshot();
-        workspace.start_native_plugin_saved_forwards_polling(cx);
-        workspace.native_plugin_transfer_snapshot = workspace.native_plugin_transfer_snapshot();
-        workspace.start_native_plugin_transfer_polling(cx);
-        workspace.native_plugin_profiler_snapshot = workspace.native_plugin_profiler_snapshot();
-        workspace.start_native_plugin_profiler_polling(cx);
-        workspace.native_plugin_ide_snapshot = workspace.native_plugin_ide_snapshot(cx);
-        workspace.start_native_plugin_ide_polling(cx);
-        workspace.native_plugin_ai_snapshot = workspace.native_plugin_ai_snapshot();
-        workspace.start_native_plugin_ai_polling(cx);
-        workspace.native_plugin_event_log_last_id = workspace.native_plugin_last_event_log_id();
-        workspace.start_native_plugin_event_log_polling(cx);
-        // Tauri initializePluginSystem() activates enabled plugins after
-        // discovery. Native only starts declared process runtimes here; legacy
-        // ESM plugins remain visible but never execute JS or WebView code.
-        workspace.start_native_plugin_confirm_polling(cx);
-        workspace.start_native_plugin_terminal_polling(cx);
-        workspace.start_native_plugin_sync_polling(cx);
-        workspace.bootstrap_native_plugin_runtime(cx);
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.restore_session_tree_snapshot();
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);

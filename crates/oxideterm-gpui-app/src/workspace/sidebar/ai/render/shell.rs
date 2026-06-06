@@ -1,5 +1,6 @@
 impl WorkspaceApp {
     pub(super) fn render_ai_sidebar_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.ensure_ai_chat_initialized();
         let enabled = self.settings_store.settings().ai.enabled;
         let panel = if !enabled {
             ai_chat_panel(&self.tokens)

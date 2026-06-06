@@ -1,4 +1,5 @@
 mod actions;
+mod ai_lazy;
 mod browser_behavior;
 mod cloud_sync;
 mod command_palette;
@@ -44,7 +45,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use self::settings::SettingsManagedKeyDialog;
+use self::{ai_lazy::LazyAiRagStore, settings::SettingsManagedKeyDialog};
 use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, CursorStyle,
@@ -623,6 +624,7 @@ pub(crate) struct WorkspaceApp {
     ai_markdown_cache: RefCell<AiMarkdownDocumentCache>,
     ai_context_token_cache: RefCell<AiContextTokenBreakdownCache>,
     ai_chat_store: Option<oxideterm_ai::AiChatPersistenceStore>,
+    ai_chat_initialized: bool,
     ai_chat_initialization_error: Option<AiChatInitializationError>,
     ai_inline_panel: AiInlinePanelState,
     ai_runtime_epoch: String,
@@ -663,7 +665,7 @@ pub(crate) struct WorkspaceApp {
     ai_pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
     ai_agent_fs: NodeAgentIdeFileSystem,
     ai_mcp_registry: oxideterm_ai::McpRegistry,
-    ai_rag_store: Arc<oxideterm_ai::RagStore>,
+    ai_rag_store: LazyAiRagStore,
     ai_mcp_add_dialog: Option<AiMcpServerDraft>,
     knowledge_reindex_cancel: Option<Arc<AtomicBool>>,
     knowledge_reindex_rx: Option<std::sync::mpsc::Receiver<KnowledgeReindexDelivery>>,
@@ -873,6 +875,7 @@ pub(crate) struct WorkspaceApp {
     native_plugin_sync_tx: std::sync::mpsc::Sender<plugin_lifecycle::NativePluginSyncRequest>,
     native_plugin_sync_rx: std::sync::mpsc::Receiver<plugin_lifecycle::NativePluginSyncRequest>,
     native_plugin_sync_polling: bool,
+    native_plugin_runtime_services_started: bool,
     native_plugin_layout_snapshot: serde_json::Value,
     native_plugin_layout_polling: bool,
     native_plugin_session_tree_snapshot: serde_json::Value,

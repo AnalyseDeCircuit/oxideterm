@@ -60,6 +60,21 @@ use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
 use oxideterm_plugin_host_api::{ai::*, transfers::*};
 
 impl WorkspaceApp {
+    pub(super) fn start_native_plugin_runtime_services_if_needed(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.native_plugin_runtime_services_started {
+            return;
+        }
+        self.native_plugin_runtime_services_started = true;
+        // Runtime request queues only need polling once a native process/WASM
+        // plugin can issue host calls; keeping them cold avoids idle startup work.
+        self.start_native_plugin_confirm_polling(cx);
+        self.start_native_plugin_terminal_polling(cx);
+        self.start_native_plugin_sync_polling(cx);
+    }
+
     pub(super) fn start_native_plugin_confirm_polling(&mut self, cx: &mut Context<Self>) {
         if self.native_plugin_confirm_polling {
             return;
@@ -948,6 +963,76 @@ impl WorkspaceApp {
             .unwrap_or_default()
     }
 
+    pub(super) fn refresh_native_plugin_event_polling(&mut self, cx: &mut Context<Self>) {
+        if self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_UI_LAYOUT_CHANGED_EVENT,
+        ) {
+            self.native_plugin_layout_snapshot = self.native_plugin_layout_snapshot();
+            self.start_native_plugin_layout_polling(cx);
+        }
+        if self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_SESSION_TREE_CHANGED_EVENT,
+        ) || self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_SESSION_NODE_STATE_CHANGED_EVENT,
+        ) {
+            self.native_plugin_session_tree_snapshot = self.native_plugin_session_tree_snapshot();
+            self.start_native_plugin_session_polling(cx);
+        }
+        if self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_FORWARD_SAVED_FORWARDS_CHANGED_EVENT,
+        ) {
+            self.native_plugin_saved_forwards_snapshot =
+                self.native_plugin_saved_forwards_snapshot();
+            self.start_native_plugin_saved_forwards_polling(cx);
+        }
+        if self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_TRANSFER_PROGRESS_EVENT,
+        ) || self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_TRANSFER_COMPLETE_EVENT,
+        ) || self
+            .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_TRANSFER_ERROR_EVENT)
+        {
+            self.native_plugin_transfer_snapshot = self.native_plugin_transfer_snapshot();
+            self.start_native_plugin_transfer_polling(cx);
+        }
+        if self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_PROFILER_METRICS_EVENT,
+        ) {
+            self.native_plugin_profiler_snapshot = self.native_plugin_profiler_snapshot();
+            self.start_native_plugin_profiler_polling(cx);
+        }
+        if self
+            .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_IDE_FILE_OPEN_EVENT)
+            || self.has_native_plugin_subscription(
+                super::plugin_host::NATIVE_PLUGIN_IDE_FILE_CLOSE_EVENT,
+            )
+            || self.has_native_plugin_subscription(
+                super::plugin_host::NATIVE_PLUGIN_IDE_ACTIVE_FILE_CHANGED_EVENT,
+            )
+        {
+            self.native_plugin_ide_snapshot = self.native_plugin_ide_snapshot(cx);
+            self.start_native_plugin_ide_polling(cx);
+        }
+        if self.has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_AI_MESSAGE_EVENT) {
+            self.native_plugin_ai_snapshot = self.native_plugin_ai_snapshot();
+            self.start_native_plugin_ai_polling(cx);
+        }
+        if self
+            .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_EVENT_LOG_ENTRY_EVENT)
+        {
+            self.native_plugin_event_log_last_id = self.native_plugin_last_event_log_id();
+            self.start_native_plugin_event_log_polling(cx);
+        }
+    }
+
+    fn has_native_plugin_subscription(&self, event_name: &str) -> bool {
+        !self
+            .plugin_registry
+            .contributions()
+            .runtime_event_subscriptions_for(event_name)
+            .is_empty()
+    }
+
     fn native_plugin_session_tree_snapshot_values(&self) -> Vec<Value> {
         let titles = self
             .ssh_nodes
@@ -1333,6 +1418,7 @@ impl WorkspaceApp {
         if process_plans.is_empty() && wasm_plans.is_empty() {
             return;
         }
+        self.start_native_plugin_runtime_services_if_needed(cx);
 
         for plan in &process_plans {
             let _ = self.plugin_registry.mark_runtime_loading(&plan.plugin_id);
@@ -1494,6 +1580,7 @@ impl WorkspaceApp {
         for effect in activation.effects {
             self.handle_native_plugin_outbound_effect(&plugin_id, effect, cx);
         }
+        self.refresh_native_plugin_event_polling(cx);
         self.refresh_native_plugin_terminal_hooks(cx);
         cx.notify();
     }
@@ -1620,6 +1707,7 @@ impl WorkspaceApp {
         for effect in dispatch.effects {
             self.handle_native_plugin_outbound_effect(&dispatch.plugin_id, effect, cx);
         }
+        self.refresh_native_plugin_event_polling(cx);
         self.refresh_native_plugin_terminal_hooks(cx);
         cx.notify();
     }
@@ -1668,6 +1756,7 @@ impl WorkspaceApp {
         for effect in dispatch.effects {
             self.handle_native_plugin_outbound_effect(&dispatch.plugin_id, effect, cx);
         }
+        self.refresh_native_plugin_event_polling(cx);
         self.refresh_native_plugin_terminal_input_interceptors(cx);
         cx.notify();
     }

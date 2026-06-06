@@ -123,10 +123,3 @@ fn default_ai_conversations_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("chat_history.redb")
 }
-
-fn default_rag_data_dir() -> PathBuf {
-    default_settings_path()
-        .parent()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-}

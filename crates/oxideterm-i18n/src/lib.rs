@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use serde_json::Value;
 
@@ -253,29 +256,21 @@ pub enum Locale {
 pub struct I18n {
     locale: Locale,
     fallback_locale: Locale,
-    catalogs: HashMap<Locale, LocaleCatalog>,
+    catalogs: Arc<RwLock<HashMap<Locale, LocaleCatalog>>>,
 }
 
 impl I18n {
     pub fn new(locale: Locale) -> Self {
-        let mut catalogs = HashMap::new();
-        catalogs.insert(Locale::De, LocaleCatalog::from_json_parts(DE_PARTS));
-        catalogs.insert(Locale::En, LocaleCatalog::from_json_parts(EN_PARTS));
-        catalogs.insert(Locale::EsEs, LocaleCatalog::from_json_parts(ES_ES_PARTS));
-        catalogs.insert(Locale::FrFr, LocaleCatalog::from_json_parts(FR_FR_PARTS));
-        catalogs.insert(Locale::It, LocaleCatalog::from_json_parts(IT_PARTS));
-        catalogs.insert(Locale::Ja, LocaleCatalog::from_json_parts(JA_PARTS));
-        catalogs.insert(Locale::Ko, LocaleCatalog::from_json_parts(KO_PARTS));
-        catalogs.insert(Locale::PtBr, LocaleCatalog::from_json_parts(PT_BR_PARTS));
-        catalogs.insert(Locale::Vi, LocaleCatalog::from_json_parts(VI_PARTS));
-        catalogs.insert(Locale::ZhCn, LocaleCatalog::from_json_parts(ZH_CN_PARTS));
-        catalogs.insert(Locale::ZhTw, LocaleCatalog::from_json_parts(ZH_TW_PARTS));
-
-        Self {
+        let i18n = Self {
             locale,
             fallback_locale: Locale::En,
-            catalogs,
-        }
+            catalogs: Arc::new(RwLock::new(HashMap::new())),
+        };
+        // Preload the visible locale and English fallback so the startup UI does
+        // not parse every catalog, while the first render has its two hot paths.
+        i18n.ensure_catalog(Locale::En);
+        i18n.ensure_catalog(locale);
+        i18n
     }
 
     pub fn locale(&self) -> Locale {
@@ -283,20 +278,51 @@ impl I18n {
     }
 
     pub fn set_locale(&mut self, locale: Locale) {
+        // Locale changes are synchronous in the settings flow; preloading here
+        // avoids moving JSON parsing into the next render pass.
+        self.ensure_catalog(locale);
         self.locale = locale;
     }
 
     pub fn t(&self, key: &str) -> String {
+        self.catalog_message(self.locale, key)
+            .or_else(|| self.catalog_message(self.fallback_locale, key))
+            .unwrap_or_else(|| key.to_string())
+    }
+
+    fn ensure_catalog(&self, locale: Locale) {
+        if self
+            .catalogs
+            .read()
+            .expect("native locale catalog lock poisoned")
+            .contains_key(&locale)
+        {
+            return;
+        }
+        let mut catalogs = self
+            .catalogs
+            .write()
+            .expect("native locale catalog lock poisoned");
+        catalogs
+            .entry(locale)
+            .or_insert_with(|| LocaleCatalog::from_json_parts(locale_parts(locale)));
+    }
+
+    fn catalog_message(&self, locale: Locale, key: &str) -> Option<String> {
+        self.ensure_catalog(locale);
         self.catalogs
-            .get(&self.locale)
-            .and_then(|catalog| catalog.get(key))
-            .or_else(|| {
-                self.catalogs
-                    .get(&self.fallback_locale)
-                    .and_then(|catalog| catalog.get(key))
-            })
-            .unwrap_or(key)
-            .to_string()
+            .read()
+            .expect("native locale catalog lock poisoned")
+            .get(&locale)
+            .and_then(|catalog| catalog.get(key).map(str::to_string))
+    }
+
+    #[cfg(test)]
+    fn loaded_catalog_count(&self) -> usize {
+        self.catalogs
+            .read()
+            .expect("native locale catalog lock poisoned")
+            .len()
     }
 }
 
@@ -324,6 +350,22 @@ impl LocaleCatalog {
 
     fn get(&self, key: &str) -> Option<&str> {
         self.messages.get(key).map(String::as_str)
+    }
+}
+
+fn locale_parts(locale: Locale) -> &'static [&'static str] {
+    match locale {
+        Locale::De => DE_PARTS,
+        Locale::En => EN_PARTS,
+        Locale::EsEs => ES_ES_PARTS,
+        Locale::FrFr => FR_FR_PARTS,
+        Locale::It => IT_PARTS,
+        Locale::Ja => JA_PARTS,
+        Locale::Ko => KO_PARTS,
+        Locale::PtBr => PT_BR_PARTS,
+        Locale::Vi => VI_PARTS,
+        Locale::ZhCn => ZH_CN_PARTS,
+        Locale::ZhTw => ZH_TW_PARTS,
     }
 }
 
@@ -373,6 +415,23 @@ mod tests {
         assert_eq!(i18n.t("sidebar.panels.sessions"), "活动会话");
         assert_eq!(i18n.t("terminal.local_terminal"), "本地终端");
         assert_eq!(i18n.t("terminal.trzsz.completed_title"), "传输已完成");
+    }
+
+    #[test]
+    fn loads_only_active_locale_and_fallback_until_switch() {
+        let mut i18n = I18n::new(Locale::ZhCn);
+        assert_eq!(i18n.loaded_catalog_count(), 2);
+
+        i18n.set_locale(Locale::Ja);
+        assert_eq!(i18n.loaded_catalog_count(), 3);
+        assert_eq!(i18n.t("menu.new_terminal"), "新しいターミナル");
+    }
+
+    #[test]
+    fn english_locale_loads_single_catalog() {
+        let i18n = I18n::new(Locale::En);
+        assert_eq!(i18n.loaded_catalog_count(), 1);
+        assert_eq!(i18n.t("menu.new_terminal"), "New Terminal");
     }
 
     #[test]

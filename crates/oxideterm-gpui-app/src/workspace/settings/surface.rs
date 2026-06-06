@@ -400,11 +400,16 @@ impl WorkspaceApp {
     }
 
     fn settings_dynamic_section_counts(&self) -> SettingsDynamicSectionCounts {
+        let knowledge_has_selected_collection = if self.settings_page.active_tab == SettingsTab::Knowledge {
+            self.knowledge_has_selected_collection()
+        } else {
+            false
+        };
         SettingsDynamicSectionCounts {
             terminal_page: self.settings_page.terminal_page,
             visible_keybinding_scope_count: self.visible_keybinding_scope_count(),
             knowledge_has_error: self.settings_page.knowledge_error.is_some(),
-            knowledge_has_selected_collection: self.knowledge_has_selected_collection(),
+            knowledge_has_selected_collection,
         }
     }
 
@@ -440,7 +445,7 @@ impl WorkspaceApp {
 
     fn knowledge_has_selected_collection(&self) -> bool {
         let collections =
-            oxideterm_ai::rag_list_collections(&self.ai_rag_store, None).unwrap_or_default();
+            oxideterm_ai::rag_list_collections(&self.ai_rag_store.get(), None).unwrap_or_default();
         self.settings_page
             .knowledge_selected_collection_id
             .as_deref()

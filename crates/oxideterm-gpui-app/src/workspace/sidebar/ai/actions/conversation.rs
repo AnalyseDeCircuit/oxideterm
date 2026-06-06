@@ -4,6 +4,7 @@ impl WorkspaceApp {
         title: Option<String>,
         cx: &mut Context<Self>,
     ) -> String {
+        self.ensure_ai_chat_initialized();
         let now = ai_now_ms();
         let id = self.next_ai_chat_id(now);
         let profile_id = self
@@ -29,6 +30,7 @@ impl WorkspaceApp {
     }
 
     fn send_ai_chat_draft(&mut self, cx: &mut Context<Self>) {
+        self.ensure_ai_chat_initialized();
         let content = self.ai_chat_draft.trim().to_string();
         if content.is_empty() {
             cx.notify();

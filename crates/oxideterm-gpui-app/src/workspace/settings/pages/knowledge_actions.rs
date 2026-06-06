@@ -6,7 +6,7 @@ impl WorkspaceApp {
             return;
         }
         match oxideterm_ai::rag_create_collection(
-            &self.ai_rag_store,
+            &self.ai_rag_store.get(),
             oxideterm_ai::RagCreateCollectionRequest {
                 name,
                 scope: oxideterm_ai::RagDocScopeRequest::Global,
@@ -26,7 +26,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn knowledge_create_blank_document(&mut self, cx: &mut Context<Self>) {
         let Some(collection_id) = self.settings_page.knowledge_selected_collection_id.clone().or_else(|| {
-            oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
+            oxideterm_ai::rag_list_collections(&self.ai_rag_store.get(), None)
                 .ok()
                 .and_then(|collections| collections.first().map(|collection| collection.id.clone()))
         }) else {
@@ -39,7 +39,7 @@ impl WorkspaceApp {
             return;
         }
         match oxideterm_ai::rag_create_blank_document(
-            &self.ai_rag_store,
+            &self.ai_rag_store.get(),
             oxideterm_ai::RagCreateBlankDocumentRequest {
                 collection_id,
                 title,
@@ -59,7 +59,7 @@ impl WorkspaceApp {
     }
 
     fn knowledge_delete_collection(&mut self, collection_id: String, cx: &mut Context<Self>) {
-        match oxideterm_ai::rag_delete_collection(&self.ai_rag_store, &collection_id) {
+        match oxideterm_ai::rag_delete_collection(&self.ai_rag_store.get(), &collection_id) {
             Ok(()) => {
                 self.settings_page
                     .clear_deleted_knowledge_collection(&collection_id);
@@ -72,7 +72,7 @@ impl WorkspaceApp {
     }
 
     fn knowledge_delete_document(&mut self, document_id: String, cx: &mut Context<Self>) {
-        match oxideterm_ai::rag_remove_document(&self.ai_rag_store, &document_id) {
+        match oxideterm_ai::rag_remove_document(&self.ai_rag_store.get(), &document_id) {
             Ok(()) => {
                 if self
                     .settings_page.knowledge_external_edit
@@ -97,7 +97,7 @@ impl WorkspaceApp {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_for_task = cancel.clone();
-        let store = self.ai_rag_store.clone();
+        let store = self.ai_rag_store.get();
         let (tx, rx) = std::sync::mpsc::channel();
         self.settings_page.start_knowledge_reindex();
         self.knowledge_reindex_cancel = Some(cancel);
@@ -197,7 +197,7 @@ impl WorkspaceApp {
                 self.i18n.t("settings_view.knowledge.import_files"),
             )),
         });
-        let store = self.ai_rag_store.clone();
+        let store = self.ai_rag_store.get();
         let error_title = self.i18n.t("settings_view.knowledge.error_import");
         cx.spawn(async move |weak, cx| {
             let Ok(Ok(Some(paths))) = receiver.await else {
@@ -278,7 +278,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let store = self.ai_rag_store.clone();
+        let store = self.ai_rag_store.get();
         let key_store = self.ai_key_store.clone();
         let key_provider_id = provider.id.clone();
         let key_lookup_runtime = self.forwarding_runtime.clone();
@@ -404,13 +404,13 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let docs = oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
+        let docs = oxideterm_ai::rag_list_collections(&self.ai_rag_store.get(), None)
             .ok()
             .into_iter()
             .flatten()
             .find_map(|collection| {
                 oxideterm_ai::rag_list_documents(
-                    &self.ai_rag_store,
+                    &self.ai_rag_store.get(),
                     &collection.id,
                     None,
                     Some(500),
@@ -427,7 +427,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let content = match oxideterm_ai::rag_get_document_content(&self.ai_rag_store, &document_id)
+        let content = match oxideterm_ai::rag_get_document_content(&self.ai_rag_store.get(), &document_id)
         {
             Ok(content) => content,
             Err(error) => {
@@ -541,7 +541,7 @@ impl WorkspaceApp {
                 return;
             }
         };
-        match oxideterm_ai::rag_get_document_content(&self.ai_rag_store, &edit.doc_id) {
+        match oxideterm_ai::rag_get_document_content(&self.ai_rag_store.get(), &edit.doc_id) {
             Ok(current) if current == content => {
                 let _ = fs::remove_file(&edit.path);
                 self.settings_page.clear_knowledge_external_edit();
@@ -565,7 +565,7 @@ impl WorkspaceApp {
             }
         }
         match oxideterm_ai::rag_update_document(
-            &self.ai_rag_store,
+            &self.ai_rag_store.get(),
             &edit.doc_id,
             content,
             Some(edit.version),

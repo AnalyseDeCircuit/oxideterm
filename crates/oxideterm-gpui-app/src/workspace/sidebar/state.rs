@@ -17,6 +17,9 @@ impl WorkspaceApp {
     pub(super) fn set_sidebar_section(&mut self, section: SidebarSection, cx: &mut Context<Self>) {
         self.clear_ai_sidebar_keyboard_focus();
         self.active_sidebar_section = section;
+        if section == SidebarSection::Extensions {
+            self.bootstrap_native_plugin_runtime(cx);
+        }
         if self.sidebar_collapsed {
             self.sidebar_collapsed = false;
         }
@@ -93,6 +96,7 @@ impl WorkspaceApp {
             .sidebar_ui
             .ai_sidebar_collapsed = collapsed;
         if !collapsed {
+            self.ensure_ai_chat_initialized();
             self.bootstrap_ai_mcp_registry();
         }
         self.clear_ai_sidebar_keyboard_focus();

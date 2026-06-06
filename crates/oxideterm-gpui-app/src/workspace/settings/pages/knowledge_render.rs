@@ -17,7 +17,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.ensure_ai_provider_key_statuses(cx);
-        let collections = oxideterm_ai::rag_list_collections(&self.ai_rag_store, None)
+        let collections = oxideterm_ai::rag_list_collections(&self.ai_rag_store.get(), None)
             .unwrap_or_default();
         let selected_id = self
             .settings_page.knowledge_selected_collection_id
@@ -31,11 +31,11 @@ impl WorkspaceApp {
         let selected_documents = selected_id
             .as_deref()
             .and_then(|id| {
-                oxideterm_ai::rag_list_documents(&self.ai_rag_store, id, None, Some(100)).ok()
+                oxideterm_ai::rag_list_documents(&self.ai_rag_store.get(), id, None, Some(100)).ok()
             });
         let selected_stats = selected_id
             .as_deref()
-            .and_then(|id| oxideterm_ai::rag_get_collection_stats(&self.ai_rag_store, id).ok());
+            .and_then(|id| oxideterm_ai::rag_get_collection_stats(&self.ai_rag_store.get(), id).ok());
 
         let mut index = section_index;
         if let Some(error) = self.settings_page.knowledge_error.as_ref() {

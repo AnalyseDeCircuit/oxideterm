@@ -66,6 +66,7 @@ enum NativePluginManagerActionButtonTone {
 
 impl WorkspaceApp {
     pub(super) fn open_plugin_manager_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.bootstrap_native_plugin_runtime(cx);
         let tab_id = if let Some(tab) = self
             .tabs
             .iter()
@@ -94,6 +95,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_plugin_manager_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.bootstrap_native_plugin_runtime(cx);
         let theme = self.tokens.ui;
         let has_background = self
             .terminal_background_preferences("plugin_manager")
@@ -1351,6 +1353,7 @@ impl WorkspaceApp {
                 let installed_id = result.manifest.id.clone();
                 self.plugin_registry =
                     plugin_host::NativePluginRegistry::discover(self.settings_store.path());
+                self.bootstrap_native_plugin_runtime(cx);
                 self.plugin_manager_available_updates
                     .retain(|entry| entry.id != installed_id);
                 self.plugin_manager_pending_overwrite = None;
@@ -1597,6 +1600,7 @@ impl WorkspaceApp {
                                         plugin_host::NativePluginRegistry::discover(
                                             this.settings_store.path(),
                                         );
+                                    this.bootstrap_native_plugin_runtime(cx);
                                     let success_template = this.i18n.t("plugin.reload_success");
                                     this.plugin_manager_operation_status =
                                         NativePluginManagerOperationStatus::Success(
@@ -1620,6 +1624,9 @@ impl WorkspaceApp {
                                     this.plugin_registry
                                         .record_manager_error(plugin_id.clone(), error);
                                 } else {
+                                    if next_enabled {
+                                        this.bootstrap_native_plugin_runtime(cx);
+                                    }
                                     let success_key = if next_enabled {
                                         "plugin.enable_success"
                                     } else {

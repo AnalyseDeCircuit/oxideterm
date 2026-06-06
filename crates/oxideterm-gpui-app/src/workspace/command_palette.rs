@@ -134,6 +134,7 @@ enum ShortcutsModalVirtualRow {
 
 impl WorkspaceApp {
     pub(super) fn open_command_palette(&mut self, cx: &mut Context<Self>) {
+        self.bootstrap_native_plugin_runtime(cx);
         self.command_palette.open = true;
         self.command_palette.raw_query.clear();
         self.command_palette.mode = PaletteMode::All;

@@ -1542,6 +1542,132 @@ fn chat_persistence_round_trips_tauri_redb_tables() {
 }
 
 #[test]
+fn chat_persistence_loads_tauri_message_field_order_with_context_snapshot() {
+    #[derive(serde::Serialize)]
+    struct TauriConversationMeta {
+        id: String,
+        title: String,
+        created_at: i64,
+        updated_at: i64,
+        message_count: usize,
+        session_id: Option<String>,
+        origin: String,
+        session_metadata: Option<Value>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct TauriContextSnapshot {
+        cwd: Option<String>,
+        selection: Option<String>,
+        buffer_tail: Option<String>,
+        buffer_compressed: bool,
+        local_os: Option<String>,
+        connection_info: Option<String>,
+        terminal_type: Option<String>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct TauriPersistedMessage {
+        id: String,
+        conversation_id: String,
+        role: String,
+        content: String,
+        timestamp: i64,
+        projection_updated_at: i64,
+        tool_calls: Vec<Value>,
+        context_snapshot: Option<TauriContextSnapshot>,
+        turn: Option<Value>,
+        transcript_ref: Option<Value>,
+        summary_ref: Option<Value>,
+        model: Option<String>,
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chat_history.redb");
+    let db = redb::Database::create(&path).unwrap();
+    let write = db.begin_write().unwrap();
+    {
+        let mut conversations = write
+            .open_table(redb::TableDefinition::<&str, &[u8]>::new("conversations"))
+            .unwrap();
+        let mut messages = write
+            .open_table(redb::TableDefinition::<&str, &[u8]>::new("messages"))
+            .unwrap();
+        let mut index = write
+            .open_table(redb::TableDefinition::<&str, &[u8]>::new(
+                "conversation_messages",
+            ))
+            .unwrap();
+
+        let meta = TauriConversationMeta {
+            id: "conv-tauri".into(),
+            title: "Tauri conversation".into(),
+            created_at: 10,
+            updated_at: 20,
+            message_count: 1,
+            session_id: None,
+            origin: "sidebar".into(),
+            session_metadata: None,
+        };
+        let message = TauriPersistedMessage {
+            id: "message-tauri".into(),
+            conversation_id: "conv-tauri".into(),
+            role: "user".into(),
+            content: "hello from tauri".into(),
+            timestamp: 20,
+            projection_updated_at: 21,
+            tool_calls: Vec::new(),
+            context_snapshot: Some(TauriContextSnapshot {
+                cwd: None,
+                selection: None,
+                buffer_tail: Some("terminal context".into()),
+                buffer_compressed: false,
+                local_os: None,
+                connection_info: None,
+                terminal_type: None,
+            }),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            model: Some("tauri-model".into()),
+        };
+        let ids = vec!["message-tauri".to_string()];
+
+        conversations
+            .insert("conv-tauri", rmp_serde::to_vec(&meta).unwrap().as_slice())
+            .unwrap();
+        messages
+            .insert(
+                "message-tauri",
+                rmp_serde::to_vec(&message).unwrap().as_slice(),
+            )
+            .unwrap();
+        index
+            .insert("conv-tauri", rmp_serde::to_vec(&ids).unwrap().as_slice())
+            .unwrap();
+    }
+    write.commit().unwrap();
+    drop(db);
+
+    let store = AiChatPersistenceStore::new(&path);
+    let state = store.load_state().unwrap();
+    let conversation = state
+        .conversations
+        .iter()
+        .find(|conversation| conversation.id == "conv-tauri")
+        .unwrap();
+    let message = conversation
+        .messages
+        .iter()
+        .find(|message| message.id == "message-tauri")
+        .unwrap();
+
+    assert_eq!(message.content, "hello from tauri");
+    assert_eq!(message.context.as_deref(), Some("terminal context"));
+    assert_eq!(message.model.as_deref(), Some("tauri-model"));
+}
+
+#[test]
 fn chat_persistence_save_state_rejects_stale_projection_snapshots() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("chat_history.redb");
