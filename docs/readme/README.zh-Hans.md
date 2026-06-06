@@ -468,7 +468,7 @@ pnpm run tauri build
 ## 路线图
 
 - [x] SSH Agent 转发
-- [ ] 完整 ProxyCommand 支持
+- [x] 完整 ProxyCommand 支持
 - [ ] 审计功能
 - [ ] Agent 增强
 - [ ] 会话搜索与快速切换

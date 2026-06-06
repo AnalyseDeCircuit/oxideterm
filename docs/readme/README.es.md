@@ -468,7 +468,7 @@ Medido con `tokei`, excluyendo dependencias y artefactos de build.
 ## Hoja de ruta
 
 - [x] Reenvío de agente SSH
-- [ ] Soporte completo de ProxyCommand
+- [x] Soporte completo de ProxyCommand
 - [ ] Registro de auditoría
 - [ ] Mejoras del Agent
 - [ ] Búsqueda de sesiones y cambio rápido

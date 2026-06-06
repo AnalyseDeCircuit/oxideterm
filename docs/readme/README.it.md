@@ -468,7 +468,7 @@ Misurato con `tokei`, escludendo dipendenze e artefatti di build.
 ## Roadmap
 
 - [x] Forwarding dell'agente SSH
-- [ ] Supporto completo ProxyCommand
+- [x] Supporto completo ProxyCommand
 - [ ] Registrazione audit
 - [ ] Miglioramenti Agent
 - [ ] Ricerca sessioni e cambio rapido

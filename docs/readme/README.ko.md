@@ -468,7 +468,7 @@ pnpm run tauri build
 ## 로드맵
 
 - [x] SSH Agent 포워딩
-- [ ] 완전한 ProxyCommand 지원
+- [x] 완전한 ProxyCommand 지원
 - [ ] 감사 로깅
 - [ ] Agent 기능 강화
 - [ ] 세션 검색 및 빠른 전환

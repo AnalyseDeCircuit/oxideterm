@@ -468,7 +468,7 @@ pnpm run tauri build
 ## ロードマップ
 
 - [x] SSH Agent フォワーディング
-- [ ] 完全な ProxyCommand サポート
+- [x] 完全な ProxyCommand サポート
 - [ ] 監査ログ
 - [ ] Agent 機能強化
 - [ ] セッション検索とクイック切替

@@ -468,7 +468,7 @@ Measured with `tokei`, excluding dependencies and build artifacts.
 ## Roadmap
 
 - [x] SSH Agent forwarding
-- [ ] Full ProxyCommand support
+- [x] Full ProxyCommand support
 - [ ] Audit logging
 - [ ] Agent enhancements
 - [ ] Session search & quick-switch

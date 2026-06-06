@@ -468,7 +468,7 @@ Medido com `tokei`, excluindo dependências e artefatos de build.
 ## Roteiro
 
 - [x] Encaminhamento de agente SSH
-- [ ] Suporte completo a ProxyCommand
+- [x] Suporte completo a ProxyCommand
 - [ ] Registro de auditoria
 - [ ] Melhorias no Agent
 - [ ] Busca de sessões e troca rápida

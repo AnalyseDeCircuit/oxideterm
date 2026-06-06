@@ -468,7 +468,7 @@ pnpm run tauri build
 ## Lộ trình
 
 - [x] Chuyển tiếp SSH Agent
-- [ ] Hỗ trợ ProxyCommand đầy đủ
+- [x] Hỗ trợ ProxyCommand đầy đủ
 - [ ] Nhật ký kiểm toán
 - [ ] Nâng cao Agent
 - [ ] Tìm kiếm phiên & chuyển đổi nhanh

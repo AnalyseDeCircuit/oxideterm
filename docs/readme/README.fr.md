@@ -468,7 +468,7 @@ Mesuré avec `tokei`, en excluant les dépendances et les artefacts de build.
 ## Feuille de route
 
 - [x] Transfert d'agent SSH
-- [ ] Support complet de ProxyCommand
+- [x] Support complet de ProxyCommand
 - [ ] Journalisation d'audit
 - [ ] Améliorations de l'Agent
 - [ ] Recherche de sessions & changement rapide
