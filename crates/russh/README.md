@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-81-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-83-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -121,6 +121,10 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses russh::client for SSH transport, authentication, and interactive PTY sessions.
 * [Yazi](https://github.com/sxyazi/yazi) - Blazing fast terminal file manager written in Rust, based on async I/O.
   * Uses `russh::client` to implement an async SFTP provider for remote file management.
+* [GitArena](https://github.com/mellowagain/gitarena) - Software development platform with built-in vcs, issue tracking and code review.
+  * Uses `russh::server` to allow Git operations over SSH.
+* [Calagopus](https://github.com/calagopus/wings) - Fast, Efficient and Scalable Game hosting - built for everyone.
+  * Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
 
 ## Contributors ✨
 
@@ -235,6 +239,8 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://vulns.xyz"><img src="https://avatars.githubusercontent.com/u/7763184?v=4?s=100" width="100px;" alt="kpcyrd"/><br /><sub><b>kpcyrd</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=kpcyrd" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/coreyleavitt"><img src="https://avatars.githubusercontent.com/u/18317330?v=4?s=100" width="100px;" alt="Corey Leavitt"/><br /><sub><b>Corey Leavitt</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=coreyleavitt" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/wi-adam"><img src="https://avatars.githubusercontent.com/u/127046659?v=4?s=100" width="100px;" alt="wi-adam"/><br /><sub><b>wi-adam</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=wi-adam" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://ddtkey.com"><img src="https://avatars.githubusercontent.com/u/26835520?v=4?s=100" width="100px;" alt="Artem Medvedev"/><br /><sub><b>Artem Medvedev</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=DDtKey" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ztbh"><img src="https://avatars.githubusercontent.com/u/67856492?v=4?s=100" width="100px;" alt="ztbh"/><br /><sub><b>ztbh</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=ztbh" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

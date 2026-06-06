@@ -92,7 +92,8 @@ fn expand_tilde_path(path: &str) -> PathBuf {
 #[cfg(test)]
 mod path_auth_tests {
     use super::*;
-    use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
+    use rand10::{rand_core::UnwrapErr, rngs::SysRng};
+    use russh::keys::ssh_key::LineEnding;
 
     fn unique_temp_dir(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -108,7 +109,7 @@ mod path_auth_tests {
     }
 
     fn write_test_key(path: &PathBuf, passphrase: Option<&str>) {
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let key = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
         let key = match passphrase {
             Some(passphrase) => key.encrypt(&mut rng, passphrase).unwrap(),

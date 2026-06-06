@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.59.0"
+version = "0.61.2"
 rust-version = "1.85"
 
 [features]
@@ -23,7 +23,7 @@ des = ["dep:des"]
 # Danger: DSA algorithm is insecure.
 dsa = ["ssh-key/dsa"]
 ring = ["dep:ring"] # Alternative crypto backend.
-rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa", "ssh-key/rsa-sha1"]
+rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa"]
 serde = ["ssh-key/serde"]
 _bench = ["dep:criterion"]
 
@@ -32,60 +32,74 @@ aes.workspace = true
 async-trait = { workspace = true, optional = true }
 aws-lc-rs = { version = "1.16.2", optional = true }
 bitflags = "2.0"
-block-padding = { version = "0.3", features = ["std"] }
+block-padding = { version = "0.4" }
 byteorder.workspace = true
 bytes.workspace = true
-cbc = { version = "0.1" }
-ctr = "0.9"
-curve25519-dalek = "4.1.3"
+cbc = { version = "0.2" }
+cipher = "0.5.1" # only pinned due to a cargo-minimal-versions failure in 0.5.0
+ctr = "0.10"
+curve25519-dalek = "=5.0.0-rc.0"
+crypto-bigint = { version = "0.7.3", features = ["alloc"] }
 data-encoding = "2.3"
 delegate.workspace = true
 digest.workspace = true
-der = "0.7"
-des = { version = "0.8.1", optional = true }
-ecdsa = "0.16"
-ed25519-dalek = { version = "2.0", features = ["rand_core", "pkcs8"] }
-elliptic-curve = { version = "0.13", features = ["ecdh"] }
+der = "0.8"
+des = { version = "0.9", optional = true }
+ecdsa = "=0.17.0-rc.18"
+ed25519-dalek = { version = "=3.0.0-rc.0", features = ["alloc", "rand_core", "pkcs8"] }
+elliptic-curve = { version = "=0.14.0-rc.33", features = ["ecdh"] }
 enum_dispatch = "0.3.13"
 flate2 = { version = "1.0.15", optional = true }
 futures.workspace = true
 generic-array = { version = "1.3.3", features = ["compat-0_14"] }
-getrandom = { version = "0.2.15", features = ["js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
+ghash = "0.6.0" # only pinned due to a cargo-minimal-versions failure in 0.6.0-rc.3
 hex-literal = "1"
 hmac.workspace = true
-inout = { version = "0.1", features = ["std"] }
+inout = { version = "0.2" }
+keccak = "0.2.0"
 log.workspace = true
-md5 = "0.7"
-ml-kem = "0.2.3"
-num-bigint = { version = "0.4.2", features = ["rand"] }
+md5 = "0.8"
+ml-kem = "0.3"
+module-lattice = "0.2"
+# num-bigint 0.4.x only supports rand 0.8. PR #338 adds rand 0.10 support
+# via the `rand_0_10` feature flag. Replace with upstream once a release with
+# rand 0.10 support is published. https://github.com/rust-num/num-bigint/pull/338
+num-bigint = { package = "internal-russh-num-bigint", version = "=0.5.0", features = ["rand_0_10"] }
+num_bigint_0_4 = { package = "num-bigint", version = "0.4.6" }
 # num-integer = "0.1"
-p256 = { version = "0.13", features = ["ecdh"] }
-p384 = { version = "0.13", features = ["ecdh"] }
-p521 = { version = "0.13", features = ["ecdh"] }
-pbkdf2 = "0.12"
-pkcs1 = { version = "0.8.0-rc.4", optional = true }
-pkcs5 = "0.7"
-pkcs8 = { version = "0.10", features = ["pkcs5", "encryption", "std"] }
-rand_core = { version = "=0.10.0-rc-3" }
+p256 = { version = "=0.14.0-rc.10", features = ["ecdh"] }
+p384 = { version = "=0.14.0-rc.10", features = ["ecdh"] }
+p521 = { version = "=0.14.0-rc.10", features = ["ecdh"] }
+pbkdf2 = "0.13"
+pkcs1 = { version = "=0.8.0-rc.4", optional = true }
+pkcs5 = "0.8"
+pkcs8 = { version = "0.11", features = ["encryption", "std"] }
+polyval = "0.7.1" # only pinned due to a cargo-minimal-versions failure in 0.7.0
+rand_core = { version = "0.10.0" }
 rand.workspace = true
 ring = { version = "0.17.14", optional = true }
-rsa = { version = "=0.10.0-rc.10", optional = true }
-russh-cryptovec = { version = "0.59.0", path = "../cryptovec", features = [
+rsa = { version = "=0.10.0-rc.18", optional = true }
+russh-cryptovec = { version = "0.61.0", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }
 russh-util = { version = "0.52.0", path = "../russh-util" }
-sec1 = { version = "0.7", features = ["pkcs8", "der"] }
+salsa20 = "0.11.0"
+scrypt = "0.12.0"
+sec1 = { version = "0.8", features = ["der"] }
 sha1.workspace = true
 sha2.workspace = true
+sha3 = "0.11.0"
 signature.workspace = true
-spki = "0.7"
+spki = "0.8"
 ssh-encoding.workspace = true
 ssh-key.workspace = true
 subtle = "2.4"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "sync", "time"] }
 typenum = "1.17"
-yasna = { version = "0.5.0", features = [
+universal-hash = "0.6.1" # only pinned due to a cargo-minimal-versions failure in 0.6.0
+yasna = { version = "0.6", features = [
   "bit-vec",
   "num-bigint",
 ], optional = true }
@@ -119,8 +133,6 @@ tokio = { workspace = true, features = [
 ] }
 rand.workspace = true
 shell-escape = "0.1"
-tokio-fd = "0.3"
-termion = "4"
 ratatui = "0.30"
 tempfile = "3.14.0"
 
@@ -128,6 +140,10 @@ tempfile = "3.14.0"
 russh-sftp = "2.1.0"
 tokio.workspace = true
 tokio-stream.workspace = true
+
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
+tokio-fd = "0.3"
+termion = "4"
 
 [package.metadata.docs.rs]
 all-features = true

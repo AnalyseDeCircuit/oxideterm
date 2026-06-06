@@ -1,7 +1,7 @@
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use rand::rngs::OsRng;
+    use rand10::{rand_core::UnwrapErr, rngs::SysRng};
     use russh::keys::ssh_key::{HashAlg, LineEnding};
     use russh::keys::{Algorithm, PrivateKey};
 
@@ -38,7 +38,7 @@ mod tests {
 
     fn generated_private_key_text(passphrase: Option<&str>) -> String {
         let key_path = temp_store_path("managed-key-source").with_extension("key");
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let key = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
         let key = match passphrase {
             Some(passphrase) => key.encrypt(&mut rng, passphrase).unwrap(),
@@ -52,7 +52,7 @@ mod tests {
 
     fn generated_large_rsa_private_key_text() -> String {
         let key_path = temp_store_path("managed-key-large-rsa-source").with_extension("key");
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let key = PrivateKey::random(
             &mut rng,
             Algorithm::Rsa {

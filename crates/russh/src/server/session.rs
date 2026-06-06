@@ -5,15 +5,14 @@ use std::sync::Arc;
 use channels::WindowSizeRef;
 use kex::ServerKex;
 use log::debug;
-use negotiation::parse_kex_algo_list;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf};
 use crate::helpers::NameList;
-use crate::kex::{KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
+use crate::kex::{EXTENSION_SUPPORT_AS_CLIENT, KexCause, SessionKexState};
 use crate::{map_err, msg};
 
 /// A connected server session. This type is unique to a client.
@@ -101,12 +100,14 @@ pub struct Handle {
 
 impl Handle {
     /// Send data to the session referenced by this handler.
-    pub async fn data(&self, id: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), bytes::Bytes> {
+    pub async fn data(
+        &self,
+        id: ChannelId,
+        data: impl Into<bytes::Bytes>,
+    ) -> Result<(), bytes::Bytes> {
         let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data {
-                data: data.clone(),
-            }))
+            .send(Msg::Channel(id, ChannelMsg::Data { data }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::Data { data }) => data,
@@ -123,10 +124,7 @@ impl Handle {
     ) -> Result<(), bytes::Bytes> {
         let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::ExtendedData {
-                ext,
-                data: data.clone(),
-            }))
+            .send(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::ExtendedData { data, .. }) => data,
@@ -403,7 +401,7 @@ impl Handle {
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
-                    return Err(Error::ChannelOpenFailure(reason))
+                    return Err(Error::ChannelOpenFailure(reason));
                 }
                 None => {
                     return Err(Error::Disconnect);
@@ -917,8 +915,10 @@ impl Session {
     /// The number of bytes added to the "sending pipeline" (to be
     /// processed by the event loop) is returned.
     pub fn data(&mut self, channel: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.data(channel, data, self.kex.active())
+        let is_rekeying = self.kex.active();
+        let common = &mut self.common;
+        if let Some(enc) = common.encrypted.as_mut() {
+            enc.data_with_writer(&mut common.packet_writer, channel, data, is_rekeying)
         } else {
             unreachable!()
         }
@@ -936,8 +936,16 @@ impl Session {
         extended: u32,
         data: impl Into<bytes::Bytes>,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.extended_data(channel, extended, data, self.kex.active())
+        let is_rekeying = self.kex.active();
+        let common = &mut self.common;
+        if let Some(enc) = common.encrypted.as_mut() {
+            enc.extended_data_with_writer(
+                &mut common.packet_writer,
+                channel,
+                extended,
+                data,
+                is_rekeying,
+            )
         } else {
             unreachable!()
         }
@@ -1253,11 +1261,11 @@ impl Session {
                 let Some(mut r) = e.client_kex_init.get(17..) else {
                     return Ok(());
                 };
-                if let Ok(kex_string) = String::decode(&mut r) {
+                if let Ok(kex_list) = NameList::decode(&mut r) {
                     use super::negotiation::Select;
                     key_extension_client = super::negotiation::Server::select(
                         &[EXTENSION_SUPPORT_AS_CLIENT],
-                        &parse_kex_algo_list(&kex_string),
+                        &kex_list,
                         AlgorithmKind::Kex,
                     )
                     .is_ok();
@@ -1307,5 +1315,126 @@ impl Session {
         kex.kexinit(&mut self.common.packet_writer)?;
         self.kex = SessionKexState::InProgress(kex);
         Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "flate2"))]
+mod tests {
+    use std::collections::{HashMap, VecDeque};
+    use std::io::Write;
+    use std::num::Wrapping;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::compression::{Compression, Decompress};
+    use crate::kex::{KEXES, NONE, SessionKexState};
+    use crate::session::{CommonSession, Encrypted, EncryptedState, Exchange};
+    use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer};
+    use crate::{CryptoVec, cipher, mac};
+
+    struct TestHandler;
+
+    impl crate::server::Handler for TestHandler {
+        type Error = crate::Error;
+    }
+
+    fn authenticated_session() -> Session {
+        let config = Arc::new(crate::server::Config::default());
+        let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
+        let handle = Handle {
+            sender,
+            channel_buffer_size: config.channel_buffer_size,
+        };
+
+        Session {
+            common: CommonSession {
+                auth_user: String::new(),
+                remote_sshid: b"SSH-2.0-test".to_vec(),
+                config: config.clone(),
+                encrypted: Some(Encrypted {
+                    state: EncryptedState::Authenticated,
+                    exchange: Some(Exchange::default()),
+                    kex: KEXES.get(&NONE).unwrap().make(),
+                    key: 0,
+                    client_mac: mac::NONE,
+                    server_mac: mac::NONE,
+                    session_id: CryptoVec::new(),
+                    channels: HashMap::new(),
+                    last_channel_id: Wrapping(0),
+                    write: Vec::new(),
+                    write_cursor: 0,
+                    last_rekey: russh_util::time::Instant::now(),
+                    server_compression: Compression::None,
+                    client_compression: Compression::None,
+                    decompress: Decompress::Zlib(flate2::Decompress::new(true)),
+                    rekey_wanted: false,
+                    received_extensions: Vec::new(),
+                    extension_info_awaiters: HashMap::new(),
+                }),
+                auth_method: None,
+                auth_attempts: 0,
+                packet_writer: PacketWriter::clear(),
+                remote_to_local: Box::new(cipher::clear::Key),
+                wants_reply: false,
+                disconnected: false,
+                buffer: Vec::new(),
+                strict_kex: false,
+                alive_timeouts: 0,
+                received_data: false,
+            },
+            sender: handle,
+            receiver,
+            target_window_size: config.window_size,
+            pending_reads: Vec::new(),
+            pending_len: 0,
+            channels: HashMap::new(),
+            open_global_requests: VecDeque::new(),
+            kex: SessionKexState::Idle,
+        }
+    }
+
+    fn compressed_debug_payload(payload_len: usize) -> Vec<u8> {
+        let mut payload = vec![b'A'; payload_len];
+        payload[0] = crate::msg::DEBUG;
+
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder.write_all(&payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert!(compressed.len() < 256 * 1024);
+        compressed
+    }
+
+    fn incoming_packet(compressed: Vec<u8>) -> SSHBuffer {
+        let mut buffer = SSHBuffer::new();
+        buffer.buffer.extend_from_slice(&[0; 5]);
+        buffer.buffer.extend_from_slice(&compressed);
+        buffer
+    }
+
+    #[tokio::test]
+    async fn compressed_debug_is_ignored_after_server_parses_it() {
+        let mut session = authenticated_session();
+        let mut handler = TestHandler;
+        let buffer = incoming_packet(compressed_debug_payload(200 * 1024));
+        let mut pkt: IncomingSshPacket = session.maybe_decompress(&buffer).unwrap();
+
+        super::super::reply(&mut session, &mut handler, &mut pkt)
+            .await
+            .unwrap();
+
+        assert!(!session.common.disconnected);
+    }
+
+    #[test]
+    fn oversized_compressed_debug_is_rejected_before_server_ignores_it() {
+        let mut session = authenticated_session();
+        let buffer = incoming_packet(compressed_debug_payload(
+            crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN + 1024,
+        ));
+
+        let err = session.maybe_decompress(&buffer).unwrap_err();
+        assert!(
+            matches!(err, crate::Error::PacketSize(len) if len > crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN)
+        );
     }
 }
