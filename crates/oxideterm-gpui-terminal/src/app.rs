@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::Result;
 use gpui::{
-    Bounds, ClipboardItem, Context, FocusHandle, PathPromptOptions, Pixels, SharedString,
+    Bounds, ClipboardItem, Context, FocusHandle, PathPromptOptions, Pixels, Point, SharedString,
     Subscription, Timer, Window, px,
 };
 use oxideterm_ssh::SshConnectionHandle;
@@ -103,6 +103,8 @@ pub struct TerminalPane {
     terminal_exited: bool,
     scroll_px: Pixels,
     scrollbar_drag: Option<ScrollbarDrag>,
+    selection_autoscroll_position: Option<Point<Pixels>>,
+    selection_autoscroll_scheduled: bool,
     copy_on_select_generation: u64,
     focused: bool,
     cursor_visible: bool,
@@ -358,6 +360,8 @@ impl TerminalPane {
             terminal_exited: false,
             scroll_px: px(0.0),
             scrollbar_drag: None,
+            selection_autoscroll_position: None,
+            selection_autoscroll_scheduled: false,
             copy_on_select_generation: 0,
             focused: true,
             cursor_visible: true,
@@ -668,14 +672,29 @@ impl TerminalPane {
             self.handle_terminal_event(event, cx);
         }
 
+        let cleared_command_mark_selection = self.clear_command_mark_selection_for_tui_mode();
         if report.changed {
             self.snapshot = self.terminal.lock().snapshot();
             cx.notify();
-        } else if self.preferences.show_fps_overlay {
+        } else if self.preferences.show_fps_overlay || cleared_command_mark_selection {
             cx.notify();
         }
 
         self.update_cursor_blink(cx);
+    }
+
+    fn clear_command_mark_selection_for_tui_mode(&mut self) -> bool {
+        let mode = self.terminal.lock().mode();
+        if self.selected_command_mark_id.is_none()
+            || !(mode.contains(TermMode::ALT_SCREEN) || mode.intersects(TermMode::MOUSE_MODE))
+        {
+            return false;
+        }
+
+        // Command mark selection overlays belong to the normal scrollback UI.
+        // TUI applications own the active screen and mouse surface instead.
+        self.selected_command_mark_id = None;
+        true
     }
 
     fn next_drain_budget(&self) -> TerminalDrainBudget {

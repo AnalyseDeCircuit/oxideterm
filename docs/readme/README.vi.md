@@ -289,7 +289,7 @@ Khi feature đã tồn tại ở bản Tauri, hãy giữ behavior, labels, inter
 
 ## Hỗ trợ và bảo trì
 
-OxideTerm Native đang được chuẩn bị làm major release tiếp theo của OxideTerm và được duy trì best-effort. Bug report có bước tái hiện và chẩn đoán đã redacted được ưu tiên; feature request có thể không được triển khai.
+Bug report và regression có bước tái hiện cùng chẩn đoán đã redacted được ưu tiên. Feature request được đánh giá theo phạm vi, an toàn và mức độ phù hợp với định hướng của OxideTerm cho workspace máy chủ từ xa.
 
 <p align="center">
   <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">

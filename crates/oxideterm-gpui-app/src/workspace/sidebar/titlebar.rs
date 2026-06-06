@@ -1,5 +1,5 @@
 impl WorkspaceApp {
-    pub(super) fn render_title_bar(&self) -> AnyElement {
+    pub(super) fn render_title_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         // Tauri does not draw a separate accent-tinted top strip; its transparent
         // macOS chrome sits over the app root background. Native still needs this
@@ -23,51 +23,71 @@ impl WorkspaceApp {
                     .flex_1()
                     .h_full()
                     .min_w(px(0.0))
-                    // Keep drag hitboxes away from Windows caption buttons; GPUI
+                    // Keep drag hitboxes away from caption buttons; GPUI
                     // returns the first matching window-control area by paint order.
                     .window_control_area(gpui::WindowControlArea::Drag)
                     // The drag filler is visually empty, so force a concrete
-                    // mouse hitbox for Windows non-client hit testing.
-                    .occlude(),
+                    // mouse hitbox for client-decoration hit testing.
+                    .occlude()
+                    // Linux X11/Wayland do not currently consume GPUI
+                    // WindowControlArea hit tests, so also start moving from a
+                    // normal client-side mouse event.
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_this, _event, window, cx| {
+                            window.start_window_move();
+                            cx.stop_propagation();
+                        }),
+                    ),
             )
-            .when(cfg!(target_os = "windows"), |bar| {
-                bar.child(self.render_windows_titlebar_controls(titlebar_bg, text_color))
-            })
+            .when(
+                cfg!(any(target_os = "windows", target_os = "linux")),
+                |bar| bar.child(self.render_client_titlebar_controls(titlebar_bg, text_color, cx)),
+            )
             .into_any_element()
     }
 
-    fn render_windows_titlebar_controls(&self, titlebar_bg: u32, text_color: u32) -> AnyElement {
+    fn render_client_titlebar_controls(
+        &self,
+        titlebar_bg: u32,
+        text_color: u32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .h_full()
             .flex()
             .flex_row()
-            .child(self.windows_titlebar_button(
+            .child(self.client_titlebar_button(
                 "−",
                 gpui::WindowControlArea::Min,
                 titlebar_button_hover(titlebar_bg),
                 text_color,
+                cx,
             ))
-            .child(self.windows_titlebar_button(
+            .child(self.client_titlebar_button(
                 "□",
                 gpui::WindowControlArea::Max,
                 titlebar_button_hover(titlebar_bg),
                 text_color,
+                cx,
             ))
-            .child(self.windows_titlebar_button(
+            .child(self.client_titlebar_button(
                 "×",
                 gpui::WindowControlArea::Close,
                 0xc42b1c,
                 0xffffff,
+                cx,
             ))
             .into_any_element()
     }
 
-    fn windows_titlebar_button(
+    fn client_titlebar_button(
         &self,
         glyph: &'static str,
         control_area: gpui::WindowControlArea,
         hover_bg: u32,
         text_color: u32,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .w(px(46.0))
@@ -77,8 +97,22 @@ impl WorkspaceApp {
             .justify_center()
             .text_size(px(13.0))
             .text_color(rgb(text_color))
-            .window_control_area(control_area)
             .hover(move |button| button.bg(rgb(hover_bg)))
+            // Caption buttons are pure GPUI client controls. Keeping
+            // WindowControlArea here can route clicks into platform non-client
+            // handling before GPUI receives the fallback mouse event.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |_this, _event, window, cx| {
+                    match control_area {
+                        gpui::WindowControlArea::Min => window.minimize_window(),
+                        gpui::WindowControlArea::Max => window.zoom_window(),
+                        gpui::WindowControlArea::Close => window.remove_window(),
+                        gpui::WindowControlArea::Drag => {}
+                    }
+                    cx.stop_propagation();
+                }),
+            )
             .child(glyph)
             .into_any_element()
     }

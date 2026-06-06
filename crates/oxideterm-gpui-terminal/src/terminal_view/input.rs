@@ -319,7 +319,7 @@ pub(crate) fn oxideterm_key_escape_sequence(
         return Some(sequence);
     }
 
-    if event_type != KittyKeyEventType::Press {
+    if event_type == KittyKeyEventType::Release {
         return None;
     }
 

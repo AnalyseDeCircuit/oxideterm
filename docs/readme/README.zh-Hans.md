@@ -296,7 +296,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 
 ## 支持与维护
 
-OxideTerm Native 正在作为下一代 OxideTerm 主版本准备中，并以**尽力而为**的方式维护。带有可复现步骤和脱敏诊断信息的 bug 报告会优先处理；功能请求不一定都会实现。
+带有可复现步骤和脱敏诊断信息的 bug 报告与回归问题会优先处理。功能请求会根据范围、安全性以及是否符合 OxideTerm 的远程服务器工作区方向来评估。
 
 <p align="center">
   <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">

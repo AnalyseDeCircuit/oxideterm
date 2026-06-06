@@ -387,7 +387,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 
 ## Support and Maintenance
 
-OxideTerm Native is maintained on a **best-effort basis** while it is prepared as the next major OxideTerm release. Bug reports with reproducible steps and redacted diagnostics are prioritized; feature requests may not always be implemented.
+Reproducible bug reports and regressions with redacted diagnostics are prioritized. Feature requests are reviewed based on scope, safety, and alignment with OxideTerm's remote-server workspace direction.
 
 <p align="center">
   <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">

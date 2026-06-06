@@ -289,7 +289,7 @@ Wenn ein Feature bereits in der Tauri-Version existiert, sollen Verhalten, Label
 
 ## Support und Wartung
 
-OxideTerm Native wird als nächste große OxideTerm-Version vorbereitet und best-effort gepflegt. Bug Reports mit reproduzierbaren Schritten und redigierten Diagnosen werden priorisiert; Feature Requests werden nicht immer umgesetzt.
+Reproduzierbare Bug Reports und Regressionen mit redigierten Diagnosen werden priorisiert. Feature Requests werden nach Umfang, Sicherheit und Ausrichtung auf OxideTerms Remote-Server-Workspace-Richtung bewertet.
 
 <p align="center">
   <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">

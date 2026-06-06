@@ -11,6 +11,9 @@ use super::{ScrollbarDrag, ScrollbarGeometry, TerminalContextMenu, TerminalPane}
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
+const TERMINAL_SELECTION_AUTOSCROLL_INTERVAL_MS: u64 = 16;
+const TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS: i32 = 4;
+
 impl TerminalPane {
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
@@ -63,8 +66,10 @@ impl TerminalPane {
             return;
         }
 
+        let mode = self.terminal.lock().mode();
         if self.settings.smart_copy
             && is_smart_copy_shortcut(event)
+            && smart_copy_selection_is_owned_by_terminal_ui(mode)
             && self.copy_selection_to_clipboard_if_present(cx)
         {
             return;
@@ -75,7 +80,6 @@ impl TerminalPane {
             return;
         }
 
-        let mode = self.terminal.lock().mode();
         let key_event_type = if event.is_held {
             KittyKeyEventType::Repeat
         } else {
@@ -215,7 +219,11 @@ impl TerminalPane {
             return;
         }
 
-        if self.settings.smart_copy && self.copy_selection_to_clipboard_if_present(cx) {
+        let mode = self.terminal.lock().mode();
+        if self.settings.smart_copy
+            && smart_copy_selection_is_owned_by_terminal_ui(mode)
+            && self.copy_selection_to_clipboard_if_present(cx)
+        {
             return;
         }
 
@@ -372,6 +380,8 @@ impl TerminalPane {
             mode,
         });
         self.selecting = true;
+        self.selection_autoscroll_position = Some(position);
+        self.schedule_selection_autoscroll(cx);
         cx.notify();
     }
 
@@ -414,7 +424,77 @@ impl TerminalPane {
     fn finish_selection(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         self.update_selection(position, cx);
         self.selecting = false;
+        self.selection_autoscroll_position = None;
         self.copy_selection_after_select_if_configured(cx);
+    }
+
+    fn update_selection_with_autoscroll(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.selection_autoscroll_position = Some(position);
+        self.update_selection(position, cx);
+        self.schedule_selection_autoscroll(cx);
+    }
+
+    fn schedule_selection_autoscroll(&mut self, cx: &mut Context<Self>) {
+        if self.selection_autoscroll_scheduled {
+            return;
+        }
+        // Browser terminals keep extending a drag selection after the pointer
+        // leaves the viewport; GPUI needs an explicit scroll tick for that.
+        self.selection_autoscroll_scheduled = true;
+        cx.spawn(async move |weak, cx| {
+            Timer::after(Duration::from_millis(
+                TERMINAL_SELECTION_AUTOSCROLL_INTERVAL_MS,
+            ))
+            .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.selection_autoscroll_scheduled = false;
+                this.run_selection_autoscroll_tick(cx);
+            });
+        })
+        .detach();
+    }
+
+    fn run_selection_autoscroll_tick(&mut self, cx: &mut Context<Self>) {
+        let Some(position) = self.selection_autoscroll_position else {
+            return;
+        };
+        if !self.selecting {
+            self.selection_autoscroll_position = None;
+            return;
+        }
+
+        let delta_rows = self.selection_autoscroll_delta_rows(position);
+        if delta_rows == 0 {
+            return;
+        }
+
+        let current_offset = self.snapshot.display_offset;
+        let target_offset = if delta_rows > 0 {
+            current_offset.saturating_add(delta_rows as usize)
+        } else {
+            current_offset.saturating_sub(delta_rows.unsigned_abs() as usize)
+        }
+        .min(self.snapshot.scrollback_lines);
+
+        if target_offset == current_offset {
+            return;
+        }
+
+        self.terminal.lock().scroll_to_display_offset(target_offset);
+        self.snapshot = self.terminal.lock().snapshot();
+        self.update_selection(position, cx);
+        self.schedule_selection_autoscroll(cx);
+    }
+
+    fn selection_autoscroll_delta_rows(&self, position: gpui::Point<Pixels>) -> i32 {
+        let origin = self.content_origin();
+        let top = origin.y + px(TERMINAL_CONTENT_PADDING);
+        let bottom = top + px(self.snapshot.rows.max(1) as f32 * self.metrics.line_height_f32());
+        terminal_selection_autoscroll_delta_rows(position.y, top, bottom, self.metrics.line_height)
     }
 
     fn apply_scroll_action(&mut self, action: TerminalScrollAction, cx: &mut Context<Self>) {
@@ -553,6 +633,7 @@ impl TerminalPane {
             }
         } else {
             self.selecting = false;
+            self.selection_autoscroll_position = None;
             self.selection = None;
         }
     }
@@ -609,7 +690,7 @@ impl TerminalPane {
         } else if event.pressed_button == Some(MouseButton::Left)
             && self.selection_allowed(event.modifiers.shift)
         {
-            self.update_selection(event.position, cx);
+            self.update_selection_with_autoscroll(event.position, cx);
         }
     }
 
@@ -647,6 +728,7 @@ impl TerminalPane {
             self.last_mouse_report_point = None;
         } else {
             self.selecting = false;
+            self.selection_autoscroll_position = None;
             self.last_mouse_report_point = None;
         }
     }
@@ -678,6 +760,14 @@ impl TerminalPane {
                 absolute_line >= mark.start_line && absolute_line <= end_line
             })
             .map(|mark| mark.command_id.clone());
+        if self.selected_command_mark_id == selected {
+            if selected.is_some() {
+                self.selected_command_mark_id = None;
+                cx.notify();
+            }
+            return;
+        }
+
         if self.selected_command_mark_id != selected {
             self.selected_command_mark_id = selected;
             cx.notify();
@@ -687,6 +777,27 @@ impl TerminalPane {
 
 fn mouse_tracking_active(mode: TermMode) -> bool {
     mode.intersects(TermMode::MOUSE_MODE)
+}
+
+fn terminal_selection_autoscroll_delta_rows(
+    position_y: Pixels,
+    top: Pixels,
+    bottom: Pixels,
+    line_height: Pixels,
+) -> i32 {
+    let distance = if position_y < top {
+        f32::from(top - position_y)
+    } else if position_y > bottom {
+        -f32::from(position_y - bottom)
+    } else {
+        return 0;
+    };
+    let line_height = f32::from(line_height).max(1.0);
+    let rows = (distance.abs() / line_height)
+        .ceil()
+        .max(1.0)
+        .min(TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS as f32) as i32;
+    if distance > 0.0 { rows } else { -rows }
 }
 
 fn is_smart_copy_shortcut(event: &KeyDownEvent) -> bool {
@@ -699,4 +810,48 @@ fn is_smart_copy_shortcut(event: &KeyDownEvent) -> bool {
         && !modifiers.alt
         && !modifiers.shift
         && event.keystroke.key.eq_ignore_ascii_case("c")
+}
+
+fn smart_copy_selection_is_owned_by_terminal_ui(mode: TermMode) -> bool {
+    // In TUI-owned modes Ctrl+C must remain application input even if native
+    // still has a stale visual selection from the normal scrollback buffer.
+    !mode.contains(TermMode::ALT_SCREEN) && !mouse_tracking_active(mode)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smart_copy_yields_ctrl_c_to_tui_modes() {
+        assert!(smart_copy_selection_is_owned_by_terminal_ui(
+            TermMode::default()
+        ));
+        assert!(!smart_copy_selection_is_owned_by_terminal_ui(
+            TermMode::ALT_SCREEN
+        ));
+        assert!(!smart_copy_selection_is_owned_by_terminal_ui(
+            TermMode::MOUSE_REPORT_CLICK
+        ));
+    }
+
+    #[test]
+    fn selection_autoscroll_matches_display_offset_direction() {
+        assert_eq!(
+            terminal_selection_autoscroll_delta_rows(px(89.0), px(100.0), px(200.0), px(10.0)),
+            2
+        );
+        assert_eq!(
+            terminal_selection_autoscroll_delta_rows(px(211.0), px(100.0), px(200.0), px(10.0)),
+            -2
+        );
+        assert_eq!(
+            terminal_selection_autoscroll_delta_rows(px(150.0), px(100.0), px(200.0), px(10.0)),
+            0
+        );
+        assert_eq!(
+            terminal_selection_autoscroll_delta_rows(px(250.0), px(100.0), px(200.0), px(10.0)),
+            -TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS
+        );
+    }
 }

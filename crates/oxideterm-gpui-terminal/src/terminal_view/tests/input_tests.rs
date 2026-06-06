@@ -26,6 +26,31 @@ fn app_cursor_navigation_uses_application_sequences() {
 }
 
 #[test]
+fn held_navigation_repeats_legacy_arrow_sequences() {
+    let normal = oxideterm_key_escape_sequence(
+        &Keystroke {
+            key: "down".to_string(),
+            ..Default::default()
+        },
+        &TermMode::default(),
+        false,
+        KittyKeyEventType::Repeat,
+    );
+    assert_eq!(normal.as_deref(), Some("\x1b[B"));
+
+    let app_cursor = oxideterm_key_escape_sequence(
+        &Keystroke {
+            key: "up".to_string(),
+            ..Default::default()
+        },
+        &(TermMode::default() | TermMode::APP_CURSOR),
+        false,
+        KittyKeyEventType::Repeat,
+    );
+    assert_eq!(app_cursor.as_deref(), Some("\x1bOA"));
+}
+
+#[test]
 fn modified_arrows_include_xterm_modifier_code() {
     let sequence = oxideterm_key_escape_sequence(
         &Keystroke {

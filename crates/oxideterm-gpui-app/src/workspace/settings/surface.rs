@@ -124,30 +124,14 @@ impl WorkspaceApp {
             return self.render_settings_ai_section_item(index, cx);
         }
 
-        let padding = self.tokens.metrics.settings_content_padding;
-        let gap = self.tokens.metrics.settings_page_gap;
-        let outer_max_width = self.settings_content_outer_max_width();
         let section_index = index.saturating_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT);
-        let mut item = div()
-            .w_full()
-            .min_w(px(0.0))
-            .max_w(px(outer_max_width))
-            .mx_auto()
-            .px(px(padding))
-            .pb(px(gap));
-        if index == 0 {
-            item = item.pt(px(padding));
-        }
-        if index + 1 == self.settings_section_list_item_count() {
-            item = item.pb(px(padding));
-        }
-
-        item.child(if index == 0 {
+        let child = if index == 0 {
             self.render_settings_virtual_header(self.settings_page.active_tab, cx)
         } else {
             self.render_settings_tab_section(self.settings_page.active_tab, section_index, cx)
-        })
-        .into_any_element()
+        };
+
+        self.wrap_settings_section_list_item(index, child)
     }
 
     fn render_settings_ai_section_item(&mut self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -228,29 +212,32 @@ impl WorkspaceApp {
         let padding = self.tokens.metrics.settings_content_padding;
         let gap = self.tokens.metrics.settings_page_gap;
         let outer_max_width = self.settings_content_outer_max_width();
-        let mut item = div()
+        let mut inner = div()
             .w_full()
             .min_w(px(0.0))
             .max_w(px(outer_max_width))
-            .mx_auto()
             .px(px(padding))
             .pb(px(gap));
         if index == 0 {
-            item = item.pt(px(padding));
+            inner = inner.pt(px(padding));
         }
         if index + 1 == self.settings_section_list_item_count() {
-            item = item.pb(px(padding));
+            inner = inner.pb(px(padding));
         }
-        item.child(child).into_any_element()
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .justify_center()
+            .child(inner.child(child))
+            .into_any_element()
     }
 
     fn settings_content_outer_max_width(&self) -> f32 {
-        // Tauri SettingsView uses `max-w-4xl mx-auto p-10`: the 4xl max-width
-        // applies to the content box and padding is added outside it. GPUI's
-        // max_w constrains this padded wrapper directly, so include both sides
-        // of settings_content_padding or every settings page becomes visually
-        // narrower and more fixed-width than the browser version.
-        self.tokens.metrics.settings_content_max_width
+        // Native keeps Tauri's padded `mx-auto` settings shell, but uses a wider
+        // semantic cap so large desktop windows do not leave every page pinned
+        // to the original browser `max-w-4xl` column.
+        self.tokens.metrics.settings_content_wide_max_width
             + self.tokens.metrics.settings_content_padding * 2.0
     }
 

@@ -289,7 +289,7 @@ Tauri 버전에 이미 있는 기능을 native로 옮길 때는 명시적인 대
 
 ## 지원 및 유지관리
 
-OxideTerm Native는 OxideTerm의 다음 major release로 준비 중이며 best-effort로 유지관리됩니다. 재현 단계와 redacted diagnostics가 포함된 bug report를 우선합니다. feature request는 항상 구현되지 않을 수 있습니다.
+재현 단계와 redacted diagnostics가 포함된 bug report 및 regression을 우선합니다. feature request는 범위, 안전성, OxideTerm의 remote-server workspace 방향성과의 일치 여부를 기준으로 검토합니다.
 
 <p align="center">
   <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">

@@ -289,7 +289,7 @@ Quando una funzione esiste già nella versione Tauri, mantieni comportamento, la
 
 ## Supporto e manutenzione
 
-OxideTerm Native è in preparazione come prossima major release di OxideTerm ed è mantenuto best-effort. I bug report con passi riproducibili e diagnostica redatta hanno priorità; le richieste di funzionalità potrebbero non essere implementate.
+I bug report e le regressioni riproducibili con diagnostica redatta hanno priorità. Le richieste di funzionalità vengono valutate in base ad ambito, sicurezza e allineamento con la direzione di OxideTerm per il workspace dei server remoti.
 
 <p align="center">
   <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">

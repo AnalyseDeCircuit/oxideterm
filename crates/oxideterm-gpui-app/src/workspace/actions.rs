@@ -1230,6 +1230,28 @@ impl WorkspaceApp {
                 self.terminal_command_suggestion_highlighted = None;
                 self.submit_terminal_command_bar(window, cx)
             }
+            "space" | " "
+                if terminal_command_bar_space_inserts_literal(
+                    modifiers.platform,
+                    modifiers.control,
+                    modifiers.alt,
+                ) =>
+            {
+                // Some GPUI platforms deliver Space without key_char, so the
+                // platform text path cannot mutate the textarea-like command
+                // draft. Preserve Tauri textarea semantics by inserting the
+                // literal space through the shared IME replacement path.
+                let target = WorkspaceImeTarget::TerminalCommandBar;
+                let replacement_range = self.ime_selection_range_for_target(target);
+                let caret = replacement_range
+                    .as_ref()
+                    .map(|range| range.start + " ".encode_utf16().count());
+                self.clear_ime_selection();
+                self.replace_ime_target_text(target, replacement_range, " ", cx);
+                if let Some(caret) = caret {
+                    self.set_ime_selection_from_anchor(target, caret, caret);
+                }
+            }
             "backspace" => {
                 let changed = self.terminal_command_bar_draft.pop().is_some()
                     || self.terminal_command_suggestions_open
@@ -1790,6 +1812,10 @@ fn terminal_command_next_suggestion_index(
     })
 }
 
+fn terminal_command_bar_space_inserts_literal(platform: bool, control: bool, alt: bool) -> bool {
+    !platform && !control && !alt
+}
+
 fn shell_words(segment: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
@@ -1922,6 +1948,22 @@ mod terminal_command_bar_behavior_tests {
             ),
             Some(0)
         );
+    }
+
+    #[test]
+    fn command_bar_plain_space_is_literal_text() {
+        assert!(terminal_command_bar_space_inserts_literal(
+            false, false, false
+        ));
+        assert!(!terminal_command_bar_space_inserts_literal(
+            true, false, false
+        ));
+        assert!(!terminal_command_bar_space_inserts_literal(
+            false, true, false
+        ));
+        assert!(!terminal_command_bar_space_inserts_literal(
+            false, false, true
+        ));
     }
 
     #[test]

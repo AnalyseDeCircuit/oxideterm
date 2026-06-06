@@ -565,7 +565,10 @@ impl WorkspaceApp {
         self.ime_selection_range_for_target(target)
     }
 
-    fn ime_selection_range_for_target(&self, target: WorkspaceImeTarget) -> Option<Range<usize>> {
+    pub(super) fn ime_selection_range_for_target(
+        &self,
+        target: WorkspaceImeTarget,
+    ) -> Option<Range<usize>> {
         self.ime_selection_for_target(target)
             .map(|selection| selection.range)
             .or_else(|| {
@@ -785,7 +788,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn set_ime_selection_from_anchor(
+    pub(super) fn set_ime_selection_from_anchor(
         &mut self,
         target: WorkspaceImeTarget,
         anchor: usize,
@@ -1723,7 +1726,7 @@ impl WorkspaceApp {
                 .any(|candidate| candidate.inline_safe)
     }
 
-    fn replace_ime_target_text(
+    pub(super) fn replace_ime_target_text(
         &mut self,
         target: WorkspaceImeTarget,
         replacement_range: Option<Range<usize>>,
