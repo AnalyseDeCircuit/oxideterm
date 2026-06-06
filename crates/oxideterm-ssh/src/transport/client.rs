@@ -283,6 +283,7 @@ impl SshTransportClient {
         config: &SshConfig,
         remote_forward_handler: RemoteForwardHandlerSlot,
     ) -> Result<(client::Handle<NativeClientHandler>, AuthBannerSink), SshTransportError> {
+        log_upstream_proxy_path(&config.host, config.port, config.upstream_proxy.as_ref());
         let stream = dial_initial_tcp(
             &config.host,
             config.port,
@@ -383,6 +384,7 @@ impl SshTransportClient {
         &self,
         hop: &ProxyHopConfig,
     ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
+        log_upstream_proxy_path(&hop.host, hop.port, self.config.upstream_proxy.as_ref());
         let stream = dial_initial_tcp(
             &hop.host,
             hop.port,

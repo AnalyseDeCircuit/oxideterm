@@ -166,6 +166,26 @@ impl SelectAnchorId {
                 | Self::SettingsConnectionImportDuplicateStrategy
         )
     }
+
+    pub fn is_new_connection_select_trigger(self) -> bool {
+        // New-connection SelectTrigger is also rendered through a portal-style
+        // overlay, so it needs the same closed-state anchor cache as settings.
+        matches!(
+            self,
+            Self::NewConnectionGroup
+                | Self::NewConnectionManagedKey
+                | Self::NewConnectionJumpManagedKey
+                | Self::NewConnectionPrivilegeKind
+                | Self::NewConnectionUpstreamProxyPolicy
+                | Self::NewConnectionUpstreamProxyProtocol
+                | Self::NewConnectionUpstreamProxyAuth
+                | Self::NewConnectionSerialPort
+                | Self::NewConnectionSerialDataBits
+                | Self::NewConnectionSerialStopBits
+                | Self::NewConnectionSerialParity
+                | Self::NewConnectionSerialFlowControl
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -672,5 +692,22 @@ mod tests {
         assert!(!SelectAnchorId::AiModelSelector.is_settings_select_trigger());
         assert!(!SelectAnchorId::AiInlineModelSelector.is_settings_select_trigger());
         assert!(!SelectAnchorId::NewConnectionGroup.is_settings_select_trigger());
+    }
+
+    #[test]
+    fn new_connection_select_anchor_ids_are_tracked_as_trigger_anchors() {
+        assert!(SelectAnchorId::NewConnectionGroup.is_new_connection_select_trigger());
+        assert!(SelectAnchorId::NewConnectionPrivilegeKind.is_new_connection_select_trigger());
+        assert!(
+            SelectAnchorId::NewConnectionUpstreamProxyPolicy.is_new_connection_select_trigger()
+        );
+        assert!(
+            SelectAnchorId::NewConnectionUpstreamProxyProtocol.is_new_connection_select_trigger()
+        );
+        assert!(SelectAnchorId::NewConnectionUpstreamProxyAuth.is_new_connection_select_trigger());
+        assert!(SelectAnchorId::NewConnectionSerialPort.is_new_connection_select_trigger());
+
+        assert!(!SelectAnchorId::SettingsLanguage.is_new_connection_select_trigger());
+        assert!(!SelectAnchorId::AiModelSelector.is_new_connection_select_trigger());
     }
 }

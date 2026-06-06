@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use oxideterm_connections::AuthType;
+use oxideterm_connections::{AuthType, SavedUpstreamProxyPolicy};
 
 use super::*;
 
@@ -16,7 +16,10 @@ fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
         auth_type: AuthType::Password,
         key_path: None,
         cert_path: None,
+        managed_key_id: None,
+        managed_key_name: None,
         proxy_chain: Vec::new(),
+        upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
         created_at: "2026-05-26T00:00:00Z".to_string(),
         last_used_at: None,
         color: None,

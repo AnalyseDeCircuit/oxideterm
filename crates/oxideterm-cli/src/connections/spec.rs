@@ -163,6 +163,9 @@ pub(super) fn connection_request_from_spec(
         username,
         auth,
         proxy_chain,
+        upstream_proxy: existing
+            .map(|connection| connection.upstream_proxy.clone())
+            .unwrap_or_default(),
         color: spec
             .color
             .unwrap_or_else(|| existing.and_then(|connection| connection.color.clone())),

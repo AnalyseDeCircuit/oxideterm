@@ -464,6 +464,22 @@ impl WorkspaceApp {
                         SelectAnchorId::NewConnectionJumpManagedKey
                     )
                     | (
+                        Some(NewConnectionSelect::PrivilegeKind),
+                        SelectAnchorId::NewConnectionPrivilegeKind
+                    )
+                    | (
+                        Some(NewConnectionSelect::UpstreamProxyPolicy),
+                        SelectAnchorId::NewConnectionUpstreamProxyPolicy
+                    )
+                    | (
+                        Some(NewConnectionSelect::UpstreamProxyProtocol),
+                        SelectAnchorId::NewConnectionUpstreamProxyProtocol
+                    )
+                    | (
+                        Some(NewConnectionSelect::UpstreamProxyAuth),
+                        SelectAnchorId::NewConnectionUpstreamProxyAuth
+                    )
+                    | (
                         Some(NewConnectionSelect::SerialPort),
                         SelectAnchorId::NewConnectionSerialPort
                     )
@@ -1225,10 +1241,10 @@ impl WorkspaceApp {
 
 fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
     // Browser/Radix selects can synchronously read their trigger rect on the
-    // opening click. GPUI portals cannot, so settings select triggers keep a
+    // opening click. GPUI portals cannot, so modal select triggers keep a
     // closed-state anchor cache without notifying; that makes first-click open
-    // immediate while preserving scroll performance.
-    if anchor_id.is_settings_select_trigger() {
+    // immediate while scroll handlers still clear stale coordinates.
+    if anchor_id.is_settings_select_trigger() || anchor_id.is_new_connection_select_trigger() {
         return true;
     }
 
