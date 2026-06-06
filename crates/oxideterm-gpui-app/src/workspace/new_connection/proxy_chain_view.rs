@@ -138,6 +138,97 @@ impl WorkspaceApp {
                     );
                 }
             }
+            NewConnectionSelect::UpstreamProxyPolicy => {
+                let selected = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.upstream_proxy_policy)
+                    .unwrap_or(NewConnectionUpstreamProxyPolicy::UseGlobal);
+                for (policy, label_key) in [
+                    (
+                        NewConnectionUpstreamProxyPolicy::UseGlobal,
+                        "modals.upstream_proxy.use_global",
+                    ),
+                    (
+                        NewConnectionUpstreamProxyPolicy::Direct,
+                        "modals.upstream_proxy.direct",
+                    ),
+                    (
+                        NewConnectionUpstreamProxyPolicy::Custom,
+                        "modals.upstream_proxy.custom",
+                    ),
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, self.i18n.t(label_key), policy == selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_upstream_proxy_policy(policy, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
+            NewConnectionSelect::UpstreamProxyProtocol => {
+                let selected = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.upstream_proxy_protocol)
+                    .unwrap_or(SavedUpstreamProxyProtocol::Socks5);
+                for (protocol, label_key) in [
+                    (
+                        SavedUpstreamProxyProtocol::Socks5,
+                        "settings_view.network.protocol_socks5",
+                    ),
+                    (
+                        SavedUpstreamProxyProtocol::HttpConnect,
+                        "settings_view.network.protocol_http_connect",
+                    ),
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, self.i18n.t(label_key), protocol == selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_upstream_proxy_protocol(protocol, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
+            NewConnectionSelect::UpstreamProxyAuth => {
+                let selected = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.upstream_proxy_auth)
+                    .unwrap_or(NewConnectionUpstreamProxyAuth::None);
+                for (auth, label_key) in [
+                    (
+                        NewConnectionUpstreamProxyAuth::None,
+                        "settings_view.network.auth_none",
+                    ),
+                    (
+                        NewConnectionUpstreamProxyAuth::Password,
+                        "settings_view.network.auth_password",
+                    ),
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, self.i18n.t(label_key), auth == selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_upstream_proxy_auth(auth, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
             NewConnectionSelect::SerialPort => {
                 let selected_port = self
                     .new_connection_form

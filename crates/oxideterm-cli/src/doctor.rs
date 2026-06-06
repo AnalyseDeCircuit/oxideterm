@@ -1,10 +1,16 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{fs, path::Path};
+use std::{env, fs, path::Path};
 
 use oxideterm_cloud_sync::state::CloudSyncPersistedState;
-use oxideterm_connections::ConnectionStore;
+use oxideterm_connections::{
+    ConnectionStore, SavedConnection, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
+    SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol,
+};
+use oxideterm_settings::{
+    SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig, SettingsUpstreamProxyProtocol,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -84,6 +90,7 @@ fn doctor_checks(json: bool) -> Vec<DoctorCheck> {
     let mut checks = Vec::new();
     checks.push(settings_check(json));
     checks.push(connections_check());
+    checks.push(upstream_proxy_check(json));
     checks.extend(cloud_sync_checks(json));
     checks
 }
@@ -145,6 +152,192 @@ fn connections_check() -> DoctorCheck {
             details: json!({ "path": path.display().to_string() }),
         },
     }
+}
+
+fn upstream_proxy_check(json: bool) -> DoctorCheck {
+    let settings_result = settings::load_settings_read_only(json);
+    let connections_path = default_connections_path();
+    let connections_result = ConnectionStore::load_read_only(&connections_path);
+    let global_proxy = settings_result
+        .as_ref()
+        .ok()
+        .and_then(|settings| settings.settings.network.upstream_proxy.as_ref());
+    let env_proxy = env_upstream_proxy_source();
+    let use_global_source = use_global_proxy_source(global_proxy, env_proxy.as_ref());
+    let connection_counts = connections_result
+        .as_ref()
+        .ok()
+        .map(|store| upstream_proxy_policy_counts(store.connections(), use_global_source))
+        .unwrap_or_default();
+    let incomplete = settings_result.is_err() || connections_result.is_err();
+
+    DoctorCheck {
+        name: "upstreamProxy",
+        severity: if incomplete {
+            DoctorSeverity::Warning
+        } else {
+            DoctorSeverity::Ok
+        },
+        ok: true,
+        message: if incomplete {
+            "upstream proxy source inspection is incomplete".to_string()
+        } else {
+            format!("upstream proxy default source is {use_global_source}")
+        },
+        details: json!({
+            "useGlobalSource": use_global_source,
+            "globalProxy": global_proxy.map(settings_proxy_summary),
+            "envProxy": env_proxy,
+            "connectionPolicyCounts": {
+                "useGlobal": connection_counts.use_global,
+                "direct": connection_counts.direct,
+                "custom": connection_counts.custom,
+            },
+            "effectiveConnectionSources": {
+                "global": connection_counts.effective_global,
+                "envFallback": connection_counts.effective_env_fallback,
+                "direct": connection_counts.effective_direct,
+                "custom": connection_counts.effective_custom,
+            },
+            "settingsReadable": settings_result.is_ok(),
+            "connectionsReadable": connections_result.is_ok(),
+            "connectionsPath": connections_path.display().to_string(),
+        }),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct UpstreamProxyPolicyCounts {
+    use_global: usize,
+    direct: usize,
+    custom: usize,
+    effective_global: usize,
+    effective_env_fallback: usize,
+    effective_direct: usize,
+    effective_custom: usize,
+}
+
+fn upstream_proxy_policy_counts(
+    connections: &[SavedConnection],
+    use_global_source: &'static str,
+) -> UpstreamProxyPolicyCounts {
+    let mut counts = UpstreamProxyPolicyCounts::default();
+    for connection in connections {
+        match &connection.upstream_proxy {
+            SavedUpstreamProxyPolicy::UseGlobal => {
+                counts.use_global += 1;
+                match use_global_source {
+                    "global" => counts.effective_global += 1,
+                    "envFallback" => counts.effective_env_fallback += 1,
+                    _ => counts.effective_direct += 1,
+                }
+            }
+            SavedUpstreamProxyPolicy::Direct => {
+                counts.direct += 1;
+                counts.effective_direct += 1;
+            }
+            SavedUpstreamProxyPolicy::Custom { .. } => {
+                counts.custom += 1;
+                counts.effective_custom += 1;
+            }
+        }
+    }
+    counts
+}
+
+fn use_global_proxy_source(
+    global_proxy: Option<&SettingsUpstreamProxyConfig>,
+    env_proxy: Option<&Value>,
+) -> &'static str {
+    if global_proxy.is_some() {
+        "global"
+    } else if env_proxy.is_some() {
+        "envFallback"
+    } else {
+        "direct"
+    }
+}
+
+fn env_upstream_proxy_source() -> Option<Value> {
+    let socks5 = env::var("OXIDETERM_SOCKS5_PROXY").ok();
+    if let Some(value) = first_non_empty(socks5.as_deref()) {
+        return Some(json!({
+            "source": "env",
+            "variable": "OXIDETERM_SOCKS5_PROXY",
+            "protocol": "socks5",
+            "configured": true,
+            "hasAuth": value.contains('@'),
+            "noProxyConfigured": first_non_empty(env::var("OXIDETERM_NO_PROXY").ok().as_deref()).is_some(),
+        }));
+    }
+
+    let http = env::var("OXIDETERM_HTTP_PROXY").ok();
+    first_non_empty(http.as_deref()).map(|value| {
+        json!({
+            "source": "env",
+            "variable": "OXIDETERM_HTTP_PROXY",
+            "protocol": "http_connect",
+            "configured": true,
+            "hasAuth": value.contains('@'),
+            "noProxyConfigured": first_non_empty(env::var("OXIDETERM_NO_PROXY").ok().as_deref()).is_some(),
+        })
+    })
+}
+
+fn settings_proxy_summary(proxy: &SettingsUpstreamProxyConfig) -> Value {
+    json!({
+        "source": "global",
+        "protocol": settings_proxy_protocol_label(proxy.protocol),
+        "host": proxy.host,
+        "port": proxy.port,
+        "auth": settings_proxy_auth_label(&proxy.auth),
+        "remoteDns": proxy.remote_dns,
+        "noProxyConfigured": !proxy.no_proxy.trim().is_empty(),
+    })
+}
+
+fn saved_proxy_summary(proxy: &SavedUpstreamProxyConfig) -> Value {
+    json!({
+        "source": "custom",
+        "protocol": saved_proxy_protocol_label(proxy.protocol),
+        "host": proxy.host,
+        "port": proxy.port,
+        "auth": saved_proxy_auth_label(&proxy.auth),
+        "remoteDns": proxy.remote_dns,
+        "noProxyConfigured": !proxy.no_proxy.trim().is_empty(),
+    })
+}
+
+fn settings_proxy_protocol_label(protocol: SettingsUpstreamProxyProtocol) -> &'static str {
+    match protocol {
+        SettingsUpstreamProxyProtocol::Socks5 => "socks5",
+        SettingsUpstreamProxyProtocol::HttpConnect => "http_connect",
+    }
+}
+
+fn saved_proxy_protocol_label(protocol: SavedUpstreamProxyProtocol) -> &'static str {
+    match protocol {
+        SavedUpstreamProxyProtocol::Socks5 => "socks5",
+        SavedUpstreamProxyProtocol::HttpConnect => "http_connect",
+    }
+}
+
+fn settings_proxy_auth_label(auth: &SettingsUpstreamProxyAuth) -> &'static str {
+    match auth {
+        SettingsUpstreamProxyAuth::None => "none",
+        SettingsUpstreamProxyAuth::Password { .. } => "password",
+    }
+}
+
+fn saved_proxy_auth_label(auth: &SavedUpstreamProxyAuth) -> &'static str {
+    match auth {
+        SavedUpstreamProxyAuth::None => "none",
+        SavedUpstreamProxyAuth::Password { .. } => "password",
+    }
+}
+
+fn first_non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 fn cloud_sync_checks(json: bool) -> Vec<DoctorCheck> {

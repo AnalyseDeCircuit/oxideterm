@@ -672,6 +672,13 @@
         "save_api_key_failed": "Échec de l'enregistrement de la clé API : {{error}}",
         "remove_api_key_failed": "Échec de la suppression de la clé API : {{error}}"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Proxy amont",
+      "policy_hint": "Choisissez comment cette connexion enregistrée doit utiliser le paramètre de proxy global.",
+      "use_global": "Utiliser global",
+      "direct": "Connexion directe",
+      "custom": "Personnalisé"
     }
   },
   "local_shell": {

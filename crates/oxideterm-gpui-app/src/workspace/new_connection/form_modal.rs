@@ -538,6 +538,7 @@ impl WorkspaceApp {
                                         .child(self.render_connection_hint(
                                             self.i18n.t("ssh.form.post_connect_command_hint"),
                                         ))
+                                        .child(self.render_upstream_proxy_policy_section(form, cx))
                                         .child(self.render_privilege_credentials_section(
                                             form,
                                             duplicate_mode,
@@ -668,6 +669,7 @@ impl WorkspaceApp {
                                                 .child(self.render_connection_hint(
                                                     self.i18n.t("ssh.form.save_connection_hint"),
                                                 ))
+                                                .child(self.render_upstream_proxy_policy_section(form, cx))
                                                 .child(self.render_proxy_chain_section(cx))
                                         })
                                 })

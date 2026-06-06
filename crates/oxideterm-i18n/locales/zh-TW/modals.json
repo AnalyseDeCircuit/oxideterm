@@ -672,6 +672,13 @@
         "save_api_key_failed": "無法儲存 API 金鑰：{{error}}",
         "remove_api_key_failed": "無法移除 API 金鑰：{{error}}"
       }
+    },
+    "upstream_proxy": {
+      "policy": "上游代理",
+      "policy_hint": "選擇此已儲存連線如何使用全域代理設定。",
+      "use_global": "使用全域",
+      "direct": "直連",
+      "custom": "自訂"
     }
   },
   "local_shell": {

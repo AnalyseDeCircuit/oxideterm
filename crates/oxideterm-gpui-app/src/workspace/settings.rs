@@ -43,6 +43,10 @@ use oxideterm_settings_model::{
     settings_section_list_item_count as settings_model_section_list_item_count,
     terminal_theme_to_colors, theme_editor_from_settings, toggle_string_set,
 };
+use oxideterm_ssh::{
+    HostKeyStatus, UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyProtocol,
+    check_host_key_with_upstream_proxy,
+};
 use oxideterm_theme::BUILT_IN_THEMES;
 
 use super::ime::WorkspaceImeTarget;
@@ -69,7 +73,6 @@ use oxideterm_connections::{
     list_ssh_config_hosts, preview_connection_import, resolve_ssh_config_alias,
     saved_connection_from_ssh_host,
 };
-use oxideterm_i18n::I18n;
 use oxideterm_gpui_settings_view::*;
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView,
@@ -97,6 +100,7 @@ use oxideterm_gpui_ui::{
         text_input_value_segments, text_input_with_content_align,
     },
 };
+use oxideterm_i18n::I18n;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum PortableSettingsDialog {

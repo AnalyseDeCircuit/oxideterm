@@ -7,6 +7,7 @@ use gpui::{
 use super::{
     form_state::{
         NewConnectionField, NewConnectionForm, NewConnectionSelect, NewConnectionTransport,
+        NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
         SavedConnectionPromptAction, SshAuthTab, backspace_current_connection_field,
         clear_connection_selection, clear_current_connection_field, connection_field_is_selected,
         current_connection_field, insert_text_into_current_connection_field,
@@ -21,7 +22,8 @@ use crate::workspace::WorkspaceApp;
 use crate::workspace::{browser_behavior, ime::WorkspaceImeTarget};
 use gpui::Div;
 use oxideterm_connections::{
-    PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SavedPrivilegeCredential, SecretString,
+    PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SavedPrivilegeCredential,
+    SavedUpstreamProxyProtocol, SecretString,
 };
 use oxideterm_gpui_ui::{
     ButtonTone, TextInputView, button,
@@ -146,6 +148,9 @@ impl WorkspaceApp {
                 | NewConnectionField::Color
                 | NewConnectionField::JumpHost
                 | NewConnectionField::JumpUsername
+                | NewConnectionField::UpstreamProxyHost
+                | NewConnectionField::UpstreamProxyNoProxy
+                | NewConnectionField::UpstreamProxyUsername
         );
 
         if modifiers.platform {
@@ -223,6 +228,8 @@ impl WorkspaceApp {
                         form.focused_field,
                         form.auth_tab,
                         form.transport,
+                        form.upstream_proxy_policy,
+                        form.upstream_proxy_auth,
                         !modifiers.shift,
                     )
                 };

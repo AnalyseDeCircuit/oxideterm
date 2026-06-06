@@ -7647,6 +7647,7 @@ dependencies = [
 name = "oxideterm-ssh"
 version = "2.0.0-gpui-preview.2"
 dependencies = [
+ "base64",
  "dashmap",
  "oxideterm-connection-monitor",
  "oxideterm-sftp",

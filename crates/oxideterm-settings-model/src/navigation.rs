@@ -31,7 +31,7 @@ pub fn settings_tab_section_count(
         SettingsTab::Connections => 5,
         SettingsTab::Ssh => 1,
         SettingsTab::Reconnect => 3,
-        SettingsTab::Network => 3,
+        SettingsTab::Network => 4,
         SettingsTab::Sftp => 3,
         SettingsTab::Ide => 5,
         SettingsTab::Ai => AI_SETTINGS_FIXED_SECTION_COUNT,

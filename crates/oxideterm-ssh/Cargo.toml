@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+base64.workspace = true
 dashmap.workspace = true
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }

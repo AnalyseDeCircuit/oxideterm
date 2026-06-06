@@ -5,6 +5,13 @@ impl WorkspaceApp {
             NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
             NewConnectionSelect::JumpManagedKey => SelectAnchorId::NewConnectionJumpManagedKey,
             NewConnectionSelect::PrivilegeKind => SelectAnchorId::NewConnectionPrivilegeKind,
+            NewConnectionSelect::UpstreamProxyPolicy => {
+                SelectAnchorId::NewConnectionUpstreamProxyPolicy
+            }
+            NewConnectionSelect::UpstreamProxyProtocol => {
+                SelectAnchorId::NewConnectionUpstreamProxyProtocol
+            }
+            NewConnectionSelect::UpstreamProxyAuth => SelectAnchorId::NewConnectionUpstreamProxyAuth,
             NewConnectionSelect::SerialPort => SelectAnchorId::NewConnectionSerialPort,
             NewConnectionSelect::SerialDataBits => SelectAnchorId::NewConnectionSerialDataBits,
             NewConnectionSelect::SerialStopBits => SelectAnchorId::NewConnectionSerialStopBits,
@@ -62,6 +69,12 @@ impl WorkspaceApp {
             .remove(&SelectAnchorId::NewConnectionJumpManagedKey);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionPrivilegeKind);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionUpstreamProxyPolicy);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionUpstreamProxyProtocol);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionUpstreamProxyAuth);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionSerialPort);
         self.select_anchors
@@ -884,6 +897,9 @@ impl WorkspaceApp {
                 }
                 NewConnectionSelect::Group
                 | NewConnectionSelect::PrivilegeKind
+                | NewConnectionSelect::UpstreamProxyPolicy
+                | NewConnectionSelect::UpstreamProxyProtocol
+                | NewConnectionSelect::UpstreamProxyAuth
                 | NewConnectionSelect::SerialPort
                 | NewConnectionSelect::SerialDataBits
                 | NewConnectionSelect::SerialStopBits
@@ -1860,6 +1876,147 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    fn upstream_proxy_policy_label(&self, policy: NewConnectionUpstreamProxyPolicy) -> String {
+        let key = match policy {
+            NewConnectionUpstreamProxyPolicy::UseGlobal => "modals.upstream_proxy.use_global",
+            NewConnectionUpstreamProxyPolicy::Direct => "modals.upstream_proxy.direct",
+            NewConnectionUpstreamProxyPolicy::Custom => "modals.upstream_proxy.custom",
+        };
+        self.i18n.t(key)
+    }
+
+    fn upstream_proxy_protocol_label(&self, protocol: SavedUpstreamProxyProtocol) -> String {
+        let key = match protocol {
+            SavedUpstreamProxyProtocol::Socks5 => "settings_view.network.protocol_socks5",
+            SavedUpstreamProxyProtocol::HttpConnect => "settings_view.network.protocol_http_connect",
+        };
+        self.i18n.t(key)
+    }
+
+    fn upstream_proxy_auth_label(&self, auth: NewConnectionUpstreamProxyAuth) -> String {
+        let key = match auth {
+            NewConnectionUpstreamProxyAuth::None => "settings_view.network.auth_none",
+            NewConnectionUpstreamProxyAuth::Password => "settings_view.network.auth_password",
+        };
+        self.i18n.t(key)
+    }
+
+    fn render_upstream_proxy_policy_section(
+        &self,
+        form: &NewConnectionForm,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let custom = form.upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom;
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .pt_4()
+            .child(form_field(
+                &self.tokens,
+                self.i18n.t("modals.upstream_proxy.policy"),
+                self.render_new_connection_select_control(
+                    NewConnectionSelect::UpstreamProxyPolicy,
+                    self.upstream_proxy_policy_label(form.upstream_proxy_policy),
+                    false,
+                    false,
+                    cx,
+                ),
+            ))
+            .child(self.render_connection_hint(
+                self.i18n.t("modals.upstream_proxy.policy_hint"),
+            ))
+            .when(custom, |content| {
+                content
+                    .child(
+                        div()
+                            .flex()
+                            .gap_4()
+                            .child(div().flex_1().child(form_field(
+                                &self.tokens,
+                                self.i18n.t("settings_view.network.protocol"),
+                                self.render_new_connection_select_control(
+                                    NewConnectionSelect::UpstreamProxyProtocol,
+                                    self.upstream_proxy_protocol_label(form.upstream_proxy_protocol),
+                                    false,
+                                    false,
+                                    cx,
+                                ),
+                            )))
+                            .child(
+                                div()
+                                    .w(px(self.tokens.metrics.form_port_width))
+                                    .child(self.render_connection_field(
+                                        self.i18n.t("settings_view.network.port"),
+                                        &form.upstream_proxy_port,
+                                        "1080".to_string(),
+                                        NewConnectionField::UpstreamProxyPort,
+                                        false,
+                                        cx,
+                                    )),
+                            ),
+                    )
+                    .child(self.render_connection_field(
+                        self.i18n.t("settings_view.network.host"),
+                        &form.upstream_proxy_host,
+                        "127.0.0.1".to_string(),
+                        NewConnectionField::UpstreamProxyHost,
+                        false,
+                        cx,
+                    ))
+                    .child(self.render_connection_field(
+                        self.i18n.t("settings_view.network.no_proxy"),
+                        &form.upstream_proxy_no_proxy,
+                        "localhost,127.0.0.1,*.internal".to_string(),
+                        NewConnectionField::UpstreamProxyNoProxy,
+                        false,
+                        cx,
+                    ))
+                    .child(self.render_connection_checkbox(
+                        self.i18n.t("settings_view.network.remote_dns"),
+                        form.upstream_proxy_remote_dns,
+                        |form| form.upstream_proxy_remote_dns = !form.upstream_proxy_remote_dns,
+                        cx,
+                    ))
+                    .child(form_field(
+                        &self.tokens,
+                        self.i18n.t("settings_view.network.auth"),
+                        self.render_new_connection_select_control(
+                            NewConnectionSelect::UpstreamProxyAuth,
+                            self.upstream_proxy_auth_label(form.upstream_proxy_auth),
+                            false,
+                            false,
+                            cx,
+                        ),
+                    ))
+                    .when(form.upstream_proxy_auth == NewConnectionUpstreamProxyAuth::Password, |content| {
+                        content
+                            .child(self.render_connection_field(
+                                self.i18n.t("settings_view.network.username"),
+                                &form.upstream_proxy_username,
+                                String::new(),
+                                NewConnectionField::UpstreamProxyUsername,
+                                false,
+                                cx,
+                            ))
+                            .child(self.render_connection_field(
+                                self.i18n.t("settings_view.network.password"),
+                                &form.upstream_proxy_password,
+                                String::new(),
+                                NewConnectionField::UpstreamProxyPassword,
+                                true,
+                                cx,
+                            ))
+                            .child(self.render_connection_hint(
+                                self.i18n.t("settings_view.network.password_hint"),
+                            ))
+                    })
+            })
+            .into_any_element()
+    }
+
     fn serial_parity_label(&self, parity: oxideterm_terminal::SerialParity) -> String {
         match parity {
             oxideterm_terminal::SerialParity::None => {
@@ -1945,6 +2102,60 @@ impl WorkspaceApp {
     ) {
         if let Some(form) = self.new_connection_form.as_mut() {
             form.serial_flow_control = flow;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_upstream_proxy_policy(
+        &mut self,
+        policy: NewConnectionUpstreamProxyPolicy,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.upstream_proxy_policy = policy;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_upstream_proxy_protocol(
+        &mut self,
+        protocol: SavedUpstreamProxyProtocol,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.upstream_proxy_protocol = protocol;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_upstream_proxy_auth(
+        &mut self,
+        auth: NewConnectionUpstreamProxyAuth,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            if auth == NewConnectionUpstreamProxyAuth::None {
+                // Hidden password fields should not retain a draft secret after
+                // switching the custom proxy back to unauthenticated mode.
+                form.upstream_proxy_password.clear();
+                form.upstream_proxy_password_keychain_id = None;
+            }
+            form.upstream_proxy_auth = auth;
             form.field_focused = false;
             clear_connection_selection(form);
             form.error = None;

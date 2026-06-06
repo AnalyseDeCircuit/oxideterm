@@ -672,6 +672,13 @@
         "save_api_key_failed": "Falha ao salvar chave de API: {{error}}",
         "remove_api_key_failed": "Falha ao remover chave de API: {{error}}"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Proxy upstream",
+      "policy_hint": "Escolha como esta conexão salva deve usar a configuração global de proxy.",
+      "use_global": "Usar global",
+      "direct": "Direto",
+      "custom": "Personalizado"
     }
   },
   "local_shell": {

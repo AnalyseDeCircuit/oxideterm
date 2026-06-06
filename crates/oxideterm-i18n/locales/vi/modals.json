@@ -672,6 +672,13 @@
         "save_api_key_failed": "Không thể lưu API key: {{error}}",
         "remove_api_key_failed": "Không thể xóa API key: {{error}}"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Proxy upstream",
+      "policy_hint": "Chọn cách kết nối đã lưu này sử dụng cấu hình proxy toàn cục.",
+      "use_global": "Dùng toàn cục",
+      "direct": "Trực tiếp",
+      "custom": "Tùy chỉnh"
     }
   },
   "local_shell": {

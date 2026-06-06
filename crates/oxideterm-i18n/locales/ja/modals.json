@@ -672,6 +672,13 @@
         "save_api_key_failed": "APIキーの保存に失敗しました: {{error}}",
         "remove_api_key_failed": "APIキーの削除に失敗しました: {{error}}"
       }
+    },
+    "upstream_proxy": {
+      "policy": "アップストリームプロキシ",
+      "policy_hint": "この保存済み接続でグローバルプロキシ設定をどう使うかを選択します。",
+      "use_global": "グローバルを使用",
+      "direct": "直接接続",
+      "custom": "カスタム"
     }
   },
   "local_shell": {

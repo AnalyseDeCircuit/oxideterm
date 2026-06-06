@@ -35,6 +35,7 @@ use crate::workspace::{
         form_from_saved_connection, managed_key_resolver_from_store,
         proxy_chain_config_from_saved_connection, save_request_from_form,
         save_request_from_form_with_existing_auth, ssh_config_from_saved_connection,
+        upstream_proxy_config_from_form,
     },
 };
 use oxideterm_terminal::SerialSessionConfig;
@@ -799,6 +800,18 @@ impl WorkspaceApp {
                 return None;
             }
         };
+        let upstream_proxy = match upstream_proxy_config_from_form(
+            &self.connection_store,
+            self.settings_store.settings(),
+            form,
+        ) {
+            Ok(upstream_proxy) => upstream_proxy,
+            Err(error) => {
+                form.error = Some(error.to_string());
+                cx.notify();
+                return None;
+            }
+        };
         let config = SshConfig {
             host: host.clone(),
             port: port.unwrap_or(22),
@@ -806,6 +819,7 @@ impl WorkspaceApp {
             auth,
             agent_forwarding: form.agent_forwarding,
             proxy_chain,
+            upstream_proxy,
             strict_host_key_checking: true,
             post_connect_command: (!form.post_connect_command.trim().is_empty())
                 .then(|| form.post_connect_command.trim().to_string()),

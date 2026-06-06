@@ -672,6 +672,13 @@
         "save_api_key_failed": "保存 API 密钥失败: {{error}}",
         "remove_api_key_failed": "移除 API 密钥失败: {{error}}"
       }
+    },
+    "upstream_proxy": {
+      "policy": "上游代理",
+      "policy_hint": "选择此已保存连接如何使用全局代理设置。",
+      "use_global": "使用全局",
+      "direct": "直连",
+      "custom": "自定义"
     }
   },
   "export": {

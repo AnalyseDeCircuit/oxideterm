@@ -1175,7 +1175,15 @@
       "password_saved_placeholder": "Saved in keychain",
       "save_password": "Save Password",
       "remove_password": "Remove",
-      "saving": "Saving..."
+      "saving": "Saving...",
+      "test_title": "Proxy Test",
+      "test_hint": "Test the configured proxy route to a target SSH host without using a fixed public endpoint.",
+      "test_host": "Host",
+      "test_port": "Port",
+      "test_button": "Test Proxy Route",
+      "testing": "Testing...",
+      "test_success": "Connected in {{elapsed}} ms",
+      "test_error": "Test failed: {{error}}"
     }
   }
 }

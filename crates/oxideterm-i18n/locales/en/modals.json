@@ -672,6 +672,13 @@
         "save_api_key_failed": "Failed to save API key: {{error}}",
         "remove_api_key_failed": "Failed to remove API key: {{error}}"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Upstream Proxy",
+      "policy_hint": "Choose how this saved connection should use the global proxy setting.",
+      "use_global": "Use Global",
+      "direct": "Direct",
+      "custom": "Custom"
     }
   },
   "export": {

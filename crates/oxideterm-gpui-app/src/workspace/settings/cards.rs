@@ -1026,6 +1026,16 @@ impl WorkspaceApp {
                 self.settings_local_privilege_error = None;
                 cx.notify();
             }
+            SettingsInput::NetworkProxyTestHost => {
+                self.settings_network_proxy_test_host = self.settings_input_draft.clone();
+                self.settings_network_proxy_test_status = None;
+                cx.notify();
+            }
+            SettingsInput::NetworkProxyTestPort => {
+                self.settings_network_proxy_test_port = self.settings_input_draft.clone();
+                self.settings_network_proxy_test_status = None;
+                cx.notify();
+            }
             SettingsInput::PluginSetting(index) => {
                 let Some(setting) = self
                     .plugin_registry

@@ -6,6 +6,9 @@ use std::{
     time::Duration,
 };
 
+use crate::workspace::new_connection::{
+    NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
+};
 use crate::workspace::quick_commands::QuickCommandImportStrategy;
 use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{Div, StatefulInteractiveElement, prelude::*};
@@ -53,7 +56,7 @@ use oxideterm_settings::{
 };
 use oxideterm_ssh::{
     AuthMethod, ManagedKeyResolver, ProxyHopConfig, SshTransportError, UpstreamProxyAuth,
-    UpstreamProxyConfig, UpstreamProxyProtocol,
+    UpstreamProxyConfig, UpstreamProxyProtocol, upstream_proxy_from_env,
 };
 
 use super::*;

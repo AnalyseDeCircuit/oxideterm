@@ -93,6 +93,7 @@ pub fn persisted_settings_input_value(
             })
             .unwrap_or_default(),
         SettingsInput::NetworkProxyPassword => String::new(),
+        SettingsInput::NetworkProxyTestHost | SettingsInput::NetworkProxyTestPort => return None,
         SettingsInput::SftpSpeedLimitKbps => settings.sftp.speed_limit_kbps.to_string(),
         SettingsInput::InBandTransferMaxChunkBytes => settings
             .terminal
@@ -311,6 +312,9 @@ pub fn apply_persisted_settings_input_draft(
             };
         }),
         SettingsInput::NetworkProxyPassword => SettingsInputDraftApply::Unhandled,
+        SettingsInput::NetworkProxyTestHost | SettingsInput::NetworkProxyTestPort => {
+            SettingsInputDraftApply::Unhandled
+        }
         SettingsInput::SftpSpeedLimitKbps => parse_i64(draft)
             .map(|value| settings.sftp.speed_limit_kbps = value.max(0))
             .into(),

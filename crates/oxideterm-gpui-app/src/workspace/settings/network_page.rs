@@ -134,6 +134,7 @@ impl WorkspaceApp {
                 ))
                 .into_any_element(),
             2 => self.settings_network_auth_section(proxy, cx),
+            3 => self.settings_network_test_section(proxy.is_some(), cx),
             _ => div().into_any_element(),
         }
     }
@@ -197,6 +198,126 @@ impl WorkspaceApp {
         }
 
         section.into_any_element()
+    }
+
+    fn settings_network_test_section(
+        &self,
+        proxy_enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let host_value = if self.focused_settings_input == Some(SettingsInput::NetworkProxyTestHost)
+        {
+            self.settings_input_draft.clone()
+        } else {
+            self.settings_network_proxy_test_host.clone()
+        };
+        let port_value = if self.focused_settings_input == Some(SettingsInput::NetworkProxyTestPort)
+        {
+            self.settings_input_draft.clone()
+        } else {
+            self.settings_network_proxy_test_port.clone()
+        };
+        let test_disabled = !proxy_enabled
+            || self.settings_network_proxy_test_pending
+            || host_value.trim().is_empty()
+            || port_value.trim().parse::<u16>().is_err();
+
+        div()
+            .w_full()
+            .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .opacity(if proxy_enabled { 1.0 } else { 0.4 })
+            .child(
+                div()
+                    .grid()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(18.0))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text_heading))
+                            .child(self.i18n.t("settings_view.network.test_title")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("settings_view.network.test_hint")),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(16.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(self.network_input_field(
+                                "settings_view.network.test_host",
+                                "settings_view.network.host_hint",
+                                SettingsInput::NetworkProxyTestHost,
+                                host_value,
+                                "server.example.com".to_string(),
+                                proxy_enabled,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .w(px(SETTINGS_NETWORK_FIELD_WIDTH / 2.0))
+                            .child(self.network_input_field(
+                                "settings_view.network.test_port",
+                                "settings_view.network.port_hint",
+                                SettingsInput::NetworkProxyTestPort,
+                                port_value,
+                                "22".to_string(),
+                                proxy_enabled,
+                                cx,
+                            )),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(self.workspace_toolbar_action_button(
+                        if self.settings_network_proxy_test_pending {
+                            self.i18n.t("settings_view.network.testing")
+                        } else {
+                            self.i18n.t("settings_view.network.test_button")
+                        },
+                        None,
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Default,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: test_disabled,
+                            },
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(|this, _event, _window, cx| {
+                            this.start_settings_network_proxy_test(cx);
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .when_some(
+                        self.settings_network_proxy_test_status.clone(),
+                        |row, status| {
+                            row.child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(status),
+                            )
+                        },
+                    ),
+            )
+            .into_any_element()
     }
 
     fn network_checkbox_row(
@@ -545,5 +666,100 @@ impl WorkspaceApp {
             }
         }
         cx.notify();
+    }
+
+    fn start_settings_network_proxy_test(&mut self, cx: &mut Context<Self>) {
+        let host = self.settings_network_proxy_test_host.trim().to_string();
+        let Ok(port) = self.settings_network_proxy_test_port.trim().parse::<u16>() else {
+            self.settings_network_proxy_test_status =
+                Some(self.i18n.t("settings_view.network.test_error").replace(
+                    "{{error}}",
+                    "invalid port",
+                ));
+            cx.notify();
+            return;
+        };
+        let Some(proxy) = self
+            .settings_store
+            .settings()
+            .network
+            .upstream_proxy
+            .as_ref()
+            .cloned()
+        else {
+            self.settings_network_proxy_test_status =
+                Some(self.i18n.t("settings_view.network.test_error").replace(
+                    "{{error}}",
+                    "proxy is disabled",
+                ));
+            cx.notify();
+            return;
+        };
+        let Ok(upstream_proxy) = self.runtime_global_upstream_proxy_config(proxy) else {
+            self.settings_network_proxy_test_status =
+                Some(self.i18n.t("settings_view.network.test_error").replace(
+                    "{{error}}",
+                    "proxy password is not available",
+                ));
+            cx.notify();
+            return;
+        };
+        self.settings_network_proxy_test_pending = true;
+        self.settings_network_proxy_test_status = None;
+        let started_at = std::time::Instant::now();
+
+        cx.spawn(async move |weak, cx| {
+            let status = check_host_key_with_upstream_proxy(&host, port, 10, Some(&upstream_proxy))
+                .await;
+            let elapsed = started_at.elapsed().as_millis();
+            let _ = weak.update(cx, move |this, cx| {
+                this.settings_network_proxy_test_pending = false;
+                this.settings_network_proxy_test_status = Some(match status {
+                    HostKeyStatus::Error { message } => this
+                        .i18n
+                        .t("settings_view.network.test_error")
+                        .replace("{{error}}", &message),
+                    _ => this
+                        .i18n
+                        .t("settings_view.network.test_success")
+                        .replace("{{elapsed}}", &elapsed.to_string()),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn runtime_global_upstream_proxy_config(
+        &self,
+        proxy: SettingsUpstreamProxyConfig,
+    ) -> anyhow::Result<UpstreamProxyConfig> {
+        let auth = match proxy.auth {
+            SettingsUpstreamProxyAuth::None => UpstreamProxyAuth::None,
+            SettingsUpstreamProxyAuth::Password {
+                username,
+                keychain_id,
+            } => {
+                let password = self
+                    .connection_store
+                    .get_global_upstream_proxy_password(keychain_id.as_deref().unwrap_or_default())?
+                    .into_zeroizing();
+                // The test route uses the same hydrated runtime proxy boundary as
+                // real SSH preflight and never writes the secret into UI state.
+                UpstreamProxyAuth::Password { username, password }
+            }
+        };
+        Ok(UpstreamProxyConfig {
+            protocol: match proxy.protocol {
+                SettingsUpstreamProxyProtocol::Socks5 => UpstreamProxyProtocol::Socks5,
+                SettingsUpstreamProxyProtocol::HttpConnect => UpstreamProxyProtocol::HttpConnect,
+            },
+            host: proxy.host,
+            port: proxy.port,
+            auth,
+            remote_dns: proxy.remote_dns,
+            no_proxy: proxy.no_proxy,
+        })
     }
 }

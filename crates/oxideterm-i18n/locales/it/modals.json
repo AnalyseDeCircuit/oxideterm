@@ -672,6 +672,13 @@
         "save_api_key_failed": "Impossibile salvare la chiave API: {{error}}",
         "remove_api_key_failed": "Impossibile rimuovere la chiave API: {{error}}"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Proxy upstream",
+      "policy_hint": "Scegli come questa connessione salvata deve usare l’impostazione proxy globale.",
+      "use_global": "Usa globale",
+      "direct": "Diretta",
+      "custom": "Personalizzato"
     }
   },
   "local_shell": {

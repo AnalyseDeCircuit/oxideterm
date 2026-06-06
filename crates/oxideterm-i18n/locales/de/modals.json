@@ -672,6 +672,13 @@
         "save_api_key_failed": "API-Schlüssel konnte nicht gespeichert werden: {{error}}",
         "remove_api_key_failed": "API-Schlüssel konnte nicht entfernt werden: {{error}}"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Upstream-Proxy",
+      "policy_hint": "Wählen Sie, wie diese gespeicherte Verbindung die globale Proxy-Einstellung verwendet.",
+      "use_global": "Global verwenden",
+      "direct": "Direkt",
+      "custom": "Benutzerdefiniert"
     }
   },
   "local_shell": {

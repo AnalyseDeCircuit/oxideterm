@@ -1,6 +1,8 @@
 use std::fmt;
 
-use oxideterm_connections::{PrivilegeCredentialKind, SavedPrivilegeCredential};
+use oxideterm_connections::{
+    PrivilegeCredentialKind, SavedPrivilegeCredential, SavedUpstreamProxyProtocol,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshAuthTab {
@@ -65,11 +67,27 @@ pub(in crate::workspace) enum NewConnectionSelect {
     ManagedKey,
     JumpManagedKey,
     PrivilegeKind,
+    UpstreamProxyPolicy,
+    UpstreamProxyProtocol,
+    UpstreamProxyAuth,
     SerialPort,
     SerialDataBits,
     SerialStopBits,
     SerialParity,
     SerialFlowControl,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum NewConnectionUpstreamProxyPolicy {
+    UseGlobal,
+    Direct,
+    Custom,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum NewConnectionUpstreamProxyAuth {
+    None,
+    Password,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -98,6 +116,11 @@ pub(in crate::workspace) enum NewConnectionField {
     PrivilegeUsernameHint,
     PrivilegeSecret,
     PrivilegePromptPatterns,
+    UpstreamProxyHost,
+    UpstreamProxyPort,
+    UpstreamProxyNoProxy,
+    UpstreamProxyUsername,
+    UpstreamProxyPassword,
     SerialPortPath,
     SerialBaudRate,
     SerialProfileName,
@@ -225,6 +248,16 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
     pub(in crate::workspace) proxy_chain_expanded: bool,
     pub(in crate::workspace) jump_server_form: Option<NewConnectionProxyHop>,
+    pub(in crate::workspace) upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
+    pub(in crate::workspace) upstream_proxy_protocol: SavedUpstreamProxyProtocol,
+    pub(in crate::workspace) upstream_proxy_host: String,
+    pub(in crate::workspace) upstream_proxy_port: String,
+    pub(in crate::workspace) upstream_proxy_auth: NewConnectionUpstreamProxyAuth,
+    pub(in crate::workspace) upstream_proxy_username: String,
+    pub(in crate::workspace) upstream_proxy_password: String,
+    pub(in crate::workspace) upstream_proxy_password_keychain_id: Option<String>,
+    pub(in crate::workspace) upstream_proxy_remote_dns: bool,
+    pub(in crate::workspace) upstream_proxy_no_proxy: String,
     pub(in crate::workspace) agent_forwarding: bool,
     pub(in crate::workspace) agent_available: Option<bool>,
     pub(in crate::workspace) save_connection: bool,
@@ -279,6 +312,19 @@ impl fmt::Debug for NewConnectionForm {
             .field("proxy_hops", &self.proxy_hops)
             .field("proxy_chain_expanded", &self.proxy_chain_expanded)
             .field("jump_server_form", &self.jump_server_form)
+            .field("upstream_proxy_policy", &self.upstream_proxy_policy)
+            .field("upstream_proxy_protocol", &self.upstream_proxy_protocol)
+            .field("upstream_proxy_host", &self.upstream_proxy_host)
+            .field("upstream_proxy_port", &self.upstream_proxy_port)
+            .field("upstream_proxy_auth", &self.upstream_proxy_auth)
+            .field("upstream_proxy_username", &self.upstream_proxy_username)
+            .field("upstream_proxy_password", &"[redacted secret]")
+            .field(
+                "upstream_proxy_password_keychain_id",
+                &self.upstream_proxy_password_keychain_id,
+            )
+            .field("upstream_proxy_remote_dns", &self.upstream_proxy_remote_dns)
+            .field("upstream_proxy_no_proxy", &self.upstream_proxy_no_proxy)
             .field("agent_forwarding", &self.agent_forwarding)
             .field("agent_available", &self.agent_available)
             .field("save_connection", &self.save_connection)
@@ -331,6 +377,16 @@ impl Default for NewConnectionForm {
             proxy_hops: Vec::new(),
             proxy_chain_expanded: false,
             jump_server_form: None,
+            upstream_proxy_policy: NewConnectionUpstreamProxyPolicy::UseGlobal,
+            upstream_proxy_protocol: SavedUpstreamProxyProtocol::Socks5,
+            upstream_proxy_host: "127.0.0.1".to_string(),
+            upstream_proxy_port: "1080".to_string(),
+            upstream_proxy_auth: NewConnectionUpstreamProxyAuth::None,
+            upstream_proxy_username: String::new(),
+            upstream_proxy_password: String::new(),
+            upstream_proxy_password_keychain_id: None,
+            upstream_proxy_remote_dns: true,
+            upstream_proxy_no_proxy: String::new(),
             agent_forwarding: false,
             agent_available: None,
             save_connection: false,
@@ -357,6 +413,8 @@ pub(in crate::workspace) fn next_connection_field(
     field: NewConnectionField,
     auth_tab: SshAuthTab,
     transport: NewConnectionTransport,
+    upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
+    upstream_proxy_auth: NewConnectionUpstreamProxyAuth,
     forward: bool,
 ) -> NewConnectionField {
     if transport == NewConnectionTransport::Serial {
@@ -379,7 +437,7 @@ pub(in crate::workspace) fn next_connection_field(
         return fields[next];
     }
 
-    let fields: Vec<NewConnectionField> = match auth_tab {
+    let mut fields: Vec<NewConnectionField> = match auth_tab {
         SshAuthTab::Password => vec![
             NewConnectionField::Name,
             NewConnectionField::Host,
@@ -438,6 +496,19 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::PostConnectCommand,
         ],
     };
+    if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom {
+        fields.extend([
+            NewConnectionField::UpstreamProxyHost,
+            NewConnectionField::UpstreamProxyPort,
+            NewConnectionField::UpstreamProxyNoProxy,
+        ]);
+        if upstream_proxy_auth == NewConnectionUpstreamProxyAuth::Password {
+            fields.extend([
+                NewConnectionField::UpstreamProxyUsername,
+                NewConnectionField::UpstreamProxyPassword,
+            ]);
+        }
+    }
     let index = fields
         .iter()
         .position(|candidate| *candidate == field)
@@ -530,6 +601,11 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::PrivilegeUsernameHint => &mut form.privilege_draft.username_hint,
         NewConnectionField::PrivilegeSecret => &mut form.privilege_draft.secret,
         NewConnectionField::PrivilegePromptPatterns => &mut form.privilege_draft.prompt_patterns,
+        NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
+        NewConnectionField::UpstreamProxyPort => &mut form.upstream_proxy_port,
+        NewConnectionField::UpstreamProxyNoProxy => &mut form.upstream_proxy_no_proxy,
+        NewConnectionField::UpstreamProxyUsername => &mut form.upstream_proxy_username,
+        NewConnectionField::UpstreamProxyPassword => &mut form.upstream_proxy_password,
         NewConnectionField::Color => &mut form.color,
         NewConnectionField::JumpHost => {
             &mut form
@@ -610,6 +686,11 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::PrivilegeUsernameHint => &form.privilege_draft.username_hint,
         NewConnectionField::PrivilegeSecret => &form.privilege_draft.secret,
         NewConnectionField::PrivilegePromptPatterns => &form.privilege_draft.prompt_patterns,
+        NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
+        NewConnectionField::UpstreamProxyPort => &form.upstream_proxy_port,
+        NewConnectionField::UpstreamProxyNoProxy => &form.upstream_proxy_no_proxy,
+        NewConnectionField::UpstreamProxyUsername => &form.upstream_proxy_username,
+        NewConnectionField::UpstreamProxyPassword => &form.upstream_proxy_password,
         NewConnectionField::Color => &form.color,
         NewConnectionField::JumpHost => {
             &form

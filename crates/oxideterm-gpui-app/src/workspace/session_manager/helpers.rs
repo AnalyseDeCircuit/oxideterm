@@ -361,6 +361,7 @@ pub(super) fn form_from_saved_connection(
             false,
         ),
     };
+    let upstream_proxy_form = upstream_proxy_form_fields(&conn.upstream_proxy);
     NewConnectionForm {
         name: conn.name.clone(),
         host: conn.host.clone(),
@@ -386,10 +387,87 @@ pub(super) fn form_from_saved_connection(
         tags: conn.tags.clone(),
         post_connect_command: conn.post_connect_command().unwrap_or_default().to_string(),
         privilege_credentials: conn.privilege_credentials.clone(),
+        upstream_proxy_policy: upstream_proxy_form.policy,
+        upstream_proxy_protocol: upstream_proxy_form.protocol,
+        upstream_proxy_host: upstream_proxy_form.host,
+        upstream_proxy_port: upstream_proxy_form.port,
+        upstream_proxy_auth: upstream_proxy_form.auth,
+        upstream_proxy_username: upstream_proxy_form.username,
+        upstream_proxy_password_keychain_id: upstream_proxy_form.password_keychain_id,
+        upstream_proxy_remote_dns: upstream_proxy_form.remote_dns,
+        upstream_proxy_no_proxy: upstream_proxy_form.no_proxy,
         agent_forwarding: conn.options.agent_forwarding,
         save_connection: true,
         error,
         ..NewConnectionForm::default()
+    }
+}
+
+struct UpstreamProxyFormFields {
+    policy: NewConnectionUpstreamProxyPolicy,
+    protocol: SavedUpstreamProxyProtocol,
+    host: String,
+    port: String,
+    auth: NewConnectionUpstreamProxyAuth,
+    username: String,
+    password_keychain_id: Option<String>,
+    remote_dns: bool,
+    no_proxy: String,
+}
+
+fn upstream_proxy_form_fields(policy: &SavedUpstreamProxyPolicy) -> UpstreamProxyFormFields {
+    match policy {
+        SavedUpstreamProxyPolicy::UseGlobal => {
+            default_upstream_proxy_form_fields(NewConnectionUpstreamProxyPolicy::UseGlobal)
+        }
+        SavedUpstreamProxyPolicy::Direct => {
+            default_upstream_proxy_form_fields(NewConnectionUpstreamProxyPolicy::Direct)
+        }
+        SavedUpstreamProxyPolicy::Custom { proxy } => {
+            let (auth, username, password_keychain_id) = match &proxy.auth {
+                SavedUpstreamProxyAuth::None => (
+                    NewConnectionUpstreamProxyAuth::None,
+                    String::new(),
+                    None,
+                ),
+                SavedUpstreamProxyAuth::Password {
+                    username,
+                    keychain_id,
+                    ..
+                } => (
+                    NewConnectionUpstreamProxyAuth::Password,
+                    username.clone(),
+                    keychain_id.clone(),
+                ),
+            };
+            UpstreamProxyFormFields {
+                policy: NewConnectionUpstreamProxyPolicy::Custom,
+                protocol: proxy.protocol,
+                host: proxy.host.clone(),
+                port: proxy.port.to_string(),
+                auth,
+                username,
+                password_keychain_id,
+                remote_dns: proxy.remote_dns,
+                no_proxy: proxy.no_proxy.clone(),
+            }
+        }
+    }
+}
+
+fn default_upstream_proxy_form_fields(
+    policy: NewConnectionUpstreamProxyPolicy,
+) -> UpstreamProxyFormFields {
+    UpstreamProxyFormFields {
+        policy,
+        protocol: SavedUpstreamProxyProtocol::Socks5,
+        host: "127.0.0.1".to_string(),
+        port: "1080".to_string(),
+        auth: NewConnectionUpstreamProxyAuth::None,
+        username: String::new(),
+        password_keychain_id: None,
+        remote_dns: true,
+        no_proxy: String::new(),
     }
 }
 
@@ -405,7 +483,9 @@ pub(super) fn save_request_from_form_with_existing_auth(
     id: Option<String>,
     existing_auth: Option<&SavedAuth>,
 ) -> anyhow::Result<SaveConnectionRequest> {
-    save_request_from_draft(connection_draft_from_form(form), id, existing_auth)
+    let mut request = save_request_from_draft(connection_draft_from_form(form), id, existing_auth)?;
+    request.upstream_proxy = saved_upstream_proxy_policy_from_form(form)?;
+    Ok(request)
 }
 
 fn connection_draft_from_form(form: &NewConnectionForm) -> ConnectionDraft {
@@ -467,6 +547,99 @@ fn secret_from_ui_draft(value: &str) -> SecretString {
     SecretString::from(zeroize::Zeroizing::new(value.to_string()))
 }
 
+pub(super) fn saved_upstream_proxy_policy_from_form(
+    form: &NewConnectionForm,
+) -> anyhow::Result<SavedUpstreamProxyPolicy> {
+    match form.upstream_proxy_policy {
+        NewConnectionUpstreamProxyPolicy::UseGlobal => Ok(SavedUpstreamProxyPolicy::UseGlobal),
+        NewConnectionUpstreamProxyPolicy::Direct => Ok(SavedUpstreamProxyPolicy::Direct),
+        NewConnectionUpstreamProxyPolicy::Custom => Ok(SavedUpstreamProxyPolicy::Custom {
+            proxy: saved_upstream_proxy_config_from_form(form)?,
+        }),
+    }
+}
+
+fn saved_upstream_proxy_config_from_form(
+    form: &NewConnectionForm,
+) -> anyhow::Result<SavedUpstreamProxyConfig> {
+    Ok(SavedUpstreamProxyConfig {
+        protocol: form.upstream_proxy_protocol,
+        host: form.upstream_proxy_host.trim().to_string(),
+        port: upstream_proxy_port_from_form(form)?,
+        auth: saved_upstream_proxy_auth_from_form(form),
+        remote_dns: form.upstream_proxy_remote_dns,
+        no_proxy: form.upstream_proxy_no_proxy.trim().to_string(),
+    })
+}
+
+fn saved_upstream_proxy_auth_from_form(form: &NewConnectionForm) -> SavedUpstreamProxyAuth {
+    match form.upstream_proxy_auth {
+        NewConnectionUpstreamProxyAuth::None => SavedUpstreamProxyAuth::None,
+        NewConnectionUpstreamProxyAuth::Password => SavedUpstreamProxyAuth::Password {
+            username: form.upstream_proxy_username.trim().to_string(),
+            keychain_id: form.upstream_proxy_password_keychain_id.clone(),
+            // Only a visible draft secret crosses into persistence when the
+            // user typed one; otherwise an existing keychain id remains intact.
+            plaintext_password: (!form.upstream_proxy_password.is_empty())
+                .then(|| secret_from_ui_draft(&form.upstream_proxy_password)),
+        },
+    }
+}
+
+fn upstream_proxy_port_from_form(form: &NewConnectionForm) -> anyhow::Result<u16> {
+    let port = form.upstream_proxy_port.trim().parse::<u16>()?;
+    Ok(port.max(1))
+}
+
+pub(super) fn upstream_proxy_config_from_form(
+    store: &ConnectionStore,
+    settings: &PersistedSettings,
+    form: &NewConnectionForm,
+) -> anyhow::Result<Option<UpstreamProxyConfig>> {
+    match form.upstream_proxy_policy {
+        NewConnectionUpstreamProxyPolicy::UseGlobal => Ok(upstream_proxy_config_from_saved_policy(
+            store,
+            settings,
+            &SavedUpstreamProxyPolicy::UseGlobal,
+        )),
+        NewConnectionUpstreamProxyPolicy::Direct => Ok(None),
+        NewConnectionUpstreamProxyPolicy::Custom => {
+            Ok(Some(runtime_upstream_proxy_config_from_form(store, form)?))
+        }
+    }
+}
+
+fn runtime_upstream_proxy_config_from_form(
+    store: &ConnectionStore,
+    form: &NewConnectionForm,
+) -> anyhow::Result<UpstreamProxyConfig> {
+    let auth = match form.upstream_proxy_auth {
+        NewConnectionUpstreamProxyAuth::None => UpstreamProxyAuth::None,
+        NewConnectionUpstreamProxyAuth::Password => {
+            let username = form.upstream_proxy_username.trim().to_string();
+            let password = if form.upstream_proxy_password.is_empty() {
+                let saved_auth = saved_upstream_proxy_auth_from_form(form);
+                store.get_saved_upstream_proxy_password(&saved_auth)?.into_zeroizing()
+            } else {
+                zeroize::Zeroizing::new(form.upstream_proxy_password.clone())
+            };
+            UpstreamProxyAuth::Password { username, password }
+        }
+    };
+
+    Ok(UpstreamProxyConfig {
+        protocol: match form.upstream_proxy_protocol {
+            SavedUpstreamProxyProtocol::Socks5 => UpstreamProxyProtocol::Socks5,
+            SavedUpstreamProxyProtocol::HttpConnect => UpstreamProxyProtocol::HttpConnect,
+        },
+        host: form.upstream_proxy_host.trim().to_string(),
+        port: upstream_proxy_port_from_form(form)?,
+        auth,
+        remote_dns: form.upstream_proxy_remote_dns,
+        no_proxy: form.upstream_proxy_no_proxy.trim().to_string(),
+    })
+}
+
 fn auth_draft_kind(tab: SshAuthTab) -> ConnectionAuthDraftKind {
     match tab {
         SshAuthTab::Password => ConnectionAuthDraftKind::Password,
@@ -510,7 +683,8 @@ pub(super) fn upstream_proxy_config_from_saved_policy(
             .network
             .upstream_proxy
             .as_ref()
-            .and_then(|proxy| upstream_proxy_config_from_global_proxy(store, proxy)),
+            .and_then(|proxy| upstream_proxy_config_from_global_proxy(store, proxy))
+            .or_else(|| upstream_proxy_from_env().ok().flatten()),
         SavedUpstreamProxyPolicy::Direct => None,
         SavedUpstreamProxyPolicy::Custom { proxy } => {
             Some(upstream_proxy_config_from_saved_proxy(store, proxy)?)
