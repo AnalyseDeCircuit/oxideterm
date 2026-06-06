@@ -36,25 +36,52 @@ fn is_sftp_incomplete_store_compat_error(error: &str) -> bool {
 }
 
 fn home_path() -> String {
-    std::env::var("HOME").unwrap_or_else(|_| {
-        #[cfg(windows)]
-        {
-            "C:\\".to_string()
+    local_home_path_buf()
+        .unwrap_or_else(|| std::path::PathBuf::from(home_path_root()))
+        .to_string_lossy()
+        .to_string()
+}
+
+fn local_home_path_buf() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
+}
+
+/// Expands home aliases before local file manager paths reach filesystem APIs.
+fn expand_local_path(path: &str) -> std::path::PathBuf {
+    let trimmed = path.trim();
+    if trimmed == "~" || trimmed == "$HOME" {
+        return local_home_path_buf().unwrap_or_else(|| std::path::PathBuf::from(trimmed));
+    }
+
+    for prefix in ["~/", "~\\", "$HOME/", "$HOME\\"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            if let Some(home) = local_home_path_buf() {
+                return home.join(rest);
+            }
         }
-        #[cfg(not(windows))]
-        {
-            "/".to_string()
-        }
-    })
+    }
+
+    std::path::PathBuf::from(trimmed)
 }
 
 fn list_local_files(path: &str) -> std::io::Result<Vec<SftpFileEntry>> {
     let mut entries = Vec::new();
-    for entry in std::fs::read_dir(path)? {
+    let expanded_path = expand_local_path(path);
+    for entry in std::fs::read_dir(expanded_path)? {
         let entry = entry?;
-        let metadata = std::fs::symlink_metadata(entry.path())?;
+        let entry_path = entry.path();
+        let metadata = match std::fs::symlink_metadata(&entry_path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                // Windows reserved device names can fail metadata probing even
+                // when directory enumeration reports them; keep the listing open.
+                continue;
+            }
+        };
         let name = entry.file_name().to_string_lossy().to_string();
-        let full_path = entry.path().to_string_lossy().to_string();
+        let full_path = entry_path.to_string_lossy().to_string();
         let file_type = if metadata.is_dir() {
             SftpFileType::Directory
         } else {
@@ -75,7 +102,7 @@ fn list_local_files(path: &str) -> std::io::Result<Vec<SftpFileEntry>> {
             owner: None,
             group: None,
             is_symlink: metadata.file_type().is_symlink(),
-            symlink_target: std::fs::read_link(entry.path())
+            symlink_target: std::fs::read_link(&entry_path)
                 .ok()
                 .map(|target| target.to_string_lossy().to_string()),
         });
