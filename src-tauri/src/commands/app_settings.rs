@@ -246,12 +246,15 @@ fn default_settings() -> Value {
                 "disabledTools": []
             },
             "contextSources": { "ide": true, "sftp": true },
+            "acpAgents": [],
             "executionProfiles": {
                 "defaultProfileId": "default",
                 "profiles": [{
                     "id": "default",
                     "name": "Default",
+                    "backend": "provider",
                     "providerId": null,
+                    "acpAgentId": null,
                     "model": null,
                     "reasoningEffort": "auto",
                     "toolUse": {
@@ -416,6 +419,122 @@ fn sanitize_enum(
     }
     *value = json!(fallback);
     warnings.push(format!("{} reset to {}", path.join("."), fallback));
+}
+
+fn trimmed_object_string(object: &Map<String, Value>, key: &str) -> Option<String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn sanitize_ai_acp_agents(settings: &mut Value) {
+    let Some(ai) = settings.get_mut("ai").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let Some(raw_agents) = ai.get_mut("acpAgents") else {
+        ai.insert("acpAgents".to_string(), json!([]));
+        return;
+    };
+    let Some(agents) = raw_agents.as_array() else {
+        *raw_agents = json!([]);
+        return;
+    };
+
+    let mut sanitized = Vec::new();
+    for agent in agents.iter().filter_map(Value::as_object) {
+        let Some(id) = trimmed_object_string(agent, "id") else {
+            continue;
+        };
+        let command = agent
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string();
+        let args = agent
+            .get("args")
+            .and_then(Value::as_array)
+            .map(|args| {
+                args.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let env = agent
+            .get("env")
+            .and_then(Value::as_object)
+            .map(|env| {
+                let mut clean = Map::new();
+                for (key, value) in env {
+                    if let Some(value) = value.as_str() {
+                        clean.insert(key.clone(), json!(value));
+                    }
+                }
+                Value::Object(clean)
+            })
+            .unwrap_or_else(|| json!({}));
+        let auth = agent.get("auth").and_then(Value::as_object);
+        let auth_status = auth
+            .and_then(|auth| auth.get("status"))
+            .and_then(Value::as_str)
+            .filter(|status| {
+                matches!(
+                    *status,
+                    "unknown" | "not_required" | "required" | "authenticated" | "expired"
+                )
+            })
+            .unwrap_or("unknown");
+        let account_label = auth
+            .and_then(|auth| trimmed_object_string(auth, "accountLabel"))
+            .map(Value::String)
+            .unwrap_or(Value::Null);
+        let capability_policy = agent.get("capabilityPolicy").and_then(Value::as_object);
+        let capability_bool = |key: &str| {
+            capability_policy
+                .and_then(|policy| policy.get(key))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        };
+        let status = agent.get("status").and_then(Value::as_object);
+        let runtime_state = status
+            .and_then(|status| status.get("state"))
+            .and_then(Value::as_str)
+            .filter(|state| matches!(*state, "unknown" | "ready" | "auth_required" | "error"))
+            .unwrap_or("unknown");
+        let last_error_kind = status
+            .and_then(|status| trimmed_object_string(status, "lastErrorKind"))
+            .map(Value::String)
+            .unwrap_or(Value::Null);
+
+        sanitized.push(json!({
+            "id": id,
+            "displayName": trimmed_object_string(agent, "displayName").unwrap_or_default(),
+            "command": command,
+            "args": args,
+            "env": env,
+            "cwd": trimmed_object_string(agent, "cwd").map(Value::String).unwrap_or(Value::Null),
+            "enabled": agent.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+            "auth": {
+                "status": auth_status,
+                "accountLabel": account_label
+            },
+            "capabilityPolicy": {
+                "fsReadTextFile": capability_bool("fsReadTextFile"),
+                "fsWriteTextFile": capability_bool("fsWriteTextFile"),
+                "terminal": capability_bool("terminal")
+            },
+            "status": {
+                "state": runtime_state,
+                "lastErrorKind": last_error_kind
+            }
+        }));
+    }
+
+    *raw_agents = Value::Array(sanitized);
 }
 
 fn sanitize_settings(raw: Value) -> SanitizedSettings {
@@ -764,6 +883,8 @@ fn sanitize_settings(raw: Value) -> SanitizedSettings {
         "none",
         &mut validation_warnings,
     );
+
+    sanitize_ai_acp_agents(&mut settings);
 
     if let Some(auth) = get_path_mut(&mut settings, &["network", "upstreamProxy", "auth"])
         .and_then(Value::as_object_mut)
@@ -1465,6 +1586,48 @@ mod tests {
         assert_eq!(auth["username"], json!("proxy-user"));
         assert!(auth.get("password").is_none());
         assert!(auth.get("proxyAuthorization").is_none());
+    }
+
+    #[test]
+    fn ai_acp_agents_drop_plaintext_auth_material() {
+        let sanitized = sanitize_settings(json!({
+            "version": SETTINGS_SCHEMA_VERSION,
+            "ai": {
+                "acpAgents": [{
+                    "id": "codex-local",
+                    "displayName": "Codex Local",
+                    "command": "codex",
+                    "args": ["--acp"],
+                    "env": { "CODEX_HOME": "/tmp/codex", "BAD": 42 },
+                    "cwd": "/workspace",
+                    "enabled": true,
+                    "auth": {
+                        "status": "authenticated",
+                        "accountLabel": "user@example.test",
+                        "token": "secret-token"
+                    },
+                    "authToken": "legacy-secret",
+                    "capabilityPolicy": {
+                        "fsReadTextFile": true,
+                        "fsWriteTextFile": false,
+                        "terminal": false
+                    },
+                    "status": {
+                        "state": "ready",
+                        "lastErrorKind": "none",
+                        "stderr": "secret stderr"
+                    }
+                }]
+            }
+        }));
+
+        let agent = &sanitized.settings["ai"]["acpAgents"][0];
+        let serialized = serde_json::to_string(agent).expect("agent json");
+        assert_eq!(agent["auth"]["accountLabel"], json!("user@example.test"));
+        assert_eq!(agent["env"], json!({ "CODEX_HOME": "/tmp/codex" }));
+        assert!(!serialized.contains("secret-token"));
+        assert!(!serialized.contains("legacy-secret"));
+        assert!(!serialized.contains("secret stderr"));
     }
 
     #[test]

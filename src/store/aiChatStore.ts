@@ -9,6 +9,7 @@ import { useSettingsStore, type AiMemorySettings, type AiSettings } from './sett
 import { useAppStore } from './appStore';
 import { gatherSidebarContext, buildContextReminder, type SidebarContext } from '../lib/sidebarContextProvider';
 import { getProvider, getProviderReasoningProtocol } from '../lib/ai/providerRegistry';
+import { streamAcpCompletion, type AcpPermissionRequestedEvent } from '../lib/ai/acp/acpProvider';
 import { requiresEmbeddingApiKey, resolveEmbeddingProvider } from '../lib/ai/embeddingConfig';
 import { resolveChatEmbeddingApiKey } from '../lib/ai/providerKeyScope';
 import { resolveAiReasoningEffort } from '../lib/ai/reasoningSettings';
@@ -383,8 +384,10 @@ function applyExecutionProfileToAiSettings(
     profile,
     settings: {
       ...settings,
-      activeProviderId: profile.providerId ?? settings.activeProviderId,
-      activeModel: profile.model ?? settings.activeModel,
+      // ACP-backed profiles are not model-provider profiles; later runtime
+      // routing uses profile.backend/profile.acpAgentId instead.
+      activeProviderId: profile.backend === 'acp' ? null : profile.providerId ?? settings.activeProviderId,
+      activeModel: profile.backend === 'acp' ? null : profile.model ?? settings.activeModel,
       reasoningEffort: profile.reasoningEffort ?? settings.reasoningEffort,
       toolUse: mergedToolUse,
     },
@@ -1093,31 +1096,41 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     // Resolve Active Provider and API Key
     // ════════════════════════════════════════════════════════════════════
 
-    const activeProvider = aiSettings.providers?.find(p => p.id === aiSettings.activeProviderId);
+    const isAcpProfile = activeProfile?.backend === 'acp';
+    const acpAgent = isAcpProfile
+      ? aiSettings.acpAgents?.find((agent) => agent.id === activeProfile?.acpAgentId)
+      : undefined;
+    const activeProvider = isAcpProfile ? undefined : aiSettings.providers?.find(p => p.id === aiSettings.activeProviderId);
     const providerType = activeProvider?.type || 'openai';
     const providerBaseUrl = activeProvider?.baseUrl || aiSettings.baseUrl;
-    const providerModel = aiSettings.activeModel || activeProvider?.defaultModel || aiSettings.model;
+    const providerModel = isAcpProfile
+      ? acpAgent?.displayName || acpAgent?.id || activeProfile?.acpAgentId || 'ACP'
+      : aiSettings.activeModel || activeProvider?.defaultModel || aiSettings.model;
     const providerId = activeProvider?.id;
     const reasoningEffort = resolveAiReasoningEffort(aiSettings, providerId, providerModel);
 
-    if (!providerModel) {
+    if (!isAcpProfile && !providerModel) {
       set({ error: 'No model selected. Please refresh models or select one in Settings > AI.' });
+      return;
+    }
+    if (isAcpProfile && !acpAgent) {
+      set({ error: 'No ACP agent selected for this execution profile.' });
       return;
     }
 
     // Get API key - provider-specific only
     let apiKey: string | null = null;
     try {
-      if (providerId) {
+      if (!isAcpProfile && providerId) {
         apiKey = await api.getAiProviderApiKey(providerId);
       }
       // Ollama and OpenAI-compatible (e.g. LM Studio) don't require an API key
-      if (!apiKey && providerType !== 'ollama' && providerType !== 'openai_compatible') {
+      if (!isAcpProfile && !apiKey && providerType !== 'ollama' && providerType !== 'openai_compatible') {
         set({ error: i18n.t('ai.model_selector.api_key_not_found') });
         return;
       }
     } catch (e) {
-      if (providerType !== 'ollama' && providerType !== 'openai_compatible') {
+      if (!isAcpProfile && providerType !== 'ollama' && providerType !== 'openai_compatible') {
         set({ error: i18n.t('ai.model_selector.failed_to_get_api_key') });
         return;
       }
@@ -1736,7 +1749,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       // Stream via Provider Abstraction Layer (with tool execution loop)
       // ════════════════════════════════════════════════════════════════════
 
-      const provider = getProvider(providerType);
+      const provider = isAcpProfile ? null : getProvider(providerType);
       let roundReasoningContent = '';
 
       const resolveToolContext = async (): Promise<OrchestratorToolContext | null> => {
@@ -1978,20 +1991,145 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           updateAssistantSnapshot(force, false);
         };
 
-        for await (const event of provider.streamCompletion(
-          {
-            baseUrl: providerBaseUrl,
-            model: providerModel,
-            apiKey: apiKey || '',
-            maxResponseTokens,
-            reasoningEffort,
-            reasoningProtocol: getProviderReasoningProtocol(providerType),
-            tools: toolDefs,
-            toolChoice,
-          },
-          sanitizeApiMessages(apiMessages),
-          abortController.signal
-        )) {
+        const resolveAcpPermissionRequest = async (event: AcpPermissionRequestedEvent): Promise<string | null> => {
+          if (get().activeGenerationId !== runId) return null;
+          const allowOption = event.options.find((option) => option.kind === 'allow_once')
+            ?? event.options.find((option) => option.kind === 'allow_always');
+          const rejectOption = event.options.find((option) => option.kind === 'reject_once')
+            ?? event.options.find((option) => option.kind === 'reject_always');
+          const toolCall: AiToolCall = {
+            id: event.toolCallId,
+            name: event.name,
+            arguments: event.arguments,
+            status: 'pending_user_approval',
+          };
+
+          // ACP permission requests reuse the normal tool approval surface so
+          // user-visible pending/approved/rejected states stay identical.
+          accumulator.onToolCallComplete({
+            id: toolCall.id,
+            name: toolCall.name,
+            argumentsText: toolCall.arguments,
+          });
+          accumulator.syncToolCalls([toolCall]);
+          updateAssistantSnapshot(true, false);
+
+          const approvalPromise = new Promise<boolean>((resolve) => {
+            pendingApprovalResolvers.set(toolCall.id, {
+              runId,
+              conversationId: convId,
+              assistantMessageId: assistantMessage.id,
+              resolve,
+            });
+          });
+          const abortPromise = new Promise<null>((resolve) => {
+            if (abortController.signal.aborted) {
+              resolve(null);
+              return;
+            }
+            abortController.signal.addEventListener('abort', () => resolve(null), { once: true });
+          });
+          const approved = await Promise.race([approvalPromise, abortPromise]);
+          pendingApprovalResolvers.delete(toolCall.id);
+          if (approved === null || get().activeGenerationId !== runId) {
+            toolCall.status = 'rejected';
+            toolCall.result = {
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              success: false,
+              output: '',
+              error: 'Generation was stopped.',
+            };
+            accumulator.syncToolCalls([toolCall]);
+            updateAssistantSnapshot(true, false);
+            return null;
+          }
+
+          toolCall.status = approved ? 'approved' : 'rejected';
+          if (!approved) {
+            toolCall.result = {
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              success: false,
+              output: '',
+              error: 'Tool call rejected by user.',
+            };
+          }
+          accumulator.syncToolCalls([toolCall]);
+          updateAssistantSnapshot(true, false);
+
+          return approved ? allowOption?.optionId ?? null : rejectOption?.optionId ?? null;
+        };
+
+        const streamEvents = isAcpProfile && acpAgent
+          ? streamAcpCompletion(
+              {
+                agent: acpAgent,
+                conversationId: convId,
+                generationId: runId,
+                existingSessionId: conversation.sessionId
+                  ?? conversation.sessionMetadata?.acp?.sessionId
+                  ?? null,
+                onSessionStarted: (event) => {
+                  let nextConversation: AiConversation | undefined;
+                  if (get().activeGenerationId !== runId) {
+                    return;
+                  }
+                  set((state) => {
+                    // ACP session-start events can arrive after Stop or retry;
+                    // only the active generation may update conversation state.
+                    if (state.activeGenerationId !== runId) return {};
+                    return {
+                      conversations: state.conversations.map((candidate) => {
+                        if (candidate.id !== convId) return candidate;
+                        const sessionMetadata = {
+                          ...(candidate.sessionMetadata ?? {
+                            conversationId: candidate.id,
+                            origin: candidate.origin ?? 'sidebar',
+                          }),
+                          acp: {
+                            agentId: acpAgent.id,
+                            sessionId: event.sessionId,
+                            metadata: event.sessionMetadata ?? null,
+                          },
+                        };
+                        nextConversation = {
+                          ...candidate,
+                          sessionId: event.sessionId,
+                          sessionMetadata,
+                          updatedAt: Date.now(),
+                        };
+                        return nextConversation;
+                      }),
+                    };
+                  });
+                  if (nextConversation) {
+                    persistConversationMetadata(nextConversation).catch((error) => {
+                      console.warn('[AiChatStore] Failed to persist ACP session metadata:', error);
+                    });
+                  }
+                },
+                onPermissionRequested: resolveAcpPermissionRequest,
+              },
+              sanitizeApiMessages(apiMessages),
+              abortController.signal,
+            )
+          : provider!.streamCompletion(
+              {
+                baseUrl: providerBaseUrl,
+                model: providerModel,
+                apiKey: apiKey || '',
+                maxResponseTokens,
+                reasoningEffort,
+                reasoningProtocol: getProviderReasoningProtocol(providerType),
+                tools: toolDefs,
+                toolChoice,
+              },
+              sanitizeApiMessages(apiMessages),
+              abortController.signal,
+            );
+
+        for await (const event of streamEvents) {
           switch (event.type) {
             case 'content':
               clearAwaitingToolSummaryMarker(true);

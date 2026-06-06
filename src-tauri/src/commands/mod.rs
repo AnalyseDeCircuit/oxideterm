@@ -5,6 +5,7 @@
 //!
 //! This module contains all Tauri commands exposed to the frontend.
 
+pub mod acp;
 pub mod ai_chat;
 pub mod ai_http;
 pub mod app_settings;
@@ -45,6 +46,7 @@ pub mod ssh;
 pub mod startup;
 pub mod trzsz;
 
+pub use acp::*;
 pub use ai_chat::*;
 pub use ai_http::*;
 pub use app_settings::*;

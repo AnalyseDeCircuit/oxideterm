@@ -3,10 +3,14 @@
 
 import type { AiReasoningEffort } from './providers';
 
+export type AiExecutionBackend = 'provider' | 'acp';
+
 export type AiExecutionProfile = {
   id: string;
   name: string;
+  backend?: AiExecutionBackend;
   providerId: string | null;
+  acpAgentId?: string | null;
   model: string | null;
   reasoningEffort: AiReasoningEffort;
   toolUse?: {
@@ -45,7 +49,9 @@ export function createDefaultExecutionProfile(input: {
   return {
     id: DEFAULT_AI_EXECUTION_PROFILE_ID,
     name: 'Default',
+    backend: 'provider',
     providerId: input.providerId,
+    acpAgentId: null,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
     toolUse: input.toolUse,
@@ -72,11 +78,23 @@ export function normalizeExecutionProfiles(input: {
 }): AiExecutionProfilesConfig {
   const fallback = createDefaultExecutionProfile(input);
   const existingProfiles = Array.isArray(input.config?.profiles) ? input.config.profiles : [];
-  const profiles = existingProfiles.length > 0 ? existingProfiles : [fallback];
+  const profiles = (existingProfiles.length > 0 ? existingProfiles : [fallback]).map(normalizeExecutionProfile);
   const defaultProfileId = input.config?.defaultProfileId && profiles.some((profile) => profile.id === input.config?.defaultProfileId)
     ? input.config.defaultProfileId
     : profiles[0]?.id ?? fallback.id;
   return { defaultProfileId, profiles };
+}
+
+function normalizeExecutionProfile(profile: AiExecutionProfile): AiExecutionProfile {
+  const backend: AiExecutionBackend = profile.backend === 'acp' ? 'acp' : 'provider';
+  return {
+    ...profile,
+    // Missing backend is legacy provider-backed profile data.
+    backend,
+    providerId: backend === 'acp' ? null : profile.providerId,
+    acpAgentId: backend === 'acp' ? profile.acpAgentId ?? null : null,
+    model: backend === 'acp' ? null : profile.model,
+  };
 }
 
 export function resolveExecutionProfile(

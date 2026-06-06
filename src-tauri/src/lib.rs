@@ -393,6 +393,8 @@ pub fn run() {
         .manage(update_manager::UpdateManagerState::default())
         .manage(Arc::new(commands::McpProcessRegistry::new()))
         .manage(commands::AiStreamCancelRegistry::default())
+        .manage(commands::AcpStreamCancelRegistry::default())
+        .manage(commands::AcpPermissionResponseRegistry::default())
         .manage(linux_startup_recovery.clone());
 
     let builder = if portable_bootstrap_status == config::PortableBootstrapStatus::Disabled {
@@ -816,6 +818,10 @@ pub fn run() {
         commands::ai_fetch,
         commands::ai_fetch_stream,
         commands::ai_fetch_stream_cancel,
+        commands::acp_stream_prompt,
+        commands::acp_stream_prompt_cancel,
+        commands::acp_stream_permission_respond,
+        commands::acp_probe_agent,
         commands::plugin_http_request,
         // Plugin system commands
         commands::list_plugins,
@@ -1221,6 +1227,10 @@ pub fn run() {
         commands::ai_fetch,
         commands::ai_fetch_stream,
         commands::ai_fetch_stream_cancel,
+        commands::acp_stream_prompt,
+        commands::acp_stream_prompt_cancel,
+        commands::acp_stream_permission_respond,
+        commands::acp_probe_agent,
         commands::plugin_http_request,
         // Plugin system commands
         commands::list_plugins,

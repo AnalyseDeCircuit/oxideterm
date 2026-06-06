@@ -31,6 +31,14 @@ import {
   normalizeExecutionProfiles,
   type AiExecutionProfilesConfig,
 } from '../lib/ai/profiles';
+import {
+  defaultAcpAgentAuthState,
+  defaultAcpAgentCapabilityPolicy,
+  defaultAcpAgentRuntimeStatus,
+  type AcpAgentAuthStatus,
+  type AcpAgentConfig,
+  type AcpAgentRuntimeStatus,
+} from '../lib/ai/acp/acpTypes';
 import packageJson from '../../package.json';
 
 // ============================================================================
@@ -411,6 +419,8 @@ export interface AiSettings {
   };
   /** Configured MCP servers */
   mcpServers?: import('../lib/ai/mcp/mcpTypes').McpServerConfig[];
+  /** Configured local stdio ACP agents. Secrets live in the native keychain boundary. */
+  acpAgents?: AcpAgentConfig[];
   /** Global embedding provider/model (separate from chat provider) */
   embeddingConfig?: import('../types').EmbeddingConfig;
   /** OxideSens execution profiles: model, policy, context, and command defaults. */
@@ -669,6 +679,7 @@ const defaultAiSettings: AiSettings = {
     ide: true,
     sftp: true,
   },
+  acpAgents: [],
   executionProfiles: {
     defaultProfileId: 'default',
     profiles: [
@@ -847,6 +858,88 @@ function mergeAutoApproveTools(
   return merged;
 }
 
+const ACP_AUTH_STATUSES: readonly AcpAgentAuthStatus[] = [
+  'unknown',
+  'not_required',
+  'required',
+  'authenticated',
+  'expired',
+] as const;
+
+const ACP_RUNTIME_STATES: readonly AcpAgentRuntimeStatus['state'][] = [
+  'unknown',
+  'ready',
+  'auth_required',
+  'error',
+] as const;
+
+function stringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
+  );
+}
+
+function normalizedAcpAgents(value: unknown): AcpAgentConfig[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => {
+      const auth = item.auth && typeof item.auth === 'object' && !Array.isArray(item.auth)
+        ? item.auth as Record<string, unknown>
+        : {};
+      const capabilityPolicy = item.capabilityPolicy && typeof item.capabilityPolicy === 'object' && !Array.isArray(item.capabilityPolicy)
+        ? item.capabilityPolicy as Record<string, unknown>
+        : {};
+      const status = item.status && typeof item.status === 'object' && !Array.isArray(item.status)
+        ? item.status as Record<string, unknown>
+        : {};
+      const authStatus = typeof auth.status === 'string' && ACP_AUTH_STATUSES.includes(auth.status as AcpAgentAuthStatus)
+        ? auth.status as AcpAgentAuthStatus
+        : defaultAcpAgentAuthState().status;
+      const runtimeState = typeof status.state === 'string' && ACP_RUNTIME_STATES.includes(status.state as AcpAgentRuntimeStatus['state'])
+        ? status.state as AcpAgentRuntimeStatus['state']
+        : defaultAcpAgentRuntimeStatus().state;
+      const defaults = defaultAcpAgentCapabilityPolicy();
+
+      return {
+        id: typeof item.id === 'string' ? item.id.trim() : '',
+        displayName: typeof item.displayName === 'string' ? item.displayName.trim() : '',
+        command: typeof item.command === 'string' ? item.command.trim() : '',
+        args: Array.isArray(item.args) ? item.args.filter((arg): arg is string => typeof arg === 'string') : [],
+        env: stringRecord(item.env),
+        cwd: typeof item.cwd === 'string' && item.cwd.trim() ? item.cwd.trim() : null,
+        enabled: typeof item.enabled === 'boolean' ? item.enabled : true,
+        auth: {
+          status: authStatus,
+          accountLabel: typeof auth.accountLabel === 'string' && auth.accountLabel.trim()
+            ? auth.accountLabel.trim()
+            : null,
+        },
+        capabilityPolicy: {
+          fsReadTextFile: typeof capabilityPolicy.fsReadTextFile === 'boolean'
+            ? capabilityPolicy.fsReadTextFile
+            : defaults.fsReadTextFile,
+          fsWriteTextFile: typeof capabilityPolicy.fsWriteTextFile === 'boolean'
+            ? capabilityPolicy.fsWriteTextFile
+            : defaults.fsWriteTextFile,
+          terminal: typeof capabilityPolicy.terminal === 'boolean'
+            ? capabilityPolicy.terminal
+            : defaults.terminal,
+        },
+        status: {
+          state: runtimeState,
+          lastErrorKind: typeof status.lastErrorKind === 'string' && status.lastErrorKind.trim()
+            ? status.lastErrorKind.trim()
+            : null,
+        },
+      };
+    })
+    .filter((agent) => agent.id.length > 0 && agent.command.length > 0);
+}
+
 // ============================================================================
 // Persistence Helpers
 // ============================================================================
@@ -925,6 +1018,7 @@ export function mergeWithDefaults(saved: OxidePartialSettingsSnapshot | Partial<
             maxRounds: normalizeAiToolMaxRounds(saved.ai.toolUse.maxRounds),
           }
         : defaults.ai.toolUse,
+      acpAgents: normalizedAcpAgents(saved.ai?.acpAgents),
       executionProfiles: normalizeExecutionProfiles({
         config: saved.ai?.executionProfiles,
         providerId: saved.ai?.activeProviderId ?? defaults.ai.activeProviderId,
@@ -1979,7 +2073,9 @@ const AI_KEYS: Array<keyof AiSettings> = [
   'toolUse',
   'contextSources',
   'mcpServers',
+  'acpAgents',
   'embeddingConfig',
+  'executionProfiles',
 ];
 const RECONNECT_KEYS: Array<keyof ReconnectSettings> = ['enabled', 'maxAttempts', 'baseDelayMs', 'maxDelayMs'];
 const CONNECTION_POOL_KEYS: Array<keyof ConnectionPoolSettings> = ['idleTimeoutSecs'];

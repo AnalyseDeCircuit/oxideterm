@@ -103,6 +103,12 @@ export interface AiConversationSessionMetadata {
   conversationId: string;
   firstUserMessage?: string;
   origin?: string;
+  // ACP stores redacted session identity here so chat reload can resume the agent session.
+  acp?: {
+    agentId?: string;
+    sessionId?: string;
+    metadata?: Record<string, unknown> | null;
+  };
   providerId?: string;
   providerModel?: string;
   profileId?: string;

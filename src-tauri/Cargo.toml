@@ -23,6 +23,7 @@ wsl-graphics = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+agent-client-protocol = "=0.14.0"
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-clipboard-manager = "2"
@@ -51,6 +52,8 @@ ssh-encoding = "0.2"
 # WebSocket
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+futures = "0.3"
+async-process = "2.5"
 
 # Binary Protocol
 bytes = "1"

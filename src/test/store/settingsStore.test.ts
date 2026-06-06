@@ -234,6 +234,57 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settings.ai.toolUse?.maxRounds).toBe(30);
   });
 
+  it('normalizes ACP agents without persisting plaintext auth tokens', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      ai: {
+        ...buildSavedSettings().ai,
+        acpAgents: [{
+          id: ' codex-local ',
+          displayName: ' Codex Local ',
+          command: ' codex ',
+          args: ['--acp', 42],
+          env: { CODEX_HOME: '/tmp/codex', BAD: 42 },
+          cwd: ' /workspace ',
+          enabled: true,
+          auth: {
+            status: 'authenticated',
+            accountLabel: ' user@example.test ',
+            token: 'secret-token',
+          },
+          authToken: 'legacy-secret',
+          capabilityPolicy: {
+            fsReadTextFile: true,
+            fsWriteTextFile: false,
+            terminal: false,
+          },
+          status: {
+            state: 'ready',
+            lastErrorKind: ' none ',
+            stderr: 'secret stderr',
+          },
+        }],
+      },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+    const agent = useSettingsStore.getState().settings.ai.acpAgents?.[0];
+    const serialized = JSON.stringify(agent);
+
+    expect(agent).toMatchObject({
+      id: 'codex-local',
+      displayName: 'Codex Local',
+      command: 'codex',
+      args: ['--acp'],
+      env: { CODEX_HOME: '/tmp/codex' },
+      cwd: '/workspace',
+      auth: { status: 'authenticated', accountLabel: 'user@example.test' },
+      status: { state: 'ready', lastErrorKind: 'none' },
+    });
+    expect(serialized).not.toContain('secret-token');
+    expect(serialized).not.toContain('legacy-secret');
+    expect(serialized).not.toContain('secret stderr');
+  });
+
   it('merges terminal autosuggest defaults for existing settings', async () => {
     localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
       terminal: { theme: 'default', renderer: 'auto' },

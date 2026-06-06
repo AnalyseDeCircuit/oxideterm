@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiToolDefinition } from '@/lib/ai/providers';
+import type { AiSettings } from '@/store/settingsStore';
 
 const invokeMock = vi.hoisted(() => vi.fn());
 const parseUserInputMock = vi.hoisted(() => vi.fn(() => ({
@@ -28,6 +29,7 @@ const getModelContextWindowMock = vi.hoisted(() => vi.fn(() => 1000));
 const responseReserveMock = vi.hoisted(() => vi.fn(() => 256));
 const trimHistoryMock = vi.hoisted(() => vi.fn((messages) => ({ messages, trimmedCount: 0 })));
 const providerStreamMock = vi.hoisted(() => vi.fn());
+const acpStreamMock = vi.hoisted(() => vi.fn());
 const gatherSidebarContextMock = vi.hoisted(() => vi.fn<() => unknown>(() => null));
 const buildContextReminderMock = vi.hoisted(() => vi.fn<(ctx: unknown) => string | null>(() => null));
 const resolveReferenceTypeMock = vi.hoisted(() => vi.fn());
@@ -72,6 +74,8 @@ const settingsStoreMock = vi.hoisted(() => ({
           enabled: true,
           content: '',
         },
+        acpAgents: [] as NonNullable<AiSettings['acpAgents']>,
+        executionProfiles: undefined as AiSettings['executionProfiles'],
         toolUse: {
           enabled: false,
           disabledTools: [],
@@ -129,6 +133,10 @@ vi.mock('@/lib/sidebarContextProvider', () => ({
 vi.mock('@/lib/ai/providerRegistry', () => ({
   getProvider: getProviderMock,
   getProviderReasoningProtocol: () => 'none',
+}));
+
+vi.mock('@/lib/ai/acp/acpProvider', () => ({
+  streamAcpCompletion: acpStreamMock,
 }));
 
 vi.mock('@/lib/ai/tokenUtils', () => ({
@@ -280,6 +288,7 @@ describe('aiChatStore workflows', () => {
     vi.clearAllMocks();
     invokeMock.mockReset();
     providerStreamMock.mockReset();
+    acpStreamMock.mockReset();
     settingsStoreMock.state.settings.ai.enabled = true;
     settingsStoreMock.state.settings.ai.baseUrl = 'https://api.example.com/v1';
     settingsStoreMock.state.settings.ai.model = 'default-model';
@@ -298,6 +307,8 @@ describe('aiChatStore workflows', () => {
     settingsStoreMock.state.settings.ai.activeProviderId = 'provider-1';
     settingsStoreMock.state.settings.ai.activeModel = 'mock-model';
     settingsStoreMock.state.settings.ai.embeddingConfig = { providerId: null, model: '' };
+    settingsStoreMock.state.settings.ai.acpAgents = [];
+    settingsStoreMock.state.settings.ai.executionProfiles = undefined;
     settingsStoreMock.state.settings.ai.toolUse.enabled = false;
     settingsStoreMock.state.settings.ai.toolUse.disabledTools = [];
     settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = {};
@@ -580,6 +591,173 @@ describe('aiChatStore workflows', () => {
 
     useAiChatStore.getState().stopGeneration();
     await secondRun;
+  });
+
+  it('ignores stale ACP session metadata after Stop while accepting the active run', async () => {
+    setConversation([]);
+    settingsStoreMock.state.settings.ai.acpAgents = [{
+      id: 'acp-agent-1',
+      displayName: 'ACP Agent',
+      command: 'codex',
+      args: ['--acp'],
+      env: {},
+      cwd: null,
+      enabled: true,
+      auth: { status: 'not_required', accountLabel: null },
+      capabilityPolicy: { fsReadTextFile: false, fsWriteTextFile: false, terminal: false },
+      status: { state: 'ready', lastErrorKind: null },
+    }];
+    settingsStoreMock.state.settings.ai.executionProfiles = {
+      defaultProfileId: 'acp-profile',
+      profiles: [{
+        id: 'acp-profile',
+        name: 'ACP',
+        backend: 'acp',
+        providerId: null,
+        acpAgentId: 'acp-agent-1',
+        model: null,
+        reasoningEffort: 'auto',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    };
+    const acpRuns: Array<{
+      config: {
+        onSessionStarted?: (event: {
+          type: 'session_started';
+          sessionId: string;
+          sessionMetadata?: Record<string, unknown> | null;
+        }) => void | Promise<void>;
+      };
+      resolve: () => void;
+    }> = [];
+    acpStreamMock.mockImplementation(async function* (config) {
+      let resolveRun: () => void = () => {};
+      const waitForRelease = new Promise<void>((resolve) => {
+        resolveRun = resolve;
+      });
+      acpRuns.push({ config, resolve: resolveRun });
+      await waitForRelease;
+      yield { type: 'done' };
+    });
+
+    const firstRun = useAiChatStore.getState().sendMessage('first ACP run');
+    await waitFor(() => acpRuns.length === 1);
+    useAiChatStore.getState().stopGeneration();
+    await acpRuns[0].config.onSessionStarted?.({
+      type: 'session_started',
+      sessionId: 'stale-session',
+      sessionMetadata: { source: 'stale' },
+    });
+
+    expect(useAiChatStore.getState().conversations[0].sessionId).toBeUndefined();
+    acpRuns[0].resolve();
+    await firstRun;
+
+    const secondRun = useAiChatStore.getState().sendMessage('second ACP run');
+    await waitFor(() => acpRuns.length === 2);
+    await acpRuns[1].config.onSessionStarted?.({
+      type: 'session_started',
+      sessionId: 'fresh-session',
+      sessionMetadata: { source: 'fresh' },
+    });
+
+    const conversation = useAiChatStore.getState().conversations[0];
+    expect(conversation.sessionId).toBe('fresh-session');
+    expect(conversation.sessionMetadata?.acp).toMatchObject({
+      agentId: 'acp-agent-1',
+      sessionId: 'fresh-session',
+      metadata: { source: 'fresh' },
+    });
+    acpRuns[1].resolve();
+    await secondRun;
+  });
+
+  it('maps ACP permission requests onto the existing approval UI', async () => {
+    setConversation([]);
+    settingsStoreMock.state.settings.ai.acpAgents = [{
+      id: 'acp-agent-1',
+      displayName: 'ACP Agent',
+      command: 'codex',
+      args: ['--acp'],
+      env: {},
+      cwd: null,
+      enabled: true,
+      auth: { status: 'not_required', accountLabel: null },
+      capabilityPolicy: { fsReadTextFile: false, fsWriteTextFile: false, terminal: false },
+      status: { state: 'ready', lastErrorKind: null },
+    }];
+    settingsStoreMock.state.settings.ai.executionProfiles = {
+      defaultProfileId: 'acp-profile',
+      profiles: [{
+        id: 'acp-profile',
+        name: 'ACP',
+        backend: 'acp',
+        providerId: null,
+        acpAgentId: 'acp-agent-1',
+        model: null,
+        reasoningEffort: 'auto',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    };
+    const permissionResults: Array<Promise<string | null>> = [];
+    acpStreamMock.mockImplementation(async function* (config) {
+      const approved = config.onPermissionRequested({
+        type: 'permission_requested',
+        requestId: 'permission-approve',
+        toolCallId: 'acp-tool-approve',
+        name: 'Run command',
+        arguments: JSON.stringify({ input: { command: 'pwd' } }),
+        summary: 'ACP agent requested permission.',
+        risk: 'execute',
+        options: [
+          { optionId: 'allow-once', name: 'Allow', kind: 'allow_once' },
+          { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
+        ],
+      });
+      permissionResults.push(approved);
+      await approved;
+
+      const rejected = config.onPermissionRequested({
+        type: 'permission_requested',
+        requestId: 'permission-reject',
+        toolCallId: 'acp-tool-reject',
+        name: 'Write file',
+        arguments: JSON.stringify({ input: { path: '/tmp/file' } }),
+        summary: 'ACP agent requested permission.',
+        risk: 'execute',
+        options: [
+          { optionId: 'allow-write', name: 'Allow', kind: 'allow_once' },
+          { optionId: 'reject-write', name: 'Reject', kind: 'reject_once' },
+        ],
+      });
+      permissionResults.push(rejected);
+      await rejected;
+      yield { type: 'done' };
+    });
+
+    const sendPromise = useAiChatStore.getState().sendMessage('ask ACP');
+    await waitFor(() => permissionResults.length === 1);
+    await waitFor(() => {
+      const assistant = useAiChatStore.getState().conversations[0]?.messages.find((message) => message.role === 'assistant');
+      return Boolean(assistant?.turn?.toolRounds.some((round) =>
+        round.toolCalls.some((toolCall) => toolCall.id === 'acp-tool-approve' && toolCall.approvalState === 'pending')
+      ));
+    });
+    useAiChatStore.getState().resolveToolApproval('acp-tool-approve', true);
+    await waitFor(() => permissionResults.length === 2);
+    await waitFor(() => {
+      const assistant = useAiChatStore.getState().conversations[0]?.messages.find((message) => message.role === 'assistant');
+      return Boolean(assistant?.turn?.toolRounds.some((round) =>
+        round.toolCalls.some((toolCall) => toolCall.id === 'acp-tool-reject' && toolCall.approvalState === 'pending')
+      ));
+    });
+    useAiChatStore.getState().resolveToolApproval('acp-tool-reject', false);
+
+    await sendPromise;
+    await expect(permissionResults[0]).resolves.toBe('allow-once');
+    await expect(permissionResults[1]).resolves.toBe('reject-write');
   });
 
   it('keeps the newer assistant snapshot after same-message save callbacks resolve out of order', async () => {

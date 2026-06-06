@@ -106,7 +106,48 @@ describe('OxideSens vNext runtime layers', () => {
 
     expect(profiles.profiles).toHaveLength(1);
     expect(profiles.defaultProfileId).toBe(profiles.profiles[0].id);
+    expect(profiles.profiles[0].backend).toBe('provider');
+    expect(profiles.profiles[0].acpAgentId).toBeNull();
     expect(profiles.profiles[0].providerId).toBe('provider-1');
     expect(profiles.profiles[0].model).toBe('model-1');
+  });
+
+  it('keeps legacy provider profiles separate from ACP profiles', () => {
+    const profiles = normalizeExecutionProfiles({
+      config: {
+        defaultProfileId: 'legacy',
+        profiles: [
+          {
+            id: 'legacy',
+            name: 'Legacy',
+            providerId: 'provider-1',
+            model: 'model-1',
+            reasoningEffort: 'auto',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            id: 'acp',
+            name: 'ACP',
+            backend: 'acp',
+            providerId: null,
+            acpAgentId: 'codex-local',
+            model: null,
+            reasoningEffort: 'auto',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      },
+      providerId: 'provider-1',
+      model: 'model-1',
+      reasoningEffort: 'auto',
+      toolUse: baseAiSettings.toolUse,
+    });
+
+    expect(profiles.profiles[0].backend).toBe('provider');
+    expect(profiles.profiles[0].acpAgentId).toBeNull();
+    expect(profiles.profiles[1].backend).toBe('acp');
+    expect(profiles.profiles[1].acpAgentId).toBe('codex-local');
   });
 });

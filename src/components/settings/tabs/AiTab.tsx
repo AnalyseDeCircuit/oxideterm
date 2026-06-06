@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import { Brain, ChevronDown, ChevronRight, Copy, Plus, RefreshCw, Trash2, Wrench, X } from 'lucide-react';
 import { McpServersPanel } from '@/components/settings/McpServersPanel';
 import { ProviderKeyInput } from '@/components/settings/ProviderKeyInput';
@@ -19,6 +20,15 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { AiProvider, AiProviderType } from '@/types';
 import type { AiReasoningEffort } from '@/lib/ai/providers';
+import {
+    defaultAcpAgentAuthState,
+    defaultAcpAgentCapabilityPolicy,
+    defaultAcpAgentRuntimeStatus,
+    type AcpAgentConfig,
+    type AcpAgentCapabilityPolicy,
+    type AcpAgentRuntimeStatus,
+    type AcpAgentAuthStatus,
+} from '@/lib/ai/acp/acpTypes';
 import {
     DEFAULT_AI_TOOL_MAX_ROUNDS,
     MAX_AI_TOOL_MAX_ROUNDS,
@@ -108,9 +118,54 @@ const REASONING_EFFORTS: AiReasoningEffort[] = ['auto', 'off', 'low', 'medium', 
 const INHERIT_REASONING = '__inherit__';
 
 type ReasoningSelectValue = AiReasoningEffort | typeof INHERIT_REASONING;
+type AcpAgentPatch = Partial<Omit<AcpAgentConfig, 'capabilityPolicy' | 'auth' | 'status'>> & {
+    capabilityPolicy?: Partial<AcpAgentCapabilityPolicy>;
+    auth?: Partial<{ status: AcpAgentAuthStatus; accountLabel: string | null }>;
+    status?: Partial<AcpAgentRuntimeStatus>;
+};
+
+type AcpProbeAgentResponse = {
+    runtimeState: AcpAgentRuntimeStatus['state'];
+    authStatus: AcpAgentAuthStatus;
+    lastErrorKind?: string | null;
+};
 
 function reasoningValueOrNull(value: string): AiReasoningEffort | null {
     return value === INHERIT_REASONING ? null : value as AiReasoningEffort;
+}
+
+function acpListDraftId(prefix: string): string {
+    return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `${prefix}-${crypto.randomUUID()}`
+        : `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function acpArgsDraft(args: string[]): string {
+    return args.join('\n');
+}
+
+function acpArgsFromDraft(value: string): string[] {
+    return value.split('\n').map((arg) => arg.trim()).filter(Boolean);
+}
+
+function acpEnvDraft(env: Record<string, string>): string {
+    return Object.entries(env).map(([key, value]) => `${key}=${value}`).join('\n');
+}
+
+function acpEnvFromDraft(value: string): Record<string, string> {
+    return Object.fromEntries(
+        value
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => {
+                const separatorIndex = line.indexOf('=');
+                return separatorIndex === -1
+                    ? [line, '']
+                    : [line.slice(0, separatorIndex).trim(), line.slice(separatorIndex + 1)];
+            })
+            .filter(([key]) => key.length > 0),
+    );
 }
 
 export const AiTab = ({
@@ -138,6 +193,10 @@ export const AiTab = ({
     const [providerSettingsExpanded, setProviderSettingsExpanded] = useState(true);
     const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
     const [expandedProviderModels, setExpandedProviderModels] = useState<Record<string, boolean>>({});
+    const [acpAgentsExpanded, setAcpAgentsExpanded] = useState(false);
+    const [testingAcpAgentId, setTestingAcpAgentId] = useState<string | null>(null);
+    const [savingAcpAuthAgentId, setSavingAcpAuthAgentId] = useState<string | null>(null);
+    const [acpAuthTokenDrafts, setAcpAuthTokenDrafts] = useState<Record<string, string>>({});
     const [toolUseExpanded, setToolUseExpanded] = useState(true);
     const toolUseSectionRef = useRef<HTMLDivElement | null>(null);
     const [newProviderType, setNewProviderType] = useState<AiProviderType>('openai_compatible');
@@ -152,6 +211,9 @@ export const AiTab = ({
         });
     };
     const selectedProviderTemplate = PROVIDER_TEMPLATES.find((template) => template.type === newProviderType) ?? PROVIDER_TEMPLATES[0];
+    const acpAgents = ai.acpAgents ?? [];
+    const acpAgentsRef = useRef<AcpAgentConfig[]>(acpAgents);
+    acpAgentsRef.current = acpAgents;
     const profilesConfig: AiExecutionProfilesConfig = ai.executionProfiles ?? {
         defaultProfileId: 'default',
         profiles: [
@@ -175,6 +237,121 @@ export const AiTab = ({
         updateProfiles(profilesConfig.profiles.map((profile) => (
             profile.id === profileId ? { ...profile, ...patch, updatedAt: Date.now() } : profile
         )));
+    };
+    const patchAcpAgent = (agentId: string, patch: AcpAgentPatch) => {
+        updateAi('acpAgents', acpAgentsRef.current.map((agent) => (
+            agent.id === agentId
+                ? {
+                    ...agent,
+                    ...patch,
+                    capabilityPolicy: {
+                        ...agent.capabilityPolicy,
+                        ...(patch.capabilityPolicy ?? {}),
+                    },
+                    auth: {
+                        ...agent.auth,
+                        ...(patch.auth ?? {}),
+                    },
+                    status: {
+                        ...agent.status,
+                        ...(patch.status ?? {}),
+                    },
+                }
+                : agent
+        )));
+    };
+    const addAcpAgent = () => {
+        const id = acpListDraftId('acp-agent');
+        const agent: AcpAgentConfig = {
+            id,
+            displayName: t('settings_view.ai.acp_agent_new_name'),
+            command: '',
+            args: [],
+            env: {},
+            cwd: null,
+            enabled: true,
+            auth: defaultAcpAgentAuthState(),
+            capabilityPolicy: defaultAcpAgentCapabilityPolicy(),
+            status: defaultAcpAgentRuntimeStatus(),
+        };
+        updateAi('acpAgents', [...acpAgentsRef.current, agent]);
+        setAcpAgentsExpanded(true);
+    };
+    const deleteAcpAgent = (agentId: string) => {
+        updateAi('acpAgents', acpAgentsRef.current.filter((agent) => agent.id !== agentId));
+        updateProfiles(profilesConfig.profiles.map((profile) => (
+            profile.acpAgentId === agentId
+                ? { ...profile, acpAgentId: null, updatedAt: Date.now() }
+                : profile
+        )));
+    };
+    const testAcpAgent = async (agent: AcpAgentConfig) => {
+        setTestingAcpAgentId(agent.id);
+        try {
+            const response = await invoke<AcpProbeAgentResponse>('acp_probe_agent', {
+                request: {
+                    launchConfig: {
+                        id: agent.id,
+                        displayName: agent.displayName,
+                        command: agent.command,
+                        args: agent.args,
+                        env: agent.env,
+                        cwd: agent.cwd,
+                    },
+                    capabilityPolicy: agent.capabilityPolicy,
+                },
+            });
+            patchAcpAgent(agent.id, {
+                auth: { status: response.authStatus },
+                status: {
+                    state: response.runtimeState,
+                    lastErrorKind: response.lastErrorKind ?? null,
+                },
+            });
+        } catch {
+            // Tauri command failures can include transport details. Store only
+            // a stable safe category in settings.
+            patchAcpAgent(agent.id, {
+                auth: { status: 'unknown' },
+                status: { state: 'error', lastErrorKind: 'invoke' },
+            });
+        } finally {
+            setTestingAcpAgentId(null);
+        }
+    };
+    const saveAcpAuthToken = async (agent: AcpAgentConfig) => {
+        const token = acpAuthTokenDrafts[agent.id]?.trim();
+        if (!token) return;
+
+        setSavingAcpAuthAgentId(agent.id);
+        try {
+            await api.setAiProviderApiKey(`acp:${agent.id}`, token);
+            setAcpAuthTokenDrafts((drafts) => ({ ...drafts, [agent.id]: '' }));
+            patchAcpAgent(agent.id, {
+                auth: {
+                    status: 'authenticated',
+                    accountLabel: agent.displayName.trim() || agent.id,
+                },
+            });
+        } catch (error) {
+            toastError(t('settings_view.ai.save_failed', { error: String(error) }));
+        } finally {
+            setSavingAcpAuthAgentId(null);
+        }
+    };
+    const deleteAcpAuthToken = async (agent: AcpAgentConfig) => {
+        setSavingAcpAuthAgentId(agent.id);
+        try {
+            await api.deleteAiProviderApiKey(`acp:${agent.id}`);
+            setAcpAuthTokenDrafts((drafts) => ({ ...drafts, [agent.id]: '' }));
+            patchAcpAgent(agent.id, {
+                auth: { status: 'unknown', accountLabel: null },
+            });
+        } catch (error) {
+            toastError(t('settings_view.ai.remove_failed', { error: String(error) }));
+        } finally {
+            setSavingAcpAuthAgentId(null);
+        }
     };
     const addProfile = () => {
         const now = Date.now();
@@ -272,7 +449,7 @@ export const AiTab = ({
 
 	                    <Separator className="my-6 opacity-50" />
 
-	                    <div className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
+		                    <div className={ai.enabled ? '' : 'opacity-50'}>
                             <div className="mb-6 max-w-3xl rounded-lg border border-theme-border/70 bg-theme-bg/60 p-4">
                                 <div className="mb-3 flex items-center justify-between gap-3">
                                     <div>
@@ -320,29 +497,73 @@ export const AiTab = ({
                                                     <Trash2 className="h-3.5 w-3.5 text-red-400" />
                                                 </Button>
                                             </div>
-                                            <div className="mt-3 grid gap-2 md:grid-cols-3">
+                                            <div className="mt-3 grid gap-2 md:grid-cols-4">
                                                 <Select
-                                                    value={profile.providerId ?? 'inherit'}
+                                                    value={profile.backend ?? 'provider'}
+                                                    onValueChange={(value) => patchProfile(profile.id, value === 'acp'
+                                                        ? {
+                                                            backend: 'acp',
+                                                            providerId: null,
+                                                            model: null,
+                                                            acpAgentId: profile.acpAgentId ?? acpAgents[0]?.id ?? null,
+                                                        }
+                                                        : {
+                                                            backend: 'provider',
+                                                            providerId: ai.activeProviderId,
+                                                            model: ai.activeModel,
+                                                            acpAgentId: null,
+                                                        })}
+                                                >
+                                                    <SelectTrigger className="h-8">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="provider">{t('settings_view.ai.profile_backend_provider')}</SelectItem>
+                                                        <SelectItem value="acp">{t('settings_view.ai.profile_backend_acp')}</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                {(profile.backend ?? 'provider') === 'acp' ? (
+                                                    <Select
+                                                        value={profile.acpAgentId ?? 'none'}
+                                                        onValueChange={(value) => patchProfile(profile.id, { acpAgentId: value === 'none' ? null : value })}
+                                                    >
+                                                        <SelectTrigger className="h-8">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="none">{t('settings_view.ai.profile_no_acp_agent')}</SelectItem>
+                                                            {acpAgents.map((agent) => (
+                                                                <SelectItem key={agent.id} value={agent.id}>{agent.displayName || agent.id}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <Select
+                                                        value={profile.providerId ?? 'inherit'}
                                                     onValueChange={(value) => patchProfile(profile.id, {
                                                         providerId: value === 'inherit' ? null : value,
                                                         model: value === 'inherit'
                                                             ? null
                                                             : ai.providers.find((provider) => provider.id === value)?.defaultModel ?? null,
                                                     })}
-                                                >
-                                                    <SelectTrigger className="h-8">
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="inherit">{t('settings_view.ai.profile_inherit_provider', { defaultValue: 'Use active provider' })}</SelectItem>
-                                                        {ai.providers.map((provider) => (
-                                                            <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                                    >
+                                                        <SelectTrigger className="h-8">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="inherit">{t('settings_view.ai.profile_inherit_provider')}</SelectItem>
+                                                            {ai.providers.map((provider) => (
+                                                                <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                )}
                                                 <Input
                                                     value={profile.model ?? ''}
-                                                    placeholder={t('settings_view.ai.profile_inherit_model', { defaultValue: 'Use provider default' })}
+                                                    disabled={(profile.backend ?? 'provider') === 'acp'}
+                                                    placeholder={(profile.backend ?? 'provider') === 'acp'
+                                                        ? t('settings_view.ai.profile_acp_model_disabled')
+                                                        : t('settings_view.ai.profile_inherit_model')}
                                                     onChange={(event) => patchProfile(profile.id, { model: event.currentTarget.value || null })}
                                                     className="h-8"
                                                 />
@@ -366,6 +587,200 @@ export const AiTab = ({
                                     ))}
                                 </div>
                             </div>
+
+                            <button
+                                type="button"
+                                className="mb-4 flex w-full max-w-3xl items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-theme-text-muted hover:bg-theme-bg-hover/40 hover:text-theme-text transition-colors"
+                                onClick={() => setAcpAgentsExpanded((current) => !current)}
+                                aria-expanded={acpAgentsExpanded}
+                            >
+                                <div>
+                                    <h4 className="text-sm font-medium text-theme-text uppercase tracking-wider">{t('settings_view.ai.acp_agents')}</h4>
+                                    <p className="mt-1 text-xs text-theme-text-muted">
+                                        {t('settings_view.ai.acp_agents_summary', { count: acpAgents.length })}
+                                    </p>
+                                </div>
+                                {acpAgentsExpanded
+                                    ? <ChevronDown className="mt-0.5 h-4 w-4 shrink-0" />
+                                    : <ChevronRight className="mt-0.5 h-4 w-4 shrink-0" />}
+                            </button>
+
+                            {acpAgentsExpanded && (
+                                <div className="mb-6 max-w-3xl space-y-3">
+                                    <div className="flex justify-end">
+                                        <Button type="button" variant="outline" size="sm" onClick={addAcpAgent} className="gap-1.5">
+                                            <Plus className="h-3.5 w-3.5" />
+                                            {t('settings_view.ai.acp_agent_add')}
+                                        </Button>
+                                    </div>
+                                    {acpAgents.length === 0 && (
+                                        <div className="rounded-md border border-dashed border-theme-border/70 bg-theme-bg/40 p-4 text-xs text-theme-text-muted">
+                                            {t('settings_view.ai.acp_agents_empty')}
+                                        </div>
+                                    )}
+                                    {acpAgents.map((agent) => (
+                                        <div key={agent.id} className="rounded-lg border border-theme-border/70 bg-theme-bg/70 p-4">
+                                            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                                                <label className="flex items-center gap-2 text-xs text-theme-text-muted cursor-pointer">
+                                                    <Checkbox checked={agent.enabled} onCheckedChange={(checked) => patchAcpAgent(agent.id, { enabled: !!checked })} />
+                                                    {agent.enabled ? t('settings_view.ai.acp_agent_enabled') : t('settings_view.ai.acp_agent_disabled')}
+                                                </label>
+                                                <div className="flex items-center gap-2">
+                                                    {agent.status.lastErrorKind && (
+                                                        <span className="text-[10px] text-theme-text-muted">
+                                                            {t('settings_view.ai.acp_agent_last_error', { error: agent.status.lastErrorKind })}
+                                                        </span>
+                                                    )}
+                                                    <span className="rounded bg-theme-bg-panel px-2 py-1 text-[10px] uppercase tracking-wider text-theme-text-muted">
+                                                        {t(`settings_view.ai.acp_agent_status_${agent.status.state}`)}
+                                                    </span>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="h-7 gap-1.5 px-2 text-xs"
+                                                        disabled={testingAcpAgentId === agent.id}
+                                                        onClick={() => void testAcpAgent(agent)}
+                                                    >
+                                                        <RefreshCw className={cn('h-3 w-3', testingAcpAgentId === agent.id && 'animate-spin')} />
+                                                        {testingAcpAgentId === agent.id
+                                                            ? t('settings_view.ai.acp_agent_testing')
+                                                            : t('settings_view.ai.acp_agent_test')}
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-7 px-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-400/10"
+                                                        disabled={testingAcpAgentId === agent.id}
+                                                        onClick={() => deleteAcpAgent(agent.id)}
+                                                    >
+                                                        {t('settings_view.ai.remove')}
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-3 text-xs md:grid-cols-2">
+                                                <div className="grid gap-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.acp_agent_name')}</Label>
+                                                    <Input
+                                                        value={agent.displayName}
+                                                        onChange={(event) => patchAcpAgent(agent.id, { displayName: event.currentTarget.value })}
+                                                        className="bg-theme-bg h-8 text-xs"
+                                                    />
+                                                </div>
+                                                <div className="grid gap-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.acp_agent_command')}</Label>
+                                                    <Input
+                                                        value={agent.command}
+                                                        onChange={(event) => patchAcpAgent(agent.id, { command: event.currentTarget.value })}
+                                                        className="bg-theme-bg h-8 text-xs font-mono"
+                                                        placeholder={t('settings_view.ai.acp_agent_command_placeholder')}
+                                                    />
+                                                </div>
+                                                <div className="grid gap-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.acp_agent_cwd')}</Label>
+                                                    <Input
+                                                        value={agent.cwd ?? ''}
+                                                        onChange={(event) => patchAcpAgent(agent.id, { cwd: event.currentTarget.value.trim() || null })}
+                                                        className="bg-theme-bg h-8 text-xs font-mono"
+                                                        placeholder={t('settings_view.ai.acp_agent_cwd_placeholder')}
+                                                    />
+                                                </div>
+                                                <div className="grid gap-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.acp_agent_auth')}</Label>
+                                                    <div className="flex h-8 items-center rounded border border-theme-border bg-theme-bg px-3 text-xs text-theme-text-muted">
+                                                        {t(`settings_view.ai.acp_agent_auth_${agent.auth.status}`)}
+                                                    </div>
+                                                </div>
+                                                <div className="grid gap-1 md:col-span-2">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.acp_agent_auth_token')}</Label>
+                                                    <div className="flex gap-2">
+                                                        <Input
+                                                            type="password"
+                                                            value={acpAuthTokenDrafts[agent.id] ?? ''}
+                                                            onChange={(event) => setAcpAuthTokenDrafts((drafts) => ({
+                                                                ...drafts,
+                                                                [agent.id]: event.currentTarget.value,
+                                                            }))}
+                                                            className="h-8 flex-1 bg-theme-bg text-xs"
+                                                            placeholder={agent.auth.status === 'authenticated'
+                                                                ? t('settings_view.ai.acp_agent_auth_token_saved')
+                                                                : t('settings_view.ai.acp_agent_auth_token_placeholder')}
+                                                        />
+                                                        <Button
+                                                            type="button"
+                                                            variant="secondary"
+                                                            size="sm"
+                                                            className="h-8 text-xs"
+                                                            disabled={!acpAuthTokenDrafts[agent.id]?.trim() || savingAcpAuthAgentId === agent.id}
+                                                            onClick={() => void saveAcpAuthToken(agent)}
+                                                        >
+                                                            {savingAcpAuthAgentId === agent.id ? t('settings_view.ai.saving') : t('settings_view.ai.save')}
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-8 text-xs text-red-400 hover:text-red-300 hover:bg-red-400/10"
+                                                            disabled={agent.auth.status !== 'authenticated' || savingAcpAuthAgentId === agent.id}
+                                                            onClick={() => void deleteAcpAuthToken(agent)}
+                                                        >
+                                                            {t('settings_view.ai.remove')}
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                                <div className="grid gap-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.acp_agent_args')}</Label>
+                                                    <textarea
+                                                        value={acpArgsDraft(agent.args)}
+                                                        onChange={(event) => patchAcpAgent(agent.id, { args: acpArgsFromDraft(event.currentTarget.value) })}
+                                                        className="min-h-[72px] rounded-md border border-theme-border bg-theme-bg px-3 py-2 text-xs font-mono text-theme-text outline-none focus:border-theme-accent"
+                                                        placeholder={t('settings_view.ai.acp_agent_args_placeholder')}
+                                                    />
+                                                </div>
+                                                <div className="grid gap-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.acp_agent_env')}</Label>
+                                                    <textarea
+                                                        value={acpEnvDraft(agent.env)}
+                                                        onChange={(event) => patchAcpAgent(agent.id, { env: acpEnvFromDraft(event.currentTarget.value) })}
+                                                        className="min-h-[72px] rounded-md border border-theme-border bg-theme-bg px-3 py-2 text-xs font-mono text-theme-text outline-none focus:border-theme-accent"
+                                                        placeholder={t('settings_view.ai.acp_agent_env_placeholder')}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="mt-3 rounded-md border border-theme-border/45 bg-theme-bg-card/45 p-3">
+                                                <div className="mb-2 text-xs font-medium text-theme-text">{t('settings_view.ai.acp_agent_capabilities')}</div>
+                                                <div className="grid grid-cols-1 gap-2 text-xs text-theme-text-muted md:grid-cols-3">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <Checkbox
+                                                            checked={agent.capabilityPolicy.fsReadTextFile}
+                                                            onCheckedChange={(checked) => patchAcpAgent(agent.id, { capabilityPolicy: { fsReadTextFile: !!checked } })}
+                                                        />
+                                                        {t('settings_view.ai.acp_agent_capability_read')}
+                                                    </label>
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <Checkbox
+                                                            checked={agent.capabilityPolicy.fsWriteTextFile}
+                                                            onCheckedChange={(checked) => patchAcpAgent(agent.id, { capabilityPolicy: { fsWriteTextFile: !!checked } })}
+                                                        />
+                                                        {t('settings_view.ai.acp_agent_capability_write')}
+                                                    </label>
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <Checkbox
+                                                            checked={agent.capabilityPolicy.terminal}
+                                                            onCheckedChange={(checked) => patchAcpAgent(agent.id, { capabilityPolicy: { terminal: !!checked } })}
+                                                        />
+                                                        {t('settings_view.ai.acp_agent_capability_terminal')}
+                                                    </label>
+                                                </div>
+                                                <p className="mt-2 text-[11px] leading-relaxed text-theme-text-muted">
+                                                    {t('settings_view.ai.acp_agent_capabilities_hint')}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
 
 	                        <button
 	                            type="button"
