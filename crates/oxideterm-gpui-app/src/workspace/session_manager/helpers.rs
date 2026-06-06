@@ -491,10 +491,51 @@ pub(super) fn ssh_config_from_saved_connection(
         username: conn.username.clone(),
         auth,
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
+        upstream_proxy: upstream_proxy_config_from_saved_policy(store, &conn.upstream_proxy),
         agent_forwarding: conn.options.agent_forwarding,
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         ..SshConfig::default()
+    })
+}
+
+pub(super) fn upstream_proxy_config_from_saved_policy(
+    store: &ConnectionStore,
+    policy: &SavedUpstreamProxyPolicy,
+) -> Option<UpstreamProxyConfig> {
+    match policy {
+        SavedUpstreamProxyPolicy::UseGlobal | SavedUpstreamProxyPolicy::Direct => None,
+        SavedUpstreamProxyPolicy::Custom { proxy } => {
+            Some(upstream_proxy_config_from_saved_proxy(store, proxy)?)
+        }
+    }
+}
+
+fn upstream_proxy_config_from_saved_proxy(
+    store: &ConnectionStore,
+    proxy: &SavedUpstreamProxyConfig,
+) -> Option<UpstreamProxyConfig> {
+    let auth = match &proxy.auth {
+        SavedUpstreamProxyAuth::None => UpstreamProxyAuth::None,
+        SavedUpstreamProxyAuth::Password { username, .. } => UpstreamProxyAuth::Password {
+            username: username.clone(),
+            password: store
+                .get_saved_upstream_proxy_password(&proxy.auth)
+                .ok()?
+                .into_zeroizing(),
+        },
+    };
+
+    Some(UpstreamProxyConfig {
+        protocol: match proxy.protocol {
+            SavedUpstreamProxyProtocol::Socks5 => UpstreamProxyProtocol::Socks5,
+            SavedUpstreamProxyProtocol::HttpConnect => UpstreamProxyProtocol::HttpConnect,
+        },
+        host: proxy.host.clone(),
+        port: proxy.port,
+        auth,
+        remote_dns: proxy.remote_dns,
+        no_proxy: proxy.no_proxy.clone(),
     })
 }
 

@@ -847,6 +847,26 @@ impl ConnectionStore {
         }
     }
 
+    pub fn get_saved_upstream_proxy_password(
+        &self,
+        auth: &SavedUpstreamProxyAuth,
+    ) -> Result<SecretString> {
+        match auth {
+            SavedUpstreamProxyAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => self.keychain.get(keychain_id),
+            SavedUpstreamProxyAuth::Password {
+                plaintext_password: Some(password),
+                ..
+            } => Ok(password.clone()),
+            SavedUpstreamProxyAuth::Password {
+                keychain_id: None, ..
+            } => bail!("Upstream proxy password is not saved"),
+            SavedUpstreamProxyAuth::None => bail!("Upstream proxy does not use password auth"),
+        }
+    }
+
     pub fn create_managed_ssh_key_from_text(
         &mut self,
         private_key: SecretString,

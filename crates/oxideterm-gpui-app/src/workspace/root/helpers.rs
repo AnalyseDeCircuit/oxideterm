@@ -1347,6 +1347,10 @@ fn saved_manual_preset_hop_config(
             username: hop.username.clone(),
             auth: self::session_manager::auth_method_from_saved_auth(store, &hop.auth)?,
             proxy_chain: None,
+            upstream_proxy: self::session_manager::upstream_proxy_config_from_saved_policy(
+                store,
+                &connection.upstream_proxy,
+            ),
             agent_forwarding: hop.agent_forwarding,
             strict_host_key_checking: true,
             ..SshConfig::default()

@@ -12,7 +12,8 @@ use gpui::{Div, StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
-    SavedProxyHop, SecretString, SerialProfile, SshConfigHost, list_ssh_config_hosts,
+    SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
+    SavedUpstreamProxyProtocol, SecretString, SerialProfile, SshConfigHost, list_ssh_config_hosts,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord,
@@ -49,7 +50,10 @@ use oxideterm_settings::{
     ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS,
     export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
 };
-use oxideterm_ssh::{AuthMethod, ManagedKeyResolver, ProxyHopConfig, SshTransportError};
+use oxideterm_ssh::{
+    AuthMethod, ManagedKeyResolver, ProxyHopConfig, SshTransportError, UpstreamProxyAuth,
+    UpstreamProxyConfig, UpstreamProxyProtocol,
+};
 
 use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;

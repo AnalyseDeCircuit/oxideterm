@@ -35,3 +35,4 @@ docs/tauri/*
 AGENTS.md
 tasks/*
 docs/native-mosh-spike-boundary.md
+docs/design/upstream-proxy-support.md
