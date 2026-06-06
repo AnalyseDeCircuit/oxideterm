@@ -128,6 +128,66 @@ pub struct SavedProxyHop {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum SavedUpstreamProxyProtocol {
+    Socks5,
+    HttpConnect,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SavedUpstreamProxyAuth {
+    None,
+    Password {
+        username: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keychain_id: Option<String>,
+        #[serde(default, rename = "password", skip_serializing)]
+        plaintext_password: Option<SecretString>,
+    },
+}
+
+impl Default for SavedUpstreamProxyAuth {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedUpstreamProxyConfig {
+    pub protocol: SavedUpstreamProxyProtocol,
+    pub host: String,
+    pub port: u16,
+    #[serde(default)]
+    pub auth: SavedUpstreamProxyAuth,
+    #[serde(default = "default_proxy_remote_dns")]
+    pub remote_dns: bool,
+    #[serde(default)]
+    pub no_proxy: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum SavedUpstreamProxyPolicy {
+    UseGlobal,
+    Direct,
+    Custom { proxy: SavedUpstreamProxyConfig },
+}
+
+impl SavedUpstreamProxyPolicy {
+    pub fn is_use_global(&self) -> bool {
+        matches!(self, Self::UseGlobal)
+    }
+}
+
+impl Default for SavedUpstreamProxyPolicy {
+    fn default() -> Self {
+        Self::UseGlobal
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PrivilegeCredentialKind {
     SudoPassword,
     SuPassword,
@@ -198,6 +258,8 @@ pub struct SavedConnection {
     pub auth: SavedAuth,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proxy_chain: Vec<SavedProxyHop>,
+    #[serde(default, skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global")]
+    pub upstream_proxy: SavedUpstreamProxyPolicy,
     #[serde(default)]
     pub options: ConnectionOptions,
     pub created_at: DateTime<Utc>,
@@ -222,6 +284,10 @@ fn default_port() -> u16 {
 }
 
 fn default_true() -> bool {
+    true
+}
+
+fn default_proxy_remote_dns() -> bool {
     true
 }
 
@@ -257,6 +323,7 @@ pub struct ConnectionInfo {
     pub managed_key_id: Option<String>,
     pub managed_key_name: Option<String>,
     pub proxy_chain: Vec<ProxyHopInfo>,
+    pub upstream_proxy: SavedUpstreamProxyPolicy,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub color: Option<String>,
@@ -316,6 +383,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             managed_key_id: conn.auth.managed_key_id().map(ToOwned::to_owned),
             managed_key_name: None,
             proxy_chain: conn.proxy_chain.iter().map(ProxyHopInfo::from).collect(),
+            upstream_proxy: conn.upstream_proxy.clone(),
             created_at: conn.created_at.to_rfc3339(),
             last_used_at: conn.last_used_at.map(|time| time.to_rfc3339()),
             color: conn.color.clone(),
@@ -433,6 +501,7 @@ pub struct SaveConnectionRequest {
     pub username: String,
     pub auth: SavedAuth,
     pub proxy_chain: Vec<SavedProxyHop>,
+    pub upstream_proxy: SavedUpstreamProxyPolicy,
     pub color: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,

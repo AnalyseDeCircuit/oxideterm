@@ -283,7 +283,13 @@ impl SshTransportClient {
         config: &SshConfig,
         remote_forward_handler: RemoteForwardHandlerSlot,
     ) -> Result<(client::Handle<NativeClientHandler>, AuthBannerSink), SshTransportError> {
-        let socket_addr = resolve_socket_addr(&config.host, config.port)?;
+        let stream = dial_initial_tcp(
+            &config.host,
+            config.port,
+            config.timeout_secs,
+            config.upstream_proxy.as_ref(),
+        )
+        .await?;
 
         let client_config = ssh_client_config();
         let handler = NativeClientHandler::new(
@@ -298,7 +304,7 @@ impl SshTransportClient {
         let auth_banners = handler.auth_banners();
         let mut handle = tokio::time::timeout(
             Duration::from_secs(config.timeout_secs),
-            client::connect(Arc::new(client_config), socket_addr, handler),
+            client::connect_stream(Arc::new(client_config), stream, handler),
         )
         .await
         .map_err(|_| SshTransportError::Timeout)?
@@ -377,14 +383,16 @@ impl SshTransportClient {
         &self,
         hop: &ProxyHopConfig,
     ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
-        let socket_addr = resolve_socket_addr(&hop.host, hop.port)?;
+        let stream = dial_initial_tcp(
+            &hop.host,
+            hop.port,
+            self.config.timeout_secs,
+            self.config.upstream_proxy.as_ref(),
+        )
+        .await?;
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
-            client::connect(
-                Arc::new(ssh_client_config()),
-                socket_addr,
-                proxy_hop_handler(hop),
-            ),
+            client::connect_stream(Arc::new(ssh_client_config()), stream, proxy_hop_handler(hop)),
         )
         .await
         .map_err(|_| SshTransportError::Timeout)?

@@ -46,20 +46,6 @@ fn validate_proxy_chain_depth(chain: &[ProxyHopConfig]) -> Result<(), SshTranspo
     Ok(())
 }
 
-fn resolve_socket_addr(host: &str, port: u16) -> Result<SocketAddr, SshTransportError> {
-    let addr = format!("{host}:{port}");
-    addr.to_socket_addrs()
-        .map_err(|error| SshTransportError::DnsResolution {
-            address: addr.clone(),
-            message: error.to_string(),
-        })?
-        .next()
-        .ok_or_else(|| SshTransportError::DnsResolution {
-            address: addr,
-            message: "no address found".to_string(),
-        })
-}
-
 fn proxy_hop_handler(hop: &ProxyHopConfig) -> NativeClientHandler {
     NativeClientHandler::new(
         hop.host.clone(),

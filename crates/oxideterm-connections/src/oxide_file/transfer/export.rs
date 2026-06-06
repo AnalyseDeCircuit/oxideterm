@@ -280,9 +280,40 @@ fn export_connection(
         color: conn.color.clone(),
         tags: conn.tags.clone(),
         options: conn.options.clone(),
+        upstream_proxy: export_upstream_proxy_policy(&conn.upstream_proxy),
         proxy_chain,
         forwards,
     })
+}
+
+fn export_upstream_proxy_policy(policy: &SavedUpstreamProxyPolicy) -> EncryptedUpstreamProxyPolicy {
+    match policy {
+        SavedUpstreamProxyPolicy::UseGlobal => EncryptedUpstreamProxyPolicy::UseGlobal,
+        SavedUpstreamProxyPolicy::Direct => EncryptedUpstreamProxyPolicy::Direct,
+        SavedUpstreamProxyPolicy::Custom { proxy } => EncryptedUpstreamProxyPolicy::Custom {
+            proxy: EncryptedUpstreamProxyConfig {
+                protocol: proxy.protocol,
+                host: proxy.host.clone(),
+                port: proxy.port,
+                auth: export_upstream_proxy_auth(&proxy.auth),
+                remote_dns: proxy.remote_dns,
+                no_proxy: proxy.no_proxy.clone(),
+            },
+        },
+    }
+}
+
+fn export_upstream_proxy_auth(auth: &SavedUpstreamProxyAuth) -> EncryptedUpstreamProxyAuth {
+    match auth {
+        SavedUpstreamProxyAuth::None => EncryptedUpstreamProxyAuth::None,
+        SavedUpstreamProxyAuth::Password { username, .. } => {
+            // .oxide archives preserve proxy auth metadata only; the password and
+            // local keychain id are intentionally not portable.
+            EncryptedUpstreamProxyAuth::Password {
+                username: username.clone(),
+            }
+        }
+    }
 }
 
 fn export_proxy_chain(

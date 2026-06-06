@@ -1206,6 +1206,7 @@ mod auto_route_tests {
             username: "root".to_string(),
             auth: SavedAuth::Agent,
             proxy_chain,
+            upstream_proxy: oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal,
             options: ConnectionOptions::default(),
             created_at: Utc::now(),
             last_used_at: None,

@@ -5,7 +5,6 @@ use std::{
     collections::HashMap,
     fs::{self, OpenOptions},
     io::{BufRead, BufReader, Write},
-    net::ToSocketAddrs,
     path::{Path, PathBuf},
     sync::{Arc, LazyLock},
     time::{Duration, SystemTime},
@@ -19,7 +18,10 @@ use russh::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use crate::SshTransportError;
+use crate::{
+    SshTransportError,
+    upstream_proxy::{UpstreamProxyConfig, dial_initial_tcp},
+};
 
 const CACHE_TTL_SECS: u64 = 3600;
 const MAX_CACHE_ENTRIES: usize = 500;
@@ -568,23 +570,24 @@ impl client::Handler for PreflightHandler {
 }
 
 pub async fn check_host_key(host: &str, port: u16, timeout_secs: u64) -> HostKeyStatus {
+    check_host_key_with_upstream_proxy(host, port, timeout_secs, None).await
+}
+
+pub async fn check_host_key_with_upstream_proxy(
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    upstream_proxy: Option<&UpstreamProxyConfig>,
+) -> HostKeyStatus {
     if HOST_KEY_CACHE.get_verified(host, port).is_some() {
         return HostKeyStatus::Verified;
     }
 
-    let addr = format!("{host}:{port}");
-    let socket_addr = match addr.to_socket_addrs() {
-        Ok(mut addrs) => match addrs.next() {
-            Some(addr) => addr,
-            None => {
-                return HostKeyStatus::Error {
-                    message: format!("Could not resolve address: {addr}"),
-                };
-            }
-        },
+    let stream = match dial_initial_tcp(host, port, timeout_secs, upstream_proxy).await {
+        Ok(stream) => stream,
         Err(error) => {
             return HostKeyStatus::Error {
-                message: format!("DNS resolution failed: {error}"),
+                message: error.to_string(),
             };
         }
     };
@@ -598,7 +601,7 @@ pub async fn check_host_key(host: &str, port: u16, timeout_secs: u64) -> HostKey
 
     let result = tokio::time::timeout(
         Duration::from_secs(timeout_secs),
-        client::connect(Arc::new(config), socket_addr, handler),
+        client::connect_stream(Arc::new(config), stream, handler),
     )
     .await;
 

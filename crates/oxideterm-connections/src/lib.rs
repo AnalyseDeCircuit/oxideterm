@@ -33,6 +33,7 @@ pub use store::{
     ManagedSshKeyInfo, ManagedSshKeyOrigin, ManagedSshKeyUsage, PrivilegeCredentialKind,
     ProxyHopInfo, SaveConnectionRequest, SavePrivilegeCredentialRequest, SaveSerialProfileRequest,
     SavedAuth, SavedConnection, SavedConnectionSyncRecord, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot, SavedPrivilegeCredential, SavedProxyHop, SerialFlowControl,
-    SerialParity, SerialProfile, validate_group_name,
+    SavedConnectionsSyncSnapshot, SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth,
+    SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol,
+    SerialFlowControl, SerialParity, SerialProfile, validate_group_name,
 };

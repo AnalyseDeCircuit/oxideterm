@@ -6,6 +6,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use crate::upstream_proxy::UpstreamProxyConfig;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SshConfig {
     pub host: String,
@@ -21,6 +23,8 @@ pub struct SshConfig {
     pub rows: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_chain: Option<Vec<ProxyHopConfig>>,
+    #[serde(default, skip)]
+    pub upstream_proxy: Option<UpstreamProxyConfig>,
     #[serde(default)]
     pub strict_host_key_checking: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,9 +61,18 @@ impl SshConfig {
                 .collect::<Vec<_>>()
                 .join(">")
         });
+        let upstream_proxy_key = self
+            .upstream_proxy
+            .as_ref()
+            .map_or_else(String::new, |proxy| {
+                format!(
+                    "|upstream={:?}:{}:{}:{}",
+                    proxy.protocol, proxy.host, proxy.port, proxy.remote_dns
+                )
+            });
         format!(
-            "{}@{}:{}|{}",
-            self.username, self.host, self.port, proxy_key
+            "{}@{}:{}|{}{}",
+            self.username, self.host, self.port, proxy_key, upstream_proxy_key
         )
     }
 }
@@ -227,6 +240,7 @@ impl Default for SshConfig {
             cols: default_cols(),
             rows: default_rows(),
             proxy_chain: None,
+            upstream_proxy: None,
             strict_host_key_checking: false,
             trust_host_key: None,
             expected_host_key_fingerprint: None,

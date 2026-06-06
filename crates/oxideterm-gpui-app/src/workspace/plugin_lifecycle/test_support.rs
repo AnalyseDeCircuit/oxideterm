@@ -304,6 +304,7 @@ pub(super) fn test_connection_store_with_agent_connection(
             username: "me".to_string(),
             auth: oxideterm_connections::SavedAuth::Agent,
             proxy_chain: Vec::new(),
+            upstream_proxy: oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal,
             color: None,
             tags: Vec::new(),
             agent_forwarding: false,

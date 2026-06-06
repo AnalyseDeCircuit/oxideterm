@@ -14,7 +14,7 @@ use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionState, HostKeyStatus,
     KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, NodeId, NodeReadiness,
     ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler, SshTransportClient,
-    check_host_key,
+    check_host_key_with_upstream_proxy,
 };
 use tokio::sync::oneshot;
 
@@ -647,11 +647,17 @@ impl WorkspaceApp {
         let tx = self.ssh_worker_tx.clone();
         let host = config.host.clone();
         let port = config.port;
+        let upstream_proxy = config.upstream_proxy.clone();
         let worker_config = config.clone();
         let worker_title = title.clone();
         std::thread::spawn(move || {
             let status = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime.block_on(check_host_key(&host, port, 10)),
+                Ok(runtime) => runtime.block_on(check_host_key_with_upstream_proxy(
+                    &host,
+                    port,
+                    10,
+                    upstream_proxy.as_ref(),
+                )),
                 Err(error) => HostKeyStatus::Error {
                     message: format!("failed to initialize SSH runtime: {error}"),
                 },
@@ -925,6 +931,7 @@ impl WorkspaceApp {
             );
             return;
         }
+        let upstream_proxy = config.upstream_proxy.clone();
         let endpoints = proxy_session_tree_endpoints(&config);
         let expansion_id = match &intent {
             SshConnectionIntent::ConnectSaved(id) => id.clone(),
@@ -955,6 +962,7 @@ impl WorkspaceApp {
             title,
             intent,
             save_after_open,
+            upstream_proxy,
         });
         self.continue_active_proxy_session_tree_connect(window, cx);
     }
@@ -1063,6 +1071,7 @@ impl WorkspaceApp {
         let router = self.node_router.clone();
         let runtime_store = self.node_runtime_store.clone();
         std::thread::spawn(move || {
+            let root_upstream_proxy = run.upstream_proxy.clone();
             let status = match tokio::runtime::Runtime::new() {
                 Ok(runtime) => runtime.block_on(async move {
                     match runtime_store
@@ -1098,7 +1107,18 @@ impl WorkspaceApp {
                                 },
                             }
                         }
-                        None => check_host_key(&step.host, step.port, 10).await,
+                        None => {
+                            // The root ProxyJump step uses the same initial TCP outlet
+                            // as the eventual SSH connection; child steps keep using
+                            // parent direct-tcpip streams.
+                            check_host_key_with_upstream_proxy(
+                                &step.host,
+                                step.port,
+                                10,
+                                root_upstream_proxy.as_ref(),
+                            )
+                            .await
+                        }
                     }
                 }),
                 Err(error) => HostKeyStatus::Error {

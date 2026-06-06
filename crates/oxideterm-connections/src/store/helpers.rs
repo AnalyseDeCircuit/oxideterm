@@ -209,8 +209,31 @@ fn existing_password_keychain_id(auth: Option<&SavedAuth>) -> Option<String> {
     }
 }
 
+fn existing_upstream_proxy_password_keychain_id(
+    policy: Option<&SavedUpstreamProxyPolicy>,
+) -> Option<String> {
+    match policy {
+        Some(SavedUpstreamProxyPolicy::Custom {
+            proxy:
+                SavedUpstreamProxyConfig {
+                    auth:
+                        SavedUpstreamProxyAuth::Password {
+                            keychain_id: Some(keychain_id),
+                            ..
+                        },
+                    ..
+                },
+        }) => Some(keychain_id.clone()),
+        _ => None,
+    }
+}
+
 fn collect_connection_keychain_ids(connection: &SavedConnection) -> Vec<String> {
-    collect_keychain_ids_for_parts(&connection.auth, &connection.proxy_chain)
+    collect_keychain_ids_for_parts(
+        &connection.auth,
+        &connection.proxy_chain,
+        &connection.upstream_proxy,
+    )
 }
 
 fn collect_privilege_keychain_ids(connection: &SavedConnection) -> Vec<String> {
@@ -221,11 +244,16 @@ fn collect_privilege_keychain_ids(connection: &SavedConnection) -> Vec<String> {
         .collect()
 }
 
-fn collect_keychain_ids_for_parts(auth: &SavedAuth, proxy_chain: &[SavedProxyHop]) -> Vec<String> {
+fn collect_keychain_ids_for_parts(
+    auth: &SavedAuth,
+    proxy_chain: &[SavedProxyHop],
+    upstream_proxy: &SavedUpstreamProxyPolicy,
+) -> Vec<String> {
     let mut ids = collect_keychain_ids_for_auth(auth);
     for hop in proxy_chain {
         ids.extend(collect_keychain_ids_for_auth(&hop.auth));
     }
+    ids.extend(collect_keychain_ids_for_upstream_proxy(upstream_proxy));
     ids
 }
 
@@ -251,12 +279,33 @@ fn collect_keychain_ids_for_auth(auth: &SavedAuth) -> Vec<String> {
     }
 }
 
+fn collect_keychain_ids_for_upstream_proxy(policy: &SavedUpstreamProxyPolicy) -> Vec<String> {
+    match policy {
+        SavedUpstreamProxyPolicy::Custom {
+            proxy:
+                SavedUpstreamProxyConfig {
+                    auth:
+                        SavedUpstreamProxyAuth::Password {
+                            keychain_id: Some(keychain_id),
+                            ..
+                        },
+                    ..
+                },
+        } => vec![keychain_id.clone()],
+        _ => Vec::new(),
+    }
+}
+
 fn new_password_keychain_id() -> String {
     format!("oxide_conn_{}", Uuid::new_v4())
 }
 
 fn new_key_passphrase_keychain_id() -> String {
     format!("oxide_conn_key_{}", Uuid::new_v4())
+}
+
+fn new_upstream_proxy_password_keychain_id() -> String {
+    format!("oxide_conn_upstream_proxy_{}", Uuid::new_v4())
 }
 
 fn privilege_keychain_id(connection_id: &str, credential_id: &str) -> String {

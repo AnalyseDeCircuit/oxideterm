@@ -3,6 +3,7 @@ mod tests {
     use super::*;
     use std::fs;
 
+    use crate::SavedUpstreamProxyProtocol;
     use rand::rngs::OsRng;
     use russh::keys::ssh_key::LineEnding;
     use russh::keys::{Algorithm, PrivateKey};
@@ -48,6 +49,7 @@ mod tests {
                 auth: SavedAuth::Agent,
                 agent_forwarding: false,
             }],
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             options: ConnectionOptions {
                 keep_alive_interval: 30,
                 compression: true,
@@ -368,6 +370,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             options: ConnectionOptions::default(),
+            upstream_proxy: EncryptedUpstreamProxyPolicy::UseGlobal,
             proxy_chain: Vec::new(),
             forwards: Vec::new(),
         }];
@@ -468,6 +471,77 @@ mod tests {
         assert_eq!(exported.proxy_chain[0].host, "jump.example.com");
         assert_eq!(exported.proxy_chain[0].username, "jump");
         assert_eq!(exported.options.jump_host.as_deref(), Some("jump-1"));
+    }
+
+    #[test]
+    fn upstream_proxy_export_import_preserves_metadata_without_secret() {
+        let mut source = temp_store("upstream-proxy-source");
+        let mut connection = saved_connection("conn-1", "Prod");
+        connection.proxy_chain.clear();
+        connection.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
+            proxy: SavedUpstreamProxyConfig {
+                protocol: SavedUpstreamProxyProtocol::Socks5,
+                host: "proxy.example.com".to_string(),
+                port: 1080,
+                auth: SavedUpstreamProxyAuth::Password {
+                    username: "proxy-user".to_string(),
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from("proxy-secret")),
+                },
+                remote_dns: true,
+                no_proxy: "localhost,*.internal".to_string(),
+            },
+        };
+        source.upsert_imported_connection(connection).unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions::default(),
+        )
+        .unwrap();
+        let payload = decrypt_payload(&bytes, "secret!").unwrap();
+        let exported = payload.connections.first().unwrap();
+
+        match &exported.upstream_proxy {
+            EncryptedUpstreamProxyPolicy::Custom { proxy } => {
+                assert_eq!(proxy.host, "proxy.example.com");
+                assert!(matches!(
+                    proxy.auth,
+                    EncryptedUpstreamProxyAuth::Password { ref username }
+                        if username == "proxy-user"
+                ));
+            }
+            other => panic!("unexpected upstream proxy policy: {other:?}"),
+        }
+        let payload_json = serde_json::to_string(&payload).unwrap();
+        assert!(!payload_json.contains("proxy-secret"));
+        assert!(!payload_json.contains("keychain_id"));
+
+        let mut target = temp_store("upstream-proxy-target");
+        apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        let imported = target.connections().first().unwrap();
+        match &imported.upstream_proxy {
+            SavedUpstreamProxyPolicy::Custom { proxy } => {
+                assert_eq!(proxy.host, "proxy.example.com");
+                assert!(matches!(
+                    &proxy.auth,
+                    SavedUpstreamProxyAuth::Password {
+                        username,
+                        keychain_id: None,
+                        plaintext_password: None,
+                    } if username == "proxy-user"
+                ));
+            }
+            other => panic!("unexpected imported upstream proxy policy: {other:?}"),
+        }
     }
 
     #[test]
@@ -730,6 +804,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             options: ConnectionOptions::default(),
+            upstream_proxy: EncryptedUpstreamProxyPolicy::UseGlobal,
             proxy_chain: Vec::new(),
             forwards: Vec::new(),
         }

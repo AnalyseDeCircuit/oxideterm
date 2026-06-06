@@ -120,6 +120,59 @@ impl Default for ConnectionPoolSettings {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsUpstreamProxyProtocol {
+    Socks5,
+    HttpConnect,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SettingsUpstreamProxyAuth {
+    None,
+    Password {
+        username: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keychain_id: Option<String>,
+    },
+}
+
+impl Default for SettingsUpstreamProxyAuth {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsUpstreamProxyConfig {
+    pub protocol: SettingsUpstreamProxyProtocol,
+    pub host: String,
+    pub port: u16,
+    #[serde(default)]
+    pub auth: SettingsUpstreamProxyAuth,
+    #[serde(default = "default_proxy_remote_dns")]
+    pub remote_dns: bool,
+    #[serde(default)]
+    pub no_proxy: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_proxy: Option<SettingsUpstreamProxyConfig>,
+    #[serde(default)]
+    pub upstream_proxy_disclaimer_accepted: bool,
+    #[serde(flatten)]
+    pub extra: ExtraFields,
+}
+
+fn default_proxy_remote_dns() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExperimentalSettings {
@@ -176,6 +229,8 @@ pub struct PersistedSettings {
     pub ide: IdeSettings,
     pub reconnect: ReconnectSettings,
     pub connection_pool: ConnectionPoolSettings,
+    #[serde(default)]
+    pub network: NetworkSettings,
     pub experimental: ExperimentalSettings,
     pub onboarding_completed: bool,
     #[serde(default)]
@@ -211,6 +266,7 @@ impl Default for PersistedSettings {
             ide: IdeSettings::default(),
             reconnect: ReconnectSettings::default(),
             connection_pool: ConnectionPoolSettings::default(),
+            network: NetworkSettings::default(),
             experimental: ExperimentalSettings::default(),
             onboarding_completed: false,
             command_palette_mru: Vec::new(),

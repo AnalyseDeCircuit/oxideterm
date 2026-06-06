@@ -130,7 +130,7 @@ use oxideterm_ssh::{
     ReconnectForwardRuleSnapshot, ReconnectJob, ReconnectNodeConnectionSnapshot,
     ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
     ReconnectPhase, ReconnectSnapshot, ReconnectTiming, SshConfig, SshConnectionHandle,
-    SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
+    SshConnectionRegistry, SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
 };
 use oxideterm_terminal::{
     LocalPtyConfig, SerialSessionConfig, ShellInfo, SshSessionConfig, TelnetSessionConfig,
@@ -1131,6 +1131,7 @@ struct NativeProxyConnectRun {
     title: String,
     intent: SshConnectionIntent,
     save_after_open: Option<SaveConnectionRequest>,
+    upstream_proxy: Option<UpstreamProxyConfig>,
 }
 
 #[derive(Clone, Debug)]

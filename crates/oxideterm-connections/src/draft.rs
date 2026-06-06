@@ -6,7 +6,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     ConnectionOptions, SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop,
-    SecretString, SshConfigHost,
+    SavedUpstreamProxyPolicy, SecretString, SshConfigHost,
 };
 
 pub const IMPORTED_GROUP: &str = "Imported";
@@ -121,6 +121,7 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
         username: host.user.unwrap_or_else(current_username),
         auth,
         proxy_chain: Vec::new(),
+        upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
         options: ConnectionOptions::default(),
         created_at: now,
         last_used_at: None,
@@ -151,6 +152,7 @@ pub fn save_request_from_draft(
             saved_auth_from_draft_for_save(draft.auth)?
         },
         proxy_chain: saved_proxy_chain_from_drafts(draft.proxy_hops)?,
+        upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
         color: (!draft.color.trim().is_empty()).then(|| draft.color.trim().to_string()),
         tags: draft.tags,
         agent_forwarding: draft.agent_forwarding,

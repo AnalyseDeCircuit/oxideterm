@@ -15,6 +15,7 @@ mod monitor;
 mod reconnect;
 mod router;
 mod transport;
+mod upstream_proxy;
 
 pub use config::{AuthMethod, ProxyHopConfig, SshConfig};
 pub use connection_registry::{
@@ -24,7 +25,9 @@ pub use connection_registry::{
     SshConnectionHandle, SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL,
     WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
-pub use host_key::{HostKeyStatus, check_host_key, remove_host_key};
+pub use host_key::{
+    HostKeyStatus, check_host_key, check_host_key_with_upstream_proxy, remove_host_key,
+};
 pub use oxideterm_connection_monitor::ConnectionPoolMonitorStats;
 pub use oxideterm_sftp::{
     DEFAULT_SFTP_CONCURRENT_TRANSFERS, DEFAULT_SFTP_DIRECTORY_PARALLELISM, FileInfo, FileType,
@@ -49,4 +52,8 @@ pub use transport::{
     KeyboardInteractiveResponses, ManagedKeyResolver, RemoteForwardHandler, RemoteForwardedTcpIp,
     SshCommandOutput, SshForwardStream, SshPromptError, SshPromptHandler, SshPtyHandle,
     SshShellChannel, SshTransportClient, SshTransportCommand, SshTransportError,
+};
+pub use upstream_proxy::{
+    UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyError, UpstreamProxyProtocol,
+    dial_initial_tcp, parse_socks5_proxy_value, socks5_proxy_from_env,
 };

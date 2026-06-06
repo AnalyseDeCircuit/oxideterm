@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     CONFIG_VERSION, ConnectionOptions, ConnectionStore, SavedAuth, SavedConnection, SavedProxyHop,
+    SavedUpstreamProxyPolicy,
 };
 
 const DEFAULT_IMPORTED_GROUP: &str = "Imported";
@@ -674,6 +675,7 @@ fn imported_draft_to_saved_connection(
             .iter()
             .map(imported_proxy_hop_to_saved)
             .collect(),
+        upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
         options: ConnectionOptions::default(),
         created_at: Utc::now(),
         last_used_at: None,

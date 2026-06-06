@@ -16,6 +16,7 @@ pub use error::OxideFileError;
 pub use format::{
     EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedManagedKeyMetadata,
     EncryptedPayload, EncryptedPluginSetting, EncryptedPortableSecret, EncryptedProxyHop,
+    EncryptedUpstreamProxyAuth, EncryptedUpstreamProxyConfig, EncryptedUpstreamProxyPolicy,
     FileHeader, MAGIC, NONCE_LEN, OxideFile, OxideMetadata, SALT_LEN, TAG_LEN, VERSION, kdf_flags,
 };
 pub use transfer::{

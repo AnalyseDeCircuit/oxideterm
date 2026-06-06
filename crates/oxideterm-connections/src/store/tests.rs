@@ -24,6 +24,7 @@ mod tests {
             username: "me".to_string(),
             auth,
             proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             color: None,
             tags: Vec::new(),
             agent_forwarding: false,
@@ -226,6 +227,7 @@ mod tests {
             username: "me".to_string(),
             auth: SavedAuth::Agent,
             proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             options: ConnectionOptions {
                 post_connect_command: Some("uptime".to_string()),
                 ..ConnectionOptions::default()
@@ -568,6 +570,52 @@ mod tests {
             } => assert_eq!(store.keychain.get(keychain_id).unwrap(), "jump-secret"),
             other => panic!("unexpected proxy auth: {other:?}"),
         }
+    }
+
+    #[test]
+    fn upstream_proxy_password_is_saved_to_keychain_reference() {
+        let mut store = load_empty_store("upstream-proxy-password");
+        let path = store.path().to_path_buf();
+        let mut req = request("conn-1", SavedAuth::Agent);
+        req.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
+            proxy: SavedUpstreamProxyConfig {
+                protocol: SavedUpstreamProxyProtocol::Socks5,
+                host: "proxy.example.com".to_string(),
+                port: 1080,
+                auth: SavedUpstreamProxyAuth::Password {
+                    username: "proxy-user".to_string(),
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from("proxy-secret")),
+                },
+                remote_dns: true,
+                no_proxy: "localhost,127.0.0.1".to_string(),
+            },
+        };
+
+        store.upsert(req).unwrap();
+
+        let conn = store.get("conn-1").unwrap();
+        let SavedUpstreamProxyPolicy::Custom { proxy } = &conn.upstream_proxy else {
+            panic!("expected custom upstream proxy policy");
+        };
+        match &proxy.auth {
+            SavedUpstreamProxyAuth::Password {
+                username,
+                keychain_id: Some(keychain_id),
+                plaintext_password: None,
+            } => {
+                assert_eq!(username, "proxy-user");
+                assert_eq!(store.keychain.get(keychain_id).unwrap(), "proxy-secret");
+            }
+            other => panic!("unexpected upstream proxy auth: {other:?}"),
+        }
+
+        let saved = fs::read_to_string(path).unwrap();
+        assert!(saved.contains("proxy.example.com"));
+        assert!(saved.contains("proxy-user"));
+        assert!(saved.contains("keychain_id"));
+        assert!(!saved.contains("proxy-secret"));
+        assert!(!saved.contains("Proxy-Authorization"));
     }
 
     #[test]
@@ -978,6 +1026,7 @@ mod tests {
                 plaintext_password: Some(SecretString::from("secret")),
             },
             proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             options: ConnectionOptions::default(),
             created_at: chrono::Utc::now(),
             last_used_at: None,
@@ -1358,6 +1407,7 @@ mod tests {
                 plaintext_passphrase: None,
             },
             proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             options: ConnectionOptions::default(),
             created_at: Utc::now(),
             last_used_at: None,

@@ -165,7 +165,12 @@ impl ConnectionStore {
         options.agent_forwarding = request.agent_forwarding;
         let auth = self.materialize_auth(request.auth, existing_auth.as_ref())?;
         let proxy_chain = self.materialize_proxy_chain(request.proxy_chain)?;
-        let next_keychain_ids = collect_keychain_ids_for_parts(&auth, &proxy_chain);
+        let upstream_proxy = self.materialize_upstream_proxy_policy(
+            request.upstream_proxy,
+            existing.as_ref().map(|conn| &conn.upstream_proxy),
+        )?;
+        let next_keychain_ids =
+            collect_keychain_ids_for_parts(&auth, &proxy_chain, &upstream_proxy);
         let post_connect_command = request.post_connect_command.and_then(|command| {
             let command = command.trim().to_string();
             (!command.is_empty()).then_some(command)
@@ -186,6 +191,7 @@ impl ConnectionStore {
             username: non_empty(request.username.trim(), "Username")?.to_string(),
             auth,
             proxy_chain,
+            upstream_proxy,
             options,
             created_at: self.get(&id).map(|conn| conn.created_at).unwrap_or(now),
             last_used_at: if is_update {
@@ -455,6 +461,8 @@ impl ConnectionStore {
         connection.updated_at = Some(Utc::now());
         connection.auth = self.materialize_auth(connection.auth, None)?;
         connection.proxy_chain = self.materialize_proxy_chain(connection.proxy_chain)?;
+        connection.upstream_proxy =
+            self.materialize_upstream_proxy_policy(connection.upstream_proxy, None)?;
         // Third-party imports do not carry privilege helper secrets. The user
         // must explicitly create them after import.
         connection.privilege_credentials.clear();
@@ -493,6 +501,10 @@ impl ConnectionStore {
         connection.username = non_empty(connection.username.trim(), "Username")?.to_string();
         connection.auth = self.materialize_auth(connection.auth, existing_auth.as_ref())?;
         connection.proxy_chain = self.materialize_proxy_chain(connection.proxy_chain)?;
+        connection.upstream_proxy = self.materialize_upstream_proxy_policy(
+            connection.upstream_proxy,
+            existing.as_ref().map(|conn| &conn.upstream_proxy),
+        )?;
         if let Some(existing) = existing.as_ref() {
             connection.created_at = existing.created_at;
             connection.last_used_at = existing.last_used_at;
@@ -502,8 +514,11 @@ impl ConnectionStore {
         }
         connection.updated_at = Some(now);
 
-        let next_keychain_ids =
-            collect_keychain_ids_for_parts(&connection.auth, &connection.proxy_chain);
+        let next_keychain_ids = collect_keychain_ids_for_parts(
+            &connection.auth,
+            &connection.proxy_chain,
+            &connection.upstream_proxy,
+        );
         if let Some(index) = self
             .data
             .connections
@@ -1163,6 +1178,64 @@ impl ConnectionStore {
             .collect()
     }
 
+    fn materialize_upstream_proxy_policy(
+        &self,
+        policy: SavedUpstreamProxyPolicy,
+        existing_policy: Option<&SavedUpstreamProxyPolicy>,
+    ) -> Result<SavedUpstreamProxyPolicy> {
+        match policy {
+            SavedUpstreamProxyPolicy::UseGlobal => Ok(SavedUpstreamProxyPolicy::UseGlobal),
+            SavedUpstreamProxyPolicy::Direct => Ok(SavedUpstreamProxyPolicy::Direct),
+            SavedUpstreamProxyPolicy::Custom { proxy } => {
+                let auth = self.materialize_upstream_proxy_auth(proxy.auth, existing_policy)?;
+                Ok(SavedUpstreamProxyPolicy::Custom {
+                    proxy: SavedUpstreamProxyConfig {
+                        protocol: proxy.protocol,
+                        host: non_empty(proxy.host.trim(), "Upstream proxy host")?.to_string(),
+                        port: proxy.port.max(1),
+                        auth,
+                        remote_dns: proxy.remote_dns,
+                        no_proxy: proxy.no_proxy.trim().to_string(),
+                    },
+                })
+            }
+        }
+    }
+
+    fn materialize_upstream_proxy_auth(
+        &self,
+        auth: SavedUpstreamProxyAuth,
+        existing_policy: Option<&SavedUpstreamProxyPolicy>,
+    ) -> Result<SavedUpstreamProxyAuth> {
+        match auth {
+            SavedUpstreamProxyAuth::None => Ok(SavedUpstreamProxyAuth::None),
+            SavedUpstreamProxyAuth::Password {
+                username,
+                keychain_id,
+                plaintext_password,
+            } => {
+                let username = non_empty(username.trim(), "Upstream proxy username")?.to_string();
+                if let Some(password) = plaintext_password {
+                    let keychain_id = existing_upstream_proxy_password_keychain_id(existing_policy)
+                        .or(keychain_id)
+                        .unwrap_or_else(new_upstream_proxy_password_keychain_id);
+                    self.keychain.store(&keychain_id, &password)?;
+                    Ok(SavedUpstreamProxyAuth::Password {
+                        username,
+                        keychain_id: Some(keychain_id),
+                        plaintext_password: None,
+                    })
+                } else {
+                    Ok(SavedUpstreamProxyAuth::Password {
+                        username,
+                        keychain_id,
+                        plaintext_password: None,
+                    })
+                }
+            }
+        }
+    }
+
     fn stage_imported_connection(
         &mut self,
         mut connection: SavedConnection,
@@ -1206,8 +1279,14 @@ impl ConnectionStore {
             });
         }
 
+        let upstream_proxy = self.materialize_upstream_proxy_policy(
+            connection.upstream_proxy,
+            existing.as_ref().map(|conn| &conn.upstream_proxy),
+        )?;
+        touched_keychain_ids.extend(collect_keychain_ids_for_upstream_proxy(&upstream_proxy));
         connection.auth = auth;
         connection.proxy_chain = proxy_chain;
+        connection.upstream_proxy = upstream_proxy;
         if let Some(existing) = existing.as_ref() {
             connection.created_at = existing.created_at;
             connection.last_used_at = existing.last_used_at;
@@ -1220,8 +1299,11 @@ impl ConnectionStore {
         }
         connection.updated_at = Some(now);
 
-        let next_keychain_ids =
-            collect_keychain_ids_for_parts(&connection.auth, &connection.proxy_chain);
+        let next_keychain_ids = collect_keychain_ids_for_parts(
+            &connection.auth,
+            &connection.proxy_chain,
+            &connection.upstream_proxy,
+        );
         let stale_old_keychain_ids = old_keychain_ids
             .into_iter()
             .filter(|keychain_id| !next_keychain_ids.contains(keychain_id))

@@ -314,6 +314,7 @@ fn encrypted_connection_to_saved(
                     )
                 })
                 .collect::<Result<_, _>>()?,
+            upstream_proxy: import_upstream_proxy_policy(conn.upstream_proxy),
             options,
             created_at: now,
             last_used_at: None,
@@ -367,6 +368,37 @@ fn import_proxy_hop(
         )?,
         agent_forwarding: false,
     })
+}
+
+fn import_upstream_proxy_policy(policy: EncryptedUpstreamProxyPolicy) -> SavedUpstreamProxyPolicy {
+    match policy {
+        EncryptedUpstreamProxyPolicy::UseGlobal => SavedUpstreamProxyPolicy::UseGlobal,
+        EncryptedUpstreamProxyPolicy::Direct => SavedUpstreamProxyPolicy::Direct,
+        EncryptedUpstreamProxyPolicy::Custom { proxy } => SavedUpstreamProxyPolicy::Custom {
+            proxy: SavedUpstreamProxyConfig {
+                protocol: proxy.protocol,
+                host: proxy.host,
+                port: proxy.port,
+                auth: import_upstream_proxy_auth(proxy.auth),
+                remote_dns: proxy.remote_dns,
+                no_proxy: proxy.no_proxy,
+            },
+        },
+    }
+}
+
+fn import_upstream_proxy_auth(auth: EncryptedUpstreamProxyAuth) -> SavedUpstreamProxyAuth {
+    match auth {
+        EncryptedUpstreamProxyAuth::None => SavedUpstreamProxyAuth::None,
+        EncryptedUpstreamProxyAuth::Password { username } => {
+            // Passwords and local keychain ids are never portable in .oxide files.
+            SavedUpstreamProxyAuth::Password {
+                username,
+                keychain_id: None,
+                plaintext_password: None,
+            }
+        }
+    }
 }
 
 fn import_auth(
@@ -610,6 +642,7 @@ fn merge_saved_connection(
     if imported_has_proxy_chain {
         existing.proxy_chain = imported.proxy_chain;
     }
+    existing.upstream_proxy = imported.upstream_proxy;
     let legacy_post_connect_command = imported.post_connect_command;
     existing.options = merge_options(existing.options, imported.options, imported_has_proxy_chain);
     if existing.options.post_connect_command.is_none() {

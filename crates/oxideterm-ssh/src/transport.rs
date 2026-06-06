@@ -1,14 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    future::Future,
-    net::{SocketAddr, ToSocketAddrs},
-    path::PathBuf,
-    pin::Pin,
-    sync::Arc,
-    time::Duration,
-};
+use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 
 use oxideterm_sftp::{SftpChannelOpener, SftpError, SftpExecChannelOpener};
 use parking_lot::RwLock;
@@ -41,6 +34,7 @@ use crate::{
         HostKeyStatus, HostKeyVerification, accept_host_key_for_session, check_host_key_via_stream,
         learn_host_key, public_key_fingerprint, verify_host_key,
     },
+    upstream_proxy::dial_initial_tcp,
 };
 
 pub const DEFAULT_PTY_MODES: &[(Pty, u32)] = &[

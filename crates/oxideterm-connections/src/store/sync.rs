@@ -191,6 +191,7 @@ fn build_saved_connection_from_sync_payload(
         username: non_empty(payload.username.trim(), "Username")?.to_string(),
         auth,
         proxy_chain,
+        upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
         options: ConnectionOptions {
             agent_forwarding: payload.agent_forwarding,
             post_connect_command: payload.post_connect_command.clone(),
