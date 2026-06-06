@@ -4,10 +4,7 @@
 use std::{env, fs, path::Path};
 
 use oxideterm_cloud_sync::state::CloudSyncPersistedState;
-use oxideterm_connections::{
-    ConnectionStore, SavedConnection, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
-    SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol,
-};
+use oxideterm_connections::{ConnectionStore, SavedUpstreamProxyPolicy};
 use oxideterm_settings::{
     SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig, SettingsUpstreamProxyProtocol,
 };
@@ -167,7 +164,15 @@ fn upstream_proxy_check(json: bool) -> DoctorCheck {
     let connection_counts = connections_result
         .as_ref()
         .ok()
-        .map(|store| upstream_proxy_policy_counts(store.connections(), use_global_source))
+        .map(|store| {
+            upstream_proxy_policy_counts(
+                store
+                    .connections()
+                    .iter()
+                    .map(|connection| &connection.upstream_proxy),
+                use_global_source,
+            )
+        })
         .unwrap_or_default();
     let incomplete = settings_result.is_err() || connections_result.is_err();
 
@@ -217,13 +222,13 @@ struct UpstreamProxyPolicyCounts {
     effective_custom: usize,
 }
 
-fn upstream_proxy_policy_counts(
-    connections: &[SavedConnection],
+fn upstream_proxy_policy_counts<'a>(
+    policies: impl IntoIterator<Item = &'a SavedUpstreamProxyPolicy>,
     use_global_source: &'static str,
 ) -> UpstreamProxyPolicyCounts {
     let mut counts = UpstreamProxyPolicyCounts::default();
-    for connection in connections {
-        match &connection.upstream_proxy {
+    for policy in policies {
+        match policy {
             SavedUpstreamProxyPolicy::UseGlobal => {
                 counts.use_global += 1;
                 match use_global_source {
@@ -296,18 +301,6 @@ fn settings_proxy_summary(proxy: &SettingsUpstreamProxyConfig) -> Value {
     })
 }
 
-fn saved_proxy_summary(proxy: &SavedUpstreamProxyConfig) -> Value {
-    json!({
-        "source": "custom",
-        "protocol": saved_proxy_protocol_label(proxy.protocol),
-        "host": proxy.host,
-        "port": proxy.port,
-        "auth": saved_proxy_auth_label(&proxy.auth),
-        "remoteDns": proxy.remote_dns,
-        "noProxyConfigured": !proxy.no_proxy.trim().is_empty(),
-    })
-}
-
 fn settings_proxy_protocol_label(protocol: SettingsUpstreamProxyProtocol) -> &'static str {
     match protocol {
         SettingsUpstreamProxyProtocol::Socks5 => "socks5",
@@ -315,24 +308,10 @@ fn settings_proxy_protocol_label(protocol: SettingsUpstreamProxyProtocol) -> &'s
     }
 }
 
-fn saved_proxy_protocol_label(protocol: SavedUpstreamProxyProtocol) -> &'static str {
-    match protocol {
-        SavedUpstreamProxyProtocol::Socks5 => "socks5",
-        SavedUpstreamProxyProtocol::HttpConnect => "http_connect",
-    }
-}
-
 fn settings_proxy_auth_label(auth: &SettingsUpstreamProxyAuth) -> &'static str {
     match auth {
         SettingsUpstreamProxyAuth::None => "none",
         SettingsUpstreamProxyAuth::Password { .. } => "password",
-    }
-}
-
-fn saved_proxy_auth_label(auth: &SavedUpstreamProxyAuth) -> &'static str {
-    match auth {
-        SavedUpstreamProxyAuth::None => "none",
-        SavedUpstreamProxyAuth::Password { .. } => "password",
     }
 }
 
@@ -503,6 +482,9 @@ fn severity_label(severity: DoctorSeverity) -> &'static str {
 #[cfg(test)]
 mod tests {
     use oxideterm_cloud_sync::StructuredDirtySections;
+    use oxideterm_connections::{
+        SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyProtocol,
+    };
 
     use super::*;
 
@@ -561,5 +543,33 @@ mod tests {
 
         assert!(doctor_ok(&summary, false));
         assert!(!doctor_ok(&summary, true));
+    }
+
+    #[test]
+    fn upstream_proxy_policy_counts_resolve_effective_sources() {
+        let custom = SavedUpstreamProxyPolicy::Custom {
+            proxy: SavedUpstreamProxyConfig {
+                protocol: SavedUpstreamProxyProtocol::HttpConnect,
+                host: "proxy.example.com".to_string(),
+                port: 8080,
+                auth: SavedUpstreamProxyAuth::None,
+                remote_dns: true,
+                no_proxy: String::new(),
+            },
+        };
+        let policies = vec![
+            SavedUpstreamProxyPolicy::UseGlobal,
+            SavedUpstreamProxyPolicy::Direct,
+            custom,
+        ];
+
+        let counts = upstream_proxy_policy_counts(policies.iter(), "envFallback");
+
+        assert_eq!(counts.use_global, 1);
+        assert_eq!(counts.direct, 1);
+        assert_eq!(counts.custom, 1);
+        assert_eq!(counts.effective_env_fallback, 1);
+        assert_eq!(counts.effective_direct, 1);
+        assert_eq!(counts.effective_custom, 1);
     }
 }

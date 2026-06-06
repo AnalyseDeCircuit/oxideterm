@@ -34,7 +34,7 @@ use crate::{
         HostKeyStatus, HostKeyVerification, accept_host_key_for_session, check_host_key_via_stream,
         learn_host_key, public_key_fingerprint, verify_host_key,
     },
-    upstream_proxy::dial_initial_tcp,
+    upstream_proxy::{UpstreamProxyConfig, UpstreamProxyProtocol, dial_initial_tcp},
 };
 
 pub const DEFAULT_PTY_MODES: &[(Pty, u32)] = &[
@@ -78,6 +78,32 @@ const KBI_USER_PROMPT_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_PASSWORD_KBI_FALLBACK_ROUNDS: usize = 5;
 const RSA_AUTH_ALGORITHMS: [Option<HashAlg>; 3] =
     [Some(HashAlg::Sha512), Some(HashAlg::Sha256), None];
+
+fn log_upstream_proxy_path(
+    target_host: &str,
+    target_port: u16,
+    proxy: Option<&UpstreamProxyConfig>,
+) {
+    if let Some(proxy) = proxy {
+        tracing::info!(
+            target_host,
+            target_port,
+            proxy_protocol = upstream_proxy_protocol_label(proxy.protocol),
+            proxy_host = proxy.host.as_str(),
+            proxy_port = proxy.port,
+            proxy_remote_dns = proxy.remote_dns,
+            proxy_no_proxy_configured = !proxy.no_proxy.trim().is_empty(),
+            "Connecting through upstream proxy"
+        );
+    }
+}
+
+fn upstream_proxy_protocol_label(protocol: UpstreamProxyProtocol) -> &'static str {
+    match protocol {
+        UpstreamProxyProtocol::Socks5 => "socks5",
+        UpstreamProxyProtocol::HttpConnect => "http_connect",
+    }
+}
 const SSH_COMMAND_CHANNEL_CAPACITY: usize = 1024;
 const SSH_OUTPUT_CHANNEL_CAPACITY: usize = 1024;
 const SSH_OUTPUT_BATCH_MAX_BYTES: usize = 64 * 1024;

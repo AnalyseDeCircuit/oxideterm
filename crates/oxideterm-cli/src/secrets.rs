@@ -496,6 +496,7 @@ fn write_connection_secret(
             username: connection.username,
             auth,
             proxy_chain: connection.proxy_chain,
+            upstream_proxy: connection.upstream_proxy,
             color: connection.color,
             tags: connection.tags,
             agent_forwarding: connection.options.agent_forwarding,

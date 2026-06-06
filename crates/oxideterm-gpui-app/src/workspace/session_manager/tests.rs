@@ -445,4 +445,61 @@ mod tests {
         assert!(upstream_proxy_config_from_saved_policy(&store, &settings, &policy).is_none());
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    fn use_global_upstream_proxy_prefers_global_settings_over_env_fallback() {
+        let _socks_env = EnvVarGuard::set("OXIDETERM_SOCKS5_PROXY", "env-proxy.local:1080");
+        let _http_env = EnvVarGuard::set("OXIDETERM_HTTP_PROXY", "http://env-http.local:8080");
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-gpui-global-proxy-priority-test-{}-connections.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let store = ConnectionStore::load(&path).unwrap();
+        let mut settings = PersistedSettings::default();
+        settings.network.upstream_proxy = Some(SettingsUpstreamProxyConfig {
+            protocol: SettingsUpstreamProxyProtocol::Socks5,
+            host: "global-proxy.local".to_string(),
+            port: 1080,
+            auth: SettingsUpstreamProxyAuth::None,
+            remote_dns: true,
+            no_proxy: String::new(),
+        });
+        let policy = oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal;
+
+        let proxy = upstream_proxy_config_from_saved_policy(&store, &settings, &policy).unwrap();
+
+        assert_eq!(proxy.host, "global-proxy.local");
+        assert!(matches!(proxy.auth, UpstreamProxyAuth::None));
+        let _ = std::fs::remove_file(path);
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            // These resolver tests run in-process and temporarily control
+            // proxy environment variables to verify fallback precedence.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // Restore the caller's environment after the focused resolver test.
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
 }
