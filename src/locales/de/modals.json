@@ -706,6 +706,13 @@
         "description": "Füge einen OpenSSH-Privatschlüssel ein. Zeilenumbrüche bleiben für die Validierung erhalten.",
         "private_key": "Privater Schlüssel"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Upstream-Proxy",
+      "policy_hint": "Wählen Sie, wie diese gespeicherte Verbindung die globale Proxy-Einstellung verwendet.",
+      "use_global": "Global verwenden",
+      "direct": "Direkt",
+      "custom": "Benutzerdefiniert"
     }
   }
 }

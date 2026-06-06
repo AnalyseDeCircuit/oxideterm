@@ -706,6 +706,13 @@
         "description": "Incolla una chiave privata OpenSSH. Le interruzioni di riga vengono conservate per la validazione.",
         "private_key": "Chiave privata"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Proxy upstream",
+      "policy_hint": "Scegli come questa connessione salvata deve usare l’impostazione proxy globale.",
+      "use_global": "Usa globale",
+      "direct": "Diretta",
+      "custom": "Personalizzato"
     }
   }
 }

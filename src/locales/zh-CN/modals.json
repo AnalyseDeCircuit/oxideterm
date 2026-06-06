@@ -706,6 +706,13 @@
         "description": "粘贴 OpenSSH 私钥。换行会保留用于校验。",
         "private_key": "私钥"
       }
+    },
+    "upstream_proxy": {
+      "policy": "上游代理",
+      "policy_hint": "选择此已保存连接如何使用全局代理设置。",
+      "use_global": "使用全局",
+      "direct": "直连",
+      "custom": "自定义"
     }
   }
 }

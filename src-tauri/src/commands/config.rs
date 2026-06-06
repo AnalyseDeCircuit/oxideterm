@@ -25,7 +25,13 @@ use crate::config::{
 };
 use crate::config::{
     SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    UpstreamProxyAuthForConnect, UpstreamProxyForConnect,
+    SavedUpstreamProxyProtocol, UpstreamProxyAuthForConnect, UpstreamProxyForConnect,
+};
+use crate::ssh::{
+    UpstreamProxyAuth as RuntimeUpstreamProxyAuth,
+    UpstreamProxyConfig as RuntimeUpstreamProxyConfig,
+    UpstreamProxyProtocol as RuntimeUpstreamProxyProtocol, check_host_key_with_upstream_proxy,
+    upstream_proxy_from_env,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
@@ -5232,6 +5238,13 @@ pub struct GlobalUpstreamProxyPasswordSaveResult {
     pub keychain_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestUpstreamProxyRouteRequest {
+    pub host: String,
+    pub port: u16,
+}
+
 #[tauri::command]
 pub async fn save_global_upstream_proxy_password(
     state: State<'_, Arc<ConfigState>>,
@@ -5258,6 +5271,52 @@ pub async fn delete_global_upstream_proxy_password(
         .keychain
         .delete(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID)
         .map_err(|err| format!("Failed to delete global upstream proxy password: {}", err))
+}
+
+#[tauri::command]
+pub async fn test_upstream_proxy_route(
+    state: State<'_, Arc<ConfigState>>,
+    request: TestUpstreamProxyRouteRequest,
+) -> Result<crate::ssh::HostKeyStatus, String> {
+    let app_settings = crate::commands::app_settings::load_current_app_settings_value()
+        .await
+        .map_err(|error| format!("Failed to load app settings: {error}"))?;
+    let upstream_proxy = global_upstream_proxy_to_connect_info(&app_settings, &state.keychain)
+        .map(runtime_upstream_proxy_from_connect_info)
+        .transpose()?;
+    Ok(check_host_key_with_upstream_proxy(
+        request.host.trim(),
+        request.port,
+        10,
+        upstream_proxy.as_ref(),
+    )
+    .await)
+}
+
+fn runtime_upstream_proxy_from_connect_info(
+    upstream_proxy: UpstreamProxyForConnect,
+) -> Result<RuntimeUpstreamProxyConfig, String> {
+    let auth = match upstream_proxy.auth {
+        UpstreamProxyAuthForConnect::None => RuntimeUpstreamProxyAuth::None,
+        UpstreamProxyAuthForConnect::Password { username, password } => {
+            let password = password.ok_or("Upstream proxy password required")?;
+            RuntimeUpstreamProxyAuth::Password { username, password }
+        }
+    };
+
+    // The test command hydrates the same runtime proxy structure used by real
+    // SSH preflight; no proxy password is returned to the frontend.
+    Ok(RuntimeUpstreamProxyConfig {
+        protocol: match upstream_proxy.protocol {
+            SavedUpstreamProxyProtocol::Socks5 => RuntimeUpstreamProxyProtocol::Socks5,
+            SavedUpstreamProxyProtocol::HttpConnect => RuntimeUpstreamProxyProtocol::HttpConnect,
+        },
+        host: upstream_proxy.host,
+        port: upstream_proxy.port,
+        auth,
+        remote_dns: upstream_proxy.remote_dns,
+        no_proxy: upstream_proxy.no_proxy,
+    })
 }
 
 fn upstream_proxy_config_to_connect_info(
@@ -5308,6 +5367,32 @@ fn global_upstream_proxy_to_connect_info(
     upstream_proxy_config_to_connect_info(&proxy, keychain)
 }
 
+fn runtime_upstream_proxy_to_connect_info(
+    proxy: RuntimeUpstreamProxyConfig,
+) -> UpstreamProxyForConnect {
+    let auth = match proxy.auth {
+        RuntimeUpstreamProxyAuth::None => UpstreamProxyAuthForConnect::None,
+        RuntimeUpstreamProxyAuth::Password { username, password } => {
+            UpstreamProxyAuthForConnect::Password {
+                username,
+                password: Some(password),
+            }
+        }
+    };
+
+    UpstreamProxyForConnect {
+        protocol: match proxy.protocol {
+            RuntimeUpstreamProxyProtocol::Socks5 => SavedUpstreamProxyProtocol::Socks5,
+            RuntimeUpstreamProxyProtocol::HttpConnect => SavedUpstreamProxyProtocol::HttpConnect,
+        },
+        host: proxy.host,
+        port: proxy.port,
+        auth,
+        remote_dns: proxy.remote_dns,
+        no_proxy: proxy.no_proxy,
+    }
+}
+
 fn upstream_proxy_to_connect_info(
     policy: &SavedUpstreamProxyPolicy,
     keychain: &Keychain,
@@ -5318,9 +5403,9 @@ fn upstream_proxy_to_connect_info(
         SavedUpstreamProxyPolicy::Custom { proxy } => {
             upstream_proxy_config_to_connect_info(proxy, keychain)
         }
-        SavedUpstreamProxyPolicy::UseGlobal => {
-            global_upstream_proxy_to_connect_info(app_settings?, keychain)
-        }
+        SavedUpstreamProxyPolicy::UseGlobal => app_settings
+            .and_then(|settings| global_upstream_proxy_to_connect_info(settings, keychain))
+            .or_else(|| upstream_proxy_from_env().ok().flatten().map(runtime_upstream_proxy_to_connect_info)),
     }
 }
 

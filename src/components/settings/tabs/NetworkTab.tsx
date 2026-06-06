@@ -41,6 +41,10 @@ export const NetworkTab = ({ network, updateNetwork }: NetworkTabProps) => {
     const [passwordDraft, setPasswordDraft] = useState('');
     const [savingPassword, setSavingPassword] = useState(false);
     const [passwordError, setPasswordError] = useState('');
+    const [testHost, setTestHost] = useState('');
+    const [testPort, setTestPort] = useState(22);
+    const [testingRoute, setTestingRoute] = useState(false);
+    const [testResult, setTestResult] = useState('');
 
     const updateProxy = (nextProxy: SettingsUpstreamProxyConfig | null) => {
         updateNetwork('upstreamProxy', nextProxy);
@@ -82,6 +86,26 @@ export const NetworkTab = ({ network, updateNetwork }: NetworkTabProps) => {
             setPasswordError(error instanceof Error ? error.message : String(error));
         } finally {
             setSavingPassword(false);
+        }
+    };
+
+    const handleTestRoute = async () => {
+        if (!testHost.trim() || !proxy) return;
+        setTestingRoute(true);
+        setTestResult('');
+        const startedAt = performance.now();
+        try {
+            const status = await api.testUpstreamProxyRoute({ host: testHost.trim(), port: testPort });
+            const elapsedMs = Math.round(performance.now() - startedAt);
+            if (status.status === 'error') {
+                setTestResult(t('settings_view.network.test_error', { error: status.message }));
+            } else {
+                setTestResult(t('settings_view.network.test_success', { elapsed: elapsedMs }));
+            }
+        } catch (error) {
+            setTestResult(t('settings_view.network.test_error', { error: error instanceof Error ? error.message : String(error) }));
+        } finally {
+            setTestingRoute(false);
         }
     };
 
@@ -251,6 +275,40 @@ export const NetworkTab = ({ network, updateNetwork }: NetworkTabProps) => {
                         {passwordError && <p className="text-xs text-red-400">{passwordError}</p>}
                     </div>
                 )}
+
+                <Separator />
+
+                <div className="grid gap-4 max-w-2xl">
+                    <div>
+                        <h4 className="text-lg font-medium text-theme-text-heading">{t('settings_view.network.test_title')}</h4>
+                        <p className="text-xs text-theme-text-muted">{t('settings_view.network.test_hint')}</p>
+                    </div>
+                    <div className="grid grid-cols-[1fr_120px] gap-4">
+                        <div className="grid gap-2">
+                            <Label>{t('settings_view.network.test_host')}</Label>
+                            <Input value={testHost} onChange={(event) => setTestHost(event.target.value)} placeholder="server.example.com" />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label>{t('settings_view.network.test_port')}</Label>
+                            <Input
+                                type="number"
+                                value={testPort}
+                                min={1}
+                                max={65535}
+                                onChange={(event) => {
+                                    const value = Number.parseInt(event.target.value, 10);
+                                    setTestPort(Number.isFinite(value) ? Math.min(65535, Math.max(1, value)) : 22);
+                                }}
+                            />
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <Button disabled={!proxy || !testHost.trim() || testingRoute} onClick={handleTestRoute}>
+                            {testingRoute ? t('settings_view.network.testing') : t('settings_view.network.test_button')}
+                        </Button>
+                        {testResult && <p className="text-xs text-theme-text-muted">{testResult}</p>}
+                    </div>
+                </div>
             </div>
         </div>
     );

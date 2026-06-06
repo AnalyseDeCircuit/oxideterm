@@ -44,9 +44,15 @@ import { buildTestConnectionRequest } from '../../lib/testConnectionRequest';
 import { AddJumpServerDialog } from './AddJumpServerDialog';
 import { HostKeyConfirmDialog } from './HostKeyConfirmDialog';
 import { ManagedSshKeySelector } from './ManagedSshKeySelector';
+import {
+  UpstreamProxyPolicyFields,
+  defaultSavedUpstreamProxyPolicy,
+  upstreamProxyForConnectFromPolicy,
+} from './UpstreamProxyPolicyFields';
 import { Plus, Trash2, Key, Lock, ChevronDown, ChevronRight, Info, RefreshCw } from 'lucide-react';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useToast } from '../../hooks/useToast';
+import type { SavedUpstreamProxyPolicy } from '../../types';
 import {
   Tooltip,
   TooltipContent,
@@ -118,6 +124,9 @@ export const NewConnectionModal = () => {
   const [groups, setGroups] = useState<string[]>([]);
 
   const [proxyServers, setProxyServers] = useState<ProxyHopConfig[]>([]);
+  const [upstreamProxyPolicy, setUpstreamProxyPolicy] = useState<SavedUpstreamProxyPolicy>(
+    defaultSavedUpstreamProxyPolicy,
+  );
   const [showAddJumpDialog, setShowAddJumpDialog] = useState(false);
   const [proxyChainExpanded, setProxyChainExpanded] = useState(false);
   const [agentAvailable, setAgentAvailable] = useState<boolean | null>(null);
@@ -215,6 +224,7 @@ export const NewConnectionModal = () => {
           agent_forwarding: request.agentForwarding,
           post_connect_command: normalizedPostConnectCommand || null,
           proxy_chain: proxyServers.length > 0 ? proxyServers : undefined,
+          upstream_proxy: upstreamProxyPolicy,
         });
         window.dispatchEvent(new CustomEvent('saved-connections-changed'));
       } catch (saveErr) {
@@ -245,6 +255,7 @@ export const NewConnectionModal = () => {
     toastError,
     toggleModal,
     certPath,
+    upstreamProxyPolicy,
   ]);
 
   const executeConnect = useCallback(async (
@@ -252,9 +263,12 @@ export const NewConnectionModal = () => {
     options?: { trustHostKey?: boolean; expectedHostKeyFingerprint?: string },
   ) => {
     const nodeId = await addRootNode(request);
-    await connectNode(nodeId, options);
+    await connectNode(nodeId, {
+      ...options,
+      upstreamProxy: upstreamProxyForConnectFromPolicy(upstreamProxyPolicy),
+    });
     await finalizeConnectedNode(request, nodeId);
-  }, [addRootNode, connectNode, finalizeConnectedNode]);
+  }, [addRootNode, connectNode, finalizeConnectedNode, upstreamProxyPolicy]);
 
   const continueProxyConnectPlan = useCallback(async (
     request: ConnectFormRequest,
@@ -1204,6 +1218,11 @@ export const NewConnectionModal = () => {
             </div>
             <p className="text-xs text-muted-foreground -mt-1 ml-6">{t('modals.new_connection.save_connection_hint')}</p>
           </div>
+
+          <UpstreamProxyPolicyFields
+            value={upstreamProxyPolicy}
+            onChange={setUpstreamProxyPolicy}
+          />
 
           <div className="border-t border-theme-border rounded-lg p-4">
             <div className="flex items-center justify-between mb-4">

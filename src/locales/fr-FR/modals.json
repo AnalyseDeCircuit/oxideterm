@@ -706,6 +706,13 @@
         "description": "Collez une clé privée OpenSSH. Les sauts de ligne sont conservés pour la validation.",
         "private_key": "Clé privée"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Proxy amont",
+      "policy_hint": "Choisissez comment cette connexion enregistrée doit utiliser le paramètre de proxy global.",
+      "use_global": "Utiliser global",
+      "direct": "Connexion directe",
+      "custom": "Personnalisé"
     }
   }
 }

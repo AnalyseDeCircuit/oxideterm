@@ -706,6 +706,13 @@
         "description": "貼上 OpenSSH 私鑰。換行會保留用於驗證。",
         "private_key": "私鑰"
       }
+    },
+    "upstream_proxy": {
+      "policy": "上游代理",
+      "policy_hint": "選擇此已儲存連線如何使用全域代理設定。",
+      "use_global": "使用全域",
+      "direct": "直連",
+      "custom": "自訂"
     }
   }
 }

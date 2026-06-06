@@ -706,6 +706,13 @@
         "description": "Paste an OpenSSH private key. Line breaks are preserved for validation.",
         "private_key": "Private key"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Upstream Proxy",
+      "policy_hint": "Choose how this saved connection should use the global proxy setting.",
+      "use_global": "Use Global",
+      "direct": "Direct",
+      "custom": "Custom"
     }
   }
 }

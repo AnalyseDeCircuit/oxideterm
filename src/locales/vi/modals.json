@@ -706,6 +706,13 @@
         "description": "Dán OpenSSH private key. Dấu xuống dòng được giữ nguyên để xác thực.",
         "private_key": "Khóa riêng"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Proxy upstream",
+      "policy_hint": "Chọn cách kết nối đã lưu này sử dụng cấu hình proxy toàn cục.",
+      "use_global": "Dùng toàn cục",
+      "direct": "Trực tiếp",
+      "custom": "Tùy chỉnh"
     }
   }
 }

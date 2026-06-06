@@ -35,8 +35,13 @@ import type {
   PrivilegeCredentialKind,
   SaveConnectionRequest,
   SavedPrivilegeCredential,
+  SavedUpstreamProxyPolicy,
 } from '../../types';
 import { ManagedSshKeySelector } from './ManagedSshKeySelector';
+import {
+  UpstreamProxyPolicyFields,
+  defaultSavedUpstreamProxyPolicy,
+} from './UpstreamProxyPolicyFields';
 
 type EditableAuthType = 'password' | 'key' | 'managed_key' | 'agent' | 'certificate';
 
@@ -101,6 +106,9 @@ export const EditConnectionPropertiesModal = ({
   const [group, setGroup] = useState('');
   const [color, setColor] = useState('');
   const [postConnectCommand, setPostConnectCommand] = useState('');
+  const [upstreamProxyPolicy, setUpstreamProxyPolicy] = useState<SavedUpstreamProxyPolicy>(
+    defaultSavedUpstreamProxyPolicy,
+  );
   const [groups, setGroups] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -135,6 +143,11 @@ export const EditConnectionPropertiesModal = ({
       setGroup(activeConnection.group || 'Ungrouped');
       setColor(activeConnection.color || '');
       setPostConnectCommand(activeConnection.post_connect_command || '');
+      setUpstreamProxyPolicy(
+        duplicateDraft?.saveRequest.upstream_proxy
+          ?? activeConnection.upstream_proxy
+          ?? defaultSavedUpstreamProxyPolicy(),
+      );
       setPrivilegeCredentials([]);
       setPrivilegeDraft(EMPTY_PRIVILEGE_DRAFT);
       setPrivilegeError('');
@@ -329,6 +342,7 @@ export const EditConnectionPropertiesModal = ({
         agent_forwarding: conn.agent_forwarding ?? draftRequest?.agent_forwarding,
         post_connect_command: postConnectCommand.trim(),
         proxy_chain: draftRequest?.proxy_chain,
+        upstream_proxy: upstreamProxyPolicy,
       });
       onOpenChange(false);
       await onSaved?.();
@@ -563,6 +577,11 @@ export const EditConnectionPropertiesModal = ({
               {t('modals.new_connection.post_connect_command_hint')}
             </p>
           </div>
+
+          <UpstreamProxyPolicyFields
+            value={upstreamProxyPolicy}
+            onChange={setUpstreamProxyPolicy}
+          />
 
           <div className="grid gap-3 rounded-lg border border-theme-border/60 bg-theme-bg-panel/45 p-3">
             <div className="flex items-start justify-between gap-3">

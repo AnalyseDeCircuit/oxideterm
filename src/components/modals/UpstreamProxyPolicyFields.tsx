@@ -49,6 +49,7 @@ export function upstreamProxyForConnectFromPolicy(policy: SavedUpstreamProxyPoli
 export const UpstreamProxyPolicyFields = ({ value, onChange }: UpstreamProxyPolicyFieldsProps) => {
   const { t } = useTranslation();
   const customProxy = value.mode === 'custom' ? value.proxy : null;
+  const passwordAuth = customProxy?.auth.type === 'password' ? customProxy.auth : null;
 
   const setMode = (mode: SavedUpstreamProxyPolicy['mode']) => {
     if (mode === 'custom') {
@@ -162,28 +163,28 @@ export const UpstreamProxyPolicyFields = ({ value, onChange }: UpstreamProxyPoli
             </Select>
           </div>
 
-          {customProxy.auth.type === 'password' && (
+          {passwordAuth && (
             <div className="grid gap-4">
               <div className="grid gap-2">
                 <Label>{t('settings_view.network.username')}</Label>
                 <Input
-                  value={customProxy.auth.username}
-                  onChange={(event) => setAuth({ ...customProxy.auth, username: event.target.value })}
+                  value={passwordAuth.username}
+                  onChange={(event) => setAuth({ ...passwordAuth, username: event.target.value })}
                 />
               </div>
               <div className="grid gap-2">
                 <Label>{t('settings_view.network.password')}</Label>
                 <Input
                   type="password"
-                  value={customProxy.auth.password ?? ''}
-                  placeholder={customProxy.auth.keychain_id ? t('settings_view.network.password_saved_placeholder') : ''}
+                  value={passwordAuth.password ?? ''}
+                  placeholder={passwordAuth.keychain_id ? t('settings_view.network.password_saved_placeholder') : ''}
                   onChange={(event) => {
                     // The draft password is sent only in the explicit save request.
-                    setAuth({ ...customProxy.auth, password: event.target.value || undefined });
+                    setAuth({ ...passwordAuth, password: event.target.value || undefined });
                   }}
                 />
                 <p className="text-xs text-theme-text-muted">
-                  {customProxy.auth.keychain_id
+                  {passwordAuth.keychain_id
                     ? t('settings_view.network.password_saved_hint')
                     : t('settings_view.network.password_hint')}
                 </p>

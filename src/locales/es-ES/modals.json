@@ -706,6 +706,13 @@
         "description": "Pega una clave privada OpenSSH. Los saltos de línea se conservan para la validación.",
         "private_key": "Clave privada"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Proxy ascendente",
+      "policy_hint": "Elige cómo debe usar esta conexión guardada la configuración global del proxy.",
+      "use_global": "Usar global",
+      "direct": "Directo",
+      "custom": "Personalizado"
     }
   }
 }

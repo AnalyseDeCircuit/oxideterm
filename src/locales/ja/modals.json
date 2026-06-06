@@ -706,6 +706,13 @@
         "description": "OpenSSH 秘密鍵を貼り付けます。検証のため改行は保持されます。",
         "private_key": "秘密鍵"
       }
+    },
+    "upstream_proxy": {
+      "policy": "アップストリームプロキシ",
+      "policy_hint": "この保存済み接続でグローバルプロキシ設定をどう使うかを選択します。",
+      "use_global": "グローバルを使用",
+      "direct": "直接接続",
+      "custom": "カスタム"
     }
   }
 }

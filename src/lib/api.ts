@@ -2244,6 +2244,13 @@ export const api = {
     return invoke('preflight_tree_node', { nodeId, upstreamProxy });
   },
 
+  testUpstreamProxyRoute: async (
+    request: { host: string; port: number },
+  ): Promise<import('../types').HostKeyStatus> => {
+    if (USE_MOCK) return { status: 'verified' };
+    return invoke('test_upstream_proxy_route', { request });
+  },
+
   /**
    * 断开树节点（断开 SSH 连接）
    */

@@ -706,6 +706,13 @@
         "description": "Cole uma chave privada OpenSSH. Quebras de linha são preservadas para validação.",
         "private_key": "Chave privada"
       }
+    },
+    "upstream_proxy": {
+      "policy": "Proxy upstream",
+      "policy_hint": "Escolha como esta conexão salva deve usar a configuração global de proxy.",
+      "use_global": "Usar global",
+      "direct": "Direto",
+      "custom": "Personalizado"
     }
   }
 }
