@@ -2326,9 +2326,7 @@ impl WorkspaceApp {
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
         let managed_key_resolver =
-            crate::workspace::session_manager::managed_key_resolver_from_store(
-                &self.connection_store,
-            );
+            oxideterm_session_adapter::managed_key_resolver_from_store(&self.connection_store);
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             // This is the native connect_tree_node path: authenticate the SSH

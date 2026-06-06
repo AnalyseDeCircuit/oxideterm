@@ -463,7 +463,7 @@ struct SftpDiffStats {
 struct SftpDrive {
     name: String,
     path: String,
-    drive_type: &'static str,
+    drive_type: String,
     total_space: u64,
     available_space: u64,
     read_only: bool,

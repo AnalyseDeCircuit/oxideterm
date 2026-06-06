@@ -954,7 +954,7 @@ impl WorkspaceApp {
                         )
                         .with_target(target);
                 };
-                let Some(config) = crate::workspace::session_manager::ssh_config_from_saved_connection(
+                let Some(config) = oxideterm_session_adapter::ssh_config_from_saved_connection(
                     &self.connection_store,
                     self.settings_store.settings(),
                     &connection,
@@ -1665,7 +1665,8 @@ impl WorkspaceApp {
             },
             "settings" => {
                 if let Some(section) = args.get("section").and_then(serde_json::Value::as_str)
-                    && let Some(tab) = settings_tab_for_ai_section(section)
+                    && let Some(tab) =
+                        oxideterm_gpui_settings_view::settings_tab_from_ai_section(section)
                 {
                     self.settings_page.set_active_tab(tab);
                 }

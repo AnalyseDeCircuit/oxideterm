@@ -1,28 +1,32 @@
 use std::path::{Path, PathBuf};
 
 pub fn home_path() -> String {
-    std::env::var("HOME").unwrap_or_else(|_| {
-        #[cfg(windows)]
-        {
-            "C:\\".to_string()
-        }
-        #[cfg(not(windows))]
-        {
-            "/".to_string()
-        }
-    })
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| {
+            #[cfg(windows)]
+            {
+                "C:\\".to_string()
+            }
+            #[cfg(not(windows))]
+            {
+                "/".to_string()
+            }
+        })
 }
 
 pub fn normalize_local_path(path: &str) -> String {
     let trimmed = path.trim();
-    if trimmed == "~" {
+    if trimmed == "~" || trimmed == "$HOME" {
         return home_path();
     }
-    if let Some(rest) = trimmed.strip_prefix("~/") {
-        return Path::new(&home_path())
-            .join(rest)
-            .to_string_lossy()
-            .to_string();
+    for prefix in ["~/", "~\\", "$HOME/", "$HOME\\"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            return Path::new(&home_path())
+                .join(rest)
+                .to_string_lossy()
+                .to_string();
+        }
     }
     if trimmed.is_empty() {
         home_path()

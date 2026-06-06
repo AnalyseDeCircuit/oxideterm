@@ -15,7 +15,7 @@ use gpui::{Div, StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
-    SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
+    SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
     SavedUpstreamProxyProtocol, SecretString, SerialProfile, SshConfigHost, list_ssh_config_hosts,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
@@ -49,14 +49,13 @@ use oxideterm_gpui_ui::{
         text_input_visual_range,
     },
 };
+use oxideterm_session_adapter::upstream_proxy_config_from_saved_policy;
 use oxideterm_settings::{
     ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS, PersistedSettings,
-    SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig, SettingsUpstreamProxyProtocol,
     export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
 };
 use oxideterm_ssh::{
-    AuthMethod, ManagedKeyResolver, ProxyHopConfig, SshTransportError, UpstreamProxyAuth,
-    UpstreamProxyConfig, UpstreamProxyProtocol, upstream_proxy_from_env,
+    AuthMethod, SshConfig, UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyProtocol,
 };
 
 use super::*;

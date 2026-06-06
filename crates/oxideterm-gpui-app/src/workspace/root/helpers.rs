@@ -1330,7 +1330,7 @@ fn saved_origin_config(
             saved_connection_id,
         } => {
             let connection = store.get(saved_connection_id)?;
-            self::session_manager::ssh_config_from_saved_connection(store, settings, connection)
+            oxideterm_session_adapter::ssh_config_from_saved_connection(store, settings, connection)
         }
         NodeOrigin::ManualPreset {
             saved_connection_id,
@@ -1356,9 +1356,9 @@ fn saved_manual_preset_hop_config(
             host: hop.host.clone(),
             port: hop.port,
             username: hop.username.clone(),
-            auth: self::session_manager::auth_method_from_saved_auth(store, &hop.auth)?,
+            auth: oxideterm_session_adapter::auth_method_from_saved_auth(store, &hop.auth)?,
             proxy_chain: None,
-            upstream_proxy: self::session_manager::upstream_proxy_config_from_saved_policy(
+            upstream_proxy: oxideterm_session_adapter::upstream_proxy_config_from_saved_policy(
                 store,
                 settings,
                 &connection.upstream_proxy,
@@ -1371,7 +1371,7 @@ fn saved_manual_preset_hop_config(
 
     if hop_index == connection.proxy_chain.len() {
         let mut target =
-            self::session_manager::ssh_config_from_saved_connection(store, settings, connection)?;
+            oxideterm_session_adapter::ssh_config_from_saved_connection(store, settings, connection)?;
         target.proxy_chain = None;
         return Some(target);
     }
