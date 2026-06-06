@@ -43,6 +43,7 @@ oxideterm-preview = { path = "../oxideterm-preview" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
+oxideterm-session-adapter = { path = "../oxideterm-session-adapter" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }

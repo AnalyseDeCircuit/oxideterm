@@ -38,6 +38,7 @@ members = [
   "crates/oxideterm-render-policy",
   "crates/oxideterm-settings",
   "crates/oxideterm-settings-model",
+  "crates/oxideterm-session-adapter",
   "crates/oxideterm-sftp",
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",

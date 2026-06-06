@@ -36,258 +36,49 @@ fn is_sftp_incomplete_store_compat_error(error: &str) -> bool {
 }
 
 fn home_path() -> String {
-    local_home_path_buf()
-        .unwrap_or_else(|| std::path::PathBuf::from(home_path_root()))
-        .to_string_lossy()
-        .to_string()
-}
-
-fn local_home_path_buf() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
-}
-
-/// Expands home aliases before local file manager paths reach filesystem APIs.
-fn expand_local_path(path: &str) -> std::path::PathBuf {
-    let trimmed = path.trim();
-    if trimmed == "~" || trimmed == "$HOME" {
-        return local_home_path_buf().unwrap_or_else(|| std::path::PathBuf::from(trimmed));
-    }
-
-    for prefix in ["~/", "~\\", "$HOME/", "$HOME\\"] {
-        if let Some(rest) = trimmed.strip_prefix(prefix) {
-            if let Some(home) = local_home_path_buf() {
-                return home.join(rest);
-            }
-        }
-    }
-
-    std::path::PathBuf::from(trimmed)
+    oxideterm_local_files::home_path()
 }
 
 fn list_local_files(path: &str) -> std::io::Result<Vec<SftpFileEntry>> {
-    let mut entries = Vec::new();
-    let expanded_path = expand_local_path(path);
-    for entry in std::fs::read_dir(expanded_path)? {
-        let entry = entry?;
-        let entry_path = entry.path();
-        let metadata = match std::fs::symlink_metadata(&entry_path) {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                // Windows reserved device names can fail metadata probing even
-                // when directory enumeration reports them; keep the listing open.
-                continue;
-            }
-        };
-        let name = entry.file_name().to_string_lossy().to_string();
-        let full_path = entry_path.to_string_lossy().to_string();
-        let file_type = if metadata.is_dir() {
-            SftpFileType::Directory
-        } else {
-            SftpFileType::File
-        };
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|mtime| mtime.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_secs() as i64);
-        entries.push(SftpFileEntry {
-            name,
-            path: full_path,
-            file_type,
-            size: metadata.len(),
-            modified,
-            permissions: None,
-            owner: None,
-            group: None,
-            is_symlink: metadata.file_type().is_symlink(),
-            symlink_target: std::fs::read_link(&entry_path)
-                .ok()
-                .map(|target| target.to_string_lossy().to_string()),
-        });
-    }
-    entries.sort_by(|left, right| match (left.file_type, right.file_type) {
-        (SftpFileType::Directory, SftpFileType::File) => std::cmp::Ordering::Less,
-        (SftpFileType::File, SftpFileType::Directory) => std::cmp::Ordering::Greater,
-        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-    });
-    Ok(entries)
+    oxideterm_local_files::list_local_files(&oxideterm_local_files::normalize_local_path(path))
+        .map(|files| files.into_iter().map(sftp_file_entry_from_local).collect())
 }
 
 fn local_drives() -> Vec<SftpDrive> {
-    let mut drives = platform_local_drives();
-    drives.sort_by(|left, right| {
-        let left_system = if left.drive_type == "system" { 0 } else { 1 };
-        let right_system = if right.drive_type == "system" { 0 } else { 1 };
-        left_system
-            .cmp(&right_system)
-            .then_with(|| left.path.cmp(&right.path))
-    });
-    if drives.is_empty() {
-        drives.push(SftpDrive {
-            name: "System".to_string(),
-            path: home_path_root(),
-            drive_type: "system",
-            total_space: 0,
-            available_space: 0,
-            read_only: false,
-        });
-    }
-    drives
+    oxideterm_local_files::local_drives()
+        .into_iter()
+        .map(sftp_drive_from_local)
+        .collect()
 }
 
-fn home_path_root() -> String {
-    #[cfg(windows)]
-    {
-        "C:\\".to_string()
-    }
-    #[cfg(not(windows))]
-    {
-        "/".to_string()
+fn sftp_file_entry_from_local(entry: oxideterm_local_files::LocalFileEntry) -> SftpFileEntry {
+    let is_symlink = entry.file_type == oxideterm_local_files::LocalFileType::Symlink;
+    SftpFileEntry {
+        name: entry.name,
+        path: entry.path,
+        file_type: match entry.file_type {
+            oxideterm_local_files::LocalFileType::Directory => SftpFileType::Directory,
+            oxideterm_local_files::LocalFileType::File
+            | oxideterm_local_files::LocalFileType::Symlink => SftpFileType::File,
+        },
+        size: entry.size,
+        modified: entry.modified,
+        permissions: None,
+        owner: None,
+        group: None,
+        is_symlink,
+        symlink_target: entry.symlink_target,
     }
 }
 
-fn platform_local_drives() -> Vec<SftpDrive> {
-    use sysinfo::Disks;
-
-    let disks = Disks::new_with_refreshed_list();
-    let mut drives: Vec<SftpDrive> = Vec::new();
-
-    #[cfg(unix)]
-    let mut seen_dev_ids: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
-    #[cfg(not(unix))]
-    let mut seen_mount_points: std::collections::HashSet<std::path::PathBuf> =
-        std::collections::HashSet::new();
-
-    for disk in disks.list() {
-        let mount_point = disk.mount_point().to_path_buf();
-
-        #[cfg(unix)]
-        let unix_dev_id = {
-            use std::os::unix::fs::MetadataExt;
-            match std::fs::metadata(&mount_point) {
-                Ok(metadata) => {
-                    let dev = metadata.dev();
-                    if let Some(&existing_idx) = seen_dev_ids.get(&dev) {
-                        if mount_point.as_os_str().len() < drives[existing_idx].path.len() {
-                            drives[existing_idx].path = mount_point.to_string_lossy().to_string();
-                            drives[existing_idx].name = drive_display_name(disk, &mount_point);
-                        }
-                        continue;
-                    }
-                    Some(dev)
-                }
-                Err(_) => None,
-            }
-        };
-        #[cfg(not(unix))]
-        {
-            let canonical = mount_point
-                .canonicalize()
-                .unwrap_or_else(|_| mount_point.clone());
-            if !seen_mount_points.insert(canonical) {
-                continue;
-            }
-        }
-
-        let mount = mount_point.to_string_lossy();
-        if is_pseudo_mount(&mount) {
-            continue;
-        }
-
-        #[cfg(unix)]
-        if let Some(dev) = unix_dev_id {
-            seen_dev_ids.insert(dev, drives.len());
-        }
-
-        let read_only = if cfg!(target_os = "macos") && mount == "/" {
-            !std::fs::metadata("/Users")
-                .map(|metadata| !metadata.permissions().readonly())
-                .unwrap_or(false)
-        } else {
-            disk.is_read_only()
-        };
-
-        drives.push(SftpDrive {
-            name: drive_display_name(disk, &mount_point),
-            path: mount.to_string(),
-            drive_type: classify_disk(disk),
-            total_space: disk.total_space(),
-            available_space: disk.available_space(),
-            read_only,
-        });
-    }
-    drives
-}
-
-fn is_pseudo_mount(mount: &str) -> bool {
-    mount.starts_with("/proc")
-        || mount.starts_with("/sys")
-        || mount.starts_with("/dev")
-        || mount.starts_with("/snap")
-        || mount == "/boot"
-        || mount == "/boot/efi"
-        || is_blocked_run_mount(mount)
-}
-
-fn is_blocked_run_mount(mount: &str) -> bool {
-    if !mount.starts_with("/run") {
-        return false;
-    }
-    if mount.starts_with("/run/media/") || mount.starts_with("/run/mount/") {
-        return false;
-    }
-    mount.starts_with("/run/user/") && !mount.contains("/gvfs/")
-        || (!mount.starts_with("/run/user/"))
-}
-
-fn drive_display_name(disk: &sysinfo::Disk, mount_point: &std::path::Path) -> String {
-    let raw_name = disk.name().to_string_lossy().to_string();
-    if !raw_name.is_empty() {
-        return raw_name;
-    }
-    let mount = mount_point.to_string_lossy();
-    mount_point
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| {
-            if mount == "/" {
-                "System".to_string()
-            } else {
-                mount.to_string()
-            }
-        })
-}
-
-fn classify_disk(disk: &sysinfo::Disk) -> &'static str {
-    use sysinfo::DiskKind;
-
-    let mount = disk.mount_point().to_string_lossy();
-    #[cfg(not(windows))]
-    if mount == "/" {
-        return "system";
-    }
-    #[cfg(windows)]
-    if mount.to_uppercase().starts_with("C:") {
-        return "system";
-    }
-
-    if disk.is_removable() {
-        return "removable";
-    }
-
-    let fs_type = disk.file_system().to_string_lossy().to_lowercase();
-    if matches!(
-        fs_type.as_str(),
-        "nfs" | "cifs" | "smb" | "smbfs" | "afpfs" | "9p" | "fuse.sshfs"
-    ) {
-        return "network";
-    }
-
-    match disk.kind() {
-        DiskKind::SSD | DiskKind::HDD => "system",
-        _ => "removable",
+fn sftp_drive_from_local(drive: oxideterm_local_files::LocalDrive) -> SftpDrive {
+    SftpDrive {
+        name: drive.name,
+        path: drive.path,
+        drive_type: drive.drive_type,
+        total_space: drive.total_space,
+        available_space: drive.available_space,
+        read_only: drive.read_only,
     }
 }
 
@@ -433,9 +224,7 @@ fn remote_directory_prefixes(path: &str) -> Vec<String> {
 }
 
 fn join_local_path(base: &str, name: &str) -> String {
-    let mut path = std::path::PathBuf::from(base);
-    path.push(name);
-    path.to_string_lossy().to_string()
+    oxideterm_local_files::join_local_path(base, name)
 }
 
 fn normalize_external_dropped_path(path: &std::path::Path) -> Option<std::path::PathBuf> {

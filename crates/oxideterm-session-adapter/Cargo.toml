@@ -1,12 +1,13 @@
 [package]
-name = "oxideterm-topology"
+name = "oxideterm-session-adapter"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 
 [dependencies]
 oxideterm-connections = { path = "../oxideterm-connections" }
-serde.workspace = true
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
 
 [dev-dependencies]
 chrono.workspace = true

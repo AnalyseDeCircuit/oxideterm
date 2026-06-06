@@ -502,7 +502,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let Some(config) = ssh_config_from_saved_connection(
+        let Some(config) = oxideterm_session_adapter::ssh_config_from_saved_connection(
             &self.connection_store,
             self.settings_store.settings(),
             &conn,

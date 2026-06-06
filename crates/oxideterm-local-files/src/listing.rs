@@ -5,7 +5,11 @@ pub fn list_local_files(path: &str) -> std::io::Result<Vec<LocalFileEntry>> {
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
         let path_buf = entry.path();
-        let symlink_metadata = std::fs::symlink_metadata(&path_buf)?;
+        let Ok(symlink_metadata) = std::fs::symlink_metadata(&path_buf) else {
+            // Some platform entries can be listed but fail metadata probing.
+            // Keep the directory usable instead of failing the whole listing.
+            continue;
+        };
         let target_metadata = std::fs::metadata(&path_buf).ok();
         let metadata = target_metadata.as_ref().unwrap_or(&symlink_metadata);
         let file_type = if symlink_metadata.file_type().is_symlink() {

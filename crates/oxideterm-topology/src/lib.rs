@@ -8,10 +8,15 @@
 //! matrix visibility/status rules, and deterministic graph layout. GPUI only
 //! renders the returned layout.
 
+mod auto_route;
 mod layout;
 mod model;
 mod status;
 
+pub use auto_route::{
+    AutoRouteNetworkTopology, AutoRouteNodeConfig, AutoRouteNodeInfo, AutoRouteResult,
+    AutoRouteTopologyAuthType,
+};
 pub use layout::{
     ConnectionTopologyLayout, TOPOLOGY_CANVAS_MIN_HEIGHT, TOPOLOGY_CANVAS_MIN_WIDTH,
     TOPOLOGY_DEPTH_GAP, TOPOLOGY_LEAF_GAP, TOPOLOGY_NODE_HEIGHT, TOPOLOGY_NODE_WIDTH,

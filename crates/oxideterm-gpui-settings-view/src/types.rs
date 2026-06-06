@@ -18,6 +18,26 @@ pub enum ActiveSurface {
     Settings,
 }
 
+pub fn settings_tab_from_ai_section(section: &str) -> Option<SettingsTab> {
+    match section {
+        "general" => Some(SettingsTab::General),
+        "portable" => Some(SettingsTab::Portable),
+        "terminal" => Some(SettingsTab::Terminal),
+        "appearance" => Some(SettingsTab::Appearance),
+        "local" | "local_terminal" => Some(SettingsTab::Local),
+        "connections" | "connection_manager" => Some(SettingsTab::Connections),
+        "ssh" => Some(SettingsTab::Ssh),
+        "reconnect" => Some(SettingsTab::Reconnect),
+        "sftp" => Some(SettingsTab::Sftp),
+        "ide" => Some(SettingsTab::Ide),
+        "ai" | "assistant" => Some(SettingsTab::Ai),
+        "knowledge" | "rag" => Some(SettingsTab::Knowledge),
+        "keybindings" | "keyboard" => Some(SettingsTab::Keybindings),
+        "help" => Some(SettingsTab::Help),
+        _ => None,
+    }
+}
+
 pub trait SettingsSelectAnchorExt {
     fn anchor_id(self) -> SelectAnchorId;
 }
@@ -73,5 +93,27 @@ impl SettingsSelectAnchorExt for SettingsSelect {
                 SelectAnchorId::SettingsConnectionImportDuplicateStrategy
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ai_section_aliases_map_to_settings_tabs() {
+        assert_eq!(
+            settings_tab_from_ai_section("local_terminal"),
+            Some(SettingsTab::Local)
+        );
+        assert_eq!(
+            settings_tab_from_ai_section("assistant"),
+            Some(SettingsTab::Ai)
+        );
+        assert_eq!(
+            settings_tab_from_ai_section("keyboard"),
+            Some(SettingsTab::Keybindings)
+        );
+        assert_eq!(settings_tab_from_ai_section("missing"), None);
     }
 }

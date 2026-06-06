@@ -32,11 +32,13 @@ use super::{
 use crate::workspace::{
     NativeProxyConnectRun, WorkspaceApp,
     session_manager::{
-        form_from_saved_connection, managed_key_resolver_from_store,
-        proxy_chain_config_from_saved_connection, save_request_from_form,
-        save_request_from_form_with_existing_auth, ssh_config_from_saved_connection,
-        upstream_proxy_config_from_form,
+        form_from_saved_connection, save_request_from_form,
+        save_request_from_form_with_existing_auth, upstream_proxy_config_from_form,
     },
+};
+use oxideterm_session_adapter::{
+    managed_key_resolver_from_store, proxy_chain_config_from_saved_connection,
+    ssh_config_from_saved_connection,
 };
 use oxideterm_terminal::SerialSessionConfig;
 

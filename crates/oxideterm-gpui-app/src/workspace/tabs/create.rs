@@ -470,9 +470,7 @@ impl WorkspaceApp {
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
         let managed_key_resolver =
-            crate::workspace::session_manager::managed_key_resolver_from_store(
-                &self.connection_store,
-            );
+            oxideterm_session_adapter::managed_key_resolver_from_store(&self.connection_store);
         // Tauri passes postConnectCommand as a createTerminalForNode option.
         // Keep it one-shot for this terminal instead of letting every future
         // terminal opened from the same node replay the saved command.
@@ -618,9 +616,7 @@ impl WorkspaceApp {
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
         let managed_key_resolver =
-            crate::workspace::session_manager::managed_key_resolver_from_store(
-                &self.connection_store,
-            );
+            oxideterm_session_adapter::managed_key_resolver_from_store(&self.connection_store);
         // Opening another terminal for an already-connected node mirrors
         // Tauri's createTerminalForNode(nodeId) path: no post-connect command
         // is replayed unless the caller explicitly supplies one.

@@ -7383,6 +7383,7 @@ dependencies = [
  "oxideterm-portable-runtime",
  "oxideterm-preview",
  "oxideterm-render-policy",
+ "oxideterm-session-adapter",
  "oxideterm-settings",
  "oxideterm-settings-model",
  "oxideterm-sftp",
@@ -7703,6 +7704,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-session-adapter"
+version = "2.0.0-gpui-preview.3"
+dependencies = [
+ "chrono",
+ "oxideterm-connections",
+ "oxideterm-settings",
+ "oxideterm-ssh",
+]
+
+[[package]]
 name = "oxideterm-settings"
 version = "2.0.0-gpui-preview.3"
 dependencies = [
@@ -7832,6 +7843,8 @@ version = "2.0.0-gpui-preview.3"
 name = "oxideterm-topology"
 version = "2.0.0-gpui-preview.3"
 dependencies = [
+ "chrono",
+ "oxideterm-connections",
  "serde",
 ]
 
