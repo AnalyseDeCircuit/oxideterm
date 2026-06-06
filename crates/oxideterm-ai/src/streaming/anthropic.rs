@@ -405,11 +405,14 @@ fn parse_anthropic_error(status: u16, body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AiPolicySafetyMode, AiToolUsePolicy};
+    use crate::{AiExecutionBackend, AiPolicySafetyMode, AiToolUsePolicy};
 
     fn config(reasoning_effort: &str, max_response_tokens: i64) -> AiChatStreamConfig {
         AiChatStreamConfig {
+            execution_backend: AiExecutionBackend::Provider,
             provider_id: Some("anthropic".to_string()),
+            acp_agent_id: None,
+            acp_session_id: None,
             provider_type: "anthropic".to_string(),
             base_url: "https://api.anthropic.com".to_string(),
             model: "claude".to_string(),

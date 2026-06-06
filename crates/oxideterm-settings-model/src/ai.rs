@@ -4,7 +4,7 @@
 //! AI settings page model helpers.
 
 use std::{
-    collections::{HashSet, hash_map::DefaultHasher},
+    collections::{BTreeMap, HashSet, hash_map::DefaultHasher},
     fmt,
     hash::{Hash, Hasher},
 };
@@ -14,7 +14,10 @@ use oxideterm_ai::{
     model_context_window_info, provider_views as ai_provider_views_from_values,
     update_provider as ai_update_provider_values,
 };
-use oxideterm_settings::PersistedSettings;
+use oxideterm_settings::{
+    AcpAgentAuthState, AcpAgentCapabilityPolicy, AcpAgentConfig, AcpAgentRuntimeStatus,
+    PersistedSettings,
+};
 
 use crate::SettingsInput;
 
@@ -418,7 +421,9 @@ fn ai_fallback_execution_profile(settings: &PersistedSettings) -> serde_json::Va
     serde_json::json!({
         "id": "default",
         "name": "Default",
+        "backend": "provider",
         "providerId": settings.ai.active_provider_id.clone(),
+        "acpAgentId": null,
         "model": settings.ai.active_model.clone(),
         "reasoningEffort": ai_reasoning_profile_value(settings.ai.reasoning_effort),
         "toolUse": {
@@ -537,6 +542,48 @@ pub fn ai_default_execution_profile(settings: &PersistedSettings) -> Option<Stri
         .map(str::to_string)
 }
 
+pub fn ai_add_acp_agent(settings: &mut PersistedSettings) {
+    let now = current_time_millis();
+    settings.ai.acp_agents.push(AcpAgentConfig {
+        id: format!("acp-agent-{now}"),
+        display_name: String::new(),
+        command: String::new(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+        cwd: None,
+        enabled: true,
+        auth: AcpAgentAuthState::default(),
+        capability_policy: AcpAgentCapabilityPolicy::default(),
+        status: AcpAgentRuntimeStatus::default(),
+    });
+}
+
+pub fn ai_delete_acp_agent(settings: &mut PersistedSettings, index: usize) {
+    if index >= settings.ai.acp_agents.len() {
+        return;
+    }
+    let removed_id = settings.ai.acp_agents.remove(index).id;
+    if let Some(profiles) = ai_execution_profiles_array_mut(settings) {
+        for profile in profiles
+            .iter_mut()
+            .filter_map(serde_json::Value::as_object_mut)
+        {
+            if profile
+                .get("acpAgentId")
+                .and_then(serde_json::Value::as_str)
+                == Some(removed_id.as_str())
+            {
+                // Keep profile shape intact while removing a now-stale agent reference.
+                profile.insert("acpAgentId".to_string(), serde_json::Value::Null);
+                profile.insert(
+                    "updatedAt".to_string(),
+                    serde_json::json!(current_time_millis()),
+                );
+            }
+        }
+    }
+}
+
 pub fn ai_add_execution_profile(settings: &mut PersistedSettings) {
     let now = current_time_millis();
     let profile_count = settings
@@ -550,7 +597,9 @@ pub fn ai_add_execution_profile(settings: &mut PersistedSettings) {
     let profile = serde_json::json!({
         "id": profile_id,
         "name": format!("Profile {}", profile_count + 1),
+        "backend": "provider",
         "providerId": settings.ai.active_provider_id.clone(),
+        "acpAgentId": null,
         "model": settings.ai.active_model.clone(),
         "reasoningEffort": ai_reasoning_profile_value(settings.ai.reasoning_effort),
         "toolUse": {

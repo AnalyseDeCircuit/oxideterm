@@ -76,7 +76,9 @@ pub enum SettingsSelect {
     AiContextMaxChars,
     AiContextVisibleLines,
     AiGlobalReasoning,
+    AiProfileBackend(usize),
     AiProfileProvider(usize),
+    AiProfileAcpAgent(usize),
     AiProfileReasoning(usize),
     AiProviderReasoning(usize),
     AiModelReasoning(usize, usize),
@@ -140,6 +142,12 @@ pub enum SettingsInput {
     AiProviderApiKey(usize),
     AiProfileName(usize),
     AiProfileModel(usize),
+    AiAcpAgentDisplayName(usize),
+    AiAcpAgentCommand(usize),
+    AiAcpAgentCwd(usize),
+    AiAcpAgentArgs(usize),
+    AiAcpAgentEnv(usize),
+    AiAcpAgentAuthToken(usize),
     AiSystemPrompt,
     AiMemoryContent,
     AiToolUseMaxRounds,
@@ -350,6 +358,8 @@ impl SettingsInput {
                 | Self::TerminalCommandSpecsJson
                 | Self::AiSystemPrompt
                 | Self::AiMemoryContent
+                | Self::AiAcpAgentArgs(_)
+                | Self::AiAcpAgentEnv(_)
                 | Self::AiMcpArgs
                 | Self::LocalPrivilegePromptPatterns
                 | Self::ManagedKeyPastePrivateKey
@@ -362,7 +372,9 @@ impl SettingsInput {
         match self {
             Self::TerminalCommandBarFocusHandoff | Self::TerminalCommandSpecsJson => 20.0,
             Self::AiSystemPrompt | Self::AiMemoryContent => 22.0,
-            Self::AiMcpArgs
+            Self::AiAcpAgentArgs(_)
+            | Self::AiAcpAgentEnv(_)
+            | Self::AiMcpArgs
             | Self::LocalPrivilegePromptPatterns
             | Self::ManagedKeyPastePrivateKey => 20.0,
             _ => DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT,
@@ -415,6 +427,12 @@ impl SettingsInput {
             Self::AiProviderApiKey(index) => 20_003 + index as u64 * 4,
             Self::AiProfileName(index) => 21_000 + index as u64 * 2,
             Self::AiProfileModel(index) => 21_001 + index as u64 * 2,
+            Self::AiAcpAgentDisplayName(index) => 21_500 + index as u64 * 6,
+            Self::AiAcpAgentCommand(index) => 21_501 + index as u64 * 6,
+            Self::AiAcpAgentCwd(index) => 21_502 + index as u64 * 6,
+            Self::AiAcpAgentArgs(index) => 21_503 + index as u64 * 6,
+            Self::AiAcpAgentEnv(index) => 21_504 + index as u64 * 6,
+            Self::AiAcpAgentAuthToken(index) => 21_505 + index as u64 * 6,
             Self::AiSystemPrompt => 22_000,
             Self::AiMemoryContent => 22_001,
             Self::AiToolUseMaxRounds => 22_002,
@@ -472,6 +490,7 @@ impl SettingsInput {
         matches!(
             self,
             Self::AiProviderApiKey(_)
+                | Self::AiAcpAgentAuthToken(_)
                 | Self::AiMcpAuthToken
                 | Self::CloudSyncToken
                 | Self::CloudSyncGitToken
@@ -555,6 +574,7 @@ mod tests {
     #[test]
     fn secret_inputs_are_categorized_in_the_model_layer() {
         assert!(SettingsInput::AiProviderApiKey(0).is_secret());
+        assert!(SettingsInput::AiAcpAgentAuthToken(0).is_secret());
         assert!(SettingsInput::CloudSyncSecretAccessKey.is_secret());
         assert!(SettingsInput::PortableCurrentPassword.is_secret());
         assert!(SettingsInput::PortableNewPassword.is_secret());

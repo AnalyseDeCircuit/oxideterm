@@ -160,6 +160,44 @@ pub fn persisted_settings_input_value(
         SettingsInput::AiProviderApiKey(_) => String::new(),
         SettingsInput::AiProfileName(index) => ai_profile_field(settings, index, "name"),
         SettingsInput::AiProfileModel(index) => ai_profile_field(settings, index, "model"),
+        SettingsInput::AiAcpAgentDisplayName(index) => settings
+            .ai
+            .acp_agents
+            .get(index)
+            .map(|agent| agent.display_name.clone())
+            .unwrap_or_default(),
+        SettingsInput::AiAcpAgentCommand(index) => settings
+            .ai
+            .acp_agents
+            .get(index)
+            .map(|agent| agent.command.clone())
+            .unwrap_or_default(),
+        SettingsInput::AiAcpAgentCwd(index) => settings
+            .ai
+            .acp_agents
+            .get(index)
+            .and_then(|agent| agent.cwd.clone())
+            .unwrap_or_default(),
+        SettingsInput::AiAcpAgentArgs(index) => settings
+            .ai
+            .acp_agents
+            .get(index)
+            .map(|agent| agent.args.join("\n"))
+            .unwrap_or_default(),
+        SettingsInput::AiAcpAgentEnv(index) => settings
+            .ai
+            .acp_agents
+            .get(index)
+            .map(|agent| {
+                agent
+                    .env
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default(),
+        SettingsInput::AiAcpAgentAuthToken(_) => String::new(),
         SettingsInput::AiSystemPrompt => settings.ai.custom_system_prompt.clone(),
         SettingsInput::AiMemoryContent => settings.ai.memory.content.clone(),
         SettingsInput::AiToolUseMaxRounds => settings
@@ -382,6 +420,62 @@ pub fn apply_persisted_settings_input_draft(
             });
             SettingsInputDraftApply::Applied
         }
+        SettingsInput::AiAcpAgentDisplayName(index) => {
+            if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
+                agent.display_name = draft.trim().to_string();
+            }
+            SettingsInputDraftApply::Applied
+        }
+        SettingsInput::AiAcpAgentCommand(index) => {
+            if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
+                agent.command = draft.trim().to_string();
+            }
+            SettingsInputDraftApply::Applied
+        }
+        SettingsInput::AiAcpAgentCwd(index) => {
+            if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
+                let cwd = draft.trim();
+                agent.cwd = if cwd.is_empty() {
+                    None
+                } else {
+                    Some(cwd.to_string())
+                };
+            }
+            SettingsInputDraftApply::Applied
+        }
+        SettingsInput::AiAcpAgentArgs(index) => {
+            if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
+                agent.args = draft
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect();
+            }
+            SettingsInputDraftApply::Applied
+        }
+        SettingsInput::AiAcpAgentEnv(index) => {
+            if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
+                agent.env = draft
+                    .lines()
+                    .filter_map(|line| {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() {
+                            return None;
+                        }
+                        let (key, value) = trimmed.split_once('=').unwrap_or((trimmed, ""));
+                        let key = key.trim();
+                        if key.is_empty() {
+                            None
+                        } else {
+                            Some((key.to_string(), value.to_string()))
+                        }
+                    })
+                    .collect();
+            }
+            SettingsInputDraftApply::Applied
+        }
+        SettingsInput::AiAcpAgentAuthToken(_) => SettingsInputDraftApply::Unhandled,
         SettingsInput::AiSystemPrompt => {
             settings.ai.custom_system_prompt = draft.to_string();
             SettingsInputDraftApply::Applied

@@ -165,6 +165,64 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn acp_session_started_ignores_stale_generation_and_persists_current_metadata() {
+        let mut conversations = vec![AiConversation {
+            id: "conv-1".to_string(),
+            title: "Conversation".to_string(),
+            messages: Vec::new(),
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            origin: "sidebar".to_string(),
+            profile_id: None,
+            message_count: 0,
+            session_id: None,
+            session_metadata: None,
+            messages_loaded: true,
+        }];
+
+        let stale_applied = apply_ai_acp_session_started_to_conversations(
+            &mut conversations,
+            2,
+            1,
+            "conv-1",
+            "stale-session",
+            Some(serde_json::json!({ "source": "stale" })),
+            "agent-1",
+        );
+
+        assert!(!stale_applied);
+        assert_eq!(conversations[0].session_id, None);
+        assert_eq!(conversations[0].session_metadata, None);
+
+        let current_applied = apply_ai_acp_session_started_to_conversations(
+            &mut conversations,
+            2,
+            2,
+            "conv-1",
+            "fresh-session",
+            Some(serde_json::json!({ "source": "fresh" })),
+            "agent-1",
+        );
+
+        assert!(current_applied);
+        assert_eq!(
+            conversations[0].session_id.as_deref(),
+            Some("fresh-session")
+        );
+        assert_eq!(
+            conversations[0]
+                .session_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("acp")),
+            Some(&serde_json::json!({
+                "agentId": "agent-1",
+                "sessionId": "fresh-session",
+                "metadata": { "source": "fresh" },
+            }))
+        );
+    }
+
+    #[test]
     fn sftp_target_shape_is_node_runtime_scoped_like_tauri() {
         let node_id = NodeId::new("node-1".to_string());
         let mut config = oxideterm_ssh::SshConfig::default();
@@ -899,7 +957,10 @@ mod ai_turn_order_tests {
         let mut tool_policy = AiToolUsePolicy::default();
         tool_policy.enabled = true;
         let config = AiChatStreamConfig {
+            execution_backend: AiExecutionBackend::Provider,
             provider_id: Some("provider-1".to_string()),
+            acp_agent_id: None,
+            acp_session_id: None,
             provider_type: "openai".to_string(),
             base_url: "https://api.example.test".to_string(),
             model: "model".to_string(),

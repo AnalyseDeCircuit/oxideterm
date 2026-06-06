@@ -89,7 +89,9 @@ fn default_execution_profiles() -> Value {
         "profiles": [{
             "id": "default",
             "name": "Default",
+            "backend": "provider",
             "providerId": null,
+            "acpAgentId": null,
             "model": null,
             "reasoningEffort": "auto",
             "toolUse": {
@@ -109,6 +111,104 @@ fn default_execution_profiles() -> Value {
             "updatedAt": 0
         }]
     })
+}
+
+fn default_acp_agent_enabled() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpAgentAuthStatus {
+    #[default]
+    Unknown,
+    NotRequired,
+    Required,
+    Authenticated,
+    Expired,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpAgentAuthState {
+    #[serde(default)]
+    pub status: AcpAgentAuthStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpAgentCapabilityPolicy {
+    #[serde(default)]
+    pub fs_read_text_file: bool,
+    #[serde(default)]
+    pub fs_write_text_file: bool,
+    #[serde(default)]
+    pub terminal: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpAgentRuntimeState {
+    #[default]
+    Unknown,
+    Ready,
+    AuthRequired,
+    Error,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpAgentRuntimeStatus {
+    #[serde(default)]
+    pub state: AcpAgentRuntimeState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_kind: Option<String>,
+}
+
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpAgentConfig {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default = "default_acp_agent_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub auth: AcpAgentAuthState,
+    #[serde(default)]
+    pub capability_policy: AcpAgentCapabilityPolicy,
+    #[serde(default)]
+    pub status: AcpAgentRuntimeStatus,
+}
+
+impl std::fmt::Debug for AcpAgentConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AcpAgentConfig")
+            .field("id", &self.id)
+            .field("display_name", &self.display_name)
+            .field("command", &self.command)
+            // Args and env values can contain tokens, so Debug only exposes shape.
+            .field("args", &format_args!("<redacted:{}>", self.args.len()))
+            .field("env", &format_args!("<redacted:{}>", self.env.len()))
+            .field("cwd", &self.cwd)
+            .field("enabled", &self.enabled)
+            .field("auth", &self.auth)
+            .field("capability_policy", &self.capability_policy)
+            .field("status", &self.status)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -140,6 +240,8 @@ pub struct AiSettings {
     pub context_sources: AiContextSources,
     #[serde(default)]
     pub mcp_servers: Vec<Value>,
+    #[serde(default)]
+    pub acp_agents: Vec<AcpAgentConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_config: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -174,10 +276,78 @@ impl Default for AiSettings {
             tool_use: AiToolUseSettings::default(),
             context_sources: AiContextSources::default(),
             mcp_servers: Vec::new(),
+            acp_agents: Vec::new(),
             embedding_config: None,
             agent_roles: None,
             execution_profiles: default_execution_profiles(),
             extra: ExtraFields::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod ai_model_tests {
+    use super::*;
+
+    #[test]
+    fn acp_agent_defaults_keep_host_capabilities_closed() {
+        let agent: AcpAgentConfig = serde_json::from_value(json!({
+            "id": "codex-local",
+            "displayName": "Codex Local",
+            "command": "codex"
+        }))
+        .expect("agent config");
+
+        assert!(agent.enabled);
+        assert!(!agent.capability_policy.fs_read_text_file);
+        assert!(!agent.capability_policy.fs_write_text_file);
+        assert!(!agent.capability_policy.terminal);
+    }
+
+    #[test]
+    fn acp_agent_debug_redacts_args_and_env_values() {
+        let agent: AcpAgentConfig = serde_json::from_value(json!({
+            "id": "codex-local",
+            "displayName": "Codex Local",
+            "command": "codex",
+            "args": ["--api-key=arg-secret"],
+            "env": { "API_KEY": "env-secret" },
+            "auth": { "status": "authenticated", "accountLabel": "user@example.test" }
+        }))
+        .expect("agent config");
+
+        let debug = format!("{agent:?}");
+
+        assert!(debug.contains("<redacted:1>"));
+        assert!(!debug.contains("arg-secret"));
+        assert!(!debug.contains("env-secret"));
+    }
+
+    #[test]
+    fn acp_agent_serialization_drops_unknown_secret_fields() {
+        let agent: AcpAgentConfig = serde_json::from_value(json!({
+            "id": "codex-local",
+            "displayName": "Codex Local",
+            "command": "codex",
+            "authToken": "legacy-secret",
+            "auth": {
+                "status": "authenticated",
+                "accountLabel": "user@example.test",
+                "token": "auth-secret"
+            },
+            "status": {
+                "state": "ready",
+                "lastErrorKind": "none",
+                "stderr": "stderr-secret"
+            }
+        }))
+        .expect("agent config");
+
+        let serialized = serde_json::to_string(&agent).expect("agent json");
+
+        assert!(serialized.contains("user@example.test"));
+        assert!(!serialized.contains("legacy-secret"));
+        assert!(!serialized.contains("auth-secret"));
+        assert!(!serialized.contains("stderr-secret"));
     }
 }

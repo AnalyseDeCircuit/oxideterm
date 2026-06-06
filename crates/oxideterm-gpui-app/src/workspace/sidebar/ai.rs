@@ -4,7 +4,7 @@ use gpui::{Context, Div, MouseDownEvent, Rgba, Window};
 use oxideterm_ai::{
     AiAutocompleteCandidate, AiAutocompleteKind, AiChatMessage, AiChatMessageMetadata,
     AiChatRole, AiChatStreamConfig, AiConversation, AiMessageBranches, AiProviderView,
-    AiPolicySafetyMode, AiReferenceMatch, AiStreamEvent, AiToolUsePolicy,
+    AiExecutionBackend, AiPolicySafetyMode, AiReferenceMatch, AiStreamEvent, AiToolUsePolicy,
     AiToolCall, ModelSelectorProviderProbe, ResolvedAiExecutionProfile, active_model_or_provider_default,
     active_provider_view, ai_autocomplete_candidates, ai_help_markdown as ai_help_markdown_core,
     ai_input_system_prompt, ai_reference_context_block, apply_ai_autocomplete_candidate,

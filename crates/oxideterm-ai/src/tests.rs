@@ -30,7 +30,10 @@ fn provider(id: &str, provider_type: &str, base_url: &str, enabled: bool) -> AiP
 
 fn test_stream_config(provider_type: &str) -> AiChatStreamConfig {
     AiChatStreamConfig {
+        execution_backend: AiExecutionBackend::Provider,
         provider_id: Some("provider".to_string()),
+        acp_agent_id: None,
+        acp_session_id: None,
         provider_type: provider_type.to_string(),
         base_url: "https://api.example.test".to_string(),
         model: "model".to_string(),
@@ -787,7 +790,9 @@ fn execution_profile_merge_matches_tauri_settings_overlay() {
     );
 
     assert_eq!(resolved.profile_id.as_deref(), Some("agent"));
+    assert_eq!(resolved.backend, AiExecutionBackend::Provider);
     assert_eq!(resolved.provider_id.as_deref(), Some("anthropic"));
+    assert_eq!(resolved.acp_agent_id, None);
     assert_eq!(resolved.model.as_deref(), Some("claude-3-7-sonnet"));
     assert_eq!(resolved.reasoning_effort.as_deref(), Some("high"));
     assert!(!resolved.include_runtime_chips);
@@ -815,6 +820,56 @@ fn execution_profile_merge_matches_tauri_settings_overlay() {
         resolved.tool_policy.disabled_tools,
         vec!["write_resource:settings".to_string()]
     );
+}
+
+#[test]
+fn execution_profile_backend_distinguishes_acp_from_legacy_provider() {
+    let config = serde_json::json!({
+        "defaultProfileId": "legacy",
+        "profiles": [
+            {
+                "id": "legacy",
+                "name": "Legacy",
+                "providerId": "openai",
+                "model": "gpt-4o-mini",
+                "reasoningEffort": "auto"
+            },
+            {
+                "id": "acp",
+                "name": "Codex ACP",
+                "backend": "acp",
+                "providerId": "stale-provider",
+                "acpAgentId": "codex-local",
+                "model": "stale-model",
+                "reasoningEffort": "auto"
+            }
+        ]
+    });
+
+    let legacy = resolve_ai_execution_profile(
+        &config,
+        Some("legacy"),
+        Some("base-provider"),
+        Some("base-model"),
+        Some("auto"),
+        AiToolUsePolicy::default(),
+    );
+    assert_eq!(legacy.backend, AiExecutionBackend::Provider);
+    assert_eq!(legacy.provider_id.as_deref(), Some("openai"));
+    assert_eq!(legacy.acp_agent_id, None);
+
+    let acp = resolve_ai_execution_profile(
+        &config,
+        Some("acp"),
+        Some("base-provider"),
+        Some("base-model"),
+        Some("auto"),
+        AiToolUsePolicy::default(),
+    );
+    assert_eq!(acp.backend, AiExecutionBackend::Acp);
+    assert_eq!(acp.acp_agent_id.as_deref(), Some("codex-local"));
+    assert_eq!(acp.provider_id, None);
+    assert_eq!(acp.model, None);
 }
 
 #[test]

@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::policy::{AiPolicySafetyMode, AiToolUsePolicy};
+use crate::{
+    policy::{AiPolicySafetyMode, AiToolUsePolicy},
+    profiles::AiExecutionBackend,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AiProviderTemplate {
@@ -201,7 +204,10 @@ pub enum AiToolChoice {
 
 #[derive(Clone)]
 pub struct AiChatStreamConfig {
+    pub execution_backend: AiExecutionBackend,
     pub provider_id: Option<String>,
+    pub acp_agent_id: Option<String>,
+    pub acp_session_id: Option<String>,
     pub provider_type: String,
     pub base_url: String,
     pub model: String,

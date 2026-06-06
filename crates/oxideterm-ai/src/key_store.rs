@@ -272,6 +272,20 @@ impl AiProviderKeyStore {
         }
     }
 
+    pub fn store_acp_auth_token(&self, agent_id: &str, token: Zeroizing<String>) -> Result<()> {
+        // ACP tokens share the AI keychain service but use their own namespace
+        // so provider, MCP, and ACP credentials cannot overwrite each other.
+        self.store_provider_key(&format!("acp:{agent_id}"), token)
+    }
+
+    pub fn has_acp_auth_token(&self, agent_id: &str) -> bool {
+        self.has_provider_key(&format!("acp:{agent_id}"))
+    }
+
+    pub fn delete_acp_auth_token(&self, agent_id: &str) -> Result<()> {
+        self.delete_provider_key(&format!("acp:{agent_id}"))
+    }
+
     fn load_provider_key_from_os(&self, provider_id: &str) -> Result<Option<Zeroizing<String>>> {
         if portable_keychain_enabled()? {
             return self.load_provider_key_from_portable(provider_id);

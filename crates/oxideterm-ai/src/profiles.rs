@@ -2,10 +2,19 @@ use crate::AiToolUsePolicy;
 use serde_json::Value;
 use std::collections::HashMap;
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum AiExecutionBackend {
+    #[default]
+    Provider,
+    Acp,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedAiExecutionProfile {
     pub profile_id: Option<String>,
+    pub backend: AiExecutionBackend,
     pub provider_id: Option<String>,
+    pub acp_agent_id: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub tool_policy: AiToolUsePolicy,
@@ -18,7 +27,9 @@ impl Default for ResolvedAiExecutionProfile {
     fn default() -> Self {
         Self {
             profile_id: None,
+            backend: AiExecutionBackend::Provider,
             provider_id: None,
+            acp_agent_id: None,
             model: None,
             reasoning_effort: None,
             tool_policy: AiToolUsePolicy::default(),
@@ -42,7 +53,9 @@ pub fn resolve_ai_execution_profile(
         profile_id: profile
             .and_then(|profile| string_field(profile, "id"))
             .or_else(|| requested_profile_id.map(str::to_string)),
+        backend: AiExecutionBackend::Provider,
         provider_id: base_provider_id.map(str::to_string),
+        acp_agent_id: None,
         model: base_model.map(str::to_string),
         reasoning_effort: base_reasoning_effort.map(str::to_string),
         tool_policy: base_tool_policy,
@@ -55,11 +68,19 @@ pub fn resolve_ai_execution_profile(
         return resolved;
     };
 
-    if let Some(provider_id) = string_field(profile, "providerId") {
-        resolved.provider_id = Some(provider_id);
+    if profile.get("backend").and_then(Value::as_str) == Some("acp") {
+        resolved.backend = AiExecutionBackend::Acp;
+        resolved.acp_agent_id = string_field(profile, "acpAgentId");
+        resolved.provider_id = None;
+        resolved.model = None;
     }
-    if let Some(model) = string_field(profile, "model") {
-        resolved.model = Some(model);
+    if resolved.backend == AiExecutionBackend::Provider {
+        if let Some(provider_id) = string_field(profile, "providerId") {
+            resolved.provider_id = Some(provider_id);
+        }
+        if let Some(model) = string_field(profile, "model") {
+            resolved.model = Some(model);
+        }
     }
     if let Some(reasoning_effort) = string_field(profile, "reasoningEffort") {
         resolved.reasoning_effort = Some(reasoning_effort);

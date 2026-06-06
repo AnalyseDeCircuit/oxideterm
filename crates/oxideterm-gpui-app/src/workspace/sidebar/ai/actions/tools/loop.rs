@@ -8,6 +8,20 @@ async fn run_ai_chat_tool_loop(
     assistant_id: String,
     ui_tx: std::sync::mpsc::Sender<AiStreamDelivery>,
 ) {
+    if config.execution_backend == AiExecutionBackend::Acp {
+        run_acp_chat_loop(
+            config,
+            history,
+            snapshot,
+            generation,
+            conversation_id,
+            assistant_id,
+            ui_tx,
+        )
+        .await;
+        return;
+    }
+
     let max_rounds = config
         .tool_policy
         .max_rounds
@@ -998,6 +1012,317 @@ async fn run_ai_chat_tool_loop(
         &assistant_id,
         AiStreamDeliveryEvent::Stream(AiStreamEvent::Done),
     );
+}
+
+async fn run_acp_chat_loop(
+    config: AiChatStreamConfig,
+    history: Vec<AiChatMessage>,
+    snapshot: AiOrchestratorRuntimeSnapshot,
+    generation: u64,
+    conversation_id: String,
+    assistant_id: String,
+    ui_tx: std::sync::mpsc::Sender<AiStreamDelivery>,
+) {
+    let Some(agent_id) = config
+        .acp_agent_id
+        .as_deref()
+        .filter(|agent_id| !agent_id.trim().is_empty())
+    else {
+        let _ = send_ai_stream_delivery(
+            &ui_tx,
+            generation,
+            &conversation_id,
+            &assistant_id,
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(
+                "No ACP agent selected for this execution profile.".to_string(),
+            )),
+        );
+        return;
+    };
+    let Some(prompt) = history
+        .iter()
+        .rev()
+        .find(|message| message.role == AiChatRole::User)
+        .map(|message| message.content.trim().to_string())
+        .filter(|content| !content.is_empty())
+    else {
+        let _ = send_ai_stream_delivery(
+            &ui_tx,
+            generation,
+            &conversation_id,
+            &assistant_id,
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(
+                "Cannot start ACP agent without a user prompt.".to_string(),
+            )),
+        );
+        return;
+    };
+    let agent = match acp_agent_config_from_settings(&snapshot.settings_state, agent_id) {
+        Ok(agent) => agent,
+        Err(error) => {
+            let _ = send_ai_stream_delivery(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(error)),
+            );
+            return;
+        }
+    };
+    if !agent.enabled {
+        let _ = send_ai_stream_delivery(
+            &ui_tx,
+            generation,
+            &conversation_id,
+            &assistant_id,
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(format!(
+                "ACP agent `{}` is disabled.",
+                agent.id
+            ))),
+        );
+        return;
+    }
+    let launch_config = acp_launch_config_from_agent(&agent);
+    let launcher = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
+        Ok(launcher) => launcher,
+        Err(error) => {
+            let _ = send_ai_stream_delivery(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(error.to_string())),
+            );
+            return;
+        }
+    };
+    let session_cwd = std::env::current_dir().unwrap_or_else(|_| {
+        agent
+            .cwd
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    });
+    let host_policy = acp_host_capability_policy_from_agent(&agent);
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let bridge_ui_tx = ui_tx.clone();
+    let bridge_conversation_id = conversation_id.clone();
+    let bridge_assistant_id = assistant_id.clone();
+    let bridge_session_cwd = session_cwd.clone();
+    let bridge_host_policy = host_policy.clone();
+    let bridge_terminal_registry = oxideterm_ai::AcpTerminalRegistry::new();
+    let bridge = tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            match event {
+                oxideterm_ai::AcpClientEvent::ReadTextFile {
+                    request,
+                    response_tx,
+                } => {
+                    let response = if bridge_host_policy.fs_read_text_file {
+                        oxideterm_ai::resolve_acp_read_text_file_request(
+                            &bridge_session_cwd,
+                            &request,
+                        )
+                        .await
+                    } else {
+                        Err(oxideterm_ai::acp_method_not_found("fs/read_text_file"))
+                    };
+                    let _ = response_tx.send(response);
+                    continue;
+                }
+                oxideterm_ai::AcpClientEvent::WriteTextFile {
+                    request,
+                    response_tx,
+                } => {
+                    let response = if bridge_host_policy.fs_write_text_file {
+                        oxideterm_ai::resolve_acp_write_text_file_request(
+                            &bridge_session_cwd,
+                            &request,
+                        )
+                        .await
+                    } else {
+                        Err(oxideterm_ai::acp_method_not_found("fs/write_text_file"))
+                    };
+                    let _ = response_tx.send(response);
+                    continue;
+                }
+                oxideterm_ai::AcpClientEvent::CreateTerminal {
+                    request,
+                    response_tx,
+                } => {
+                    let response = if bridge_host_policy.terminal {
+                        bridge_terminal_registry
+                            .create_terminal(&bridge_session_cwd, &request)
+                            .await
+                    } else {
+                        Err(oxideterm_ai::acp_method_not_found("terminal/create"))
+                    };
+                    let _ = response_tx.send(response);
+                    continue;
+                }
+                oxideterm_ai::AcpClientEvent::TerminalOutput {
+                    request,
+                    response_tx,
+                } => {
+                    let response = if bridge_host_policy.terminal {
+                        bridge_terminal_registry.terminal_output(&request).await
+                    } else {
+                        Err(oxideterm_ai::acp_method_not_found("terminal/output"))
+                    };
+                    let _ = response_tx.send(response);
+                    continue;
+                }
+                oxideterm_ai::AcpClientEvent::ReleaseTerminal {
+                    request,
+                    response_tx,
+                } => {
+                    let response = if bridge_host_policy.terminal {
+                        bridge_terminal_registry.release_terminal(&request).await
+                    } else {
+                        Err(oxideterm_ai::acp_method_not_found("terminal/release"))
+                    };
+                    let _ = response_tx.send(response);
+                    continue;
+                }
+                oxideterm_ai::AcpClientEvent::WaitForTerminalExit {
+                    request,
+                    response_tx,
+                } => {
+                    let response = if bridge_host_policy.terminal {
+                        bridge_terminal_registry.wait_for_terminal_exit(&request).await
+                    } else {
+                        Err(oxideterm_ai::acp_method_not_found("terminal/wait_for_exit"))
+                    };
+                    let _ = response_tx.send(response);
+                    continue;
+                }
+                oxideterm_ai::AcpClientEvent::KillTerminal {
+                    request,
+                    response_tx,
+                } => {
+                    let response = if bridge_host_policy.terminal {
+                        bridge_terminal_registry.kill_terminal(&request).await
+                    } else {
+                        Err(oxideterm_ai::acp_method_not_found("terminal/kill"))
+                    };
+                    let _ = response_tx.send(response);
+                    continue;
+                }
+                event => {
+                    if send_ai_stream_delivery(
+                        &bridge_ui_tx,
+                        generation,
+                        &bridge_conversation_id,
+                        &bridge_assistant_id,
+                        AiStreamDeliveryEvent::AcpClientEvent(event),
+                    )
+                    .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    let result = oxideterm_ai::run_acp_prompt_session_events(
+        launcher,
+        env!("CARGO_PKG_VERSION").to_string(),
+        host_policy,
+        session_cwd,
+        config.acp_session_id.clone(),
+        prompt,
+        event_tx,
+        snapshot.ai_acp_runtime_registry.clone(),
+        conversation_id.clone(),
+        generation.to_string(),
+    )
+    .await;
+    let _ = bridge.await;
+    match result {
+        Ok(outcome) => {
+            // Persist the ACP session identity before the final Done event so a
+            // retry or resumed conversation can load the same agent session.
+            if send_ai_stream_delivery(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::AcpSessionStarted {
+                    session_id: outcome.session_id,
+                    session_metadata: outcome.session_metadata,
+                    agent_id: agent.id.clone(),
+                },
+            )
+            .is_err()
+            {
+                return;
+            }
+            let _ = send_ai_stream_delivery(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::Stream(AiStreamEvent::Done),
+            );
+        }
+        Err(error) => {
+            let _ = send_ai_stream_delivery(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(error.to_string())),
+            );
+        }
+    }
+}
+
+fn acp_agent_config_from_settings(
+    settings_state: &serde_json::Value,
+    agent_id: &str,
+) -> Result<oxideterm_settings::AcpAgentConfig, String> {
+    settings_state
+        .get("ai")
+        .and_then(|ai| ai.get("acpAgents"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|agents| {
+            agents
+                .iter()
+                .filter_map(|agent| {
+                    serde_json::from_value::<oxideterm_settings::AcpAgentConfig>(agent.clone()).ok()
+                })
+                .find(|agent| agent.id == agent_id)
+        })
+        .ok_or_else(|| format!("ACP agent `{agent_id}` is not configured."))
+}
+
+fn acp_launch_config_from_agent(
+    agent: &oxideterm_settings::AcpAgentConfig,
+) -> oxideterm_ai::AcpLaunchConfig {
+    oxideterm_ai::AcpLaunchConfig {
+        id: agent.id.clone(),
+        display_name: if agent.display_name.trim().is_empty() {
+            agent.id.clone()
+        } else {
+            agent.display_name.clone()
+        },
+        command: agent.command.clone(),
+        args: agent.args.clone(),
+        env: agent.env.clone(),
+        cwd: agent.cwd.as_deref().map(std::path::PathBuf::from),
+    }
+}
+
+fn acp_host_capability_policy_from_agent(
+    agent: &oxideterm_settings::AcpAgentConfig,
+) -> oxideterm_ai::AcpHostCapabilityPolicy {
+    oxideterm_ai::AcpHostCapabilityPolicy {
+        fs_read_text_file: agent.capability_policy.fs_read_text_file,
+        fs_write_text_file: agent.capability_policy.fs_write_text_file,
+        terminal: agent.capability_policy.terminal,
+    }
 }
 
 fn flush_ai_required_tool_buffer(

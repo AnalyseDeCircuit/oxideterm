@@ -9,7 +9,7 @@
 use crate::{SettingsTab, TerminalSettingsPage};
 
 pub const SETTINGS_SECTION_HEADER_ITEM_COUNT: usize = 1;
-pub const AI_SETTINGS_FIXED_SECTION_COUNT: usize = 6;
+pub const AI_SETTINGS_FIXED_SECTION_COUNT: usize = 7;
 
 pub fn settings_section_list_item_count(
     tab: SettingsTab,

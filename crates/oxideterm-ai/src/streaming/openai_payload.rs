@@ -241,7 +241,7 @@ fn tool_calls_from_message(message: &AiChatMessage) -> Vec<AiToolCall> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AiPolicySafetyMode, AiToolUsePolicy};
+    use crate::{AiExecutionBackend, AiPolicySafetyMode, AiToolUsePolicy};
 
     fn message(role: AiChatRole, content: &str) -> AiChatMessage {
         AiChatMessage {
@@ -266,7 +266,10 @@ mod tests {
 
     fn config(provider_type: &str, reasoning_effort: &str) -> AiChatStreamConfig {
         AiChatStreamConfig {
+            execution_backend: AiExecutionBackend::Provider,
             provider_id: Some("provider".to_string()),
+            acp_agent_id: None,
+            acp_session_id: None,
             provider_type: provider_type.to_string(),
             base_url: "https://api.example.test".to_string(),
             model: "model".to_string(),

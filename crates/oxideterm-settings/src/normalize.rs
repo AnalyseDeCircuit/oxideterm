@@ -278,7 +278,9 @@ fn normalize_ai_execution_profiles(settings: &mut Value, raw_had_execution_profi
     let fallback = json!({
         "id": "default",
         "name": "Default",
+        "backend": "provider",
         "providerId": active_provider_id,
+        "acpAgentId": null,
         "model": active_model,
         "reasoningEffort": reasoning_effort,
         "toolUse": tool_use,

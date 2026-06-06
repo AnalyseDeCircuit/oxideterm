@@ -69,6 +69,110 @@ impl WorkspaceApp {
                         cx,
                     );
                 }
+                AiStreamDeliveryEvent::AcpClientEvent(event) => {
+                    // ACP session/update notifications are normalized in
+                    // oxideterm-ai, then consumed by the same stream apply path
+                    // as provider events so generation guards remain shared.
+                    match event {
+                        oxideterm_ai::AcpClientEvent::RequestPermission {
+                            request,
+                            response_tx,
+                        } => {
+                            self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                            if self.ai_chat_stream_generation != delivery.generation {
+                                let _ = response_tx
+                                    .send(Ok(oxideterm_ai::acp_permission_cancelled_response()));
+                                continue;
+                            }
+                            let projection =
+                                oxideterm_ai::acp_permission_request_projection(&request);
+                            let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
+                            self.ai_pending_tool_approvals
+                                .insert(projection.tool_call_id.clone(), approval_tx);
+                            let forwarding_runtime = self.forwarding_runtime.clone();
+                            forwarding_runtime.spawn(async move {
+                                let approved = approval_rx.await.unwrap_or(false);
+                                let response = oxideterm_ai::acp_permission_response_for_decision(
+                                    &request, approved,
+                                );
+                                let _ = response_tx.send(Ok(response));
+                            });
+                            self.apply_ai_tool_status(
+                                delivery.generation,
+                                &delivery.conversation_id,
+                                &delivery.assistant_id,
+                                &projection.tool_call_id,
+                                &projection.name,
+                                &projection.arguments,
+                                "pending_user_approval",
+                                None,
+                                Some(projection.risk),
+                                Some(projection.summary),
+                                false,
+                                None,
+                                None,
+                                None,
+                                cx,
+                            );
+                        }
+                        event => {
+                            for stream_event in
+                                oxideterm_ai::acp_client_event_to_ai_stream_events(event)
+                            {
+                                match stream_event {
+                                    AiStreamEvent::Content(chunk) => {
+                                        self.merge_or_flush_pending_ai_stream_text(
+                                            &mut pending_text,
+                                            delivery.generation,
+                                            delivery.conversation_id.clone(),
+                                            delivery.assistant_id.clone(),
+                                            PendingAiStreamTextKind::Content,
+                                            chunk,
+                                            cx,
+                                        );
+                                    }
+                                    AiStreamEvent::Thinking(chunk) => {
+                                        self.merge_or_flush_pending_ai_stream_text(
+                                            &mut pending_text,
+                                            delivery.generation,
+                                            delivery.conversation_id.clone(),
+                                            delivery.assistant_id.clone(),
+                                            PendingAiStreamTextKind::Thinking,
+                                            chunk,
+                                            cx,
+                                        );
+                                    }
+                                    event => {
+                                        self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                                        self.apply_ai_stream_event(
+                                            delivery.generation,
+                                            &delivery.conversation_id,
+                                            &delivery.assistant_id,
+                                            event,
+                                            cx,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                AiStreamDeliveryEvent::AcpSessionStarted {
+                    session_id,
+                    session_metadata,
+                    agent_id,
+                } => {
+                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    if self.apply_ai_acp_session_started(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &session_id,
+                        session_metadata,
+                        &agent_id,
+                    ) {
+                        cx.notify();
+                    }
+                }
                 AiStreamDeliveryEvent::Guardrail {
                     code,
                     message,

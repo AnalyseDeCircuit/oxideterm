@@ -1,4 +1,70 @@
+fn apply_ai_acp_session_started_to_conversations(
+    conversations: &mut [AiConversation],
+    current_generation: u64,
+    delivery_generation: u64,
+    conversation_id: &str,
+    session_id: &str,
+    session_metadata: Option<serde_json::Value>,
+    agent_id: &str,
+) -> bool {
+    if current_generation != delivery_generation {
+        return false;
+    }
+    let Some(conversation) = conversations
+        .iter_mut()
+        .find(|conversation| conversation.id == conversation_id)
+    else {
+        return false;
+    };
+
+    conversation.session_id = Some(session_id.to_string());
+    let metadata = conversation
+        .session_metadata
+        .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
+    if let Some(object) = metadata.as_object_mut() {
+        // ACP session metadata is redacted protocol state, not credentials;
+        // store it with the conversation so native resumes match Tauri.
+        object.insert(
+            "conversationId".to_string(),
+            serde_json::json!(conversation_id),
+        );
+        object.insert("origin".to_string(), serde_json::json!("sidebar"));
+        object.insert(
+            "acp".to_string(),
+            serde_json::json!({
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "metadata": session_metadata,
+            }),
+        );
+    }
+    true
+}
+
 impl WorkspaceApp {
+    fn apply_ai_acp_session_started(
+        &mut self,
+        generation: u64,
+        conversation_id: &str,
+        session_id: &str,
+        session_metadata: Option<serde_json::Value>,
+        agent_id: &str,
+    ) -> bool {
+        if !apply_ai_acp_session_started_to_conversations(
+            &mut self.ai_chat.conversations,
+            self.ai_chat_stream_generation,
+            generation,
+            conversation_id,
+            session_id,
+            session_metadata,
+            agent_id,
+        ) {
+            return false;
+        }
+        self.persist_ai_chat_state();
+        true
+    }
+
     fn apply_ai_stream_event(
         &mut self,
         generation: u64,

@@ -622,6 +622,7 @@ impl WorkspaceApp {
             backend_runtime: self.forwarding_runtime.clone(),
             rag_store: self.ai_rag_store.get(),
             ai_mcp_registry: self.ai_mcp_registry.clone(),
+            ai_acp_runtime_registry: self.ai_acp_runtime_registry.clone(),
             ai_key_store: self.ai_key_store.clone(),
             ai_providers: settings.ai.providers.clone(),
             ai_embedding_config: settings.ai.embedding_config.clone(),

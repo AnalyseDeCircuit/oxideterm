@@ -5,13 +5,16 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+agent-client-protocol.workspace = true
 anyhow.workspace = true
+async-process.workspace = true
 base64.workspace = true
 chrono.workspace = true
 instant-distance = { version = "0.6.1", features = ["with-serde"] }
 keyring.workspace = true
 eventsource-stream = "0.2.3"
 futures-util.workspace = true
+futures.workspace = true
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 parking_lot.workspace = true
 redb = "2.1"

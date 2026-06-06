@@ -878,7 +878,10 @@ impl WorkspaceApp {
                 "No model selected. Please refresh models or select one in Settings > AI.".to_string()
             })?;
         Ok(AiChatStreamConfig {
+            execution_backend: AiExecutionBackend::Provider,
             provider_id: Some(provider.id.clone()),
+            acp_agent_id: None,
+            acp_session_id: None,
             provider_type: provider.provider_type,
             base_url: provider.base_url,
             model: model.clone(),

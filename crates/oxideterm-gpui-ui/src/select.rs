@@ -73,7 +73,9 @@ pub enum SelectAnchorId {
     SettingsAiContextMaxChars,
     SettingsAiContextVisibleLines,
     SettingsAiGlobalReasoning,
+    SettingsAiProfileBackend(usize),
     SettingsAiProfileProvider(usize),
+    SettingsAiProfileAcpAgent(usize),
     SettingsAiProfileReasoning(usize),
     SettingsAiProviderReasoning(usize),
     SettingsAiModelReasoning(usize, usize),
@@ -148,7 +150,9 @@ impl SelectAnchorId {
                 | Self::SettingsAiContextMaxChars
                 | Self::SettingsAiContextVisibleLines
                 | Self::SettingsAiGlobalReasoning
+                | Self::SettingsAiProfileBackend(_)
                 | Self::SettingsAiProfileProvider(_)
+                | Self::SettingsAiProfileAcpAgent(_)
                 | Self::SettingsAiProfileReasoning(_)
                 | Self::SettingsAiProviderReasoning(_)
                 | Self::SettingsAiModelReasoning(_, _)
@@ -680,7 +684,9 @@ mod tests {
     #[test]
     fn settings_select_anchor_ids_are_distinct_from_slider_and_sidebar_anchors() {
         assert!(SelectAnchorId::SettingsLanguage.is_settings_select_trigger());
+        assert!(SelectAnchorId::SettingsAiProfileBackend(2).is_settings_select_trigger());
         assert!(SelectAnchorId::SettingsAiProfileProvider(2).is_settings_select_trigger());
+        assert!(SelectAnchorId::SettingsAiProfileAcpAgent(2).is_settings_select_trigger());
         assert!(SelectAnchorId::SettingsAiModelReasoning(1, 3).is_settings_select_trigger());
         assert!(SelectAnchorId::SettingsSftpConflict.is_settings_select_trigger());
         assert!(SelectAnchorId::SettingsConnectionImportSource.is_settings_select_trigger());

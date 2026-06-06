@@ -24,6 +24,7 @@ struct AiOrchestratorRuntimeSnapshot {
     backend_runtime: std::sync::Arc<tokio::runtime::Runtime>,
     rag_store: std::sync::Arc<oxideterm_ai::RagStore>,
     ai_mcp_registry: oxideterm_ai::McpRegistry,
+    ai_acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
     ai_key_store: oxideterm_ai::AiProviderKeyStore,
     ai_providers: Vec<serde_json::Value>,
     ai_embedding_config: Option<serde_json::Value>,
@@ -67,6 +68,12 @@ enum AiRemoteFileWriteError {
 
 pub(super) enum AiStreamDeliveryEvent {
     Stream(AiStreamEvent),
+    AcpClientEvent(oxideterm_ai::AcpClientEvent),
+    AcpSessionStarted {
+        session_id: String,
+        session_metadata: Option<serde_json::Value>,
+        agent_id: String,
+    },
     Guardrail {
         code: String,
         message: String,

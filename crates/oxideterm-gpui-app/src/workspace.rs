@@ -670,6 +670,11 @@ pub(crate) struct WorkspaceApp {
     ai_pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
     ai_agent_fs: NodeAgentIdeFileSystem,
     ai_mcp_registry: oxideterm_ai::McpRegistry,
+    ai_acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
+    ai_acp_agent_probe_pending: HashSet<String>,
+    ai_acp_agent_probe_tx: Option<std::sync::mpsc::Sender<AcpAgentProbeDelivery>>,
+    ai_acp_agent_probe_rx: Option<std::sync::mpsc::Receiver<AcpAgentProbeDelivery>>,
+    ai_acp_agent_probe_polling: bool,
     ai_rag_store: LazyAiRagStore,
     ai_mcp_add_dialog: Option<AiMcpServerDraft>,
     knowledge_reindex_cancel: Option<Arc<AtomicBool>>,
@@ -1052,6 +1057,19 @@ pub(crate) struct AiCliAgentSession {
 struct WorkspaceToast {
     notice: TerminalNotice,
     expires_at: Instant,
+}
+
+#[derive(Clone, Debug)]
+struct AcpAgentProbeDelivery {
+    agent_id: String,
+    result: AcpAgentProbeResult,
+}
+
+#[derive(Clone, Debug)]
+struct AcpAgentProbeResult {
+    runtime_state: oxideterm_settings::AcpAgentRuntimeState,
+    auth_status: oxideterm_settings::AcpAgentAuthStatus,
+    last_error_kind: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

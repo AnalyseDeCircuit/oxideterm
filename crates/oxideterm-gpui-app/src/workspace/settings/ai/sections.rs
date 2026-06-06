@@ -1,5 +1,6 @@
 const AI_TEXTAREA_SYSTEM_PROMPT_MIN_H: f32 = 80.0; // Tauri rows=4 min-h-[80px].
 const AI_TEXTAREA_MEMORY_MIN_H: f32 = 120.0; // Tauri rows=5 min-h-[120px].
+const AI_ACP_AGENT_TEXTAREA_MIN_H: f32 = 72.0; // Tauri min-h-[72px] for ACP args/env drafts.
 const AI_TOOL_NUMBER_INPUT_W: f32 = 96.0; // Tauri w-24.
 
 impl WorkspaceApp {
@@ -160,6 +161,10 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let profile_id = ai_execution_profile_id(profile).unwrap_or_else(|| format!("profile-{index}"));
         let is_default = profile_id == default_profile_id;
+        let backend = profile
+            .get("backend")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("provider");
         let provider_id = profile
             .get("providerId")
             .and_then(serde_json::Value::as_str)
@@ -175,6 +180,32 @@ impl WorkspaceApp {
                     .and_then(|provider| ai_provider_string(provider, "name"))
             })
             .unwrap_or_else(|| self.i18n.t("settings_view.ai.profile_inherit_provider"));
+        let acp_agent_id = profile
+            .get("acpAgentId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let acp_agent_label = acp_agent_id
+            .as_deref()
+            .and_then(|id| {
+                settings
+                    .ai
+                    .acp_agents
+                    .iter()
+                    .find(|agent| agent.id == id)
+                    .map(|agent| {
+                        if agent.display_name.trim().is_empty() {
+                            agent.id.clone()
+                        } else {
+                            agent.display_name.clone()
+                        }
+                    })
+            })
+            .unwrap_or_else(|| self.i18n.t("settings_view.ai.profile_no_acp_agent"));
+        let backend_label = if backend == "acp" {
+            self.i18n.t("settings_view.ai.profile_backend_acp")
+        } else {
+            self.i18n.t("settings_view.ai.profile_backend_provider")
+        };
         let reasoning = profile
             .get("reasoningEffort")
             .and_then(serde_json::Value::as_str)
@@ -233,22 +264,43 @@ impl WorkspaceApp {
             .child(
                 div()
                     .grid()
-                    .grid_cols(3)
+                    .grid_cols(4)
                     .gap(px(8.0))
                     .child(self.settings_select_control(
-                        SettingsSelect::AiProfileProvider(index),
-                        provider_label,
+                        SettingsSelect::AiProfileBackend(index),
+                        backend_label,
+                        false,
+                        Some(150.0),
+                        cx,
+                    ))
+                    .child(self.settings_select_control(
+                        if backend == "acp" {
+                            SettingsSelect::AiProfileAcpAgent(index)
+                        } else {
+                            SettingsSelect::AiProfileProvider(index)
+                        },
+                        if backend == "acp" {
+                            acp_agent_label
+                        } else {
+                            provider_label
+                        },
                         false,
                         Some(180.0),
                         cx,
                     ))
-                    .child(self.settings_text_input_control(
-                        SettingsInput::AiProfileModel(index),
-                        self.current_settings_input_value(SettingsInput::AiProfileModel(index)),
-                        self.i18n.t("settings_view.ai.profile_inherit_model"),
-                        180.0,
-                        cx,
-                    ))
+                    .child(if backend == "acp" {
+                        self.ai_readonly_profile_value(
+                            self.i18n.t("settings_view.ai.profile_acp_model_disabled"),
+                        )
+                    } else {
+                        self.settings_text_input_control(
+                            SettingsInput::AiProfileModel(index),
+                            self.current_settings_input_value(SettingsInput::AiProfileModel(index)),
+                            self.i18n.t("settings_view.ai.profile_inherit_model"),
+                            180.0,
+                            cx,
+                        )
+                    })
                     .child(self.settings_select_control(
                         SettingsSelect::AiProfileReasoning(index),
                         self.i18n.t(ai_reasoning_label_key(reasoning)),
@@ -256,6 +308,752 @@ impl WorkspaceApp {
                         Some(160.0),
                         cx,
                     )),
+            )
+            .into_any_element()
+    }
+
+    fn ai_readonly_profile_value(&self, label: String) -> AnyElement {
+        // Tauri disables the model input for ACP-backed profiles because the
+        // selected agent owns model choice outside the provider settings path.
+        div()
+            .w(px(180.0))
+            .h(px(32.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+            .bg(rgba((self.tokens.ui.bg << 8) | 0x66))
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .text_size(px(12.0))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(label)
+            .into_any_element()
+    }
+
+    fn ai_acp_agents_section(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let agent_count = settings.ai.acp_agents.len();
+        let mut section = div()
+            .max_w(px(AI_PROVIDER_MAX_W))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgba(
+                (self.tokens.ui.border << 8) | AI_PROVIDER_SECTION_BORDER_ALPHA,
+            ))
+            .bg(rgba((self.tokens.ui.bg_card << 8) | AI_PROVIDER_SECTION_BG_ALPHA))
+            .p(px(16.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(settings_ai_section_heading(
+                        &self.tokens,
+                        self.i18n.t("settings_view.ai.acp_agents"),
+                        self.i18n_count("settings_view.ai.acp_agents_summary", agent_count),
+                    ))
+                    .child(
+                        self.workspace_toolbar_action_button(
+                            self.i18n.t("settings_view.ai.acp_agent_add"),
+                            Some(Self::render_lucide_icon(
+                                LucideIcon::Plus,
+                                14.0,
+                                rgb(self.tokens.ui.text_muted),
+                            )),
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                                icon_gap: Some(6.0),
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(|this, _event, _window, cx| {
+                                this.edit_settings(ai_add_acp_agent, cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                        .into_any_element(),
+                    ),
+            );
+
+        if agent_count == 0 {
+            return section
+                .child(
+                    div()
+                        .rounded(px(self.tokens.radii.md))
+                        .border_1()
+                        .border_color(rgba((self.tokens.ui.border << 8) | 0x73))
+                        .bg(rgba((self.tokens.ui.bg << 8) | 0x66))
+                        .p(px(14.0))
+                        .text_size(px(12.0))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("settings_view.ai.acp_agents_empty")),
+                )
+                .into_any_element();
+        }
+
+        for (index, agent) in settings.ai.acp_agents.iter().enumerate() {
+            section = section.child(self.ai_acp_agent_card(index, agent, cx));
+        }
+        section.into_any_element()
+    }
+
+    fn ai_acp_agent_card(
+        &self,
+        index: usize,
+        agent: &oxideterm_settings::AcpAgentConfig,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let testing = self.ai_acp_agent_probe_pending.contains(&agent.id);
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x73))
+            .bg(rgba((self.tokens.ui.bg_card << 8) | 0x73))
+            .p(px(12.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(self.ai_acp_agent_enabled_toggle(index, agent.enabled, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .when_some(agent.status.last_error_kind.as_ref(), |row, error| {
+                                row.child(
+                                    div()
+                                        .text_size(px(10.0))
+                                        .text_color(rgb(self.tokens.ui.text_muted))
+                                        .child(self.ai_i18n_error(
+                                            "settings_view.ai.acp_agent_last_error",
+                                            error,
+                                        )),
+                                )
+                            })
+                            .child(self.ai_acp_agent_status_badge(agent))
+                            .child(self.ai_acp_agent_test_button(index, agent, testing, cx))
+                            .child(self.ai_icon_button(
+                                LucideIcon::Trash2,
+                                testing,
+                                move |this, _event, _window, cx| {
+                                    this.edit_settings(
+                                        |settings| ai_delete_acp_agent(settings, index),
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            )),
+                    ),
+            )
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(2)
+                    .gap(px(10.0))
+                    .child(self.ai_labeled_text_input(
+                        "settings_view.ai.acp_agent_name",
+                        SettingsInput::AiAcpAgentDisplayName(index),
+                        self.i18n.t("settings_view.ai.acp_agent_new_name"),
+                        cx,
+                    ))
+                    .child(self.ai_labeled_text_input(
+                        "settings_view.ai.acp_agent_command",
+                        SettingsInput::AiAcpAgentCommand(index),
+                        self.i18n.t("settings_view.ai.acp_agent_command_placeholder"),
+                        cx,
+                    ))
+                    .child(self.ai_labeled_text_input(
+                        "settings_view.ai.acp_agent_cwd",
+                        SettingsInput::AiAcpAgentCwd(index),
+                        self.i18n.t("settings_view.ai.acp_agent_cwd_placeholder"),
+                        cx,
+                    ))
+                    .child(self.ai_readonly_profile_value(self.i18n.t(
+                        acp_agent_auth_status_key(&agent.auth.status),
+                    ))),
+            )
+            .child(self.ai_acp_agent_auth_token_input(index, agent, cx))
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(2)
+                    .gap(px(10.0))
+                    .child(self.ai_textarea_row(
+                        SettingsInput::AiAcpAgentArgs(index),
+                        self.i18n.t("settings_view.ai.acp_agent_args"),
+                        self.i18n.t("settings_view.ai.acp_agent_args_placeholder"),
+                        self.i18n.t("settings_view.ai.acp_agent_args_placeholder"),
+                        self.current_settings_input_value(SettingsInput::AiAcpAgentArgs(index)),
+                        AI_ACP_AGENT_TEXTAREA_MIN_H,
+                        cx,
+                    ))
+                    .child(self.ai_textarea_row(
+                        SettingsInput::AiAcpAgentEnv(index),
+                        self.i18n.t("settings_view.ai.acp_agent_env"),
+                        self.i18n.t("settings_view.ai.acp_agent_env_placeholder"),
+                        self.i18n.t("settings_view.ai.acp_agent_env_placeholder"),
+                        self.current_settings_input_value(SettingsInput::AiAcpAgentEnv(index)),
+                        AI_ACP_AGENT_TEXTAREA_MIN_H,
+                        cx,
+                    )),
+            )
+            .child(self.ai_acp_agent_capabilities(index, agent, cx))
+            .into_any_element()
+    }
+
+    fn ai_acp_agent_auth_token_input(
+        &self,
+        index: usize,
+        agent: &oxideterm_settings::AcpAgentConfig,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let input = SettingsInput::AiAcpAgentAuthToken(index);
+        let focused = self.focused_settings_input == Some(input);
+        let draft = if focused {
+            self.settings_input_draft.as_str()
+        } else {
+            ""
+        };
+        let save_disabled = draft.trim().is_empty();
+        let remove_disabled =
+            agent.auth.status != oxideterm_settings::AcpAgentAuthStatus::Authenticated;
+        let save_agent_id = agent.id.clone();
+        let remove_agent_id = agent.id.clone();
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(12.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.ai.acp_agent_auth_token")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(px(8.0))
+                    .child(div().flex_1().min_w(px(0.0)).child(
+                        self.ai_provider_secret_input(
+                            input,
+                            draft,
+                            if agent.auth.status
+                                == oxideterm_settings::AcpAgentAuthStatus::Authenticated
+                            {
+                                self.i18n.t("settings_view.ai.acp_agent_auth_token_saved")
+                            } else {
+                                self.i18n
+                                    .t("settings_view.ai.acp_agent_auth_token_placeholder")
+                            },
+                            focused,
+                            cx,
+                        ),
+                    ))
+                    .child(
+                        self.workspace_toolbar_action_button(
+                            self.i18n.t("settings_view.ai.save"),
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Secondary,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: save_disabled,
+                                },
+                                height: Some(32.0),
+                                font_size: Some(self.tokens.metrics.ui_text_xs),
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.save_ai_acp_agent_auth_token(index, save_agent_id.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                        .into_any_element(),
+                    )
+                    .child(
+                        self.workspace_toolbar_action_button(
+                            self.i18n.t("settings_view.ai.remove"),
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Ghost,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: remove_disabled,
+                                },
+                                height: Some(32.0),
+                                font_size: Some(self.tokens.metrics.ui_text_xs),
+                                text_color: Some(rgb(self.tokens.ui.error)),
+                                hover_text_color: Some(rgb(self.tokens.ui.error)),
+                                hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1a)),
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.delete_ai_acp_agent_auth_token(
+                                    index,
+                                    remove_agent_id.clone(),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        )
+                        .into_any_element(),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn save_ai_acp_agent_auth_token(
+        &mut self,
+        index: usize,
+        agent_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.focused_settings_input != Some(SettingsInput::AiAcpAgentAuthToken(index)) {
+            cx.notify();
+            return;
+        }
+
+        // The ACP token draft is converted to a zeroizing owner at the
+        // UI/backend boundary and is never applied through persisted settings.
+        let Some(token) = ai_take_provider_key_secret(&mut self.settings_input_draft) else {
+            cx.notify();
+            return;
+        };
+        let key_store = self.ai_key_store.clone();
+        let runtime = self.forwarding_runtime.clone();
+        cx.spawn(async move |weak, cx| {
+            let agent_id_for_store = agent_id.clone();
+            let result = runtime
+                .spawn_blocking(move || key_store.store_acp_auth_token(&agent_id_for_store, token))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+            let _ = weak.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.focused_settings_input = None;
+                        this.edit_settings(
+                            |settings| {
+                                if let Some(agent) = settings
+                                    .ai
+                                    .acp_agents
+                                    .iter_mut()
+                                    .find(|agent| agent.id == agent_id)
+                                {
+                                    agent.auth.status =
+                                        oxideterm_settings::AcpAgentAuthStatus::Authenticated;
+                                    agent.auth.account_label = Some(
+                                        (!agent.display_name.trim().is_empty())
+                                            .then(|| agent.display_name.clone())
+                                            .unwrap_or_else(|| agent.id.clone()),
+                                    );
+                                }
+                            },
+                            cx,
+                        );
+                    }
+                    Err(error) => {
+                        this.push_ai_settings_toast(
+                            this.ai_i18n_error("settings_view.ai.save_failed", &error),
+                            TerminalNoticeVariant::Error,
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn delete_ai_acp_agent_auth_token(
+        &mut self,
+        _index: usize,
+        agent_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let key_store = self.ai_key_store.clone();
+        let runtime = self.forwarding_runtime.clone();
+        cx.spawn(async move |weak, cx| {
+            let agent_id_for_delete = agent_id.clone();
+            let result = runtime
+                .spawn_blocking(move || key_store.delete_acp_auth_token(&agent_id_for_delete))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+            let _ = weak.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.edit_settings(
+                            |settings| {
+                                if let Some(agent) = settings
+                                    .ai
+                                    .acp_agents
+                                    .iter_mut()
+                                    .find(|agent| agent.id == agent_id)
+                                {
+                                    agent.auth.status =
+                                        oxideterm_settings::AcpAgentAuthStatus::Unknown;
+                                    agent.auth.account_label = None;
+                                }
+                            },
+                            cx,
+                        );
+                    }
+                    Err(error) => {
+                        this.push_ai_settings_toast(
+                            this.ai_i18n_error("settings_view.ai.remove_failed", &error),
+                            TerminalNoticeVariant::Error,
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn ai_labeled_text_input(
+        &self,
+        label_key: &str,
+        input: SettingsInput,
+        placeholder: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(12.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t(label_key)),
+            )
+            .child(self.settings_text_input_control(
+                input,
+                self.current_settings_input_value(input),
+                placeholder,
+                240.0,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn ai_acp_agent_enabled_toggle(
+        &self,
+        index: usize,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        checkbox(
+            &self.tokens,
+            if enabled {
+                self.i18n.t("settings_view.ai.acp_agent_enabled")
+            } else {
+                self.i18n.t("settings_view.ai.acp_agent_disabled")
+            },
+            enabled,
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                this.edit_settings(
+                    |settings| {
+                        if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
+                            agent.enabled = !enabled;
+                        }
+                    },
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn ai_acp_agent_status_badge(
+        &self,
+        agent: &oxideterm_settings::AcpAgentConfig,
+    ) -> AnyElement {
+        div()
+            .rounded(px(self.tokens.radii.sm))
+            .bg(rgba((self.tokens.ui.bg << 8) | 0x80))
+            .px(px(8.0))
+            .py(px(4.0))
+            .text_size(px(10.0))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(self.i18n.t(acp_agent_runtime_status_key(&agent.status.state)))
+            .into_any_element()
+    }
+
+    fn ai_acp_agent_test_button(
+        &self,
+        index: usize,
+        agent: &oxideterm_settings::AcpAgentConfig,
+        testing: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let agent_for_probe = agent.clone();
+        let mut options = ToolbarButtonOptions::compact_text(
+            ButtonVariant::Outline,
+            ButtonRadius::Md,
+            28.0,
+            8.0,
+            12.0,
+        );
+        options.button.disabled = testing;
+        options.icon_gap = Some(6.0);
+        options.loading = testing;
+
+        self.workspace_toolbar_action_button(
+            if testing {
+                self.i18n.t("settings_view.ai.acp_agent_testing")
+            } else {
+                self.i18n.t("settings_view.ai.acp_agent_test")
+            },
+            Some(Self::render_lucide_icon(
+                LucideIcon::RefreshCw,
+                12.0,
+                rgb(self.tokens.ui.text_muted),
+            )),
+            options,
+            cx.listener(move |this, _event, _window, cx| {
+                this.test_ai_acp_agent(index, agent_for_probe.clone(), cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn test_ai_acp_agent(
+        &mut self,
+        _index: usize,
+        agent: oxideterm_settings::AcpAgentConfig,
+        cx: &mut Context<Self>,
+    ) {
+        if self.ai_acp_agent_probe_pending.contains(&agent.id) {
+            cx.notify();
+            return;
+        }
+
+        let agent_id = agent.id.clone();
+        self.ai_acp_agent_probe_pending.insert(agent_id.clone());
+        if self.ai_acp_agent_probe_tx.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.ai_acp_agent_probe_tx = Some(tx);
+            self.ai_acp_agent_probe_rx = Some(rx);
+        }
+        let Some(ui_tx) = self.ai_acp_agent_probe_tx.as_ref().cloned() else {
+            self.ai_acp_agent_probe_pending.remove(&agent_id);
+            cx.notify();
+            return;
+        };
+
+        let launch_config = ai_acp_launch_config_from_settings(&agent);
+        let capability_policy = ai_acp_capability_policy_from_settings(&agent.capability_policy);
+        // ACP probe uses the shared backend runtime because launching a stdio
+        // agent needs Tokio process IO. The UI receives only redacted status.
+        self.forwarding_runtime.spawn(async move {
+            let result = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
+                Ok(launcher) => {
+                    match oxideterm_ai::initialize_acp_agent(
+                        launcher,
+                        env!("CARGO_PKG_VERSION").to_string(),
+                        capability_policy,
+                    )
+                    .await
+                    {
+                        Ok(response) => {
+                            let auth_required = !response.auth_methods.is_empty();
+                            AcpAgentProbeResult {
+                                runtime_state: if auth_required {
+                                    oxideterm_settings::AcpAgentRuntimeState::AuthRequired
+                                } else {
+                                    oxideterm_settings::AcpAgentRuntimeState::Ready
+                                },
+                                auth_status: if auth_required {
+                                    oxideterm_settings::AcpAgentAuthStatus::Required
+                                } else {
+                                    oxideterm_settings::AcpAgentAuthStatus::NotRequired
+                                },
+                                last_error_kind: None,
+                            }
+                        }
+                        Err(_) => ai_acp_probe_error_result("initialize"),
+                    }
+                }
+                Err(_) => ai_acp_probe_error_result("config"),
+            };
+            let _ = ui_tx.send(AcpAgentProbeDelivery { agent_id, result });
+        });
+        self.schedule_ai_acp_agent_probe_poll(cx);
+        cx.notify();
+    }
+
+    fn poll_ai_acp_agent_probe_results(&mut self, cx: &mut Context<Self>) {
+        let Some(rx) = self.ai_acp_agent_probe_rx.take() else {
+            return;
+        };
+        let mut keep_rx = true;
+        loop {
+            match rx.try_recv() {
+                Ok(delivery) => {
+                    self.ai_acp_agent_probe_pending.remove(&delivery.agent_id);
+                    self.edit_settings(
+                        |settings| {
+                            if let Some(agent) = settings
+                                .ai
+                                .acp_agents
+                                .iter_mut()
+                                .find(|agent| agent.id == delivery.agent_id)
+                            {
+                                agent.auth.status = delivery.result.auth_status.clone();
+                                agent.status.state = delivery.result.runtime_state.clone();
+                                agent.status.last_error_kind =
+                                    delivery.result.last_error_kind.clone();
+                            }
+                        },
+                        cx,
+                    );
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    keep_rx = false;
+                    self.ai_acp_agent_probe_tx = None;
+                    self.ai_acp_agent_probe_pending.clear();
+                    break;
+                }
+            }
+        }
+        if keep_rx && !self.ai_acp_agent_probe_pending.is_empty() {
+            self.ai_acp_agent_probe_rx = Some(rx);
+        } else if self.ai_acp_agent_probe_pending.is_empty() {
+            self.ai_acp_agent_probe_tx = None;
+        }
+    }
+
+    fn schedule_ai_acp_agent_probe_poll(&mut self, cx: &mut Context<Self>) {
+        if self.ai_acp_agent_probe_polling {
+            return;
+        }
+        self.ai_acp_agent_probe_polling = true;
+        cx.spawn(async move |weak, cx| {
+            Timer::after(Duration::from_millis(50)).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.ai_acp_agent_probe_polling = false;
+                this.poll_ai_acp_agent_probe_results(cx);
+                if !this.ai_acp_agent_probe_pending.is_empty() {
+                    this.schedule_ai_acp_agent_probe_poll(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn ai_acp_agent_capabilities(
+        &self,
+        index: usize,
+        agent: &oxideterm_settings::AcpAgentConfig,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+            .bg(rgba((self.tokens.ui.bg << 8) | 0x66))
+            .p(px(12.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(px(12.0))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t("settings_view.ai.acp_agent_capabilities")),
+            )
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(3)
+                    .gap(px(8.0))
+                    .child(self.ai_acp_agent_capability_toggle(
+                        index,
+                        "settings_view.ai.acp_agent_capability_read",
+                        agent.capability_policy.fs_read_text_file,
+                        |policy| policy.fs_read_text_file = !policy.fs_read_text_file,
+                        cx,
+                    ))
+                    .child(self.ai_acp_agent_capability_toggle(
+                        index,
+                        "settings_view.ai.acp_agent_capability_write",
+                        agent.capability_policy.fs_write_text_file,
+                        |policy| policy.fs_write_text_file = !policy.fs_write_text_file,
+                        cx,
+                    ))
+                    .child(self.ai_acp_agent_capability_toggle(
+                        index,
+                        "settings_view.ai.acp_agent_capability_terminal",
+                        agent.capability_policy.terminal,
+                        |policy| policy.terminal = !policy.terminal,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .text_size(px(11.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.ai.acp_agent_capabilities_hint")),
+            )
+            .into_any_element()
+    }
+
+    fn ai_acp_agent_capability_toggle(
+        &self,
+        index: usize,
+        label_key: &str,
+        checked: bool,
+        toggle: fn(&mut oxideterm_settings::AcpAgentCapabilityPolicy),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = self.i18n.t(label_key);
+        checkbox(&self.tokens, label, checked)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.edit_settings(
+                        |settings| {
+                            if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
+                                toggle(&mut agent.capability_policy);
+                            }
+                        },
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
             )
             .into_any_element()
     }
@@ -1495,4 +2293,78 @@ impl WorkspaceApp {
         )
     }
 
+}
+
+fn acp_agent_auth_status_key(
+    status: &oxideterm_settings::AcpAgentAuthStatus,
+) -> &'static str {
+    match status {
+        oxideterm_settings::AcpAgentAuthStatus::Unknown => {
+            "settings_view.ai.acp_agent_auth_unknown"
+        }
+        oxideterm_settings::AcpAgentAuthStatus::NotRequired => {
+            "settings_view.ai.acp_agent_auth_not_required"
+        }
+        oxideterm_settings::AcpAgentAuthStatus::Required => {
+            "settings_view.ai.acp_agent_auth_required"
+        }
+        oxideterm_settings::AcpAgentAuthStatus::Authenticated => {
+            "settings_view.ai.acp_agent_auth_authenticated"
+        }
+        oxideterm_settings::AcpAgentAuthStatus::Expired => {
+            "settings_view.ai.acp_agent_auth_expired"
+        }
+    }
+}
+
+fn acp_agent_runtime_status_key(
+    status: &oxideterm_settings::AcpAgentRuntimeState,
+) -> &'static str {
+    match status {
+        oxideterm_settings::AcpAgentRuntimeState::Unknown => {
+            "settings_view.ai.acp_agent_status_unknown"
+        }
+        oxideterm_settings::AcpAgentRuntimeState::Ready => {
+            "settings_view.ai.acp_agent_status_ready"
+        }
+        oxideterm_settings::AcpAgentRuntimeState::AuthRequired => {
+            "settings_view.ai.acp_agent_status_auth_required"
+        }
+        oxideterm_settings::AcpAgentRuntimeState::Error => {
+            "settings_view.ai.acp_agent_status_error"
+        }
+    }
+}
+
+fn ai_acp_launch_config_from_settings(
+    agent: &oxideterm_settings::AcpAgentConfig,
+) -> oxideterm_ai::AcpLaunchConfig {
+    oxideterm_ai::AcpLaunchConfig {
+        id: agent.id.clone(),
+        display_name: agent.display_name.clone(),
+        command: agent.command.clone(),
+        args: agent.args.clone(),
+        env: agent.env.clone(),
+        cwd: agent.cwd.as_ref().map(std::path::PathBuf::from),
+    }
+}
+
+fn ai_acp_capability_policy_from_settings(
+    policy: &oxideterm_settings::AcpAgentCapabilityPolicy,
+) -> oxideterm_ai::AcpHostCapabilityPolicy {
+    oxideterm_ai::AcpHostCapabilityPolicy {
+        fs_read_text_file: policy.fs_read_text_file,
+        fs_write_text_file: policy.fs_write_text_file,
+        terminal: policy.terminal,
+    }
+}
+
+fn ai_acp_probe_error_result(kind: &'static str) -> AcpAgentProbeResult {
+    // Probe failures store only stable categories. Raw process errors can
+    // contain command args, env values, or auth material from local agents.
+    AcpAgentProbeResult {
+        runtime_state: oxideterm_settings::AcpAgentRuntimeState::Error,
+        auth_status: oxideterm_settings::AcpAgentAuthStatus::Unknown,
+        last_error_kind: Some(kind.to_string()),
+    }
 }

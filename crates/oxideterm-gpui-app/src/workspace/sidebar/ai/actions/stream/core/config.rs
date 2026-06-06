@@ -51,8 +51,36 @@ impl WorkspaceApp {
 
     fn resolve_ai_stream_config(&self) -> Result<AiChatStreamConfig, String> {
         let settings = self.settings_store.settings();
-        let providers = ai_provider_views(&settings.ai.providers);
         let applied_profile = self.resolved_ai_execution_profile();
+        if applied_profile.backend == AiExecutionBackend::Acp {
+            let acp_agent_id = applied_profile
+                .acp_agent_id
+                .clone()
+                .filter(|agent_id| !agent_id.trim().is_empty())
+                .ok_or_else(|| "No ACP agent selected for this execution profile.".to_string())?;
+            return Ok(AiChatStreamConfig {
+                execution_backend: AiExecutionBackend::Acp,
+                provider_id: None,
+                acp_agent_id: Some(acp_agent_id.clone()),
+                acp_session_id: self.active_ai_conversation_acp_session_id(),
+                provider_type: "acp".to_string(),
+                base_url: String::new(),
+                model: acp_agent_id,
+                api_key: None,
+                max_response_tokens: None,
+                reasoning_effort: None,
+                safety_mode: match self.active_ai_safety_mode() {
+                    AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
+                    AiSafetyMode::Default => AiPolicySafetyMode::Default,
+                },
+                profile_id: applied_profile.profile_id,
+                tool_policy: applied_profile.tool_policy,
+                tools: Vec::new(),
+                tool_choice: oxideterm_ai::AiToolChoice::Auto,
+            });
+        }
+
+        let providers = ai_provider_views(&settings.ai.providers);
         let provider = active_provider_view(&providers, applied_profile.provider_id.as_deref())
             .cloned()
             .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
@@ -72,7 +100,10 @@ impl WorkspaceApp {
             &self.ai_mcp_registry,
         );
         Ok(AiChatStreamConfig {
+            execution_backend: AiExecutionBackend::Provider,
             provider_id: Some(provider.id),
+            acp_agent_id: None,
+            acp_session_id: None,
             provider_type: provider.provider_type,
             base_url: provider.base_url,
             model,
@@ -124,7 +155,10 @@ impl WorkspaceApp {
             Some(&model),
         );
         Ok(AiChatStreamConfig {
+            execution_backend: AiExecutionBackend::Provider,
             provider_id: Some(provider.id),
+            acp_agent_id: None,
+            acp_session_id: None,
             provider_type: provider.provider_type,
             base_url: provider.base_url,
             model,
@@ -172,6 +206,20 @@ impl WorkspaceApp {
                     .session_metadata
                     .as_ref()
                     .and_then(|metadata| metadata.get("profileId"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+        })
+    }
+
+    fn active_ai_conversation_acp_session_id(&self) -> Option<String> {
+        self.ai_chat.active_conversation().and_then(|conversation| {
+            conversation.session_id.clone().or_else(|| {
+                conversation
+                    .session_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.get("acp"))
+                    .and_then(|metadata| metadata.get("sessionId"))
                     .and_then(serde_json::Value::as_str)
                     .map(str::to_string)
             })

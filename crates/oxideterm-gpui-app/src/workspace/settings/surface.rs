@@ -166,6 +166,13 @@ impl WorkspaceApp {
                 )
             }
             3 => {
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_acp_agents_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            4 => {
                 let provider_views = self.ai_provider_views_for_settings_render(cx);
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
@@ -173,14 +180,14 @@ impl WorkspaceApp {
                     settings.ai.enabled,
                 )
             }
-            4 => {
+            5 => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_context_controls_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            5 => {
+            6 => {
                 let settings = self.settings_store.settings();
                 let provider_views = ai_provider_views(settings);
                 self.ai_disabled_settings_card(
@@ -188,7 +195,7 @@ impl WorkspaceApp {
                     settings.ai.enabled,
                 )
             }
-            6 => {
+            7 => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_tool_use_section(settings, cx),
@@ -370,6 +377,7 @@ impl WorkspaceApp {
             SettingsTab::Ai => {
                 settings.ai.enabled.hash(&mut hasher);
                 settings.ai.providers.len().hash(&mut hasher);
+                settings.ai.acp_agents.len().hash(&mut hasher);
                 self.settings_page.ai_provider_settings_expanded.hash(&mut hasher);
                 self.settings_page.ai_tool_use_expanded.hash(&mut hasher);
                 self.settings_page.ai_context_windows_expanded.hash(&mut hasher);

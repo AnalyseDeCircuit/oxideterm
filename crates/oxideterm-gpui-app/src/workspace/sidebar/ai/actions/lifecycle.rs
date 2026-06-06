@@ -75,6 +75,14 @@ impl WorkspaceApp {
     }
 
     fn cancel_ai_chat_stream(&mut self, cx: &mut Context<Self>) {
+        if let Some(conversation_id) = self.ai_chat.active_conversation_id.as_deref() {
+            let generation_id = self.ai_chat_stream_generation.to_string();
+            // ACP Stop must target the live generation before local task abort
+            // drops the registered session handle.
+            let _ = self
+                .ai_acp_runtime_registry
+                .cancel_generation(conversation_id, &generation_id);
+        }
         if let Some(task) = self.ai_chat_stream_task.take() {
             task.abort();
         }
@@ -165,6 +173,13 @@ impl WorkspaceApp {
     }
 
     fn cancel_ai_chat_stream_without_notify(&mut self) {
+        if let Some(conversation_id) = self.ai_chat.active_conversation_id.as_deref() {
+            let generation_id = self.ai_chat_stream_generation.to_string();
+            // Keep silent cancellation aligned with the visible Stop path.
+            let _ = self
+                .ai_acp_runtime_registry
+                .cancel_generation(conversation_id, &generation_id);
+        }
         if let Some(task) = self.ai_chat_stream_task.take() {
             task.abort();
         }

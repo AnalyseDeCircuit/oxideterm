@@ -888,6 +888,91 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Ai, SettingsSelect::AiProfileBackend(profile_index)) => {
+                let current = settings
+                    .ai
+                    .execution_profiles
+                    .get("profiles")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|profiles| profiles.get(profile_index))
+                    .and_then(|profile| profile.get("backend"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("provider")
+                    .to_string();
+                let mut popup = select_overlay_popup(&self.tokens, width.max(170.0));
+                for (value, label_key) in [
+                    ("provider", "settings_view.ai.profile_backend_provider"),
+                    ("acp", "settings_view.ai.profile_backend_acp"),
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, self.i18n.t(label_key), current == value),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    move |settings| {
+                                        let active_provider_id = settings.ai.active_provider_id.clone();
+                                        let active_model = settings.ai.active_model.clone();
+                                        let first_acp_agent_id =
+                                            settings.ai.acp_agents.first().map(|agent| agent.id.clone());
+                                        ai_patch_execution_profile(settings, profile_index, |profile| {
+                                            profile.insert(
+                                                "backend".to_string(),
+                                                serde_json::json!(value),
+                                            );
+                                            if value == "acp" {
+                                                profile.insert(
+                                                    "providerId".to_string(),
+                                                    serde_json::Value::Null,
+                                                );
+                                                profile.insert(
+                                                    "model".to_string(),
+                                                    serde_json::Value::Null,
+                                                );
+                                                profile.insert(
+                                                    "acpAgentId".to_string(),
+                                                    first_acp_agent_id
+                                                        .clone()
+                                                        .map(serde_json::Value::String)
+                                                        .unwrap_or(serde_json::Value::Null),
+                                                );
+                                            } else {
+                                                profile.insert(
+                                                    "providerId".to_string(),
+                                                    active_provider_id
+                                                        .clone()
+                                                        .map(serde_json::Value::String)
+                                                        .unwrap_or(serde_json::Value::Null),
+                                                );
+                                                profile.insert(
+                                                    "model".to_string(),
+                                                    active_model
+                                                        .clone()
+                                                        .map(serde_json::Value::String)
+                                                        .unwrap_or(serde_json::Value::Null),
+                                                );
+                                                profile.insert(
+                                                    "acpAgentId".to_string(),
+                                                    serde_json::Value::Null,
+                                                );
+                                            }
+                                            profile.insert(
+                                                "updatedAt".to_string(),
+                                                serde_json::json!(current_time_millis()),
+                                            );
+                                        });
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             (SettingsTab::Ai, SettingsSelect::AiProfileProvider(profile_index)) => {
                 let mut popup = select_panel_overlay_popup_with_max_height(
                     &self.tokens,
@@ -961,6 +1046,89 @@ impl WorkspaceApp {
                                                 } else {
                                                     serde_json::json!(default_model.clone())
                                                 },
+                                            );
+                                            profile.insert(
+                                                "updatedAt".to_string(),
+                                                serde_json::json!(current_time_millis()),
+                                            );
+                                        });
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ai, SettingsSelect::AiProfileAcpAgent(profile_index)) => {
+                let current = settings
+                    .ai
+                    .execution_profiles
+                    .get("profiles")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|profiles| profiles.get(profile_index))
+                    .and_then(|profile| profile.get("acpAgentId"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let mut popup = select_panel_overlay_popup_with_max_height(
+                    &self.tokens,
+                    width.max(AI_PROVIDER_SELECT_W),
+                    320.0,
+                );
+                popup = popup.child(
+                    select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.i18n.t("settings_view.ai.profile_no_acp_agent"),
+                            current.is_none(),
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                move |settings| {
+                                    ai_patch_execution_profile(settings, profile_index, |profile| {
+                                        profile.insert(
+                                            "acpAgentId".to_string(),
+                                            serde_json::Value::Null,
+                                        );
+                                        profile.insert(
+                                            "updatedAt".to_string(),
+                                            serde_json::json!(current_time_millis()),
+                                        );
+                                    });
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+                for agent in settings.ai.acp_agents.clone() {
+                    let agent_id = agent.id.clone();
+                    let label = if agent.display_name.trim().is_empty() {
+                        agent.id.clone()
+                    } else {
+                        agent.display_name.clone()
+                    };
+                    let selected = current.as_deref() == Some(agent.id.as_str());
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, label, selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                let agent_id = agent_id.clone();
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    move |settings| {
+                                        ai_patch_execution_profile(settings, profile_index, |profile| {
+                                            profile.insert(
+                                                "acpAgentId".to_string(),
+                                                serde_json::json!(agent_id.clone()),
                                             );
                                             profile.insert(
                                                 "updatedAt".to_string(),

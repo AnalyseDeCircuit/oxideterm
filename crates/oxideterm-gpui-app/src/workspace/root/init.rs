@@ -89,6 +89,7 @@ impl WorkspaceApp {
         );
         let ai_key_store = oxideterm_ai::AiProviderKeyStore::new();
         let ai_mcp_registry = oxideterm_ai::McpRegistry::new(ai_key_store.clone());
+        let ai_acp_runtime_registry = oxideterm_ai::AcpRuntimeRegistry::default();
         let cloud_sync_store = oxideterm_cloud_sync::state::CloudSyncStateStore::load(
             oxideterm_cloud_sync::state::default_cloud_sync_state_path(settings_store.path()),
         )?;
@@ -390,6 +391,11 @@ impl WorkspaceApp {
             ai_pending_tool_approvals: HashMap::new(),
             ai_agent_fs,
             ai_mcp_registry,
+            ai_acp_runtime_registry,
+            ai_acp_agent_probe_pending: HashSet::new(),
+            ai_acp_agent_probe_tx: None,
+            ai_acp_agent_probe_rx: None,
+            ai_acp_agent_probe_polling: false,
             ai_rag_store,
             ai_mcp_add_dialog: None,
             knowledge_reindex_cancel: None,

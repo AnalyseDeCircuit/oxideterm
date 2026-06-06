@@ -1,3 +1,4 @@
+mod acp;
 mod chat;
 mod context_sanitizer;
 mod context_window;
@@ -18,6 +19,18 @@ mod suggestions;
 mod touch_id;
 mod types;
 
+pub use acp::{
+    AcpAgentRuntime, AcpClientEvent, AcpClientEventSender, AcpHostCapabilityPolicy,
+    AcpLaunchConfig, AcpLaunchConfigError, AcpPermissionOptionProjection,
+    AcpPermissionRequestProjection, AcpPromptSessionOutcome, AcpRegisteredRuntimeHandle,
+    AcpRuntimeHandleKey, AcpRuntimeRegistry, AcpStdioLauncher, AcpTerminalRegistry,
+    acp_client_event_to_ai_stream_events, acp_method_not_found, acp_permission_cancelled_response,
+    acp_permission_request_projection, acp_permission_response_for_decision,
+    acp_session_notification_to_ai_stream_events, build_acp_initialize_request,
+    build_acp_stdio_launcher, build_sdk_acp_agent, initialize_acp_agent,
+    resolve_acp_read_text_file_request, resolve_acp_write_text_file_request,
+    run_acp_prompt_session_events, with_acp_agent_runtime, with_acp_agent_runtime_events,
+};
 pub use chat::{apply_chat_request_overrides, generate_chat_title};
 pub use context_sanitizer::{sanitize_api_messages_for_provider, sanitize_for_ai};
 pub use context_window::{
@@ -38,8 +51,8 @@ pub use policy::{
     orchestrator_approval_key_for_tool, orchestrator_risk_for_tool, resolve_ai_policy_decision,
 };
 pub use profiles::{
-    ResolvedAiExecutionProfile, resolve_ai_execution_profile, resolve_ai_reasoning_effort,
-    tool_policy_from_parts,
+    AiExecutionBackend, ResolvedAiExecutionProfile, resolve_ai_execution_profile,
+    resolve_ai_reasoning_effort, tool_policy_from_parts,
 };
 pub use provider_embeddings::{
     AiChatEmbeddingApiKeyDecision, AiEmbeddingMode, AiEmbeddingProviderReason,
