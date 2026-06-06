@@ -361,10 +361,8 @@ fn key_error_is_passphrase_related(error: &russh::keys::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use russh::keys::{
-        Algorithm, PrivateKey,
-        ssh_key::{LineEnding, rand_core::OsRng},
-    };
+    use rand10::{rand_core::UnwrapErr, rngs::SysRng};
+    use russh::keys::{Algorithm, PrivateKey, ssh_key::LineEnding};
 
     fn password_draft() -> ConnectionAuthDraft {
         ConnectionAuthDraft {
@@ -501,7 +499,7 @@ mod tests {
         std::fs::create_dir_all(&ssh_dir).unwrap();
         let encrypted = ssh_dir.join("id_ed25519");
         let fallback = ssh_dir.join("id_ecdsa");
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         PrivateKey::random(&mut rng, Algorithm::Ed25519)
             .unwrap()
             .encrypt(&mut rng, "secret")

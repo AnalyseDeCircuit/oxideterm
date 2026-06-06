@@ -4,8 +4,8 @@ mod tests {
     use std::fs;
 
     use crate::SavedUpstreamProxyProtocol;
-    use rand::rngs::OsRng;
     use russh::keys::ssh_key::LineEnding;
+    use rand10::{rand_core::UnwrapErr, rngs::SysRng};
     use russh::keys::{Algorithm, PrivateKey};
 
     fn temp_store(name: &str) -> ConnectionStore {
@@ -19,7 +19,7 @@ mod tests {
     fn generated_private_key_text() -> String {
         let key_path = std::env::temp_dir()
             .join(format!("oxideterm-managed-key-{}.key", Uuid::new_v4()));
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let key = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
         key.write_openssh_file(&key_path, LineEnding::LF).unwrap();
         let private_key = fs::read_to_string(&key_path).unwrap();

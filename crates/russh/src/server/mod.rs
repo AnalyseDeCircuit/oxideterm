@@ -48,13 +48,13 @@ use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::cipher::{clear, OpeningKey};
-use crate::kex::dh::groups::{DhGroup, BUILTIN_SAFE_DH_GROUPS, DH_GROUP14};
+use crate::cipher::{OpeningKey, clear};
+use crate::kex::dh::groups::{BUILTIN_SAFE_DH_GROUPS, DH_GROUP14, DhGroup};
 use crate::kex::{KexProgress, SessionKexState};
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
-use crate::{*};
+use crate::*;
 
 mod kex;
 mod session;
@@ -211,18 +211,19 @@ impl Auth {
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
 
-    /// Check authentication using the "none" method. Russh makes
-    /// sure rejection happens in time `config.auth_rejection_time`,
+    /// Check authentication using the "none" method.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
     /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_none(&mut self, user: &str) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
         async { Ok(Auth::reject()) }
     }
 
-    /// Check authentication using the "password" method. Russh
-    /// makes sure rejection happens in time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// than that.
+    /// Check authentication using the "password" method.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_password(
         &mut self,
@@ -232,13 +233,30 @@ pub trait Handler: Sized {
         async { Ok(Auth::reject()) }
     }
 
-    /// Check authentication using the "publickey" method. This method
-    /// should just check whether the public key matches the
-    /// authorized ones. Russh then checks the signature. If the key
-    /// is unknown, or the signature is invalid, Russh guarantees
-    /// that rejection happens in constant time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// time than that.
+    /// Pre-authentication callback for public key authentication.
+    /// This method is called when a client is:
+    /// * probing public key authentication without a signature (yet) or
+    /// * attempting authentication with a signature without doing
+    ///   a prior probe.
+    ///
+    /// The purpose of this callback is to spare the effort of signing
+    /// and verifying the signature if the server will not accept this
+    /// public key anyway.
+    ///
+    /// Note that at this stage, the ownership of the key has
+    /// not been verified yet.
+    ///
+    /// You should not alter your session's authentication state
+    /// from this callback. Implement your actual authentication check
+    /// in [`Handler::auth_publickey`]. Seeing an unknown key here should
+    /// in most cases not be counted towards an eventual authentication
+    /// attempt limit.
+    ///
+    /// The default implementation accepts all keys, allowing them to
+    /// proceed to [`Handler::auth_publickey`].
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_publickey_offered(
         &mut self,
@@ -251,9 +269,9 @@ pub trait Handler: Sized {
     /// Check authentication using the "publickey" method. This method
     /// is called after the signature has been verified and key
     /// ownership has been confirmed.
-    /// Russh guarantees that rejection happens in constant time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// time than that.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_publickey(
         &mut self,
@@ -266,9 +284,9 @@ pub trait Handler: Sized {
     /// Check authentication using an OpenSSH certificate. This method
     /// is called after the signature has been verified and key
     /// ownership has been confirmed.
-    /// Russh guarantees that rejection happens in constant time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// time than that.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_openssh_certificate(
         &mut self,
@@ -279,9 +297,10 @@ pub trait Handler: Sized {
     }
 
     /// Check authentication using the "keyboard-interactive"
-    /// method. Russh makes sure rejection happens in time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// than that.
+    /// method.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_keyboard_interactive<'a>(
         &'a mut self,
@@ -370,6 +389,7 @@ pub trait Handler: Sized {
     }
 
     /// Called when a new remote forwarded TCP connection comes in.
+    ///
     /// <https://www.rfc-editor.org/rfc/rfc4254#section-7>
     #[allow(unused_variables)]
     fn channel_open_forwarded_tcpip(
@@ -460,8 +480,9 @@ pub trait Handler: Sized {
     /// specifications.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn pty_request(
@@ -497,8 +518,9 @@ pub trait Handler: Sized {
     /// The client requests an X11 connection.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn x11_request(
@@ -532,8 +554,9 @@ pub trait Handler: Sized {
     /// environment to be set.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn env_request(
@@ -561,8 +584,9 @@ pub trait Handler: Sized {
     /// The client requests a shell.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn shell_request(
@@ -587,8 +611,9 @@ pub trait Handler: Sized {
     /// shell. Make sure to check the command before doing so.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn exec_request(
@@ -615,8 +640,9 @@ pub trait Handler: Sized {
     /// (such as sftp).
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn subsystem_request(
@@ -642,8 +668,9 @@ pub trait Handler: Sized {
     /// The client's pseudo-terminal window size has changed.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn window_change_request(
@@ -675,8 +702,9 @@ pub trait Handler: Sized {
     /// The client requests OpenSSH agent forwarding
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn agent_request(
@@ -753,6 +781,7 @@ pub trait Handler: Sized {
     }
 
     /// Override when enabling the `diffie-hellman-group-exchange-*` key exchange methods.
+    ///
     /// Should return a Diffie-Hellman group with a safe prime whose length is
     /// between `gex_params.min_group_size` and `gex_params.max_group_size` and
     /// (if possible) over and as close as possible to `gex_params.preferred_group_size`.
@@ -1041,9 +1070,9 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     read: &mut SshRead<R>,
 ) -> Result<CommonSession<Arc<Config>>, Error> {
     let sshid = if let Some(t) = config.inactivity_timeout {
-        tokio::time::timeout(t, read.read_ssh_id()).await??
+        tokio::time::timeout(t, read.read_client_ssh_id()).await??
     } else {
-        read.read_ssh_id().await?
+        read.read_client_ssh_id().await?
     };
 
     let session = CommonSession {
@@ -1116,11 +1145,17 @@ async fn reply<H: Handler + Send>(
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex();
 
-                    if let Some(ref mut enc) = session.common.encrypted {
+                    if session.common.encrypted.is_some() {
                         // This is a rekey
-                        enc.last_rekey = Instant::now();
-                        session.common.packet_writer.buffer().bytes = 0;
-                        enc.flush_all_pending()?;
+                        {
+                            let common = &mut session.common;
+                            common.newkeys(newkeys);
+                            common.packet_writer.buffer().bytes = 0;
+                            if let Some(enc) = common.encrypted.as_mut() {
+                                enc.last_rekey = Instant::now();
+                                enc.flush_all_pending_with_writer(&mut common.packet_writer)?;
+                            }
+                        }
 
                         let mut pending = std::mem::take(&mut session.pending_reads);
                         for p in pending.drain(..) {
@@ -1128,7 +1163,6 @@ async fn reply<H: Handler + Send>(
                         }
                         session.pending_reads = pending;
                         session.pending_len = 0;
-                        session.common.newkeys(newkeys);
                         session.flush()?;
                     } else {
                         // This is the initial kex

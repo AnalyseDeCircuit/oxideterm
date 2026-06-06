@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::future::{Future, Pending};
 
 use futures::future::Either as EitherFuture;
-use log::{debug, warn};
+use log::warn;
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
 use ssh_encoding::{Decode, Encode};
@@ -217,7 +217,9 @@ pub enum Error {
     #[error(transparent)]
     Elapsed(#[from] tokio::time::error::Elapsed),
 
-    #[error("Violation detected during strict key exchange, message {message_type} at seq no {sequence_number}")]
+    #[error(
+        "Violation detected during strict key exchange, message {message_type} at seq no {sequence_number}"
+    )]
     StrictKeyExchangeViolation {
         message_type: u8,
         sequence_number: usize,
@@ -425,6 +427,14 @@ impl ChannelOpenFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 /// The identifier of a channel.
 pub struct ChannelId(u32);
+
+impl ChannelId {
+    // Not public to prevent construction of invalid
+    // ChannelIds by the library user
+    pub fn number(&self) -> u32 {
+        self.0
+    }
+}
 
 impl Decode for ChannelId {
     type Error = ssh_encoding::Error;

@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use russh::keys::PrivateKeyWithHashAlg;
-use russh::keys::ssh_key::rand_core::OsRng;
 use russh::*;
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -12,12 +11,24 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 const MAX_CHANNEL_PACKET_SIZE: u32 = 256 * 1024;
 const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const STDERR_EXTENDED_DATA_TYPE: u32 = 1;
+#[cfg(feature = "flate2")]
+const ZLIB_ONLY: &[compression::Name] = &[compression::ZLIB];
 
 #[tokio::test]
 async fn test_aes256_gcm_allows_full_256k_channel_packet() {
+    run_max_channel_packet_size_test(None).await;
+}
+
+#[tokio::test]
+#[cfg(feature = "flate2")]
+async fn test_aes256_gcm_with_zlib_allows_full_256k_channel_packet() {
+    run_max_channel_packet_size_test(Some(ZLIB_ONLY)).await;
+}
+
+async fn run_max_channel_packet_size_test(compression: Option<&'static [compression::Name]>) {
     let _ = env_logger::try_init();
 
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
@@ -26,10 +37,13 @@ async fn test_aes256_gcm_allows_full_256k_channel_packet() {
     server_config.window_size = MAX_CHANNEL_PACKET_SIZE * 4;
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
     server_config.preferred = {
         let mut preferred = Preferred::default();
         preferred.cipher = Cow::Borrowed(&[cipher::AES_256_GCM]);
+        if let Some(compression) = compression {
+            preferred.compression = Cow::Borrowed(compression);
+        }
         preferred
     };
 
@@ -50,6 +64,9 @@ async fn test_aes256_gcm_allows_full_256k_channel_packet() {
     client_config.preferred = {
         let mut preferred = Preferred::default();
         preferred.cipher = Cow::Borrowed(&[cipher::AES_256_GCM]);
+        if let Some(compression) = compression {
+            preferred.compression = Cow::Borrowed(compression);
+        }
         preferred
     };
 

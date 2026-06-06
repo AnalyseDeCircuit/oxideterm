@@ -8,9 +8,10 @@ use oxideterm_ssh::{
     ConnectionConsumer, ConnectionPoolConfig, SshConfig, SshConnectionHandle,
     SshConnectionRegistry, SshTransportClient,
 };
+use rand10::{rand_core::UnwrapErr, rngs::SysRng};
 use russh::{
     Channel, ChannelId,
-    keys::{Algorithm, HashAlg, PrivateKey, ssh_key::rand_core::OsRng},
+    keys::{Algorithm, HashAlg, PrivateKey},
     server::{self, Msg, Session},
 };
 use tokio::{
@@ -154,7 +155,7 @@ struct DirectTcpipOpen {
 }
 
 async fn start_forwarding_ssh_server() -> TestSshServer {
-    let host_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
+    let host_key = PrivateKey::random(&mut UnwrapErr(SysRng), Algorithm::Ed25519).unwrap();
     let host_key_fingerprint = host_key
         .public_key()
         .fingerprint(HashAlg::Sha256)
