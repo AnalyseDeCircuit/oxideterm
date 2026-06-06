@@ -114,7 +114,7 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-i18next": "^16.6.5",
-    "react-resizable-panels": "^4.10.0",
+    "react-resizable-panels": "^4.11.2",
     "tailwind-merge": "^3.6.0",
     "ts-md5": "^2.0.1",
     "xlsx": "^0.18.5",
