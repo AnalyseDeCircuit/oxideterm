@@ -62,6 +62,53 @@ pub struct AiModelContextWindowRow {
     pub source: ContextWindowSource,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AcpAgentPreset {
+    ClaudeCode,
+    Codex,
+    GithubCopilot,
+}
+
+struct AcpAgentPresetTemplate {
+    base_id: &'static str,
+    display_name: &'static str,
+    command: &'static str,
+    args: &'static [&'static str],
+}
+
+impl AcpAgentPreset {
+    pub fn display_name(self) -> &'static str {
+        self.template().display_name
+    }
+
+    fn base_id(self) -> &'static str {
+        self.template().base_id
+    }
+
+    fn template(self) -> AcpAgentPresetTemplate {
+        match self {
+            Self::ClaudeCode => AcpAgentPresetTemplate {
+                base_id: "claude-code",
+                display_name: "Claude Code",
+                command: "npx",
+                args: &["-y", "@agentclientprotocol/claude-agent-acp"],
+            },
+            Self::Codex => AcpAgentPresetTemplate {
+                base_id: "codex",
+                display_name: "Codex",
+                command: "codex-acp",
+                args: &[],
+            },
+            Self::GithubCopilot => AcpAgentPresetTemplate {
+                base_id: "github-copilot",
+                display_name: "GitHub Copilot",
+                command: "copilot",
+                args: &["--acp", "--stdio"],
+            },
+        }
+    }
+}
+
 pub fn ai_tool_auto_approved_count(settings: &PersistedSettings) -> usize {
     settings
         .ai
@@ -556,6 +603,47 @@ pub fn ai_add_acp_agent(settings: &mut PersistedSettings) {
         capability_policy: AcpAgentCapabilityPolicy::default(),
         status: AcpAgentRuntimeStatus::default(),
     });
+}
+
+pub fn ai_add_acp_agent_preset(settings: &mut PersistedSettings, preset: AcpAgentPreset) {
+    let id = ai_unique_acp_agent_id(settings, preset.base_id());
+    let template = preset.template();
+    // Presets seed editable agent entries; capabilities stay closed until users opt in.
+    settings.ai.acp_agents.push(AcpAgentConfig {
+        id,
+        display_name: template.display_name.to_string(),
+        command: template.command.to_string(),
+        args: template.args.iter().map(|arg| (*arg).to_string()).collect(),
+        env: BTreeMap::new(),
+        cwd: None,
+        enabled: true,
+        auth: AcpAgentAuthState::default(),
+        capability_policy: AcpAgentCapabilityPolicy::default(),
+        status: AcpAgentRuntimeStatus::default(),
+    });
+}
+
+fn ai_unique_acp_agent_id(settings: &PersistedSettings, base_id: &str) -> String {
+    if !settings
+        .ai
+        .acp_agents
+        .iter()
+        .any(|agent| agent.id == base_id)
+    {
+        return base_id.to_string();
+    }
+    for suffix in 2usize.. {
+        let candidate = format!("{base_id}-{suffix}");
+        if !settings
+            .ai
+            .acp_agents
+            .iter()
+            .any(|agent| agent.id == candidate)
+        {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded suffix search should always find a free ACP agent id")
 }
 
 pub fn ai_delete_acp_agent(settings: &mut PersistedSettings, index: usize) {
@@ -1057,6 +1145,42 @@ mod tests {
             ai_mcp_server_signature(&config, None),
             ai_mcp_server_signature(&changed_secret, None)
         );
+    }
+
+    #[test]
+    fn acp_agent_presets_create_editable_configs_with_unique_ids() {
+        let mut settings = PersistedSettings::default();
+
+        ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::ClaudeCode);
+        ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::Codex);
+        ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::GithubCopilot);
+        ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::Codex);
+
+        let claude = &settings.ai.acp_agents[0];
+        assert_eq!(claude.id, "claude-code");
+        assert_eq!(claude.command, "npx");
+        assert_eq!(
+            claude.args,
+            vec![
+                "-y".to_string(),
+                "@agentclientprotocol/claude-agent-acp".to_string()
+            ]
+        );
+        assert!(!claude.capability_policy.terminal);
+
+        let codex = &settings.ai.acp_agents[1];
+        assert_eq!(codex.id, "codex");
+        assert_eq!(codex.command, "codex-acp");
+
+        let copilot = &settings.ai.acp_agents[2];
+        assert_eq!(copilot.id, "github-copilot");
+        assert_eq!(copilot.command, "copilot");
+        assert_eq!(
+            copilot.args,
+            vec!["--acp".to_string(), "--stdio".to_string()]
+        );
+
+        assert_eq!(settings.ai.acp_agents[3].id, "codex-2");
     }
 }
 

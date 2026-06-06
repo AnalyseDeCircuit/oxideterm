@@ -10,13 +10,13 @@ use oxideterm_settings::{
     reindex_highlight_rules,
 };
 use oxideterm_settings_model::{
-    AI_MODEL_REFRESH_MISSING_API_KEY, AiMcpServerDraft, AiModelRefreshDelivery,
+    AI_MODEL_REFRESH_MISSING_API_KEY, AcpAgentPreset, AiMcpServerDraft, AiModelRefreshDelivery,
     AiProviderModelChipItem, AiProviderModelPanel, AiSettingsPage, AiSettingsSection,
     AiToolPolicyGroup, CliCompanionStatus, KNOWLEDGE_EMBEDDING_BATCH_SIZE, KnowledgeDeleteTarget,
     KnowledgeExternalEdit, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts,
     SettingsInputDraftApply, TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection,
-    ThemeEditorState, UI_THEME_COLOR_FIELDS, ai_add_acp_agent, ai_add_execution_profile,
-    ai_context_max_chars_label_key, ai_context_visible_lines_label_key,
+    ThemeEditorState, UI_THEME_COLOR_FIELDS, ai_add_acp_agent, ai_add_acp_agent_preset,
+    ai_add_execution_profile, ai_context_max_chars_label_key, ai_context_visible_lines_label_key,
     ai_default_execution_profile, ai_delete_acp_agent, ai_delete_execution_profile,
     ai_duplicate_execution_profile, ai_execution_profile_id, ai_execution_profile_signature,
     ai_execution_profiles_need_normalization, ai_mcp_auth_mode_value, ai_mcp_clean_record,

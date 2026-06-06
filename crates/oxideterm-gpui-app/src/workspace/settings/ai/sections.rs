@@ -361,29 +361,31 @@ impl WorkspaceApp {
                         self.i18n_count("settings_view.ai.acp_agents_summary", agent_count),
                     ))
                     .child(
-                        self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.ai.acp_agent_add"),
-                            Some(Self::render_lucide_icon(
-                                LucideIcon::Plus,
-                                14.0,
-                                rgb(self.tokens.ui.text_muted),
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .justify_end()
+                            .gap(px(8.0))
+                            .child(self.ai_acp_agent_add_button(
+                                self.i18n.t("settings_view.ai.acp_agent_add"),
+                                None,
+                                cx,
+                            ))
+                            .child(self.ai_acp_agent_add_button(
+                                AcpAgentPreset::ClaudeCode.display_name().to_string(),
+                                Some(AcpAgentPreset::ClaudeCode),
+                                cx,
+                            ))
+                            .child(self.ai_acp_agent_add_button(
+                                AcpAgentPreset::Codex.display_name().to_string(),
+                                Some(AcpAgentPreset::Codex),
+                                cx,
+                            ))
+                            .child(self.ai_acp_agent_add_button(
+                                AcpAgentPreset::GithubCopilot.display_name().to_string(),
+                                Some(AcpAgentPreset::GithubCopilot),
+                                cx,
                             )),
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Outline,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: false,
-                                },
-                                icon_gap: Some(6.0),
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(|this, _event, _window, cx| {
-                                this.edit_settings(ai_add_acp_agent, cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .into_any_element(),
                     ),
             );
 
@@ -518,6 +520,43 @@ impl WorkspaceApp {
             )
             .child(self.ai_acp_agent_capabilities(index, agent, cx))
             .into_any_element()
+    }
+
+    fn ai_acp_agent_add_button(
+        &self,
+        label: String,
+        preset: Option<AcpAgentPreset>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.workspace_toolbar_action_button(
+            label,
+            Some(Self::render_lucide_icon(
+                LucideIcon::Plus,
+                14.0,
+                rgb(self.tokens.ui.text_muted),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                icon_gap: Some(6.0),
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(move |this, _event, _window, cx| {
+                this.edit_settings(
+                    |settings| match preset {
+                        Some(preset) => ai_add_acp_agent_preset(settings, preset),
+                        None => ai_add_acp_agent(settings),
+                    },
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     fn ai_acp_agent_auth_token_input(
