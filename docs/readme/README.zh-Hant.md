@@ -272,7 +272,8 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] 無 WebSocket 的進程內終端資料流
 - [x] SFTP、轉發、IDE、AI、雲同步、外掛、CLI
 - [x] 本地序列埠終端
-- [ ] 完整 ProxyCommand、審計日誌
+- [x] 完整 ProxyCommand
+- [ ] 審計日誌
 
 ## 貢獻
 

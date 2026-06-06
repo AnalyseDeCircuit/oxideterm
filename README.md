@@ -356,7 +356,7 @@ Prefer scoped crate checks while iterating. Broaden to `--workspace` when a chan
 - [x] In-process terminal data flow (no WebSocket)
 - [x] SFTP, port forwarding, IDE, AI, cloud sync, plugins, CLI
 - [x] Local serial terminals
-- [ ] Full ProxyCommand support
+- [x] Full ProxyCommand support
 - [ ] Audit logging
 
 ---

@@ -272,7 +272,8 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] Terminal data flow in-process senza WebSocket
 - [x] SFTP, forwarding, IDE, AI, cloud sync, plugins, CLI
 - [x] Terminali seriali locali
-- [ ] Full ProxyCommand, audit logging
+- [x] Full ProxyCommand
+- [ ] Audit logging
 
 ## Contribuire
 

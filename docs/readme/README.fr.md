@@ -272,7 +272,8 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] Flux terminal in-process sans WebSocket
 - [x] SFTP, forwarding, IDE, IA, cloud sync, plugins, CLI
 - [x] Terminaux série locaux
-- [ ] ProxyCommand complet, audit logging
+- [x] ProxyCommand complet
+- [ ] Audit logging
 
 ## Contribution
 

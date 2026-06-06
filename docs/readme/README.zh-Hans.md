@@ -275,7 +275,8 @@ cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 - [x] 无 WebSocket 的进程内终端数据流
 - [x] SFTP、端口转发、IDE、AI、云同步、插件、CLI
 - [x] 本地串口终端
-- [ ] 完整 ProxyCommand、审计日志
+- [x] 完整 ProxyCommand
+- [ ] 审计日志
 
 ## Provider 中立性
 
