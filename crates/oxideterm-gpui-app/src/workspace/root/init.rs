@@ -163,6 +163,7 @@ impl WorkspaceApp {
             settings_selected_connection_import_drafts: HashSet::new(),
             settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy::Skip,
             settings_connection_import_target_group: String::new(),
+            settings_network_proxy_password_status: None,
             settings_local_privilege_draft: PrivilegeCredentialDraft::default(),
             settings_local_privilege_error: None,
             quick_commands: QuickCommandsState::load(settings_store.path()),

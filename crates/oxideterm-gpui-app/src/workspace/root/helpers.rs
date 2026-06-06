@@ -1125,7 +1125,13 @@ impl WorkspaceApp {
         for node in persisted.nodes {
             let config = node
                 .config
-                .or_else(|| saved_origin_config(&self.connection_store, &node.origin));
+                .or_else(|| {
+                    saved_origin_config(
+                        &self.connection_store,
+                        self.settings_store.settings(),
+                        &node.origin,
+                    )
+                });
             let Some(config) = config else {
                 continue;
             };
@@ -1314,20 +1320,24 @@ fn connection_trace_failure_stage(error: Option<&str>) -> ConnectionTraceStage {
     }
 }
 
-fn saved_origin_config(store: &ConnectionStore, origin: &NodeOrigin) -> Option<SshConfig> {
+fn saved_origin_config(
+    store: &ConnectionStore,
+    settings: &PersistedSettings,
+    origin: &NodeOrigin,
+) -> Option<SshConfig> {
     match origin {
         NodeOrigin::Restored {
             saved_connection_id,
         } => {
             let connection = store.get(saved_connection_id)?;
-            self::session_manager::ssh_config_from_saved_connection(store, connection)
+            self::session_manager::ssh_config_from_saved_connection(store, settings, connection)
         }
         NodeOrigin::ManualPreset {
             saved_connection_id,
             hop_index,
         } => {
             let connection = store.get(saved_connection_id)?;
-            saved_manual_preset_hop_config(store, connection, *hop_index)
+            saved_manual_preset_hop_config(store, settings, connection, *hop_index)
         }
         NodeOrigin::AutoRoute { .. } | NodeOrigin::DrillDown { .. } | NodeOrigin::Direct => None,
     }
@@ -1335,6 +1345,7 @@ fn saved_origin_config(store: &ConnectionStore, origin: &NodeOrigin) -> Option<S
 
 fn saved_manual_preset_hop_config(
     store: &ConnectionStore,
+    settings: &PersistedSettings,
     connection: &oxideterm_connections::SavedConnection,
     hop_index: u32,
 ) -> Option<SshConfig> {
@@ -1349,6 +1360,7 @@ fn saved_manual_preset_hop_config(
             proxy_chain: None,
             upstream_proxy: self::session_manager::upstream_proxy_config_from_saved_policy(
                 store,
+                settings,
                 &connection.upstream_proxy,
             ),
             agent_forwarding: hop.agent_forwarding,
@@ -1359,7 +1371,7 @@ fn saved_manual_preset_hop_config(
 
     if hop_index == connection.proxy_chain.len() {
         let mut target =
-            self::session_manager::ssh_config_from_saved_connection(store, connection)?;
+            self::session_manager::ssh_config_from_saved_connection(store, settings, connection)?;
         target.proxy_chain = None;
         return Some(target);
     }

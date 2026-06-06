@@ -867,6 +867,27 @@ impl ConnectionStore {
         }
     }
 
+    pub fn save_global_upstream_proxy_password(&self, password: &SecretString) -> Result<String> {
+        // The global proxy has one stable keychain slot, separate from
+        // connection-scoped oxide_conn_upstream_proxy_* entries.
+        self.keychain
+            .store(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID, password)?;
+        Ok(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID.to_string())
+    }
+
+    pub fn delete_global_upstream_proxy_password(&self) -> Result<()> {
+        self.keychain
+            .delete(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID)
+            .map_err(Into::into)
+    }
+
+    pub fn get_global_upstream_proxy_password(&self, keychain_id: &str) -> Result<SecretString> {
+        if keychain_id != GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID {
+            bail!("Invalid global upstream proxy keychain id");
+        }
+        self.keychain.get(keychain_id)
+    }
+
     pub fn create_managed_ssh_key_from_text(
         &mut self,
         private_key: SecretString,

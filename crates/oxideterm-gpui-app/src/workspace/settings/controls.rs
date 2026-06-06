@@ -691,6 +691,98 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Network, SettingsSelect::NetworkProxyProtocol) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let current = settings
+                    .network
+                    .upstream_proxy
+                    .as_ref()
+                    .map(|proxy| proxy.protocol)
+                    .unwrap_or(SettingsUpstreamProxyProtocol::Socks5);
+                for protocol in [
+                    SettingsUpstreamProxyProtocol::Socks5,
+                    SettingsUpstreamProxyProtocol::HttpConnect,
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                network_proxy_protocol_label(protocol, &self.i18n),
+                                protocol == current,
+                            ),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    move |settings| {
+                                        if let Some(proxy) =
+                                            settings.network.upstream_proxy.as_mut()
+                                        {
+                                            proxy.protocol = protocol;
+                                        }
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Network, SettingsSelect::NetworkProxyAuth) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let current = settings
+                    .network
+                    .upstream_proxy
+                    .as_ref()
+                    .map(|proxy| match &proxy.auth {
+                        SettingsUpstreamProxyAuth::None => NetworkProxyAuthMode::None,
+                        SettingsUpstreamProxyAuth::Password { .. } => NetworkProxyAuthMode::Password,
+                    })
+                    .unwrap_or(NetworkProxyAuthMode::None);
+                for mode in [NetworkProxyAuthMode::None, NetworkProxyAuthMode::Password] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                network_proxy_auth_label(mode, &self.i18n),
+                                mode == current,
+                            ),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.settings_network_proxy_password_status = None;
+                                this.clear_settings_input_draft(SettingsInput::NetworkProxyPassword);
+                                this.edit_settings(
+                                    move |settings| {
+                                        if let Some(proxy) =
+                                            settings.network.upstream_proxy.as_mut()
+                                        {
+                                            proxy.auth = match mode {
+                                                NetworkProxyAuthMode::None => {
+                                                    SettingsUpstreamProxyAuth::None
+                                                }
+                                                NetworkProxyAuthMode::Password => {
+                                                    SettingsUpstreamProxyAuth::Password {
+                                                        username: String::new(),
+                                                        keychain_id: None,
+                                                    }
+                                                }
+                                            };
+                                        }
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             (SettingsTab::Ai, SettingsSelect::AiProviderTemplate) => {
                 let mut popup = select_overlay_popup(&self.tokens, width.max(AI_PROVIDER_SELECT_W));
                 for template in AI_PROVIDER_TEMPLATES {

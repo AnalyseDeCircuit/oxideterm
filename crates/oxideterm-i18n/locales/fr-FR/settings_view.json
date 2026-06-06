@@ -49,7 +49,8 @@
       "reconnect": "Reconnexion",
       "help": "Aide et À propos",
       "keybindings": "Raccourcis clavier",
-      "graphics": "Graphiques"
+      "graphics": "Graphiques",
+      "network": "Network"
     },
     "general": {
       "title": "Général",
@@ -1141,6 +1142,40 @@
         "palette.aiSidebar": "Barre latérale IA",
         "palette.broadcast": "Mode diffusion"
       }
+    },
+    "network": {
+      "title": "Network",
+      "description": "Configure global network routing used by saved SSH connections.",
+      "disclaimer": "I understand the proxy routing behavior",
+      "disclaimer_hint": "SSH and SFTP traffic for connections using the global proxy will be routed through this upstream proxy.",
+      "enabled": "Enable Global Upstream Proxy",
+      "enabled_hint": "Connections using “Use Global” will route through this proxy.",
+      "proxy": "Upstream Proxy",
+      "protocol": "Protocol",
+      "protocol_hint": "Choose the upstream proxy protocol.",
+      "protocol_socks5": "SOCKS5",
+      "protocol_http_connect": "HTTP CONNECT",
+      "host": "Host",
+      "host_hint": "Proxy host or IP address.",
+      "port": "Port",
+      "port_hint": "Proxy listening port.",
+      "remote_dns": "Remote DNS",
+      "remote_dns_hint": "Resolve target hostnames through the proxy when supported.",
+      "no_proxy": "No Proxy",
+      "no_proxy_hint": "Comma-separated host patterns that bypass the proxy.",
+      "auth": "Authentication",
+      "auth_hint": "Optional username/password authentication for the proxy.",
+      "auth_none": "No authentication",
+      "auth_password": "Username and password",
+      "username": "Username",
+      "username_hint": "Proxy authentication username.",
+      "password": "Password",
+      "password_hint": "Stored in the system keychain, never in settings JSON.",
+      "password_saved_hint": "A password is saved in the system keychain. Enter a new one to replace it.",
+      "password_saved_placeholder": "Saved in keychain",
+      "save_password": "Save Password",
+      "remove_password": "Remove",
+      "saving": "Saving..."
     }
   }
 }

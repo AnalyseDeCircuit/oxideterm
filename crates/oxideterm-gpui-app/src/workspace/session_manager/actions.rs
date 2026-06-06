@@ -502,7 +502,11 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let Some(config) = ssh_config_from_saved_connection(&self.connection_store, &conn) else {
+        let Some(config) = ssh_config_from_saved_connection(
+            &self.connection_store,
+            self.settings_store.settings(),
+            &conn,
+        ) else {
             self.open_saved_connection_prompt(
                 id,
                 SavedConnectionPromptAction::Test,

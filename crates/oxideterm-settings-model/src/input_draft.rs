@@ -13,7 +13,7 @@ use oxideterm_ai::{
 use oxideterm_settings::{
     DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND, DEFAULT_AI_TOOL_MAX_ROUNDS,
     MAX_AI_TOOL_MAX_CALLS_PER_ROUND, MAX_AI_TOOL_MAX_ROUNDS, MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
-    MIN_AI_TOOL_MAX_ROUNDS, PersistedSettings, reindex_highlight_rules,
+    MIN_AI_TOOL_MAX_ROUNDS, PersistedSettings, SettingsUpstreamProxyAuth, reindex_highlight_rules,
 };
 
 use crate::{
@@ -65,6 +65,34 @@ pub fn persisted_settings_input_value(
         SettingsInput::ConnectionDefaultUsername => settings.connection_defaults.username.clone(),
         SettingsInput::ConnectionDefaultPort => settings.connection_defaults.port.to_string(),
         SettingsInput::ConnectionImportTargetGroup => return None,
+        SettingsInput::NetworkProxyHost => settings
+            .network
+            .upstream_proxy
+            .as_ref()
+            .map(|proxy| proxy.host.clone())
+            .unwrap_or_default(),
+        SettingsInput::NetworkProxyPort => settings
+            .network
+            .upstream_proxy
+            .as_ref()
+            .map(|proxy| proxy.port.to_string())
+            .unwrap_or_else(|| "1080".to_string()),
+        SettingsInput::NetworkProxyNoProxy => settings
+            .network
+            .upstream_proxy
+            .as_ref()
+            .map(|proxy| proxy.no_proxy.clone())
+            .unwrap_or_default(),
+        SettingsInput::NetworkProxyUsername => settings
+            .network
+            .upstream_proxy
+            .as_ref()
+            .and_then(|proxy| match &proxy.auth {
+                SettingsUpstreamProxyAuth::Password { username, .. } => Some(username.clone()),
+                SettingsUpstreamProxyAuth::None => None,
+            })
+            .unwrap_or_default(),
+        SettingsInput::NetworkProxyPassword => String::new(),
         SettingsInput::SftpSpeedLimitKbps => settings.sftp.speed_limit_kbps.to_string(),
         SettingsInput::InBandTransferMaxChunkBytes => settings
             .terminal
@@ -262,6 +290,27 @@ pub fn apply_persisted_settings_input_draft(
             .map(|value| settings.connection_defaults.port = value.clamp(1, 65_535))
             .into(),
         SettingsInput::ConnectionImportTargetGroup => SettingsInputDraftApply::Unhandled,
+        SettingsInput::NetworkProxyHost => {
+            edit_upstream_proxy(settings, |proxy| proxy.host = draft.trim().to_string())
+        }
+        SettingsInput::NetworkProxyPort => parse_i64(draft)
+            .map(|value| {
+                edit_upstream_proxy(settings, |proxy| proxy.port = value.clamp(1, 65_535) as u16);
+            })
+            .into(),
+        SettingsInput::NetworkProxyNoProxy => {
+            edit_upstream_proxy(settings, |proxy| proxy.no_proxy = draft.trim().to_string())
+        }
+        SettingsInput::NetworkProxyUsername => edit_upstream_proxy(settings, |proxy| {
+            proxy.auth = SettingsUpstreamProxyAuth::Password {
+                username: draft.trim().to_string(),
+                keychain_id: match &proxy.auth {
+                    SettingsUpstreamProxyAuth::Password { keychain_id, .. } => keychain_id.clone(),
+                    SettingsUpstreamProxyAuth::None => None,
+                },
+            };
+        }),
+        SettingsInput::NetworkProxyPassword => SettingsInputDraftApply::Unhandled,
         SettingsInput::SftpSpeedLimitKbps => parse_i64(draft)
             .map(|value| settings.sftp.speed_limit_kbps = value.max(0))
             .into(),
@@ -450,6 +499,16 @@ fn edit_highlight_rule(
     edit(rule);
     settings.terminal.highlight_rules =
         reindex_highlight_rules(settings.terminal.highlight_rules.clone());
+    SettingsInputDraftApply::Applied
+}
+
+fn edit_upstream_proxy(
+    settings: &mut PersistedSettings,
+    edit: impl FnOnce(&mut oxideterm_settings::SettingsUpstreamProxyConfig),
+) -> SettingsInputDraftApply {
+    if let Some(proxy) = settings.network.upstream_proxy.as_mut() {
+        edit(proxy);
+    }
     SettingsInputDraftApply::Applied
 }
 

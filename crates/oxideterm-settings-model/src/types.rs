@@ -21,6 +21,7 @@ pub enum SettingsTab {
     Connections,
     Ssh,
     Reconnect,
+    Network,
     Sftp,
     Ide,
     Ai,
@@ -69,6 +70,8 @@ pub enum SettingsSelect {
     ReconnectMaxAttempts,
     ReconnectBaseDelay,
     ReconnectMaxDelay,
+    NetworkProxyProtocol,
+    NetworkProxyAuth,
     AiProviderTemplate,
     AiContextMaxChars,
     AiContextVisibleLines,
@@ -110,6 +113,11 @@ pub enum SettingsInput {
     ConnectionDefaultPort,
     ConnectionNewGroup,
     ConnectionImportTargetGroup,
+    NetworkProxyHost,
+    NetworkProxyPort,
+    NetworkProxyNoProxy,
+    NetworkProxyUsername,
+    NetworkProxyPassword,
     SftpSpeedLimitKbps,
     InBandTransferMaxChunkBytes,
     InBandTransferMaxFileCount,
@@ -239,7 +247,7 @@ impl SettingsTab {
         &[
             &[Self::General, Self::Portable],
             &[Self::Terminal, Self::Appearance, Self::Local],
-            &[Self::Connections, Self::Ssh, Self::Reconnect],
+            &[Self::Connections, Self::Ssh, Self::Reconnect, Self::Network],
             &[
                 Self::Sftp,
                 Self::Ide,
@@ -261,6 +269,7 @@ impl SettingsTab {
             Self::Connections => "settings_view.tabs.connections",
             Self::Ssh => "settings_view.tabs.ssh",
             Self::Reconnect => "settings_view.tabs.reconnect",
+            Self::Network => "settings_view.tabs.network",
             Self::Sftp => "settings_view.tabs.sftp",
             Self::Ide => "settings_view.tabs.ide",
             Self::Ai => "settings_view.tabs.ai",
@@ -280,6 +289,7 @@ impl SettingsTab {
             Self::Connections => "settings_view.connections.title",
             Self::Ssh => "settings_view.tabs.ssh",
             Self::Reconnect => "settings_view.reconnect.title",
+            Self::Network => "settings_view.network.title",
             Self::Sftp => "settings_view.sftp.title",
             Self::Ide => "settings_view.ide.title",
             Self::Ai => "settings_view.ai.title",
@@ -299,6 +309,7 @@ impl SettingsTab {
             Self::Connections => "settings_view.connections.description",
             Self::Ssh => "ssh.form.subtitle",
             Self::Reconnect => "settings_view.reconnect.description",
+            Self::Network => "settings_view.network.description",
             Self::Sftp => "settings_view.sftp.description",
             Self::Ide => "settings_view.ide.description",
             Self::Ai => "settings_view.ai.description",
@@ -317,6 +328,7 @@ impl SettingsTab {
             Self::Connections => SettingsTabIcon::Shield,
             Self::Ssh => SettingsTabIcon::Key,
             Self::Reconnect => SettingsTabIcon::WifiOff,
+            Self::Network => SettingsTabIcon::Network,
             Self::Ide => SettingsTabIcon::Code2,
             Self::Ai => SettingsTabIcon::Sparkles,
             Self::Knowledge => SettingsTabIcon::BookOpen,
@@ -374,6 +386,11 @@ impl SettingsInput {
             Self::ConnectionDefaultPort => 10,
             Self::ConnectionNewGroup => 11,
             Self::ConnectionImportTargetGroup => 20,
+            Self::NetworkProxyHost => 32_000,
+            Self::NetworkProxyPort => 32_001,
+            Self::NetworkProxyNoProxy => 32_002,
+            Self::NetworkProxyUsername => 32_003,
+            Self::NetworkProxyPassword => 32_004,
             Self::SftpSpeedLimitKbps => 12,
             Self::InBandTransferMaxChunkBytes => 13,
             Self::InBandTransferMaxFileCount => 14,
@@ -467,6 +484,7 @@ impl SettingsInput {
                 | Self::ManagedKeyFilePassphrase
                 | Self::ManagedKeyPastePrivateKey
                 | Self::ManagedKeyPastePassphrase
+                | Self::NetworkProxyPassword
         )
     }
 
@@ -496,6 +514,7 @@ pub enum SettingsTabIcon {
     Key,
     Keyboard,
     Monitor,
+    Network,
     Shield,
     Sparkles,
     Square,

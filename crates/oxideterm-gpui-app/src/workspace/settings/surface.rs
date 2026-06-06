@@ -329,6 +329,19 @@ impl WorkspaceApp {
             SettingsTab::Sftp => {
                 settings.sftp.speed_limit_enabled.hash(&mut hasher);
             }
+            SettingsTab::Network => {
+                settings.network.upstream_proxy.is_some().hash(&mut hasher);
+                settings
+                    .network
+                    .upstream_proxy
+                    .as_ref()
+                    .map(|proxy| matches!(proxy.auth, SettingsUpstreamProxyAuth::Password { .. }))
+                    .hash(&mut hasher);
+                settings
+                    .network
+                    .upstream_proxy_disclaimer_accepted
+                    .hash(&mut hasher);
+            }
             SettingsTab::Connections => {
                 self.connection_store.connections().len().hash(&mut hasher);
                 self.settings_connection_groups_signature().hash(&mut hasher);
@@ -472,6 +485,7 @@ impl WorkspaceApp {
             SettingsTab::Connections => self.settings_connections_section(section_index, cx),
             SettingsTab::Ssh => self.settings_ssh_section(section_index, cx),
             SettingsTab::Reconnect => self.settings_reconnect_section(section_index, cx),
+            SettingsTab::Network => self.settings_network_section(section_index, cx),
             SettingsTab::Sftp => self.settings_sftp_section(section_index, cx),
             SettingsTab::Ide => self.settings_ide_section(section_index, cx),
             SettingsTab::Ai => div().into_any_element(),

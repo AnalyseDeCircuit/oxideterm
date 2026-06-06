@@ -555,6 +555,7 @@ pub(crate) struct WorkspaceApp {
     settings_selected_connection_import_drafts: HashSet<String>,
     settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy,
     settings_connection_import_target_group: String,
+    settings_network_proxy_password_status: Option<String>,
     settings_local_privilege_draft: PrivilegeCredentialDraft,
     settings_local_privilege_error: Option<String>,
     quick_commands: QuickCommandsState,

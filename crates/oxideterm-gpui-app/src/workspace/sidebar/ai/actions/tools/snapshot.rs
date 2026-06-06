@@ -955,6 +955,7 @@ impl WorkspaceApp {
                 };
                 let Some(config) = crate::workspace::session_manager::ssh_config_from_saved_connection(
                     &self.connection_store,
+                    self.settings_store.settings(),
                     &connection,
                 ) else {
                     if self.try_reuse_active_saved_connection_terminal(

@@ -5,7 +5,9 @@ use gpui::{
 };
 use oxideterm_settings::{
     FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
-    PersistedSettings, UpdateChannel, create_default_highlight_rule, reindex_highlight_rules,
+    PersistedSettings, SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig,
+    SettingsUpstreamProxyProtocol, UpdateChannel, create_default_highlight_rule,
+    reindex_highlight_rules,
 };
 use oxideterm_settings_model::{
     AI_MODEL_REFRESH_MISSING_API_KEY, AiMcpServerDraft, AiModelRefreshDelivery,
@@ -67,6 +69,7 @@ use oxideterm_connections::{
     list_ssh_config_hosts, preview_connection_import, resolve_ssh_config_alias,
     saved_connection_from_ssh_host,
 };
+use oxideterm_i18n::I18n;
 use oxideterm_gpui_settings_view::*;
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView,
@@ -139,6 +142,7 @@ include!("settings/update.rs");
 include!("settings/general_terminal_pages.rs");
 include!("settings/appearance.rs");
 include!("settings/connections_page.rs");
+include!("settings/network_page.rs");
 include!("settings/sftp_page.rs");
 include!("settings/ide_page.rs");
 include!("settings/ai_page.rs");
@@ -153,6 +157,7 @@ fn settings_tab_lucide(icon: SettingsTabIcon) -> LucideIcon {
         SettingsTabIcon::Key => LucideIcon::Key,
         SettingsTabIcon::Keyboard => LucideIcon::Keyboard,
         SettingsTabIcon::Monitor => LucideIcon::Monitor,
+        SettingsTabIcon::Network => LucideIcon::Network,
         SettingsTabIcon::Shield => LucideIcon::Shield,
         SettingsTabIcon::Sparkles => LucideIcon::Sparkles,
         SettingsTabIcon::Square => LucideIcon::Square,

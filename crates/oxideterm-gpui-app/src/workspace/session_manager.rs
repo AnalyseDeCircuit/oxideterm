@@ -47,7 +47,8 @@ use oxideterm_gpui_ui::{
     },
 };
 use oxideterm_settings::{
-    ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS,
+    ALL_OXIDE_SETTINGS_SECTIONS, DEFAULT_OXIDE_SETTINGS_SECTIONS, PersistedSettings,
+    SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig, SettingsUpstreamProxyProtocol,
     export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
 };
 use oxideterm_ssh::{

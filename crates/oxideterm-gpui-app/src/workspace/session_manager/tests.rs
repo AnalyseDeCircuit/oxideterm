@@ -326,7 +326,8 @@ mod tests {
             privilege_credentials: Vec::new(),
         };
 
-        let config = ssh_config_from_saved_connection(&store, &conn).unwrap();
+        let settings = PersistedSettings::default();
+        let config = ssh_config_from_saved_connection(&store, &settings, &conn).unwrap();
 
         assert!(config.strict_host_key_checking);
         let chain = config.proxy_chain.unwrap();
@@ -372,13 +373,76 @@ mod tests {
             privilege_credentials: Vec::new(),
         };
 
-        let config = ssh_config_from_saved_connection(&store, &conn).unwrap();
+        let settings = PersistedSettings::default();
+        let config = ssh_config_from_saved_connection(&store, &settings, &conn).unwrap();
 
         assert!(matches!(
             config.auth,
             AuthMethod::ManagedKey { key_id, passphrase }
                 if key_id == "managed-key-1" && passphrase.is_none()
         ));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn use_global_upstream_proxy_hydrates_settings_keychain_secret() {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-gpui-global-proxy-test-{}-connections.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let store = ConnectionStore::load(&path).unwrap();
+        let keychain_id = store
+            .save_global_upstream_proxy_password(&SecretString::new("global-secret"))
+            .unwrap();
+        let mut settings = PersistedSettings::default();
+        settings.network.upstream_proxy = Some(SettingsUpstreamProxyConfig {
+            protocol: SettingsUpstreamProxyProtocol::Socks5,
+            host: "global-proxy.local".to_string(),
+            port: 1080,
+            auth: SettingsUpstreamProxyAuth::Password {
+                username: "global-user".to_string(),
+                keychain_id: Some(keychain_id),
+            },
+            remote_dns: true,
+            no_proxy: "localhost".to_string(),
+        });
+        let policy = oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal;
+
+        let proxy = upstream_proxy_config_from_saved_policy(&store, &settings, &policy).unwrap();
+
+        assert_eq!(proxy.host, "global-proxy.local");
+        assert_eq!(proxy.no_proxy, "localhost");
+        match proxy.auth {
+            UpstreamProxyAuth::Password { username, password } => {
+                assert_eq!(username, "global-user");
+                assert_eq!(password.as_str(), "global-secret");
+            }
+            UpstreamProxyAuth::None => panic!("expected password auth"),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn direct_upstream_proxy_policy_ignores_global_proxy() {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-gpui-direct-proxy-test-{}-connections.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let store = ConnectionStore::load(&path).unwrap();
+        let mut settings = PersistedSettings::default();
+        settings.network.upstream_proxy = Some(SettingsUpstreamProxyConfig {
+            protocol: SettingsUpstreamProxyProtocol::Socks5,
+            host: "global-proxy.local".to_string(),
+            port: 1080,
+            auth: SettingsUpstreamProxyAuth::None,
+            remote_dns: true,
+            no_proxy: String::new(),
+        });
+        let policy = oxideterm_connections::SavedUpstreamProxyPolicy::Direct;
+
+        assert!(upstream_proxy_config_from_saved_policy(&store, &settings, &policy).is_none());
         let _ = std::fs::remove_file(path);
     }
 }

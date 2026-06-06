@@ -412,7 +412,11 @@ impl WorkspaceApp {
         let Some(conn) = self.connection_store.get(id).cloned() else {
             return;
         };
-        let Some(config) = ssh_config_from_saved_connection(&self.connection_store, &conn) else {
+        let Some(config) = ssh_config_from_saved_connection(
+            &self.connection_store,
+            self.settings_store.settings(),
+            &conn,
+        ) else {
             if self.try_reuse_active_saved_connection_terminal(id, &conn, window, cx) {
                 return;
             }

@@ -481,6 +481,7 @@ fn auth_draft_kind(tab: SshAuthTab) -> ConnectionAuthDraftKind {
 
 pub(super) fn ssh_config_from_saved_connection(
     store: &ConnectionStore,
+    settings: &PersistedSettings,
     conn: &SavedConnection,
 ) -> Option<SshConfig> {
     let auth = auth_method_from_saved_auth(store, &conn.auth)?;
@@ -491,7 +492,7 @@ pub(super) fn ssh_config_from_saved_connection(
         username: conn.username.clone(),
         auth,
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
-        upstream_proxy: upstream_proxy_config_from_saved_policy(store, &conn.upstream_proxy),
+        upstream_proxy: upstream_proxy_config_from_saved_policy(store, settings, &conn.upstream_proxy),
         agent_forwarding: conn.options.agent_forwarding,
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
@@ -501,14 +502,53 @@ pub(super) fn ssh_config_from_saved_connection(
 
 pub(super) fn upstream_proxy_config_from_saved_policy(
     store: &ConnectionStore,
+    settings: &PersistedSettings,
     policy: &SavedUpstreamProxyPolicy,
 ) -> Option<UpstreamProxyConfig> {
     match policy {
-        SavedUpstreamProxyPolicy::UseGlobal | SavedUpstreamProxyPolicy::Direct => None,
+        SavedUpstreamProxyPolicy::UseGlobal => settings
+            .network
+            .upstream_proxy
+            .as_ref()
+            .and_then(|proxy| upstream_proxy_config_from_global_proxy(store, proxy)),
+        SavedUpstreamProxyPolicy::Direct => None,
         SavedUpstreamProxyPolicy::Custom { proxy } => {
             Some(upstream_proxy_config_from_saved_proxy(store, proxy)?)
         }
     }
+}
+
+fn upstream_proxy_config_from_global_proxy(
+    store: &ConnectionStore,
+    proxy: &SettingsUpstreamProxyConfig,
+) -> Option<UpstreamProxyConfig> {
+    let auth = match &proxy.auth {
+        SettingsUpstreamProxyAuth::None => UpstreamProxyAuth::None,
+        SettingsUpstreamProxyAuth::Password {
+            username,
+            keychain_id,
+        } => UpstreamProxyAuth::Password {
+            username: username.clone(),
+            password: store
+                .get_global_upstream_proxy_password(keychain_id.as_deref()?)
+                .ok()?
+                .into_zeroizing(),
+        },
+    };
+
+    // Global proxy passwords live in the shared keychain slot referenced by
+    // settings metadata; only this runtime config owns the hydrated secret.
+    Some(UpstreamProxyConfig {
+        protocol: match proxy.protocol {
+            SettingsUpstreamProxyProtocol::Socks5 => UpstreamProxyProtocol::Socks5,
+            SettingsUpstreamProxyProtocol::HttpConnect => UpstreamProxyProtocol::HttpConnect,
+        },
+        host: proxy.host.clone(),
+        port: proxy.port,
+        auth,
+        remote_dns: proxy.remote_dns,
+        no_proxy: proxy.no_proxy.clone(),
+    })
 }
 
 fn upstream_proxy_config_from_saved_proxy(
