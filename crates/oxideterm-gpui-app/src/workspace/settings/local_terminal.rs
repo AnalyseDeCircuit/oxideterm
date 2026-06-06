@@ -5,6 +5,30 @@ fn normalized_local_git_bash_path(path: Option<&str>) -> Option<PathBuf> {
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
+fn local_home_path_buf() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+}
+
+/// Expands home aliases before the configured cwd is passed to the PTY layer.
+fn expand_local_terminal_cwd(path: &str) -> PathBuf {
+    let trimmed = path.trim();
+    if trimmed == "~" || trimmed == "$HOME" {
+        return local_home_path_buf().unwrap_or_else(|| PathBuf::from(trimmed));
+    }
+
+    for prefix in ["~/", "~\\", "$HOME/", "$HOME\\"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            if let Some(home) = local_home_path_buf() {
+                return home.join(rest);
+            }
+        }
+    }
+
+    PathBuf::from(trimmed)
+}
+
 fn local_git_bash_override(path: Option<&str>) -> Option<ShellInfo> {
     let path = normalized_local_git_bash_path(path)?;
     Some(
@@ -192,7 +216,7 @@ impl WorkspaceApp {
             .as_deref()
             .map(str::trim)
             .filter(|cwd| !cwd.is_empty())
-            .map(PathBuf::from);
+            .map(expand_local_terminal_cwd);
         let env = settings
             .custom_env_vars
             .iter()

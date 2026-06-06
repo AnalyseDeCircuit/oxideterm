@@ -103,11 +103,17 @@ fn powershell_init_args(config: &LocalPtyConfig, shell: &ShellInfo) -> Option<Ve
     }
 
     init_parts.push("Clear-Host".to_string());
+    // PowerShell -LiteralPath does not expand "$HOME"; resolve the default cwd
+    // before building the initialization command.
     let cwd = config
         .cwd
         .as_ref()
+        .cloned()
+        .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+        .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
+        .or_else(|| std::env::current_dir().ok())
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "$HOME".to_string())
+        .unwrap_or_else(|| ".".to_string())
         .replace('\'', "''");
     init_parts.push(format!("Set-Location -LiteralPath '{cwd}'"));
 
