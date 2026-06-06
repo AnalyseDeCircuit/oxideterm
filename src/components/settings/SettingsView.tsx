@@ -15,7 +15,7 @@ import {
     DialogHeader,
     DialogFooter
 } from '@/components/ui/dialog';
-import { BookOpen, Code2, HardDrive, HelpCircle, Key, Keyboard, Monitor, Shield, Sparkles, Square, Terminal as TerminalIcon, WifiOff } from 'lucide-react';
+import { BookOpen, Code2, HardDrive, HelpCircle, Key, Keyboard, Monitor, Network, Shield, Sparkles, Square, Terminal as TerminalIcon, WifiOff } from 'lucide-react';
 import { DocumentManager } from '@/components/settings/DocumentManager';
 import { EmbeddingConfigSection } from '@/components/settings/EmbeddingConfigSection';
 import { KeybindingEditorSection } from '@/components/settings/KeybindingEditorSection';
@@ -33,6 +33,7 @@ import { SftpTab } from '@/components/settings/tabs/SftpTab';
 import { IdeTab } from '@/components/settings/tabs/IdeTab';
 import { AiTab } from '@/components/settings/tabs/AiTab';
 import { PortableTab } from '@/components/settings/tabs/PortableTab';
+import { NetworkTab } from '@/components/settings/tabs/NetworkTab';
 import { api } from '@/lib/api';
 import type { PortableStatusResponse } from '@/types';
 
@@ -44,8 +45,8 @@ export const SettingsView = () => {
     const [activeTab, setActiveTab] = useState('general');
     const [portableStatus, setPortableStatus] = useState<PortableStatusResponse | null | undefined>(undefined);
 
-    const { settings, updateTerminal, updateBuffer, updateAppearance, updateConnectionDefaults, updateAi, updateSftp, updateIde, updateReconnect, updateConnectionPool, updateExperimental, setLanguage, addProvider, removeProvider, updateProvider, setActiveProvider, refreshProviderModels, setUserContextWindow, setProviderReasoningEffort, setModelReasoningEffort } = useSettingsStore();
-    const { general, terminal, buffer, appearance, connectionDefaults, ai, sftp, ide, reconnect, experimental } = settings;
+    const { settings, updateTerminal, updateBuffer, updateAppearance, updateConnectionDefaults, updateAi, updateSftp, updateIde, updateReconnect, updateConnectionPool, updateNetwork, updateExperimental, setLanguage, addProvider, removeProvider, updateProvider, setActiveProvider, refreshProviderModels, setUserContextWindow, setProviderReasoningEffort, setModelReasoningEffort } = useSettingsStore();
+    const { general, terminal, buffer, appearance, connectionDefaults, ai, sftp, ide, reconnect, network, experimental } = settings;
     const [showAiConfirm, setShowAiConfirm] = useState(false);
     const [refreshingModels, setRefreshingModels] = useState<string | null>(null);
     const [embeddingConfigExpanded, setEmbeddingConfigExpanded] = useState(false);
@@ -162,6 +163,13 @@ export const SettingsView = () => {
                         onClick={() => setActiveTab('reconnect')}
                     >
                         <WifiOff className="h-4 w-4" /> {t('settings_view.tabs.reconnect')}
+                    </Button>
+                    <Button
+                        variant={activeTab === 'network' ? 'secondary' : 'ghost'}
+                        className="w-full justify-start gap-3 h-10 font-normal rounded-md"
+                        onClick={() => setActiveTab('network')}
+                    >
+                        <Network className="h-4 w-4" /> {t('settings_view.tabs.network')}
                     </Button>
 
                     <Separator className="!my-2" />
@@ -291,6 +299,8 @@ export const SettingsView = () => {
                     )}
 
                     {activeTab === 'reconnect' && <ReconnectTab reconnect={reconnect} updateReconnect={updateReconnect} />}
+
+                    {activeTab === 'network' && <NetworkTab network={network} updateNetwork={updateNetwork} />}
 
                     {activeTab === 'help' && (
                         <HelpAboutSection isPortableMode={portableStatus ? portableStatus.isPortable : portableStatus ?? null} />

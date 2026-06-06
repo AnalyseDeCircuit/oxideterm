@@ -461,6 +461,26 @@ export interface ConnectionPoolSettings {
   idleTimeoutSecs: number;
 }
 
+export type SettingsUpstreamProxyProtocol = 'socks5' | 'http_connect';
+
+export type SettingsUpstreamProxyAuth =
+  | { type: 'none' }
+  | { type: 'password'; username: string; keychain_id?: string };
+
+export interface SettingsUpstreamProxyConfig {
+  protocol: SettingsUpstreamProxyProtocol;
+  host: string;
+  port: number;
+  auth: SettingsUpstreamProxyAuth;
+  remoteDns: boolean;
+  noProxy: string;
+}
+
+export interface NetworkSettings {
+  upstreamProxy: SettingsUpstreamProxyConfig | null;
+  upstreamProxyDisclaimerAccepted: boolean;
+}
+
 /** Complete settings structure */
 export interface PersistedSettingsV2 {
   version: number;
@@ -477,6 +497,7 @@ export interface PersistedSettingsV2 {
   ide?: IdeSettings;
   reconnect?: ReconnectSettings;
   connectionPool?: ConnectionPoolSettings;
+  network?: NetworkSettings;
   experimental?: ExperimentalSettings;
   /** Whether the first-run onboarding wizard has been completed or dismissed */
   onboardingCompleted?: boolean;
@@ -704,6 +725,11 @@ const defaultConnectionPoolSettings: ConnectionPoolSettings = {
   idleTimeoutSecs: 1800,
 };
 
+const defaultNetworkSettings: NetworkSettings = {
+  upstreamProxy: null,
+  upstreamProxyDisclaimerAccepted: false,
+};
+
 function syncConnectionPoolToBackend(connectionPool: ConnectionPoolSettings): void {
   import('../lib/api').then(({ api }) => {
     api.sshGetPoolConfig()
@@ -733,6 +759,7 @@ function createDefaultSettings(): PersistedSettingsV2 {
     ide: { ...defaultIdeSettings },
     reconnect: { ...defaultReconnectSettings },
     connectionPool: { ...defaultConnectionPoolSettings },
+    network: { ...defaultNetworkSettings },
     experimental: { virtualSessionProxy: false, gpuCanvas: false },
     onboardingCompleted: false,
   };
@@ -929,6 +956,9 @@ export function mergeWithDefaults(saved: OxidePartialSettingsSnapshot | Partial<
     connectionPool: saved.connectionPool
       ? { ...defaults.connectionPool!, ...saved.connectionPool }
       : defaults.connectionPool,
+    network: saved.network
+      ? { ...defaults.network!, ...saved.network }
+      : defaults.network,
     experimental: saved.experimental
       ? { ...defaults.experimental, ...saved.experimental }
       : defaults.experimental,
@@ -1101,6 +1131,7 @@ interface SettingsStore {
   updateIde: <K extends keyof IdeSettings>(key: K, value: IdeSettings[K]) => void;
   updateReconnect: <K extends keyof ReconnectSettings>(key: K, value: ReconnectSettings[K]) => void;
   updateConnectionPool: <K extends keyof ConnectionPoolSettings>(key: K, value: ConnectionPoolSettings[K]) => void;
+  updateNetwork: <K extends keyof NetworkSettings>(key: K, value: NetworkSettings[K]) => void;
   updateExperimental: <K extends keyof ExperimentalSettings>(key: K, value: ExperimentalSettings[K]) => void;
 
   // Actions - Dedicated language setter with i18n sync
@@ -1143,6 +1174,7 @@ interface SettingsStore {
   getIde: () => IdeSettings;
   getReconnect: () => ReconnectSettings;
   getConnectionPool: () => ConnectionPoolSettings;
+  getNetwork: () => NetworkSettings;
 }
 
 // ============================================================================
@@ -1322,6 +1354,19 @@ export const useSettingsStore = create<SettingsStore>()(
         syncConnectionPoolToBackend(
           newSettings.connectionPool || defaultConnectionPoolSettings,
         );
+        return { settings: newSettings };
+      });
+    },
+
+    // ========== Network Settings ==========
+    updateNetwork: (key, value) => {
+      set((state) => {
+        const currentNetwork = state.settings.network || defaultNetworkSettings;
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          network: { ...currentNetwork, [key]: value },
+        };
+        persistSettings(newSettings);
         return { settings: newSettings };
       });
     },
@@ -1803,6 +1848,7 @@ export const useSettingsStore = create<SettingsStore>()(
     getReconnect: () => get().settings.reconnect || defaultReconnectSettings,
     getConnectionPool: () =>
       get().settings.connectionPool || defaultConnectionPoolSettings,
+    getNetwork: () => get().settings.network || defaultNetworkSettings,
   }))
 );
 
@@ -1821,6 +1867,7 @@ export const OXIDE_APP_SETTINGS_SECTION_IDS = [
   'terminalBehavior',
   'appearance',
   'connections',
+  'network',
   'fileAndEditor',
   'ai',
   'localTerminal',
@@ -1840,7 +1887,7 @@ type ApplyImportedSettingsOptions = {
 
 type OxidePartialSettingsSnapshot = Omit<
   Partial<PersistedSettingsV2>,
-  'general' | 'terminal' | 'appearance' | 'connectionDefaults' | 'localTerminal' | 'sftp' | 'ide' | 'reconnect' | 'connectionPool' | 'ai'
+  'general' | 'terminal' | 'appearance' | 'connectionDefaults' | 'localTerminal' | 'sftp' | 'ide' | 'reconnect' | 'connectionPool' | 'network' | 'ai'
 > & {
   general?: Partial<GeneralSettings>;
   terminal?: Partial<TerminalSettings>;
@@ -1852,6 +1899,7 @@ type OxidePartialSettingsSnapshot = Omit<
   ide?: Partial<IdeSettings>;
   reconnect?: Partial<ReconnectSettings>;
   connectionPool?: Partial<ConnectionPoolSettings>;
+  network?: Partial<NetworkSettings>;
 };
 
 type OxideSectionedSettingsEnvelope = {
@@ -1868,6 +1916,7 @@ const DEFAULT_OXIDE_APP_SETTINGS_EXPORT_SECTIONS: OxideAppSettingsSectionId[] = 
   'terminalBehavior',
   'appearance',
   'connections',
+  'network',
   'fileAndEditor',
 ];
 
@@ -1934,6 +1983,7 @@ const AI_KEYS: Array<keyof AiSettings> = [
 ];
 const RECONNECT_KEYS: Array<keyof ReconnectSettings> = ['enabled', 'maxAttempts', 'baseDelayMs', 'maxDelayMs'];
 const CONNECTION_POOL_KEYS: Array<keyof ConnectionPoolSettings> = ['idleTimeoutSecs'];
+const NETWORK_KEYS: Array<keyof NetworkSettings> = ['upstreamProxy', 'upstreamProxyDisclaimerAccepted'];
 const SFTP_KEYS: Array<keyof SftpSettings> = [
   'maxConcurrentTransfers',
   'directoryParallelism',
@@ -2034,6 +2084,8 @@ function buildSectionPreviewValues(
         ...buildPreviewValues(settings.reconnect, RECONNECT_KEYS, 'reconnect'),
         ...buildPreviewValues(settings.connectionPool, CONNECTION_POOL_KEYS, 'connectionPool'),
       };
+    case 'network':
+      return buildPreviewValues(settings.network, NETWORK_KEYS, 'network');
     case 'ai':
       return buildPreviewValues(settings.ai, AI_KEYS, 'ai');
     case 'fileAndEditor':
@@ -2108,6 +2160,11 @@ function buildOxideSectionedSettingsSnapshot(
         }
         if (settings.connectionPool) {
           partialSettings.connectionPool = { ...pickDefinedFields(settings.connectionPool, CONNECTION_POOL_KEYS) };
+        }
+        break;
+      case 'network':
+        if (settings.network) {
+          partialSettings.network = { ...pickDefinedFields(settings.network, NETWORK_KEYS) };
         }
         break;
       case 'ai':

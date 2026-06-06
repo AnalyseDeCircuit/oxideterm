@@ -13,6 +13,7 @@ type SaveableConnectionMetadata = Pick<
   | 'tags'
   | 'agent_forwarding'
   | 'post_connect_command'
+  | 'upstream_proxy'
 >;
 
 type SaveConnectionOverrides = Partial<Omit<SaveConnectionRequest, 'proxy_chain'>>;
@@ -64,5 +65,8 @@ export function buildSaveConnectionRequestFromSaved(
           agent_forwarding: hop.agent_forwarding,
         }))
       : undefined,
+    upstream_proxy: hasOverride(overrides, 'upstream_proxy')
+      ? overrides.upstream_proxy
+      : connection.upstream_proxy ?? { mode: 'use_global' },
   };
 }

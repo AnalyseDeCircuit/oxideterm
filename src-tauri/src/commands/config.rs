@@ -18,11 +18,10 @@ use crate::config::types::{
 use crate::config::types::{SerialFlowControl, SerialParity, SerialProfile};
 use crate::config::{
     AiProviderVault, CONFIG_ENCRYPTION_KEY_LEN, ConfigFile, ConfigStorage, ConfigStorageFormat,
-    GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID, Keychain, KeychainError,
-    PortableBootstrapStatus, ProxyHopConfig, ResolvedProxyJumpHost, ResolvedSshConfigHost,
-    SavedAuth, SavedConnection, SshConfigHost, default_ssh_config_path, load_ssh_config_content,
-    parse_ssh_config, portable_aware_app_data_dir,
-    resolve_ssh_config_host, resolve_ssh_config_host_content,
+    GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID, Keychain, KeychainError, PortableBootstrapStatus,
+    ProxyHopConfig, ResolvedProxyJumpHost, ResolvedSshConfigHost, SavedAuth, SavedConnection,
+    SshConfigHost, default_ssh_config_path, load_ssh_config_content, parse_ssh_config,
+    portable_aware_app_data_dir, resolve_ssh_config_host, resolve_ssh_config_host_content,
 };
 use crate::config::{
     SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
@@ -3637,7 +3636,7 @@ mod tests {
             },
         };
 
-        let proxy = upstream_proxy_to_connect_info(&policy, &keychain).unwrap();
+        let proxy = upstream_proxy_to_connect_info(&policy, &keychain, None).unwrap();
 
         assert_eq!(proxy.host, "proxy.local");
         assert_eq!(proxy.no_proxy, "localhost");
@@ -3651,6 +3650,73 @@ mod tests {
             }
             UpstreamProxyAuthForConnect::None => panic!("expected password auth"),
         }
+    }
+
+    #[test]
+    fn upstream_proxy_to_connect_info_uses_global_settings_for_use_global() {
+        let keychain = Keychain::in_memory_for_tests("com.oxideterm.test");
+        keychain
+            .store(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID, "global-secret")
+            .unwrap();
+        let settings = serde_json::json!({
+            "network": {
+                "upstreamProxy": {
+                    "protocol": "socks5",
+                    "host": "global-proxy.local",
+                    "port": 1080,
+                    "auth": {
+                        "type": "password",
+                        "username": "global-user",
+                        "keychain_id": GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID
+                    },
+                    "remoteDns": true,
+                    "noProxy": "localhost"
+                }
+            }
+        });
+
+        let proxy = upstream_proxy_to_connect_info(
+            &SavedUpstreamProxyPolicy::UseGlobal,
+            &keychain,
+            Some(&settings),
+        )
+        .unwrap();
+
+        assert_eq!(proxy.host, "global-proxy.local");
+        match proxy.auth {
+            UpstreamProxyAuthForConnect::Password { username, password } => {
+                assert_eq!(username, "global-user");
+                assert_eq!(
+                    password.as_ref().map(|value| value.as_str()),
+                    Some("global-secret")
+                );
+            }
+            UpstreamProxyAuthForConnect::None => panic!("expected password auth"),
+        }
+    }
+
+    #[test]
+    fn upstream_proxy_to_connect_info_direct_ignores_global_settings() {
+        let keychain = Keychain::in_memory_for_tests("com.oxideterm.test");
+        let settings = serde_json::json!({
+            "network": {
+                "upstreamProxy": {
+                    "protocol": "socks5",
+                    "host": "global-proxy.local",
+                    "port": 1080,
+                    "auth": { "type": "none" }
+                }
+            }
+        });
+
+        assert!(
+            upstream_proxy_to_connect_info(
+                &SavedUpstreamProxyPolicy::Direct,
+                &keychain,
+                Some(&settings)
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -5174,7 +5240,10 @@ pub async fn save_global_upstream_proxy_password(
     let password = Zeroizing::new(password);
     state
         .keychain
-        .store(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID, password.as_str())
+        .store(
+            GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID,
+            password.as_str(),
+        )
         .map_err(|err| format!("Failed to save global upstream proxy password: {}", err))?;
     Ok(GlobalUpstreamProxyPasswordSaveResult {
         keychain_id: GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID.to_string(),

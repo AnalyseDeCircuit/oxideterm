@@ -538,6 +538,26 @@ export interface ProxyHopInfo {
   agent_forwarding?: boolean;
 }
 
+export type SavedUpstreamProxyProtocol = 'socks5' | 'http_connect';
+
+export type SavedUpstreamProxyAuth =
+  | { type: 'none' }
+  | { type: 'password'; username: string; keychain_id?: string; password?: string };
+
+export type SavedUpstreamProxyConfig = {
+  protocol: SavedUpstreamProxyProtocol;
+  host: string;
+  port: number;
+  auth: SavedUpstreamProxyAuth;
+  remoteDns: boolean;
+  noProxy: string;
+};
+
+export type SavedUpstreamProxyPolicy =
+  | { mode: 'use_global' }
+  | { mode: 'direct' }
+  | { mode: 'custom'; proxy: SavedUpstreamProxyConfig };
+
 export interface ConnectionInfo {
   id: string;
   name: string;
@@ -557,6 +577,7 @@ export interface ConnectionInfo {
   agent_forwarding?: boolean;
   post_connect_command?: string | null;
   proxy_chain?: ProxyHopInfo[];
+  upstream_proxy?: SavedUpstreamProxyPolicy;
 }
 
 export type ManagedSshKeyOrigin = 'imported_file' | 'pasted_text' | 'oxide_import';
@@ -746,6 +767,7 @@ export interface SaveConnectionRequest {
   agent_forwarding?: boolean;
   post_connect_command?: string | null;
   proxy_chain?: SaveProxyHopRequest[];
+  upstream_proxy?: SavedUpstreamProxyPolicy;
 }
 
 export type PrivilegeCredentialKind = 'sudo_password' | 'su_password' | 'custom_prompt';

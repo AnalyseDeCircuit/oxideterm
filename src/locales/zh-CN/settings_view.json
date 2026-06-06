@@ -48,7 +48,8 @@
       "local": "本地终端",
       "reconnect": "自动重连",
       "help": "帮助与关于",
-      "keybindings": "快捷键"
+      "keybindings": "快捷键",
+      "network": "网络"
     },
     "general": {
       "title": "常规",
@@ -1103,6 +1104,40 @@
         "palette.aiSidebar": "AI 侧边栏",
         "palette.broadcast": "广播模式"
       }
+    },
+    "network": {
+      "title": "网络",
+      "description": "配置保存连接可复用的全局网络路由。",
+      "disclaimer": "我理解代理路由行为",
+      "disclaimer_hint": "使用全局代理的连接，其 SSH 和 SFTP 流量会通过这个上游代理转发。",
+      "enabled": "启用全局上游代理",
+      "enabled_hint": "选择“使用全局”的连接会通过此代理路由。",
+      "proxy": "上游代理",
+      "protocol": "协议",
+      "protocol_hint": "选择上游代理协议。",
+      "protocol_socks5": "SOCKS5",
+      "protocol_http_connect": "HTTP CONNECT",
+      "host": "主机",
+      "host_hint": "代理主机名或 IP 地址。",
+      "port": "端口",
+      "port_hint": "代理监听端口。",
+      "remote_dns": "远程 DNS",
+      "remote_dns_hint": "支持时通过代理解析目标主机名。",
+      "no_proxy": "不走代理",
+      "no_proxy_hint": "逗号分隔的主机匹配规则，这些目标会绕过代理。",
+      "auth": "认证",
+      "auth_hint": "可选的代理用户名/密码认证。",
+      "auth_none": "不认证",
+      "auth_password": "用户名和密码",
+      "username": "用户名",
+      "username_hint": "代理认证用户名。",
+      "password": "密码",
+      "password_hint": "保存到系统钥匙串，不写入 settings JSON。",
+      "password_saved_hint": "密码已保存在系统钥匙串。输入新密码可替换。",
+      "password_saved_placeholder": "已保存到钥匙串",
+      "save_password": "保存密码",
+      "remove_password": "移除",
+      "saving": "保存中..."
     }
   }
 }

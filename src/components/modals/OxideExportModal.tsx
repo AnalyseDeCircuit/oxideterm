@@ -150,6 +150,8 @@ export function OxideExportModal({ isOpen, onClose, mode = 'default' }: OxideExp
         return t('settings_view.appearance.title');
       case 'connections':
         return t('settings_view.connections.title');
+      case 'network':
+        return t('settings_view.network.title');
       case 'ai':
         return t('settings_view.tabs.ai');
       case 'fileAndEditor':

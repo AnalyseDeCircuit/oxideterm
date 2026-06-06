@@ -2423,6 +2423,16 @@ export const api = {
     });
   },
 
+  saveGlobalUpstreamProxyPassword: async (password: string): Promise<{ keychainId: string }> => {
+    if (USE_MOCK) return { keychainId: 'oxide_global_upstream_proxy_password' };
+    return invoke('save_global_upstream_proxy_password', { password });
+  },
+
+  deleteGlobalUpstreamProxyPassword: async (): Promise<void> => {
+    if (USE_MOCK) return;
+    return invoke('delete_global_upstream_proxy_password');
+  },
+
   // ============ Local Terminal (PTY) ============
 
   /**

@@ -219,6 +219,8 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
         return t('settings_view.appearance.title');
       case 'connections':
         return t('settings_view.connections.title');
+      case 'network':
+        return t('settings_view.network.title');
       case 'ai':
         return t('settings_view.tabs.ai');
       case 'fileAndEditor':
