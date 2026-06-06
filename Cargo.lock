@@ -7141,7 +7141,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ai"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -7178,11 +7178,11 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-backend-classification"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 
 [[package]]
 name = "oxideterm-cli"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "chrono",
  "clap",
@@ -7202,7 +7202,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-cloud-sync"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "anyhow",
  "base64",
@@ -7225,7 +7225,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-code-editor"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "gpui",
  "gpui-component",
@@ -7234,7 +7234,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-connection-monitor"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "serde",
  "tokio",
@@ -7242,7 +7242,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-connections"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "anyhow",
  "argon2",
@@ -7269,7 +7269,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-editor-core"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "thiserror 2.0.18",
  "unicode-segmentation",
@@ -7277,7 +7277,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-editor-syntax"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "oxideterm-editor-core",
  "thiserror 2.0.18",
@@ -7321,7 +7321,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-forwarding"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "chrono",
  "dashmap",
@@ -7340,7 +7340,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-app"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "anyhow",
  "base64",
@@ -7416,7 +7416,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-cloud-sync"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "anyhow",
  "base64",
@@ -7436,7 +7436,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-editor"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "gpui",
  "oxideterm-editor-core",
@@ -7446,7 +7446,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-ide"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "gpui",
  "oxideterm-editor-syntax",
@@ -7461,7 +7461,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-markdown"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "gpui",
  "gpui-component",
@@ -7476,7 +7476,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-platform"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "gpui",
  "oxideterm-render-policy",
@@ -7487,7 +7487,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-settings-view"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "gpui",
  "oxideterm-ai",
@@ -7503,7 +7503,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-terminal"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "anyhow",
  "gpui",
@@ -7522,7 +7522,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-ui"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "gpui",
  "oxideterm-theme",
@@ -7530,14 +7530,14 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-i18n"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "oxideterm-ide-core"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -7546,7 +7546,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ide-fs"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "base64",
  "dashmap",
@@ -7566,7 +7566,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-launcher"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "oxideterm-settings",
  "oxideterm-wsl-graphics",
@@ -7574,7 +7574,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-local-files"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "chrono",
  "md5",
@@ -7587,11 +7587,11 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-notification-center"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 
 [[package]]
 name = "oxideterm-plugin-host-api"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "anyhow",
  "base64",
@@ -7622,7 +7622,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-plugin-manifest"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -7630,7 +7630,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-plugin-protocol"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "oxideterm-plugin-manifest",
  "serde",
@@ -7639,7 +7639,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-plugin-registry"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "oxideterm-ai",
  "oxideterm-plugin-manifest",
@@ -7652,7 +7652,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-portable-runtime"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "argon2",
  "base64",
@@ -7670,7 +7670,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-preview"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "chardetng",
  "encoding_rs",
@@ -7689,7 +7689,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-quick-commands"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -7697,14 +7697,14 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-render-policy"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "oxideterm-settings"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "anyhow",
  "oxideterm-portable-runtime",
@@ -7716,7 +7716,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-settings-model"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "oxideterm-ai",
  "oxideterm-cloud-sync",
@@ -7727,7 +7727,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-sftp"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "async-trait",
  "base64",
@@ -7753,7 +7753,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ssh"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "base64",
  "dashmap",
@@ -7774,7 +7774,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-terminal"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -7792,14 +7792,14 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-terminal-encoding"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "encoding_rs",
 ]
 
 [[package]]
 name = "oxideterm-terminal-graphics"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "anyhow",
  "base64",
@@ -7810,14 +7810,14 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-terminal-recording"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "oxideterm-terminal-unicode"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "oxideterm-terminal",
  "unicode-bidi",
@@ -7826,18 +7826,18 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-theme"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 
 [[package]]
 name = "oxideterm-topology"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "oxideterm-trzsz"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "base64",
  "flate2",
@@ -7855,7 +7855,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-update"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "anyhow",
  "base64",
@@ -7875,7 +7875,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-webview"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "gpui",
  "gpui-component",
@@ -7884,11 +7884,11 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-workspace"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 
 [[package]]
 name = "oxideterm-wsl-graphics"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 dependencies = [
  "base64",
  "futures-util",

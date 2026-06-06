@@ -57,7 +57,7 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "GPL-3.0-only"
-version = "2.0.0-gpui-preview.2"
+version = "2.0.0-gpui-preview.3"
 
 [workspace.dependencies]
 alacritty_terminal = "0.26.0"
