@@ -21,12 +21,5 @@
       "renderer_changed": "렌더러 변경됨",
       "renderer_changed_desc": "터미널 렌더러가 {{renderer}}(으)로 전환되었습니다. 새 터미널은 이 렌더러를 사용하며, 기존 터미널은 영향을 받지 않습니다."
     }
-  },
-  "settings_view": {
-    "local_terminal": {
-      "privilege_credentials": "권한 상승 자격 증명",
-      "privilege_credentials_hint": "이 장치의 로컬 sudo/su 도우미 자격 증명을 저장합니다. 비밀 값은 권한 상승 키체인 범위에만 보관되며 명시적으로 클릭한 뒤에만 전송됩니다.",
-      "privilege_username_placeholder": "현재 로컬 사용자"
-    }
   }
 }

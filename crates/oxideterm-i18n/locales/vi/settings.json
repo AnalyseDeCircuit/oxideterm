@@ -21,12 +21,5 @@
       "renderer_changed": "Đã thay đổi trình kết xuất",
       "renderer_changed_desc": "Trình kết xuất terminal đã chuyển sang {{renderer}}. Terminal mới sẽ sử dụng trình kết xuất này, các terminal hiện có không bị ảnh hưởng."
     }
-  },
-  "settings_view": {
-    "local_terminal": {
-      "privilege_credentials": "Thông tin xác thực đặc quyền",
-      "privilege_credentials_hint": "Lưu thông tin xác thực trợ giúp sudo/su cục bộ cho thiết bị này. Bí mật chỉ nằm trong phạm vi keychain đặc quyền và chỉ được gửi sau khi bạn bấm rõ ràng.",
-      "privilege_username_placeholder": "Người dùng cục bộ hiện tại"
-    }
   }
 }

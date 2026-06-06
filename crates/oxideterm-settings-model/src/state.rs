@@ -10,8 +10,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    KnowledgeDeleteConfirm, KnowledgeDeleteTarget, KnowledgeExternalEdit, SettingsInput,
-    SettingsKeybindingScopeFilter, SettingsTab, TerminalSettingsPage, ThemeEditorState,
+    AiSettingsPage, KnowledgeDeleteConfirm, KnowledgeDeleteTarget, KnowledgeExternalEdit,
+    SettingsInput, SettingsKeybindingScopeFilter, SettingsTab, TerminalSettingsPage,
+    ThemeEditorState,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -29,6 +30,7 @@ pub struct CliCompanionStatus {
 pub struct SettingsPageModel {
     pub active_tab: SettingsTab,
     pub terminal_page: TerminalSettingsPage,
+    pub ai_page: AiSettingsPage,
     pub keybinding_scope_filter: SettingsKeybindingScopeFilter,
     pub settings_reset_confirm_open: bool,
     pub ai_new_provider_type: String,
@@ -77,6 +79,7 @@ impl Default for SettingsPageModel {
         Self {
             active_tab: SettingsTab::General,
             terminal_page: TerminalSettingsPage::Display,
+            ai_page: AiSettingsPage::General,
             keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
             settings_reset_confirm_open: false,
             ai_new_provider_type: "openai_compatible".to_string(),
@@ -131,6 +134,11 @@ impl SettingsPageModel {
     /// Selects the active terminal settings subpage.
     pub fn set_terminal_page(&mut self, page: TerminalSettingsPage) {
         self.terminal_page = page;
+    }
+
+    /// Selects the active OxideSens settings subpage.
+    pub fn set_ai_page(&mut self, page: AiSettingsPage) {
+        self.ai_page = page;
     }
 
     /// Selects the keybinding scope filter used by the keybindings page.

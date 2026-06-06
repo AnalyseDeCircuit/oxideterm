@@ -152,27 +152,31 @@ impl WorkspaceApp {
 
     fn render_settings_ai_section_item(&mut self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         self.normalize_ai_execution_profiles_for_settings_render();
-        let item = match index {
-            0 => self.render_settings_virtual_header(SettingsTab::Ai, cx),
-            1 => {
+        let item = if index == 0 {
+            self.render_settings_virtual_header(SettingsTab::Ai, cx)
+        } else {
+            self.render_settings_ai_page_section(index - 1, cx)
+        };
+
+        self.wrap_settings_section_list_item(index, item)
+    }
+
+    fn render_settings_ai_page_section(
+        &mut self,
+        section_index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if section_index == 0 {
+            return self.ai_page_switcher(cx);
+        }
+
+        let page_section_index = section_index - 1;
+        match (self.settings_page.ai_page, page_section_index) {
+            (AiSettingsPage::General, 0) => {
                 let settings = self.settings_store.settings();
                 self.ai_general_settings_card(settings, cx)
             }
-            2 => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_execution_profiles_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
-            3 => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_acp_agents_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
-            4 => {
+            (AiSettingsPage::Providers, 0) => {
                 let provider_views = self.ai_provider_views_for_settings_render(cx);
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
@@ -180,14 +184,28 @@ impl WorkspaceApp {
                     settings.ai.enabled,
                 )
             }
-            5 => {
+            (AiSettingsPage::Agents, 0) => {
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_execution_profiles_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            (AiSettingsPage::Agents, 1) => {
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_acp_agents_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            (AiSettingsPage::Context, 0) => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_context_controls_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            6 => {
+            (AiSettingsPage::Context, 1) => {
                 let settings = self.settings_store.settings();
                 let provider_views = ai_provider_views(settings);
                 self.ai_disabled_settings_card(
@@ -195,7 +213,7 @@ impl WorkspaceApp {
                     settings.ai.enabled,
                 )
             }
-            7 => {
+            (AiSettingsPage::Tools, 0) => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_tool_use_section(settings, cx),
@@ -203,9 +221,7 @@ impl WorkspaceApp {
                 )
             }
             _ => div().into_any_element(),
-        };
-
-        self.wrap_settings_section_list_item(index, item)
+        }
     }
 
     fn wrap_settings_section_list_item(&self, index: usize, child: AnyElement) -> AnyElement {
@@ -293,6 +309,7 @@ impl WorkspaceApp {
         settings_model_section_list_identity(
             self.settings_page.active_tab,
             self.settings_page.terminal_page,
+            self.settings_page.ai_page,
             &format!("{:?}", self.settings_page.keybinding_scope_filter),
             self.settings_page.keybinding_search_query.trim(),
         )
@@ -375,6 +392,7 @@ impl WorkspaceApp {
                 }
             }
             SettingsTab::Ai => {
+                format!("{:?}", self.settings_page.ai_page).hash(&mut hasher);
                 settings.ai.enabled.hash(&mut hasher);
                 settings.ai.providers.len().hash(&mut hasher);
                 settings.ai.acp_agents.len().hash(&mut hasher);
@@ -428,6 +446,7 @@ impl WorkspaceApp {
         };
         SettingsDynamicSectionCounts {
             terminal_page: self.settings_page.terminal_page,
+            ai_page: self.settings_page.ai_page,
             visible_keybinding_scope_count: self.visible_keybinding_scope_count(),
             knowledge_has_error: self.settings_page.knowledge_error.is_some(),
             knowledge_has_selected_collection,

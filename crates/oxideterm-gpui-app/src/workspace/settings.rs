@@ -11,8 +11,8 @@ use oxideterm_settings::{
 };
 use oxideterm_settings_model::{
     AI_MODEL_REFRESH_MISSING_API_KEY, AiMcpServerDraft, AiModelRefreshDelivery,
-    AiProviderModelChipItem, AiProviderModelPanel, AiSettingsSection, AiToolPolicyGroup,
-    CliCompanionStatus, KNOWLEDGE_EMBEDDING_BATCH_SIZE, KnowledgeDeleteTarget,
+    AiProviderModelChipItem, AiProviderModelPanel, AiSettingsPage, AiSettingsSection,
+    AiToolPolicyGroup, CliCompanionStatus, KNOWLEDGE_EMBEDDING_BATCH_SIZE, KnowledgeDeleteTarget,
     KnowledgeExternalEdit, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts,
     SettingsInputDraftApply, TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection,
     ThemeEditorState, UI_THEME_COLOR_FIELDS, ai_add_acp_agent, ai_add_execution_profile,

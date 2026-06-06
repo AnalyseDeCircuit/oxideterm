@@ -21,12 +21,5 @@
       "renderer_changed": "Renderizador cambiado",
       "renderer_changed_desc": "El renderizador del terminal cambió a {{renderer}}. Los nuevos terminales usarán este renderizador, los existentes no se verán afectados."
     }
-  },
-  "settings_view": {
-    "local_terminal": {
-      "privilege_credentials": "Credenciales de privilegio",
-      "privilege_credentials_hint": "Guarda credenciales locales de ayuda sudo/su para este dispositivo. Los secretos permanecen en el ámbito del llavero de privilegios y solo se envían tras un clic explícito.",
-      "privilege_username_placeholder": "Usuario local actual"
-    }
   }
 }

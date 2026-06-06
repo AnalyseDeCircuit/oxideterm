@@ -21,12 +21,5 @@
       "renderer_changed": "レンダラーが変更されました",
       "renderer_changed_desc": "ターミナルレンダラーが{{renderer}}に切り替わりました。新しいターミナルはこのレンダラーを使用し、既存のものは影響を受けません。"
     }
-  },
-  "settings_view": {
-    "local_terminal": {
-      "privilege_credentials": "権限昇格資格情報",
-      "privilege_credentials_hint": "この端末のローカル sudo/su ヘルパー資格情報を保存します。シークレットは権限昇格用キーチェーンスコープにのみ保存され、明示的にクリックした場合だけ送信されます。",
-      "privilege_username_placeholder": "現在のローカルユーザー"
-    }
   }
 }

@@ -444,6 +444,62 @@ impl WorkspaceApp {
         tabs.into_any_element()
     }
 
+    fn ai_page_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        // OxideSens uses the same lightweight subpage tabs as terminal settings.
+        let mut tabs = div()
+            .w_full()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(self.settings_panel_background(theme.bg_card))
+            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
+            .p(px(8.0));
+
+        for page in AiSettingsPage::all() {
+            let page_id = *page;
+            let active = self.settings_page.ai_page == page_id;
+            let item = div()
+                .rounded(px(self.tokens.radii.md))
+                .px(px(12.0))
+                .py(px(6.0))
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(if active {
+                    rgb(theme.accent)
+                } else {
+                    rgb(theme.text_muted)
+                })
+                .bg(if active {
+                    rgba((theme.accent << 8) | 0x26)
+                } else {
+                    rgba(0x00000000)
+                })
+                .cursor_pointer()
+                .hover(move |style| {
+                    if active {
+                        style
+                    } else {
+                        style.bg(rgb(theme.bg_hover)).text_color(rgb(theme.text))
+                    }
+                })
+                .child(self.i18n.t(page_id.label_key()))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.settings_page.set_ai_page(page_id);
+                        cx.notify();
+                    }),
+                );
+            tabs = tabs.child(item);
+        }
+
+        tabs.into_any_element()
+    }
+
     pub(in crate::workspace) fn update_select_anchor(
         &mut self,
         anchor: OverlayAnchor,

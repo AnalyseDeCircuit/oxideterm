@@ -6,10 +6,9 @@
 //! The GPUI app supplies runtime counts for data-backed pages, while this
 //! module owns the invariant section-count math shared by the settings page.
 
-use crate::{SettingsTab, TerminalSettingsPage};
+use crate::{AiSettingsPage, SettingsTab, TerminalSettingsPage};
 
 pub const SETTINGS_SECTION_HEADER_ITEM_COUNT: usize = 1;
-pub const AI_SETTINGS_FIXED_SECTION_COUNT: usize = 7;
 
 pub fn settings_section_list_item_count(
     tab: SettingsTab,
@@ -34,7 +33,7 @@ pub fn settings_tab_section_count(
         SettingsTab::Network => 4,
         SettingsTab::Sftp => 3,
         SettingsTab::Ide => 5,
-        SettingsTab::Ai => AI_SETTINGS_FIXED_SECTION_COUNT,
+        SettingsTab::Ai => ai_settings_section_count(dynamic.ai_page),
         SettingsTab::Knowledge => knowledge_settings_section_count(
             dynamic.knowledge_has_error,
             dynamic.knowledge_has_selected_collection,
@@ -58,6 +57,18 @@ pub fn terminal_settings_section_count(page: TerminalSettingsPage) -> usize {
     1 + page_cards
 }
 
+pub fn ai_settings_section_count(page: AiSettingsPage) -> usize {
+    let page_cards = match page {
+        AiSettingsPage::General => 1,
+        AiSettingsPage::Providers => 1,
+        AiSettingsPage::Agents => 2,
+        AiSettingsPage::Context => 2,
+        AiSettingsPage::Tools => 1,
+    };
+    // The first section is the subpage picker, matching terminal settings.
+    1 + page_cards
+}
+
 pub fn keybinding_settings_section_count(visible_scope_count: usize) -> usize {
     1 + visible_scope_count.max(1)
 }
@@ -69,15 +80,17 @@ pub fn knowledge_settings_section_count(has_error: bool, has_selected_collection
 pub fn settings_section_list_identity(
     tab: SettingsTab,
     terminal_page: TerminalSettingsPage,
+    ai_page: AiSettingsPage,
     keybinding_scope_key: &str,
     keybinding_query: &str,
 ) -> String {
-    format!("{tab:?}:{terminal_page:?}:{keybinding_scope_key}:{keybinding_query}")
+    format!("{tab:?}:{terminal_page:?}:{ai_page:?}:{keybinding_scope_key}:{keybinding_query}")
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct SettingsDynamicSectionCounts {
     pub terminal_page: TerminalSettingsPage,
+    pub ai_page: AiSettingsPage,
     pub visible_keybinding_scope_count: usize,
     pub knowledge_has_error: bool,
     pub knowledge_has_selected_collection: bool,
@@ -115,6 +128,7 @@ mod tests {
     fn help_page_count_omits_shortcuts_and_memory_diagnostics_sections() {
         let dynamic = SettingsDynamicSectionCounts {
             terminal_page: TerminalSettingsPage::Display,
+            ai_page: AiSettingsPage::General,
             visible_keybinding_scope_count: 0,
             knowledge_has_error: false,
             knowledge_has_selected_collection: false,
