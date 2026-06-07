@@ -2,6 +2,7 @@ pub mod error;
 pub mod fs;
 mod handler;
 pub mod rawsession;
+pub(crate) mod runtime;
 mod session;
 
 pub use handler::Handler;
@@ -87,7 +88,7 @@ where
     let rc = CancellationToken::new();
     let wc = rc.clone();
     {
-        tokio::spawn(async move {
+        runtime::spawn(async move {
             loop {
                 select! {
                     result = process_handler(&mut rd, &mut handler) => {
@@ -106,7 +107,7 @@ where
         });
     }
 
-    tokio::spawn(async move {
+    runtime::spawn(async move {
         loop {
             select! {
                 Some(data) = rx.recv() => {

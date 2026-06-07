@@ -31,5 +31,6 @@ pub mod extensions;
 pub mod protocol;
 pub mod ser;
 /// Server side
+#[cfg(not(target_arch = "wasm32"))]
 pub mod server;
 mod utils;

@@ -11,7 +11,6 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf},
-    runtime::Handle,
     sync::oneshot,
 };
 
@@ -58,8 +57,9 @@ struct PendingWrite {
 
 const WINDOW_TUNER_ADJUST_INTERVAL: Duration = Duration::from_millis(750);
 const WINDOW_TUNER_MIN_CHUNK: usize = 64 * 1024;
-const WINDOW_TUNER_START_CHUNK: usize = 1024 * 1024;
-const WINDOW_TUNER_START_REQUESTS: usize = 16;
+const WINDOW_TUNER_START_CHUNK: usize = 128 * 1024;
+const WINDOW_TUNER_START_REQUESTS: usize = 8;
+const WINDOW_TUNER_FAST_RAMP_INTERVALS: usize = 4;
 const WINDOW_TUNER_RTT_SAMPLE_CAP: usize = 64;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -163,6 +163,7 @@ struct SftpWindowTuner {
     channel_closed_count: u64,
     zero_read_count: u64,
     last_shrink_reason: Option<SftpWindowShrinkReason>,
+    clean_growth_intervals: usize,
 }
 
 impl SftpWindowTuner {
@@ -216,6 +217,7 @@ impl SftpWindowTuner {
             channel_closed_count: 0,
             zero_read_count: 0,
             last_shrink_reason: None,
+            clean_growth_intervals: 0,
         }
     }
 
@@ -267,6 +269,7 @@ impl SftpWindowTuner {
         self.target_requests = (self.target_requests / 2).max(self.min_requests);
         self.target_inflight_bytes = (self.target_inflight_bytes / 2).max(self.min_inflight_bytes);
         self.target_chunk_len = (self.target_chunk_len / 2).max(self.min_chunk_len);
+        self.clean_growth_intervals = 0;
         self.window_shrink_count = self.window_shrink_count.saturating_add(1);
         self.reset_interval();
         self.clamp_targets();
@@ -322,23 +325,46 @@ impl SftpWindowTuner {
                 (self.target_chunk_len / 2).max(desired_chunk)
             };
 
-            // High RTT links need more requests in flight to keep the pipe full.
-            let request_step = if avg_rtt >= Duration::from_millis(150) {
-                8
-            } else {
-                4
-            };
-            self.target_requests = (self.target_requests + request_step).min(self.max_requests);
+            // Unknown servers start conservatively, then clean early intervals
+            // ramp faster so high-RTT links can fill the pipe without waiting
+            // through many linear growth windows.
+            let request_step = self.request_growth_step(avg_rtt);
+            self.target_requests = self.next_request_target(request_step);
             let inflight_step = self.target_chunk_len.saturating_mul(request_step);
             self.target_inflight_bytes = self
                 .target_inflight_bytes
                 .saturating_add(inflight_step)
                 .min(self.max_inflight_bytes);
+            self.clean_growth_intervals = self.clean_growth_intervals.saturating_add(1);
             self.window_growth_count = self.window_growth_count.saturating_add(1);
         }
 
         self.reset_interval();
         self.clamp_targets();
+    }
+
+    fn request_growth_step(&self, avg_rtt: Duration) -> usize {
+        let base_step = if avg_rtt >= Duration::from_millis(150) {
+            8
+        } else {
+            4
+        };
+
+        if self.clean_growth_intervals < WINDOW_TUNER_FAST_RAMP_INTERVALS {
+            base_step * 2
+        } else {
+            base_step
+        }
+    }
+
+    fn next_request_target(&self, request_step: usize) -> usize {
+        let linear_target = self.target_requests.saturating_add(request_step);
+        if self.clean_growth_intervals < WINDOW_TUNER_FAST_RAMP_INTERVALS {
+            linear_target.max(self.target_requests.saturating_mul(2))
+        } else {
+            linear_target
+        }
+        .min(self.max_requests)
     }
 
     fn chunk_for_throughput(bytes_per_sec: usize) -> usize {
@@ -696,14 +722,7 @@ impl Drop for FileDownloadParts {
             return;
         }
 
-        if let Ok(handle) = Handle::try_current() {
-            let session = self.session.clone();
-            let file_handle = self.handle.clone();
-
-            handle.spawn(async move {
-                let _ = session.close(file_handle).await;
-            });
-        }
+        let _ = self.session.close_nowait(mem::take(&mut self.handle));
     }
 }
 
@@ -737,14 +756,7 @@ impl Drop for FileUploadParts {
             return;
         }
 
-        if let Ok(handle) = Handle::try_current() {
-            let session = self.session.clone();
-            let file_handle = self.handle.clone();
-
-            handle.spawn(async move {
-                let _ = session.close(file_handle).await;
-            });
-        }
+        let _ = self.session.close_nowait(mem::take(&mut self.handle));
     }
 }
 
@@ -1029,14 +1041,7 @@ impl Drop for PipelinedFileDownloader {
             return;
         }
 
-        if let Ok(handle) = Handle::try_current() {
-            let session = self.session.clone();
-            let file_handle = self.handle.clone();
-
-            handle.spawn(async move {
-                let _ = session.close(file_handle).await;
-            });
-        }
+        let _ = self.session.close_nowait(mem::take(&mut self.handle));
     }
 }
 
@@ -1312,14 +1317,7 @@ impl Drop for PipelinedFileUploader {
             return;
         }
 
-        if let Ok(handle) = Handle::try_current() {
-            let session = self.session.clone();
-            let file_handle = self.handle.clone();
-
-            handle.spawn(async move {
-                let _ = session.close(file_handle).await;
-            });
-        }
+        let _ = self.session.close_nowait(mem::take(&mut self.handle));
     }
 }
 
@@ -1377,14 +1375,7 @@ impl Drop for File {
             return;
         }
 
-        if let Ok(handle) = Handle::try_current() {
-            let session = self.session.clone();
-            let file_handle = self.handle.clone();
-
-            handle.spawn(async move {
-                let _ = session.close(file_handle).await;
-            });
-        }
+        let _ = self.session.close_nowait(mem::take(&mut self.handle));
     }
 }
 
@@ -1640,6 +1631,32 @@ mod tests {
         let snapshot = tuner.snapshot();
         assert!(snapshot.completed_bytes >= 2 * 1024 * 1024);
         assert!(snapshot.rtt_avg_ms > 0);
+    }
+
+    #[test]
+    fn window_tuner_starts_conservatively_and_fast_ramps_clean_high_rtt() {
+        let mut tuner = SftpWindowTuner::new(64, 16 * 1024 * 1024, 2 * 1024 * 1024);
+
+        assert_eq!(tuner.target_requests(), WINDOW_TUNER_START_REQUESTS);
+        assert_eq!(tuner.target_chunk_len(), WINDOW_TUNER_START_CHUNK);
+        assert_eq!(
+            tuner.target_inflight_bytes(),
+            WINDOW_TUNER_START_REQUESTS * WINDOW_TUNER_START_CHUNK
+        );
+
+        tuner.interval_started = Instant::now() - WINDOW_TUNER_ADJUST_INTERVAL;
+        tuner.record_success(1024 * 1024, Duration::from_millis(250), None);
+
+        assert!(tuner.target_requests() > WINDOW_TUNER_START_REQUESTS);
+        assert!(
+            tuner.target_inflight_bytes() > WINDOW_TUNER_START_REQUESTS * WINDOW_TUNER_START_CHUNK
+        );
+
+        let grown_requests = tuner.target_requests();
+        tuner.record_error(SftpWindowShrinkReason::StatusError);
+
+        assert!(tuner.target_requests() < grown_requests);
+        assert_eq!(tuner.clean_growth_intervals, 0);
     }
 
     #[test]
