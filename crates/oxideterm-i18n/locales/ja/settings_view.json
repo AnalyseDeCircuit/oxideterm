@@ -786,6 +786,10 @@
       "acp_agent_test": "テスト",
       "acp_agent_testing": "テスト中...",
       "acp_agent_last_error": "最後のエラー: {{error}}",
+      "acp_agent_error_command_not_found": "コマンドが見つかりません",
+      "acp_agent_error_config": "設定が無効です",
+      "acp_agent_error_initialize": "初期化に失敗しました",
+      "acp_agent_error_unknown": "不明なエラー",
       "acp_agent_auth_token": "認証トークン",
       "acp_agent_auth_token_placeholder": "キーチェーンにトークンを保存",
       "acp_agent_auth_token_saved": "トークンはキーチェーンに保存済みです"

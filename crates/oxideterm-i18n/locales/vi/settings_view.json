@@ -786,6 +786,10 @@
       "acp_agent_test": "Kiểm tra",
       "acp_agent_testing": "Đang kiểm tra...",
       "acp_agent_last_error": "Lỗi gần nhất: {{error}}",
+      "acp_agent_error_command_not_found": "Không tìm thấy lệnh",
+      "acp_agent_error_config": "Cấu hình không hợp lệ",
+      "acp_agent_error_initialize": "Khởi tạo thất bại",
+      "acp_agent_error_unknown": "Lỗi không xác định",
       "acp_agent_auth_token": "Mã xác thực",
       "acp_agent_auth_token_placeholder": "Lưu mã vào kho khóa",
       "acp_agent_auth_token_saved": "Mã đã được lưu trong kho khóa"

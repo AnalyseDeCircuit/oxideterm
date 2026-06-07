@@ -786,6 +786,10 @@
       "acp_agent_test": "Testar",
       "acp_agent_testing": "Testando...",
       "acp_agent_last_error": "Último erro: {{error}}",
+      "acp_agent_error_command_not_found": "Comando não encontrado",
+      "acp_agent_error_config": "Configuração inválida",
+      "acp_agent_error_initialize": "Falha na inicialização",
+      "acp_agent_error_unknown": "Erro desconhecido",
       "acp_agent_auth_token": "Token de autenticação",
       "acp_agent_auth_token_placeholder": "Salvar token no chaveiro",
       "acp_agent_auth_token_saved": "Token salvo no chaveiro"

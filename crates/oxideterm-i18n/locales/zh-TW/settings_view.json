@@ -786,6 +786,10 @@
       "acp_agent_test": "測試",
       "acp_agent_testing": "測試中...",
       "acp_agent_last_error": "最近錯誤：{{error}}",
+      "acp_agent_error_command_not_found": "找不到命令",
+      "acp_agent_error_config": "設定無效",
+      "acp_agent_error_initialize": "初始化失敗",
+      "acp_agent_error_unknown": "未知錯誤",
       "acp_agent_auth_token": "認證權杖",
       "acp_agent_auth_token_placeholder": "將權杖儲存到鑰匙圈",
       "acp_agent_auth_token_saved": "權杖已儲存到鑰匙圈"

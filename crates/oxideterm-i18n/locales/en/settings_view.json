@@ -786,6 +786,10 @@
       "acp_agent_test": "Test",
       "acp_agent_testing": "Testing...",
       "acp_agent_last_error": "Last error: {{error}}",
+      "acp_agent_error_command_not_found": "Command not found",
+      "acp_agent_error_config": "Invalid configuration",
+      "acp_agent_error_initialize": "Initialization failed",
+      "acp_agent_error_unknown": "Unknown error",
       "acp_agent_auth_token": "Auth Token",
       "acp_agent_auth_token_placeholder": "Save token in keychain",
       "acp_agent_auth_token_saved": "Token stored in keychain"

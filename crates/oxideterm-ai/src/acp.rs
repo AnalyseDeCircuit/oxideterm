@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    fmt,
+    env, fmt,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -684,7 +684,8 @@ impl AcpStdioLauncher {
         ),
         agent_client_protocol::Error,
     > {
-        let mut command = async_process::Command::new(self.config.command.trim());
+        let command_path = resolve_acp_command(self.config.command.trim());
+        let mut command = async_process::Command::new(command_path);
         command.args(&self.config.args);
         command.envs(&self.config.env);
         if let Some(cwd) = &self.config.cwd {
@@ -819,6 +820,13 @@ pub fn build_acp_stdio_launcher(
     validate_launch_config(&config)?;
     acp_env_variables(&config)?;
     Ok(AcpStdioLauncher { config })
+}
+
+pub fn acp_launch_command_available(
+    config: &AcpLaunchConfig,
+) -> Result<bool, AcpLaunchConfigError> {
+    validate_launch_config(config)?;
+    Ok(resolve_acp_command(config.command.trim()).exists())
 }
 
 pub fn build_acp_initialize_request(
@@ -1583,6 +1591,69 @@ fn validate_launch_config(config: &AcpLaunchConfig) -> Result<(), AcpLaunchConfi
         return Err(AcpLaunchConfigError::CommandContainsNul);
     }
     Ok(())
+}
+
+fn resolve_acp_command(command: &str) -> PathBuf {
+    let command_path = Path::new(command);
+    if command_path.components().count() > 1 || command_path.is_absolute() {
+        return command_path.to_path_buf();
+    }
+
+    // Packaged helper binaries are expected beside the current executable.
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            for candidate in acp_command_candidates(parent, command) {
+                if candidate.exists() {
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    if let Some(path_var) = env::var_os("PATH") {
+        for search_dir in env::split_paths(&path_var) {
+            for candidate in acp_command_candidates(&search_dir, command) {
+                if candidate.exists() {
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    command_path.to_path_buf()
+}
+
+fn acp_command_candidates(parent: &Path, command: &str) -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        let has_extension = Path::new(command).extension().is_some();
+        if has_extension {
+            return vec![parent.join(command)];
+        }
+        let pathext = env::var_os("PATHEXT")
+            .map(|value| {
+                value
+                    .to_string_lossy()
+                    .split(';')
+                    .filter(|extension| !extension.trim().is_empty())
+                    .map(|extension| extension.trim().to_ascii_lowercase())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|extensions| !extensions.is_empty())
+            .unwrap_or_else(|| vec![".exe".to_string(), ".cmd".to_string(), ".bat".to_string()]);
+        let mut candidates = Vec::with_capacity(pathext.len() + 1);
+        candidates.push(parent.join(command));
+        candidates.extend(
+            pathext
+                .into_iter()
+                .map(|extension| parent.join(format!("{command}{extension}"))),
+        );
+        candidates
+    }
+    #[cfg(not(windows))]
+    {
+        vec![parent.join(command)]
+    }
 }
 
 fn acp_env_variables(config: &AcpLaunchConfig) -> Result<Vec<EnvVariable>, AcpLaunchConfigError> {

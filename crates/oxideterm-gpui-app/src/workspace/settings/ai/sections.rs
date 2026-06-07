@@ -440,13 +440,14 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(8.0))
                             .when_some(agent.status.last_error_kind.as_ref(), |row, error| {
+                                let error_label = self.i18n.t(acp_agent_error_kind_key(error));
                                 row.child(
                                     div()
                                         .text_size(px(10.0))
                                         .text_color(rgb(self.tokens.ui.text_muted))
                                         .child(self.ai_i18n_error(
                                             "settings_view.ai.acp_agent_last_error",
-                                            error,
+                                            &error_label,
                                         )),
                                 )
                             })
@@ -919,30 +920,36 @@ impl WorkspaceApp {
         self.forwarding_runtime.spawn(async move {
             let result = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
                 Ok(launcher) => {
-                    match oxideterm_ai::initialize_acp_agent(
-                        launcher,
-                        env!("CARGO_PKG_VERSION").to_string(),
-                        capability_policy,
-                    )
-                    .await
+                    if !oxideterm_ai::acp_launch_command_available(launcher.config())
+                        .unwrap_or(false)
                     {
-                        Ok(response) => {
-                            let auth_required = !response.auth_methods.is_empty();
-                            AcpAgentProbeResult {
-                                runtime_state: if auth_required {
-                                    oxideterm_settings::AcpAgentRuntimeState::AuthRequired
-                                } else {
-                                    oxideterm_settings::AcpAgentRuntimeState::Ready
-                                },
-                                auth_status: if auth_required {
-                                    oxideterm_settings::AcpAgentAuthStatus::Required
-                                } else {
-                                    oxideterm_settings::AcpAgentAuthStatus::NotRequired
-                                },
-                                last_error_kind: None,
+                        ai_acp_probe_error_result("command_not_found")
+                    } else {
+                        let initialize_result = oxideterm_ai::initialize_acp_agent(
+                            launcher,
+                            env!("CARGO_PKG_VERSION").to_string(),
+                            capability_policy,
+                        )
+                        .await;
+                        match initialize_result {
+                            Ok(response) => {
+                                let auth_required = !response.auth_methods.is_empty();
+                                AcpAgentProbeResult {
+                                    runtime_state: if auth_required {
+                                        oxideterm_settings::AcpAgentRuntimeState::AuthRequired
+                                    } else {
+                                        oxideterm_settings::AcpAgentRuntimeState::Ready
+                                    },
+                                    auth_status: if auth_required {
+                                        oxideterm_settings::AcpAgentAuthStatus::Required
+                                    } else {
+                                        oxideterm_settings::AcpAgentAuthStatus::NotRequired
+                                    },
+                                    last_error_kind: None,
+                                }
                             }
+                            Err(_) => ai_acp_probe_error_result("initialize"),
                         }
-                        Err(_) => ai_acp_probe_error_result("initialize"),
                     }
                 }
                 Err(_) => ai_acp_probe_error_result("config"),
@@ -2372,6 +2379,15 @@ fn acp_agent_runtime_status_key(
         oxideterm_settings::AcpAgentRuntimeState::Error => {
             "settings_view.ai.acp_agent_status_error"
         }
+    }
+}
+
+fn acp_agent_error_kind_key(kind: &str) -> &'static str {
+    match kind {
+        "command_not_found" => "settings_view.ai.acp_agent_error_command_not_found",
+        "config" => "settings_view.ai.acp_agent_error_config",
+        "initialize" => "settings_view.ai.acp_agent_error_initialize",
+        _ => "settings_view.ai.acp_agent_error_unknown",
     }
 }
 

@@ -7259,6 +7259,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-acp-adapter"
+version = "2.0.0-gpui-preview.4"
+dependencies = [
+ "agent-client-protocol",
+ "clap",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "oxideterm-ai"
 version = "2.0.0-gpui-preview.4"
 dependencies = [
@@ -7478,6 +7489,7 @@ dependencies = [
  "objc2-av-foundation",
  "objc2-av-kit",
  "objc2-foundation",
+ "oxideterm-acp-adapter",
  "oxideterm-ai",
  "oxideterm-backend-classification",
  "oxideterm-cloud-sync",

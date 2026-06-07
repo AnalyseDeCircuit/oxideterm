@@ -786,6 +786,10 @@
       "acp_agent_test": "Testen",
       "acp_agent_testing": "Test läuft...",
       "acp_agent_last_error": "Letzter Fehler: {{error}}",
+      "acp_agent_error_command_not_found": "Befehl nicht gefunden",
+      "acp_agent_error_config": "Ungültige Konfiguration",
+      "acp_agent_error_initialize": "Initialisierung fehlgeschlagen",
+      "acp_agent_error_unknown": "Unbekannter Fehler",
       "acp_agent_auth_token": "Auth-Token",
       "acp_agent_auth_token_placeholder": "Token in Schlüsselbund speichern",
       "acp_agent_auth_token_saved": "Token ist im Schlüsselbund gespeichert"

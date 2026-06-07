@@ -212,6 +212,64 @@ fn normalize_ai_tool_auto_approve_keys(settings: &mut Value, raw: &Value) {
     }
 }
 
+fn migrate_acp_agent_presets(settings: &mut Value, warnings: &mut Vec<String>) {
+    let Some(agents) = settings
+        .get_mut("ai")
+        .and_then(|ai| ai.get_mut("acpAgents"))
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+
+    let mut migrated = 0;
+    for agent in agents {
+        let Some(agent) = agent.as_object_mut() else {
+            continue;
+        };
+        let command = agent
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let args = agent
+            .get("args")
+            .and_then(Value::as_array)
+            .map(|args| args.iter().filter_map(Value::as_str).collect::<Vec<&str>>())
+            .unwrap_or_default();
+
+        let Some((new_command, new_args)) = acp_agent_preset_migration(command, &args) else {
+            continue;
+        };
+        agent.insert("command".to_string(), json!(new_command));
+        agent.insert("args".to_string(), json!(new_args));
+        migrated += 1;
+    }
+
+    if migrated > 0 {
+        warnings.push(format!(
+            "Migrated {migrated} ACP agent preset(s) to current launch commands"
+        ));
+    }
+}
+
+fn acp_agent_preset_migration(
+    command: &str,
+    args: &[&str],
+) -> Option<(&'static str, Vec<&'static str>)> {
+    match (command, args) {
+        ("npx", ["-y", "@agentclientprotocol/claude-agent-acp"]) => {
+            Some(("oxideterm-native", vec!["--acp-adapter", "claude-code"]))
+        }
+        ("codex-acp", []) => Some(("oxideterm-native", vec!["--acp-adapter", "codex"])),
+        // Copilot already exposes native ACP over stdio; undo older OxideTerm
+        // migrations that wrapped it as a text CLI adapter.
+        ("oxideterm-native", ["--acp-adapter", "github-copilot"])
+        | ("oxideterm", ["--acp-adapter", "github-copilot"]) => {
+            Some(("copilot", vec!["--acp", "--stdio"]))
+        }
+        _ => None,
+    }
+}
+
 fn migrate_ai_tool_use_settings(settings: &mut Value, raw: &Value) {
     let Some(raw_tool_use) = raw
         .get("ai")
@@ -468,6 +526,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     migrate_ai_providers(&mut settings, &mut migration_warnings);
     migrate_ai_tool_use_settings(&mut settings, &raw);
     normalize_ai_tool_auto_approve_keys(&mut settings, &raw);
+    migrate_acp_agent_presets(&mut settings, &mut migration_warnings);
 
     if saved_version < SETTINGS_SCHEMA_VERSION
         && let Some(old_scrollback) = raw
@@ -779,6 +838,51 @@ mod tests {
         .expect("sanitize settings");
 
         assert_eq!(sanitized.settings.sftp.speed_limit_kbps, 4096);
+    }
+
+    #[test]
+    fn migrates_legacy_acp_agent_presets_to_current_launch_commands() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "acpAgents": [
+                    {
+                        "id": "claude-code",
+                        "displayName": "Claude Code",
+                        "command": "npx",
+                        "args": ["-y", "@agentclientprotocol/claude-agent-acp"]
+                    },
+                    {
+                        "id": "codex",
+                        "displayName": "Codex",
+                        "command": "codex-acp",
+                        "args": []
+                    },
+                    {
+                        "id": "custom",
+                        "displayName": "Custom",
+                        "command": "custom-acp",
+                        "args": ["--stdio"]
+                    },
+                    {
+                        "id": "github-copilot",
+                        "displayName": "GitHub Copilot",
+                        "command": "oxideterm-native",
+                        "args": ["--acp-adapter", "github-copilot"]
+                    }
+                ]
+            }
+        }))
+        .expect("sanitize settings");
+
+        let agents = sanitized.settings.ai.acp_agents;
+        assert_eq!(agents[0].command, "oxideterm-native");
+        assert_eq!(agents[0].args, vec!["--acp-adapter", "claude-code"]);
+        assert_eq!(agents[1].command, "oxideterm-native");
+        assert_eq!(agents[1].args, vec!["--acp-adapter", "codex"]);
+        assert_eq!(agents[2].command, "custom-acp");
+        assert_eq!(agents[2].args, vec!["--stdio"]);
+        assert_eq!(agents[3].command, "copilot");
+        assert_eq!(agents[3].args, vec!["--acp", "--stdio"]);
     }
 
     #[test]

@@ -90,19 +90,20 @@ impl AcpAgentPreset {
             Self::ClaudeCode => AcpAgentPresetTemplate {
                 base_id: "claude-code",
                 display_name: "Claude Code",
-                command: "npx",
-                args: &["-y", "@agentclientprotocol/claude-agent-acp"],
+                command: "oxideterm-native",
+                args: &["--acp-adapter", "claude-code"],
             },
             Self::Codex => AcpAgentPresetTemplate {
                 base_id: "codex",
                 display_name: "Codex",
-                command: "codex-acp",
-                args: &[],
+                command: "oxideterm-native",
+                args: &["--acp-adapter", "codex"],
             },
             Self::GithubCopilot => AcpAgentPresetTemplate {
                 base_id: "github-copilot",
                 display_name: "GitHub Copilot",
                 command: "copilot",
+                // GitHub Copilot CLI exposes a native ACP stdio server.
                 args: &["--acp", "--stdio"],
             },
         }
@@ -1158,19 +1159,20 @@ mod tests {
 
         let claude = &settings.ai.acp_agents[0];
         assert_eq!(claude.id, "claude-code");
-        assert_eq!(claude.command, "npx");
+        assert_eq!(claude.command, "oxideterm-native");
         assert_eq!(
             claude.args,
-            vec![
-                "-y".to_string(),
-                "@agentclientprotocol/claude-agent-acp".to_string()
-            ]
+            vec!["--acp-adapter".to_string(), "claude-code".to_string()]
         );
         assert!(!claude.capability_policy.terminal);
 
         let codex = &settings.ai.acp_agents[1];
         assert_eq!(codex.id, "codex");
-        assert_eq!(codex.command, "codex-acp");
+        assert_eq!(codex.command, "oxideterm-native");
+        assert_eq!(
+            codex.args,
+            vec!["--acp-adapter".to_string(), "codex".to_string()]
+        );
 
         let copilot = &settings.ai.acp_agents[2];
         assert_eq!(copilot.id, "github-copilot");

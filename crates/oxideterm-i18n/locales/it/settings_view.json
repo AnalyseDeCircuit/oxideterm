@@ -786,6 +786,10 @@
       "acp_agent_test": "Testa",
       "acp_agent_testing": "Test in corso...",
       "acp_agent_last_error": "Ultimo errore: {{error}}",
+      "acp_agent_error_command_not_found": "Comando non trovato",
+      "acp_agent_error_config": "Configurazione non valida",
+      "acp_agent_error_initialize": "Inizializzazione non riuscita",
+      "acp_agent_error_unknown": "Errore sconosciuto",
       "acp_agent_auth_token": "Token di autenticazione",
       "acp_agent_auth_token_placeholder": "Salva il token nel portachiavi",
       "acp_agent_auth_token_saved": "Token salvato nel portachiavi"

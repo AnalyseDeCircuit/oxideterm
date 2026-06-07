@@ -91,6 +91,8 @@ actions!(
 );
 
 fn main() {
+    oxideterm_acp_adapter::run_from_env_if_requested();
+
     // Match Tauri's startup ordering: portable detection and instance locking
     // happen before any settings or connection stores choose their data path.
     if let Err(error) = oxideterm_portable_runtime::initialize_portable_runtime()

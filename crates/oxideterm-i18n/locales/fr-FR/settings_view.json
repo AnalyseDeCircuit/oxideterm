@@ -786,6 +786,10 @@
       "acp_agent_test": "Tester",
       "acp_agent_testing": "Test en cours...",
       "acp_agent_last_error": "Dernière erreur : {{error}}",
+      "acp_agent_error_command_not_found": "Commande introuvable",
+      "acp_agent_error_config": "Configuration invalide",
+      "acp_agent_error_initialize": "Échec de l'initialisation",
+      "acp_agent_error_unknown": "Erreur inconnue",
       "acp_agent_auth_token": "Jeton d’authentification",
       "acp_agent_auth_token_placeholder": "Enregistrer le jeton dans le trousseau",
       "acp_agent_auth_token_saved": "Jeton enregistré dans le trousseau"
