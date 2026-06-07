@@ -192,7 +192,9 @@ impl WorkspaceApp {
             .execution_profiles
             .get("defaultProfileId")
             .and_then(serde_json::Value::as_str);
-        if profile.profile_id.as_deref() == default_profile_id {
+        if profile.backend == AiExecutionBackend::Provider
+            && profile.profile_id.as_deref() == default_profile_id
+        {
             profile.provider_id = settings.ai.active_provider_id.clone();
             profile.model = settings.ai.active_model.clone();
         }

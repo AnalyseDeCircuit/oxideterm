@@ -376,6 +376,15 @@ impl WorkspaceApp {
         else {
             return;
         };
+        if profile
+            .get("backend")
+            .and_then(serde_json::Value::as_str)
+            == Some("acp")
+        {
+            // ACP profiles delegate model choice to the selected agent, so the
+            // provider/model selector must not rewrite their launch profile.
+            return;
+        }
         profile.insert(
             "providerId".to_string(),
             serde_json::Value::String(provider_id.to_string()),
