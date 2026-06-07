@@ -363,7 +363,7 @@ Function .onInit
 uninstall_existing:
   ClearErrors
   ExecWait '"$0\\Uninstall.exe" _?=$0' $1
-  IfErrors uninstall_failed 0 check_uninstall_exit
+  IfErrors uninstall_failed check_uninstall_exit
 
 check_uninstall_exit:
   IntCmp $1 0 verify_uninstalled uninstall_failed uninstall_failed

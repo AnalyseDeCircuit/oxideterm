@@ -38,7 +38,9 @@ jobs:
             os: macos-14
             target: aarch64-apple-darwin
           - label: macos-x64
-            os: macos-14
+            # Use an Intel runner so Cargo build scripts run on the same host
+            # architecture as the x86_64 release target.
+            os: macos-15-intel
             target: x86_64-apple-darwin
           - label: linux-x64
             os: ubuntu-22.04
