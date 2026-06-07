@@ -359,6 +359,7 @@ impl WorkspaceApp {
             let progress_transfer_id = transfer_id.clone();
             tokio::spawn(async move {
                 let mut accumulator = DirectoryProgressAccumulator::default();
+                let mut last_directory_progress_save = std::time::Instant::now();
                 while let Some(progress) = progress_rx.recv().await {
                     let progress = if is_directory {
                         accumulator.update(progress)
@@ -368,7 +369,16 @@ impl WorkspaceApp {
                     if let Some(stored) = directory_progress.as_mut() {
                         stored.total_bytes = stored.total_bytes.max(progress.total_bytes);
                         stored.update_progress(progress.transferred_bytes);
-                        let _ = progress_store_for_task.save(stored).await;
+                        if last_directory_progress_save.elapsed()
+                            >= std::time::Duration::from_millis(
+                                SFTP_DIRECTORY_PROGRESS_SAVE_INTERVAL_MS,
+                            )
+                        {
+                            // The transfer task records terminal directory states; this task only
+                            // needs periodic snapshots for resume after process interruption.
+                            let _ = progress_store_for_task.save(stored).await;
+                            last_directory_progress_save = std::time::Instant::now();
+                        }
                     }
                     if is_directory {
                         progress_manager.update_background_transfer_progress(

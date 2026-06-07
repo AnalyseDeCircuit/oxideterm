@@ -71,6 +71,7 @@ const SFTP_DIFF_WRAP_COLUMNS: usize = 64; // max-w-5xl split diff leaves roughly
 const SFTP_PREVIEW_FONT_DEFAULT_SIZE: f32 = 32.0; // Tauri FontPreview initial fontSize
 const SFTP_SIZE_COL: f32 = 80.0; // Tauri w-20
 const SFTP_MODIFIED_COL: f32 = 96.0; // Tauri w-24
+const SFTP_DIRECTORY_PROGRESS_SAVE_INTERVAL_MS: u64 = 1_000; // Keep resume progress fresh without writing on every file tick.
 const SFTP_BG_ACTIVE_BG_ALPHA: u32 = 0x66; // [data-bg-active] --color-theme-bg 40%
 const SFTP_BG_ACTIVE_PANEL_ALPHA: u32 = 0x66; // [data-bg-active] --color-theme-bg-panel 40%
 const SFTP_BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // [data-bg-active] --color-theme-bg-hover 50%
@@ -382,23 +383,30 @@ struct SftpTransferBatch {
 #[derive(Default)]
 struct DirectoryProgressAccumulator {
     files: HashMap<(String, String), (u64, u64)>,
+    transferred_bytes: u64,
+    total_bytes: u64,
 }
 
 impl DirectoryProgressAccumulator {
     fn update(&mut self, progress: TransferProgress) -> TransferProgress {
-        self.files.insert(
-            (progress.remote_path.clone(), progress.local_path.clone()),
-            (progress.transferred_bytes, progress.total_bytes),
-        );
-        let transferred_bytes = self
-            .files
-            .values()
-            .map(|(transferred, _)| *transferred)
-            .sum();
-        let total_bytes = self.files.values().map(|(_, total)| *total).sum();
+        let key = (progress.remote_path.clone(), progress.local_path.clone());
+        if let Some((previous_transferred, previous_total)) = self.files.get(&key).copied() {
+            self.transferred_bytes = self.transferred_bytes.saturating_sub(previous_transferred);
+            self.total_bytes = self.total_bytes.saturating_sub(previous_total);
+        }
+
+        // Directory transfers can emit many file progress events; keep aggregate
+        // totals incrementally instead of re-summing the whole file map per tick.
+        self.transferred_bytes = self
+            .transferred_bytes
+            .saturating_add(progress.transferred_bytes);
+        self.total_bytes = self.total_bytes.saturating_add(progress.total_bytes);
+        self.files
+            .insert(key, (progress.transferred_bytes, progress.total_bytes));
+
         TransferProgress {
-            transferred_bytes,
-            total_bytes,
+            transferred_bytes: self.transferred_bytes,
+            total_bytes: self.total_bytes,
             ..progress
         }
     }

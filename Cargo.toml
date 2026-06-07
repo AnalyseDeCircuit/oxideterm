@@ -51,9 +51,13 @@ members = [
   "crates/oxideterm-webview",
   "crates/oxideterm-workspace",
   "crates/russh",
+  "crates/russh-sftp",
 ]
 default-members = ["crates/oxideterm-gpui-app"]
 resolver = "2"
+
+[patch.crates-io]
+russh-sftp = { path = "crates/russh-sftp" }
 
 [workspace.package]
 edition = "2024"

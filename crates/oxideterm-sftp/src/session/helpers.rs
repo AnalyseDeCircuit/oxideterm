@@ -108,20 +108,27 @@ async fn send_transfer_progress(
     } else {
         None
     };
-    let _ = tx
-        .send(TransferProgress {
-            id: transfer_id.to_string(),
-            remote_path: remote_path.to_string(),
-            local_path: local_path.to_string(),
-            direction,
-            state,
-            total_bytes,
-            transferred_bytes,
-            speed,
-            eta_seconds,
-            error,
-        })
-        .await;
+    let progress = TransferProgress {
+        id: transfer_id.to_string(),
+        remote_path: remote_path.to_string(),
+        local_path: local_path.to_string(),
+        direction,
+        state,
+        total_bytes,
+        transferred_bytes,
+        speed,
+        eta_seconds,
+        error,
+    };
+
+    if state == TransferState::InProgress {
+        // Intermediate progress is lossy by design; the data plane must not wait
+        // for a slow UI or persistence consumer while SFTP requests can keep flowing.
+        let _ = tx.try_send(progress);
+        return;
+    }
+
+    let _ = tx.send(progress).await;
 }
 
 fn is_missing_file_error_message(message: &str) -> bool {
