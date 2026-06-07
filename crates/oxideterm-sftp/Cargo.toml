@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 async-trait = "0.1"
 base64.workspace = true
+bytes = "1.11.1"
 chrono.workspace = true
 flate2 = "1.1.9"
 futures-util = "0.3"

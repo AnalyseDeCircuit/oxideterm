@@ -98,57 +98,11 @@ pub enum TransferState {
     Cancelled,
 }
 
-pub struct AdaptiveChunkSizer {
-    current: usize,
-    window_bytes: u64,
-    window_start: std::time::Instant,
-}
+/// Backward-compatible namespace for the bulk SFTP chunk cap.
+pub struct AdaptiveChunkSizer;
 
 impl AdaptiveChunkSizer {
-    pub const MIN_CHUNK: usize = 64 * 1024;
     pub const MAX_CHUNK: usize = 2 * 1024 * 1024;
-    const ADAPT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
-
-    pub fn new() -> Self {
-        Self {
-            current: 256 * 1024,
-            window_bytes: 0,
-            window_start: std::time::Instant::now(),
-        }
-    }
-
-    pub fn chunk_size(&self) -> usize {
-        self.current
-    }
-
-    pub fn record(&mut self, bytes: usize) {
-        self.window_bytes += bytes as u64;
-        if self.window_start.elapsed() >= Self::ADAPT_INTERVAL {
-            let elapsed = self.window_start.elapsed().as_secs_f64();
-            if elapsed > 0.0 {
-                self.current =
-                    Self::throughput_to_chunk((self.window_bytes as f64 / elapsed) as u64);
-            }
-            self.window_bytes = 0;
-            self.window_start = std::time::Instant::now();
-        }
-    }
-
-    fn throughput_to_chunk(bytes_per_sec: u64) -> usize {
-        match bytes_per_sec {
-            0..=262_144 => Self::MIN_CHUNK,
-            262_145..=1_048_576 => 128 * 1024,
-            1_048_577..=10_485_760 => 256 * 1024,
-            10_485_761..=52_428_800 => 1_048_576,
-            _ => Self::MAX_CHUNK,
-        }
-    }
-}
-
-impl Default for AdaptiveChunkSizer {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 pub fn is_text_extension(ext: &str) -> bool {

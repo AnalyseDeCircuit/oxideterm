@@ -961,7 +961,7 @@ impl Element for TerminalElement {
             paint_scrollbar(
                 scrollbar,
                 origin,
-                self.snapshot.cols,
+                bounds.size.width,
                 self.snapshot.rows,
                 &self.metrics,
                 window,

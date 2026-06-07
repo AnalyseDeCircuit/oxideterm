@@ -1202,9 +1202,10 @@ mod tests {
         let grid_span = terminal_grid_span_for_viewport(px(120.0), cell_width);
         let cols = whole_cells_in_span(grid_span, cell_width);
         let scrollbar_right =
-            cols as f32 * cell_width + SCROLLBAR_GAP + SCROLLBAR_WIDTH + SCROLLBAR_GAP;
+            f32::from(terminal_scrollbar_x_for_viewport(px(120.0))) + SCROLLBAR_WIDTH;
 
-        assert_eq!(cols, 10);
+        assert_eq!(cols, 11);
         assert!(scrollbar_right <= 120.0);
+        assert_eq!(scrollbar_right, 120.0);
     }
 }

@@ -9,6 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bytes::Bytes;
 use russh::ChannelMsg;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
@@ -183,7 +184,7 @@ where
         .map_err(|error| SftpError::ChannelError(format!("Failed to exec tar: {error}")))?;
 
     let start = Instant::now();
-    let (data_tx, data_rx) = mpsc::channel::<Vec<u8>>(64);
+    let (data_tx, data_rx) = mpsc::channel::<Bytes>(64);
     let decode_handle = tokio::task::spawn_blocking({
         let local_path = local_path.to_string();
         move || tar_decode_directory(&local_path, data_rx, compression)
@@ -205,7 +206,7 @@ where
         match channel.wait().await {
             Some(ChannelMsg::Data { data: chunk }) => {
                 received += chunk.len() as u64;
-                if data_tx.send(chunk.to_vec()).await.is_err() {
+                if data_tx.send(chunk).await.is_err() {
                     break;
                 }
                 throttle(received, start, &transfer_manager).await;
@@ -323,16 +324,16 @@ impl Drop for ChunkWriter {
 }
 
 struct ChannelReader {
-    rx: mpsc::Receiver<Vec<u8>>,
-    buffer: Vec<u8>,
+    rx: mpsc::Receiver<Bytes>,
+    buffer: Bytes,
     position: usize,
 }
 
 impl ChannelReader {
-    fn new(rx: mpsc::Receiver<Vec<u8>>) -> Self {
+    fn new(rx: mpsc::Receiver<Bytes>) -> Self {
         Self {
             rx,
-            buffer: Vec::new(),
+            buffer: Bytes::new(),
             position: 0,
         }
     }
@@ -397,7 +398,7 @@ fn tar_encode_directory(
 
 fn tar_decode_directory(
     local_path: &str,
-    data_rx: mpsc::Receiver<Vec<u8>>,
+    data_rx: mpsc::Receiver<Bytes>,
     compression: TarCompression,
 ) -> Result<(), SftpError> {
     fn unpack_tar<R: Read>(reader: R, local_path: &str) -> Result<(), SftpError> {

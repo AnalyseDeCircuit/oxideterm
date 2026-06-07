@@ -421,14 +421,14 @@ pub(crate) fn paint_cursor(
 pub(crate) fn paint_scrollbar(
     scrollbar: TerminalScrollbar,
     origin: gpui::Point<Pixels>,
-    cols: usize,
+    viewport_width: Pixels,
     rows: usize,
     metrics: &TerminalMetrics,
     window: &mut Window,
 ) {
-    let x = cols as f32 * metrics.cell_width_f32() + SCROLLBAR_GAP;
+    let x = terminal_scrollbar_x_for_viewport(viewport_width);
     let track = Bounds::new(
-        origin + point(px(x), px(0.0)),
+        origin + point(x, px(0.0)),
         size(
             px(SCROLLBAR_WIDTH),
             px(rows as f32 * metrics.line_height_f32()),
@@ -437,7 +437,7 @@ pub(crate) fn paint_scrollbar(
     window.paint_quad(fill(track, rgba(0xffffff20)));
 
     let thumb = Bounds::new(
-        origin + point(px(x), px(scrollbar.top)),
+        origin + point(x, px(scrollbar.top)),
         size(px(SCROLLBAR_WIDTH), px(scrollbar.height)),
     );
     window.paint_quad(fill(thumb, rgba(0xffffff66)));

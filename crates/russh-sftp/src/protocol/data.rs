@@ -1,11 +1,12 @@
+use bytes::Bytes;
+
 use super::{impl_packet_for, impl_request_id, Packet, RequestId};
 
 /// Implementation for `SSH_FXP_DATA`
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Data {
     pub id: u32,
-    #[serde(with = "serde_bytes")]
-    pub data: Vec<u8>,
+    pub data: Bytes,
 }
 
 impl_request_id!(Data);

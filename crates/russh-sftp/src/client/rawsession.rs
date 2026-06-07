@@ -1,4 +1,4 @@
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use dashmap::DashMap as HashMap;
 use std::{
     sync::{
@@ -24,6 +24,7 @@ use crate::{
         Attrs, Close, Data, Extended, ExtendedReply, FSetStat, FileAttributes, Fstat, Handle, Init,
         Lstat, MkDir, Name, Open, OpenDir, OpenFlags, Packet, Read, ReadDir, ReadLink, RealPath,
         Remove, Rename, RmDir, SetStat, Stat, Status, StatusCode, Symlink, Version, Write,
+        SSH_FXP_READ, SSH_FXP_WRITE,
     },
 };
 
@@ -146,6 +147,70 @@ macro_rules! into_status {
     };
 }
 
+fn checked_packet_len(parts: &[usize]) -> SftpResult<u32> {
+    let mut len = 0usize;
+    for part in parts {
+        len = len
+            .checked_add(*part)
+            .ok_or_else(|| Error::Limited("sftp packet length overflow".to_owned()))?;
+    }
+    u32::try_from(len).map_err(|_| Error::Limited("sftp packet too large".to_owned()))
+}
+
+fn encode_write_packet(id: u32, handle: &str, offset: u64, data: &[u8]) -> SftpResult<Bytes> {
+    let handle_len =
+        u32::try_from(handle.len()).map_err(|_| Error::Limited("handle too large".to_owned()))?;
+    let data_len =
+        u32::try_from(data.len()).map_err(|_| Error::Limited("write data too large".to_owned()))?;
+    let packet_len = checked_packet_len(&[
+        1,
+        std::mem::size_of::<u32>(),
+        std::mem::size_of::<u32>(),
+        handle.len(),
+        std::mem::size_of::<u64>(),
+        std::mem::size_of::<u32>(),
+        data.len(),
+    ])?;
+
+    // SFTP frames are length-prefixed outside the packet body. Building the
+    // WRITE frame directly avoids allocating an intermediate Write payload.
+    let mut bytes = BytesMut::with_capacity(std::mem::size_of::<u32>() + packet_len as usize);
+    bytes.put_u32(packet_len);
+    bytes.put_u8(SSH_FXP_WRITE);
+    bytes.put_u32(id);
+    bytes.put_u32(handle_len);
+    bytes.put_slice(handle.as_bytes());
+    bytes.put_u64(offset);
+    bytes.put_u32(data_len);
+    bytes.put_slice(data);
+    Ok(bytes.freeze())
+}
+
+fn encode_read_packet(id: u32, handle: &str, offset: u64, len: u32) -> SftpResult<Bytes> {
+    let handle_len =
+        u32::try_from(handle.len()).map_err(|_| Error::Limited("handle too large".to_owned()))?;
+    let packet_len = checked_packet_len(&[
+        1,
+        std::mem::size_of::<u32>(),
+        std::mem::size_of::<u32>(),
+        handle.len(),
+        std::mem::size_of::<u64>(),
+        std::mem::size_of::<u32>(),
+    ])?;
+
+    // Bulk downloads schedule many READ requests. Encoding the frame directly
+    // avoids cloning the handle and building a generic packet payload each time.
+    let mut bytes = BytesMut::with_capacity(std::mem::size_of::<u32>() + packet_len as usize);
+    bytes.put_u32(packet_len);
+    bytes.put_u8(SSH_FXP_READ);
+    bytes.put_u32(id);
+    bytes.put_u32(handle_len);
+    bytes.put_slice(handle.as_bytes());
+    bytes.put_u64(offset);
+    bytes.put_u32(len);
+    Ok(bytes.freeze())
+}
+
 impl RawSftpSession {
     pub fn new<S>(stream: S) -> Self
     where
@@ -190,11 +255,18 @@ impl RawSftpSession {
         id: Option<u32>,
         packet: Packet,
     ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
+        let bytes = Bytes::try_from(packet)?;
+        self.send_encoded(id, bytes)
+    }
+
+    fn send_encoded(
+        &self,
+        id: Option<u32>,
+        bytes: Bytes,
+    ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
         if self.tx.is_closed() {
             return Err(Error::UnexpectedBehavior("session closed".into()));
         }
-
-        let bytes = Bytes::try_from(packet)?;
 
         if let Some(max_len) = self.limits.packet_len {
             if bytes.len() as u64 > max_len {
@@ -341,9 +413,9 @@ impl RawSftpSession {
     }
 
     /// Sends a read packet without awaiting the server's response.
-    pub(crate) fn read_nowait(
+    pub(crate) fn read_nowait_raw(
         &self,
-        handle: String,
+        handle: &str,
         offset: u64,
         len: u32,
     ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
@@ -352,16 +424,8 @@ impl RawSftpSession {
         }
 
         let id = self.use_next_id();
-        self.send(
-            Some(id),
-            Read {
-                id,
-                handle,
-                offset,
-                len,
-            }
-            .into(),
-        )
+        let bytes = encode_read_packet(id, handle, offset, len)?;
+        self.send_encoded(Some(id), bytes)
     }
 
     pub async fn write<H: Into<String>>(
@@ -391,28 +455,22 @@ impl RawSftpSession {
         into_status!(result)
     }
 
-    /// Sends a write packet without awaiting the server's acknowledgement.
-    pub(crate) fn write_nowait(
+    /// Sends a raw write packet without routing bulk data through the generic
+    /// packet serializer. This keeps the upload hot path to one data copy into
+    /// the final outgoing SFTP frame.
+    pub(crate) fn write_nowait_raw(
         &self,
-        handle: String,
+        handle: &str,
         offset: u64,
-        data: Vec<u8>,
+        data: &[u8],
     ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
         if self.limits.write_len.is_some_and(|w| data.len() as u64 > w) {
             return Err(Error::Limited("write limit reached".to_owned()));
         }
 
         let id = self.use_next_id();
-        self.send(
-            Some(id),
-            Write {
-                id,
-                handle,
-                offset,
-                data,
-            }
-            .into(),
-        )
+        let bytes = encode_write_packet(id, handle, offset, data)?;
+        self.send_encoded(Some(id), bytes)
     }
 
     pub async fn lstat<P: Into<String>>(&self, path: P) -> SftpResult<Attrs> {
@@ -761,5 +819,48 @@ impl RawSftpSession {
 impl Drop for RawSftpSession {
     fn drop(&mut self) {
         let _ = self.close_session();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_write_packet_matches_generic_packet_encoding() {
+        let id = 42;
+        let handle = "remote-handle";
+        let offset = 9_876;
+        let data = b"upload-payload";
+
+        let raw = encode_write_packet(id, handle, offset, data).expect("raw write packet encodes");
+        let generic = Bytes::try_from(Packet::Write(Write {
+            id,
+            handle: handle.to_owned(),
+            offset,
+            data: data.to_vec(),
+        }))
+        .expect("generic write packet encodes");
+
+        assert_eq!(raw, generic);
+    }
+
+    #[test]
+    fn raw_read_packet_matches_generic_packet_encoding() {
+        let id = 17;
+        let handle = "remote-handle";
+        let offset = 1_024;
+        let len = 131_072;
+
+        let raw = encode_read_packet(id, handle, offset, len).expect("raw read packet encodes");
+        let generic = Bytes::try_from(Packet::Read(Read {
+            id,
+            handle: handle.to_owned(),
+            offset,
+            len,
+        }))
+        .expect("generic read packet encodes");
+
+        assert_eq!(raw, generic);
     }
 }

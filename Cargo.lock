@@ -7863,6 +7863,7 @@ version = "2.0.0-gpui-preview.3"
 dependencies = [
  "async-trait",
  "base64",
+ "bytes",
  "chrono",
  "flate2",
  "futures-util",

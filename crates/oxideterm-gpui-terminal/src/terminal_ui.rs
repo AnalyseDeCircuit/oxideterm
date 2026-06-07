@@ -21,9 +21,9 @@ pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
 pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
 pub(crate) const OXIDETERM_TERMINAL_BACKGROUND: u32 = 0x0d0f12;
 pub(crate) const OXIDETERM_TERMINAL_FOREGROUND: u32 = 0xe6e8eb;
-pub(crate) const SCROLLBAR_WIDTH: f32 = 3.0;
-pub(crate) const SCROLLBAR_GAP: f32 = 6.0;
-pub(crate) const SCROLLBAR_RESERVED_WIDTH: f32 = SCROLLBAR_GAP * 2.0 + SCROLLBAR_WIDTH;
+pub(crate) const SCROLLBAR_WIDTH: f32 = 10.0;
+pub(crate) const SCROLLBAR_GAP: f32 = 0.0;
+pub(crate) const SCROLLBAR_RESERVED_WIDTH: f32 = SCROLLBAR_WIDTH;
 pub(crate) const SCROLLBAR_MIN_THUMB: f32 = 24.0;
 pub(crate) const TERMINAL_SCROLL_MULTIPLIER: f32 = 1.0;
 pub(crate) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
@@ -129,6 +129,13 @@ impl TerminalRenderTier {
             Self::Idle => 0x94a3b8,
         }
     }
+}
+
+pub(crate) fn terminal_scrollbar_x_for_viewport(viewport_width: Pixels) -> Pixels {
+    // Tauri/xterm uses overviewRuler.width as right-side terminal viewport
+    // chrome. Anchor the native scrollbar to that viewport edge instead of
+    // deriving its x-position from the rounded PTY column count.
+    px((f32::from(viewport_width) - TERMINAL_CONTENT_PADDING - SCROLLBAR_WIDTH).max(0.0))
 }
 
 #[derive(Clone, Copy, Debug)]

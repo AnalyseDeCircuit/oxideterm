@@ -593,13 +593,12 @@ impl SftpSession {
             SFTP_UPLOAD_MAX_INFLIGHT_BYTES,
         );
         let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
-        let mut chunk_sizer = AdaptiveChunkSizer::new();
         let started = Instant::now();
         let mut transferred = 0u64;
         let mut last_progress = Instant::now();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
-            let chunk_size = chunk_sizer.chunk_size();
+            let chunk_size = remote_writer.target_chunk_len();
             let read = local_file
                 .read(&mut buffer[..chunk_size])
                 .await
@@ -612,7 +611,6 @@ impl SftpSession {
                 .await
                 .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
             transferred = transferred.saturating_add(scheduled as u64);
-            chunk_sizer.record(scheduled);
             throttle_transfer(transferred, started, transfer_manager).await;
             if last_progress.elapsed().as_millis() >= 200 {
                 send_transfer_progress(
@@ -815,14 +813,13 @@ impl SftpSession {
             SFTP_UPLOAD_MAX_INFLIGHT_BYTES,
         );
         let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
-        let mut chunk_sizer = AdaptiveChunkSizer::new();
         let started = Instant::now();
         let mut transferred = offset;
         let mut last_progress = Instant::now();
         let mut last_persist = Instant::now();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
-            let chunk_size = chunk_sizer.chunk_size();
+            let chunk_size = remote_writer.target_chunk_len();
             let read = local_file
                 .read(&mut buffer[..chunk_size])
                 .await
@@ -835,7 +832,6 @@ impl SftpSession {
                 .await
                 .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
             transferred = transferred.saturating_add(scheduled as u64);
-            chunk_sizer.record(scheduled);
             throttle_transfer(
                 transferred.saturating_sub(offset),
                 started,

@@ -331,9 +331,11 @@ impl TerminalPane {
     fn scrollbar_geometry(&self) -> Option<ScrollbarGeometry> {
         terminal_scrollbar(&self.snapshot, &self.metrics).map(|scrollbar| {
             let origin = self.content_origin();
-            let x = px(TERMINAL_CONTENT_PADDING
-                + self.snapshot.cols as f32 * self.metrics.cell_width_f32()
-                + SCROLLBAR_GAP);
+            let viewport_width = self
+                .bounds
+                .map(|bounds| bounds.size.width)
+                .unwrap_or_else(|| px(0.0));
+            let x = terminal_scrollbar_x_for_viewport(viewport_width);
             ScrollbarGeometry {
                 x: origin.x + x,
                 y: origin.y + px(TERMINAL_CONTENT_PADDING),
