@@ -12,7 +12,11 @@ use std::{
 
 use futures_util::stream::{self, StreamExt, TryStreamExt};
 use russh_sftp::{
-    client::{SftpSession as RusshSftpSession, error::Error as SftpErrorInner},
+    client::{
+        SftpSession as RusshSftpSession,
+        error::Error as SftpErrorInner,
+        fs::{PipelinedDownloaderSnapshot, PipelinedUploaderSnapshot},
+    },
     protocol::{FileAttributes, OpenFlags},
 };
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -33,9 +37,11 @@ use crate::{
 };
 
 const SFTP_DOWNLOAD_MAX_REQUESTS: usize = 64;
-const SFTP_DOWNLOAD_MAX_INFLIGHT_BYTES: usize = 8 * 1024 * 1024;
 const SFTP_UPLOAD_MAX_REQUESTS: usize = 64;
-const SFTP_UPLOAD_MAX_INFLIGHT_BYTES: usize = 8 * 1024 * 1024;
+// Keep enough single-file SFTP data in flight for high-RTT links while still
+// bounding per-transfer memory. Many servers cap SFTP packets near 256 KiB, so
+// 64 requests need roughly 16 MiB to avoid an artificial byte-window bottleneck.
+const SFTP_SINGLE_FILE_MAX_INFLIGHT_BYTES: usize = 16 * 1024 * 1024;
 const SFTP_PROGRESS_PERSIST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub trait SftpChannelOpener: Clone + Send + Sync + 'static {

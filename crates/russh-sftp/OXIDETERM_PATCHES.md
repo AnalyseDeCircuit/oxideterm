@@ -124,3 +124,17 @@ The tuner uses conservative additive-increase / multiplicative-decrease rules:
 
 This keeps UI-level SFTP settings stable while letting each single-file
 transfer adapt to RTT, ACK pace, server limits, and short-read/error feedback.
+
+## Local-only window diagnostics
+
+The pipelined downloader and uploader expose in-process diagnostic snapshots for
+OxideTerm's local SFTP performance debugging. These snapshots contain only
+numeric counters and small enums such as target request count, in-flight bytes,
+chunk length, RTT summaries, shrink reason, short-read counts, queue state, and
+ACK/capacity-wait counters.
+
+The snapshot types intentionally do not derive serde serialization or broad
+debug formatting. They do not include hostnames, usernames, node identifiers,
+paths, filenames, server banners, raw error messages, or secret-bearing data.
+OxideTerm may format them to the local stderr stream only when an explicit local
+diagnostic environment variable is enabled.

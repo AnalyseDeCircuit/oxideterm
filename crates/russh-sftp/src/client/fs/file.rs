@@ -60,6 +60,77 @@ const WINDOW_TUNER_ADJUST_INTERVAL: Duration = Duration::from_millis(750);
 const WINDOW_TUNER_MIN_CHUNK: usize = 64 * 1024;
 const WINDOW_TUNER_START_CHUNK: usize = 1024 * 1024;
 const WINDOW_TUNER_START_REQUESTS: usize = 16;
+const WINDOW_TUNER_RTT_SAMPLE_CAP: usize = 64;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SftpWindowShrinkReason {
+    ShortRead,
+    StatusError,
+    ProtocolError,
+    ChannelClosed,
+}
+
+impl SftpWindowShrinkReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ShortRead => "short_read",
+            Self::StatusError => "status_error",
+            Self::ProtocolError => "protocol_error",
+            Self::ChannelClosed => "channel_closed",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct SftpWindowSnapshot {
+    pub target_requests: usize,
+    pub target_inflight_bytes: usize,
+    pub target_chunk_len: usize,
+    pub cap_requests: usize,
+    pub cap_inflight_bytes: usize,
+    pub cap_chunk_len: usize,
+    pub completed_requests: u64,
+    pub completed_bytes: u64,
+    pub bytes_per_sec: u64,
+    pub rtt_avg_ms: u64,
+    pub rtt_min_ms: u64,
+    pub rtt_max_ms: u64,
+    pub rtt_p50_ms: u64,
+    pub rtt_p95_ms: u64,
+    pub window_growth_count: u64,
+    pub window_shrink_count: u64,
+    pub short_read_count: u64,
+    pub status_error_count: u64,
+    pub protocol_error_count: u64,
+    pub channel_closed_count: u64,
+    pub zero_read_count: u64,
+    pub last_shrink_reason: Option<SftpWindowShrinkReason>,
+}
+
+#[derive(Clone, Copy)]
+pub struct PipelinedDownloaderSnapshot {
+    pub window: SftpWindowSnapshot,
+    pub pending_requests: usize,
+    pub inflight_bytes: usize,
+    pub ready_chunks: usize,
+    pub discarded_speculative_requests: u64,
+    pub discarded_ready_chunks: u64,
+    pub out_of_order_completed: u64,
+    pub largest_reorder_gap: u64,
+    pub restart_from_offset_count: u64,
+}
+
+#[derive(Clone, Copy)]
+pub struct PipelinedUploaderSnapshot {
+    pub window: SftpWindowSnapshot,
+    pub pending_write_acks: usize,
+    pub inflight_bytes: usize,
+    pub scheduled_bytes: u64,
+    pub capacity_wait_count: u64,
+    pub capacity_wait_avg_ms: u64,
+    pub write_status_ok_count: u64,
+    pub write_status_error_count: u64,
+}
 
 struct SftpWindowTuner {
     max_requests: usize,
@@ -76,6 +147,22 @@ struct SftpWindowTuner {
     completed_bytes: usize,
     rtt_total: Duration,
     congestion_events: usize,
+    started_at: Instant,
+    total_completed_requests: u64,
+    total_completed_bytes: u64,
+    total_rtt: Duration,
+    rtt_min_ms: Option<u64>,
+    rtt_max_ms: u64,
+    rtt_samples_ms: VecDeque<u64>,
+    last_bytes_per_sec: u64,
+    window_growth_count: u64,
+    window_shrink_count: u64,
+    short_read_count: u64,
+    status_error_count: u64,
+    protocol_error_count: u64,
+    channel_closed_count: u64,
+    zero_read_count: u64,
+    last_shrink_reason: Option<SftpWindowShrinkReason>,
 }
 
 impl SftpWindowTuner {
@@ -113,6 +200,22 @@ impl SftpWindowTuner {
             completed_bytes: 0,
             rtt_total: Duration::ZERO,
             congestion_events: 0,
+            started_at: Instant::now(),
+            total_completed_requests: 0,
+            total_completed_bytes: 0,
+            total_rtt: Duration::ZERO,
+            rtt_min_ms: None,
+            rtt_max_ms: 0,
+            rtt_samples_ms: VecDeque::with_capacity(WINDOW_TUNER_RTT_SAMPLE_CAP),
+            last_bytes_per_sec: 0,
+            window_growth_count: 0,
+            window_shrink_count: 0,
+            short_read_count: 0,
+            status_error_count: 0,
+            protocol_error_count: 0,
+            channel_closed_count: 0,
+            zero_read_count: 0,
+            last_shrink_reason: None,
         }
     }
 
@@ -128,9 +231,15 @@ impl SftpWindowTuner {
         self.target_chunk_len
     }
 
-    fn record_success(&mut self, bytes: usize, rtt: Duration, congested: bool) {
-        if congested {
-            self.record_congestion();
+    fn record_success(
+        &mut self,
+        bytes: usize,
+        rtt: Duration,
+        shrink_reason: Option<SftpWindowShrinkReason>,
+    ) {
+        self.record_completion(bytes, rtt);
+        if let Some(reason) = shrink_reason {
+            self.record_congestion(reason);
             return;
         }
 
@@ -144,17 +253,54 @@ impl SftpWindowTuner {
         }
     }
 
-    fn record_error(&mut self) {
-        self.record_congestion();
+    fn record_zero_read(&mut self) {
+        self.zero_read_count = self.zero_read_count.saturating_add(1);
     }
 
-    fn record_congestion(&mut self) {
+    fn record_error(&mut self, reason: SftpWindowShrinkReason) {
+        self.record_congestion(reason);
+    }
+
+    fn record_congestion(&mut self, reason: SftpWindowShrinkReason) {
+        self.record_shrink_reason(reason);
         self.congestion_events = self.congestion_events.saturating_add(1);
         self.target_requests = (self.target_requests / 2).max(self.min_requests);
         self.target_inflight_bytes = (self.target_inflight_bytes / 2).max(self.min_inflight_bytes);
         self.target_chunk_len = (self.target_chunk_len / 2).max(self.min_chunk_len);
+        self.window_shrink_count = self.window_shrink_count.saturating_add(1);
         self.reset_interval();
         self.clamp_targets();
+    }
+
+    fn record_completion(&mut self, bytes: usize, rtt: Duration) {
+        let rtt_ms = duration_millis(rtt);
+        self.total_completed_requests = self.total_completed_requests.saturating_add(1);
+        self.total_completed_bytes = self.total_completed_bytes.saturating_add(bytes as u64);
+        self.total_rtt += rtt;
+        self.rtt_min_ms = Some(self.rtt_min_ms.map_or(rtt_ms, |min| min.min(rtt_ms)));
+        self.rtt_max_ms = self.rtt_max_ms.max(rtt_ms);
+        if self.rtt_samples_ms.len() >= WINDOW_TUNER_RTT_SAMPLE_CAP {
+            self.rtt_samples_ms.pop_front();
+        }
+        self.rtt_samples_ms.push_back(rtt_ms);
+    }
+
+    fn record_shrink_reason(&mut self, reason: SftpWindowShrinkReason) {
+        match reason {
+            SftpWindowShrinkReason::ShortRead => {
+                self.short_read_count = self.short_read_count.saturating_add(1);
+            }
+            SftpWindowShrinkReason::StatusError => {
+                self.status_error_count = self.status_error_count.saturating_add(1);
+            }
+            SftpWindowShrinkReason::ProtocolError => {
+                self.protocol_error_count = self.protocol_error_count.saturating_add(1);
+            }
+            SftpWindowShrinkReason::ChannelClosed => {
+                self.channel_closed_count = self.channel_closed_count.saturating_add(1);
+            }
+        }
+        self.last_shrink_reason = Some(reason);
     }
 
     fn adjust_after_interval(&mut self, elapsed: Duration) {
@@ -167,6 +313,7 @@ impl SftpWindowTuner {
             let avg_rtt = self.rtt_total / self.completed_requests as u32;
             let bytes_per_sec =
                 (self.completed_bytes as f64 / elapsed.as_secs_f64().max(0.001)) as usize;
+            self.last_bytes_per_sec = bytes_per_sec as u64;
             let desired_chunk = Self::chunk_for_throughput(bytes_per_sec)
                 .clamp(self.min_chunk_len, self.max_chunk_len);
             self.target_chunk_len = if desired_chunk >= self.target_chunk_len {
@@ -187,6 +334,7 @@ impl SftpWindowTuner {
                 .target_inflight_bytes
                 .saturating_add(inflight_step)
                 .min(self.max_inflight_bytes);
+            self.window_growth_count = self.window_growth_count.saturating_add(1);
         }
 
         self.reset_interval();
@@ -223,6 +371,64 @@ impl SftpWindowTuner {
             .clamp(self.min_inflight_bytes, self.max_inflight_bytes)
             .max(self.target_chunk_len);
     }
+
+    fn snapshot(&self) -> SftpWindowSnapshot {
+        let avg_rtt_ms = if self.total_completed_requests > 0 {
+            duration_millis(self.total_rtt / self.total_completed_requests as u32)
+        } else {
+            0
+        };
+        let bytes_per_sec = if self.last_bytes_per_sec > 0 {
+            self.last_bytes_per_sec
+        } else {
+            let elapsed = self.started_at.elapsed().as_secs_f64();
+            if elapsed > 0.0 {
+                (self.total_completed_bytes as f64 / elapsed) as u64
+            } else {
+                0
+            }
+        };
+
+        SftpWindowSnapshot {
+            target_requests: self.target_requests,
+            target_inflight_bytes: self.target_inflight_bytes,
+            target_chunk_len: self.target_chunk_len,
+            cap_requests: self.max_requests,
+            cap_inflight_bytes: self.max_inflight_bytes,
+            cap_chunk_len: self.max_chunk_len,
+            completed_requests: self.total_completed_requests,
+            completed_bytes: self.total_completed_bytes,
+            bytes_per_sec,
+            rtt_avg_ms: avg_rtt_ms,
+            rtt_min_ms: self.rtt_min_ms.unwrap_or_default(),
+            rtt_max_ms: self.rtt_max_ms,
+            rtt_p50_ms: percentile(&self.rtt_samples_ms, 50),
+            rtt_p95_ms: percentile(&self.rtt_samples_ms, 95),
+            window_growth_count: self.window_growth_count,
+            window_shrink_count: self.window_shrink_count,
+            short_read_count: self.short_read_count,
+            status_error_count: self.status_error_count,
+            protocol_error_count: self.protocol_error_count,
+            channel_closed_count: self.channel_closed_count,
+            zero_read_count: self.zero_read_count,
+            last_shrink_reason: self.last_shrink_reason,
+        }
+    }
+}
+
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn percentile(samples: &VecDeque<u64>, percentile: u8) -> u64 {
+    if samples.is_empty() {
+        return 0;
+    }
+    let mut values = samples.iter().copied().collect::<Vec<_>>();
+    values.sort_unstable();
+    let numerator = (values.len().saturating_sub(1)).saturating_mul(percentile as usize);
+    let index = (numerator + 50) / 100;
+    values[index.min(values.len() - 1)]
 }
 
 /// A chunk returned by a pipelined SFTP file read.
@@ -260,6 +466,11 @@ pub struct PipelinedFileDownloader {
     max_read_len: usize,
     inflight_bytes: usize,
     tuner: SftpWindowTuner,
+    discarded_speculative_requests: u64,
+    discarded_ready_chunks: u64,
+    out_of_order_completed: u64,
+    largest_reorder_gap: u64,
+    restart_from_offset_count: u64,
     scheduling_error: Option<Error>,
     finished: bool,
     closed: bool,
@@ -274,6 +485,11 @@ pub struct PipelinedFileUploader {
     max_write_len: usize,
     inflight_bytes: usize,
     tuner: SftpWindowTuner,
+    scheduled_bytes: u64,
+    capacity_wait_count: u64,
+    capacity_wait_total: Duration,
+    write_status_ok_count: u64,
+    write_status_error_count: u64,
     fsync: bool,
     closed: bool,
 }
@@ -555,6 +771,11 @@ impl PipelinedFileDownloader {
             max_read_len,
             inflight_bytes: 0,
             tuner,
+            discarded_speculative_requests: 0,
+            discarded_ready_chunks: 0,
+            out_of_order_completed: 0,
+            largest_reorder_gap: 0,
+            restart_from_offset_count: 0,
             scheduling_error: None,
             finished: false,
             closed: false,
@@ -598,9 +819,11 @@ impl PipelinedFileDownloader {
             {
                 Ok(rx) => rx,
                 Err(error) => {
+                    self.tuner
+                        .record_error(SftpWindowShrinkReason::ProtocolError);
                     self.scheduling_error = Some(error);
                     self.finished = true;
-                    self.discard_pending();
+                    self.discard_pending_after_fault();
                     break;
                 }
             };
@@ -622,6 +845,21 @@ impl PipelinedFileDownloader {
         for pending in self.pending.drain(..) {
             self.inflight_bytes = self.inflight_bytes.saturating_sub(pending.requested_len);
         }
+    }
+
+    fn discard_pending_after_fault(&mut self) {
+        self.discarded_speculative_requests = self
+            .discarded_speculative_requests
+            .saturating_add(self.pending.len() as u64);
+        self.discard_pending();
+    }
+
+    fn retain_ready_before(&mut self, next_offset: u64) {
+        let before = self.ready_chunks.len();
+        self.ready_chunks.retain(|offset, _| *offset < next_offset);
+        self.discarded_ready_chunks = self
+            .discarded_ready_chunks
+            .saturating_add(before.saturating_sub(self.ready_chunks.len()) as u64);
     }
 
     fn poll_completed_read(&mut self, cx: &mut Context<'_>) -> Poll<Option<CompletedRead>> {
@@ -675,30 +913,44 @@ impl PipelinedFileDownloader {
         match completed.result {
             Ok(Packet::Data(data)) => {
                 let read_len = data.data.len();
+                if completed.offset != self.next_write_offset {
+                    self.out_of_order_completed = self.out_of_order_completed.saturating_add(1);
+                    let gap = completed.offset.abs_diff(self.next_write_offset);
+                    self.largest_reorder_gap = self.largest_reorder_gap.max(gap);
+                }
+
                 if read_len == 0 {
+                    self.tuner.record_zero_read();
                     self.finished = true;
                     self.discard_pending();
                     return Ok(());
                 }
 
                 if read_len < completed.requested_len {
-                    self.tuner.record_success(read_len, rtt, true);
-                    self.discard_pending();
+                    self.tuner.record_success(
+                        read_len,
+                        rtt,
+                        Some(SftpWindowShrinkReason::ShortRead),
+                    );
+                    self.discard_pending_after_fault();
                     if completed.offset != self.next_write_offset {
                         // A speculative later read can complete before the
                         // contiguous offset. Restart from the next emit point
                         // so a legal short read never creates a gap.
                         self.next_request_offset = self.next_write_offset;
-                        self.ready_chunks
-                            .retain(|offset, _| *offset < self.next_write_offset);
+                        self.retain_ready_before(self.next_write_offset);
+                        self.restart_from_offset_count =
+                            self.restart_from_offset_count.saturating_add(1);
                         return Ok(());
                     }
 
                     let next_offset = completed.offset.saturating_add(read_len as u64);
                     self.next_request_offset = next_offset;
-                    self.ready_chunks.retain(|offset, _| *offset < next_offset);
+                    self.retain_ready_before(next_offset);
+                    self.restart_from_offset_count =
+                        self.restart_from_offset_count.saturating_add(1);
                 } else {
-                    self.tuner.record_success(read_len, rtt, false);
+                    self.tuner.record_success(read_len, rtt, None);
                 }
 
                 self.ready_chunks.insert(completed.offset, data.data);
@@ -710,18 +962,20 @@ impl PipelinedFileDownloader {
                 Ok(())
             }
             Ok(Packet::Status(status)) => {
-                self.discard_pending();
-                self.tuner.record_error();
+                self.discard_pending_after_fault();
+                self.tuner.record_error(SftpWindowShrinkReason::StatusError);
                 Err(status.into())
             }
             Ok(_) => {
-                self.discard_pending();
-                self.tuner.record_error();
+                self.discard_pending_after_fault();
+                self.tuner
+                    .record_error(SftpWindowShrinkReason::ProtocolError);
                 Err(Error::UnexpectedPacket)
             }
             Err(error) => {
-                self.discard_pending();
-                self.tuner.record_error();
+                self.discard_pending_after_fault();
+                self.tuner
+                    .record_error(SftpWindowShrinkReason::ChannelClosed);
                 Err(error)
             }
         }
@@ -811,6 +1065,20 @@ impl PipelinedFileDownloader {
     pub fn next_request_offset(&self) -> u64 {
         self.next_request_offset
     }
+
+    pub fn diagnostic_snapshot(&self) -> PipelinedDownloaderSnapshot {
+        PipelinedDownloaderSnapshot {
+            window: self.tuner.snapshot(),
+            pending_requests: self.pending.len(),
+            inflight_bytes: self.inflight_bytes,
+            ready_chunks: self.ready_chunks.len(),
+            discarded_speculative_requests: self.discarded_speculative_requests,
+            discarded_ready_chunks: self.discarded_ready_chunks,
+            out_of_order_completed: self.out_of_order_completed,
+            largest_reorder_gap: self.largest_reorder_gap,
+            restart_from_offset_count: self.restart_from_offset_count,
+        }
+    }
 }
 
 impl PipelinedFileUploader {
@@ -832,6 +1100,11 @@ impl PipelinedFileUploader {
             max_write_len,
             inflight_bytes: 0,
             tuner,
+            scheduled_bytes: 0,
+            capacity_wait_count: 0,
+            capacity_wait_total: Duration::ZERO,
+            write_status_ok_count: 0,
+            write_status_error_count: 0,
             fsync,
             closed: false,
         }
@@ -891,17 +1164,22 @@ impl PipelinedFileUploader {
                         self.tuner.record_success(
                             pending.requested_len,
                             pending.sent_at.elapsed(),
-                            false,
+                            None,
                         );
+                        self.write_status_ok_count = self.write_status_ok_count.saturating_add(1);
                         pending.requested_len
                     }
                     Err(error) => {
-                        self.tuner.record_error();
+                        self.write_status_error_count =
+                            self.write_status_error_count.saturating_add(1);
+                        self.tuner.record_error(SftpWindowShrinkReason::StatusError);
                         return Poll::Ready(Err(error));
                     }
                 },
                 Err(_) => {
-                    self.tuner.record_error();
+                    self.write_status_error_count = self.write_status_error_count.saturating_add(1);
+                    self.tuner
+                        .record_error(SftpWindowShrinkReason::ChannelClosed);
                     return Poll::Ready(Err(Error::UnexpectedBehavior(
                         "write channel closed".into(),
                     )));
@@ -916,8 +1194,13 @@ impl PipelinedFileUploader {
     }
 
     async fn wait_for_capacity(&mut self) -> SftpResult<()> {
+        let started = (!self.has_write_capacity()).then(Instant::now);
         while !self.has_write_capacity() {
             let _completed = future::poll_fn(|cx| self.poll_write_progress(cx, true)).await?;
+        }
+        if let Some(started) = started {
+            self.capacity_wait_count = self.capacity_wait_count.saturating_add(1);
+            self.capacity_wait_total += started.elapsed();
         }
         Ok(())
     }
@@ -965,6 +1248,7 @@ impl PipelinedFileUploader {
             self.inflight_bytes = self.inflight_bytes.saturating_add(len);
             self.next_write_offset = self.next_write_offset.saturating_add(len as u64);
             scheduled = scheduled.saturating_add(len);
+            self.scheduled_bytes = self.scheduled_bytes.saturating_add(len as u64);
             data = &data[len..];
         }
 
@@ -998,6 +1282,25 @@ impl PipelinedFileUploader {
 
     pub fn target_chunk_len(&self) -> usize {
         self.tuner.target_chunk_len()
+    }
+
+    pub fn diagnostic_snapshot(&self) -> PipelinedUploaderSnapshot {
+        let capacity_wait_avg_ms = if self.capacity_wait_count > 0 {
+            duration_millis(self.capacity_wait_total / self.capacity_wait_count as u32)
+        } else {
+            0
+        };
+
+        PipelinedUploaderSnapshot {
+            window: self.tuner.snapshot(),
+            pending_write_acks: self.pending.len(),
+            inflight_bytes: self.inflight_bytes,
+            scheduled_bytes: self.scheduled_bytes,
+            capacity_wait_count: self.capacity_wait_count,
+            capacity_wait_avg_ms,
+            write_status_ok_count: self.write_status_ok_count,
+            write_status_error_count: self.write_status_error_count,
+        }
     }
 }
 
@@ -1311,19 +1614,32 @@ mod tests {
         let initial_inflight = tuner.target_inflight_bytes();
         let initial_chunk = tuner.target_chunk_len();
 
-        tuner.record_success(128 * 1024, Duration::from_millis(40), true);
+        tuner.record_success(
+            128 * 1024,
+            Duration::from_millis(40),
+            Some(SftpWindowShrinkReason::ShortRead),
+        );
 
         assert!(tuner.target_requests() < initial_requests);
         assert!(tuner.target_inflight_bytes() < initial_inflight);
         assert!(tuner.target_chunk_len() < initial_chunk);
+        let snapshot = tuner.snapshot();
+        assert_eq!(snapshot.short_read_count, 1);
+        assert_eq!(
+            snapshot.last_shrink_reason.map(|reason| reason.as_str()),
+            Some("short_read")
+        );
 
         let reduced_requests = tuner.target_requests();
         let reduced_inflight = tuner.target_inflight_bytes();
         tuner.interval_started = Instant::now() - WINDOW_TUNER_ADJUST_INTERVAL;
-        tuner.record_success(2 * 1024 * 1024, Duration::from_millis(200), false);
+        tuner.record_success(2 * 1024 * 1024, Duration::from_millis(200), None);
 
         assert!(tuner.target_requests() > reduced_requests);
         assert!(tuner.target_inflight_bytes() > reduced_inflight);
+        let snapshot = tuner.snapshot();
+        assert!(snapshot.completed_bytes >= 2 * 1024 * 1024);
+        assert!(snapshot.rtt_avg_ms > 0);
     }
 
     #[test]
@@ -1332,7 +1648,7 @@ mod tests {
 
         for _ in 0..16 {
             tuner.interval_started = Instant::now() - WINDOW_TUNER_ADJUST_INTERVAL;
-            tuner.record_success(4 * 1024 * 1024, Duration::from_millis(250), false);
+            tuner.record_success(4 * 1024 * 1024, Duration::from_millis(250), None);
         }
 
         assert!(tuner.target_requests() <= 8);

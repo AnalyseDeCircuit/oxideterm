@@ -501,11 +501,12 @@ impl SftpSession {
             Some(job.total_bytes),
             AdaptiveChunkSizer::MAX_CHUNK,
             SFTP_DOWNLOAD_MAX_REQUESTS,
-            SFTP_DOWNLOAD_MAX_INFLIGHT_BYTES,
+            SFTP_SINGLE_FILE_MAX_INFLIGHT_BYTES,
         );
         let started = Instant::now();
         let mut transferred = 0u64;
         let mut last_progress = Instant::now();
+        let mut diagnostics = LocalSftpDiagnostics::new();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
             let Some(chunk) = remote_reader
@@ -519,17 +520,30 @@ impl SftpSession {
             if chunk.offset != transferred {
                 // Pipelined reads are emitted in order, but seeking keeps the
                 // local file correct if a server short-read forces a restart.
+                let seek_started = Instant::now();
                 local_file
                     .seek(std::io::SeekFrom::Start(chunk.offset))
                     .await
                     .map_err(SftpError::IoError)?;
+                diagnostics.record_local_seek(seek_started.elapsed());
             }
+            let write_started = Instant::now();
             local_file
                 .write_all(&chunk.data)
                 .await
                 .map_err(SftpError::IoError)?;
+            diagnostics.record_local_write(read, write_started.elapsed());
             transferred = chunk.offset.saturating_add(read as u64);
-            throttle_transfer(transferred, started, transfer_manager).await;
+            let throttle_sleep = throttle_transfer(transferred, started, transfer_manager).await;
+            diagnostics.record_throttle_sleep(throttle_sleep);
+            if diagnostics.should_log() {
+                emit_local_sftp_diagnostics(format_download_diagnostics(
+                    transferred,
+                    job.total_bytes,
+                    remote_reader.diagnostic_snapshot(),
+                    &diagnostics,
+                ));
+            }
             if last_progress.elapsed().as_millis() >= 200 {
                 send_transfer_progress(
                     progress_tx,
@@ -590,19 +604,22 @@ impl SftpSession {
             0,
             AdaptiveChunkSizer::MAX_CHUNK,
             SFTP_UPLOAD_MAX_REQUESTS,
-            SFTP_UPLOAD_MAX_INFLIGHT_BYTES,
+            SFTP_SINGLE_FILE_MAX_INFLIGHT_BYTES,
         );
         let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
         let started = Instant::now();
         let mut transferred = 0u64;
         let mut last_progress = Instant::now();
+        let mut diagnostics = LocalSftpDiagnostics::new();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
             let chunk_size = remote_writer.target_chunk_len();
+            let read_started = Instant::now();
             let read = local_file
                 .read(&mut buffer[..chunk_size])
                 .await
                 .map_err(SftpError::IoError)?;
+            diagnostics.record_local_read(read, read_started.elapsed());
             if read == 0 {
                 break;
             }
@@ -611,7 +628,16 @@ impl SftpSession {
                 .await
                 .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
             transferred = transferred.saturating_add(scheduled as u64);
-            throttle_transfer(transferred, started, transfer_manager).await;
+            let throttle_sleep = throttle_transfer(transferred, started, transfer_manager).await;
+            diagnostics.record_throttle_sleep(throttle_sleep);
+            if diagnostics.should_log() {
+                emit_local_sftp_diagnostics(format_upload_diagnostics(
+                    transferred,
+                    job.total_bytes,
+                    remote_writer.diagnostic_snapshot(),
+                    &diagnostics,
+                ));
+            }
             if last_progress.elapsed().as_millis() >= 200 {
                 send_transfer_progress(
                     progress_tx,
@@ -691,12 +717,13 @@ impl SftpSession {
             Some(job.total_bytes),
             AdaptiveChunkSizer::MAX_CHUNK,
             SFTP_DOWNLOAD_MAX_REQUESTS,
-            SFTP_DOWNLOAD_MAX_INFLIGHT_BYTES,
+            SFTP_SINGLE_FILE_MAX_INFLIGHT_BYTES,
         );
         let started = Instant::now();
         let mut transferred = offset;
         let mut last_progress = Instant::now();
         let mut last_persist = Instant::now();
+        let mut diagnostics = LocalSftpDiagnostics::new();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
             let Some(chunk) = remote_reader
@@ -710,22 +737,35 @@ impl SftpSession {
             if chunk.offset != transferred {
                 // Preserve sparse correctness if a short-read causes the
                 // pipelined reader to restart at a non-speculative offset.
+                let seek_started = Instant::now();
                 local_file
                     .seek(std::io::SeekFrom::Start(chunk.offset))
                     .await
                     .map_err(SftpError::IoError)?;
+                diagnostics.record_local_seek(seek_started.elapsed());
             }
+            let write_started = Instant::now();
             local_file
                 .write_all(&chunk.data)
                 .await
                 .map_err(SftpError::IoError)?;
+            diagnostics.record_local_write(read, write_started.elapsed());
             transferred = chunk.offset.saturating_add(read as u64);
-            throttle_transfer(
+            let throttle_sleep = throttle_transfer(
                 transferred.saturating_sub(offset),
                 started,
                 transfer_manager,
             )
             .await;
+            diagnostics.record_throttle_sleep(throttle_sleep);
+            if diagnostics.should_log() {
+                emit_local_sftp_diagnostics(format_download_diagnostics(
+                    transferred,
+                    job.total_bytes,
+                    remote_reader.diagnostic_snapshot(),
+                    &diagnostics,
+                ));
+            }
             if last_progress.elapsed().as_millis() >= 200 {
                 stored_progress.update_progress(transferred);
                 if last_persist.elapsed() >= SFTP_PROGRESS_PERSIST_INTERVAL {
@@ -810,20 +850,23 @@ impl SftpSession {
             offset,
             AdaptiveChunkSizer::MAX_CHUNK,
             SFTP_UPLOAD_MAX_REQUESTS,
-            SFTP_UPLOAD_MAX_INFLIGHT_BYTES,
+            SFTP_SINGLE_FILE_MAX_INFLIGHT_BYTES,
         );
         let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
         let started = Instant::now();
         let mut transferred = offset;
         let mut last_progress = Instant::now();
         let mut last_persist = Instant::now();
+        let mut diagnostics = LocalSftpDiagnostics::new();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
             let chunk_size = remote_writer.target_chunk_len();
+            let read_started = Instant::now();
             let read = local_file
                 .read(&mut buffer[..chunk_size])
                 .await
                 .map_err(SftpError::IoError)?;
+            diagnostics.record_local_read(read, read_started.elapsed());
             if read == 0 {
                 break;
             }
@@ -832,12 +875,21 @@ impl SftpSession {
                 .await
                 .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
             transferred = transferred.saturating_add(scheduled as u64);
-            throttle_transfer(
+            let throttle_sleep = throttle_transfer(
                 transferred.saturating_sub(offset),
                 started,
                 transfer_manager,
             )
             .await;
+            diagnostics.record_throttle_sleep(throttle_sleep);
+            if diagnostics.should_log() {
+                emit_local_sftp_diagnostics(format_upload_diagnostics(
+                    transferred,
+                    job.total_bytes,
+                    remote_writer.diagnostic_snapshot(),
+                    &diagnostics,
+                ));
+            }
             if last_progress.elapsed().as_millis() >= 200 {
                 stored_progress.update_progress(transferred);
                 if last_persist.elapsed() >= SFTP_PROGRESS_PERSIST_INTERVAL {

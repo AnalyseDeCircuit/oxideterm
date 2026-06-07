@@ -353,6 +353,31 @@ BrandingText "{identity.app_name}"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+Function .onInit
+  ReadRegStr $0 HKCU "Software\\{identity.windows_registry_key}" "InstallDir"
+  StrCmp $0 "" install_ready
+  IfFileExists "$0\\Uninstall.exe" 0 install_ready
+  MessageBox MB_ICONQUESTION|MB_YESNO "{nsis_string(identity.app_name)} is already installed.$\\r$\\n$\\r$\\nUninstall the existing installation before continuing?" IDYES uninstall_existing
+  Abort
+
+uninstall_existing:
+  ClearErrors
+  ExecWait '"$0\\Uninstall.exe" _?=$0' $1
+  IfErrors uninstall_failed 0 check_uninstall_exit
+
+check_uninstall_exit:
+  IntCmp $1 0 verify_uninstalled uninstall_failed uninstall_failed
+
+verify_uninstalled:
+  IfFileExists "$0\\Uninstall.exe" uninstall_failed install_ready
+
+uninstall_failed:
+  MessageBox MB_ICONEXCLAMATION "The existing {nsis_string(identity.app_name)} installation was not uninstalled. Setup will exit."
+  Abort
+
+install_ready:
+FunctionEnd
+
 Section "Install"
   SetOutPath "$INSTDIR"
   File /r "{nsis_path(installer_root)}\\*"
@@ -361,7 +386,7 @@ Section "Install"
   WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "DisplayName" "{identity.app_name}"
   WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "DisplayVersion" "{nsis_string(version)}"
   WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "Publisher" "AnalyseDeCircuit"
-  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "UninstallString" "$INSTDIR\\Uninstall.exe"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "UninstallString" "$\\"$INSTDIR\\Uninstall.exe$\\""
   CreateDirectory "$SMPROGRAMS\\{identity.app_name}"
   CreateShortcut "$SMPROGRAMS\\{identity.app_name}\\{identity.app_name}.lnk" "$INSTDIR\\{binary.name}" "" "$INSTDIR\\resources\\icons\\icon.ico"
 SectionEnd
