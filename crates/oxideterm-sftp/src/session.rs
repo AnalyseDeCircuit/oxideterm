@@ -32,6 +32,12 @@ use crate::{
     ProgressStore, SftpTransferGuard, SftpTransferManager, StoredTransferProgress, TransferType,
 };
 
+const SFTP_DOWNLOAD_MAX_REQUESTS: usize = 64;
+const SFTP_DOWNLOAD_MAX_INFLIGHT_BYTES: usize = 8 * 1024 * 1024;
+const SFTP_UPLOAD_MAX_REQUESTS: usize = 64;
+const SFTP_UPLOAD_MAX_INFLIGHT_BYTES: usize = 8 * 1024 * 1024;
+const SFTP_PROGRESS_PERSIST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
 pub trait SftpChannelOpener: Clone + Send + Sync + 'static {
     fn open_sftp_channel(
         &self,

@@ -1070,8 +1070,7 @@ impl TerminalPane {
         self.bounds = Some(bounds);
         let cell_width = self.metrics.cell_width_f32();
         let line_height = self.metrics.line_height_f32();
-        let width =
-            (f32::from(bounds.size.width) - TERMINAL_CONTENT_PADDING * 2.0).max(cell_width * 2.0);
+        let width = terminal_grid_span_for_viewport(bounds.size.width, cell_width);
         let height =
             (f32::from(bounds.size.height) - TERMINAL_CONTENT_PADDING * 2.0).max(line_height * 2.0);
         let cols = whole_cells_in_span(width, cell_width).max(2);
@@ -1182,5 +1181,30 @@ fn whole_cells_in_span(span: f32, cell_span: f32) -> usize {
         nearest_integer.max(0.0) as usize
     } else {
         cells.floor().max(0.0) as usize
+    }
+}
+
+fn terminal_grid_span_for_viewport(viewport_width: Pixels, cell_width: f32) -> f32 {
+    // Browser terminals reserve right-side scrollbar chrome outside the grid.
+    // Keep that gutter stable even before scrollback exists so history growth
+    // does not resize the PTY and push the scrollbar outside the viewport.
+    (f32::from(viewport_width) - TERMINAL_CONTENT_PADDING * 2.0 - SCROLLBAR_RESERVED_WIDTH)
+        .max(cell_width * 2.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_grid_span_reserves_scrollbar_gutter() {
+        let cell_width = 10.0;
+        let grid_span = terminal_grid_span_for_viewport(px(120.0), cell_width);
+        let cols = whole_cells_in_span(grid_span, cell_width);
+        let scrollbar_right =
+            cols as f32 * cell_width + SCROLLBAR_GAP + SCROLLBAR_WIDTH + SCROLLBAR_GAP;
+
+        assert_eq!(cols, 10);
+        assert!(scrollbar_right <= 120.0);
     }
 }

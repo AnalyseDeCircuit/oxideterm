@@ -483,7 +483,7 @@ impl SftpSession {
         progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
     ) -> Result<(), SftpError> {
-        let mut remote_file = self
+        let remote_file = self
             .sftp
             .open(&job.remote_path)
             .await
@@ -496,27 +496,39 @@ impl SftpSession {
         let mut local_file = tokio::fs::File::create(&job.local_path)
             .await
             .map_err(SftpError::IoError)?;
-        let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
-        let mut chunk_sizer = AdaptiveChunkSizer::new();
+        let mut remote_reader = remote_file.into_pipelined_downloader_for_range(
+            0,
+            Some(job.total_bytes),
+            AdaptiveChunkSizer::MAX_CHUNK,
+            SFTP_DOWNLOAD_MAX_REQUESTS,
+            SFTP_DOWNLOAD_MAX_INFLIGHT_BYTES,
+        );
         let started = Instant::now();
         let mut transferred = 0u64;
         let mut last_progress = Instant::now();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
-            let chunk_size = chunk_sizer.chunk_size();
-            let read = remote_file
-                .read(&mut buffer[..chunk_size])
+            let Some(chunk) = remote_reader
+                .next_chunk()
                 .await
-                .map_err(SftpError::IoError)?;
-            if read == 0 {
+                .map_err(|error| self.map_sftp_error(error, &job.remote_path))?
+            else {
                 break;
+            };
+            let read = chunk.data.len();
+            if chunk.offset != transferred {
+                // Pipelined reads are emitted in order, but seeking keeps the
+                // local file correct if a server short-read forces a restart.
+                local_file
+                    .seek(std::io::SeekFrom::Start(chunk.offset))
+                    .await
+                    .map_err(SftpError::IoError)?;
             }
             local_file
-                .write_all(&buffer[..read])
+                .write_all(&chunk.data)
                 .await
                 .map_err(SftpError::IoError)?;
-            transferred += read as u64;
-            chunk_sizer.record(read);
+            transferred = chunk.offset.saturating_add(read as u64);
             throttle_transfer(transferred, started, transfer_manager).await;
             if last_progress.elapsed().as_millis() >= 200 {
                 send_transfer_progress(
@@ -535,6 +547,10 @@ impl SftpSession {
                 last_progress = Instant::now();
             }
         }
+        remote_reader
+            .shutdown()
+            .await
+            .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
         local_file.flush().await.map_err(SftpError::IoError)?;
         send_transfer_progress(
             progress_tx,
@@ -562,7 +578,7 @@ impl SftpSession {
         let mut local_file = tokio::fs::File::open(&job.local_path)
             .await
             .map_err(SftpError::IoError)?;
-        let mut remote_file = self
+        let remote_file = self
             .sftp
             .open_with_flags(
                 &job.remote_path,
@@ -570,6 +586,12 @@ impl SftpSession {
             )
             .await
             .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
+        let mut remote_writer = remote_file.into_pipelined_uploader(
+            0,
+            AdaptiveChunkSizer::MAX_CHUNK,
+            SFTP_UPLOAD_MAX_REQUESTS,
+            SFTP_UPLOAD_MAX_INFLIGHT_BYTES,
+        );
         let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
         let mut chunk_sizer = AdaptiveChunkSizer::new();
         let started = Instant::now();
@@ -585,12 +607,12 @@ impl SftpSession {
             if read == 0 {
                 break;
             }
-            remote_file
-                .write_all(&buffer[..read])
+            let scheduled = remote_writer
+                .write_all_chunk(&buffer[..read])
                 .await
-                .map_err(SftpError::IoError)?;
-            transferred += read as u64;
-            chunk_sizer.record(read);
+                .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
+            transferred = transferred.saturating_add(scheduled as u64);
+            chunk_sizer.record(scheduled);
             throttle_transfer(transferred, started, transfer_manager).await;
             if last_progress.elapsed().as_millis() >= 200 {
                 send_transfer_progress(
@@ -609,7 +631,10 @@ impl SftpSession {
                 last_progress = Instant::now();
             }
         }
-        remote_file.flush().await.map_err(SftpError::IoError)?;
+        remote_writer
+            .shutdown()
+            .await
+            .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
         send_transfer_progress(
             progress_tx,
             transfer_id,
@@ -636,17 +661,11 @@ impl SftpSession {
         progress_store: Arc<dyn ProgressStore>,
         mut stored_progress: StoredTransferProgress,
     ) -> Result<u64, SftpError> {
-        let mut remote_file = self
+        let remote_file = self
             .sftp
             .open(&job.remote_path)
             .await
             .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
-        if offset > 0 {
-            remote_file
-                .seek(std::io::SeekFrom::Start(offset))
-                .await
-                .map_err(SftpError::IoError)?;
-        }
         if let Some(parent) = Path::new(&job.local_path).parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -669,27 +688,40 @@ impl SftpSession {
                 .await
                 .map_err(SftpError::IoError)?;
         }
-        let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
-        let mut chunk_sizer = AdaptiveChunkSizer::new();
+        let mut remote_reader = remote_file.into_pipelined_downloader_for_range(
+            offset,
+            Some(job.total_bytes),
+            AdaptiveChunkSizer::MAX_CHUNK,
+            SFTP_DOWNLOAD_MAX_REQUESTS,
+            SFTP_DOWNLOAD_MAX_INFLIGHT_BYTES,
+        );
         let started = Instant::now();
         let mut transferred = offset;
         let mut last_progress = Instant::now();
+        let mut last_persist = Instant::now();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
-            let chunk_size = chunk_sizer.chunk_size();
-            let read = remote_file
-                .read(&mut buffer[..chunk_size])
+            let Some(chunk) = remote_reader
+                .next_chunk()
                 .await
-                .map_err(SftpError::IoError)?;
-            if read == 0 {
+                .map_err(|error| self.map_sftp_error(error, &job.remote_path))?
+            else {
                 break;
+            };
+            let read = chunk.data.len();
+            if chunk.offset != transferred {
+                // Preserve sparse correctness if a short-read causes the
+                // pipelined reader to restart at a non-speculative offset.
+                local_file
+                    .seek(std::io::SeekFrom::Start(chunk.offset))
+                    .await
+                    .map_err(SftpError::IoError)?;
             }
             local_file
-                .write_all(&buffer[..read])
+                .write_all(&chunk.data)
                 .await
                 .map_err(SftpError::IoError)?;
-            transferred += read as u64;
-            chunk_sizer.record(read);
+            transferred = chunk.offset.saturating_add(read as u64);
             throttle_transfer(
                 transferred.saturating_sub(offset),
                 started,
@@ -698,7 +730,12 @@ impl SftpSession {
             .await;
             if last_progress.elapsed().as_millis() >= 200 {
                 stored_progress.update_progress(transferred);
-                progress_store.save(&stored_progress).await?;
+                if last_persist.elapsed() >= SFTP_PROGRESS_PERSIST_INTERVAL {
+                    // Persist resume state less often than UI progress so storage I/O
+                    // cannot become part of the bulk transfer hot path.
+                    progress_store.save(&stored_progress).await?;
+                    last_persist = Instant::now();
+                }
                 send_transfer_progress(
                     progress_tx,
                     transfer_id,
@@ -715,6 +752,10 @@ impl SftpSession {
                 last_progress = Instant::now();
             }
         }
+        remote_reader
+            .shutdown()
+            .await
+            .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
         local_file.flush().await.map_err(SftpError::IoError)?;
         stored_progress.mark_completed();
         progress_store.save(&stored_progress).await?;
@@ -753,9 +794,9 @@ impl SftpSession {
                 .await
                 .map_err(SftpError::IoError)?;
         }
-        let mut remote_file = if offset > 0 {
+        let remote_file = if offset > 0 {
             self.sftp
-                .open_with_flags(&job.remote_path, OpenFlags::WRITE | OpenFlags::APPEND)
+                .open_with_flags(&job.remote_path, OpenFlags::WRITE)
                 .await
                 .map_err(|error| self.map_sftp_error(error, &job.remote_path))?
         } else {
@@ -767,11 +808,18 @@ impl SftpSession {
                 .await
                 .map_err(|error| self.map_sftp_error(error, &job.remote_path))?
         };
+        let mut remote_writer = remote_file.into_pipelined_uploader(
+            offset,
+            AdaptiveChunkSizer::MAX_CHUNK,
+            SFTP_UPLOAD_MAX_REQUESTS,
+            SFTP_UPLOAD_MAX_INFLIGHT_BYTES,
+        );
         let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
         let mut chunk_sizer = AdaptiveChunkSizer::new();
         let started = Instant::now();
         let mut transferred = offset;
         let mut last_progress = Instant::now();
+        let mut last_persist = Instant::now();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
             let chunk_size = chunk_sizer.chunk_size();
@@ -782,12 +830,12 @@ impl SftpSession {
             if read == 0 {
                 break;
             }
-            remote_file
-                .write_all(&buffer[..read])
+            let scheduled = remote_writer
+                .write_all_chunk(&buffer[..read])
                 .await
-                .map_err(SftpError::IoError)?;
-            transferred += read as u64;
-            chunk_sizer.record(read);
+                .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
+            transferred = transferred.saturating_add(scheduled as u64);
+            chunk_sizer.record(scheduled);
             throttle_transfer(
                 transferred.saturating_sub(offset),
                 started,
@@ -796,7 +844,12 @@ impl SftpSession {
             .await;
             if last_progress.elapsed().as_millis() >= 200 {
                 stored_progress.update_progress(transferred);
-                progress_store.save(&stored_progress).await?;
+                if last_persist.elapsed() >= SFTP_PROGRESS_PERSIST_INTERVAL {
+                    // Persist resume state less often than UI progress so storage I/O
+                    // cannot become part of the bulk transfer hot path.
+                    progress_store.save(&stored_progress).await?;
+                    last_persist = Instant::now();
+                }
                 send_transfer_progress(
                     progress_tx,
                     transfer_id,
@@ -813,7 +866,10 @@ impl SftpSession {
                 last_progress = Instant::now();
             }
         }
-        remote_file.flush().await.map_err(SftpError::IoError)?;
+        remote_writer
+            .shutdown()
+            .await
+            .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
         stored_progress.mark_completed();
         progress_store.save(&stored_progress).await?;
         send_transfer_progress(

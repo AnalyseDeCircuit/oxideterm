@@ -17,7 +17,7 @@ parking_lot.workspace = true
 redb = "2.1"
 rmp-serde = "1"
 russh = { path = "../russh" }
-russh-sftp = "2.1.2"
+russh-sftp = { path = "../russh-sftp" }
 serde.workspace = true
 tar = "0.4"
 thiserror.workspace = true
