@@ -1,6 +1,6 @@
-# OxideTerm patches for russh-sftp 2.1.2
+# OxideTerm patches for russh-sftp 2.3.0
 
-This vendored copy is based on `russh-sftp` 2.1.2.
+This vendored copy is based on `russh-sftp` 2.3.0.
 
 ## Raw queued sequential downloads
 
@@ -20,8 +20,8 @@ and emits chunks only at the next contiguous file offset.
 OxideTerm uses this path for normal and resumed downloads in
 `crates/oxideterm-sftp`. The effective request length still comes from the
 server `limits@openssh.com` read limit or the configured packet cap, whichever
-is smaller. The current bulk download window is capped at 64 requests and 8 MiB
-of in-flight data.
+is smaller. OxideTerm currently passes a bulk download cap of 64 requests and
+16 MiB of in-flight data.
 
 Correctness notes:
 
@@ -59,7 +59,7 @@ upload-owned writer that:
 - closes the handle on drop without pretending already queued writes completed.
 
 OxideTerm currently uses this path for normal and resumed uploads with a
-64-request / 8 MiB in-flight cap. The effective write size still honors the
+64-request / 16 MiB in-flight cap. The effective write size still honors the
 server `limits@openssh.com` write limit or the configured packet cap.
 
 ## Raw WRITE packet encoding
@@ -108,8 +108,8 @@ length, request id, and payload bytes round-trip correctly.
 
 ## Adaptive bulk transfer windows
 
-The 64-request / 8 MiB bulk values are now hard caps rather than the active
-window at every moment. `PipelinedFileDownloader` and
+The caller-provided 64-request / byte-window values are now hard caps rather
+than the active window at every moment. `PipelinedFileDownloader` and
 `PipelinedFileUploader` own a small `SftpWindowTuner` that records request
 send time, DATA/ACK completion latency, completed bytes, and congestion events.
 
@@ -121,6 +121,11 @@ The tuner uses conservative additive-increase / multiplicative-decrease rules:
   shrink the target request count, in-flight bytes, and chunk length;
 - server `limits@openssh.com` and the caller-provided caps remain hard upper
   bounds.
+
+The startup window intentionally begins below the cap, then clean early
+intervals ramp faster than steady-state growth. This avoids overloading unknown
+servers immediately while still filling high-RTT links quickly when there are no
+short reads or status/protocol errors.
 
 This keeps UI-level SFTP settings stable while letting each single-file
 transfer adapt to RTT, ACK pace, server limits, and short-read/error feedback.

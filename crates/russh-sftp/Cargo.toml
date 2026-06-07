@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "russh-sftp"
-version = "2.1.2"
+version = "2.3.0"
 build = false
 autolib = false
 autobins = false
@@ -63,7 +63,7 @@ version = "1.0.228"
 features = ["derive"]
 
 [dependencies.serde_bytes]
-version = "0.11"
+version = "0.11.19"
 
 [dependencies.thiserror]
 version = "2.0.18"
@@ -81,3 +81,31 @@ default-features = false
 
 [dependencies.tokio-util]
 version = "0.7.18"
+features = ["rt"]
+default-features = false
+
+[dev-dependencies.anyhow]
+version = "1.0.102"
+
+[dev-dependencies.criterion]
+version = "0.8.2"
+features = ["async_tokio"]
+
+[dev-dependencies.env_logger]
+version = "0.11.10"
+
+[dev-dependencies.futures]
+version = "0.3.32"
+
+[dev-dependencies.rand]
+version = "0.10.1"
+
+[dev-dependencies.russh]
+version = "0.61.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.gloo-timers]
+version = "0.4.0"
+features = ["futures"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.wasm-bindgen-futures]
+version = "0.4.71"

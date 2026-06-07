@@ -39,19 +39,6 @@ impl SftpSession {
         Self::new_with_config(stream, Config::default()).await
     }
 
-    /// Creates a new session with timeout opt before the first request
-    #[deprecated(note = "use SftpSession::new_with_config with Config::req_timeout_secs instead")]
-    pub async fn new_opts<S>(stream: S, timeout: Option<u64>) -> SftpResult<Self>
-    where
-        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    {
-        let mut cfg = Config::default();
-        if let Some(secs) = timeout {
-            cfg.request_timeout_secs = secs;
-        }
-        Self::new_with_config(stream, cfg).await
-    }
-
     /// Creates a new session with custom configuration
     pub async fn new_with_config<S>(stream: S, cfg: Config) -> SftpResult<Self>
     where
@@ -181,8 +168,11 @@ impl SftpSession {
 
     /// Returns an iterator over the entries within a directory.
     pub async fn read_dir<P: Into<String>>(&self, path: P) -> SftpResult<ReadDir> {
-        let mut files = vec![];
+        let path: String = path.into();
+        let parent = Arc::from(path.as_str());
+
         let handle = self.session.opendir(path).await?.handle;
+        let mut files = vec![];
 
         loop {
             match self.session.readdir(handle.as_str()).await {
@@ -191,7 +181,7 @@ impl SftpSession {
                         .files
                         .into_iter()
                         .map(|f| (f.filename, f.attrs))
-                        .chain(files.into_iter())
+                        .chain(files)
                         .collect();
                 }
                 Err(Error::Status(status)) if status.status_code == StatusCode::Eof => break,
@@ -202,6 +192,7 @@ impl SftpSession {
         self.session.close(handle).await?;
 
         Ok(ReadDir {
+            parent,
             entries: files.into(),
         })
     }

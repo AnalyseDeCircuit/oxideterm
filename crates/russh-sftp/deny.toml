@@ -1,0 +1,13 @@
+[advisories]
+ignore = [
+    # `rsa` via russh dev-dep only; no patch upstream
+    "RUSTSEC-2023-0071",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

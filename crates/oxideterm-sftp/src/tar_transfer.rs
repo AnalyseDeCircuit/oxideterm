@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use russh::ChannelMsg;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
@@ -91,7 +91,7 @@ where
         .await
         .map_err(|error| SftpError::ChannelError(format!("Failed to exec tar: {error}")))?;
 
-    let (data_tx, mut data_rx) = mpsc::channel::<Vec<u8>>(32);
+    let (data_tx, mut data_rx) = mpsc::channel::<Bytes>(32);
     // tar::Builder is synchronous. Keep it on a blocking thread and bridge it
     // to the async SSH channel with bounded chunks, matching the Tauri pipeline.
     let tar_handle = tokio::task::spawn_blocking({
@@ -278,48 +278,58 @@ where
 const TAR_STREAM_CHUNK_SIZE: usize = 256 * 1024;
 
 struct ChunkWriter {
-    tx: mpsc::Sender<Vec<u8>>,
-    buffer: Vec<u8>,
+    tx: mpsc::Sender<Bytes>,
+    buffer: BytesMut,
 }
 
 impl ChunkWriter {
-    fn new(tx: mpsc::Sender<Vec<u8>>) -> Self {
+    fn new(tx: mpsc::Sender<Bytes>) -> Self {
         Self {
             tx,
-            buffer: Vec::with_capacity(TAR_STREAM_CHUNK_SIZE),
+            buffer: BytesMut::with_capacity(TAR_STREAM_CHUNK_SIZE),
         }
+    }
+
+    fn send_full_chunks(&mut self) -> std::io::Result<()> {
+        while self.buffer.len() >= TAR_STREAM_CHUNK_SIZE {
+            // BytesMut::split_to keeps the chunk backed by the existing buffer
+            // allocation instead of copying every tar chunk into a fresh Vec.
+            let chunk = self.buffer.split_to(TAR_STREAM_CHUNK_SIZE).freeze();
+            self.tx.blocking_send(chunk).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "tar stream closed")
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn send_remaining(&mut self) -> std::io::Result<()> {
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
+
+        let chunk = self.buffer.split().freeze();
+        self.tx
+            .blocking_send(chunk)
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "tar stream closed"))
     }
 }
 
 impl Write for ChunkWriter {
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        self.buffer.extend_from_slice(data);
-        while self.buffer.len() >= TAR_STREAM_CHUNK_SIZE {
-            let chunk = self.buffer.drain(..TAR_STREAM_CHUNK_SIZE).collect();
-            self.tx.blocking_send(chunk).map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "tar stream closed")
-            })?;
-        }
+        self.buffer.put_slice(data);
+        self.send_full_chunks()?;
         Ok(data.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        if !self.buffer.is_empty() {
-            let chunk = std::mem::take(&mut self.buffer);
-            self.tx.blocking_send(chunk).map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "tar stream closed")
-            })?;
-        }
-        Ok(())
+        self.send_remaining()
     }
 }
 
 impl Drop for ChunkWriter {
     fn drop(&mut self) {
-        if !self.buffer.is_empty() {
-            let chunk = std::mem::take(&mut self.buffer);
-            let _ = self.tx.blocking_send(chunk);
-        }
+        let _ = self.send_remaining();
     }
 }
 
@@ -361,7 +371,7 @@ impl Read for ChannelReader {
 
 fn tar_encode_directory(
     local_path: &str,
-    data_tx: mpsc::Sender<Vec<u8>>,
+    data_tx: mpsc::Sender<Bytes>,
     compression: TarCompression,
 ) -> Result<(), SftpError> {
     fn append_tar<W: Write>(writer: W, local_path: &str) -> Result<W, SftpError> {
