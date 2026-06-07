@@ -190,6 +190,13 @@ impl WorkspaceApp {
             );
         }
 
+        // Only the trailing filler is draggable. Do not mark the tabbar parent
+        // or scroll viewport as WindowControlArea::Drag; those elements contain
+        // interactive tabs and close buttons that must keep receiving normal
+        // GPUI mouse events.
+        scroll_viewport =
+            scroll_viewport.child(self.render_window_drag_region("workspace-tabbar-drag-region", cx));
+
         bar.child(scroll_viewport)
             .when_some(self.render_legacy_terminal_actions(cx), |bar, actions| {
                 bar.child(actions)

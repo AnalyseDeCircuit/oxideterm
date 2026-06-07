@@ -77,7 +77,7 @@ pub fn settings_ai_context_select_field(
 }
 
 pub fn settings_ai_context_controls_section(
-    max_width: f32,
+    _max_width: f32,
     title: AnyElement,
     fields: Vec<AnyElement>,
     sources: AnyElement,
@@ -85,7 +85,8 @@ pub fn settings_ai_context_controls_section(
     // Context controls are a two-column form followed by source toggles. The
     // controls themselves stay app-owned because select/list state lives there.
     div()
-        .max_w(px(max_width))
+        .w_full()
+        .min_w(px(0.0))
         .flex()
         .flex_col()
         .gap(px(16.0))
@@ -96,7 +97,7 @@ pub fn settings_ai_context_controls_section(
 }
 
 pub fn settings_ai_system_prompt_section(
-    max_width: f32,
+    _max_width: f32,
     title: AnyElement,
     system_prompt_row: AnyElement,
     first_separator: AnyElement,
@@ -110,7 +111,8 @@ pub fn settings_ai_system_prompt_section(
     // This section owns only vertical composition. Textareas, buttons, and
     // downstream model controls are still supplied by app/model boundaries.
     div()
-        .max_w(px(max_width))
+        .w_full()
+        .min_w(px(0.0))
         .flex()
         .flex_col()
         .gap(px(16.0))
@@ -139,7 +141,7 @@ pub fn settings_ai_icon_heading(icon: AnyElement, title: AnyElement) -> AnyEleme
 }
 
 pub fn settings_ai_tool_use_section(
-    max_width: f32,
+    _max_width: f32,
     heading: AnyElement,
     expand_button: AnyElement,
     enabled_row: AnyElement,
@@ -151,7 +153,8 @@ pub fn settings_ai_tool_use_section(
     // The tool-use section shell owns header/body ordering. Policy controls
     // and settings writes stay in the app and settings-model crates.
     div()
-        .max_w(px(max_width))
+        .w_full()
+        .min_w(px(0.0))
         .flex()
         .flex_col()
         .gap(px(16.0))
@@ -179,6 +182,8 @@ pub fn settings_ai_context_sources_group(
 ) -> AnyElement {
     // Source toggles share one small titled group under the context selectors.
     div()
+        .w_full()
+        .min_w(px(0.0))
         .mt(px(8.0))
         .flex()
         .flex_col()
@@ -203,6 +208,8 @@ pub fn settings_ai_context_source_row(
     // The row chrome is reusable, while caller-provided handlers keep settings
     // mutation and event propagation in the app crate.
     div()
+        .w_full()
+        .min_w(px(0.0))
         .flex()
         .items_center()
         .gap(px(12.0))
@@ -233,12 +240,13 @@ pub fn settings_ai_global_reasoning_section(
     title: String,
     control: AnyElement,
     hint: String,
-    max_width: f32,
+    _max_width: f32,
 ) -> AnyElement {
     // The global reasoning section is a simple labeled select. Option content
     // and writes stay app/model-owned.
     div()
-        .max_w(px(max_width))
+        .w_full()
+        .min_w(px(0.0))
         .flex()
         .flex_col()
         .gap(px(8.0))
@@ -332,6 +340,8 @@ pub fn settings_ai_textarea_row(
     // Label and hint layout is presentational; the control can be a GPUI anchor
     // probe or any other app-owned multiline input.
     div()
+        .w_full()
+        .min_w(px(0.0))
         .flex()
         .flex_col()
         .gap(px(8.0))
@@ -362,6 +372,7 @@ pub fn settings_ai_section_heading(
 ) -> AnyElement {
     // Section headings are pure copy layout; the app supplies translated text.
     div()
+        .w_full()
         .min_w(px(0.0))
         .flex_1()
         .child(
@@ -435,6 +446,8 @@ pub fn settings_ai_model_reasoning_header(
     // Reasoning override header uses the compact hoverable trigger from the
     // React settings card. The app attaches the expansion toggle.
     div()
+        .w_full()
+        .min_w(px(0.0))
         .mb(px(12.0))
         .rounded(px(tokens.radii.md))
         .px(px(4.0))
@@ -479,14 +492,14 @@ pub fn settings_ai_context_windows_header(
     title: String,
     hint: String,
     chevron: AnyElement,
-    max_width: f32,
+    _max_width: f32,
 ) -> gpui::Div {
     // Context-window header is wider and less card-like than the reasoning
     // override trigger, matching the original page hierarchy.
     div()
         .mb(px(16.0))
         .w_full()
-        .max_w(px(max_width))
+        .min_w(px(0.0))
         .flex()
         .items_start()
         .justify_between()
@@ -534,6 +547,8 @@ pub fn settings_ai_model_provider_header(
     // Provider headers are compact table group toggles. The actual provider id
     // and expansion mutation remain in the app state.
     div()
+        .w_full()
+        .min_w(px(0.0))
         .mb(px(4.0))
         .rounded(px(tokens.radii.sm))
         .px(px(4.0))
@@ -575,7 +590,13 @@ pub fn settings_ai_model_provider_section(
 ) -> AnyElement {
     // A provider section owns only vertical grouping; row virtualization is
     // supplied by the app because it owns ListState caches.
-    let section = div().flex().flex_col().gap(px(4.0)).child(provider_header);
+    let section = div()
+        .w_full()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(provider_header);
     if let Some(rows) = rows {
         section.child(rows).into_any_element()
     } else {
@@ -591,6 +612,8 @@ pub fn settings_ai_model_row_list_frame(
     // Virtualized model rows need a fixed-height bordered frame so GPUI's list
     // measurements do not resize the surrounding settings layout.
     div()
+        .w_full()
+        .min_w(px(0.0))
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(rgba(

@@ -26,6 +26,8 @@ impl WorkspaceApp {
         let hidden_count = provider.models.len().saturating_sub(visible_model_count);
 
         let mut card = div()
+            .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(if active_provider {
@@ -71,6 +73,7 @@ impl WorkspaceApp {
         let provider_has_key = provider_key_state.has_usable_key();
         div()
             .w_full()
+            .min_w(px(0.0))
             .flex()
             .items_start()
             .justify_between()
@@ -79,7 +82,7 @@ impl WorkspaceApp {
             .cursor_pointer()
             .child(
                 div()
-                .min_w_0()
+                    .min_w_0()
                     .flex_1()
                     .flex()
                     .flex_col()

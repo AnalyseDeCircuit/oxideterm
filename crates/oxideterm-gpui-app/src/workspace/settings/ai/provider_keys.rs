@@ -32,6 +32,8 @@ impl WorkspaceApp {
         };
         let save_disabled = draft.trim().is_empty();
         div()
+            .w_full()
+            .min_w(px(0.0))
             .px(px(16.0))
             .pb(px(16.0))
             .grid()
@@ -93,6 +95,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let provider_id = provider.id.clone();
         div()
+            .w_full()
+            .min_w(px(0.0))
             .px(px(16.0))
             .pb(px(16.0))
             .grid()
@@ -109,6 +113,7 @@ impl WorkspaceApp {
                     .gap(px(8.0))
                     .child(
                         div()
+                            .min_w(px(0.0))
                             .flex_1()
                             .h(px(32.0))
                             .px(px(8.0))

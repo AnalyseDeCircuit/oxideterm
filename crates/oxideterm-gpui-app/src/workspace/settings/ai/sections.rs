@@ -24,6 +24,8 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let profile_count = profiles.len();
         let profile_list = div()
+            .w_full()
+            .min_w(px(0.0))
             .h(px(
                 profile_count as f32 * AI_EXECUTION_PROFILE_LIST_ESTIMATED_HEIGHT,
             ))
@@ -38,7 +40,8 @@ impl WorkspaceApp {
             ));
 
         div()
-            .max_w(px(AI_PROVIDER_MAX_W))
+            .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgba(
@@ -138,6 +141,8 @@ impl WorkspaceApp {
             ai_default_execution_profile(settings).unwrap_or_else(|| "default".to_string());
         let profile_count = profiles.len();
         div()
+            .w_full()
+            .min_w(px(0.0))
             .pb(px(8.0))
             .child(self.ai_execution_profile_card(
                 index,
@@ -212,6 +217,8 @@ impl WorkspaceApp {
             .unwrap_or("auto");
 
         div()
+            .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x73))
@@ -338,7 +345,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let agent_count = settings.ai.acp_agents.len();
         let mut section = div()
-            .max_w(px(AI_PROVIDER_MAX_W))
+            .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgba(
@@ -419,6 +427,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let testing = self.ai_acp_agent_probe_pending.contains(&agent.id);
         div()
+            .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x73))
@@ -469,6 +479,8 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .grid()
                     .grid_cols(2)
                     .gap(px(10.0))
@@ -497,6 +509,8 @@ impl WorkspaceApp {
             .child(self.ai_acp_agent_auth_token_input(index, agent, cx))
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .grid()
                     .grid_cols(2)
                     .gap(px(10.0))
@@ -784,6 +798,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(4.0))
@@ -1027,6 +1043,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
@@ -1043,6 +1061,8 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .grid()
                     .grid_cols(3)
                     .gap(px(8.0))
@@ -1122,6 +1142,8 @@ impl WorkspaceApp {
             let list_height = self.ai_provider_card_list_estimated_height(providers);
             Some(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .mt(px(12.0))
                     .h(px(list_height))
                     .child(tauri_virtual_list(
@@ -1140,7 +1162,8 @@ impl WorkspaceApp {
         };
 
         div()
-            .max_w(px(AI_PROVIDER_MAX_W))
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .child(self.ai_collapsible_header(
@@ -1255,6 +1278,8 @@ impl WorkspaceApp {
         let providers = ai_provider_views(self.settings_store.settings());
         if index == providers.len() {
             return div()
+                .w_full()
+                .min_w(px(0.0))
                 .pb(px(12.0))
                 .child(self.ai_provider_add_controls(cx))
                 .into_any_element();
@@ -1263,6 +1288,8 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         div()
+            .w_full()
+            .min_w(px(0.0))
             .pb(px(12.0))
             .child(self.ai_provider_card(index, provider, cx))
             .into_any_element()
@@ -1739,7 +1766,8 @@ impl WorkspaceApp {
         let provider_panels = ai_model_reasoning_panels(settings, providers);
         div()
             .mt(px(8.0))
-            .max_w(px(AI_PROVIDER_MAX_W))
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .child(self.ai_model_reasoning_header(cx))
@@ -1750,7 +1778,12 @@ impl WorkspaceApp {
                         self.i18n.t("settings_view.ai.model_reasoning_overrides_empty"),
                     ))
                 } else {
-                    let mut list = div().flex().flex_col().gap(px(16.0));
+                    let mut list = div()
+                        .w_full()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(16.0));
                     for panel in provider_panels {
                         list = list.child(self.ai_model_reasoning_provider(settings, panel, cx));
                     }
@@ -1948,6 +1981,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let provider_panels = ai_model_context_window_panels(settings, providers);
         div()
+            .w_full()
+            .min_w(px(0.0))
             .opacity(if settings.ai.enabled { 1.0 } else { 0.5 })
             .flex()
             .flex_col()
@@ -1960,7 +1995,8 @@ impl WorkspaceApp {
                     ))
                 } else {
                     let mut list = div()
-                        .max_w(px(AI_PROVIDER_MAX_W))
+                        .w_full()
+                        .min_w(px(0.0))
                         .flex()
                         .flex_col()
                         .gap(px(16.0));

@@ -1,4 +1,38 @@
 impl WorkspaceApp {
+    fn portable_settings_text(
+        &self,
+        scope: &'static str,
+        key: impl std::hash::Hash,
+        text: String,
+        size: f32,
+        color: u32,
+        weight: Option<gpui::FontWeight>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut text_block = div()
+            .w_full()
+            .min_w(px(0.0))
+            .text_size(px(size))
+            .text_color(rgb(color))
+            // Tauri renders these PortableTab labels as normal block text.
+            // GPUI can otherwise measure CJK text in a narrow flex column and
+            // wrap it one glyph per line.
+            .line_height(px((size + 4.0).max(16.0)));
+        if let Some(weight) = weight {
+            text_block = text_block.font_weight(weight);
+        }
+        text_block
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                scope,
+                key,
+                text,
+                color,
+                cx,
+            ))
+            .into_any_element()
+    }
+
     fn settings_portable_section(
         &mut self,
         section_index: usize,
@@ -26,7 +60,7 @@ impl WorkspaceApp {
             "settings_view.general.portable_runtime_disabled_hint"
         };
         let mut rows = vec![
-            self.portable_runtime_summary_row(portable_status, hint_key),
+            self.portable_runtime_summary_row(portable_status, hint_key, cx),
             self.card_separator(),
         ];
 
@@ -35,7 +69,7 @@ impl WorkspaceApp {
             rows.push(self.card_separator());
             rows.push(self.portable_security_group(status, cx));
         } else {
-            rows.push(self.portable_disabled_notice());
+            rows.push(self.portable_disabled_notice(cx));
         }
 
         self.plain_settings_card(
@@ -49,6 +83,7 @@ impl WorkspaceApp {
         &self,
         portable_status: Option<&oxideterm_portable_runtime::PortableStatusSnapshot>,
         hint_key: &str,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let (badge_label, badge_color) = portable_status
             .map(|status| {
@@ -75,21 +110,27 @@ impl WorkspaceApp {
                 div()
                     .flex()
                     .flex_col()
+                    .w_full()
                     .gap(px(4.0))
                     .min_w(px(0.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t("settings_view.general.portable_runtime")),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t(hint_key)),
-                    ),
+                    .child(self.portable_settings_text(
+                        "portable-runtime-summary-title",
+                        "title",
+                        self.i18n.t("settings_view.general.portable_runtime"),
+                        self.tokens.metrics.ui_text_sm,
+                        self.tokens.ui.text,
+                        Some(gpui::FontWeight::MEDIUM),
+                        cx,
+                    ))
+                    .child(self.portable_settings_text(
+                        "portable-runtime-summary-hint",
+                        hint_key,
+                        self.i18n.t(hint_key),
+                        self.tokens.metrics.ui_text_xs,
+                        self.tokens.ui.text_muted,
+                        None,
+                        cx,
+                    )),
             )
             .child(self.text_badge(badge_label, badge_color))
             .into_any_element()
@@ -151,17 +192,19 @@ impl WorkspaceApp {
         label_key: &str,
         value: String,
         mono: bool,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut value_row = div()
             .mt(px(4.0))
             .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.sm))
             .bg(rgb(self.tokens.ui.bg))
             .px(px(10.0))
             .py(px(8.0))
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(self.tokens.ui.text))
+            .line_height(px((self.tokens.metrics.ui_text_xs + 4.0).max(16.0)))
             .child(value);
         if mono {
             value_row =
@@ -173,12 +216,15 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .min_w(px(0.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(label_key)),
-            )
+            .child(self.portable_settings_text(
+                "portable-value-label",
+                label_key,
+                self.i18n.t(label_key),
+                self.tokens.metrics.ui_text_xs,
+                self.tokens.ui.text_muted,
+                None,
+                cx,
+            ))
             .child(value_row)
             .into_any_element()
     }
@@ -204,22 +250,25 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t("settings_view.general.portable_biometric")),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.general.portable_biometric_unsupported"),
-                            ),
-                    ),
+                    .child(self.portable_settings_text(
+                        "portable-security-title",
+                        "settings_view.general.portable_biometric",
+                        self.i18n.t("settings_view.general.portable_biometric"),
+                        self.tokens.metrics.ui_text_sm,
+                        self.tokens.ui.text,
+                        Some(gpui::FontWeight::MEDIUM),
+                        cx,
+                    ))
+                    .child(self.portable_settings_text(
+                        "portable-security-hint",
+                        "settings_view.general.portable_biometric_unsupported",
+                        self.i18n
+                            .t("settings_view.general.portable_biometric_unsupported"),
+                        self.tokens.metrics.ui_text_xs,
+                        self.tokens.ui.text_muted,
+                        None,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -255,20 +304,26 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn portable_disabled_notice(&self) -> AnyElement {
+    fn portable_disabled_notice(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
+            .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
             .bg(self.settings_panel_background(self.tokens.ui.bg))
             .px(px(12.0))
             .py(px(12.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(
+            .child(self.portable_settings_text(
+                "portable-disabled-notice",
+                "settings_view.general.portable_runtime_disabled_hint",
                 self.i18n
                     .t("settings_view.general.portable_runtime_disabled_hint"),
-            )
+                self.tokens.metrics.ui_text_xs,
+                self.tokens.ui.text_muted,
+                None,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -293,25 +348,34 @@ impl WorkspaceApp {
                 .flex()
                 .flex_col()
                 .gap(px(4.0))
-                .child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(self.tokens.ui.text))
-                        .child(self.i18n.t("settings_view.general.portable_migration")),
-                )
-                .child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(if is_portable {
-                            self.i18n
-                                .t("settings_view.general.portable_migration_portable_hint")
-                        } else {
-                            self.i18n
-                                .t("settings_view.general.portable_migration_installed_hint")
-                        }),
-                )
+                .child(self.portable_settings_text(
+                    "portable-migration-title",
+                    "settings_view.general.portable_migration",
+                    self.i18n.t("settings_view.general.portable_migration"),
+                    self.tokens.metrics.ui_text_sm,
+                    self.tokens.ui.text,
+                    Some(gpui::FontWeight::MEDIUM),
+                    cx,
+                ))
+                .child(self.portable_settings_text(
+                    "portable-migration-hint",
+                    if is_portable {
+                        "settings_view.general.portable_migration_portable_hint"
+                    } else {
+                        "settings_view.general.portable_migration_installed_hint"
+                    },
+                    if is_portable {
+                        self.i18n
+                            .t("settings_view.general.portable_migration_portable_hint")
+                    } else {
+                        self.i18n
+                            .t("settings_view.general.portable_migration_installed_hint")
+                    },
+                    self.tokens.metrics.ui_text_xs,
+                    self.tokens.ui.text_muted,
+                    None,
+                    cx,
+                ))
                 .into_any_element(),
             div()
                 .rounded(px(self.tokens.radii.md))
@@ -335,13 +399,18 @@ impl WorkspaceApp {
                     cx,
                 ))
                 .child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n_with(
+                    self.portable_settings_text(
+                        "portable-migration-secret-summary",
+                        secret_count,
+                        self.i18n_with(
                             "settings_view.general.portable_migration_secret_summary",
                             &[("count", secret_count.to_string())],
-                        )),
+                        ),
+                        self.tokens.metrics.ui_text_xs,
+                        self.tokens.ui.text_muted,
+                        None,
+                        cx,
+                    ),
                 )
                 .into_any_element(),
             div()

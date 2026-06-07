@@ -11,7 +11,7 @@ impl WorkspaceApp {
 
         div()
             .w_full()
-            .max_w(px(AI_PROVIDER_MAX_W))
+            .min_w(px(0.0))
             .flex()
             .flex_wrap()
             .items_end()

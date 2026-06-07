@@ -236,6 +236,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .w_full()
+            .min_w(px(0.0))
             .px(px(16.0))
             .pb(px(12.0))
             .grid()

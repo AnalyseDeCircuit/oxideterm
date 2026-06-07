@@ -664,14 +664,22 @@ impl WorkspaceApp {
         let title = self.i18n.t(tab.title_key());
         let description = self.i18n.t(tab.description_key());
         div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(8.0))
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .text_size(px(24.0))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(self.tokens.ui.text_heading))
+                    // Settings headers mirror Tauri block text. Keep the
+                    // wrapper full-width so CJK descriptions are never measured
+                    // as a one-glyph column by nested flex layout.
+                    .line_height(px(30.0))
                     .child(self.render_selectable_text_scoped(
                         "settings-page-title",
                         tab.title_key(),
@@ -682,8 +690,11 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .text_size(px(self.tokens.metrics.ui_text_base))
                     .text_color(rgb(self.tokens.ui.text_muted))
+                    .line_height(px((self.tokens.metrics.ui_text_base + 6.0).max(20.0)))
                     .child(self.render_selectable_text_scoped(
                         "settings-page-description",
                         tab.description_key(),
@@ -697,8 +708,11 @@ impl WorkspaceApp {
                 header.child(
                     div()
                         .mt(px(2.0))
+                        .w_full()
+                        .min_w(px(0.0))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xb3))
+                        .line_height(px((self.tokens.metrics.ui_text_xs + 4.0).max(16.0)))
                         .child(self.render_selectable_text_scoped(
                             "settings-keybindings-note",
                             "keybindings",

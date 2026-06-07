@@ -29,6 +29,8 @@ impl WorkspaceApp {
 
     fn ai_disabled_settings_card(&self, body: AnyElement, enabled: bool) -> AnyElement {
         let mut body = div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .opacity(if enabled { 1.0 } else { 0.5 })

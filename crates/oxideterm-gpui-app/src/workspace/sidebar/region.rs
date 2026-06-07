@@ -50,34 +50,38 @@ impl WorkspaceApp {
                     .h(px(42.0))
                     .flex()
                     .items_center()
-                    .justify_between()
                     .px_3()
                     .border_b_1()
                     .border_color(rgba((theme.border << 8) | 0x4d))
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Sparkles,
-                                16.0,
-                                rgb(theme.accent),
-                            ))
-                            .child(
-                                div()
-                                    .text_size(px(13.0))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(theme.text))
-                                    .child(self.render_display_text_with_role(
-                                        SelectableTextRole::PlainDocument,
-                                        "ai-sidebar-title",
-                                        "label",
-                                        self.i18n.t("sidebar.panels.ai"),
-                                        theme.text,
-                                        cx,
-                                    )),
-                            ),
+                        self.render_window_drag_content_region(
+                            "ai-sidebar-titlebar-drag-region",
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(Self::render_lucide_icon(
+                                    LucideIcon::Sparkles,
+                                    16.0,
+                                    rgb(theme.accent),
+                                ))
+                                .child(
+                                    div()
+                                        .text_size(px(13.0))
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(rgb(theme.text))
+                                        .child(self.render_display_text_with_role(
+                                            SelectableTextRole::PlainDocument,
+                                            "ai-sidebar-title",
+                                            "label",
+                                            self.i18n.t("sidebar.panels.ai"),
+                                            theme.text,
+                                            cx,
+                                        )),
+                                )
+                            .into_any_element(),
+                            cx,
+                        ),
                     )
                     .child(
                         div()
@@ -205,20 +209,26 @@ impl WorkspaceApp {
             .items_center()
             .px_2()
             .child(
-                div()
-                    .flex_1()
-                    .truncate()
-                    .text_size(px(self.tokens.metrics.sidebar_title_font_size))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
-                        "sidebar-header-title",
-                        title_key,
-                        title,
-                        theme.text_muted,
-                        cx,
-                    )),
+                self.render_window_drag_content_region(
+                    "sidebar-header-title-drag-region",
+                    div()
+                        .flex()
+                        .items_center()
+                        .truncate()
+                        .text_size(px(self.tokens.metrics.sidebar_title_font_size))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "sidebar-header-title",
+                            title_key,
+                            title,
+                            theme.text_muted,
+                            cx,
+                        ))
+                    .into_any_element(),
+                    cx,
+                ),
             );
         if self.active_sidebar_section == SidebarSection::Sessions {
             let (view_icon, view_action) = match self.active_session_sidebar_view_mode {

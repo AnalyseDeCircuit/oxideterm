@@ -9,8 +9,10 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let provider_id = provider.id.clone();
         let models_expanded = self.settings_page.expanded_ai_provider_models.contains(&provider.id);
-        let mut body = div().flex().flex_col().gap(px(6.0)).child(
+        let mut body = div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(6.0)).child(
             div()
+                .w_full()
+                .min_w(px(0.0))
                 .flex()
                 .items_center()
                 .justify_between()
@@ -82,6 +84,8 @@ impl WorkspaceApp {
             let list_height = row_count as f32 * AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT;
             body = body.child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .px(px(16.0))
                     .pb(px(16.0))
                     .h(px(list_height))
@@ -192,7 +196,7 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let is_last_row = row_index + 1 == rows.len();
-        let mut chips = div().flex().flex_wrap().gap(px(4.0));
+        let mut chips = div().w_full().min_w(px(0.0)).flex().flex_wrap().gap(px(4.0));
         for item in row {
             chips = chips.child(self.ai_provider_model_chip(
                 provider_index,

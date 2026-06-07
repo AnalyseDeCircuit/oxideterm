@@ -6,6 +6,64 @@ fn oxide_export_summary_line_signature(line: &str) -> u64 {
 }
 
 impl WorkspaceApp {
+    fn render_oxide_export_preflight_stat(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .min_w(px(160.0))
+            .flex_1()
+            .px(px(8.0))
+            .py(px(6.0))
+            .rounded(px(self.tokens.radii.sm))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+            .bg(self.render_oxide_subcard_bg(false))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(Self::render_lucide_icon(
+                icon,
+                12.0,
+                rgb(self.tokens.ui.text_muted),
+            ))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "oxide-export-preflight-stat",
+                        label.clone(),
+                        label,
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_oxide_export_preflight_stats(
+        &self,
+        stats: Vec<(LucideIcon, String)>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_wrap()
+            .gap(px(8.0))
+            .children(
+                stats
+                    .into_iter()
+                    .map(|(icon, label)| self.render_oxide_export_preflight_stat(icon, label, cx)),
+            )
+            .into_any_element()
+    }
+
     fn render_oxide_export_preflight(
         &self,
         preflight: Option<ExportPreflightResult>,
@@ -28,10 +86,11 @@ impl WorkspaceApp {
                     16.0,
                     rgb(theme.text),
                 ))
-                .child(self.render_selectable_text_scoped(
+                .child(self.render_display_text_with_role(
+                    SelectableTextRole::NonSelectable,
                     "oxide-export-preflight-heading",
                     (),
-                    "导出概览",
+                    self.i18n.t("modals.export.summary_title"),
                     theme.text,
                     cx,
                 )),
@@ -39,49 +98,40 @@ impl WorkspaceApp {
         let Some(preflight) = preflight.filter(|_| show_card) else {
             return section.into_any_element();
         };
-        let mut card_children = vec![
-            div()
-                .grid()
-                .grid_cols(3)
-                .gap(px(8.0))
-                .children([
-                    (
-                        LucideIcon::Lock,
-                        format!("{} 个使用密码", preflight.connections_with_passwords),
-                    ),
-                    (
-                        LucideIcon::Key,
-                        format!("{} 个使用密钥", preflight.connections_with_keys),
-                    ),
-                    (
-                        LucideIcon::FileLock,
-                        format!("{} 个使用代理", preflight.connections_with_agent),
-                    ),
-                ].into_iter().map(|(icon, label)| {
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(theme.text_muted))
-                        .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)))
-                        .child(self.render_selectable_text_scoped(
-                            "oxide-export-preflight-stat",
-                            label.clone(),
-                            label,
-                            theme.text_muted,
-                            cx,
-                        ))
-                }))
-                .into_any_element(),
-        ];
+        let mut card_children = vec![self.render_oxide_export_preflight_stats(
+            vec![
+                (
+                    LucideIcon::Lock,
+                    self.i18n
+                        .t("modals.export.summary_passwords")
+                        .replace("{{count}}", &preflight.connections_with_passwords.to_string()),
+                ),
+                (
+                    LucideIcon::Key,
+                    self.i18n
+                        .t("modals.export.summary_keys")
+                        .replace("{{count}}", &preflight.connections_with_keys.to_string()),
+                ),
+                (
+                    LucideIcon::FileLock,
+                    self.i18n
+                        .t("modals.export.summary_agent")
+                        .replace("{{count}}", &preflight.connections_with_agent.to_string()),
+                ),
+            ],
+            cx,
+        )];
         if preflight.portable_secret_count > 0 {
-            let label = format!("将打包 {} 项便携秘密项。", preflight.portable_secret_count);
+            let label = self
+                .i18n
+                .t("modals.export.summary_portable_secrets")
+                .replace("{{count}}", &preflight.portable_secret_count.to_string());
             card_children.push(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.render_selectable_text_scoped(
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
                         "oxide-export-preflight-portable-secret",
                         (),
                         label,
@@ -92,44 +142,36 @@ impl WorkspaceApp {
             );
         }
         card_children.push(
-            div()
-                .grid()
-                .grid_cols(2)
-                .gap(px(8.0))
-                .children(
-                    [
+            self.render_oxide_export_preflight_stats(
+                vec![
+                    (
+                        LucideIcon::Key,
                         self.i18n
                             .t("modals.export.summary_key_passphrases")
                             .replace(
                                 "{{count}}",
                                 &preflight.key_passphrase_count.to_string(),
                             ),
+                    ),
+                    (
+                        LucideIcon::Key,
                         self.i18n.t("modals.export.summary_managed_keys").replace(
                             "{{count}}",
                             &preflight.managed_key_count.to_string(),
                         ),
+                    ),
+                    (
+                        LucideIcon::FileLock,
                         self.i18n
                             .t("modals.export.summary_managed_key_passphrases")
                             .replace(
                                 "{{count}}",
                                 &preflight.managed_key_passphrase_count.to_string(),
                             ),
-                    ]
-                    .into_iter()
-                    .map(|label| {
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.render_selectable_text_scoped(
-                                "oxide-export-preflight-credential-stat",
-                                label.clone(),
-                                label,
-                                theme.text_muted,
-                                cx,
-                            ))
-                    }),
-                )
-                .into_any_element(),
+                    ),
+                ],
+                cx,
+            ),
         );
         if !preflight.can_export {
             card_children.push(self.render_oxide_compact_warning(
@@ -170,7 +212,9 @@ impl WorkspaceApp {
         if embed_keys && !preflight.missing_keys.is_empty() {
             card_children.push(self.render_oxide_compact_warning(
                 OXIDE_YELLOW_500,
-                format!("{} 个密钥文件未找到：", preflight.missing_keys.len()),
+                self.i18n
+                    .t("modals.export.warning_missing_keys")
+                    .replace("{{count}}", &preflight.missing_keys.len().to_string()),
                 preflight
                     .missing_keys
                     .iter()
@@ -180,12 +224,16 @@ impl WorkspaceApp {
             ));
         }
         if preflight.total_key_bytes > 0 {
-            let label = format!("密钥数据总计：{}", oxide_format_bytes(preflight.total_key_bytes));
+            let label = self
+                .i18n
+                .t("modals.export.key_size")
+                .replace("{{size}}", &oxide_format_bytes(preflight.total_key_bytes));
             card_children.push(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.render_selectable_text_scoped(
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
                         "oxide-export-preflight-key-bytes",
                         (),
                         label,
