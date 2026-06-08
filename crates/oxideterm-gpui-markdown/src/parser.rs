@@ -5,9 +5,11 @@
 
 use std::collections::HashMap;
 
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{BlockQuoteKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment};
+use crate::model::{
+    Block, CalloutKind, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment,
+};
 
 /// Parse a markdown string into an OxideTerm-owned [`MarkdownDocument`].
 pub fn parse(source: &str) -> MarkdownDocument {
@@ -16,17 +18,35 @@ pub fn parse(source: &str) -> MarkdownDocument {
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_MATH
-        | Options::ENABLE_SMART_PUNCTUATION;
+        | Options::ENABLE_SMART_PUNCTUATION
+        | Options::ENABLE_GFM
+        | Options::ENABLE_HEADING_ATTRIBUTES
+        | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+        | Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS;
     let parser = Parser::new_ext(source, options);
 
     let mut ctx = ParseContext::default();
 
     for event in parser {
+        match &event {
+            Event::Start(Tag::MetadataBlock(_)) => {
+                ctx.in_metadata_block = true;
+                continue;
+            }
+            Event::End(TagEnd::MetadataBlock(_)) => {
+                ctx.in_metadata_block = false;
+                continue;
+            }
+            _ if ctx.in_metadata_block => continue,
+            _ => {}
+        }
+
         match event {
             // ── block-level open ────────────────────────────────────
-            Event::Start(Tag::Heading { level, .. }) => {
+            Event::Start(Tag::Heading { level, id, .. }) => {
                 ctx.push_inline_stack();
                 ctx.heading_level = Some(heading_level_to_u8(level));
+                ctx.heading_explicit_id = id.map(|id| id.trim_start_matches('#').to_string());
             }
             Event::Start(Tag::Paragraph) => {
                 ctx.push_inline_stack();
@@ -54,8 +74,11 @@ pub fn parse(source: &str) -> MarkdownDocument {
                 ctx.item_children.push(Vec::new());
                 ctx.item_checked.push(None);
             }
-            Event::Start(Tag::BlockQuote(_)) => {
-                ctx.block_stack.push(Vec::new());
+            Event::Start(Tag::BlockQuote(kind)) => {
+                ctx.block_stack.push(BlockquoteState {
+                    kind: kind.map(convert_callout_kind),
+                    blocks: Vec::new(),
+                });
             }
             Event::Start(Tag::Table(alignments)) => {
                 ctx.table_state = Some(TableState {
@@ -103,14 +126,14 @@ pub fn parse(source: &str) -> MarkdownDocument {
             Event::Text(text) => {
                 if ctx.in_code_block {
                     ctx.code_block_buf.push_str(&text);
-                } else {
+                } else if ctx.link_url.is_some() {
                     ctx.push_inline(Inline::Text(text.to_string()));
+                } else {
+                    ctx.push_text_with_autolinks(&text);
                 }
             }
             Event::InlineHtml(html) => {
-                // Preserve inline HTML for readability without executing or
-                // interpreting it as native UI markup.
-                ctx.push_inline(Inline::Html(html.to_string()));
+                ctx.push_inline_html(&html);
             }
             Event::Html(html) => {
                 // Raw block HTML is an inert markdown block in native GPUI so
@@ -155,7 +178,8 @@ pub fn parse(source: &str) -> MarkdownDocument {
             Event::End(TagEnd::Heading(_level)) => {
                 let inlines = ctx.pop_inline_stack();
                 let level = ctx.heading_level.take().unwrap_or(1);
-                ctx.push_block(Block::Heading { level, inlines });
+                let id = ctx.heading_id_for(&inlines);
+                ctx.push_block(Block::Heading { level, id, inlines });
             }
             Event::End(TagEnd::Paragraph) => {
                 let inlines = ctx.pop_inline_stack();
@@ -207,8 +231,11 @@ pub fn parse(source: &str) -> MarkdownDocument {
                 }
             }
             Event::End(TagEnd::BlockQuote(_)) => {
-                let blocks = ctx.block_stack.pop().unwrap_or_default();
-                ctx.push_block(Block::Blockquote { blocks });
+                let quote = ctx.block_stack.pop().unwrap_or_default();
+                ctx.push_block(Block::Blockquote {
+                    kind: quote.kind,
+                    blocks: quote.blocks,
+                });
             }
             Event::End(TagEnd::TableHead) => {
                 if let Some(ref mut table) = ctx.table_state {
@@ -296,14 +323,19 @@ struct ParseContext {
     /// nesting level (paragraph, heading, emphasis, strong, link, list item, …).
     inline_stack: Vec<Vec<Inline>>,
     heading_level: Option<u8>,
+    heading_explicit_id: Option<String>,
     code_block_lang: Option<String>,
     code_block_buf: String,
     /// Explicit flag to track whether we are inside a code block.  Using this
     /// instead of `code_block_lang.is_some()` so that indented code blocks
     /// (language = `None`) are handled correctly.
     in_code_block: bool,
+    /// Frontmatter is parsed as metadata and intentionally hidden from the
+    /// rendered document instead of appearing as a horizontal rule.
+    in_metadata_block: bool,
     link_url: Option<String>,
     image_url: Option<String>,
+    safe_html_stack: Vec<SafeInlineHtmlTag>,
     list_stack: Vec<ListState>,
     /// One entry per open `Item`; collects nested blocks within a list item.
     item_children: Vec<Vec<Block>>,
@@ -311,7 +343,7 @@ struct ParseContext {
     item_checked: Vec<Option<bool>>,
     /// Stack for nested blockquotes — each entry collects the blocks that
     /// belong to one level of `>` quoting.
-    block_stack: Vec<Vec<Block>>,
+    block_stack: Vec<BlockquoteState>,
     /// Active table accumulator, if we are inside a `<table>`.
     table_state: Option<TableState>,
     /// Stack of currently open footnote definitions.
@@ -321,6 +353,7 @@ struct ParseContext {
     /// First-reference order used for display numbering.
     footnote_reference_order: Vec<String>,
     footnote_indices: HashMap<String, usize>,
+    heading_ids: HashMap<String, usize>,
 }
 
 struct ListState {
@@ -335,9 +368,22 @@ struct TableState {
     current_row: Vec<Vec<Inline>>,
 }
 
+#[derive(Default)]
+struct BlockquoteState {
+    kind: Option<CalloutKind>,
+    blocks: Vec<Block>,
+}
+
 struct FootnoteState {
     label: String,
     blocks: Vec<Block>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SafeInlineHtmlTag {
+    Kbd,
+    Subscript,
+    Superscript,
 }
 
 impl ParseContext {
@@ -355,11 +401,42 @@ impl ParseContext {
         }
     }
 
+    fn push_inline_html(&mut self, html: &str) {
+        match classify_safe_inline_html(html) {
+            SafeInlineHtml::LineBreak => self.push_inline(Inline::LineBreak),
+            SafeInlineHtml::Open(tag) => {
+                self.push_inline_stack();
+                self.safe_html_stack.push(tag);
+            }
+            SafeInlineHtml::Close(tag) if self.safe_html_stack.last().copied() == Some(tag) => {
+                self.safe_html_stack.pop();
+                let children = self.pop_inline_stack();
+                let inline = match tag {
+                    SafeInlineHtmlTag::Kbd => Inline::Kbd(children),
+                    SafeInlineHtmlTag::Subscript => Inline::Subscript(children),
+                    SafeInlineHtmlTag::Superscript => Inline::Superscript(children),
+                };
+                self.push_inline(inline);
+            }
+            SafeInlineHtml::Close(_) | SafeInlineHtml::Unsupported => {
+                // Unsupported or malformed inline HTML remains visible as inert
+                // source text; the renderer never executes or interprets it.
+                self.push_inline(Inline::Html(html.to_string()));
+            }
+        }
+    }
+
+    fn push_text_with_autolinks(&mut self, text: &str) {
+        for inline in autolink_text(text) {
+            self.push_inline(inline);
+        }
+    }
+
     /// Push a block into the innermost open container.  If a blockquote is
     /// open the block goes there; otherwise it lands in the top-level list.
     fn push_block(&mut self, block: Block) {
         if let Some(bq) = self.block_stack.last_mut() {
-            bq.push(block);
+            bq.blocks.push(block);
         } else if let Some(footnote) = self.footnote_stack.last_mut() {
             footnote.blocks.push(block);
         } else {
@@ -397,6 +474,26 @@ impl ParseContext {
             .chain(unreferenced)
             .collect()
     }
+
+    fn heading_id_for(&mut self, inlines: &[Inline]) -> String {
+        let base = self
+            .heading_explicit_id
+            .take()
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or_else(|| slugify_heading(&inlines_to_plain_text(inlines)));
+        let base = if base.is_empty() {
+            "section".to_string()
+        } else {
+            base
+        };
+        let count = self.heading_ids.entry(base.clone()).or_insert(0);
+        *count += 1;
+        if *count == 1 {
+            base
+        } else {
+            format!("{base}-{}", *count)
+        }
+    }
 }
 
 fn heading_level_to_u8(level: HeadingLevel) -> u8 {
@@ -419,6 +516,36 @@ fn convert_alignment(a: pulldown_cmark::Alignment) -> TableAlignment {
     }
 }
 
+fn convert_callout_kind(kind: BlockQuoteKind) -> CalloutKind {
+    match kind {
+        BlockQuoteKind::Note => CalloutKind::Note,
+        BlockQuoteKind::Tip => CalloutKind::Tip,
+        BlockQuoteKind::Important => CalloutKind::Important,
+        BlockQuoteKind::Warning => CalloutKind::Warning,
+        BlockQuoteKind::Caution => CalloutKind::Caution,
+    }
+}
+
+enum SafeInlineHtml {
+    LineBreak,
+    Open(SafeInlineHtmlTag),
+    Close(SafeInlineHtmlTag),
+    Unsupported,
+}
+
+fn classify_safe_inline_html(html: &str) -> SafeInlineHtml {
+    match html.trim().to_ascii_lowercase().as_str() {
+        "<br>" | "<br/>" | "<br />" => SafeInlineHtml::LineBreak,
+        "<kbd>" => SafeInlineHtml::Open(SafeInlineHtmlTag::Kbd),
+        "</kbd>" => SafeInlineHtml::Close(SafeInlineHtmlTag::Kbd),
+        "<sub>" => SafeInlineHtml::Open(SafeInlineHtmlTag::Subscript),
+        "</sub>" => SafeInlineHtml::Close(SafeInlineHtmlTag::Subscript),
+        "<sup>" => SafeInlineHtml::Open(SafeInlineHtmlTag::Superscript),
+        "</sup>" => SafeInlineHtml::Close(SafeInlineHtmlTag::Superscript),
+        _ => SafeInlineHtml::Unsupported,
+    }
+}
+
 /// Recursively flatten a list of [`Inline`] nodes into a single plain-text
 /// string (used for image alt text).
 fn inlines_to_plain_text(inlines: &[Inline]) -> String {
@@ -431,6 +558,9 @@ fn inlines_to_plain_text(inlines: &[Inline]) -> String {
             Inline::Bold(inner)
             | Inline::Italic(inner)
             | Inline::Strikethrough(inner)
+            | Inline::Kbd(inner)
+            | Inline::Subscript(inner)
+            | Inline::Superscript(inner)
             | Inline::Link { text: inner, .. } => {
                 out.push_str(&inlines_to_plain_text(inner));
             }
@@ -455,6 +585,84 @@ fn inlines_to_plain_text(inlines: &[Inline]) -> String {
     out
 }
 
+fn slugify_heading(text: &str) -> String {
+    let mut slug = String::new();
+    let mut pending_dash = false;
+    for ch in text.chars().flat_map(char::to_lowercase) {
+        if ch.is_alphanumeric() {
+            if pending_dash && !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push(ch);
+            pending_dash = false;
+        } else if !slug.is_empty() {
+            pending_dash = true;
+        }
+    }
+    slug
+}
+
+fn autolink_text(text: &str) -> Vec<Inline> {
+    let mut inlines = Vec::new();
+    let mut cursor = 0;
+    while cursor < text.len() {
+        let Some(relative_start) = find_url_start(&text[cursor..]) else {
+            push_text_fragment(&mut inlines, &text[cursor..]);
+            break;
+        };
+        let start = cursor + relative_start;
+        push_text_fragment(&mut inlines, &text[cursor..start]);
+
+        let mut end = start;
+        for (offset, ch) in text[start..].char_indices() {
+            if ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '\'') {
+                break;
+            }
+            end = start + offset + ch.len_utf8();
+        }
+        while end > start
+            && text[..end]
+                .chars()
+                .next_back()
+                .is_some_and(|ch| matches!(ch, '.' | ',' | ';' | ':' | ')' | ']' | '}'))
+        {
+            let ch_len = text[..end]
+                .chars()
+                .next_back()
+                .map(char::len_utf8)
+                .unwrap_or(0);
+            end = end.saturating_sub(ch_len);
+        }
+
+        if end == start {
+            push_text_fragment(&mut inlines, &text[start..start + 1]);
+            cursor = start + 1;
+            continue;
+        }
+
+        let url = &text[start..end];
+        inlines.push(Inline::Link {
+            text: vec![Inline::Text(url.to_string())],
+            url: url.to_string(),
+        });
+        cursor = end;
+    }
+    inlines
+}
+
+fn push_text_fragment(inlines: &mut Vec<Inline>, text: &str) {
+    if !text.is_empty() {
+        inlines.push(Inline::Text(text.to_string()));
+    }
+}
+
+fn find_url_start(text: &str) -> Option<usize> {
+    ["https://", "http://"]
+        .into_iter()
+        .filter_map(|needle| text.find(needle))
+        .min()
+}
+
 // ─── tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -466,8 +674,9 @@ mod tests {
         let doc = parse("# Hello");
         assert_eq!(doc.blocks.len(), 1);
         match &doc.blocks[0] {
-            Block::Heading { level, inlines } => {
+            Block::Heading { level, id, inlines } => {
                 assert_eq!(*level, 1);
+                assert_eq!(id, "hello");
                 assert_eq!(inlines.len(), 1);
                 assert_eq!(inlines[0], Inline::Text("Hello".into()));
             }
@@ -588,6 +797,66 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parses_bare_http_urls_as_links() {
+        let doc = parse("See https://example.com/docs.");
+        match &doc.blocks[0] {
+            Block::Paragraph { inlines } => {
+                assert!(inlines.iter().any(|inline| matches!(
+                    inline,
+                    Inline::Link { text, url }
+                        if url == "https://example.com/docs"
+                            && text == &vec![Inline::Text("https://example.com/docs".into())]
+                )));
+                assert!(
+                    inlines
+                        .iter()
+                        .any(|inline| matches!(inline, Inline::Text(text) if text == "."))
+                );
+            }
+            other => panic!("expected Paragraph, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn hides_yaml_frontmatter() {
+        let doc = parse("---\ntitle: Demo\n---\n\n# Body");
+        assert_eq!(doc.blocks.len(), 1);
+        assert!(matches!(
+            &doc.blocks[0],
+            Block::Heading { id, .. } if id == "body"
+        ));
+    }
+
+    #[test]
+    fn parses_gfm_callout_kind() {
+        let doc = parse("> [!WARNING]\n> Careful");
+        match &doc.blocks[0] {
+            Block::Blockquote { kind, blocks } => {
+                assert_eq!(*kind, Some(CalloutKind::Warning));
+                assert_eq!(blocks.len(), 1);
+            }
+            other => panic!("expected warning callout, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn preserves_explicit_heading_id_and_uniques_generated_slugs() {
+        let doc = parse("# Intro {#custom}\n\n# Intro\n\n# Intro");
+        assert!(matches!(
+            &doc.blocks[0],
+            Block::Heading { id, .. } if id == "custom"
+        ));
+        assert!(matches!(
+            &doc.blocks[1],
+            Block::Heading { id, .. } if id == "intro"
+        ));
+        assert!(matches!(
+            &doc.blocks[2],
+            Block::Heading { id, .. } if id == "intro-2"
+        ));
+    }
+
     // ── new tests ───────────────────────────────────────────────────────
 
     #[test]
@@ -595,7 +864,8 @@ mod tests {
         let doc = parse("> Hello world");
         assert_eq!(doc.blocks.len(), 1);
         match &doc.blocks[0] {
-            Block::Blockquote { blocks } => {
+            Block::Blockquote { kind, blocks } => {
+                assert_eq!(*kind, None);
                 assert_eq!(blocks.len(), 1);
                 match &blocks[0] {
                     Block::Paragraph { inlines } => {
@@ -617,7 +887,7 @@ mod tests {
         let doc = parse("> outer\n> > inner");
         assert_eq!(doc.blocks.len(), 1);
         match &doc.blocks[0] {
-            Block::Blockquote { blocks } => {
+            Block::Blockquote { blocks, .. } => {
                 // Should contain the outer paragraph and a nested blockquote.
                 assert!(
                     blocks.iter().any(|b| matches!(b, Block::Blockquote { .. })),
@@ -779,6 +1049,36 @@ mod tests {
                 assert!(inlines.iter().any(|inline| matches!(
                     inline,
                     Inline::Html(html) if html.contains("<span")
+                )));
+            }
+            other => panic!("expected Paragraph, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_safe_inline_html_subset() {
+        let doc = parse("Press <kbd>Esc</kbd><br>H<sub>2</sub>O x<sup>2</sup>");
+        match &doc.blocks[0] {
+            Block::Paragraph { inlines } => {
+                assert!(inlines.iter().any(|inline| matches!(
+                    inline,
+                    Inline::Kbd(children)
+                        if children == &vec![Inline::Text("Esc".to_string())]
+                )));
+                assert!(
+                    inlines
+                        .iter()
+                        .any(|inline| matches!(inline, Inline::LineBreak))
+                );
+                assert!(inlines.iter().any(|inline| matches!(
+                    inline,
+                    Inline::Subscript(children)
+                        if children == &vec![Inline::Text("2".to_string())]
+                )));
+                assert!(inlines.iter().any(|inline| matches!(
+                    inline,
+                    Inline::Superscript(children)
+                        if children == &vec![Inline::Text("2".to_string())]
                 )));
             }
             other => panic!("expected Paragraph, got {:?}", other),

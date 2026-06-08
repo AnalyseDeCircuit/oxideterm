@@ -106,7 +106,7 @@ fn estimate_blocks_height(blocks: &[Block], opts: &MarkdownOptions) -> f32 {
 
 fn estimate_block_height(block: &Block, opts: &MarkdownOptions) -> f32 {
     match block {
-        Block::Heading { level, inlines } => {
+        Block::Heading { level, inlines, .. } => {
             let font_size = opts.base_font_size
                 * opts
                     .heading_font_scales
@@ -150,7 +150,7 @@ fn estimate_block_height(block: &Block, opts: &MarkdownOptions) -> f32 {
             estimate_list_height(items, opts)
         }
         Block::HorizontalRule => opts.block_gap * 2.0 + 1.0,
-        Block::Blockquote { blocks } => {
+        Block::Blockquote { blocks, .. } => {
             estimate_blocks_height(blocks, opts) + opts.block_gap + opts.blockquote_border_width
         }
         Block::Table { headers, rows, .. } => {
@@ -226,6 +226,9 @@ fn inline_text_len(inline: &Inline) -> usize {
     match inline {
         Inline::Text(text) | Inline::Code(text) | Inline::Html(text) => text.chars().count(),
         Inline::Bold(children) | Inline::Italic(children) | Inline::Strikethrough(children) => {
+            inlines_text_len(children)
+        }
+        Inline::Kbd(children) | Inline::Subscript(children) | Inline::Superscript(children) => {
             inlines_text_len(children)
         }
         Inline::Link { text, url } => inlines_text_len(text).max(url.chars().count()),

@@ -306,7 +306,7 @@ pub fn ai_tool_pre(
                 if next_offset != old_offset {
                     scroll_handle.set_offset(next_offset);
                     cx.stop_propagation();
-                    cx.notify(window.current_view());
+                    window.refresh();
                 }
             }
         })

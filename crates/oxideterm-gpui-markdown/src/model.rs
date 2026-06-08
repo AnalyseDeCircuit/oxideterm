@@ -26,7 +26,11 @@ pub struct FootnoteDefinition {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Block {
     /// `# … ######`  heading with a 1-based level (1 = h1, 6 = h6).
-    Heading { level: u8, inlines: Vec<Inline> },
+    Heading {
+        level: u8,
+        id: String,
+        inlines: Vec<Inline>,
+    },
 
     /// A normal paragraph.
     Paragraph { inlines: Vec<Inline> },
@@ -50,7 +54,10 @@ pub enum Block {
     HorizontalRule,
 
     /// `> blockquote` — may contain nested blocks.
-    Blockquote { blocks: Vec<Block> },
+    Blockquote {
+        kind: Option<CalloutKind>,
+        blocks: Vec<Block>,
+    },
 
     /// GFM table.
     Table {
@@ -67,6 +74,16 @@ pub enum TableAlignment {
     Left,
     Center,
     Right,
+}
+
+/// GitHub-flavored blockquote alert kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CalloutKind {
+    Note,
+    Tip,
+    Important,
+    Warning,
+    Caution,
 }
 
 /// A single item inside an ordered or unordered list.
@@ -100,6 +117,15 @@ pub enum Inline {
 
     /// Raw inline HTML preserved as inert text.
     Html(String),
+
+    /// Safe `<kbd>...</kbd>` inline HTML rendered as keyboard-style text.
+    Kbd(Vec<Inline>),
+
+    /// Safe `<sub>...</sub>` inline HTML rendered without exposing tags.
+    Subscript(Vec<Inline>),
+
+    /// Safe `<sup>...</sup>` inline HTML rendered without exposing tags.
+    Superscript(Vec<Inline>),
 
     /// `~~strikethrough~~`.
     Strikethrough(Vec<Inline>),

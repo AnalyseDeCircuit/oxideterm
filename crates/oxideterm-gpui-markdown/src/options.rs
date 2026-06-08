@@ -3,6 +3,8 @@
 
 //! Configuration knobs for the markdown renderer.
 
+use std::path::{Path, PathBuf};
+
 use oxideterm_theme::{ThemeTokens, UiMetrics};
 
 pub const MARKDOWN_IMAGE_CACHE_ID: &str = "oxideterm-markdown-images";
@@ -61,6 +63,15 @@ pub struct MarkdownOptions {
 
     /// Maximum rendered image width in pixels.
     pub max_image_width: f32,
+
+    /// Base directory used to resolve relative image paths.
+    pub image_base_dir: Option<PathBuf>,
+
+    /// URL schemes that the renderer may open from markdown links.
+    pub allowed_link_schemes: Vec<&'static str>,
+
+    /// URL schemes that the renderer may load from markdown images.
+    pub allowed_image_schemes: Vec<&'static str>,
 
     /// Width of the left border on blockquotes, in pixels.
     pub blockquote_border_width: f32,
@@ -126,6 +137,9 @@ impl MarkdownOptions {
             enable_async_images: true,
             image_cache_id: MARKDOWN_IMAGE_CACHE_ID,
             max_image_width: metrics.markdown_max_image_width,
+            image_base_dir: None,
+            allowed_link_schemes: vec!["http", "https", "mailto", "file"],
+            allowed_image_schemes: vec!["http", "https", "file", "data"],
             blockquote_border_width: metrics.markdown_blockquote_border_width,
             math_inline_scale: 1.0,
             math_display_scale: 1.2,
@@ -135,5 +149,18 @@ impl MarkdownOptions {
             mermaid_error_prefix: "Unsupported Mermaid diagram".to_string(),
             mermaid_expand_label: "EXPAND".to_string(),
         }
+    }
+
+    /// Resolve relative markdown resources against the directory containing
+    /// the rendered source file.
+    pub fn with_source_path(mut self, source_path: impl AsRef<Path>) -> Self {
+        self.image_base_dir = source_path.as_ref().parent().map(Path::to_path_buf);
+        self
+    }
+
+    /// Resolve relative markdown resources against an explicit directory.
+    pub fn with_image_base_dir(mut self, base_dir: impl Into<PathBuf>) -> Self {
+        self.image_base_dir = Some(base_dir.into());
+        self
     }
 }

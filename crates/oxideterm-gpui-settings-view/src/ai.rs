@@ -416,6 +416,9 @@ pub fn settings_ai_collapsible_header(
         .hover(|style| style.bg(rgba((tokens.ui.bg_hover << 8) | 0x80)))
         .child(
             div()
+                // Match the Tauri full-width trigger: the text column must take
+                // remaining space or CJK titles collapse to one glyph per line.
+                .flex_1()
                 .min_w(px(0.0))
                 .flex()
                 .flex_col()

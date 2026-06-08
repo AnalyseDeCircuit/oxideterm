@@ -14,14 +14,16 @@ use gpui::{
     StrikethroughStyle, Styled, StyledText, TextAlign, TextRun, UnderlineStyle, Window, div,
     image_cache, img, prelude::FluentBuilder, px, relative, retain_all,
 };
-use gpui_component::{VirtualListScrollHandle, scroll::ScrollableElement, v_virtual_list};
+use gpui_component::{VirtualListScrollHandle, v_virtual_list};
 use oxideterm_theme::ThemeTokens;
 
 use crate::highlight;
 use crate::layout::{MarkdownBlockLayout, MarkdownLayoutItem};
 use crate::math;
 use crate::mermaid;
-use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment};
+use crate::model::{
+    Block, CalloutKind, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment,
+};
 use crate::options::MarkdownOptions;
 use crate::style;
 
@@ -472,7 +474,7 @@ fn render_block_with_code_actions(
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
     match block {
-        Block::Heading { level, inlines } => render_heading(*level, inlines, tokens, opts),
+        Block::Heading { level, id, inlines } => render_heading(*level, id, inlines, tokens, opts),
         Block::Paragraph { inlines } => render_paragraph(inlines, tokens, opts),
         Block::Html(html) => render_html_block(html, tokens, opts),
         Block::CodeBlock { language, code } => {
@@ -481,8 +483,8 @@ fn render_block_with_code_actions(
         Block::UnorderedList { items } => render_unordered_list(items, tokens, opts),
         Block::OrderedList { start, items } => render_ordered_list(*start, items, tokens, opts),
         Block::HorizontalRule => render_hr(tokens),
-        Block::Blockquote { blocks } => {
-            render_blockquote_with_code_actions(blocks, tokens, opts, code_actions)
+        Block::Blockquote { kind, blocks } => {
+            render_blockquote_with_code_actions(*kind, blocks, tokens, opts, code_actions)
         }
         Block::Table {
             headers,
@@ -501,8 +503,8 @@ fn render_selectable_block(
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
     match block {
-        Block::Heading { level, inlines } => {
-            render_selectable_heading(*level, inlines, tokens, opts, path, render_text)
+        Block::Heading { level, id, inlines } => {
+            render_selectable_heading(*level, id, inlines, tokens, opts, path, render_text)
         }
         Block::Paragraph { inlines } => {
             render_selectable_paragraph(inlines, tokens, opts, path, render_text)
@@ -530,9 +532,15 @@ fn render_selectable_block(
             render_text,
         ),
         Block::HorizontalRule => render_hr(tokens),
-        Block::Blockquote { blocks } => {
-            render_selectable_blockquote(blocks, tokens, opts, code_actions, path, render_text)
-        }
+        Block::Blockquote { kind, blocks } => render_selectable_blockquote(
+            *kind,
+            blocks,
+            tokens,
+            opts,
+            code_actions,
+            path,
+            render_text,
+        ),
         Block::Table {
             headers,
             alignments,
@@ -545,6 +553,7 @@ fn render_selectable_block(
 
 fn render_heading(
     level: u8,
+    _id: &str,
     inlines: &[Inline],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
@@ -569,6 +578,7 @@ fn render_heading(
 
 fn render_selectable_heading(
     level: u8,
+    _id: &str,
     inlines: &[Inline],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
@@ -917,9 +927,9 @@ fn render_code_block_shell(
             div()
                 .w_full()
                 .min_w_0()
-                // Tauri code blocks scroll horizontally for long lines; the
-                // markdown shell must not let code define the chat/sidebar width.
-                .overflow_x_scrollbar()
+                // Keep the code body bound to the markdown column. GPUI's
+                // horizontal scroller can treat normal sidebar wheel input as
+                // horizontal movement and leave code blocks offset.
                 .p(px(opts.code_block_padding))
                 .text_size(style::code_font_size(opts))
                 .text_color(style::text_color(tokens))
@@ -1083,11 +1093,13 @@ fn is_plain_text_code_language(language: Option<&str>) -> bool {
 // ─── blockquote ─────────────────────────────────────────────────────────
 
 fn render_blockquote_with_code_actions(
+    kind: Option<CalloutKind>,
     blocks: &[Block],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
+    let accent = callout_color(kind, tokens);
     div()
         .flex()
         .flex_row()
@@ -1095,7 +1107,7 @@ fn render_blockquote_with_code_actions(
             // Left border strip
             div()
                 .w(px(opts.blockquote_border_width))
-                .bg(style::blockquote_border_color(tokens))
+                .bg(accent)
                 .rounded(px(tokens.radii.sm))
                 .flex_shrink_0(),
         )
@@ -1105,6 +1117,9 @@ fn render_blockquote_with_code_actions(
                 .pl(px(opts.list_indent))
                 .bg(style::code_bg_color(tokens))
                 .rounded(px(tokens.radii.sm))
+                .when_some(kind, |content, kind| {
+                    content.child(render_callout_label(kind, accent, tokens, opts))
+                })
                 .child(render_blocks_with_code_actions(
                     blocks,
                     tokens,
@@ -1116,6 +1131,7 @@ fn render_blockquote_with_code_actions(
 }
 
 fn render_selectable_blockquote(
+    kind: Option<CalloutKind>,
     blocks: &[Block],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
@@ -1123,13 +1139,14 @@ fn render_selectable_blockquote(
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
+    let accent = callout_color(kind, tokens);
     div()
         .flex()
         .flex_row()
         .child(
             div()
                 .w(px(opts.blockquote_border_width))
-                .bg(style::blockquote_border_color(tokens))
+                .bg(accent)
                 .rounded(px(tokens.radii.sm))
                 .flex_shrink_0(),
         )
@@ -1139,6 +1156,9 @@ fn render_selectable_blockquote(
                 .pl(px(opts.list_indent))
                 .bg(style::code_bg_color(tokens))
                 .rounded(px(tokens.radii.sm))
+                .when_some(kind, |content, kind| {
+                    content.child(render_callout_label(kind, accent, tokens, opts))
+                })
                 .child(render_selectable_blocks(
                     blocks,
                     tokens,
@@ -1149,6 +1169,46 @@ fn render_selectable_blockquote(
                 )),
         )
         .into_any_element()
+}
+
+fn render_callout_label(
+    kind: CalloutKind,
+    accent: Hsla,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) -> AnyElement {
+    div()
+        .mb(px(opts.block_gap * 0.5))
+        .text_size(style::code_label_font_size(opts))
+        .text_color(accent)
+        .font(Font {
+            weight: FontWeight::BOLD,
+            ..style::body_font(opts)
+        })
+        .child(SharedString::from(callout_label(kind, tokens)))
+        .into_any_element()
+}
+
+fn callout_label(kind: CalloutKind, _tokens: &ThemeTokens) -> &'static str {
+    match kind {
+        CalloutKind::Note => "NOTE",
+        CalloutKind::Tip => "TIP",
+        CalloutKind::Important => "IMPORTANT",
+        CalloutKind::Warning => "WARNING",
+        CalloutKind::Caution => "CAUTION",
+    }
+}
+
+fn callout_color(kind: Option<CalloutKind>, tokens: &ThemeTokens) -> Hsla {
+    match kind {
+        Some(CalloutKind::Tip) => style::hex_to_hsla(tokens.ui.success),
+        Some(CalloutKind::Warning) | Some(CalloutKind::Caution) => {
+            style::hex_to_hsla(tokens.ui.warning)
+        }
+        Some(CalloutKind::Important) => style::hex_to_hsla(tokens.ui.error),
+        Some(CalloutKind::Note) => style::accent_color(tokens),
+        None => style::blockquote_border_color(tokens),
+    }
 }
 
 // ─── table ──────────────────────────────────────────────────────────────
@@ -1375,6 +1435,9 @@ fn inline_text_width(inline: &Inline) -> usize {
     match inline {
         Inline::Text(text) | Inline::Code(text) | Inline::Html(text) => text.chars().count(),
         Inline::Bold(children) | Inline::Italic(children) | Inline::Strikethrough(children) => {
+            children.iter().map(inline_text_width).sum()
+        }
+        Inline::Kbd(children) | Inline::Subscript(children) | Inline::Superscript(children) => {
             children.iter().map(inline_text_width).sum()
         }
         Inline::Link { text, .. } => text.iter().map(inline_text_width).sum(),
@@ -1949,13 +2012,16 @@ fn render_link_run(
     let text_len = run.text.len();
     let text = SharedString::from(run.text.clone());
     let link_url = url.to_string();
+    let openable = should_open_link(url, opts);
     let run = text_run_for_flat(run, text_len, tokens, opts);
 
     div()
         .cursor_pointer()
         .child(StyledText::new(text).with_runs(vec![run]))
         .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
-            cx.open_url(&link_url);
+            if openable {
+                cx.open_url(&link_url);
+            }
             cx.stop_propagation();
         })
         .into_any_element()
@@ -1965,8 +2031,11 @@ fn render_image(url: &str, opts: &MarkdownOptions) -> AnyElement {
     if !opts.enable_async_images {
         return SharedString::from(format!("[Image: {}]", url)).into_any_element();
     }
+    if !should_load_image(url, opts) {
+        return SharedString::from(format!("[Image: {}]", url)).into_any_element();
+    }
 
-    if let Some(path) = image_path_from_url(url) {
+    if let Some(path) = image_path_from_url(url, opts) {
         img(path).max_w(px(opts.max_image_width)).into_any_element()
     } else {
         img(url.to_string())
@@ -1975,19 +2044,68 @@ fn render_image(url: &str, opts: &MarkdownOptions) -> AnyElement {
     }
 }
 
-fn image_path_from_url(url: &str) -> Option<PathBuf> {
-    if let Some(path) = url.strip_prefix("file://") {
-        return Some(PathBuf::from(path));
+fn image_path_from_url(url: &str, opts: &MarkdownOptions) -> Option<PathBuf> {
+    if let Some(scheme) = url_scheme(url) {
+        if !image_scheme_allowed(scheme, opts) {
+            return None;
+        }
+        if scheme.eq_ignore_ascii_case("file")
+            && let Some(path) = url.strip_prefix("file://")
+        {
+            return Some(PathBuf::from(path));
+        }
+        return None;
     }
 
-    let remote =
-        url.starts_with("http://") || url.starts_with("https://") || url.starts_with("data:");
-
-    if remote {
-        None
+    if let Some(base_dir) = opts.image_base_dir.as_ref()
+        && !PathBuf::from(url).is_absolute()
+    {
+        Some(base_dir.join(url))
     } else {
         Some(PathBuf::from(url))
     }
+}
+
+fn should_load_image(url: &str, opts: &MarkdownOptions) -> bool {
+    let Some(scheme) = url_scheme(url) else {
+        return true;
+    };
+    image_scheme_allowed(scheme, opts)
+}
+
+fn image_scheme_allowed(scheme: &str, opts: &MarkdownOptions) -> bool {
+    opts.allowed_image_schemes
+        .iter()
+        .any(|allowed| scheme.eq_ignore_ascii_case(allowed))
+}
+
+fn url_scheme(url: &str) -> Option<&str> {
+    let (scheme, _) = url.split_once(':')?;
+    // Treat Windows drive prefixes such as `C:\foo` as local paths instead of
+    // URL schemes; markdown image paths often point at local preview assets.
+    if scheme.len() <= 1 {
+        return None;
+    }
+    if scheme
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.'))
+    {
+        Some(scheme)
+    } else {
+        None
+    }
+}
+
+fn should_open_link(url: &str, opts: &MarkdownOptions) -> bool {
+    if url.starts_with('#') {
+        return false;
+    }
+    let Some(scheme) = url_scheme(url) else {
+        return false;
+    };
+    opts.allowed_link_schemes
+        .iter()
+        .any(|allowed| scheme.eq_ignore_ascii_case(allowed))
 }
 
 fn render_math(
@@ -2177,6 +2295,12 @@ fn collect_runs(
             Inline::Strikethrough(children) => {
                 collect_runs(children, bold, italic, code, link, true, out);
             }
+            Inline::Kbd(children) => {
+                collect_runs(children, bold, italic, true, link, strikethrough, out);
+            }
+            Inline::Subscript(children) | Inline::Superscript(children) => {
+                collect_runs(children, bold, italic, code, link, strikethrough, out);
+            }
             Inline::Image { alt, url } => {
                 out.push(FlatRun {
                     text: format!("[{}]", alt),
@@ -2257,21 +2381,54 @@ mod tests {
 
     #[test]
     fn classifies_local_image_paths() {
+        let opts = MarkdownOptions::default();
         assert_eq!(
-            image_path_from_url("images/logo.png"),
+            image_path_from_url("images/logo.png", &opts),
             Some(PathBuf::from("images/logo.png")),
         );
         assert_eq!(
-            image_path_from_url("file:///tmp/logo.png"),
+            image_path_from_url("file:///tmp/logo.png", &opts),
             Some(PathBuf::from("/tmp/logo.png")),
         );
     }
 
     #[test]
     fn leaves_remote_images_for_async_uri_loading() {
-        assert_eq!(image_path_from_url("https://example.com/logo.png"), None);
-        assert_eq!(image_path_from_url("http://example.com/logo.png"), None);
-        assert_eq!(image_path_from_url("data:image/png;base64,AAAA"), None);
+        let opts = MarkdownOptions::default();
+        assert_eq!(
+            image_path_from_url("https://example.com/logo.png", &opts),
+            None
+        );
+        assert_eq!(
+            image_path_from_url("http://example.com/logo.png", &opts),
+            None
+        );
+        assert_eq!(
+            image_path_from_url("data:image/png;base64,AAAA", &opts),
+            None
+        );
+    }
+
+    #[test]
+    fn blocks_images_with_unconfigured_schemes() {
+        let opts = MarkdownOptions::default();
+        assert!(!should_load_image("javascript:alert(1)", &opts));
+        assert!(!should_load_image("ftp://example.com/logo.png", &opts));
+        assert!(should_load_image("https://example.com/logo.png", &opts));
+        assert!(should_load_image("./assets/logo.png", &opts));
+        assert_eq!(
+            image_path_from_url("ftp://example.com/logo.png", &opts),
+            None
+        );
+    }
+
+    #[test]
+    fn resolves_relative_images_against_markdown_source_dir() {
+        let opts = MarkdownOptions::default().with_source_path("/tmp/docs/README.md");
+        assert_eq!(
+            image_path_from_url("./assets/logo.png", &opts),
+            Some(PathBuf::from("/tmp/docs/./assets/logo.png")),
+        );
     }
 
     #[test]
@@ -2378,5 +2535,14 @@ mod tests {
         assert!(runs[0].link_url.is_none());
         assert!(runs[0].image_url.is_none());
         assert!(runs[0].math_latex.is_none());
+    }
+
+    #[test]
+    fn allows_only_configured_link_schemes() {
+        let opts = MarkdownOptions::default();
+        assert!(should_open_link("https://example.com", &opts));
+        assert!(should_open_link("mailto:hello@example.com", &opts));
+        assert!(!should_open_link("#intro", &opts));
+        assert!(!should_open_link("javascript:alert(1)", &opts));
     }
 }

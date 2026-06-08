@@ -24,9 +24,15 @@
 //! - Mermaid subset diagrams (`graph` / `flowchart` TD/BT/LR/RL, `sequenceDiagram`, `pie`, and `gantt`)
 //! - Blockquotes
 //! - GFM tables
+//! - GFM callouts (`[!NOTE]`, `[!WARNING]`, etc.)
 //! - Ordered and unordered lists with task list checkboxes
 //! - Footnotes
+//! - Hidden YAML/TOML-style frontmatter metadata
+//! - Generated heading IDs and safe fragment-link handling
 //! - Clickable links and local/remote images via GPUI async image cache
+//! - Link/image scheme allowlists for untrusted markdown surfaces
+//! - Safe inline HTML subset: `<br>`, `<kbd>`, `<sub>`, `<sup>`
+//! - Bare `http://` / `https://` URL autolinks
 //! - Horizontal rules
 //! - Smart punctuation
 

@@ -309,7 +309,7 @@ impl WorkspaceApp {
                 )
             }
             Some(LocalPreview::Markdown { content }) => {
-                self.render_file_manager_preview_markdown(content, cx)
+                self.render_file_manager_preview_markdown(content, &entry.path, cx)
             }
             Some(LocalPreview::Image { path, mime_type }) => self
                 .render_file_manager_preview_image(path, mime_type.clone())
@@ -953,9 +953,12 @@ impl WorkspaceApp {
     fn render_file_manager_preview_markdown(
         &self,
         content: &str,
+        source_path: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let opts = self.localized_markdown_options();
+        let opts = self
+            .localized_markdown_options()
+            .with_source_path(source_path);
         let code_actions = self.markdown_mermaid_actions(cx);
         div()
             .size_full()

@@ -1,6 +1,14 @@
 impl WorkspaceApp {
     fn render_sftp_preview_markdown(&self, source: &str, cx: &mut Context<Self>) -> AnyElement {
-        let opts = self.localized_markdown_options();
+        let mut opts = self.localized_markdown_options();
+        if self.sftp_view.preview_pane == Some(SftpPane::Local)
+            && let Some(source_path) = self.sftp_view.preview_path.as_deref()
+        {
+            // Only local previews can resolve relative markdown images directly.
+            // Remote SFTP markdown needs a separate asset cache before paths are
+            // safe to hand to GPUI's local image renderer.
+            opts = opts.with_source_path(source_path);
+        }
         let code_actions = self.markdown_mermaid_actions(cx);
         div()
             .size_full()
