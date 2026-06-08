@@ -128,10 +128,12 @@ pub struct AiToolCallView {
     pub summary: String,
     pub status: AiToolStatus,
     pub risk: AiToolRisk,
+    pub risk_label: String,
     pub capability: Option<String>,
     pub duration: Option<String>,
     pub pending_denied_command: bool,
     pub bypass_approval: bool,
+    pub bypass_label: String,
 }
 
 pub(super) fn tone_color(tokens: &ThemeTokens, tone: AiTone) -> u32 {
@@ -194,19 +196,6 @@ pub(super) fn status_tone(status: AiToolStatus) -> AiTone {
         AiToolStatus::Rejected => AiTone::Muted,
     }
 }
-pub(super) fn risk_label(risk: AiToolRisk) -> &'static str {
-    match risk {
-        AiToolRisk::Read => "Read",
-        AiToolRisk::WriteFile => "Write File",
-        AiToolRisk::ExecuteCommand => "Execute",
-        AiToolRisk::InteractiveInput => "Interactive",
-        AiToolRisk::Destructive => "Destructive",
-        AiToolRisk::NetworkExpose => "Network",
-        AiToolRisk::SettingsChange => "Settings",
-        AiToolRisk::CredentialSensitive => "Credential",
-    }
-}
-
 pub fn ai_icon_size_large() -> f32 {
     AI_ICON_16
 }

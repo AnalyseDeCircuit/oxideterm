@@ -1,6 +1,7 @@
 use gpui::{
-    Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
-    Stateful, StatefulInteractiveElement, Styled, div, prelude::*, px, rgb, rgba,
+    Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, ScrollHandle,
+    ScrollWheelEvent, SharedString, Stateful, StatefulInteractiveElement, Styled, div, prelude::*,
+    px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -123,10 +124,14 @@ pub fn ai_tool_item_header(
         .child(ai_tool_badge(
             tokens,
             risk_tone(call.risk),
-            risk_label(call.risk),
+            call.risk_label.clone(),
         ))
         .when(call.bypass_approval, |header| {
-            header.child(ai_tool_badge(tokens, AiTone::Amber, "Bypass"))
+            header.child(ai_tool_badge(
+                tokens,
+                AiTone::Amber,
+                call.bypass_label.clone(),
+            ))
         })
         .when_some(call.capability.clone(), |header, capability| {
             header.child(ai_tool_neutral_badge(tokens, capability))
@@ -265,12 +270,13 @@ pub fn ai_tool_pre(
     content: impl Into<String>,
     max_height: f32,
     mono_font_family: SharedString,
+    scroll_handle: &ScrollHandle,
 ) -> Stateful<Div> {
     div()
         .id(id)
         .max_h(px(max_height))
-        .overflow_x_scroll()
-        .overflow_y_scroll()
+        .overflow_hidden()
+        .track_scroll(scroll_handle)
         .rounded(px(tokens.radii.md))
         .bg(bg_alpha(tokens, tokens.ui.bg, 0x80))
         .px(px(tokens.spacing.one + tokens.spacing.one / 2.0))
@@ -280,6 +286,30 @@ pub fn ai_tool_pre(
         .font_family(mono_font_family)
         .text_color(muted_text(tokens, AI_MUTED_TEXT_60_ALPHA))
         .whitespace_normal()
+        .on_scroll_wheel({
+            let scroll_handle = scroll_handle.clone();
+            move |event: &ScrollWheelEvent, window, cx| {
+                let old_offset = scroll_handle.offset();
+                let max_offset = scroll_handle.max_offset();
+                let delta = event.delta.pixel_delta(window.line_height());
+                let mut next_offset = old_offset;
+
+                if max_offset.width > px(0.0) {
+                    next_offset.x = (next_offset.x + delta.x).clamp(-max_offset.width, px(0.0));
+                }
+                if max_offset.height > px(0.0) {
+                    next_offset.y = (next_offset.y + delta.y).clamp(-max_offset.height, px(0.0));
+                }
+
+                // Stop chaining only while this payload actually consumes the
+                // wheel. At the top/bottom edge, let the AI transcript continue.
+                if next_offset != old_offset {
+                    scroll_handle.set_offset(next_offset);
+                    cx.stop_propagation();
+                    cx.notify(window.current_view());
+                }
+            }
+        })
         .child(content.into())
 }
 
@@ -288,6 +318,7 @@ pub fn ai_tool_args_pre(
     id: impl Into<ElementId>,
     content: impl Into<String>,
     mono_font_family: SharedString,
+    scroll_handle: &ScrollHandle,
 ) -> Stateful<Div> {
     ai_tool_pre(
         tokens,
@@ -295,6 +326,7 @@ pub fn ai_tool_args_pre(
         content,
         AI_TOOL_ARGS_MAX_HEIGHT,
         mono_font_family,
+        scroll_handle,
     )
 }
 
@@ -303,6 +335,7 @@ pub fn ai_tool_structured_pre(
     id: impl Into<ElementId>,
     content: impl Into<String>,
     mono_font_family: SharedString,
+    scroll_handle: &ScrollHandle,
 ) -> Stateful<Div> {
     ai_tool_pre(
         tokens,
@@ -310,6 +343,7 @@ pub fn ai_tool_structured_pre(
         content,
         AI_TOOL_STRUCTURED_MAX_HEIGHT,
         mono_font_family,
+        scroll_handle,
     )
 }
 
@@ -318,6 +352,7 @@ pub fn ai_tool_output_pre(
     id: impl Into<ElementId>,
     content: impl Into<String>,
     mono_font_family: SharedString,
+    scroll_handle: &ScrollHandle,
 ) -> Stateful<Div> {
     ai_tool_pre(
         tokens,
@@ -325,5 +360,6 @@ pub fn ai_tool_output_pre(
         content,
         AI_TOOL_OUTPUT_MAX_HEIGHT,
         mono_font_family,
+        scroll_handle,
     )
 }

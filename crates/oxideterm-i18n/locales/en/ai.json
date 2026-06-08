@@ -219,7 +219,19 @@
         "get_plugin_details": "Plugin Details",
         "get_ssh_environment": "SSH Environment",
         "get_topology": "Topology",
-        "search_docs": "Search Docs"
+        "search_docs": "Search Docs",
+        "select_target": "Select Target",
+        "connect_target": "Connect Target",
+        "run_command": "Run Command",
+        "observe_terminal": "Observe Terminal",
+        "send_terminal_input": "Send Terminal Input",
+        "read_resource": "Read Resource",
+        "write_resource": "Write Resource",
+        "transfer_resource": "Transfer Resource",
+        "open_app_surface": "Open App Surface",
+        "get_state": "Read State",
+        "remember_preference": "Remember Preference",
+        "recall_preferences": "Recall Preferences"
       },
       "risk_labels": {
         "read": "Read",
@@ -230,6 +242,53 @@
         "network-expose": "Network Exposure",
         "settings-change": "Settings Change",
         "credential-sensitive": "Credential Sensitive"
+      },
+      "capability_labels": {
+        "command.run": "Run commands",
+        "filesystem.read": "Read files",
+        "filesystem.write": "Write files",
+        "filesystem.search": "Search files",
+        "navigation.open": "Open views",
+        "state.list": "Read state",
+        "settings.read": "Read settings",
+        "settings.write": "Write settings",
+        "terminal.observe": "Observe terminal",
+        "terminal.send": "Send terminal input",
+        "terminal.wait": "Wait for terminal"
+      },
+      "policy_decisions": {
+        "allow": "Allowed",
+        "require_approval": "Approval required",
+        "deny": "Denied"
+      },
+      "policy_reasons": {
+        "tool_disabled": "Tool disabled by policy",
+        "read_only_auto_allowed": "Read-only action auto allowed",
+        "credential_requires_user": "Credential-sensitive action requires the user",
+        "bypass_destructive_allowed": "Bypass mode approved a dangerous command",
+        "destructive_requires_approval": "Dangerous command requires approval",
+        "auto_approved": "Allowed by tool policy",
+        "policy_requires_approval": "Tool policy requires approval"
+      },
+      "policy_scopes": {
+        "settings": "Settings",
+        "file": "File",
+        "directory": "Directory",
+        "sftp": "SFTP",
+        "ide": "IDE",
+        "rag": "Knowledge Base",
+        "unsupported": "Unsupported"
+      },
+      "surfaces": {
+        "settings": "Settings",
+        "connection_manager": "Connection Manager",
+        "connection_pool": "Connection Pool",
+        "connection_monitor": "Connection Monitor",
+        "sftp": "SFTP",
+        "ide": "IDE",
+        "file_manager": "File Manager",
+        "local_terminal": "Local Terminal",
+        "terminal": "Terminal"
       },
       "bypass_badge": "Bypass",
       "policy": "Policy",

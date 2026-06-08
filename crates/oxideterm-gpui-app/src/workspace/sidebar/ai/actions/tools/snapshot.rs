@@ -663,8 +663,8 @@ impl WorkspaceApp {
         let started = std::time::Instant::now();
         let result = match tool_name.as_str() {
             "connect_target" => self.execute_ai_connect_target(&args, window, cx),
-            "run_command" => self.execute_ai_terminal_run_command(&args, cx),
-            "send_terminal_input" => self.execute_ai_send_terminal_input(&args, cx),
+            "run_command" => self.execute_ai_terminal_run_command(&args, window, cx),
+            "send_terminal_input" => self.execute_ai_send_terminal_input(&args, window, cx),
             "write_resource" => self.execute_ai_write_settings_resource(&args, cx),
             "open_app_surface" => self.execute_ai_open_app_surface(&args, window, cx),
             "remember_preference" => self.execute_ai_remember_preference(&args, cx),
@@ -703,7 +703,14 @@ impl WorkspaceApp {
                 .as_deref()
                 == Some("terminal-session")
         {
-            self.start_ai_terminal_run_command_execution(tool_call_id, tool_name, args, sender, cx);
+            self.start_ai_terminal_run_command_execution(
+                tool_call_id,
+                tool_name,
+                args,
+                sender,
+                window,
+                cx,
+            );
             return;
         }
         let result = self.execute_ai_ui_orchestrator_tool(tool_call_id, tool_name, args, window, cx);
@@ -843,6 +850,7 @@ impl WorkspaceApp {
                             "reason": "Refresh available targets before retrying."
                         })]);
                 }
+                self.reveal_ai_target_if_visible(&target, window, cx);
                 snapshot
                     .ok(
                         "Target is already live.",
@@ -857,6 +865,7 @@ impl WorkspaceApp {
             }
             "ssh-node" => {
                 if target.state == "connected" {
+                    self.reveal_ai_target_if_visible(&target, window, cx);
                     return snapshot
                         .ok(
                             "Target is already live.",
@@ -1039,6 +1048,7 @@ impl WorkspaceApp {
     fn execute_ai_send_terminal_input(
         &mut self,
         args: &serde_json::Value,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
@@ -1087,7 +1097,7 @@ impl WorkspaceApp {
                 )
                 .with_target(target);
         };
-        let Some((_pane_id, pane)) = self.pane_for_terminal_session(session_id) else {
+        let Some((_pane_id, pane)) = self.reveal_ai_terminal_session(session_id, window, cx) else {
             return snapshot
                 .fail(
                     "Terminal pane is not registered.",
@@ -1136,6 +1146,7 @@ impl WorkspaceApp {
     fn execute_ai_terminal_run_command(
         &mut self,
         args: &serde_json::Value,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
@@ -1189,7 +1200,7 @@ impl WorkspaceApp {
                 )
                 .with_target(target);
         };
-        let Some((_pane_id, pane)) = self.pane_for_terminal_session(session_id) else {
+        let Some((_pane_id, pane)) = self.reveal_ai_terminal_session(session_id, window, cx) else {
             return snapshot
                 .fail(
                     "Terminal pane is not ready.",
@@ -1252,6 +1263,7 @@ impl WorkspaceApp {
         tool_name: String,
         args: serde_json::Value,
         sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let started = std::time::Instant::now();
@@ -1342,7 +1354,7 @@ impl WorkspaceApp {
             let _ = sender.send(result);
             return;
         };
-        let Some((_pane_id, pane)) = self.pane_for_terminal_session(session_id) else {
+        let Some((_pane_id, pane)) = self.reveal_ai_terminal_session(session_id, window, cx) else {
             let result = snapshot.to_executed_tool_result(
                 tool_call_id,
                 tool_name,
@@ -1725,10 +1737,22 @@ impl WorkspaceApp {
                     .and_then(|target| target.refs.get("nodeId"))
                     .map(|value| NodeId::new(value.clone()))
                     .or_else(|| self.active_ssh_node_id.clone());
-                // Match Tauri createTab: missing node context is a no-op but the tool result still reports the surface request.
-                if let Some(node_id) = node_id {
-                    self.open_sftp_tab(node_id, window, cx);
-                }
+                let Some(node_id) = node_id else {
+                    return snapshot
+                        .fail(
+                            "SFTP requires a connected SSH target.",
+                            "missing_node_context",
+                            "Open SFTP with a target_id that carries nodeId, or connect an SSH target first.",
+                            "write",
+                        )
+                        .with_optional_target(target)
+                        .with_next_actions(vec![serde_json::json!({
+                            "action": "list_targets",
+                            "args": { "view": "files" },
+                            "reason": "Find a connected SFTP or SSH target before opening SFTP."
+                        })]);
+                };
+                self.open_sftp_tab(node_id, window, cx);
                 snapshot
                     .ok("Opened sftp.", "Opened sftp.", serde_json::Value::Null, "write")
                     .with_optional_target(target)
@@ -1739,10 +1763,22 @@ impl WorkspaceApp {
                     .and_then(|target| target.refs.get("nodeId"))
                     .map(|value| NodeId::new(value.clone()))
                     .or_else(|| self.active_ssh_node_id.clone());
-                // Match Tauri createTab: missing node context is a no-op but the tool result still reports the surface request.
-                if let Some(node_id) = node_id {
-                    self.open_ide_folder_picker_tab(node_id, cx);
-                }
+                let Some(node_id) = node_id else {
+                    return snapshot
+                        .fail(
+                            "IDE requires a connected SSH target.",
+                            "missing_node_context",
+                            "Open IDE with a target_id that carries nodeId, or connect an SSH target first.",
+                            "write",
+                        )
+                        .with_optional_target(target)
+                        .with_next_actions(vec![serde_json::json!({
+                            "action": "list_targets",
+                            "args": { "view": "files" },
+                            "reason": "Find a connected IDE or SSH target before opening IDE."
+                        })]);
+                };
+                self.open_ide_folder_picker_tab(node_id, cx);
                 snapshot
                     .ok("Opened ide.", "Opened ide.", serde_json::Value::Null, "write")
                     .with_optional_target(target)
@@ -1758,16 +1794,70 @@ impl WorkspaceApp {
         }
     }
 
-    fn pane_for_terminal_session(
-        &self,
+    fn reveal_ai_target_if_visible(
+        &mut self,
+        target: &AiOrchestratorTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // Tool results are only trustworthy when the affected app surface is
+        // visible to the user. Prefer a terminal session because it is the
+        // only target that represents concrete shell state.
+        if let Some(session_id) = target
+            .refs
+            .get("sessionId")
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(TerminalSessionId)
+        {
+            return self
+                .reveal_ai_terminal_session(session_id, window, cx)
+                .is_some();
+        }
+
+        // Node-only targets may point at non-terminal surfaces. Reveal an
+        // already-open SFTP tab, but never create a new surface from a generic
+        // connect_target call because that would overstate the requested action.
+        if let Some(node_id) = target.refs.get("nodeId") {
+            let node_id = NodeId::new(node_id.clone());
+            if self.sftp_tab_nodes.values().any(|existing| existing == &node_id) {
+                self.open_sftp_tab(node_id, window, cx);
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn reveal_ai_terminal_session(
+        &mut self,
         session_id: TerminalSessionId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> Option<(PaneId, gpui::Entity<oxideterm_gpui_terminal::TerminalPane>)> {
-        let pane_id = self.tabs.iter().find_map(|tab| {
-            tab.root_pane
-                .as_ref()
-                .and_then(|root| root.pane_id_for_session(session_id))
-        })?;
+        let (tab_index, tab_id, pane_id) =
+            self.tabs.iter().enumerate().find_map(|(index, tab)| {
+                let pane_id = tab
+                    .root_pane
+                    .as_ref()
+                    .and_then(|root| root.pane_id_for_session(session_id))?;
+                Some((index, tab.id, pane_id))
+            })?;
         let pane = self.panes.get(&pane_id)?.clone();
+
+        // AI terminal tools must act on the same pane the user can see. The
+        // model may target a non-active session from context, so make that tab
+        // and pane visible before writing input or reading command output.
+        self.active_tab_id = Some(tab_id);
+        if let Some(tab) = self.tabs.get_mut(tab_index) {
+            tab.active_pane_id = Some(pane_id);
+        }
+        self.sync_active_tab_surface();
+        self.active_surface = ActiveSurface::Terminal;
+        self.needs_active_pane_focus = true;
+        self.focus_active_pane(window, cx);
+        self.reveal_active_tab(window);
+        cx.notify();
+
         Some((pane_id, pane))
     }
 

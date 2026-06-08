@@ -219,7 +219,19 @@
         "get_plugin_details": "外掛詳情",
         "get_ssh_environment": "SSH 環境",
         "get_topology": "網路拓撲",
-        "search_docs": "搜尋知識庫"
+        "search_docs": "搜尋知識庫",
+        "select_target": "選擇目標",
+        "connect_target": "連線目標",
+        "run_command": "執行命令",
+        "observe_terminal": "觀察終端",
+        "send_terminal_input": "傳送終端輸入",
+        "read_resource": "讀取資源",
+        "write_resource": "寫入資源",
+        "transfer_resource": "傳輸資源",
+        "open_app_surface": "開啟介面",
+        "get_state": "讀取狀態",
+        "remember_preference": "記住偏好",
+        "recall_preferences": "讀取偏好"
       },
       "risk_labels": {
         "read": "唯讀",
@@ -230,6 +242,53 @@
         "network-expose": "網路暴露",
         "settings-change": "修改設定",
         "credential-sensitive": "憑證敏感"
+      },
+      "capability_labels": {
+        "command.run": "執行命令",
+        "filesystem.read": "讀取檔案",
+        "filesystem.write": "寫入檔案",
+        "filesystem.search": "搜尋檔案",
+        "navigation.open": "開啟介面",
+        "state.list": "讀取狀態",
+        "settings.read": "讀取設定",
+        "settings.write": "修改設定",
+        "terminal.observe": "觀察終端",
+        "terminal.send": "傳送終端輸入",
+        "terminal.wait": "等待終端"
+      },
+      "policy_decisions": {
+        "allow": "已允許",
+        "require_approval": "需要審批",
+        "deny": "已拒絕"
+      },
+      "policy_reasons": {
+        "tool_disabled": "工具已被策略停用",
+        "read_only_auto_allowed": "唯讀操作自動允許",
+        "credential_requires_user": "憑證敏感操作必須由使用者處理",
+        "bypass_destructive_allowed": "Bypass 模式已允許危險命令",
+        "destructive_requires_approval": "危險命令需要審批",
+        "auto_approved": "工具策略已允許",
+        "policy_requires_approval": "工具策略要求審批"
+      },
+      "policy_scopes": {
+        "settings": "設定",
+        "file": "檔案",
+        "directory": "目錄",
+        "sftp": "SFTP",
+        "ide": "IDE",
+        "rag": "知識庫",
+        "unsupported": "不支援"
+      },
+      "surfaces": {
+        "settings": "設定",
+        "connection_manager": "會話管理器",
+        "connection_pool": "連線池",
+        "connection_monitor": "連線監控",
+        "sftp": "SFTP",
+        "ide": "IDE",
+        "file_manager": "檔案管理器",
+        "local_terminal": "本機終端",
+        "terminal": "終端"
       },
       "bypass_badge": "Bypass",
       "policy": "策略",

@@ -72,6 +72,8 @@ pub struct TreeUiState {
 }
 
 pub const AI_SIDEBAR_MIN_WIDTH: f32 = 280.0;
+// Tauri clamps the OxideSens sidebar at 500px; wider markdown/tool output must
+// scroll inside the panel instead of continuing to consume workspace width.
 pub const AI_SIDEBAR_MAX_WIDTH: f32 = 500.0;
 pub const AI_SIDEBAR_DEFAULT_WIDTH: i64 = 340;
 

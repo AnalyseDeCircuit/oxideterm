@@ -12,9 +12,9 @@ use gpui::{
     AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontStyle, FontWeight, Hsla, Image,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
     StrikethroughStyle, Styled, StyledText, TextAlign, TextRun, UnderlineStyle, Window, div,
-    image_cache, img, px, relative, retain_all,
+    image_cache, img, prelude::FluentBuilder, px, relative, retain_all,
 };
-use gpui_component::{VirtualListScrollHandle, v_virtual_list};
+use gpui_component::{VirtualListScrollHandle, scroll::ScrollableElement, v_virtual_list};
 use oxideterm_theme::ThemeTokens;
 
 use crate::highlight;
@@ -917,6 +917,9 @@ fn render_code_block_shell(
             div()
                 .w_full()
                 .min_w_0()
+                // Tauri code blocks scroll horizontally for long lines; the
+                // markdown shell must not let code define the chat/sidebar width.
+                .overflow_x_scrollbar()
                 .p(px(opts.code_block_padding))
                 .text_size(style::code_font_size(opts))
                 .text_color(style::text_color(tokens))
@@ -1157,17 +1160,34 @@ fn render_table(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
 ) -> AnyElement {
-    let col_count = headers.len().max(1);
+    let col_count = table_column_count(headers, rows);
+    let column_widths = table_column_widths(headers, rows, col_count);
 
+    // Approximate Tauri/browser table auto-layout without letting one long cell
+    // define the whole table width. Short label columns stay compact while
+    // content-heavy columns receive a larger relative share.
+    let has_body_rows = !rows.is_empty();
     let header_row = div()
+        .w_full()
+        .min_w(px(0.0))
         .flex()
         .flex_row()
+        .overflow_hidden()
         .bg(style::table_header_bg(tokens))
         .border_b_1()
         .border_color(style::table_border_color(tokens))
-        .children(headers.iter().enumerate().map(|(ci, cell)| {
+        // GPUI can paint row backgrounds outside the parent radius. Round the
+        // painted rows themselves so table corners match Tauri clipping.
+        .rounded_t(px(tokens.radii.sm))
+        .when(!has_body_rows, |row| row.rounded_b(px(tokens.radii.sm)))
+        .children((0..col_count).map(|ci| {
+            let cell: &[Inline] = headers.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
             div()
-                .flex_1()
+                .w(relative(column_widths[ci]))
+                .flex_shrink()
+                .min_w(px(0.0))
+                .overflow_hidden()
+                .whitespace_normal()
                 .p(px(tokens.spacing.two))
                 .text_align(table_alignment_text_align(alignment_for_column(
                     alignments, ci,
@@ -1177,16 +1197,27 @@ fn render_table(
                 .child(render_styled_inlines(cell, tokens, opts))
         }));
 
-    let body_rows = rows.iter().map(|row| {
+    let body_rows = rows.iter().enumerate().map(|(ri, row)| {
+        let is_last = ri + 1 == rows.len();
         div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_row()
-            .border_b_1()
-            .border_color(style::table_border_color(tokens))
+            .overflow_hidden()
+            .when(!is_last, |row| {
+                row.border_b_1()
+                    .border_color(style::table_border_color(tokens))
+            })
+            .when(is_last, |row| row.rounded_b(px(tokens.radii.sm)))
             .children((0..col_count).map(|ci| {
                 let cell: &[Inline] = row.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
                 div()
-                    .flex_1()
+                    .w(relative(column_widths[ci]))
+                    .flex_shrink()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
+                    .whitespace_normal()
                     .p(px(tokens.spacing.two))
                     .text_align(table_alignment_text_align(alignment_for_column(
                         alignments, ci,
@@ -1198,6 +1229,8 @@ fn render_table(
 
     div()
         .w_full()
+        .min_w(px(0.0))
+        .overflow_hidden()
         .border_1()
         .border_color(style::table_border_color(tokens))
         .rounded(px(tokens.radii.sm))
@@ -1215,17 +1248,33 @@ fn render_selectable_table(
     path: &str,
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
-    let col_count = headers.len().max(1);
+    let col_count = table_column_count(headers, rows);
+    let column_widths = table_column_widths(headers, rows, col_count);
 
+    // Keep selectable markdown tables on the same shrink contract as normal
+    // tables; selection anchors should not make cells use intrinsic width.
+    let has_body_rows = !rows.is_empty();
     let header_row = div()
+        .w_full()
+        .min_w(px(0.0))
         .flex()
         .flex_row()
+        .overflow_hidden()
         .bg(style::table_header_bg(tokens))
         .border_b_1()
         .border_color(style::table_border_color(tokens))
-        .children(headers.iter().enumerate().map(|(ci, cell)| {
+        // Selectable table rows need their own corner radii for the same
+        // reason as normal tables: selection text is not the clipping owner.
+        .rounded_t(px(tokens.radii.sm))
+        .when(!has_body_rows, |row| row.rounded_b(px(tokens.radii.sm)))
+        .children((0..col_count).map(|ci| {
+            let cell: &[Inline] = headers.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
             div()
-                .flex_1()
+                .w(relative(column_widths[ci]))
+                .flex_shrink()
+                .min_w(px(0.0))
+                .overflow_hidden()
+                .whitespace_normal()
                 .p(px(tokens.spacing.two))
                 .text_align(table_alignment_text_align(alignment_for_column(
                     alignments, ci,
@@ -1243,14 +1292,26 @@ fn render_selectable_table(
 
     let body_rows = rows.iter().enumerate().map(|(ri, row)| {
         div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_row()
-            .border_b_1()
-            .border_color(style::table_border_color(tokens))
+            .overflow_hidden()
+            .when(ri + 1 != rows.len(), |row| {
+                row.border_b_1()
+                    .border_color(style::table_border_color(tokens))
+            })
+            .when(ri + 1 == rows.len(), |row| {
+                row.rounded_b(px(tokens.radii.sm))
+            })
             .children((0..col_count).map(|ci| {
                 let cell: &[Inline] = row.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
                 div()
-                    .flex_1()
+                    .w(relative(column_widths[ci]))
+                    .flex_shrink()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
+                    .whitespace_normal()
                     .p(px(tokens.spacing.two))
                     .text_align(table_alignment_text_align(alignment_for_column(
                         alignments, ci,
@@ -1268,12 +1329,60 @@ fn render_selectable_table(
 
     div()
         .w_full()
+        .min_w(px(0.0))
+        .overflow_hidden()
         .border_1()
         .border_color(style::table_border_color(tokens))
         .rounded(px(tokens.radii.sm))
         .child(header_row)
         .children(body_rows)
         .into_any_element()
+}
+
+fn table_column_count(headers: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) -> usize {
+    headers
+        .len()
+        .max(rows.iter().map(Vec::len).max().unwrap_or(0))
+        .max(1)
+}
+
+fn table_column_widths(
+    headers: &[Vec<Inline>],
+    rows: &[Vec<Vec<Inline>>],
+    col_count: usize,
+) -> Vec<f32> {
+    let mut weights = vec![6.0_f32; col_count.max(1)];
+    for (ci, header) in headers.iter().enumerate().take(col_count) {
+        weights[ci] = weights[ci].max(table_cell_text_width(header));
+    }
+    for row in rows {
+        for (ci, cell) in row.iter().enumerate().take(col_count) {
+            weights[ci] = weights[ci].max(table_cell_text_width(cell));
+        }
+    }
+    for weight in &mut weights {
+        *weight = weight.clamp(6.0, 32.0);
+    }
+    let total = weights.iter().sum::<f32>().max(1.0);
+    weights.into_iter().map(|weight| weight / total).collect()
+}
+
+fn table_cell_text_width(inlines: &[Inline]) -> f32 {
+    inlines.iter().map(inline_text_width).sum::<usize>().max(1) as f32
+}
+
+fn inline_text_width(inline: &Inline) -> usize {
+    match inline {
+        Inline::Text(text) | Inline::Code(text) | Inline::Html(text) => text.chars().count(),
+        Inline::Bold(children) | Inline::Italic(children) | Inline::Strikethrough(children) => {
+            children.iter().map(inline_text_width).sum()
+        }
+        Inline::Link { text, .. } => text.iter().map(inline_text_width).sum(),
+        Inline::Image { alt, .. } => alt.chars().count().max(2),
+        Inline::Math { latex, .. } => latex.chars().count(),
+        Inline::FootnoteReference { index, .. } => index.to_string().chars().count() + 2,
+        Inline::LineBreak => 1,
+    }
 }
 
 fn alignment_for_column(alignments: &[TableAlignment], column: usize) -> TableAlignment {
@@ -2183,6 +2292,24 @@ mod tests {
             table_alignment_text_align(TableAlignment::Right),
             TextAlign::Right
         );
+    }
+
+    #[test]
+    fn table_column_widths_prefer_content_heavy_columns() {
+        let headers = vec![
+            vec![Inline::Text("类型".into())],
+            vec![Inline::Text("名称".into())],
+            vec![Inline::Text("说明".into())],
+        ];
+        let rows = vec![vec![
+            vec![Inline::Text("🎵".into())],
+            vec![Inline::Text("long-recording-file-name.wav".into())],
+            vec![Inline::Text("音频文件".into())],
+        ]];
+        let widths = table_column_widths(&headers, &rows, table_column_count(&headers, &rows));
+        assert!(widths[1] > widths[0]);
+        assert!(widths[1] > widths[2]);
+        assert!((widths.iter().sum::<f32>() - 1.0).abs() < 0.001);
     }
 
     #[test]

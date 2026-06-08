@@ -119,12 +119,17 @@ impl WorkspaceApp {
 
     pub(super) fn start_ai_sidebar_resize(
         &mut self,
-        _event: &MouseDownEvent,
-        _window: &Window,
+        event: &MouseDownEvent,
+        window: &Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.ai_sidebar_resizing {
-            self.ai_sidebar_resizing = true;
+        let was_resizing = self.ai_sidebar_resizing;
+        self.ai_sidebar_resizing = true;
+        // Mirror the browser sidebar: the first press updates the width from
+        // the pointer position so a resize drag is visible before the next move.
+        let width_changed =
+            self.set_ai_sidebar_width(self.ai_sidebar_width_from_cursor(event.position.x, window), cx);
+        if !was_resizing && !width_changed {
             cx.notify();
         }
     }

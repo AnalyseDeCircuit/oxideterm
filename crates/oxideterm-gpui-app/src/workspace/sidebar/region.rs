@@ -150,6 +150,7 @@ impl WorkspaceApp {
                         MouseButton::Left,
                         cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
                             this.start_ai_sidebar_resize(event, window, cx);
+                            cx.stop_propagation();
                         }),
                     ),
             )

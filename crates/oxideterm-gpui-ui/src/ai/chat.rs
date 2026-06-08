@@ -138,7 +138,9 @@ pub fn ai_context_chip(
 pub fn ai_chat_input_root(tokens: &ThemeTokens) -> Div {
     div()
         .w_full()
+        .min_w_0()
         .flex_none()
+        .overflow_hidden()
         .bg(rgb(tokens.ui.bg))
         .border_t_1()
         .border_color(bg_alpha(

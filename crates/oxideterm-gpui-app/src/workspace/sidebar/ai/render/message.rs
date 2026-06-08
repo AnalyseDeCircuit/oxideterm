@@ -1117,6 +1117,7 @@ impl WorkspaceApp {
                 .to_string();
             let status = ai_tool_status_from_value(call.get("status"));
             let risk = ai_tool_risk_from_value(call.get("risk"), &name);
+            let arguments_value = serde_json::from_str::<serde_json::Value>(&arguments).ok();
             let summary = call
                 .get("summary")
                 .and_then(serde_json::Value::as_str)
@@ -1128,25 +1129,33 @@ impl WorkspaceApp {
                 .and_then(serde_json::Value::as_str)
                 == Some("bypass");
             let view = AiToolCallView {
-                name: name.clone(),
+                name: self.ai_tool_display_name(&name),
                 summary,
                 status,
                 risk,
+                risk_label: self.ai_tool_risk_label(risk),
                 capability: result
                     .and_then(|value| value.pointer("/meta/capability"))
                     .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
+                    .map(|capability| self.ai_tool_capability_label(capability)),
                 duration: result
                     .and_then(|value| value.pointer("/meta/durationMs"))
                     .and_then(serde_json::Value::as_u64)
                     .map(|duration| format!("{duration}ms")),
                 pending_denied_command: risk == AiToolRisk::Destructive,
                 bypass_approval,
+                bypass_label: self.i18n.t("ai.tool_use.bypass_badge"),
             };
             let tool_mono_font = settings_mono_font_family(self.settings_store.settings());
             let expansion_key = format!("{}:{id}", message.id);
             let expanded = self.ai_tool_call_expansion_state.contains(&expansion_key);
             let header_key = expansion_key.clone();
+            let args_scroll =
+                self.selectable_text_scroll_handle(format!("ai-tool-args:{expansion_key}"));
+            let policy_scroll =
+                self.selectable_text_scroll_handle(format!("ai-tool-policy:{expansion_key}"));
+            let output_scroll =
+                self.selectable_text_scroll_handle(format!("ai-tool-output:{expansion_key}"));
             let mut item = ai_tool_item(&self.tokens, &view).child(
                 ai_tool_item_header(
                     &self.tokens,
@@ -1197,6 +1206,7 @@ impl WorkspaceApp {
                             ("ai-tool-args", ai_message_element_seed(&id)),
                             pretty_tool_json_or_raw(&arguments),
                             tool_mono_font.clone(),
+                            &args_scroll,
                         )),
                 );
             if let Some(result) = result {
@@ -1211,8 +1221,12 @@ impl WorkspaceApp {
                             .child(ai_tool_output_pre(
                                 &self.tokens,
                                 ("ai-tool-policy", ai_message_element_seed(&id)),
-                                ai_tool_policy_decision_summary(policy_decision),
+                                self.ai_tool_policy_decision_summary(
+                                    policy_decision,
+                                    &arguments_value,
+                                ),
                                 tool_mono_font.clone(),
+                                &policy_scroll,
                             )),
                     );
                 }
@@ -1237,6 +1251,7 @@ impl WorkspaceApp {
                             ("ai-tool-output", ai_message_element_seed(&id)),
                             output,
                             tool_mono_font.clone(),
+                            &output_scroll,
                         )),
                 );
             }
@@ -1603,6 +1618,83 @@ impl WorkspaceApp {
         };
         self.i18n.t(key)
     }
+
+    fn ai_tool_display_name(&self, name: &str) -> String {
+        self.localized_ai_tool_value("tool_names", name)
+    }
+
+    fn ai_tool_risk_label(&self, risk: AiToolRisk) -> String {
+        let key = match risk {
+            AiToolRisk::Read => "read",
+            AiToolRisk::WriteFile => "write-file",
+            AiToolRisk::ExecuteCommand => "execute-command",
+            AiToolRisk::InteractiveInput => "interactive-input",
+            AiToolRisk::Destructive => "destructive",
+            AiToolRisk::NetworkExpose => "network-expose",
+            AiToolRisk::SettingsChange => "settings-change",
+            AiToolRisk::CredentialSensitive => "credential-sensitive",
+        };
+        self.localized_ai_tool_value("risk_labels", key)
+    }
+
+    fn ai_tool_capability_label(&self, capability: &str) -> String {
+        self.localized_ai_tool_value("capability_labels", capability)
+    }
+
+    fn ai_tool_policy_decision_summary(
+        &self,
+        policy_decision: &serde_json::Value,
+        arguments: &Option<serde_json::Value>,
+    ) -> String {
+        let decision = policy_decision
+            .get("decision")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("-");
+        let reason = policy_decision
+            .get("reasonCode")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("-");
+        let matched_key = policy_decision
+            .get("matchedPolicyKey")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("-");
+        let decision_label = self.localized_ai_tool_value("policy_decisions", decision);
+        let reason_label = self.localized_ai_tool_value("policy_reasons", reason);
+        let matched_label = self.ai_tool_policy_key_label(matched_key, arguments.as_ref());
+        format!("{decision_label} · {reason_label} · {matched_label}")
+    }
+
+    fn ai_tool_policy_key_label(
+        &self,
+        matched_key: &str,
+        arguments: Option<&serde_json::Value>,
+    ) -> String {
+        if let Some((tool_name, scope)) = matched_key.split_once(':') {
+            let tool_label = self.ai_tool_display_name(tool_name);
+            let scope_label = self.localized_ai_tool_value("policy_scopes", scope);
+            return format!("{tool_label} / {scope_label}");
+        }
+
+        if matched_key == "open_app_surface"
+            && let Some(surface) = arguments
+                .and_then(|args| args.get("surface"))
+                .and_then(serde_json::Value::as_str)
+        {
+            return self.localized_ai_tool_value("surfaces", surface);
+        }
+
+        self.ai_tool_display_name(matched_key)
+    }
+
+    fn localized_ai_tool_value(&self, category: &str, value: &str) -> String {
+        let key = format!("ai.tool_use.{category}.{value}");
+        let localized = self.i18n.t(&key);
+        if localized == key {
+            value.to_string()
+        } else {
+            localized
+        }
+    }
 }
 
 fn ai_message_element_seed(value: &str) -> u64 {
@@ -1778,22 +1870,6 @@ fn ai_tool_status_color(tokens: &oxideterm_theme::ThemeTokens, status: AiToolSta
         AiToolStatus::Running | AiToolStatus::Approved => tokens.ui.accent,
         AiToolStatus::Pending => 0xeab308,
     }
-}
-
-fn ai_tool_policy_decision_summary(policy_decision: &serde_json::Value) -> String {
-    let decision = policy_decision
-        .get("decision")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("-");
-    let reason = policy_decision
-        .get("reasonCode")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("-");
-    let matched_key = policy_decision
-        .get("matchedPolicyKey")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("-");
-    format!("{decision} · {reason} · {matched_key}")
 }
 
 fn pretty_tool_json_or_raw(value: &str) -> String {

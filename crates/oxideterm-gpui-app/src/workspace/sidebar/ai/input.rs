@@ -56,6 +56,8 @@ impl WorkspaceApp {
             .as_ref()
             .filter(|range| range.start == range.end)
             .map(|range| range.start);
+        let visual_lines =
+            ai_input_visual_lines(&input_text, ai_input_soft_wrap_columns(self.ai_sidebar_width));
         let mut input = div()
             .w_full()
             .min_h(px(20.0))
@@ -71,13 +73,11 @@ impl WorkspaceApp {
             })
             .opacity(if enabled { 1.0 } else { 0.5 })
             .cursor(CursorStyle::IBeam);
-        let lines: Vec<&str> = input_text.split('\n').collect();
-        let mut line_start = 0;
-        for (index, line) in lines.iter().enumerate() {
-            let is_last_line = index + 1 == lines.len();
-            let line_len = line.encode_utf16().count();
-            let line_end = line_start + line_len;
-            let line_range = line_start..line_end;
+        for (index, visual_line) in visual_lines.iter().enumerate() {
+            let is_last_line = index + 1 == visual_lines.len();
+            let line = visual_line.text;
+            let line_len = visual_line.utf16_len();
+            let line_range = visual_line.utf16_start..visual_line.utf16_end;
             let line_selection = if showing_placeholder {
                 None
             } else {
@@ -93,7 +93,11 @@ impl WorkspaceApp {
                 caret_offset
                     .filter(|offset| {
                         *offset >= line_range.start
-                            && (*offset <= line_range.end || (is_last_line && *offset == line_end))
+                            && if is_last_line {
+                                *offset <= line_range.end
+                            } else {
+                                *offset < line_range.end
+                            }
                     })
                     .map(|offset| offset.saturating_sub(line_range.start).min(line_len))
             };
@@ -126,7 +130,6 @@ impl WorkspaceApp {
                         line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
                     }),
             );
-            line_start = line_end + 1;
         }
         if focused && !marked_text.is_empty() {
             input = input.child(
@@ -1291,6 +1294,105 @@ fn ai_input_line_segments(
     }
 
     base.child(line.to_string())
+}
+
+#[derive(Clone, Copy)]
+struct AiInputVisualLine<'a> {
+    text: &'a str,
+    utf16_start: usize,
+    utf16_end: usize,
+}
+
+impl AiInputVisualLine<'_> {
+    fn utf16_len(&self) -> usize {
+        self.utf16_end.saturating_sub(self.utf16_start)
+    }
+}
+
+const AI_INPUT_SOFT_WRAP_CHROME_PX: f32 = 56.0;
+const AI_INPUT_SOFT_WRAP_HALF_WIDTH_PX: f32 = 7.0;
+const AI_INPUT_SOFT_WRAP_MIN_COLUMNS: usize = 12;
+
+fn ai_input_soft_wrap_columns(sidebar_width: f32) -> usize {
+    let text_width = (sidebar_width - AI_INPUT_SOFT_WRAP_CHROME_PX).max(80.0);
+    ((text_width / AI_INPUT_SOFT_WRAP_HALF_WIDTH_PX).floor() as usize)
+        .max(AI_INPUT_SOFT_WRAP_MIN_COLUMNS)
+}
+
+fn ai_input_visual_lines(input: &str, wrap_columns: usize) -> Vec<AiInputVisualLine<'_>> {
+    let wrap_columns = wrap_columns.max(AI_INPUT_SOFT_WRAP_MIN_COLUMNS);
+    let mut visual_lines = Vec::new();
+    let mut utf16_line_start = 0;
+
+    for line in input.split('\n') {
+        ai_push_wrapped_input_line(line, utf16_line_start, wrap_columns, &mut visual_lines);
+        utf16_line_start += line.encode_utf16().count() + 1;
+    }
+
+    if visual_lines.is_empty() {
+        visual_lines.push(AiInputVisualLine {
+            text: "",
+            utf16_start: 0,
+            utf16_end: 0,
+        });
+    }
+    visual_lines
+}
+
+fn ai_push_wrapped_input_line<'a>(
+    line: &'a str,
+    utf16_line_start: usize,
+    wrap_columns: usize,
+    visual_lines: &mut Vec<AiInputVisualLine<'a>>,
+) {
+    if line.is_empty() {
+        visual_lines.push(AiInputVisualLine {
+            text: line,
+            utf16_start: utf16_line_start,
+            utf16_end: utf16_line_start,
+        });
+        return;
+    }
+
+    let mut segment_byte_start = 0;
+    let mut segment_utf16_start = utf16_line_start;
+    let mut segment_columns = 0;
+    let mut utf16_offset = utf16_line_start;
+
+    for (byte_index, ch) in line.char_indices() {
+        let char_columns = ai_input_char_columns(ch);
+        if segment_columns > 0 && segment_columns + char_columns > wrap_columns {
+            visual_lines.push(AiInputVisualLine {
+                text: &line[segment_byte_start..byte_index],
+                utf16_start: segment_utf16_start,
+                utf16_end: utf16_offset,
+            });
+            segment_byte_start = byte_index;
+            segment_utf16_start = utf16_offset;
+            segment_columns = 0;
+        }
+
+        segment_columns += char_columns;
+        utf16_offset += ch.len_utf16();
+    }
+
+    visual_lines.push(AiInputVisualLine {
+        text: &line[segment_byte_start..],
+        utf16_start: segment_utf16_start,
+        utf16_end: utf16_offset,
+    });
+}
+
+fn ai_input_char_columns(ch: char) -> usize {
+    // GPUI does not expose textarea-style wrapping here, so this estimates
+    // terminal-adjacent text width with UTF-16-safe boundaries for IME state.
+    if ch == '\t' {
+        4
+    } else if ch.is_ascii() {
+        1
+    } else {
+        2
+    }
 }
 
 fn ai_utf16_slice(value: &str, range: std::ops::Range<usize>) -> String {
