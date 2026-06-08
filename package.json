@@ -118,7 +118,7 @@
     "tailwind-merge": "^3.6.0",
     "ts-md5": "^2.0.1",
     "xlsx": "^0.18.5",
-    "zustand": "^5.0.9"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",
