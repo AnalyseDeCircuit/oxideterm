@@ -281,6 +281,30 @@ def zip_directory(src: Path, dest: Path) -> None:
                 archive.writestr(info, file.read())
 
 
+def require_tool(name: str) -> str:
+    tool = shutil.which(name)
+    if tool:
+        return tool
+    raise RuntimeError(f"required packaging tool not found: {name}")
+
+
+def sign_macos_app_bundle(app_dir: Path) -> None:
+    codesign = require_tool("codesign")
+    # Ad-hoc signing does not notarize the app, but it keeps stripped preview
+    # bundles launchable on Apple Silicon instead of producing a damaged-app error.
+    run([codesign, "--force", "--deep", "--sign", "-", str(app_dir)])
+    run([codesign, "--verify", "--verbose", str(app_dir)])
+
+
+def zip_macos_app_bundle(app_dir: Path, dest: Path) -> None:
+    ditto = require_tool("ditto")
+    if dest.exists():
+        dest.unlink()
+    # ditto preserves macOS bundle metadata and code-signing state; Python zip
+    # is fine for generic archives but can break .app signature metadata.
+    run([ditto, "-c", "-k", "--keepParent", app_dir.name, str(dest)], cwd=app_dir.parent)
+
+
 def create_portable_package(binary: Path, target: str, version: str, label: str) -> None:
     package_root = DIST_DIR / f"OxideTerm_{version}_{label}_portable"
     if package_root.exists():
@@ -441,7 +465,8 @@ def create_macos_app(
     with (contents / "Info.plist").open("wb") as file:
         plistlib.dump(plist, file)
 
-    zip_directory(app_dir, DIST_DIR / f"OxideTerm_{version}_{label}.app.zip")
+    sign_macos_app_bundle(app_dir)
+    zip_macos_app_bundle(app_dir, DIST_DIR / f"OxideTerm_{version}_{label}.app.zip")
 
     if shutil.which("hdiutil"):
         dmg_root = DIST_DIR / f"dmg-{label}"
