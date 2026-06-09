@@ -115,6 +115,39 @@ pub struct AgentGrepMatch {
     pub text: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum SymbolKind {
+    Function,
+    Class,
+    Struct,
+    Interface,
+    Enum,
+    Trait,
+    TypeAlias,
+    Constant,
+    Variable,
+    Module,
+    Method,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub struct SymbolInfo {
+    pub name: String,
+    pub kind: SymbolKind,
+    pub path: String,
+    pub line: u32,
+    pub column: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub struct SymbolIndexResult {
+    pub symbols: Vec<SymbolInfo>,
+    pub file_count: u32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IdeSearchMatch {
     pub path: String,

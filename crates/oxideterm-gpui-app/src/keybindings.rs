@@ -7,8 +7,9 @@ use crate::{
     CloseOtherTabs, CloseTab, CommandPalette, Find, FontDecrease, FontIncrease, FontReset,
     GoToTab1, GoToTab2, GoToTab3, GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9,
     NewConnection, NewTerminal, NextTab, OpenSettings, PaletteAiSidebar, PaletteBroadcast,
-    PaletteEventLog, Paste, PrevTab, ShellLauncher, ShowShortcuts, SplitHorizontal, SplitNavLeft,
-    SplitNavRight, SplitVertical, TerminalAiPanel, TerminalRecording, ToggleSidebar, ZenMode,
+    PaletteEventLog, Paste, PrevTab, Quit, ShellLauncher, ShowShortcuts, SplitHorizontal,
+    SplitNavLeft, SplitNavRight, SplitVertical, TerminalAiPanel, TerminalRecording, ToggleSidebar,
+    ZenMode,
 };
 
 const CONTEXT: &str = "Workspace";
@@ -208,6 +209,12 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
             ActionScope::Global,
             KeyCombo::cmd(","),
             KeyCombo::ctrl(","),
+        ),
+        def(
+            "app.quit",
+            ActionScope::Global,
+            KeyCombo::cmd("q"),
+            KeyCombo::ctrl("q"),
         ),
         def(
             "app.toggleSidebar",
@@ -808,7 +815,7 @@ pub(crate) fn startup_key_bindings(overrides: &Map<String, Value>) -> Vec<KeyBin
                 NoAction {},
                 Some(CONTEXT),
             ));
-            if definition.id == "app.commandPalette" {
+            if matches!(definition.id, "app.commandPalette" | "app.quit") {
                 bindings.push(KeyBinding::new(&default_keystroke, NoAction {}, None));
             }
         }
@@ -836,7 +843,7 @@ pub(crate) fn runtime_rebind_key_bindings(
             NoAction {},
             Some(CONTEXT),
         ));
-        if action_id == "app.commandPalette" {
+        if matches!(action_id, "app.commandPalette" | "app.quit") {
             bindings.push(KeyBinding::new(&previous_keystroke, NoAction {}, None));
         }
     }
@@ -876,6 +883,7 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
         "app.closeOtherTabs" => push_binding!(CloseOtherTabs),
         "app.newConnection" => push_binding!(NewConnection),
         "app.settings" => push_binding!(OpenSettings),
+        "app.quit" => push_binding!(Quit, workspace_and_global),
         "app.toggleSidebar" => push_binding!(ToggleSidebar),
         "app.commandPalette" => push_binding!(CommandPalette, workspace_and_global),
         "app.zenMode" => push_binding!(ZenMode),
@@ -919,8 +927,13 @@ mod tests {
 
     #[test]
     fn tauri_default_registry_contains_all_orchestrated_actions() {
-        assert_eq!(ACTION_DEFINITIONS.len(), 39);
+        assert_eq!(ACTION_DEFINITIONS.len(), 40);
         assert!(action_definition("app.commandPalette").is_some());
+        assert_eq!(
+            action_definition("app.quit")
+                .map(|definition| definition.default_combo(KeybindingSide::Mac)),
+            Some(&KeyCombo::cmd("q"))
+        );
         assert!(action_definition("terminal.closePanel").is_some());
         assert!(action_definition("palette.broadcast").is_some());
         assert_eq!(

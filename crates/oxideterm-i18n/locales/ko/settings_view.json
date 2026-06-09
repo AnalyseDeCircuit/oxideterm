@@ -1161,6 +1161,7 @@
         "app.closeOtherTabs": "다른 탭 닫기",
         "app.newConnection": "새 SSH 연결",
         "app.settings": "설정 열기",
+        "app.quit": "OxideTerm 종료",
         "app.toggleSidebar": "사이드바 전환",
         "app.commandPalette": "명령 팔레트",
         "app.zenMode": "젠 모드 전환",

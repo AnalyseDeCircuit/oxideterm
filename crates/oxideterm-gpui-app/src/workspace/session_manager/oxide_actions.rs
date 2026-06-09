@@ -897,7 +897,7 @@ impl WorkspaceApp {
         };
         if !self.oxide_export_has_content(dialog) {
             if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                dialog.error = Some(self.i18n.t("modals.export.error_select_something"));
+                dialog.error = Some(self.i18n.t("export.error_select_something"));
             }
             cx.notify();
             return;
@@ -905,9 +905,9 @@ impl WorkspaceApp {
         if dialog.password.len() < 6 || dialog.password != dialog.confirm_password {
             if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
                 dialog.error = if dialog.password.len() < 6 {
-                    Some(self.i18n.t("modals.export.error_password_too_short"))
+                    Some(self.i18n.t("export.error_password_too_short"))
                 } else {
-                    Some(self.i18n.t("modals.export.error_password_mismatch"))
+                    Some(self.i18n.t("export.error_password_mismatch"))
                 };
             }
             cx.notify();
@@ -919,7 +919,7 @@ impl WorkspaceApp {
             .is_some_and(|preflight| !preflight.can_export)
         {
             if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                dialog.error = Some(self.i18n.t("modals.export.error_managed_keys_required"));
+                dialog.error = Some(self.i18n.t("export.error_managed_keys_required"));
             }
             cx.notify();
             return;
@@ -949,7 +949,7 @@ impl WorkspaceApp {
             .session_manager
             .oxide_export_dialog
             .as_ref()
-            .ok_or_else(|| self.i18n.t("modals.export.error_export_failed"))
+            .ok_or_else(|| self.i18n.t("export.error_export_failed"))
             .and_then(|dialog| self.build_oxide_export_options(dialog));
         match result {
             Ok(options) => {
@@ -1056,7 +1056,7 @@ impl WorkspaceApp {
                             {
                                 dialog.busy = false;
                                 dialog.progress_stage = None;
-                                dialog.error = Some(this.i18n.t("modals.export.error_export_failed"));
+                                dialog.error = Some(this.i18n.t("export.error_export_failed"));
                                 cx.notify();
                             }
                         });
@@ -1104,7 +1104,7 @@ impl WorkspaceApp {
                         let _ = persist_oxide_last_export_timestamp(this.settings_store.path());
                         let summary = this
                             .i18n
-                            .t("modals.export.success")
+                            .t("export.success")
                             .replace("{{count}}", &exported_count.to_string())
                             .replace("{{path}}", path.to_string_lossy().as_ref());
                         this.session_manager.status = Some(summary);
@@ -1497,7 +1497,7 @@ fn oxide_file_error_message(error: OxideFileError, i18n: &oxideterm_i18n::I18n) 
     match error {
         OxideFileError::DecryptionFailed => i18n.t("modals.import.error_password"),
         OxideFileError::ChecksumMismatch => i18n.t("modals.import.error_tampered"),
-        OxideFileError::PasswordTooShort => i18n.t("modals.export.error_password_too_short"),
+        OxideFileError::PasswordTooShort => i18n.t("export.error_password_too_short"),
         other => other.to_string(),
     }
 }

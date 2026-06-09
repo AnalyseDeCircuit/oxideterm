@@ -18,9 +18,13 @@ fn ai_tool_requires_ui_thread(
         return snapshot
             .targets
             .iter()
-            .any(|target| target.id == target_id && target.kind == "terminal-session");
+            .any(|target| target.id == target_id && ai_run_command_requires_ui_thread_target(target));
     }
     false
+}
+
+fn ai_run_command_requires_ui_thread_target(target: &AiOrchestratorTarget) -> bool {
+    matches!(target.kind.as_str(), "terminal-session" | "ssh-node" | "local-shell")
 }
 
 #[derive(Clone, Debug)]
@@ -166,7 +170,12 @@ async fn run_local_ai_command(
                     format!("Local command exited with {}.", exit_code.map(|code| code.to_string()).unwrap_or_else(|| "unknown".to_string()))
                 },
                 output: body,
-                data: serde_json::json!({ "exitCode": exit_code, "timedOut": false }),
+                data: serde_json::json!({
+                    "exitCode": exit_code,
+                    "timedOut": false,
+                    "executionState": if output.status.success() { "completed" } else { "output_captured" },
+                    "visibleInTerminal": false,
+                }),
                 error_code: (!ok).then(|| "local_command_failed".to_string()),
                 error_message: (!ok).then(|| format!("Exit code: {}", exit_code.map(|code| code.to_string()).unwrap_or_else(|| "unknown".to_string()))),
                 risk: "execute",
@@ -200,7 +209,12 @@ async fn run_local_ai_command(
             ok: false,
             summary: "Local command timed out.".to_string(),
             output: format!("[stderr]\nCommand timed out after {timeout_secs}s\n[exit_code: unknown]"),
-            data: serde_json::json!({ "exitCode": serde_json::Value::Null, "timedOut": true }),
+            data: serde_json::json!({
+                "exitCode": serde_json::Value::Null,
+                "timedOut": true,
+                "executionState": "timeout",
+                "visibleInTerminal": false,
+            }),
             error_code: Some("local_command_timeout".to_string()),
             error_message: Some("Command timed out.".to_string()),
             risk: "execute",
@@ -302,6 +316,40 @@ fn ai_command_output(stdout: &str, stderr: &str, exit_code: Option<i32>) -> Stri
     .filter(|part| !part.is_empty())
     .collect::<Vec<_>>()
     .join("\n")
+}
+
+fn ai_target_is_local_terminal(target: &AiOrchestratorTarget) -> bool {
+    target
+        .metadata
+        .get("terminalType")
+        .and_then(serde_json::Value::as_str)
+        == Some("local_terminal")
+}
+
+fn local_terminal_run_target(
+    snapshot: &AiOrchestratorRuntimeSnapshot,
+) -> Option<AiOrchestratorTarget> {
+    let active_tab_id = snapshot.active_tab_id.as_deref();
+    let matches_local_terminal = |target: &&AiOrchestratorTarget| {
+        target.kind == "terminal-session"
+            && target.state == "connected"
+            && ai_target_is_local_terminal(target)
+    };
+
+    // Prefer the terminal the user is already looking at. If none is active,
+    // reuse any connected local terminal before opening another tab.
+    snapshot
+        .targets
+        .iter()
+        .find(|target| {
+            matches_local_terminal(target)
+                && target
+                    .refs
+                    .get("tabId")
+                    .is_some_and(|tab_id| Some(tab_id.as_str()) == active_tab_id)
+        })
+        .or_else(|| snapshot.targets.iter().find(matches_local_terminal))
+        .cloned()
 }
 
 fn target_in_ai_view(target: &AiOrchestratorTarget, view: &str) -> bool {

@@ -3,6 +3,10 @@
 
 use std::ops::Range;
 
+// Prepaint bounds can drift by fractional pixels across frames; treating that
+// as a resize would schedule unnecessary editor repaints while scrolling.
+const VIEWPORT_SIZE_EPSILON_PX: f32 = 0.5;
+
 /// Visible line window used by the GPUI surface.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VisibleRows {
@@ -32,7 +36,7 @@ impl EditorViewport {
 
     pub fn set_height(&mut self, height_px: f32) -> bool {
         let height_px = height_px.max(0.0);
-        if (self.height_px - height_px).abs() < f32::EPSILON {
+        if (self.height_px - height_px).abs() < VIEWPORT_SIZE_EPSILON_PX {
             return false;
         }
         self.height_px = height_px;
@@ -59,6 +63,19 @@ impl EditorViewport {
         self.scroll_y_px = self
             .scroll_y_px
             .clamp(0.0, max_scroll_y(line_count, line_height, self.height_px));
+    }
+
+    pub fn reveal_line(&mut self, line: usize, line_count: usize, line_height: f32) -> bool {
+        let old_y = self.scroll_y_px;
+        let line_top = line as f32 * line_height;
+        let line_bottom = line_top + line_height;
+        if line_top < self.scroll_y_px {
+            self.scroll_y_px = line_top;
+        } else if line_bottom > self.scroll_y_px + self.height_px {
+            self.scroll_y_px = line_bottom - self.height_px;
+        }
+        self.clamp(line_count, line_height);
+        (self.scroll_y_px - old_y).abs() > f32::EPSILON
     }
 
     pub fn visible_rows(&self, line_count: usize, line_height: f32) -> VisibleRows {
@@ -121,5 +138,28 @@ mod tests {
 
         assert_eq!(viewport.scroll_x_px, 12.0);
         assert_eq!(viewport.scroll_y_px, 60.0);
+    }
+
+    #[test]
+    fn reveal_line_scrolls_only_when_needed() {
+        let mut viewport = EditorViewport::new(0);
+        viewport.height_px = 60.0;
+
+        assert!(!viewport.reveal_line(1, 10, 20.0));
+        assert!(viewport.reveal_line(5, 10, 20.0));
+        assert_eq!(viewport.scroll_y_px, 60.0);
+        assert!(viewport.reveal_line(0, 10, 20.0));
+        assert_eq!(viewport.scroll_y_px, 0.0);
+    }
+
+    #[test]
+    fn ignores_subpixel_height_jitter() {
+        let mut viewport = EditorViewport::new(0);
+        viewport.height_px = 120.0;
+
+        assert!(!viewport.set_height(120.25));
+        assert_eq!(viewport.height_px, 120.0);
+        assert!(viewport.set_height(121.0));
+        assert_eq!(viewport.height_px, 121.0);
     }
 }

@@ -477,7 +477,19 @@ impl AiOrchestratorRuntimeSnapshot {
                                     .unwrap_or_else(|| "unknown".to_string())
                             )
                         };
-                        let mut data = serde_json::json!({ "exitCode": result.exit_code });
+                        let execution_state =
+                            if result.exit_code.is_some() || result.truncated {
+                                "completed"
+                            } else if has_output {
+                                "output_captured"
+                            } else {
+                                "unknown"
+                            };
+                        let mut data = serde_json::json!({
+                            "exitCode": result.exit_code,
+                            "executionState": execution_state,
+                            "visibleInTerminal": false,
+                        });
                         if result.truncated
                             && let Some(object) = data.as_object_mut()
                         {

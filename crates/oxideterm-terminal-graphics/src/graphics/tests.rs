@@ -1,6 +1,7 @@
 mod tests {
     use super::*;
-    use image::RgbaImage;
+    use image::{Delay, Frame, RgbaImage};
+    use image::codecs::gif::GifEncoder;
 
     fn cursor() -> GraphicsCursor {
         GraphicsCursor {
@@ -43,6 +44,47 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, TerminalGraphicsEvent::ImageReady(_)))
         );
+    }
+
+    #[test]
+    fn gif_payload_preserves_animation_frames() {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut bytes);
+            encoder
+                .encode_frames([
+                    Frame::from_parts(
+                        RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255])),
+                        0,
+                        0,
+                        Delay::from_numer_denom_ms(50, 1),
+                    ),
+                    Frame::from_parts(
+                        RgbaImage::from_pixel(1, 1, image::Rgba([0, 255, 0, 255])),
+                        0,
+                        0,
+                        Delay::from_numer_denom_ms(80, 1),
+                    ),
+                ])
+                .unwrap();
+        }
+        let payload = BASE64.encode(bytes);
+        let seq = format!("\x1b]1337;File=inline=1:{payload}\x07");
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+
+        let result = ingress.advance(seq.as_bytes(), cursor());
+        let image = result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TerminalGraphicsEvent::ImageReady(image) => Some(image),
+                _ => None,
+            })
+            .expect("gif image event");
+
+        assert_eq!(image.frames.len(), 2);
+        assert_eq!(image.frames[0].delay_ms_numerator, 50);
+        assert_eq!(image.frames[1].delay_ms_numerator, 80);
     }
 
     #[test]
@@ -117,6 +159,71 @@ mod tests {
                 })
             )
         }));
+    }
+
+    #[test]
+    fn kitty_animation_frame_upload_and_control_update_image() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let base_payload = BASE64.encode([255, 0, 0, 255]);
+        let upload = format!("\x1b_Ga=t,f=32,s=1,v=1,i=42;{base_payload}\x1b\\");
+        ingress.advance(upload.as_bytes(), cursor());
+
+        let frame_payload = BASE64.encode([0, 255, 0, 255]);
+        let frame = format!("\x1b_Ga=f,f=32,s=1,v=1,i=42,z=80;{frame_payload}\x1b\\");
+        let frame_result = ingress.advance(frame.as_bytes(), cursor());
+        let updated = frame_result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TerminalGraphicsEvent::ImageUpdated(image) => Some(image),
+                _ => None,
+            })
+            .expect("animation frame update");
+
+        assert_eq!(updated.frames.len(), 2);
+        assert!(updated.frames[0].gapless);
+        assert_eq!(updated.frames[1].rgba.as_ref(), &[0, 255, 0, 255]);
+        assert_eq!(updated.frames[1].delay_ms_numerator, 80);
+
+        let control = ingress.advance(b"\x1b_Ga=a,i=42,s=3,v=2\x1b\\", cursor());
+        let controlled = control
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TerminalGraphicsEvent::ImageUpdated(image) => Some(image),
+                _ => None,
+            })
+            .expect("animation control update");
+        assert!(controlled.animation.running);
+        assert!(!controlled.animation.loading);
+        assert_eq!(controlled.animation.loop_limit, Some(2));
+    }
+
+    #[test]
+    fn kitty_animation_composes_frame_rectangles() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let base_payload = BASE64.encode([255, 0, 0, 255, 0, 0, 255, 255]);
+        let upload = format!("\x1b_Ga=t,f=32,s=2,v=1,i=51;{base_payload}\x1b\\");
+        ingress.advance(upload.as_bytes(), cursor());
+
+        let overlay_payload = BASE64.encode([0, 255, 0, 255]);
+        let frame = format!("\x1b_Ga=f,f=32,s=1,v=1,i=51,x=1,y=0,c=1,X=1;{overlay_payload}\x1b\\");
+        ingress.advance(frame.as_bytes(), cursor());
+
+        let composed = ingress.advance(
+            b"\x1b_Ga=c,i=51,r=2,c=1,x=0,y=0,X=0,Y=0,w=2,h=1,C=1\x1b\\",
+            cursor(),
+        );
+        let image = composed
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TerminalGraphicsEvent::ImageUpdated(image) => Some(image),
+                _ => None,
+            })
+            .expect("composition update");
+
+        assert_eq!(image.rgba.as_ref(), &[255, 0, 0, 255, 0, 255, 0, 255]);
     }
 
     #[test]

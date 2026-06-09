@@ -129,6 +129,48 @@ impl AgentSession {
         serde_json::from_value(value).map_err(|error| AgentError::Deserialize(error.to_string()))
     }
 
+    async fn symbol_index(
+        &self,
+        path: &str,
+        max_files: Option<u32>,
+    ) -> Result<SymbolIndexResult, AgentError> {
+        let mut params = serde_json::json!({ "path": path });
+        if let Some(max_files) = max_files {
+            params["max_files"] = serde_json::json!(max_files);
+        }
+        let value = self.transport.call("symbols/index", params).await?;
+        serde_json::from_value(value).map_err(|error| AgentError::Deserialize(error.to_string()))
+    }
+
+    async fn symbol_complete(
+        &self,
+        path: &str,
+        prefix: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<SymbolInfo>, AgentError> {
+        let mut params = serde_json::json!({ "path": path, "prefix": prefix });
+        if let Some(limit) = limit {
+            params["limit"] = serde_json::json!(limit);
+        }
+        let value = self.transport.call("symbols/complete", params).await?;
+        serde_json::from_value(value).map_err(|error| AgentError::Deserialize(error.to_string()))
+    }
+
+    async fn symbol_definitions(
+        &self,
+        path: &str,
+        name: &str,
+    ) -> Result<Vec<SymbolInfo>, AgentError> {
+        let value = self
+            .transport
+            .call(
+                "symbols/definitions",
+                serde_json::json!({ "path": path, "name": name }),
+            )
+            .await?;
+        serde_json::from_value(value).map_err(|error| AgentError::Deserialize(error.to_string()))
+    }
+
     async fn watch_start(&self, path: &str, ignore: Vec<String>) -> Result<(), AgentError> {
         self.transport
             .call(

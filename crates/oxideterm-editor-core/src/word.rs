@@ -28,7 +28,7 @@ fn floor_char_boundary(text: &str, byte: usize) -> usize {
 }
 
 fn is_word_char(ch: char) -> bool {
-    ch == '_' || ch.is_alphanumeric()
+    ch == '_' || ch == '$' || ch.is_alphanumeric()
 }
 
 #[cfg(test)]
@@ -38,5 +38,10 @@ mod tests {
     #[test]
     fn word_at_respects_unicode_boundaries() {
         assert_eq!(word_at("let 名字 = value", BufferOffset(5)), "名字");
+    }
+
+    #[test]
+    fn word_at_matches_codemirror_dollar_identifiers() {
+        assert_eq!(word_at("const $value = 1", BufferOffset(8)), "$value");
     }
 }

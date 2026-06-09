@@ -30,7 +30,66 @@ fn oxide_export_forward_group_signature(owner: &str, forwards: &[PersistedForwar
     hasher.finish()
 }
 
+fn oxide_export_logical_scroll_changed(
+    before_item_ix: usize,
+    before_offset: f32,
+    after_item_ix: usize,
+    after_offset: f32,
+) -> bool {
+    before_item_ix != after_item_ix || (after_offset - before_offset).abs() >= 0.01
+}
+
+fn oxide_export_selection_count_label(template: String, selected: usize, total: usize) -> String {
+    template
+        .replace("{{selected}}", &selected.to_string())
+        .replace("{{total}}", &total.to_string())
+}
+
+fn oxide_export_count_label(template: String, count: usize) -> String {
+    template.replace("{{count}}", &count.to_string())
+}
+
 impl WorkspaceApp {
+    fn toggle_oxide_export_connection_selection(&mut self, connection_id: &str) {
+        if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
+            if dialog.selected_ids.contains(connection_id) {
+                dialog.selected_ids.remove(connection_id);
+            } else {
+                dialog.selected_ids.insert(connection_id.to_string());
+            }
+        }
+        self.refresh_oxide_export_preflight();
+    }
+
+    fn handle_oxide_export_connection_list_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let delta = event.delta.pixel_delta(px(20.0));
+        let scroll_distance = -f32::from(delta.y);
+        if scroll_distance.abs() < 0.01 {
+            return;
+        }
+
+        let before = self.oxide_export_connection_list_state.logical_scroll_top();
+        self.oxide_export_connection_list_state
+            .scroll_by(px(scroll_distance));
+        let after = self.oxide_export_connection_list_state.logical_scroll_top();
+        if oxide_export_logical_scroll_changed(
+            before.item_ix,
+            f32::from(before.offset_in_item),
+            after.item_ix,
+            f32::from(after.offset_in_item),
+        ) {
+            // Native GPUI list wheel events bubble to the outer dialog. This
+            // wheel-only layer owns the inner scroll first; unchanged boundary
+            // events are deliberately released so the outer dialog can scroll.
+            cx.notify();
+            cx.stop_propagation();
+        }
+    }
+
     fn render_oxide_connection_selection(
         &self,
         connections: &[SavedConnection],
@@ -40,6 +99,16 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let total = connections.len();
         let all_selected = total > 0 && selected_count == total;
+        let select_connections_label = oxide_export_selection_count_label(
+            self.i18n.t("export.select_connections"),
+            selected_count,
+            total,
+        );
+        let select_all_label = if all_selected {
+            self.i18n.t("export.deselect_all")
+        } else {
+            self.i18n.t("export.select_all")
+        };
         let new_connection_count = self
             .session_manager
             .oxide_export_dialog
@@ -70,7 +139,7 @@ impl WorkspaceApp {
                         SelectableTextRole::PlainDocument,
                         "oxide-export-connections",
                         "empty",
-                        "无保存的连接",
+                        self.i18n.t("export.no_connections"),
                         theme.text_muted,
                         cx,
                     )),
@@ -86,6 +155,7 @@ impl WorkspaceApp {
                 .min(OXIDE_MODAL_LIST_MAX_H);
             div()
                 .id("oxide-export-connections-selection")
+                .relative()
                 .h(px(list_height))
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
@@ -100,6 +170,16 @@ impl WorkspaceApp {
                         })
                     },
                 ))
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .on_scroll_wheel(cx.listener(
+                            move |this, event: &ScrollWheelEvent, _window, cx| {
+                                this.handle_oxide_export_connection_list_wheel(event, cx);
+                            },
+                        )),
+                )
                 .into_any_element()
         };
 
@@ -120,7 +200,7 @@ impl WorkspaceApp {
                                 SelectableTextRole::PlainDocument,
                                 "oxide-export-selection",
                                 "connection-count",
-                                format!("选择要导出的连接 ({selected_count}/{total})"),
+                                select_connections_label.clone(),
                                 theme.text,
                                 cx,
                             )),
@@ -131,11 +211,7 @@ impl WorkspaceApp {
                         // toolbar primitive so disabled/focus behavior matches
                         // the rest of the dialog actions.
                         self.workspace_toolbar_action_button(
-                            if all_selected {
-                                "取消全选".to_string()
-                            } else {
-                                "全选".to_string()
-                            },
+                            select_all_label,
                             None,
                             ToolbarButtonOptions {
                                 button: ButtonOptions {
@@ -188,7 +264,10 @@ impl WorkspaceApp {
                             SelectableTextRole::PlainDocument,
                             "oxide-export-selection",
                             "new-connections",
-                            format!("上次导出后新增 {new_connection_count} 个连接"),
+                            oxide_export_count_label(
+                                self.i18n.t("export.new_since_last_export"),
+                                new_connection_count,
+                            ),
                             OXIDE_GREEN_500,
                             cx,
                         )),
@@ -243,6 +322,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let id = connection.id.clone();
+        let row_id = id.clone();
         let row_key = id.clone();
         let checked = self
             .session_manager
@@ -274,18 +354,19 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.sm))
             .hover(move |row| row.bg(rgb(theme.bg_hover)))
             .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.toggle_oxide_export_connection_selection(&row_id);
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
             .child(self.render_oxide_checkbox(
                 String::new(),
                 checked,
                 cx.listener(move |this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
-                        if dialog.selected_ids.contains(&id) {
-                            dialog.selected_ids.remove(&id);
-                        } else {
-                            dialog.selected_ids.insert(id.clone());
-                        }
-                    }
-                    this.refresh_oxide_export_preflight();
+                    this.toggle_oxide_export_connection_selection(&id);
                     cx.notify();
                     cx.stop_propagation();
                 }),
@@ -335,10 +416,10 @@ impl WorkspaceApp {
                                             rgb(OXIDE_GREEN_500),
                                         ))
                                         .child(self.render_display_text_with_role(
-                                            SelectableTextRole::PlainDocument,
+                                            SelectableTextRole::NonSelectable,
                                             "oxide-export-new-badge",
                                             row_key.as_str(),
-                                            "新",
+                                            self.i18n.t("export.badge_new"),
                                             OXIDE_GREEN_500,
                                             cx,
                                         )),

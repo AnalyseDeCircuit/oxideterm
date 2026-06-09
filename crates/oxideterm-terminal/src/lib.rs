@@ -38,8 +38,9 @@ mod shell_integration;
 pub use alacritty_terminal::term::TermMode;
 pub use data::{
     GraphicsOptions, TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape,
-    TerminalImageData, TerminalImageId, TerminalImageProtocol, TerminalImageSnapshot, TerminalRow,
-    TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
+    TerminalImageAnimationState, TerminalImageData, TerminalImageFrame, TerminalImageId,
+    TerminalImageProtocol, TerminalImageSnapshot, TerminalRow, TerminalSearchMatch,
+    TerminalSearchRange, TerminalSnapshot,
 };
 pub use local_shell::{LocalPtyConfig, ShellInfo, default_shell, scan_shells};
 pub use oxideterm_terminal_encoding::{

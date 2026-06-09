@@ -1161,6 +1161,7 @@
         "app.closeOtherTabs": "Đóng các tab khác",
         "app.newConnection": "Kết nối SSH mới",
         "app.settings": "Mở cài đặt",
+        "app.quit": "Thoát OxideTerm",
         "app.toggleSidebar": "Bật/tắt thanh bên",
         "app.commandPalette": "Bảng lệnh",
         "app.zenMode": "Chế độ zen",

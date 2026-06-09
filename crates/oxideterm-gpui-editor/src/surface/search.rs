@@ -29,6 +29,22 @@ impl TextEditorView {
         &self.find_matches
     }
 
+    pub fn active_find_position(&self) -> Option<(usize, usize)> {
+        self.active_find_index
+            .map(|index| (index + 1, self.find_matches.len()))
+            .filter(|(_, total)| *total > 0)
+    }
+
+    pub fn set_find_case_sensitive(&mut self, case_sensitive: bool, cx: &mut Context<Self>) {
+        if self.settings.find_case_sensitive == case_sensitive {
+            return;
+        }
+        self.settings.find_case_sensitive = case_sensitive;
+        self.refresh_find_matches();
+        self.active_find_index = (!self.find_matches.is_empty()).then_some(0);
+        cx.notify();
+    }
+
     pub fn select_next_find_match(&mut self, cx: &mut Context<Self>) {
         if self.find_matches.is_empty() {
             return;
@@ -102,7 +118,10 @@ impl TextEditorView {
             self.secondary_selections.clear();
             self.marked_text = None;
             self.save_status = super::EditorSaveStatus::Dirty;
-            self.apply_syntax_edit(None);
+            // Replace-all can touch many ranges, so rebuild tree-sitter state
+            // instead of pretending a single incremental edit exists.
+            self.reparse_syntax();
+            self.clear_folds_after_buffer_change();
             self.refresh_find_matches();
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
@@ -114,6 +133,7 @@ impl TextEditorView {
         self.find_matches = self
             .buffer
             .with_text(|text| find_all(text, &self.find_query, self.find_options()));
+        self.find_line_matches = self.build_find_line_matches();
         if self
             .active_find_index
             .is_some_and(|index| index >= self.find_matches.len())

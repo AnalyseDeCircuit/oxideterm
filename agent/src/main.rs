@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
+    collections::HashMap,
     env,
     fs::{self, File},
     io::{self, BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::Command,
+    sync::{LazyLock, Mutex},
     time::UNIX_EPOCH,
 };
 
@@ -24,6 +26,12 @@ const ERR_IO: i32 = -1;
 const ERR_NOT_FOUND: i32 = -2;
 const ERR_PERMISSION: i32 = -3;
 const ERR_ALREADY_EXISTS: i32 = -4;
+const DEFAULT_SYMBOL_MAX_FILES: u32 = 500;
+const DEFAULT_SYMBOL_COMPLETE_LIMIT: u32 = 20;
+const SYMBOL_MAX_FILE_BYTES: u64 = 500_000;
+
+static SYMBOL_CACHE: LazyLock<Mutex<HashMap<String, Vec<SymbolInfo>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Deserialize)]
 struct Request {
@@ -132,7 +140,7 @@ struct SymbolIndexResult {
     file_count: u32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct SymbolInfo {
     name: String,
     kind: String,
@@ -141,6 +149,25 @@ struct SymbolInfo {
     column: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     container: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SymbolIndexParams {
+    path: String,
+    max_files: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SymbolCompleteParams {
+    path: String,
+    prefix: String,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SymbolDefinitionsParams {
+    path: String,
+    name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -290,11 +317,9 @@ fn dispatch(method: &str, params: Value) -> Result<Value, RpcError> {
         "search/grep" => to_value(grep(from_params(params)?)?),
         "git/status" => to_value(git_status(&from_params::<PathParams>(params)?.path)?),
         "watch/start" | "watch/stop" => Ok(json!({})),
-        "symbols/index" => to_value(SymbolIndexResult {
-            symbols: Vec::new(),
-            file_count: 0,
-        }),
-        "symbols/complete" | "symbols/definitions" => to_value(Vec::<SymbolInfo>::new()),
+        "symbols/index" => to_value(symbol_index(from_params(params)?)),
+        "symbols/complete" => to_value(symbol_complete(from_params(params)?)),
+        "symbols/definitions" => to_value(symbol_definitions(from_params(params)?)),
         _ => Err(rpc_error(
             ERR_METHOD_NOT_FOUND,
             format!("Unknown method: {method}"),
@@ -530,6 +555,210 @@ fn git_status(path: &str) -> Result<GitStatusResult, RpcError> {
     Ok(GitStatusResult { branch, files })
 }
 
+fn symbol_index(params: SymbolIndexParams) -> SymbolIndexResult {
+    let max_files = params.max_files.unwrap_or(DEFAULT_SYMBOL_MAX_FILES);
+    let root = normalize_path(&params.path);
+    let index = index_symbols_in_directory(&root, max_files);
+    if let Ok(mut cache) = SYMBOL_CACHE.lock() {
+        cache.insert(params.path, index.symbols.clone());
+    }
+    SymbolIndexResult {
+        file_count: index.file_count,
+        symbols: index.symbols,
+    }
+}
+
+fn symbol_complete(params: SymbolCompleteParams) -> Vec<SymbolInfo> {
+    let symbols = cached_or_indexed_symbols(&params.path);
+    let prefix = params.prefix.to_lowercase();
+    symbols
+        .into_iter()
+        .filter(|symbol| symbol.name.to_lowercase().starts_with(&prefix))
+        .take(params.limit.unwrap_or(DEFAULT_SYMBOL_COMPLETE_LIMIT) as usize)
+        .collect()
+}
+
+fn symbol_definitions(params: SymbolDefinitionsParams) -> Vec<SymbolInfo> {
+    cached_or_indexed_symbols(&params.path)
+        .into_iter()
+        .filter(|symbol| symbol.name == params.name)
+        .collect()
+}
+
+fn cached_or_indexed_symbols(path: &str) -> Vec<SymbolInfo> {
+    if let Some(symbols) = SYMBOL_CACHE
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(path).cloned())
+    {
+        return symbols;
+    }
+
+    let root = normalize_path(path);
+    let symbols = index_symbols_in_directory(&root, DEFAULT_SYMBOL_MAX_FILES).symbols;
+    if let Ok(mut cache) = SYMBOL_CACHE.lock() {
+        cache.insert(path.to_string(), symbols.clone());
+    }
+    symbols
+}
+
+struct SymbolDirectoryIndex {
+    symbols: Vec<SymbolInfo>,
+    file_count: u32,
+}
+
+fn index_symbols_in_directory(root: &Path, max_files: u32) -> SymbolDirectoryIndex {
+    let mut symbols = Vec::new();
+    let mut scanned_files = 0u32;
+    for entry in WalkDir::new(root).into_iter().filter_entry(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .map(|name| !ignored_symbol_name(name))
+            .unwrap_or(true)
+    }) {
+        if scanned_files >= max_files {
+            break;
+        }
+        let Ok(entry) = entry else {
+            continue;
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.len() > SYMBOL_MAX_FILE_BYTES {
+            continue;
+        }
+        scanned_files += 1;
+        symbols.extend(extract_symbols_from_file(entry.path()));
+    }
+    SymbolDirectoryIndex {
+        symbols,
+        file_count: scanned_files,
+    }
+}
+
+fn extract_symbols_from_file(path: &Path) -> Vec<SymbolInfo> {
+    let Some(patterns) = symbol_patterns_for_path(path) else {
+        return Vec::new();
+    };
+    let Ok(source) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+
+    let mut symbols = Vec::new();
+    let mut in_block_comment = false;
+    for (line_index, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if in_block_comment {
+            in_block_comment = !trimmed.contains("*/");
+            continue;
+        }
+        if trimmed.starts_with("/*") {
+            in_block_comment = !trimmed.contains("*/");
+            continue;
+        }
+        if trimmed.starts_with("//") || trimmed.starts_with('#') {
+            continue;
+        }
+
+        for pattern in &patterns {
+            if let Some(captures) = pattern.regex.captures(line)
+                && let Some(name_match) = captures.name("name")
+            {
+                let name = name_match.as_str();
+                if !reserved_symbol_name(name) {
+                    symbols.push(SymbolInfo {
+                        name: name.to_string(),
+                        kind: pattern.kind.to_string(),
+                        path: path.display().to_string(),
+                        line: (line_index + 1) as u32,
+                        column: (name_match.start() + 1) as u32,
+                        container: None,
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    symbols
+}
+
+struct CompiledSymbolPattern {
+    kind: &'static str,
+    regex: Regex,
+}
+
+fn symbol_patterns_for_path(path: &Path) -> Option<Vec<CompiledSymbolPattern>> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    let specs: &[(&str, &str)] = match extension.as_str() {
+        "rs" => &[
+            ("function", r"\b(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("struct", r"\b(?:pub(?:\([^)]*\))?\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("enum", r"\b(?:pub(?:\([^)]*\))?\s+)?enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("trait", r"\b(?:pub(?:\([^)]*\))?\s+)?trait\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("typeAlias", r"\b(?:pub(?:\([^)]*\))?\s+)?type\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("constant", r"\b(?:pub(?:\([^)]*\))?\s+)?(?:const|static)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+        ],
+        "py" | "pyw" => &[
+            ("function", r"\b(?:async\s+)?def\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("class", r"\bclass\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+        ],
+        "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" => &[
+            ("function", r"\b(?:export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
+            ("class", r"\b(?:export\s+)?class\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
+            ("interface", r"\b(?:export\s+)?interface\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
+            ("typeAlias", r"\b(?:export\s+)?type\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
+            ("enum", r"\b(?:export\s+)?enum\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
+            ("constant", r"\b(?:export\s+)?(?:const|let|var)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
+        ],
+        "go" => &[
+            ("function", r"\bfunc\s+(?:\([^)]*\)\s*)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("struct", r"\btype\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+struct\b"),
+            ("interface", r"\btype\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+interface\b"),
+        ],
+        "java" | "kt" | "kts" | "cs" | "swift" => &[
+            ("class", r"\b(?:public\s+|private\s+|internal\s+|open\s+|final\s+|abstract\s+|data\s+|sealed\s+|partial\s+|static\s+)*class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("struct", r"\b(?:public\s+|private\s+|internal\s+|readonly\s+)*struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("interface", r"\b(?:public\s+|private\s+|internal\s+)*(?:interface|protocol)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("enum", r"\b(?:public\s+|private\s+|internal\s+)*enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("function", r"\b(?:public\s+|private\s+|internal\s+|static\s+|override\s+|func\s+)*func\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+        ],
+        "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "hxx" => &[
+            ("class", r"\bclass\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("struct", r"\b(?:typedef\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("enum", r"\b(?:typedef\s+)?enum(?:\s+class)?\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("typeAlias", r"\b(?:typedef|using)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("module", r"\bnamespace\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+        ],
+        "rb" => &[
+            ("function", r"\bdef\s+(?P<name>[A-Za-z_][A-Za-z0-9_!?=]*)"),
+            ("class", r"\bclass\s+(?P<name>[A-Za-z_][A-Za-z0-9_:]*)"),
+            ("module", r"\bmodule\s+(?P<name>[A-Za-z_][A-Za-z0-9_:]*)"),
+        ],
+        "php" => &[
+            ("function", r"\bfunction\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("class", r"\bclass\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+        ],
+        "sh" | "bash" | "zsh" => &[
+            ("function", r"\bfunction\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            ("function", r"^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)"),
+        ],
+        _ => return None,
+    };
+
+    let mut compiled = Vec::with_capacity(specs.len());
+    for (kind, pattern) in specs {
+        if let Ok(regex) = Regex::new(pattern) {
+            compiled.push(CompiledSymbolPattern { kind, regex });
+        }
+    }
+    Some(compiled)
+}
+
 fn file_entry(path: &Path, children: Option<Vec<FileEntry>>) -> Result<FileEntry, RpcError> {
     let metadata = fs::symlink_metadata(path).map_err(|error| map_io_error(error, path))?;
     let symlink_target = if metadata.file_type().is_symlink() {
@@ -671,6 +900,41 @@ fn ignored_name(name: &str) -> bool {
     matches!(name, ".git" | "node_modules" | "target" | ".next" | "dist")
 }
 
+fn ignored_symbol_name(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | ".hg"
+            | "node_modules"
+            | "__pycache__"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".nuxt"
+            | "vendor"
+            | ".venv"
+            | "venv"
+    )
+}
+
+fn reserved_symbol_name(name: &str) -> bool {
+    matches!(
+        name,
+        "if" | "else"
+            | "for"
+            | "while"
+            | "return"
+            | "true"
+            | "false"
+            | "null"
+            | "undefined"
+            | "new"
+            | "this"
+            | "self"
+    )
+}
+
 fn rpc_error(code: i32, message: impl Into<String>) -> RpcError {
     RpcError {
         code,
@@ -721,3 +985,81 @@ fn set_permissions(_path: &Path, _mode: u32) -> Result<(), RpcError> {
 
 #[allow(dead_code)]
 fn _regex_is_send_sync(_: &Regex) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbol_index_extracts_rust_symbols_and_ignores_build_dirs() {
+        let root = test_root("symbols-rust");
+        let src = root.join("src");
+        let ignored = root.join("target");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&ignored).unwrap();
+        fs::write(
+            src.join("lib.rs"),
+            "pub struct Worker {}\npub async fn run_job() {}\nconst LIMIT: usize = 3;\n",
+        )
+        .unwrap();
+        fs::write(ignored.join("noise.rs"), "pub fn ignored_symbol() {}\n").unwrap();
+
+        let result = symbol_index(SymbolIndexParams {
+            path: root.display().to_string(),
+            max_files: Some(20),
+        });
+        let names = symbol_names(&result.symbols);
+
+        assert_eq!(result.file_count, 1);
+        assert!(names.contains(&"Worker".to_string()));
+        assert!(names.contains(&"run_job".to_string()));
+        assert!(names.contains(&"LIMIT".to_string()));
+        assert!(!names.contains(&"ignored_symbol".to_string()));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn symbol_completion_and_definitions_reuse_indexed_root() {
+        let root = test_root("symbols-complete");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("main.py"),
+            "class RemoteRunner:\n    pass\n\ndef render_result():\n    return None\n",
+        )
+        .unwrap();
+
+        let _ = symbol_index(SymbolIndexParams {
+            path: root.display().to_string(),
+            max_files: Some(20),
+        });
+        let completions = symbol_complete(SymbolCompleteParams {
+            path: root.display().to_string(),
+            prefix: "remote".to_string(),
+            limit: Some(5),
+        });
+        let definitions = symbol_definitions(SymbolDefinitionsParams {
+            path: root.display().to_string(),
+            name: "render_result".to_string(),
+        });
+
+        assert_eq!(symbol_names(&completions), vec!["RemoteRunner".to_string()]);
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].line, 4);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn symbol_names(symbols: &[SymbolInfo]) -> Vec<String> {
+        symbols.iter().map(|symbol| symbol.name.clone()).collect()
+    }
+
+    fn test_root(name: &str) -> PathBuf {
+        let root = env::temp_dir().join(format!(
+            "oxideterm-agent-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        root
+    }
+}

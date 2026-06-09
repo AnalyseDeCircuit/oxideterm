@@ -8,6 +8,14 @@ struct DecodedPixels {
     width: u32,
     height: u32,
     rgba: Vec<u8>,
+    frames: Vec<DecodedImageFrame>,
+}
+
+#[derive(Clone, Debug)]
+struct DecodedImageFrame {
+    rgba: Vec<u8>,
+    delay_ms_numerator: u32,
+    delay_ms_denominator: u32,
 }
 
 fn looks_like_sixel(data: &[u8]) -> bool {
@@ -26,17 +34,44 @@ fn decode_image_bytes(bytes: &[u8], pixel_limit: u32) -> Result<DecodedPixels, G
         let decoder = GifDecoder::new(std::io::Cursor::new(bytes))
             .map_err(|error| GraphicsError::Decode(error.to_string()))?;
         let mut frames = decoder.into_frames();
-        let frame = frames
+        let first_frame = frames
             .next()
             .ok_or(GraphicsError::UnsupportedImage)?
             .map_err(|error| GraphicsError::Decode(error.to_string()))?;
-        let image = frame.into_buffer();
-        let (width, height) = image.dimensions();
+        let (delay_ms_numerator, delay_ms_denominator) = first_frame.delay().numer_denom_ms();
+        let first_image = first_frame.into_buffer();
+        let (width, height) = first_image.dimensions();
         enforce_pixel_limit(width, height, pixel_limit)?;
+        let first_rgba = first_image.into_raw();
+        let mut decoded_frames = vec![DecodedImageFrame {
+            rgba: first_rgba.clone(),
+            // GIF zero-delay frames are common in the wild. Normalize them
+            // before rendering so protocol-level zero gaps can still mean
+            // "skip this frame" for Kitty animation frames.
+            delay_ms_numerator: normalize_gif_frame_delay_ms(delay_ms_numerator),
+            delay_ms_denominator,
+        }];
+        for frame in frames {
+            let frame = frame.map_err(|error| GraphicsError::Decode(error.to_string()))?;
+            let (delay_ms_numerator, delay_ms_denominator) = frame.delay().numer_denom_ms();
+            let image = frame.into_buffer();
+            if image.dimensions() != (width, height) {
+                return Err(GraphicsError::UnsupportedImage);
+            }
+            decoded_frames.push(DecodedImageFrame {
+                rgba: image.into_raw(),
+                delay_ms_numerator: normalize_gif_frame_delay_ms(delay_ms_numerator),
+                delay_ms_denominator,
+            });
+        }
+        let frames = (decoded_frames.len() > 1)
+            .then_some(decoded_frames)
+            .unwrap_or_default();
         return Ok(DecodedPixels {
             width,
             height,
-            rgba: image.into_raw(),
+            rgba: first_rgba,
+            frames,
         });
     }
 
@@ -52,6 +87,7 @@ fn decode_image_bytes(bytes: &[u8], pixel_limit: u32) -> Result<DecodedPixels, G
         width,
         height,
         rgba: image.into_raw(),
+        frames: Vec::new(),
     })
 }
 
@@ -98,7 +134,16 @@ fn decode_raw_rgb(
         width,
         height,
         rgba,
+        frames: Vec::new(),
     })
+}
+
+fn normalize_gif_frame_delay_ms(delay_ms: u32) -> u32 {
+    if delay_ms == 0 {
+        100
+    } else {
+        delay_ms
+    }
 }
 
 fn decode_raw_rgba(
@@ -111,6 +156,7 @@ fn decode_raw_rgba(
         width,
         height,
         rgba: bytes.to_vec(),
+        frames: Vec::new(),
     })
 }
 

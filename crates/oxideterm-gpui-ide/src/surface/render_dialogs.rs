@@ -1,4 +1,324 @@
 impl IdeSurface {
+    fn render_editor_search_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = &self.tokens;
+        let (current_match, match_count) = self
+            .active_editor()
+            .map(|editor| {
+                let editor = editor.read(cx);
+                let match_count = editor.find_matches().len();
+                let current_match = editor
+                    .active_find_position()
+                    .map(|(current, _)| current)
+                    .unwrap_or(0);
+                (current_match, match_count)
+            })
+            .unwrap_or((0, 0));
+        let match_label = if self.editor_search.query.is_empty() {
+            String::new()
+        } else if match_count > 999 {
+            "999+".to_string()
+        } else {
+            format!("{current_match}/{match_count}")
+        };
+        let query_text = if self.editor_search.query.is_empty() {
+            self.labels.find_placeholder.clone()
+        } else {
+            self.editor_search.query.clone()
+        };
+        let replacement_text = if self.editor_search.replacement.is_empty() {
+            self.labels.replace_placeholder.clone()
+        } else {
+            self.editor_search.replacement.clone()
+        };
+        let can_replace = match_count > 0;
+
+        // This mirrors Tauri's custom CodeEditorSearchBar shape while keeping
+        // text input owned by IdeSurface's key handler rather than introducing
+        // a second editor/text-input primitive inside this crate.
+        let mut panel = div()
+            .absolute()
+            .top(px(IDE_EDITOR_SEARCH_TOP))
+            .right(px(IDE_EDITOR_SEARCH_RIGHT))
+            .w(px(IDE_EDITOR_SEARCH_WIDTH))
+            .p(px(IDE_EDITOR_SEARCH_PADDING))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .rounded_b(px(tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(tokens.ui.border))
+            .bg(rgb(tokens.ui.bg_elevated))
+            .shadow_lg()
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation()
+            })
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        div()
+                            .size(px(IDE_EDITOR_SEARCH_BUTTON_SIZE))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(tokens.radii.sm))
+                            .bg(if self.editor_search.replace_open {
+                                rgba((tokens.ui.accent << 8) | 0x33)
+                            } else {
+                                rgba((tokens.ui.bg_hover << 8) | 0x00)
+                            })
+                            .text_size(px(tokens.metrics.ui_text_xs))
+                            .text_color(rgb(if self.editor_search.replace_open {
+                                tokens.ui.accent
+                            } else {
+                                tokens.ui.text_muted
+                            }))
+                            .child("R")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.toggle_editor_search_replace(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .w(px(IDE_EDITOR_SEARCH_INPUT_WIDTH))
+                            .h(px(IDE_EDITOR_SEARCH_INPUT_HEIGHT))
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .rounded(px(tokens.radii.sm))
+                            .border_1()
+                            .border_color(rgb(if !self.editor_search.replace_focused {
+                                tokens.ui.accent
+                            } else {
+                                tokens.ui.border
+                            }))
+                            .bg(rgb(tokens.ui.bg))
+                            .px_2()
+                            .child(self.icon(
+                                "lucide/search.svg",
+                                IDE_EDITOR_SEARCH_ICON_SIZE,
+                                tokens.ui.text_muted,
+                            ))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(tokens.metrics.ui_text_sm))
+                                    .text_color(rgb(if self.editor_search.query.is_empty() {
+                                        tokens.ui.text_muted
+                                    } else {
+                                        tokens.ui.text
+                                    }))
+                                    .child(query_text),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, window, cx| {
+                                    window.focus(&this.focus_handle);
+                                    this.editor_search.replace_focused = false;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .size(px(IDE_EDITOR_SEARCH_BUTTON_SIZE))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(tokens.radii.sm))
+                            .bg(if self.editor_search.case_sensitive {
+                                rgba((tokens.ui.accent << 8) | 0x33)
+                            } else {
+                                rgba((tokens.ui.bg_hover << 8) | 0x00)
+                            })
+                            .text_color(rgb(if self.editor_search.case_sensitive {
+                                tokens.ui.accent
+                            } else {
+                                tokens.ui.text_muted
+                            }))
+                            .text_size(px(tokens.metrics.ui_text_xs))
+                            .child("Aa")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.toggle_editor_search_case_sensitive(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(px(IDE_EDITOR_SEARCH_MATCH_WIDTH))
+                            .text_align(gpui::TextAlign::Center)
+                            .text_size(px(tokens.metrics.ui_text_xs))
+                            .text_color(rgb(tokens.ui.text_muted))
+                            .child(match_label),
+                    )
+                    .child(
+                        div()
+                            .size(px(IDE_EDITOR_SEARCH_BUTTON_SIZE))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(tokens.radii.sm))
+                            .opacity(if match_count > 0 { 1.0 } else { 0.35 })
+                            .hover(|style| style.bg(rgb(tokens.ui.bg_hover)))
+                            .child(self.icon(
+                                "lucide/arrow-up.svg",
+                                IDE_EDITOR_SEARCH_ICON_SIZE,
+                                tokens.ui.text_muted,
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.select_previous_editor_search_match(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .size(px(IDE_EDITOR_SEARCH_BUTTON_SIZE))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(tokens.radii.sm))
+                            .opacity(if match_count > 0 { 1.0 } else { 0.35 })
+                            .hover(|style| style.bg(rgb(tokens.ui.bg_hover)))
+                            .child(self.icon(
+                                "lucide/chevron-down.svg",
+                                IDE_EDITOR_SEARCH_ICON_SIZE,
+                                tokens.ui.text_muted,
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.select_next_editor_search_match(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .size(px(IDE_EDITOR_SEARCH_BUTTON_SIZE))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(tokens.radii.sm))
+                            .hover(|style| style.bg(rgb(tokens.ui.bg_hover)))
+                            .child(self.icon(
+                                "lucide/x.svg",
+                                IDE_EDITOR_SEARCH_ICON_SIZE,
+                                tokens.ui.text_muted,
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.close_editor_search(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    ),
+            );
+
+        if self.editor_search.replace_open {
+            panel = panel.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .pl(px(IDE_EDITOR_SEARCH_BUTTON_SIZE + 4.0))
+                    .child(
+                        div()
+                            .w(px(IDE_EDITOR_SEARCH_INPUT_WIDTH))
+                            .h(px(IDE_EDITOR_SEARCH_INPUT_HEIGHT))
+                            .flex()
+                            .items_center()
+                            .rounded(px(tokens.radii.sm))
+                            .border_1()
+                            .border_color(rgb(if self.editor_search.replace_focused {
+                                tokens.ui.accent
+                            } else {
+                                tokens.ui.border
+                            }))
+                            .bg(rgb(tokens.ui.bg))
+                            .px_2()
+                            .text_size(px(tokens.metrics.ui_text_sm))
+                            .text_color(rgb(if self.editor_search.replacement.is_empty() {
+                                tokens.ui.text_muted
+                            } else {
+                                tokens.ui.text
+                            }))
+                            .child(replacement_text)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, window, cx| {
+                                    window.focus(&this.focus_handle);
+                                    this.editor_search.replace_focused = true;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .h(px(IDE_EDITOR_SEARCH_INPUT_HEIGHT))
+                            .px_2()
+                            .flex()
+                            .items_center()
+                            .rounded(px(tokens.radii.sm))
+                            .border_1()
+                            .border_color(rgb(tokens.ui.border))
+                            .opacity(if can_replace { 1.0 } else { 0.35 })
+                            .text_size(px(tokens.metrics.ui_text_xs))
+                            .text_color(rgb(tokens.ui.text_muted))
+                            .child(self.labels.replace_btn.clone())
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.replace_current_editor_search_match(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .h(px(IDE_EDITOR_SEARCH_INPUT_HEIGHT))
+                            .px_2()
+                            .flex()
+                            .items_center()
+                            .rounded(px(tokens.radii.sm))
+                            .border_1()
+                            .border_color(rgb(tokens.ui.border))
+                            .opacity(if can_replace { 1.0 } else { 0.35 })
+                            .text_size(px(tokens.metrics.ui_text_xs))
+                            .text_color(rgb(tokens.ui.text_muted))
+                            .child(self.labels.replace_all_btn.clone())
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.replace_all_editor_search_matches(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    ),
+            );
+        }
+
+        panel.into_any_element()
+    }
+
     fn render_disconnected_overlay(&self) -> AnyElement {
         div()
             .absolute()

@@ -121,6 +121,54 @@ impl NodeAgentIdeFileSystem {
             .map_err(node_agent_rpc_error_from_agent)
     }
 
+    pub async fn node_agent_symbol_index(
+        &self,
+        node_id: impl Into<String>,
+        path: impl Into<String>,
+        max_files: Option<u32>,
+    ) -> Result<SymbolIndexResult, NodeAgentRpcError> {
+        let node_id = NodeId::new(node_id.into());
+        let path = path.into();
+        let session = self.node_agent_rpc_session(&node_id).await?;
+        session
+            .symbol_index(&path, max_files)
+            .await
+            .map_err(node_agent_rpc_error_from_agent)
+    }
+
+    pub async fn node_agent_symbol_complete(
+        &self,
+        node_id: impl Into<String>,
+        path: impl Into<String>,
+        prefix: impl Into<String>,
+        limit: Option<u32>,
+    ) -> Result<Vec<SymbolInfo>, NodeAgentRpcError> {
+        let node_id = NodeId::new(node_id.into());
+        let path = path.into();
+        let prefix = prefix.into();
+        let session = self.node_agent_rpc_session(&node_id).await?;
+        session
+            .symbol_complete(&path, &prefix, limit)
+            .await
+            .map_err(node_agent_rpc_error_from_agent)
+    }
+
+    pub async fn node_agent_symbol_definitions(
+        &self,
+        node_id: impl Into<String>,
+        path: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Result<Vec<SymbolInfo>, NodeAgentRpcError> {
+        let node_id = NodeId::new(node_id.into());
+        let path = path.into();
+        let name = name.into();
+        let session = self.node_agent_rpc_session(&node_id).await?;
+        session
+            .symbol_definitions(&path, &name)
+            .await
+            .map_err(node_agent_rpc_error_from_agent)
+    }
+
     pub async fn open_project(
         &self,
         node_id: impl Into<String>,

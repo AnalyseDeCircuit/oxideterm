@@ -1,8 +1,10 @@
+use std::time::{Duration, Instant};
+
 use gpui::{
-    App, Bounds, Corners, PathBuilder, Pixels, Point, SharedString, Window, fill, point, px, rgb,
-    rgba, size,
+    App, Bounds, Corners, PathBuilder, Pixels, Point, RenderImage, SharedString, Window, fill,
+    point, px, rgb, rgba, size,
 };
-use oxideterm_terminal::TerminalCursorShape;
+use oxideterm_terminal::{TerminalCursorShape, TerminalImageData};
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{
@@ -150,13 +152,143 @@ pub(crate) fn paint_terminal_image(
         window.paint_quad(fill(bounds, rgba(0x528bff29)));
         return;
     };
+    let data = image.image.snapshot.data.as_ref();
+    let frame_index =
+        terminal_image_frame_index(render_image, data, image.image.animation_started_at);
+    if terminal_image_should_request_frame(render_image, data, image.image.animation_started_at) {
+        window.request_animation_frame();
+    }
     let _ = window.paint_image(
         bounds,
         Corners::all(px(0.0)),
         render_image.clone(),
-        0,
+        frame_index,
         false,
     );
+}
+
+fn terminal_image_frame_index(
+    render_image: &RenderImage,
+    data: Option<&TerminalImageData>,
+    started_at: Option<Instant>,
+) -> usize {
+    let frame_count = render_image.frame_count();
+    if frame_count <= 1 {
+        return 0;
+    }
+
+    let Some(data) = data else {
+        return 0;
+    };
+    if !data.animation.running {
+        return data.animation.current_frame.min(frame_count - 1);
+    }
+    let Some(started_at) = started_at else {
+        return data.animation.current_frame.min(frame_count - 1);
+    };
+    let elapsed = started_at.elapsed();
+    let mut cycle_duration = Duration::ZERO;
+    let frame_delays = (0..frame_count)
+        .map(|index| terminal_image_frame_delay(data, render_image, index))
+        .inspect(|delay| {
+            if let Some(delay) = delay {
+                cycle_duration += *delay;
+            }
+        })
+        .collect::<Vec<_>>();
+    if cycle_duration.is_zero() {
+        return data.animation.current_frame.min(frame_count - 1);
+    }
+
+    let elapsed_ms = elapsed.as_millis();
+    if data.animation.loading && elapsed_ms >= cycle_duration.as_millis() {
+        return last_displayable_frame(&frame_delays).unwrap_or(frame_count - 1);
+    }
+    if let Some(loop_limit) = data.animation.loop_limit {
+        let total_duration = cycle_duration.as_millis() * u128::from(loop_limit);
+        if elapsed_ms >= total_duration {
+            return last_displayable_frame(&frame_delays).unwrap_or(frame_count - 1);
+        }
+    }
+
+    let elapsed_in_cycle = elapsed_ms % cycle_duration.as_millis();
+    let mut frame_end_ms = 0;
+    for (index, delay) in frame_delays.iter().enumerate() {
+        let Some(delay) = delay else {
+            continue;
+        };
+        frame_end_ms += delay.as_millis();
+        if elapsed_in_cycle < frame_end_ms {
+            return index;
+        }
+    }
+    frame_count - 1
+}
+
+fn terminal_image_frame_delay(
+    data: &TerminalImageData,
+    render_image: &RenderImage,
+    frame_index: usize,
+) -> Option<Duration> {
+    if data
+        .frames
+        .get(frame_index)
+        .is_some_and(|frame| frame.gapless)
+    {
+        return None;
+    }
+    let delay = Duration::from(render_image.delay(frame_index));
+    (!delay.is_zero()).then_some(delay)
+}
+
+fn terminal_image_should_request_frame(
+    render_image: &RenderImage,
+    data: Option<&TerminalImageData>,
+    started_at: Option<Instant>,
+) -> bool {
+    if render_image.frame_count() <= 1 {
+        return false;
+    }
+    let Some(data) = data else {
+        return false;
+    };
+    if !data.animation.running {
+        return false;
+    }
+    if !data.animation.loading && data.animation.loop_limit.is_none() {
+        return true;
+    }
+    let Some(started_at) = started_at else {
+        return true;
+    };
+    let Some(cycle_duration) = terminal_image_cycle_duration(data, render_image) else {
+        return false;
+    };
+    let elapsed_ms = started_at.elapsed().as_millis();
+    if data.animation.loading {
+        return elapsed_ms < cycle_duration.as_millis();
+    }
+    data.animation
+        .loop_limit
+        .is_none_or(|limit| elapsed_ms < cycle_duration.as_millis() * u128::from(limit))
+}
+
+fn terminal_image_cycle_duration(
+    data: &TerminalImageData,
+    render_image: &RenderImage,
+) -> Option<Duration> {
+    let cycle_duration = (0..render_image.frame_count())
+        .filter_map(|index| terminal_image_frame_delay(data, render_image, index))
+        .fold(Duration::ZERO, |total, delay| total + delay);
+    (!cycle_duration.is_zero()).then_some(cycle_duration)
+}
+
+fn last_displayable_frame(frame_delays: &[Option<Duration>]) -> Option<usize> {
+    frame_delays
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, delay)| delay.is_some().then_some(index))
 }
 
 pub(crate) fn paint_text_run(

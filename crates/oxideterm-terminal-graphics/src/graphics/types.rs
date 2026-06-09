@@ -44,7 +44,36 @@ pub struct TerminalImageData {
     pub width: u32,
     pub height: u32,
     pub rgba: Arc<[u8]>,
+    pub frames: Vec<TerminalImageFrame>,
+    pub animation: TerminalImageAnimationState,
     pub name: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalImageFrame {
+    pub rgba: Arc<[u8]>,
+    pub delay_ms_numerator: u32,
+    pub delay_ms_denominator: u32,
+    pub gapless: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalImageAnimationState {
+    pub running: bool,
+    pub loading: bool,
+    pub current_frame: usize,
+    pub loop_limit: Option<u32>,
+}
+
+impl Default for TerminalImageAnimationState {
+    fn default() -> Self {
+        Self {
+            running: false,
+            loading: false,
+            current_frame: 0,
+            loop_limit: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,6 +98,7 @@ pub struct TerminalImagePlacement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminalGraphicsEvent {
     ImageReady(TerminalImageData),
+    ImageUpdated(TerminalImageData),
     Place(TerminalImagePlacement),
     Delete { id: Option<TerminalImageId> },
     Respond(Vec<u8>),
@@ -143,16 +173,10 @@ pub struct GraphicsIngress {
     state: ParserState,
     next_image_id: u64,
     kitty_chunks: HashMap<u64, KittyChunkAssembly>,
-    kitty_images: HashMap<TerminalImageId, KittyImageRecord>,
+    kitty_images: HashMap<TerminalImageId, TerminalImageData>,
 }
 
 struct KittyChunkAssembly {
     params: HashMap<String, String>,
     encoded: Vec<u8>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct KittyImageRecord {
-    width: u32,
-    height: u32,
 }

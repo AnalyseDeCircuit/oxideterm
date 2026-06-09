@@ -3,11 +3,11 @@ fn oxide_settings_section_label(section: &str, i18n: &oxideterm_i18n::I18n) -> S
     // import/export modals so sectioned settings previews do not leak Chinese.
     match section {
         "general" => i18n.t("settings_view.general.title"),
-        "terminalAppearance" => i18n.t("modals.export.app_settings_section_terminal_appearance"),
-        "terminalBehavior" => i18n.t("modals.export.app_settings_section_terminal_behavior"),
+        "terminalAppearance" => i18n.t("export.app_settings_section_terminal_appearance"),
+        "terminalBehavior" => i18n.t("export.app_settings_section_terminal_behavior"),
         "appearance" => i18n.t("settings_view.appearance.title"),
         "connections" => i18n.t("settings_view.connections.title"),
-        "fileAndEditor" => i18n.t("modals.export.app_settings_section_file_editor"),
+        "fileAndEditor" => i18n.t("export.app_settings_section_file_editor"),
         "ai" => i18n.t("settings_view.tabs.ai"),
         "localTerminal" => i18n.t("settings_view.local_terminal.title"),
         "legacy" => i18n.t("modals.import.app_settings_legacy_title"),
@@ -87,9 +87,9 @@ fn oxide_password_strength_label(
     i18n: &oxideterm_i18n::I18n,
 ) -> String {
     match strength {
-        OxidePasswordStrength::Weak => i18n.t("modals.export.password_strength_weak"),
-        OxidePasswordStrength::Fair => i18n.t("modals.export.password_strength_fair"),
-        OxidePasswordStrength::Strong => i18n.t("modals.export.password_strength_strong"),
+        OxidePasswordStrength::Weak => i18n.t("export.password_strength_weak"),
+        OxidePasswordStrength::Fair => i18n.t("export.password_strength_fair"),
+        OxidePasswordStrength::Strong => i18n.t("export.password_strength_strong"),
     }
 }
 
@@ -99,10 +99,10 @@ fn oxide_export_progress_label(
     i18n: &oxideterm_i18n::I18n,
 ) -> String {
     let key = match stage {
-        "collecting_connections" if embed_keys => "modals.export.stage_reading_keys",
-        "serializing_file" => "modals.export.stage_writing",
-        "done" => "modals.export.stage_done",
-        _ => "modals.export.stage_encrypting",
+        "collecting_connections" if embed_keys => "export.stage_reading_keys",
+        "serializing_file" => "export.stage_writing",
+        "done" => "export.stage_done",
+        _ => "export.stage_encrypting",
     };
     i18n.t(key)
 }

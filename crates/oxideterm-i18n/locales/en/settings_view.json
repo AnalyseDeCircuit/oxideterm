@@ -1161,6 +1161,7 @@
         "app.closeOtherTabs": "Close Other Tabs",
         "app.newConnection": "New SSH Connection",
         "app.settings": "Open Settings",
+        "app.quit": "Quit OxideTerm",
         "app.toggleSidebar": "Toggle Sidebar",
         "app.commandPalette": "Command Palette",
         "app.zenMode": "Toggle Zen Mode",

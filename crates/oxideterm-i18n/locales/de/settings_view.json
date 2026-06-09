@@ -1161,6 +1161,7 @@
         "app.closeOtherTabs": "Andere Tabs schließen",
         "app.newConnection": "Neue SSH-Verbindung",
         "app.settings": "Einstellungen öffnen",
+        "app.quit": "OxideTerm beenden",
         "app.toggleSidebar": "Seitenleiste umschalten",
         "app.commandPalette": "Befehlspalette",
         "app.zenMode": "Zen-Modus umschalten",

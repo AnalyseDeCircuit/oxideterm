@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use gpui::{Context, Window};
+use gpui::{Context, Modifiers, Window};
 
 use super::{EditorSaveStatus, TextEditorView, coords::floor_char_boundary, input};
 
@@ -74,19 +74,19 @@ impl TextEditorView {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
-        if modifiers.platform && key.eq_ignore_ascii_case("s") {
+        if matches_tauri_plain_mod_key(key, modifiers, "s") {
             self.save(window, cx);
             return;
         }
-        if modifiers.platform && key.eq_ignore_ascii_case("v") {
+        if matches_tauri_plain_mod_key(key, modifiers, "v") {
             self.paste_from_clipboard(cx);
             return;
         }
-        if modifiers.platform && key.eq_ignore_ascii_case("a") {
+        if matches_tauri_plain_mod_key(key, modifiers, "a") {
             self.select_all(cx);
             return;
         }
-        if modifiers.platform && key.eq_ignore_ascii_case("z") {
+        if matches_tauri_mod_key(key, modifiers, "z") {
             if modifiers.shift {
                 self.redo(cx);
             } else {
@@ -94,15 +94,11 @@ impl TextEditorView {
             }
             return;
         }
-        if modifiers.platform && key.eq_ignore_ascii_case("y") {
+        if matches_tauri_plain_mod_key(key, modifiers, "y") {
             self.redo(cx);
             return;
         }
-        if modifiers.platform && key.eq_ignore_ascii_case("f") {
-            self.select_current_word_for_find(cx);
-            return;
-        }
-        if modifiers.platform && key.eq_ignore_ascii_case("d") {
+        if matches_tauri_plain_mod_key(key, modifiers, "d") {
             self.add_next_find_match_as_cursor(cx);
             return;
         }
@@ -144,6 +140,7 @@ impl TextEditorView {
             let _ = self.buffer.with_text(|text| syntax.reparse(text));
         }
         self.refresh_highlights();
+        self.clear_folds_after_buffer_change();
         self.refresh_find_matches();
         self.secondary_selections.clear();
         self.save_status = if self.buffer.is_dirty() {
@@ -171,5 +168,87 @@ impl TextEditorView {
             indent.push_str(&self.settings.indentation_unit());
         }
         format!("\n{indent}")
+    }
+}
+
+fn matches_tauri_plain_mod_key(key: &str, modifiers: Modifiers, expected_key: &str) -> bool {
+    matches_tauri_mod_key(key, modifiers, expected_key) && !modifiers.shift
+}
+
+fn matches_tauri_mod_key(key: &str, modifiers: Modifiers, expected_key: &str) -> bool {
+    // CodeMirror's `Mod-*` maps to Command on macOS and Control on
+    // Windows/Linux; GPUI exposes that same intent as the secondary modifier.
+    modifiers.secondary() && !modifiers.alt && key.eq_ignore_ascii_case(expected_key)
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::Modifiers;
+
+    use super::{matches_tauri_mod_key, matches_tauri_plain_mod_key};
+
+    #[test]
+    fn plain_mod_shortcuts_match_codemirror_mod_key() {
+        // The IDE source of truth is CodeMirror `Mod-*`, not GPUI's raw
+        // platform key, which is Super/Windows on non-macOS platforms.
+        assert!(matches_tauri_plain_mod_key(
+            "s",
+            Modifiers::secondary_key(),
+            "s"
+        ));
+        assert!(matches_tauri_plain_mod_key(
+            "V",
+            Modifiers::secondary_key(),
+            "v"
+        ));
+        assert!(matches_tauri_plain_mod_key(
+            "a",
+            Modifiers::secondary_key(),
+            "a"
+        ));
+        assert!(matches_tauri_plain_mod_key(
+            "d",
+            Modifiers::secondary_key(),
+            "d"
+        ));
+    }
+
+    #[test]
+    fn plain_mod_shortcuts_reject_modified_variants() {
+        // Native save currently mirrors Tauri's plain Mod-s binding only.
+        let mut alt_save = Modifiers::secondary_key();
+        alt_save.alt = true;
+        assert!(!matches_tauri_plain_mod_key("s", alt_save, "s"));
+
+        let mut shifted_save = Modifiers::secondary_key();
+        shifted_save.shift = true;
+        assert!(!matches_tauri_plain_mod_key("s", shifted_save, "s"));
+        assert!(!matches_tauri_plain_mod_key(
+            "x",
+            Modifiers::secondary_key(),
+            "s"
+        ));
+    }
+
+    #[test]
+    fn shifted_mod_z_matches_redo_binding() {
+        let mut redo = Modifiers::secondary_key();
+        redo.shift = true;
+        assert!(matches_tauri_mod_key("z", redo, "z"));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn mod_shortcuts_do_not_treat_super_as_control_on_non_macos() {
+        // GPUI's platform modifier is Super/Windows here, while CodeMirror
+        // `Mod-*` expects Control.
+        assert!(!matches_tauri_plain_mod_key(
+            "s",
+            Modifiers {
+                platform: true,
+                ..Modifiers::none()
+            },
+            "s"
+        ));
     }
 }

@@ -45,6 +45,28 @@ impl TerminalGraphicsState {
                 self.evict_images_over_budget();
                 None
             }
+            TerminalGraphicsEvent::ImageUpdated(mut image) => {
+                if let Some(previous) = self.images.remove(&image.id) {
+                    self.storage_bytes = self
+                        .storage_bytes
+                        .saturating_sub(image_storage_bytes(&previous));
+                }
+                let next_version = self
+                    .image_versions
+                    .get(&image.id)
+                    .copied()
+                    .unwrap_or_default()
+                    + 1;
+                image.version = next_version;
+                self.image_versions.insert(image.id, next_version);
+                self.storage_bytes += image_storage_bytes(&image);
+                if !self.image_order.iter().any(|id| *id == image.id) {
+                    self.image_order.push_back(image.id);
+                }
+                self.images.insert(image.id, image);
+                self.evict_images_over_budget();
+                None
+            }
             TerminalGraphicsEvent::Place(placement) => {
                 self.placements
                     .retain(|existing| existing.id != placement.id);
@@ -127,7 +149,13 @@ impl TerminalGraphicsState {
 }
 
 fn image_storage_bytes(image: &TerminalImageData) -> usize {
-    image.rgba.len()
+    if image.frames.is_empty() {
+        image.rgba.len()
+    } else {
+        // Animated images keep frame zero in `frames`, so count the frame set
+        // once instead of adding the still-preview buffer again.
+        image.frames.iter().map(|frame| frame.rgba.len()).sum()
+    }
 }
 
 pub(crate) fn graphics_cursor_from_term<T: EventListener>(

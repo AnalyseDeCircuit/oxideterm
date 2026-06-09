@@ -9,6 +9,9 @@ pub struct EditorSettings {
     pub soft_wrap_column: usize,
     pub find_case_sensitive: bool,
     pub find_whole_word: bool,
+    pub highlight_special_chars: bool,
+    pub indentation_markers: bool,
+    pub placeholder: Option<String>,
 }
 
 impl Default for EditorSettings {
@@ -20,6 +23,9 @@ impl Default for EditorSettings {
             soft_wrap_column: 120,
             find_case_sensitive: false,
             find_whole_word: false,
+            highlight_special_chars: true,
+            indentation_markers: true,
+            placeholder: Some("...".to_string()),
         }
     }
 }

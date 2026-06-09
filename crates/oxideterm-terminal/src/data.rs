@@ -1,6 +1,7 @@
 use alacritty_terminal::vte::ansi::CursorShape as AlacCursorShape;
 pub use oxideterm_terminal_graphics::{
-    GraphicsOptions, TerminalImageData, TerminalImageId, TerminalImageProtocol,
+    GraphicsOptions, TerminalImageAnimationState, TerminalImageData, TerminalImageFrame,
+    TerminalImageId, TerminalImageProtocol,
 };
 
 #[derive(Clone, Debug)]

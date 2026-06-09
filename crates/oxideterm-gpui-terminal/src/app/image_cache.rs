@@ -1,10 +1,11 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
+    time::Instant,
 };
 
 use gpui::RenderImage;
-use image::{Frame, RgbaImage};
+use image::{Delay, Frame, RgbaImage};
 use oxideterm_terminal::{TerminalImageId, TerminalImageSnapshot};
 
 const DEFAULT_RENDER_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
@@ -13,6 +14,7 @@ const DEFAULT_RENDER_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) struct TerminalRenderedImage {
     pub(crate) snapshot: TerminalImageSnapshot,
     pub(crate) render_image: Option<Arc<RenderImage>>,
+    pub(crate) animation_started_at: Option<Instant>,
 }
 
 pub(crate) struct ImageRenderCache {
@@ -35,6 +37,7 @@ struct ImageCacheKey {
 struct CachedRenderImage {
     image: Arc<RenderImage>,
     bytes: usize,
+    animation_started_at: Option<Instant>,
 }
 
 impl Default for ImageRenderCache {
@@ -63,23 +66,31 @@ impl ImageRenderCache {
             .iter()
             .cloned()
             .map(|snapshot| {
-                let render_image = if decode_images {
-                    snapshot
+                let (render_image, animation_started_at) = if decode_images {
+                    match snapshot
                         .data
                         .as_ref()
                         .and_then(|_| self.image_for_snapshot(&snapshot))
+                    {
+                        Some((image, animation_started_at)) => (Some(image), animation_started_at),
+                        None => (None, None),
+                    }
                 } else {
-                    None
+                    (None, None)
                 };
                 TerminalRenderedImage {
                     snapshot,
                     render_image,
+                    animation_started_at,
                 }
             })
             .collect()
     }
 
-    fn image_for_snapshot(&mut self, snapshot: &TerminalImageSnapshot) -> Option<Arc<RenderImage>> {
+    fn image_for_snapshot(
+        &mut self,
+        snapshot: &TerminalImageSnapshot,
+    ) -> Option<(Arc<RenderImage>, Option<Instant>)> {
         let key = ImageCacheKey {
             id: snapshot.id,
             version: snapshot.version,
@@ -90,26 +101,28 @@ impl ImageRenderCache {
         };
         if self.entries.contains_key(&key) {
             self.touch(key);
-            return self.entries.get(&key).map(|cached| cached.image.clone());
+            return self
+                .entries
+                .get(&key)
+                .map(|cached| (cached.image.clone(), cached.animation_started_at));
         }
 
         let data = snapshot.data.as_ref()?;
-        let pixels = cropped_protocol_rgba(data, snapshot);
-        let byte_len = pixels.len();
-        let pixels = gpui_render_image_pixels_from_protocol_rgba(pixels);
-        let buffer = RgbaImage::from_raw(snapshot.source_width, snapshot.source_height, pixels)?;
-        let render_image = Arc::new(RenderImage::new(vec![Frame::new(buffer)]));
+        let (frames, byte_len) = render_frames_for_snapshot(data, snapshot)?;
+        let render_image = Arc::new(RenderImage::new(frames));
+        let animation_started_at = (render_image.frame_count() > 1).then(Instant::now);
         self.entries.insert(
             key,
             CachedRenderImage {
                 image: render_image.clone(),
                 bytes: byte_len,
+                animation_started_at,
             },
         );
         self.order.push_back(key);
         self.bytes += byte_len;
         self.evict_over_budget();
-        Some(render_image)
+        Some((render_image, animation_started_at))
     }
 
     fn touch(&mut self, key: ImageCacheKey) {
@@ -130,31 +143,62 @@ impl ImageRenderCache {
     }
 }
 
-fn cropped_protocol_rgba(
+fn render_frames_for_snapshot(
     data: &oxideterm_terminal::TerminalImageData,
     snapshot: &TerminalImageSnapshot,
+) -> Option<(Vec<Frame>, usize)> {
+    if data.frames.is_empty() {
+        let pixels = cropped_protocol_rgba_pixels(&data.rgba, data.width, data.height, snapshot);
+        let byte_len = pixels.len();
+        let pixels = gpui_render_image_pixels_from_protocol_rgba(pixels);
+        let buffer = RgbaImage::from_raw(snapshot.source_width, snapshot.source_height, pixels)?;
+        return Some((vec![Frame::new(buffer)], byte_len));
+    }
+
+    let mut byte_len = 0;
+    let mut frames = Vec::with_capacity(data.frames.len());
+    for frame in &data.frames {
+        let pixels = cropped_protocol_rgba_pixels(&frame.rgba, data.width, data.height, snapshot);
+        byte_len += pixels.len();
+        let pixels = gpui_render_image_pixels_from_protocol_rgba(pixels);
+        let buffer = RgbaImage::from_raw(snapshot.source_width, snapshot.source_height, pixels)?;
+        let delay =
+            Delay::from_numer_denom_ms(frame.delay_ms_numerator, frame.delay_ms_denominator.max(1));
+        frames.push(Frame::from_parts(buffer, 0, 0, delay));
+    }
+    Some((frames, byte_len))
+}
+
+fn cropped_protocol_rgba_pixels(
+    rgba: &[u8],
+    image_width: u32,
+    image_height: u32,
+    snapshot: &TerminalImageSnapshot,
 ) -> Vec<u8> {
-    let source_x = snapshot.source_x.min(data.width);
-    let source_y = snapshot.source_y.min(data.height);
+    let source_x = snapshot.source_x.min(image_width);
+    let source_y = snapshot.source_y.min(image_height);
     let source_width = snapshot
         .source_width
-        .min(data.width.saturating_sub(source_x));
+        .min(image_width.saturating_sub(source_x));
     let source_height = snapshot
         .source_height
-        .min(data.height.saturating_sub(source_y));
+        .min(image_height.saturating_sub(source_y));
 
-    if source_x == 0 && source_y == 0 && source_width == data.width && source_height == data.height
+    if source_x == 0
+        && source_y == 0
+        && source_width == image_width
+        && source_height == image_height
     {
-        return data.rgba.to_vec();
+        return rgba.to_vec();
     }
 
     let row_bytes = source_width as usize * 4;
     let mut cropped = Vec::with_capacity(row_bytes * source_height as usize);
-    let stride = data.width as usize * 4;
+    let stride = image_width as usize * 4;
     for row in source_y..source_y + source_height {
         let start = row as usize * stride + source_x as usize * 4;
         let end = start + row_bytes;
-        cropped.extend_from_slice(&data.rgba[start..end]);
+        cropped.extend_from_slice(&rgba[start..end]);
     }
     cropped
 }
@@ -171,7 +215,10 @@ fn gpui_render_image_pixels_from_protocol_rgba(mut pixels: Vec<u8>) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use oxideterm_terminal::{TerminalImageData, TerminalImageProtocol, TerminalImageSnapshot};
+    use oxideterm_terminal::{
+        TerminalImageAnimationState, TerminalImageData, TerminalImageFrame, TerminalImageProtocol,
+        TerminalImageSnapshot,
+    };
 
     use super::*;
 
@@ -201,6 +248,8 @@ mod tests {
                 width: 1,
                 height: 1,
                 rgba: vec![0, 0, 0, 255].into(),
+                frames: Vec::new(),
+                animation: TerminalImageAnimationState::default(),
                 name: None,
             }),
         };
@@ -239,6 +288,8 @@ mod tests {
                 width: 1,
                 height: 1,
                 rgba: vec![255, 0, 0, 255].into(),
+                frames: Vec::new(),
+                animation: TerminalImageAnimationState::default(),
                 name: None,
             }),
         };
@@ -275,6 +326,8 @@ mod tests {
                 width: 2,
                 height: 1,
                 rgba: vec![255, 0, 0, 255, 0, 255, 0, 255].into(),
+                frames: Vec::new(),
+                animation: TerminalImageAnimationState::default(),
                 name: None,
             }),
         };
@@ -283,6 +336,67 @@ mod tests {
         let image = rendered[0].render_image.as_ref().unwrap();
 
         assert_eq!(image.as_bytes(0), Some([0, 255, 0, 255].as_slice()));
+    }
+
+    #[test]
+    fn render_cache_preserves_animation_frames_and_delays() {
+        let mut cache = ImageRenderCache::default();
+        let snapshot = TerminalImageSnapshot {
+            id: TerminalImageId(12),
+            protocol: TerminalImageProtocol::Kitty,
+            row: 0,
+            col: 0,
+            cols: 1,
+            rows: 1,
+            pixel_width: 1,
+            pixel_height: 1,
+            source_x: 0,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
+            z_index: 0,
+            placeholder: true,
+            version: 1,
+            data: Some(TerminalImageData {
+                id: TerminalImageId(12),
+                protocol: TerminalImageProtocol::Kitty,
+                version: 1,
+                width: 1,
+                height: 1,
+                rgba: vec![255, 0, 0, 255].into(),
+                frames: vec![
+                    TerminalImageFrame {
+                        rgba: vec![255, 0, 0, 255].into(),
+                        delay_ms_numerator: 50,
+                        delay_ms_denominator: 1,
+                        gapless: false,
+                    },
+                    TerminalImageFrame {
+                        rgba: vec![0, 255, 0, 255].into(),
+                        delay_ms_numerator: 75,
+                        delay_ms_denominator: 1,
+                        gapless: false,
+                    },
+                ],
+                animation: TerminalImageAnimationState {
+                    running: true,
+                    loading: false,
+                    current_frame: 0,
+                    loop_limit: None,
+                },
+                name: None,
+            }),
+        };
+
+        let rendered = cache.render_images(&[snapshot], true);
+        let image = rendered[0].render_image.as_ref().unwrap();
+
+        assert_eq!(image.frame_count(), 2);
+        assert_eq!(image.delay(0).numer_denom_ms(), (50, 1));
+        assert_eq!(image.delay(1).numer_denom_ms(), (75, 1));
+        assert_eq!(image.as_bytes(0), Some([0, 0, 255, 255].as_slice()));
+        assert_eq!(image.as_bytes(1), Some([0, 255, 0, 255].as_slice()));
+        assert!(rendered[0].animation_started_at.is_some());
     }
 
     #[test]
@@ -318,6 +432,8 @@ mod tests {
                 width: 1,
                 height: 1,
                 rgba: vec![255, 0, 0, 255].into(),
+                frames: Vec::new(),
+                animation: TerminalImageAnimationState::default(),
                 name: None,
             }),
         };

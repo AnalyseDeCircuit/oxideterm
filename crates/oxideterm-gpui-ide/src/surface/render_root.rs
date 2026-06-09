@@ -35,6 +35,8 @@ impl Render for IdeSurface {
                 }),
             )
             .on_key_down(cx.listener(|this, event, window, cx| {
+                this.handle_editor_search_key(event, cx);
+                this.handle_editor_find_shortcut(event, cx);
                 this.handle_project_search_key(event, cx);
                 this.handle_tree_name_input_key(event, cx);
                 this.handle_folder_picker_key(event, window, cx);

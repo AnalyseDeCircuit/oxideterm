@@ -665,7 +665,7 @@ impl WorkspaceApp {
             "connect_target" => self.execute_ai_connect_target(&args, window, cx),
             "run_command" => self.execute_ai_terminal_run_command(&args, window, cx),
             "send_terminal_input" => self.execute_ai_send_terminal_input(&args, window, cx),
-            "write_resource" => self.execute_ai_write_settings_resource(&args, cx),
+            "write_resource" => self.execute_ai_write_settings_resource(&args, window, cx),
             "open_app_surface" => self.execute_ai_open_app_surface(&args, window, cx),
             "remember_preference" => self.execute_ai_remember_preference(&args, cx),
             _ => self.ai_orchestrator_snapshot(cx).fail(
@@ -701,7 +701,7 @@ impl WorkspaceApp {
                 .ai_orchestrator_snapshot(cx)
                 .target_kind_for_args(&args)
                 .as_deref()
-                == Some("terminal-session")
+                .is_some_and(|kind| matches!(kind, "terminal-session" | "ssh-node" | "local-shell"))
         {
             self.start_ai_terminal_run_command_execution(
                 tool_call_id,
@@ -865,18 +865,19 @@ impl WorkspaceApp {
             }
             "ssh-node" => {
                 if target.state == "connected" {
-                    self.reveal_ai_target_if_visible(&target, window, cx);
-                    return snapshot
-                        .ok(
-                            "Target is already live.",
-                            "Target is already live.",
-                            serde_json::json!({
-                                "nodeId": target.refs.get("nodeId").cloned().unwrap_or_default(),
-                                "sessionId": target.refs.get("sessionId").cloned().unwrap_or_default(),
-                            }),
-                            "write",
-                        )
-                        .with_target(target);
+                    if self.reveal_ai_target_if_visible(&target, window, cx) {
+                        return snapshot
+                            .ok(
+                                "Target is already live.",
+                                "Target is already live.",
+                                serde_json::json!({
+                                    "nodeId": target.refs.get("nodeId").cloned().unwrap_or_default(),
+                                    "sessionId": target.refs.get("sessionId").cloned().unwrap_or_default(),
+                                }),
+                                "write",
+                            )
+                            .with_target(target);
+                    }
                 }
                 let Some(node_id) = target.refs.get("nodeId").map(|value| NodeId::new(value.clone()))
                 else {
@@ -1185,6 +1186,11 @@ impl WorkspaceApp {
                 ai_run_command_preflight_risk(),
             );
         };
+        let target = match self.resolve_ai_run_command_terminal_target(target, window, cx) {
+            Ok(target) => target,
+            Err(result) => return result,
+        };
+        let command = ai_command_with_cwd(command, args.get("cwd").and_then(serde_json::Value::as_str));
         let Some(session_id) = target
             .refs
             .get("sessionId")
@@ -1222,8 +1228,8 @@ impl WorkspaceApp {
         }
         let before = pane.read(cx).ai_buffer_snapshot();
         pane.update(cx, |pane, cx| {
-            pane.begin_command_mark(command, TerminalCommandMarkDetectionSource::Ai, cx);
-            pane.send_command_line(command, cx);
+            pane.begin_command_mark(&command, TerminalCommandMarkDetectionSource::Ai, cx);
+            pane.send_command_line(&command, cx);
         });
         if args
             .get("await_output")
@@ -1234,22 +1240,28 @@ impl WorkspaceApp {
                 .ok(
                     "Command sent to terminal.",
                     format!("Command sent: {command}"),
-                    serde_json::Value::Null,
+                    serde_json::json!({
+                        "executionState": "sent",
+                        "visibleInTerminal": true,
+                    }),
                     "interactive",
                 )
                 .with_target(target);
         }
         let after = pane.read(cx).ai_buffer_snapshot();
         let output = terminal_delta_output(&before, &after);
+        let output_empty = output.trim().is_empty();
         snapshot
             .ok(
                 "Command sent to terminal.",
-                if output.trim().is_empty() {
+                if output_empty {
                     format!("Command sent: {command}")
                 } else {
                     output
                 },
                 serde_json::json!({
+                    "executionState": if output_empty { "sent" } else { "output_captured" },
+                    "visibleInTerminal": true,
                     "waitingForInput": looks_waiting_for_input(&after),
                 }),
                 "interactive",
@@ -1332,6 +1344,23 @@ impl WorkspaceApp {
             let _ = sender.send(result);
             return;
         };
+        let target = match self.resolve_ai_run_command_terminal_target(target, window, cx) {
+            Ok(target) => target,
+            Err(action_result) => {
+                let result = snapshot.to_executed_tool_result(
+                    tool_call_id,
+                    tool_name,
+                    action_result,
+                    started.elapsed().as_millis(),
+                );
+                let _ = sender.send(result);
+                return;
+            }
+        };
+        let command = ai_command_with_cwd(
+            &command,
+            args.get("cwd").and_then(serde_json::Value::as_str),
+        );
         let Some(session_id) = target
             .refs
             .get("sessionId")
@@ -1405,7 +1434,10 @@ impl WorkspaceApp {
                     .ok(
                         "Command sent to terminal.",
                         format!("Command sent: {command}"),
-                        serde_json::Value::Null,
+                        serde_json::json!({
+                            "executionState": "sent",
+                            "visibleInTerminal": true,
+                        }),
                         "interactive",
                     )
                     .with_target(target),
@@ -1441,6 +1473,8 @@ impl WorkspaceApp {
                                     "Terminal command output captured.",
                                     terminal_delta_output(&before, &current),
                                     serde_json::json!({
+                                        "executionState": "output_captured",
+                                        "visibleInTerminal": true,
                                         "waitingForInput": looks_waiting_for_input(&current),
                                     }),
                                     "interactive",
@@ -1471,6 +1505,8 @@ impl WorkspaceApp {
                             output
                         },
                         data: serde_json::json!({
+                            "executionState": if output_empty { "timeout" } else { "output_captured" },
+                            "visibleInTerminal": true,
                             "waitingForInput": looks_waiting_for_input(&last),
                         }),
                         error_code: output_empty.then(|| "terminal_command_wait_timeout".to_string()),
@@ -1496,6 +1532,7 @@ impl WorkspaceApp {
     fn execute_ai_write_settings_resource(
         &mut self,
         args: &serde_json::Value,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
@@ -1558,10 +1595,21 @@ impl WorkspaceApp {
         match settings_with_json_patch(self.settings_store.settings(), section, key, value.clone()) {
             Ok(next_settings) => {
                 self.edit_settings(|settings| *settings = next_settings, cx);
+                if let Some(tab) =
+                    oxideterm_gpui_settings_view::settings_tab_from_ai_section(section)
+                {
+                    self.settings_page.set_active_tab(tab);
+                }
+                self.open_settings_tab(window, cx);
                 snapshot.ok(
                     format!("Updated settings {section}.{key}."),
                     format!("{section}.{key} updated."),
-                    serde_json::json!({ "section": section, "key": key, "value": value }),
+                    serde_json::json!({
+                        "section": section,
+                        "key": key,
+                        "value": value,
+                        "visibleSurface": "settings",
+                    }),
                     "write",
                 ).with_target(target)
             }
@@ -1611,6 +1659,90 @@ impl WorkspaceApp {
             serde_json::Value::Null,
             "write",
         )
+    }
+
+    fn resolve_ai_run_command_terminal_target(
+        &mut self,
+        target: AiOrchestratorTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<AiOrchestratorTarget, AiActionResultLite> {
+        match target.kind.as_str() {
+            "local-shell" => self.resolve_ai_local_shell_terminal_target(&target, window, cx),
+            "ssh-node" if target.refs.contains_key("sessionId") => Ok(target),
+            "ssh-node" => {
+                let snapshot = self.ai_orchestrator_snapshot(cx);
+                Err(snapshot
+                    .fail(
+                        "Visible terminal is required.",
+                        "missing_visible_terminal",
+                        "run_command for ssh-node must use a visible terminal session. Connect or open the target terminal, then retry.",
+                        "interactive",
+                    )
+                    .with_target(target.clone())
+                    .with_next_actions(vec![serde_json::json!({
+                        "action": "connect_target",
+                        "args": { "target_id": target.id },
+                        "reason": "Create or reveal a visible terminal before running the command."
+                    })]))
+            }
+            _ => Ok(target),
+        }
+    }
+
+    fn resolve_ai_local_shell_terminal_target(
+        &mut self,
+        requested_target: &AiOrchestratorTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<AiOrchestratorTarget, AiActionResultLite> {
+        let snapshot = self.ai_orchestrator_snapshot(cx);
+        if let Some(target) = local_terminal_run_target(&snapshot) {
+            if let Some(session_id) = target
+                .refs
+                .get("sessionId")
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(TerminalSessionId)
+            {
+                self.reveal_ai_terminal_session(session_id, window, cx);
+            }
+            return Ok(target);
+        }
+
+        if let Err(error) = self.create_local_terminal_tab(window, cx) {
+            return Err(snapshot
+                .fail(
+                    "Failed to open local terminal.",
+                    "open_local_terminal_failed",
+                    error.to_string(),
+                    "interactive",
+                )
+                .with_target(requested_target.clone()));
+        }
+
+        let active_tab_id = self.active_tab_id.map(|tab_id| tab_id.0.to_string());
+        let refreshed = self.ai_orchestrator_snapshot(cx);
+        refreshed
+            .targets
+            .iter()
+            .find(|target| {
+                target.kind == "terminal-session"
+                    && active_tab_id
+                        .as_ref()
+                        .is_some_and(|tab_id| target.refs.get("tabId") == Some(tab_id))
+                    && ai_target_is_local_terminal(target)
+            })
+            .cloned()
+            .ok_or_else(|| {
+                refreshed
+                    .fail(
+                        "Local terminal is not ready.",
+                        "local_terminal_missing",
+                        "A local terminal was opened, but no visible terminal-session target was registered yet.",
+                        "interactive",
+                    )
+                    .with_target(requested_target.clone())
+            })
     }
 
     fn execute_ai_open_app_surface(

@@ -10,7 +10,7 @@ use gpui::{
 };
 use oxideterm_editor_core::{
     BufferOffset, Cursor, EditTransaction, FindMatch, LineCol, Selection, TextBuffer, TextEdit,
-    TextRange,
+    TextRange, word_at,
 };
 use oxideterm_editor_syntax::{BracketPair, HighlightSpan, LanguageId, SyntaxEdit, SyntaxSession};
 use oxideterm_theme::ThemeTokens;
@@ -19,6 +19,7 @@ use crate::{EditorAppearance, EditorMetrics, EditorSettings, EditorViewport};
 
 mod commands;
 mod coords;
+mod fold;
 mod input;
 mod render;
 mod search;
@@ -30,6 +31,8 @@ use wrap::DisplayRow;
 
 pub type SaveCallback =
     Box<dyn FnMut(&str, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
+pub type ModifiedWordClickCallback =
+    Box<dyn FnMut(String, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
 
 type BoundsCallback = Box<dyn FnOnce(Bounds<Pixels>, &mut Window, &mut App)>;
 
@@ -147,12 +150,19 @@ struct MarkedText {
 struct DisplayRowsCache {
     buffer_version: u64,
     wrap_column: Option<usize>,
+    fold_revision: u64,
     rows: Arc<Vec<DisplayRow>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SelectionDrag {
     anchor: BufferOffset,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct FoldRange {
+    pub start_line: usize,
+    pub end_line: usize,
 }
 
 /// GPUI editor view for local text buffers.
@@ -165,6 +175,7 @@ pub struct TextEditorView {
     appearance: EditorAppearance,
     read_only: bool,
     on_save: Option<SaveCallback>,
+    on_modified_word_click: Option<ModifiedWordClickCallback>,
     save_status: EditorSaveStatus,
     syntax: Option<SyntaxSession>,
     highlight_spans: Vec<HighlightSpan>,
@@ -176,7 +187,13 @@ pub struct TextEditorView {
     settings: EditorSettings,
     find_query: String,
     find_matches: Vec<FindMatch>,
+    // Scroll rendering asks for highlights per visible row. Keep search hits
+    // indexed by line so each row does not scan every match in a large file.
+    find_line_matches: Vec<Range<usize>>,
     active_find_index: Option<usize>,
+    foldable_ranges: Vec<FoldRange>,
+    folded_ranges: Vec<FoldRange>,
+    fold_revision: u64,
     display_rows_cache: RefCell<Option<DisplayRowsCache>>,
     selection_drag: Option<SelectionDrag>,
     transparent_background: bool,
@@ -185,8 +202,10 @@ pub struct TextEditorView {
 impl TextEditorView {
     pub fn new(text: impl Into<String>, tokens: &ThemeTokens, cx: &mut Context<Self>) -> Self {
         let metrics = EditorMetrics::from_theme(tokens);
+        let settings = EditorSettings::default();
+        let buffer = TextBuffer::new(text);
         Self {
-            buffer: TextBuffer::new(text),
+            buffer,
             cursor: Cursor::new(BufferOffset::ZERO),
             focus_handle: cx.focus_handle(),
             viewport: EditorViewport::new(metrics.overscan_rows),
@@ -194,6 +213,7 @@ impl TextEditorView {
             appearance: EditorAppearance::from_theme(tokens),
             read_only: false,
             on_save: None,
+            on_modified_word_click: None,
             save_status: EditorSaveStatus::Clean,
             syntax: None,
             highlight_spans: Vec::new(),
@@ -202,10 +222,14 @@ impl TextEditorView {
             content_bounds: None,
             marked_text: None,
             secondary_selections: Vec::new(),
-            settings: EditorSettings::default(),
+            settings,
             find_query: String::new(),
             find_matches: Vec::new(),
+            find_line_matches: Vec::new(),
             active_find_index: None,
+            foldable_ranges: Vec::new(),
+            folded_ranges: Vec::new(),
+            fold_revision: 0,
             display_rows_cache: RefCell::new(None),
             selection_drag: None,
             transparent_background: false,
@@ -256,6 +280,7 @@ impl TextEditorView {
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
             self.reparse_syntax();
+            self.clear_folds_after_buffer_change();
             self.refresh_find_matches();
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
@@ -271,8 +296,13 @@ impl TextEditorView {
         self.on_save = Some(on_save);
     }
 
+    pub fn set_on_modified_word_click(&mut self, on_click: ModifiedWordClickCallback) {
+        self.on_modified_word_click = Some(on_click);
+    }
+
     pub fn set_settings(&mut self, settings: EditorSettings, cx: &mut Context<Self>) {
         self.settings = settings;
+        self.refresh_foldable_ranges();
         self.viewport
             .clamp(self.document_row_count(), self.metrics.line_height);
         self.refresh_find_matches();
@@ -306,6 +336,7 @@ impl TextEditorView {
                 .with_text(|text| SyntaxSession::parse(language, text).ok())
         });
         self.refresh_highlights();
+        self.refresh_foldable_ranges();
         cx.notify();
     }
 
@@ -367,6 +398,38 @@ impl TextEditorView {
         cx.notify();
     }
 
+    pub fn reveal_line_column(&mut self, line: u32, column: u32, cx: &mut Context<Self>) {
+        let line_index = line.saturating_sub(1) as usize;
+        if line_index >= self.buffer.line_count() {
+            return;
+        }
+        let unfolded = self.unfold_line_if_hidden(line_index);
+        let line_text = self.buffer.line_text(line_index).unwrap_or_default();
+        let byte_column =
+            coords::floor_char_boundary(&line_text, column.saturating_sub(1) as usize);
+        if let Ok(offset) = self
+            .buffer
+            .line_col_to_offset(LineCol::new(line_index, byte_column))
+        {
+            self.cursor.set_selection(Selection::caret(offset));
+            self.secondary_selections.clear();
+            self.marked_text = None;
+        }
+        let display_index = self
+            .display_row_index_for_line(line_index)
+            .unwrap_or(line_index);
+        self.viewport.reveal_line(
+            display_index,
+            self.document_row_count(),
+            self.metrics.line_height,
+        );
+        if unfolded {
+            self.viewport
+                .clamp(self.document_row_count(), self.metrics.line_height);
+        }
+        cx.notify();
+    }
+
     pub fn add_cursor_at(&mut self, offset: BufferOffset, cx: &mut Context<Self>) {
         let selection = Selection::caret(offset);
         if self.buffer.offset_to_line_col(offset).is_ok()
@@ -414,6 +477,7 @@ impl TextEditorView {
             self.secondary_selections.clear();
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
+            self.clear_folds_after_buffer_change();
             self.refresh_find_matches();
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
@@ -474,6 +538,7 @@ impl TextEditorView {
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
             self.reparse_syntax();
+            self.clear_folds_after_buffer_change();
             self.refresh_find_matches();
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
@@ -586,6 +651,40 @@ impl TextEditorView {
         ranges
     }
 
+    fn build_find_line_matches(&self) -> Vec<Range<usize>> {
+        let mut ranges = Vec::with_capacity(self.buffer.line_count());
+        let mut first_match = 0;
+        let mut last_match = 0;
+
+        for line in 0..self.buffer.line_count() {
+            let Some(line_start) = self.buffer.line_start_offset(line).map(|offset| offset.0)
+            else {
+                ranges.push(0..0);
+                continue;
+            };
+            let line_end = self
+                .buffer
+                .line_end_offset(line)
+                .map(|offset| offset.0)
+                .unwrap_or(line_start);
+
+            while first_match < self.find_matches.len()
+                && self.find_matches[first_match].range.end.0 <= line_start
+            {
+                first_match += 1;
+            }
+            last_match = last_match.max(first_match);
+            while last_match < self.find_matches.len()
+                && self.find_matches[last_match].range.start.0 < line_end
+            {
+                last_match += 1;
+            }
+            ranges.push(first_match..last_match);
+        }
+
+        ranges
+    }
+
     fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
         let delta = event.delta.pixel_delta(px(self.metrics.line_height));
         let dx = if event.modifiers.shift {
@@ -645,6 +744,24 @@ impl TextEditorView {
         self.buffer
             .line_col_to_offset(LineCol::new(display_row.line, byte_column))
             .ok()
+    }
+
+    fn modified_word_click(
+        &mut self,
+        offset: BufferOffset,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let word = self.buffer.with_text(|text| word_at(text, offset));
+        if word.is_empty() {
+            return false;
+        }
+        let Some(mut on_click) = self.on_modified_word_click.take() else {
+            return false;
+        };
+        let handled = on_click(word, window, cx).is_ok();
+        self.on_modified_word_click = Some(on_click);
+        handled
     }
 
     fn start_selection_drag(

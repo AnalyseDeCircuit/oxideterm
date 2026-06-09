@@ -1161,6 +1161,7 @@
         "app.closeOtherTabs": "关闭其他标签页",
         "app.newConnection": "新建 SSH 连接",
         "app.settings": "打开设置",
+        "app.quit": "退出 OxideTerm",
         "app.toggleSidebar": "切换侧边栏",
         "app.commandPalette": "命令面板",
         "app.zenMode": "切换禅模式",

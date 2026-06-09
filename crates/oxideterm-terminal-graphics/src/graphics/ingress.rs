@@ -15,10 +15,59 @@ enum KittyDecodeResult {
         placement: Option<TerminalImagePlacement>,
         advance: Vec<u8>,
     },
+    ImageUpdated {
+        image: TerminalImageData,
+    },
     Placement {
         placement: TerminalImagePlacement,
         advance: Vec<u8>,
     },
+}
+
+fn terminal_image_data_from_decoded(
+    id: TerminalImageId,
+    protocol: TerminalImageProtocol,
+    decoded: DecodedPixels,
+    name: Option<String>,
+) -> TerminalImageData {
+    let rgba: Arc<[u8]> = decoded.rgba.into();
+    let frames: Vec<TerminalImageFrame> = decoded
+        .frames
+        .into_iter()
+        .enumerate()
+        .map(|(index, frame)| {
+            // Reuse the primary static buffer for the first animation frame so
+            // the always-present still preview does not duplicate frame zero.
+            let frame_rgba = if index == 0 && frame.rgba.as_slice() == rgba.as_ref() {
+                rgba.clone()
+            } else {
+                frame.rgba.into()
+            };
+            TerminalImageFrame {
+                rgba: frame_rgba,
+                delay_ms_numerator: frame.delay_ms_numerator,
+                delay_ms_denominator: frame.delay_ms_denominator,
+                gapless: false,
+            }
+        })
+        .collect();
+    let animation = TerminalImageAnimationState {
+        running: !frames.is_empty(),
+        loading: false,
+        current_frame: 0,
+        loop_limit: None,
+    };
+    TerminalImageData {
+        id,
+        protocol,
+        version: 0,
+        width: decoded.width,
+        height: decoded.height,
+        rgba,
+        frames,
+        animation,
+        name,
+    }
 }
 
 impl GraphicsIngress {
@@ -327,6 +376,24 @@ impl GraphicsIngress {
                 }
                 return;
             }
+            "a" => {
+                match self.control_kitty_animation(&params) {
+                    Ok(image) => result.events.push(TerminalGraphicsEvent::ImageUpdated(image)),
+                    Err(error) => result
+                        .events
+                        .push(TerminalGraphicsEvent::Error(error.to_string())),
+                }
+                return;
+            }
+            "c" => {
+                match self.compose_kitty_animation_frame(&params) {
+                    Ok(image) => result.events.push(TerminalGraphicsEvent::ImageUpdated(image)),
+                    Err(error) => result
+                        .events
+                        .push(TerminalGraphicsEvent::Error(error.to_string())),
+                }
+                return;
+            }
             _ if payload.is_none() => return,
             _ => {}
         }
@@ -342,6 +409,9 @@ impl GraphicsIngress {
                     result.events.push(TerminalGraphicsEvent::Place(placement));
                 }
                 result.terminal_bytes.extend(advance);
+            }
+            Ok(Some(KittyDecodeResult::ImageUpdated { image })) => {
+                result.events.push(TerminalGraphicsEvent::ImageUpdated(image));
             }
             Ok(Some(KittyDecodeResult::Placement { placement, advance })) => {
                 result.events.push(TerminalGraphicsEvent::Place(placement));
@@ -378,15 +448,10 @@ impl GraphicsIngress {
         let height = params
             .get("height")
             .and_then(|value| parse_pixel_size(value, decoded.height));
-        let image = TerminalImageData {
-            id: self.next_id(),
-            protocol: TerminalImageProtocol::Iterm2,
-            version: 0,
-            width: width.unwrap_or(decoded.width),
-            height: height.unwrap_or(decoded.height),
-            rgba: decoded.rgba.into(),
-            name,
-        };
+        let mut image =
+            terminal_image_data_from_decoded(self.next_id(), TerminalImageProtocol::Iterm2, decoded, name);
+        image.width = width.unwrap_or(image.width);
+        image.height = height.unwrap_or(image.height);
         let do_not_move = params
             .get("doNotMoveCursor")
             .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
@@ -428,6 +493,8 @@ impl GraphicsIngress {
             width,
             height,
             rgba: decoded.pixels.into(),
+            frames: Vec::new(),
+            animation: TerminalImageAnimationState::default(),
             name: None,
         };
         let (placement, advance) = self.placement_for_image(
@@ -498,7 +565,7 @@ impl GraphicsIngress {
         }
         let params = assembly.params;
         let action = params.get("a").map(String::as_str).unwrap_or("t");
-        if action != "t" && action != "T" {
+        if action != "t" && action != "T" && action != "f" {
             return Err(GraphicsError::UnsupportedImage);
         }
         let complete =
@@ -509,24 +576,15 @@ impl GraphicsIngress {
             Some("32") => decode_raw_rgba(&complete, &params)?,
             _ => decode_image_bytes(&complete, self.options.pixel_limit)?,
         };
+        if action == "f" {
+            let image = self.add_kitty_animation_frame(&params, decoded)?;
+            return Ok(Some(KittyDecodeResult::ImageUpdated { image }));
+        }
         let image_id = TerminalImageId(explicit_id);
         self.next_image_id = self.next_image_id.max(explicit_id + 1);
-        self.kitty_images.insert(
-            image_id,
-            KittyImageRecord {
-                width: decoded.width,
-                height: decoded.height,
-            },
-        );
-        let image = TerminalImageData {
-            id: image_id,
-            protocol: TerminalImageProtocol::Kitty,
-            version: 0,
-            width: decoded.width,
-            height: decoded.height,
-            rgba: decoded.rgba.into(),
-            name: None,
-        };
+        let image =
+            terminal_image_data_from_decoded(image_id, TerminalImageProtocol::Kitty, decoded, None);
+        self.kitty_images.insert(image_id, image.clone());
         if action == "t" {
             return Ok(Some(KittyDecodeResult::Image {
                 image,
@@ -550,6 +608,208 @@ impl GraphicsIngress {
         }))
     }
 
+    fn add_kitty_animation_frame(
+        &mut self,
+        params: &HashMap<String, String>,
+        decoded: DecodedPixels,
+    ) -> Result<TerminalImageData, GraphicsError> {
+        let image_id = kitty_image_id(params)?;
+        let image = self
+            .kitty_images
+            .get_mut(&image_id)
+            .ok_or(GraphicsError::UnsupportedImage)?;
+        ensure_kitty_animation_root(image);
+        let target_frame = parse_kitty_frame_index(params.get("r"));
+        let mut canvas = if let Some(target_frame) = target_frame {
+            image
+                .frames
+                .get(target_frame)
+                .map(|frame| frame.rgba.to_vec())
+                .ok_or(GraphicsError::UnsupportedImage)?
+        } else if let Some(base_frame) = parse_kitty_frame_index(params.get("c")) {
+            image
+                .frames
+                .get(base_frame)
+                .map(|frame| frame.rgba.to_vec())
+                .ok_or(GraphicsError::UnsupportedImage)?
+        } else if let Some(color) = parse_kitty_rgba_color(params.get("Y")) {
+            filled_rgba_canvas(image.width, image.height, color)
+        } else {
+            vec![0; image.width as usize * image.height as usize * 4]
+        };
+        let dest_x = parse_u32(params.get("x")).unwrap_or_default();
+        let dest_y = parse_u32(params.get("y")).unwrap_or_default();
+        if dest_x.saturating_add(decoded.width) > image.width
+            || dest_y.saturating_add(decoded.height) > image.height
+        {
+            return Err(GraphicsError::UnsupportedImage);
+        }
+        let replace = params.get("X").is_some_and(|value| value == "1");
+        blend_protocol_rgba_rect(
+            &mut canvas,
+            image.width,
+            &decoded.rgba,
+            decoded.width,
+            decoded.height,
+            dest_x,
+            dest_y,
+            replace,
+        );
+
+        let gap = parse_kitty_frame_gap(params.get("z"));
+        let frame_index = if let Some(target_frame) = target_frame {
+            let frame = image
+                .frames
+                .get_mut(target_frame)
+                .ok_or(GraphicsError::UnsupportedImage)?;
+            frame.rgba = canvas.into();
+            if let Some((delay_ms, gapless)) = gap {
+                frame.delay_ms_numerator = delay_ms;
+                frame.delay_ms_denominator = 1;
+                frame.gapless = gapless;
+            }
+            target_frame
+        } else {
+            let (delay_ms, gapless) = gap.unwrap_or((40, false));
+            image.frames.push(TerminalImageFrame {
+                rgba: canvas.into(),
+                delay_ms_numerator: delay_ms,
+                delay_ms_denominator: 1,
+                gapless,
+            });
+            image.frames.len() - 1
+        };
+        if frame_index == 0 {
+            image.rgba = image.frames[0].rgba.clone();
+        }
+        image.animation.current_frame = image
+            .animation
+            .current_frame
+            .min(image.frames.len().saturating_sub(1));
+        Ok(image.clone())
+    }
+
+    fn control_kitty_animation(
+        &mut self,
+        params: &HashMap<String, String>,
+    ) -> Result<TerminalImageData, GraphicsError> {
+        let image_id = kitty_image_id(params)?;
+        let image = self
+            .kitty_images
+            .get_mut(&image_id)
+            .ok_or(GraphicsError::UnsupportedImage)?;
+        ensure_kitty_animation_root(image);
+
+        if let Some(current_frame) = parse_kitty_frame_index(params.get("c")) {
+            if current_frame >= image.frames.len() {
+                return Err(GraphicsError::UnsupportedImage);
+            }
+            image.animation.current_frame = current_frame;
+            image.animation.running = false;
+        }
+        if let Some((delay_ms, gapless)) = parse_kitty_frame_gap(params.get("z")) {
+            let frame_index = parse_kitty_frame_index(params.get("r"))
+                .unwrap_or(image.animation.current_frame)
+                .min(image.frames.len().saturating_sub(1));
+            if let Some(frame) = image.frames.get_mut(frame_index) {
+                frame.delay_ms_numerator = delay_ms;
+                frame.delay_ms_denominator = 1;
+                frame.gapless = gapless;
+            }
+        }
+        if let Some(state) = params.get("s").and_then(|value| value.parse::<u32>().ok()) {
+            match state {
+                1 => {
+                    image.animation.running = false;
+                    image.animation.loading = false;
+                }
+                2 => {
+                    image.animation.running = true;
+                    image.animation.loading = true;
+                    image.animation.loop_limit = Some(1);
+                }
+                3 => {
+                    image.animation.running = true;
+                    image.animation.loading = false;
+                    image.animation.loop_limit = kitty_loop_limit(params.get("v"));
+                }
+                _ => return Err(GraphicsError::UnsupportedImage),
+            }
+        } else if let Some(loop_limit) = kitty_loop_limit(params.get("v")) {
+            image.animation.loop_limit = Some(loop_limit);
+        }
+        Ok(image.clone())
+    }
+
+    fn compose_kitty_animation_frame(
+        &mut self,
+        params: &HashMap<String, String>,
+    ) -> Result<TerminalImageData, GraphicsError> {
+        let image_id = kitty_image_id(params)?;
+        let image = self
+            .kitty_images
+            .get_mut(&image_id)
+            .ok_or(GraphicsError::UnsupportedImage)?;
+        ensure_kitty_animation_root(image);
+        let source_frame =
+            parse_kitty_frame_index(params.get("r")).ok_or(GraphicsError::UnsupportedImage)?;
+        let dest_frame =
+            parse_kitty_frame_index(params.get("c")).ok_or(GraphicsError::UnsupportedImage)?;
+        if source_frame >= image.frames.len() || dest_frame >= image.frames.len() {
+            return Err(GraphicsError::UnsupportedImage);
+        }
+
+        let width = parse_u32(params.get("w"))
+            .filter(|width| *width > 0)
+            .unwrap_or(image.width);
+        let height = parse_u32(params.get("h"))
+            .filter(|height| *height > 0)
+            .unwrap_or(image.height);
+        let source_x = parse_u32(params.get("x")).unwrap_or_default();
+        let source_y = parse_u32(params.get("y")).unwrap_or_default();
+        let dest_x = parse_u32(params.get("X")).unwrap_or_default();
+        let dest_y = parse_u32(params.get("Y")).unwrap_or_default();
+        if source_x.saturating_add(width) > image.width
+            || source_y.saturating_add(height) > image.height
+            || dest_x.saturating_add(width) > image.width
+            || dest_y.saturating_add(height) > image.height
+            || (source_frame == dest_frame
+                && rects_overlap(source_x, source_y, dest_x, dest_y, width, height))
+        {
+            return Err(GraphicsError::UnsupportedImage);
+        }
+
+        let source_rect = copy_protocol_rgba_rect(
+            &image.frames[source_frame].rgba,
+            image.width,
+            source_x,
+            source_y,
+            width,
+            height,
+        );
+        let replace = params.get("C").is_some_and(|value| value == "1");
+        let dest = image
+            .frames
+            .get_mut(dest_frame)
+            .ok_or(GraphicsError::UnsupportedImage)?;
+        let mut dest_rgba = dest.rgba.to_vec();
+        blend_protocol_rgba_rect(
+            &mut dest_rgba,
+            image.width,
+            &source_rect,
+            width,
+            height,
+            dest_x,
+            dest_y,
+            replace,
+        );
+        dest.rgba = dest_rgba.into();
+        if dest_frame == 0 {
+            image.rgba = dest.rgba.clone();
+        }
+        Ok(image.clone())
+    }
+
     fn place_kitty_image(
         &self,
         params: &HashMap<String, String>,
@@ -563,7 +823,6 @@ impl GraphicsIngress {
         let image = self
             .kitty_images
             .get(&image_id)
-            .copied()
             .ok_or(GraphicsError::UnsupportedImage)?;
         let placement_options = kitty_placement_options(params, image.width, image.height, cursor);
         Ok(self.placement_for_image(
@@ -702,4 +961,145 @@ fn parse_positive_usize(value: Option<&String>) -> Option<usize> {
 
 fn parse_u32(value: Option<&String>) -> Option<u32> {
     value.and_then(|value| value.parse::<u32>().ok())
+}
+
+fn kitty_image_id(params: &HashMap<String, String>) -> Result<TerminalImageId, GraphicsError> {
+    params
+        .get("i")
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(TerminalImageId)
+        .ok_or(GraphicsError::UnsupportedImage)
+}
+
+fn parse_kitty_frame_index(value: Option<&String>) -> Option<usize> {
+    value
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .map(|value| value - 1)
+}
+
+fn parse_kitty_frame_gap(value: Option<&String>) -> Option<(u32, bool)> {
+    let gap = value.and_then(|value| value.parse::<i32>().ok())?;
+    match gap.cmp(&0) {
+        std::cmp::Ordering::Less => Some((0, true)),
+        std::cmp::Ordering::Equal => None,
+        std::cmp::Ordering::Greater => Some((gap as u32, false)),
+    }
+}
+
+fn kitty_loop_limit(value: Option<&String>) -> Option<u32> {
+    match value.and_then(|value| value.parse::<u32>().ok()) {
+        Some(0) | Some(1) | None => None,
+        Some(limit) => Some(limit),
+    }
+}
+
+fn ensure_kitty_animation_root(image: &mut TerminalImageData) {
+    if image.frames.is_empty() {
+        image.frames.push(TerminalImageFrame {
+            rgba: image.rgba.clone(),
+            delay_ms_numerator: 0,
+            delay_ms_denominator: 1,
+            gapless: true,
+        });
+    }
+}
+
+fn parse_kitty_rgba_color(value: Option<&String>) -> Option<[u8; 4]> {
+    let color = value.and_then(|value| value.parse::<u32>().ok())?;
+    Some([
+        ((color >> 24) & 0xff) as u8,
+        ((color >> 16) & 0xff) as u8,
+        ((color >> 8) & 0xff) as u8,
+        (color & 0xff) as u8,
+    ])
+}
+
+fn filled_rgba_canvas(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
+    for _ in 0..width.saturating_mul(height) {
+        pixels.extend_from_slice(&color);
+    }
+    pixels
+}
+
+fn copy_protocol_rgba_rect(
+    pixels: &[u8],
+    source_width: u32,
+    source_x: u32,
+    source_y: u32,
+    width: u32,
+    height: u32,
+) -> Vec<u8> {
+    let row_bytes = width as usize * 4;
+    let stride = source_width as usize * 4;
+    let mut copied = Vec::with_capacity(row_bytes * height as usize);
+    for row in source_y..source_y + height {
+        let start = row as usize * stride + source_x as usize * 4;
+        copied.extend_from_slice(&pixels[start..start + row_bytes]);
+    }
+    copied
+}
+
+fn blend_protocol_rgba_rect(
+    dest: &mut [u8],
+    dest_width: u32,
+    source: &[u8],
+    source_width: u32,
+    source_height: u32,
+    dest_x: u32,
+    dest_y: u32,
+    replace: bool,
+) {
+    for source_row in 0..source_height {
+        for source_col in 0..source_width {
+            let source_index =
+                (source_row as usize * source_width as usize + source_col as usize) * 4;
+            let dest_index = ((dest_y + source_row) as usize * dest_width as usize
+                + (dest_x + source_col) as usize)
+                * 4;
+            if replace {
+                dest[dest_index..dest_index + 4]
+                    .copy_from_slice(&source[source_index..source_index + 4]);
+            } else {
+                alpha_blend_protocol_rgba(
+                    &mut dest[dest_index..dest_index + 4],
+                    &source[source_index..source_index + 4],
+                );
+            }
+        }
+    }
+}
+
+fn alpha_blend_protocol_rgba(dest: &mut [u8], source: &[u8]) {
+    let source_alpha = u32::from(source[3]);
+    if source_alpha == 255 {
+        dest.copy_from_slice(source);
+        return;
+    }
+    if source_alpha == 0 {
+        return;
+    }
+    let dest_alpha = u32::from(dest[3]);
+    let inverse_source_alpha = 255 - source_alpha;
+    let out_alpha = source_alpha + dest_alpha * inverse_source_alpha / 255;
+    if out_alpha == 0 {
+        dest.copy_from_slice(&[0, 0, 0, 0]);
+        return;
+    }
+    for channel in 0..3 {
+        let source_premultiplied = u32::from(source[channel]) * source_alpha;
+        let dest_premultiplied =
+            u32::from(dest[channel]) * dest_alpha * inverse_source_alpha / 255;
+        dest[channel] = ((source_premultiplied + dest_premultiplied) / out_alpha) as u8;
+    }
+    dest[3] = out_alpha as u8;
+}
+
+fn rects_overlap(ax: u32, ay: u32, bx: u32, by: u32, width: u32, height: u32) -> bool {
+    let a_right = ax.saturating_add(width);
+    let a_bottom = ay.saturating_add(height);
+    let b_right = bx.saturating_add(width);
+    let b_bottom = by.saturating_add(height);
+    ax < b_right && bx < a_right && ay < b_bottom && by < a_bottom
 }

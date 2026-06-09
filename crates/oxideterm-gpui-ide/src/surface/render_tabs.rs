@@ -1,14 +1,10 @@
 impl IdeSurface {
     fn render_editor_area(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        div()
+        let editor_content = div()
+            .relative()
             .flex_1()
-            .min_w_0()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(self.ide_editor_content_bg(self.tokens.ui.bg))
-            .child(self.render_tabs(cx))
-            .child(div().flex_1().min_h_0().child(match self.active_editor() {
+            .min_h_0()
+            .child(match self.active_editor() {
                 Some(editor) => editor.into_any_element(),
                 None if self
                     .workspace
@@ -18,7 +14,20 @@ impl IdeSurface {
                     self.render_loading_file()
                 }
                 None => self.render_empty_editor(cx),
-            }))
+            })
+            .when(self.editor_search.open, |this| {
+                this.child(self.render_editor_search_bar(cx))
+            });
+
+        div()
+            .flex_1()
+            .min_w_0()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(self.ide_editor_content_bg(self.tokens.ui.bg))
+            .child(self.render_tabs(cx))
+            .child(editor_content)
             .into_any_element()
     }
 

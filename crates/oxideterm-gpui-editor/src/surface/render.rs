@@ -27,8 +27,20 @@ const CM_ACTIVE_GUTTER_ACCENT_ALPHA: u32 = 0xcc;
 const CM_SELECTION_ACCENT_ALPHA: u32 = 0x40;
 const CM_SEARCH_MATCH_ACCENT_ALPHA: u32 = 0x40;
 const CM_SEARCH_MATCH_OUTLINE_ALPHA: u32 = 0x80;
+const CM_INDENT_GUIDE_ALPHA: u32 = 0x26;
+const CM_SPECIAL_CHAR_ALPHA: u32 = 0xcc;
+const CM_PLACEHOLDER_ALPHA: u32 = 0x80;
+const CM_FOLD_MARKER_ALPHA: u32 = 0xb3;
+const CM_FOLD_TOKEN_ALPHA: u32 = 0x99;
 const CM_SELECTION_RADIUS: f32 = 2.0;
 const CM_CURSOR_WIDTH: f32 = 2.0;
+const CM_INDENT_GUIDE_WIDTH: f32 = 1.0;
+const CM_FOLD_ICON_WIDTH: f32 = 14.0;
+const CM_TAB_MARKER: &str = "→";
+const CM_CONTROL_CHAR_MARKER: &str = "�";
+const CM_FOLDED_TOKEN: &str = " …";
+const CM_FOLD_OPEN_ICON: &str = "▾";
+const CM_FOLD_CLOSED_ICON: &str = "▸";
 
 impl Render for TextEditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -58,27 +70,32 @@ impl Render for TextEditorView {
 
         rows = rows.child(div().h(px(visible.bottom_spacer_px as f32)));
 
+        let mut body_content = div()
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+                this.handle_scroll(event, cx);
+            }))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                this.drag_selection_to_point(event.position, cx);
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    this.finish_selection_drag(cx);
+                }),
+            )
+            .child(rows);
+        if let Some(placeholder) = self.render_placeholder() {
+            body_content = body_content.child(placeholder);
+        }
+
         // Capture the viewport container, not the absolute row stack. Otherwise
         // long files report their full document height as the visible height and
         // GPUI/Monaco-style virtual scrolling clamps to zero.
         let body = EditorBoundsProbe::new(
-            div()
-                .relative()
-                .size_full()
-                .overflow_hidden()
-                .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
-                    this.handle_scroll(event, cx);
-                }))
-                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
-                    this.drag_selection_to_point(event.position, cx);
-                }))
-                .on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
-                        this.finish_selection_drag(cx);
-                    }),
-                )
-                .child(rows),
+            body_content,
             view.clone(),
             self.focus_handle.clone(),
             move |bounds, window, app| {
@@ -112,8 +129,20 @@ impl Render for TextEditorView {
 
 impl TextEditorView {
     fn render_row(&self, display_row: DisplayRow, cx: &mut Context<Self>) -> Div {
+        self.buffer
+            .with_line_text(display_row.line, |line_text| {
+                self.render_row_with_text(display_row, line_text, cx)
+            })
+            .unwrap_or_else(|| div().h(px(self.metrics.line_height)).w_full())
+    }
+
+    fn render_row_with_text(
+        &self,
+        display_row: DisplayRow,
+        line_text: &str,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let line = display_row.line;
-        let line_text = self.buffer.line_text(line).unwrap_or_default().to_string();
         let line_start = self
             .buffer
             .line_start_offset(line)
@@ -144,11 +173,17 @@ impl TextEditorView {
         let row_display = display_row;
         let byte_start = byte_column_for_visual_column(&line_text, display_row.start_col);
         let byte_end = byte_column_for_visual_column(&line_text, display_row.end_col);
-        let segment_text = line_text[byte_start..byte_end].to_string();
+        let segment_text = &line_text[byte_start..byte_end];
         let segment_range = (line_start + byte_start)..(line_start + byte_end).min(line_end);
         let selection_rects = self.selection_rects_for_line(&segment_text, segment_range.clone());
-        let find_rects = self.find_rects_for_line(&segment_text, segment_range.clone());
+        let find_rects = self.find_rects_for_line(line, &segment_text, segment_range.clone());
         let bracket_rects = self.bracket_rects_for_line(&segment_text, segment_range.clone());
+        let indent_guides = self.indentation_marker_columns(&line_text, display_row);
+        let foldable = display_row
+            .is_first
+            .then(|| self.foldable_range_starting_at(line))
+            .flatten();
+        let folded = display_row.is_folded_header;
         let marked_text = self.marked_text.as_ref().and_then(|marked| {
             (marked.range.start.0 >= segment_range.start
                 && marked.range.start.0 <= segment_range.end)
@@ -171,6 +206,14 @@ impl TextEditorView {
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle);
                     if let Some(offset) = this.offset_for_window_point(event.position) {
+                        if (event.modifiers.secondary() || event.modifiers.control)
+                            && !event.modifiers.alt
+                            && !event.modifiers.shift
+                            && this.modified_word_click(offset, window, cx)
+                        {
+                            cx.stop_propagation();
+                            return;
+                        }
                         if event.modifiers.alt {
                             this.add_cursor_at(offset, cx);
                         } else {
@@ -189,33 +232,30 @@ impl TextEditorView {
                     cx.stop_propagation();
                 }),
             )
-            .child(
+            .child(self.render_gutter(
+                display_row,
+                line_height,
+                gutter_width,
+                is_current_line,
+                foldable,
+                folded,
+                cx,
+            ));
+
+        for column in indent_guides {
+            let left = content_left + column as f32 * self.metrics.char_width;
+            row = row.child(
                 div()
                     .absolute()
-                    .left_0()
                     .top_0()
+                    .left(px(left))
+                    .w(px(CM_INDENT_GUIDE_WIDTH))
                     .h(px(line_height))
-                    .w(px(gutter_width))
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .pr(px(self.metrics.gutter_padding_x))
-                    .bg(if is_current_line && display_row.is_first {
-                        rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_GUTTER_ACCENT_ALPHA)
-                    } else {
-                        self.editor_panel_background(self.appearance.gutter_background_hex)
-                    })
-                    .text_color(rgb(if is_current_line && display_row.is_first {
-                        self.appearance.background_hex
-                    } else {
-                        self.appearance.muted_text_hex
-                    }))
-                    .child(if display_row.is_first {
-                        (line + 1).to_string()
-                    } else {
-                        String::new()
-                    }),
+                    .bg(rgba(
+                        (self.appearance.muted_text_hex << 8) | CM_INDENT_GUIDE_ALPHA,
+                    )),
             );
+        }
 
         for (start_col, end_col) in find_rects {
             let left = content_left + start_col as f32 * self.metrics.char_width;
@@ -286,8 +326,73 @@ impl TextEditorView {
                     cursor_column,
                     show_cursor,
                     marked_text,
+                    folded,
                 )),
         )
+    }
+
+    fn render_gutter(
+        &self,
+        display_row: DisplayRow,
+        line_height: f32,
+        gutter_width: f32,
+        is_current_line: bool,
+        foldable: Option<super::FoldRange>,
+        folded: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let line = display_row.line;
+        let text_hex = if is_current_line && display_row.is_first {
+            self.appearance.background_hex
+        } else {
+            self.appearance.muted_text_hex
+        };
+        let mut fold_icon = div()
+            .w(px(CM_FOLD_ICON_WIDTH))
+            .h(px(line_height))
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(rgba((text_hex << 8) | CM_FOLD_MARKER_ALPHA));
+        if foldable.is_some() {
+            fold_icon = fold_icon
+                .cursor_pointer()
+                .child(if folded {
+                    CM_FOLD_CLOSED_ICON
+                } else {
+                    CM_FOLD_OPEN_ICON
+                })
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event: &MouseDownEvent, _window, cx| {
+                        this.toggle_fold_at_line(line, cx);
+                        cx.stop_propagation();
+                    }),
+                );
+        }
+
+        div()
+            .absolute()
+            .left_0()
+            .top_0()
+            .h(px(line_height))
+            .w(px(gutter_width))
+            .flex()
+            .items_center()
+            .justify_end()
+            .pr(px(self.metrics.gutter_padding_x))
+            .bg(if is_current_line && display_row.is_first {
+                rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_GUTTER_ACCENT_ALPHA)
+            } else {
+                self.editor_panel_background(self.appearance.gutter_background_hex)
+            })
+            .text_color(rgb(text_hex))
+            .child(fold_icon)
+            .child(if display_row.is_first {
+                (line + 1).to_string()
+            } else {
+                String::new()
+            })
     }
 
     fn render_line_text(
@@ -298,6 +403,7 @@ impl TextEditorView {
         cursor_column: usize,
         show_cursor: bool,
         marked_text: Option<&str>,
+        folded: bool,
     ) -> Div {
         let byte_column = byte_column_for_visual_column(line_text, cursor_column);
         let mut row = div().flex().items_center();
@@ -308,7 +414,7 @@ impl TextEditorView {
                 let split = byte_column.saturating_sub(chunk.start);
                 let split = split.min(chunk.text.len());
                 let (before, after) = chunk.text.split_at(split);
-                row = row.child(colored_text(before, chunk.color));
+                row = self.append_rendered_text(row, before, chunk.color);
                 row = row.child(self.render_cursor());
                 if let Some(marked_text) = marked_text {
                     row = row.child(
@@ -318,10 +424,10 @@ impl TextEditorView {
                             .child(marked_text.to_string()),
                     );
                 }
-                row = row.child(colored_text(after, chunk.color));
+                row = self.append_rendered_text(row, after, chunk.color);
                 cursor_drawn = true;
             } else {
-                row = row.child(colored_text(&chunk.text, chunk.color));
+                row = self.append_rendered_text(row, &chunk.text, chunk.color);
             }
         }
 
@@ -336,7 +442,78 @@ impl TextEditorView {
                 );
             }
         }
+        if folded {
+            row = row.child(
+                div()
+                    .text_color(rgba(
+                        (self.appearance.muted_text_hex << 8) | CM_FOLD_TOKEN_ALPHA,
+                    ))
+                    .child(CM_FOLDED_TOKEN.to_string()),
+            );
+        }
         row
+    }
+
+    fn append_rendered_text(&self, mut row: Div, text: &str, color: u32) -> Div {
+        if !self.settings.highlight_special_chars || !contains_special_char(text) {
+            return row.child(colored_text(text, color));
+        }
+
+        let mut plain = String::new();
+        for ch in text.chars() {
+            if let Some(marker) = special_char_marker(ch) {
+                if !plain.is_empty() {
+                    row = row.child(colored_text(&plain, color));
+                    plain.clear();
+                }
+                row = row.child(
+                    div()
+                        .text_color(rgba(
+                            (self.appearance.muted_text_hex << 8) | CM_SPECIAL_CHAR_ALPHA,
+                        ))
+                        .child(marker.to_string()),
+                );
+            } else {
+                plain.push(ch);
+            }
+        }
+        if !plain.is_empty() {
+            row = row.child(colored_text(&plain, color));
+        }
+        row
+    }
+
+    fn indentation_marker_columns(&self, line_text: &str, display_row: DisplayRow) -> Vec<usize> {
+        if !self.settings.indentation_markers {
+            return Vec::new();
+        }
+        indentation_marker_columns(line_text, self.settings.tab_size, display_row.start_col)
+            .into_iter()
+            .filter(|column| *column >= display_row.start_col && *column < display_row.end_col)
+            .map(|column| column - display_row.start_col)
+            .collect()
+    }
+
+    fn render_placeholder(&self) -> Option<Div> {
+        let placeholder = self.settings.placeholder.as_deref()?;
+        if !self.buffer.is_empty() || placeholder.is_empty() {
+            return None;
+        }
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left(px(self.metrics.gutter_width
+                    + self.metrics.content_padding_x
+                    - self.viewport.scroll_x_px))
+                .h(px(self.metrics.line_height))
+                .flex()
+                .items_center()
+                .text_color(rgba(
+                    (self.appearance.muted_text_hex << 8) | CM_PLACEHOLDER_ALPHA,
+                ))
+                .child(placeholder.to_string()),
+        )
     }
 
     fn selection_rects_for_line(
@@ -354,10 +531,14 @@ impl TextEditorView {
 
     fn find_rects_for_line(
         &self,
+        line: usize,
         line_text: &str,
         line_range: Range<usize>,
     ) -> Vec<(usize, usize)> {
+        let match_range = self.find_line_matches.get(line).cloned().unwrap_or(0..0);
         self.find_matches
+            .get(match_range)
+            .unwrap_or(&[])
             .iter()
             .filter_map(|hit| {
                 selection_columns_for_line(
@@ -414,17 +595,17 @@ impl TextEditorView {
         }
     }
 
-    fn highlighted_line_chunks(
+    fn highlighted_line_chunks<'a>(
         &self,
         line: usize,
-        line_text: &str,
+        line_text: &'a str,
         line_range: Range<usize>,
-    ) -> Vec<LineChunk> {
+    ) -> Vec<LineChunk<'a>> {
         if line_text.is_empty() {
             return vec![LineChunk {
                 start: 0,
                 end: 1,
-                text: " ".to_string(),
+                text: " ",
                 color: self.appearance.text_hex,
             }];
         }
@@ -487,14 +668,20 @@ impl TextEditorView {
     }
 }
 
-struct LineChunk {
+struct LineChunk<'a> {
     start: usize,
     end: usize,
-    text: String,
+    text: &'a str,
     color: u32,
 }
 
-fn push_chunk(chunks: &mut Vec<LineChunk>, line_text: &str, start: usize, end: usize, color: u32) {
+fn push_chunk<'a>(
+    chunks: &mut Vec<LineChunk<'a>>,
+    line_text: &'a str,
+    start: usize,
+    end: usize,
+    color: u32,
+) {
     if start >= end || start >= line_text.len() {
         return;
     }
@@ -505,7 +692,74 @@ fn push_chunk(chunks: &mut Vec<LineChunk>, line_text: &str, start: usize, end: u
     chunks.push(LineChunk {
         start,
         end,
-        text: line_text[start..end].to_string(),
+        text: &line_text[start..end],
         color,
     });
+}
+
+fn contains_special_char(text: &str) -> bool {
+    text.chars().any(|ch| special_char_marker(ch).is_some())
+}
+
+fn special_char_marker(ch: char) -> Option<&'static str> {
+    match ch {
+        '\t' => Some(CM_TAB_MARKER),
+        ch if ch.is_control() => Some(CM_CONTROL_CHAR_MARKER),
+        _ => None,
+    }
+}
+
+fn indentation_marker_columns(
+    line_text: &str,
+    tab_size: usize,
+    first_visible_column: usize,
+) -> Vec<usize> {
+    let tab_size = tab_size.max(1);
+    let mut visual_column = 0usize;
+    let mut columns = Vec::new();
+    for ch in line_text.chars() {
+        match ch {
+            ' ' => visual_column += 1,
+            '\t' => visual_column += tab_size,
+            _ => break,
+        }
+        if visual_column >= tab_size
+            && visual_column % tab_size == 0
+            && visual_column > first_visible_column
+        {
+            // CodeMirror's indentation markers are paint-only guides; the text
+            // buffer and byte-offset mapping remain unchanged.
+            columns.push(visual_column);
+        }
+    }
+    columns
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{contains_special_char, indentation_marker_columns, special_char_marker};
+
+    #[test]
+    fn special_char_markers_cover_tabs_and_controls_only() {
+        assert!(contains_special_char("\t"));
+        assert!(contains_special_char("\u{0007}"));
+        assert_eq!(special_char_marker('\t'), Some("→"));
+        assert_eq!(special_char_marker(' '), None);
+        assert_eq!(special_char_marker('a'), None);
+    }
+
+    #[test]
+    fn indentation_guides_follow_configured_tab_size() {
+        assert_eq!(indentation_marker_columns("        code", 4, 0), vec![4, 8]);
+        assert_eq!(indentation_marker_columns("\t  code", 4, 0), vec![4]);
+        assert_eq!(indentation_marker_columns("  code", 2, 0), vec![2]);
+    }
+
+    #[test]
+    fn indentation_guides_skip_columns_before_wrapped_segment() {
+        assert_eq!(
+            indentation_marker_columns("            code", 4, 4),
+            vec![8, 12]
+        );
+    }
 }

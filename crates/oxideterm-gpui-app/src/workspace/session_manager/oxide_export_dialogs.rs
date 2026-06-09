@@ -131,11 +131,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.render_oxide_card(
-            Some((LucideIcon::Key, self.i18n.t("modals.export.credential_material"))),
+            Some((LucideIcon::Key, self.i18n.t("export.credential_material"))),
             vec![
                 self.render_oxide_option_row(
-                    self.i18n.t("modals.export.include_passwords"),
-                    self.i18n.t("modals.export.include_passwords_description"),
+                    self.i18n.t("export.include_passwords"),
+                    self.i18n.t("export.include_passwords_description"),
                     dialog.include_passwords,
                     cx.listener(|this, _event, _window, cx| {
                         if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
@@ -148,8 +148,8 @@ impl WorkspaceApp {
                     cx,
                 ),
                 self.render_oxide_option_row(
-                    self.i18n.t("modals.export.embed_keys"),
-                    self.i18n.t("modals.export.embed_keys_description"),
+                    self.i18n.t("export.embed_keys"),
+                    self.i18n.t("export.embed_keys_description"),
                     dialog.embed_keys,
                     cx.listener(|this, _event, _window, cx| {
                         if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
@@ -162,9 +162,9 @@ impl WorkspaceApp {
                     cx,
                 ),
                 self.render_oxide_option_row(
-                    self.i18n.t("modals.export.include_key_passphrases"),
+                    self.i18n.t("export.include_key_passphrases"),
                     self.i18n
-                        .t("modals.export.include_key_passphrases_description"),
+                        .t("export.include_key_passphrases_description"),
                     dialog.include_key_passphrases,
                     cx.listener(|this, _event, _window, cx| {
                         if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
@@ -177,8 +177,8 @@ impl WorkspaceApp {
                     cx,
                 ),
                 self.render_oxide_option_row(
-                    self.i18n.t("modals.export.include_managed_keys"),
-                    self.i18n.t("modals.export.include_managed_keys_description"),
+                    self.i18n.t("export.include_managed_keys"),
+                    self.i18n.t("export.include_managed_keys_description"),
                     dialog.include_managed_keys,
                     cx.listener(|this, _event, _window, cx| {
                         if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
@@ -196,9 +196,9 @@ impl WorkspaceApp {
                 div()
                     .opacity(if dialog.include_managed_keys { 1.0 } else { 0.45 })
                     .child(self.render_oxide_option_row(
-                        self.i18n.t("modals.export.include_managed_key_passphrases"),
+                        self.i18n.t("export.include_managed_key_passphrases"),
                         self.i18n
-                            .t("modals.export.include_managed_key_passphrases_description"),
+                            .t("export.include_managed_key_passphrases_description"),
                         dialog.include_managed_key_passphrases,
                         cx.listener(|this, _event, _window, cx| {
                             if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut()

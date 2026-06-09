@@ -106,6 +106,17 @@ const IDE_AGENT_OPT_IN_ACTION_PADDING_Y: f32 = 10.0;
 const IDE_AGENT_OPT_IN_BORDER_ALPHA: u32 = 0x99;
 const IDE_AGENT_OPT_IN_ACCENT_BG_ALPHA: u32 = 0x1a;
 const IDE_AGENT_OPT_IN_ACCENT_BORDER_ALPHA: u32 = 0x33;
+// Tauri `CodeEditorSearchBar.tsx` uses a compact absolute panel at the editor
+// top-right with h-7 controls, p-2 padding, and 12-14px icons.
+const IDE_EDITOR_SEARCH_WIDTH: f32 = 430.0;
+const IDE_EDITOR_SEARCH_TOP: f32 = 0.0;
+const IDE_EDITOR_SEARCH_RIGHT: f32 = 16.0;
+const IDE_EDITOR_SEARCH_PADDING: f32 = 8.0;
+const IDE_EDITOR_SEARCH_INPUT_HEIGHT: f32 = 28.0;
+const IDE_EDITOR_SEARCH_INPUT_WIDTH: f32 = 160.0;
+const IDE_EDITOR_SEARCH_BUTTON_SIZE: f32 = 28.0;
+const IDE_EDITOR_SEARCH_ICON_SIZE: f32 = 14.0;
+const IDE_EDITOR_SEARCH_MATCH_WIDTH: f32 = 48.0;
 const IDE_AGENT_POLL_READY_SECS: u64 = 5;
 const IDE_AGENT_POLL_DEPLOYING_SECS: u64 = 2;
 const IDE_AGENT_POLL_MANUAL_SECS: u64 = 10;
@@ -273,6 +284,16 @@ struct ProjectSearchState {
     generation: u64,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct EditorSearchState {
+    open: bool,
+    query: String,
+    replacement: String,
+    replace_open: bool,
+    case_sensitive: bool,
+    replace_focused: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TabContextMenu {
     tab_id: EditorTabId,
@@ -346,6 +367,12 @@ struct TabDrag {
     activated: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PendingEditorReveal {
+    line: u32,
+    column: u32,
+}
+
 /// GPUI IDE owner.
 ///
 /// This is the native equivalent of Tauri's `IdeWorkspace` + `ideStore` owner:
@@ -382,9 +409,11 @@ pub struct IdeSurface {
     tree_rows_cache: Option<TreeRowsCache>,
     tree_scroll_handle: UniformListScrollHandle,
     search: ProjectSearchState,
+    editor_search: EditorSearchState,
     search_cache: HashMap<String, SearchCacheEntry>,
     search_cache_order: Vec<String>,
     pending_search_queries: BTreeMap<String, String>,
+    pending_editor_reveals: BTreeMap<String, PendingEditorReveal>,
     tab_context_menu: Option<TabContextMenu>,
     tree_context_menu: Option<TreeContextMenu>,
     tree_name_input: Option<TreeNameInputState>,

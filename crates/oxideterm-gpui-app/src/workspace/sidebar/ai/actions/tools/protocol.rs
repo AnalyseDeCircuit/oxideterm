@@ -458,6 +458,12 @@ fn annotate_ai_run_command_execution_result(
     let timed_out = data
         .and_then(|value| value.get("timedOut"))
         .and_then(serde_json::Value::as_bool);
+    let execution_state = data
+        .and_then(|value| value.get("executionState"))
+        .and_then(serde_json::Value::as_str);
+    let visible_in_terminal = data
+        .and_then(|value| value.get("visibleInTerminal"))
+        .and_then(serde_json::Value::as_bool);
     let truncated = envelope
         .get("meta")
         .and_then(|meta| meta.get("truncated"))
@@ -506,6 +512,18 @@ fn annotate_ai_run_command_execution_result(
     }
     if let Some(timed_out) = timed_out {
         execution.insert("timedOut".to_string(), serde_json::json!(timed_out));
+    }
+    if let Some(execution_state) = execution_state {
+        execution.insert(
+            "state".to_string(),
+            serde_json::json!(execution_state),
+        );
+    }
+    if let Some(visible_in_terminal) = visible_in_terminal {
+        execution.insert(
+            "visibleInTerminal".to_string(),
+            serde_json::json!(visible_in_terminal),
+        );
     }
     if let Some(truncated) = truncated {
         execution.insert("truncated".to_string(), serde_json::json!(truncated));
@@ -840,6 +858,41 @@ mod tests {
     }
 
     #[test]
+    fn run_command_execution_summary_preserves_visibility_and_state() {
+        let mut result = sample_result();
+        result.envelope = serde_json::json!({
+            "ok": true,
+            "summary": "Command sent to terminal.",
+            "output": "Command sent: uptime",
+            "data": {
+                "executionState": "sent",
+                "visibleInTerminal": true
+            },
+            "targets": [{
+                "id": "ssh-node:prod-node-1",
+                "kind": "ssh-node",
+                "label": "prod.example.com",
+                "metadata": { "state": "connected", "refs": { "sessionId": "42" } }
+            }],
+            "meta": { "toolName": "run_command", "durationMs": 7, "truncated": false }
+        });
+
+        annotate_ai_run_command_execution_result(
+            &mut result,
+            &serde_json::json!({ "command": "uptime" }),
+        );
+
+        assert_eq!(
+            result.envelope.pointer("/execution/state"),
+            Some(&serde_json::json!("sent"))
+        );
+        assert_eq!(
+            result.envelope.pointer("/execution/visibleInTerminal"),
+            Some(&serde_json::json!(true))
+        );
+    }
+
+    #[test]
     fn tool_result_model_content_omits_ui_only_payload_like_tauri() {
         let mut result = sample_result();
         result.envelope = serde_json::json!({
@@ -972,6 +1025,25 @@ mod tests {
     #[test]
     fn terminal_run_command_preflight_keeps_execute_risk_like_tauri() {
         assert_eq!(ai_run_command_preflight_risk(), "execute");
+    }
+
+    #[test]
+    fn run_command_targets_with_visible_side_effects_use_ui_executor() {
+        let mut target = sample_target();
+        target
+            .refs
+            .insert("sessionId".to_string(), "42".to_string());
+
+        assert!(ai_run_command_requires_ui_thread_target(&target));
+
+        target.refs.remove("sessionId");
+        assert!(ai_run_command_requires_ui_thread_target(&target));
+
+        target.kind = "terminal-session".to_string();
+        assert!(ai_run_command_requires_ui_thread_target(&target));
+
+        target.kind = "local-shell".to_string();
+        assert!(ai_run_command_requires_ui_thread_target(&target));
     }
 
     #[test]

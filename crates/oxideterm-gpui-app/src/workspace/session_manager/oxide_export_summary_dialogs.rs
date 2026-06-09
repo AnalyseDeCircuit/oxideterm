@@ -90,7 +90,7 @@ impl WorkspaceApp {
                     SelectableTextRole::NonSelectable,
                     "oxide-export-preflight-heading",
                     (),
-                    self.i18n.t("modals.export.summary_title"),
+                    self.i18n.t("export.summary_title"),
                     theme.text,
                     cx,
                 )),
@@ -103,19 +103,19 @@ impl WorkspaceApp {
                 (
                     LucideIcon::Lock,
                     self.i18n
-                        .t("modals.export.summary_passwords")
+                        .t("export.summary_passwords")
                         .replace("{{count}}", &preflight.connections_with_passwords.to_string()),
                 ),
                 (
                     LucideIcon::Key,
                     self.i18n
-                        .t("modals.export.summary_keys")
+                        .t("export.summary_keys")
                         .replace("{{count}}", &preflight.connections_with_keys.to_string()),
                 ),
                 (
                     LucideIcon::FileLock,
                     self.i18n
-                        .t("modals.export.summary_agent")
+                        .t("export.summary_agent")
                         .replace("{{count}}", &preflight.connections_with_agent.to_string()),
                 ),
             ],
@@ -124,7 +124,7 @@ impl WorkspaceApp {
         if preflight.portable_secret_count > 0 {
             let label = self
                 .i18n
-                .t("modals.export.summary_portable_secrets")
+                .t("export.summary_portable_secrets")
                 .replace("{{count}}", &preflight.portable_secret_count.to_string());
             card_children.push(
                 div()
@@ -147,7 +147,7 @@ impl WorkspaceApp {
                     (
                         LucideIcon::Key,
                         self.i18n
-                            .t("modals.export.summary_key_passphrases")
+                            .t("export.summary_key_passphrases")
                             .replace(
                                 "{{count}}",
                                 &preflight.key_passphrase_count.to_string(),
@@ -155,7 +155,7 @@ impl WorkspaceApp {
                     ),
                     (
                         LucideIcon::Key,
-                        self.i18n.t("modals.export.summary_managed_keys").replace(
+                        self.i18n.t("export.summary_managed_keys").replace(
                             "{{count}}",
                             &preflight.managed_key_count.to_string(),
                         ),
@@ -163,7 +163,7 @@ impl WorkspaceApp {
                     (
                         LucideIcon::FileLock,
                         self.i18n
-                            .t("modals.export.summary_managed_key_passphrases")
+                            .t("export.summary_managed_key_passphrases")
                             .replace(
                                 "{{count}}",
                                 &preflight.managed_key_passphrase_count.to_string(),
@@ -177,7 +177,7 @@ impl WorkspaceApp {
             card_children.push(self.render_oxide_compact_warning(
                 OXIDE_RED_500,
                 self.i18n
-                    .t("modals.export.warning_managed_keys_required")
+                    .t("export.warning_managed_keys_required")
                     .replace(
                         "{{count}}",
                         &preflight.blocked_managed_key_connections.len().to_string(),
@@ -189,14 +189,14 @@ impl WorkspaceApp {
         if preflight.connections_with_passwords > 0 {
             let password_warning = if include_passwords {
                 self.i18n
-                    .t("modals.export.warning_passwords_included")
+                    .t("export.warning_passwords_included")
                     .replace(
                         "{{count}}",
                         &preflight.connections_with_passwords.to_string(),
                     )
             } else {
                 self.i18n
-                    .t("modals.export.warning_passwords_excluded")
+                    .t("export.warning_passwords_excluded")
                     .replace(
                         "{{count}}",
                         &preflight.connections_with_passwords.to_string(),
@@ -213,7 +213,7 @@ impl WorkspaceApp {
             card_children.push(self.render_oxide_compact_warning(
                 OXIDE_YELLOW_500,
                 self.i18n
-                    .t("modals.export.warning_missing_keys")
+                    .t("export.warning_missing_keys")
                     .replace("{{count}}", &preflight.missing_keys.len().to_string()),
                 preflight
                     .missing_keys
@@ -226,7 +226,7 @@ impl WorkspaceApp {
         if preflight.total_key_bytes > 0 {
             let label = self
                 .i18n
-                .t("modals.export.key_size")
+                .t("export.key_size")
                 .replace("{{size}}", &oxide_format_bytes(preflight.total_key_bytes));
             card_children.push(
                 div()
@@ -258,14 +258,14 @@ impl WorkspaceApp {
         if connection_count > 0 {
             items.push(
                 self.i18n
-                    .t("modals.export.content_summary_connections")
+                    .t("export.content_summary_connections")
                     .replace("{{count}}", &connection_count.to_string()),
             );
         }
         if dialog.include_forwards && !dialog.selected_forward_ids.is_empty() {
             items.push(
                 self.i18n
-                    .t("modals.export.content_summary_forwards")
+                    .t("export.content_summary_forwards")
                     .replace("{{count}}", &dialog.selected_forward_ids.len().to_string()),
             );
         }
@@ -278,14 +278,14 @@ impl WorkspaceApp {
                 .join(", ");
             items.push(format!(
                 "{}: {labels}",
-                self.i18n.t("modals.export.content_summary_app_settings")
+                self.i18n.t("export.content_summary_app_settings")
             ));
         }
         let selected_plugin_setting_count = oxide_export_selected_plugin_setting_count(dialog);
         if dialog.include_plugin_settings && selected_plugin_setting_count > 0 {
             items.push(
                 self.i18n
-                    .t("modals.export.content_summary_plugin_settings")
+                    .t("export.content_summary_plugin_settings")
                     .replace("{{plugins}}", &dialog.selected_plugin_ids.len().to_string())
                     .replace("{{count}}", &selected_plugin_setting_count.to_string()),
             );
@@ -298,18 +298,18 @@ impl WorkspaceApp {
                     .unwrap_or(0);
             items.push(
                 self.i18n
-                    .t("modals.export.content_summary_portable_secrets")
+                    .t("export.content_summary_portable_secrets")
                     .replace("{{count}}", &count.to_string()),
             );
         }
         if dialog.embed_keys {
-            items.push(self.i18n.t("modals.export.content_summary_embed_keys"));
+            items.push(self.i18n.t("export.content_summary_embed_keys"));
         }
         if dialog.include_passwords {
-            items.push(self.i18n.t("modals.export.content_summary_passwords"));
+            items.push(self.i18n.t("export.content_summary_passwords"));
         }
         if dialog.include_key_passphrases {
-            items.push(self.i18n.t("modals.export.content_summary_key_passphrases"));
+            items.push(self.i18n.t("export.content_summary_key_passphrases"));
         }
         if dialog.include_managed_keys {
             if let Some(count) = dialog
@@ -320,7 +320,7 @@ impl WorkspaceApp {
             {
                 items.push(
                     self.i18n
-                        .t("modals.export.content_summary_managed_keys")
+                        .t("export.content_summary_managed_keys")
                         .replace("{{count}}", &count.to_string()),
                 );
             }
@@ -334,7 +334,7 @@ impl WorkspaceApp {
             {
                 items.push(
                     self.i18n
-                        .t("modals.export.content_summary_managed_key_passphrases")
+                        .t("export.content_summary_managed_key_passphrases")
                         .replace("{{count}}", &count.to_string()),
                 );
             }
@@ -343,7 +343,7 @@ impl WorkspaceApp {
         {
             items.push(
                 self.i18n
-                    .t("modals.export.warning_managed_keys_required")
+                    .t("export.warning_managed_keys_required")
                     .replace(
                         "{{count}}",
                         &preflight.blocked_managed_key_connections.len().to_string(),
@@ -358,7 +358,7 @@ impl WorkspaceApp {
                     .child(self.render_selectable_text_scoped(
                         "oxide-export-content-summary-empty",
                         (),
-                        self.i18n.t("modals.export.app_settings_no_sections"),
+                        self.i18n.t("export.app_settings_no_sections"),
                         self.tokens.ui.text_muted,
                         cx,
                     ))
@@ -384,7 +384,7 @@ impl WorkspaceApp {
                 .collect()
         };
         self.render_oxide_card(
-            Some((LucideIcon::Shield, self.i18n.t("modals.export.content_summary_title"))),
+            Some((LucideIcon::Shield, self.i18n.t("export.content_summary_title"))),
             content,
             cx,
         )
@@ -416,25 +416,25 @@ impl WorkspaceApp {
         };
         self.render_oxide_tone_notice(
             OXIDE_BLUE_500,
-            self.i18n.t("modals.export.security_notice"),
+            self.i18n.t("export.security_notice"),
             vec![
-                self.i18n.t("modals.export.security_encryption"),
-                self.i18n.t("modals.export.security_kdf"),
-                self.i18n.t("modals.export.security_contains"),
+                self.i18n.t("export.security_encryption"),
+                self.i18n.t("export.security_kdf"),
+                self.i18n.t("export.security_contains"),
                 self.i18n
-                    .t("modals.export.security_settings")
+                    .t("export.security_settings")
                     .replace("{{app}}", app_settings_label)
                     .replace("{{plugin}}", plugin_settings_label),
                 self.i18n
-                    .t("modals.export.security_portable_secrets")
+                    .t("export.security_portable_secrets")
                     .replace("{{portable}}", portable_secrets_label),
                 if dialog.include_passwords {
-                    self.i18n.t("modals.export.security_passwords_included")
+                    self.i18n.t("export.security_passwords_included")
                 } else {
-                    self.i18n.t("modals.export.security_passwords_excluded")
+                    self.i18n.t("export.security_passwords_excluded")
                 },
-                self.i18n.t("modals.export.security_no_session"),
-                self.i18n.t("modals.export.security_keep_safe"),
+                self.i18n.t("export.security_no_session"),
+                self.i18n.t("export.security_keep_safe"),
             ],
             cx,
         )
@@ -610,7 +610,7 @@ impl WorkspaceApp {
             .as_ref()
             .filter(|_| dialog.busy)
             .map(|progress| oxide_export_progress_label(&progress.stage, dialog.embed_keys, &self.i18n))
-            .unwrap_or_else(|| self.i18n.t("modals.export.export"));
+            .unwrap_or_else(|| self.i18n.t("export.export"));
         self.render_oxide_footer(
             dialog.busy,
             !oxide_export_has_selected_content(dialog),

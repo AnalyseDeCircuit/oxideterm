@@ -99,6 +99,37 @@ impl TextBuffer {
         Some(self.storage.slice_to_string(start..end))
     }
 
+    pub fn with_line_text<R>(&self, line: usize, f: impl FnOnce(&str) -> R) -> Option<R> {
+        let start = *self.line_starts.get(line)?;
+        let end = self.line_end_offset(line)?.0;
+        // Rendering hot paths need a borrowed line view. Materialize the shared
+        // text cache once and slice it instead of allocating a fresh line string.
+        self.with_text(|text| text.get(start..end).map(f))
+    }
+
+    pub fn line_char_counts(&self) -> Vec<usize> {
+        // Soft-wrap layout may scan every line after width changes. Count from
+        // the materialized text cache so layout does not allocate one string per
+        // line before it can rebuild display rows.
+        self.with_text(|text| {
+            (0..self.line_starts.len())
+                .map(|line| {
+                    let start = self.line_starts[line];
+                    let end = self
+                        .line_starts
+                        .get(line + 1)
+                        .copied()
+                        .map(|next| next.saturating_sub(1))
+                        .unwrap_or_else(|| text.len())
+                        .max(start);
+                    text.get(start..end)
+                        .map(|line_text| line_text.chars().count())
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+    }
+
     pub fn offset_to_line_col(&self, offset: BufferOffset) -> Result<LineCol, EditorError> {
         self.validate_offset(offset)?;
         let line = match self.line_starts.binary_search(&offset.0) {
@@ -384,6 +415,24 @@ mod tests {
         );
         assert_eq!(buffer.line_count(), 3);
         assert_eq!(buffer.line_text(1), Some("你b".to_string()));
+    }
+
+    #[test]
+    fn borrowed_line_text_matches_owned_line_text() {
+        let buffer = TextBuffer::new("alpha\n你b\nlast");
+
+        assert_eq!(
+            buffer.with_line_text(1, str::to_string),
+            buffer.line_text(1)
+        );
+        assert_eq!(buffer.with_line_text(99, str::len), None);
+    }
+
+    #[test]
+    fn line_char_counts_match_visible_line_text() {
+        let buffer = TextBuffer::new("aé\n你b\n");
+
+        assert_eq!(buffer.line_char_counts(), vec![2, 2, 0]);
     }
 
     #[test]

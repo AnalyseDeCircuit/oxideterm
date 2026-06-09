@@ -14,6 +14,10 @@ impl WorkspaceApp {
                     .bottom_0()
                     .w(px(self.tokens.metrics.sidebar_resize_handle_width))
                     .cursor(CursorStyle::ResizeColumn)
+                    // The handle is intentionally transparent while idle, so
+                    // give GPUI a concrete top-level hitbox instead of relying
+                    // on neighboring title/content regions to leave the edge.
+                    .occlude()
                     .bg(if self.sidebar_resizing {
                         rgb(theme.accent)
                     } else {
@@ -22,8 +26,10 @@ impl WorkspaceApp {
                     .hover(|handle| handle.bg(rgba((theme.accent << 8) | 0x80)))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, event, _window, cx| {
+                        cx.listener(|this, event, window, cx| {
                             this.start_sidebar_resize(event, cx);
+                            window.prevent_default();
+                            cx.stop_propagation();
                         }),
                     ),
             )
@@ -140,6 +146,9 @@ impl WorkspaceApp {
                     .bottom_0()
                     .w(px(self.tokens.metrics.sidebar_resize_handle_width))
                     .cursor(CursorStyle::ResizeColumn)
+                    // The titlebar/content regions are full-width hitboxes; the
+                    // resize strip must explicitly occlude their left edge.
+                    .occlude()
                     .bg(if self.ai_sidebar_resizing {
                         rgb(theme.accent)
                     } else {
@@ -150,6 +159,7 @@ impl WorkspaceApp {
                         MouseButton::Left,
                         cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
                             this.start_ai_sidebar_resize(event, window, cx);
+                            window.prevent_default();
                             cx.stop_propagation();
                         }),
                     ),

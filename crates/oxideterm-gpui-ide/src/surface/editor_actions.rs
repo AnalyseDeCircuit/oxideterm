@@ -541,6 +541,142 @@ impl IdeSurface {
         cx.stop_propagation();
     }
 
+    fn handle_editor_find_shortcut(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.secondary()
+            && !modifiers.alt
+            && !modifiers.shift
+            && event.keystroke.key.eq_ignore_ascii_case("f")
+        {
+            self.open_editor_search(cx);
+            cx.stop_propagation();
+        }
+    }
+
+    fn handle_editor_search_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        if !self.editor_search.open {
+            return;
+        }
+        let mut handled = true;
+        match event.keystroke.key.as_str() {
+            "escape" => self.close_editor_search(cx),
+            "enter" => {
+                if event.keystroke.modifiers.shift {
+                    self.select_previous_editor_search_match(cx);
+                } else {
+                    self.select_next_editor_search_match(cx);
+                }
+            }
+            "tab" => {
+                self.editor_search.replace_focused =
+                    self.editor_search.replace_open && !self.editor_search.replace_focused;
+                cx.notify();
+            }
+            "backspace" => {
+                if self.editor_search.replace_focused {
+                    if self.editor_search.replacement.pop().is_some() {
+                        cx.notify();
+                    }
+                } else if self.editor_search.query.pop().is_some() {
+                    self.apply_editor_search_query(cx);
+                }
+            }
+            _ => {
+                handled = false;
+                if let Some(text) = event.keystroke.key_char.as_deref()
+                    && !text.is_empty()
+                    && !text.chars().any(char::is_control)
+                    && !event.keystroke.modifiers.platform
+                    && !event.keystroke.modifiers.control
+                {
+                    handled = true;
+                    if self.editor_search.replace_focused {
+                        self.editor_search.replacement.push_str(text);
+                        cx.notify();
+                    } else {
+                        self.editor_search.query.push_str(text);
+                        self.apply_editor_search_query(cx);
+                    }
+                }
+            }
+        }
+        if handled {
+            cx.stop_propagation();
+        }
+    }
+
+    fn open_editor_search(&mut self, cx: &mut Context<Self>) {
+        self.editor_search.open = true;
+        self.editor_search.replace_focused = false;
+        self.apply_editor_search_query(cx);
+        cx.notify();
+    }
+
+    fn close_editor_search(&mut self, cx: &mut Context<Self>) {
+        self.editor_search.open = false;
+        self.editor_search.query.clear();
+        self.editor_search.replacement.clear();
+        self.editor_search.replace_open = false;
+        self.editor_search.replace_focused = false;
+        if let Some(editor) = self.active_editor() {
+            editor.update(cx, |editor, cx| editor.set_find_query("", cx));
+        }
+        cx.notify();
+    }
+
+    fn apply_editor_search_query(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            let query = self.editor_search.query.clone();
+            let case_sensitive = self.editor_search.case_sensitive;
+            editor.update(cx, |editor, cx| {
+                editor.set_find_case_sensitive(case_sensitive, cx);
+                editor.set_find_query(query, cx);
+            });
+        }
+        cx.notify();
+    }
+
+    fn toggle_editor_search_replace(&mut self, cx: &mut Context<Self>) {
+        self.editor_search.replace_open = !self.editor_search.replace_open;
+        if !self.editor_search.replace_open {
+            self.editor_search.replace_focused = false;
+        }
+        cx.notify();
+    }
+
+    fn toggle_editor_search_case_sensitive(&mut self, cx: &mut Context<Self>) {
+        self.editor_search.case_sensitive = !self.editor_search.case_sensitive;
+        self.apply_editor_search_query(cx);
+    }
+
+    fn select_next_editor_search_match(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            editor.update(cx, |editor, cx| editor.select_next_find_match(cx));
+        }
+    }
+
+    fn select_previous_editor_search_match(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            editor.update(cx, |editor, cx| editor.select_previous_find_match(cx));
+        }
+    }
+
+    fn replace_current_editor_search_match(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            let replacement = self.editor_search.replacement.clone();
+            editor.update(cx, |editor, cx| {
+                editor.replace_current_find_match(replacement, cx)
+            });
+        }
+    }
+
+    fn replace_all_editor_search_matches(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            let replacement = self.editor_search.replacement.clone();
+            editor.update(cx, |editor, cx| editor.replace_all_find_matches(replacement, cx));
+        }
+    }
+
     fn open_search_match(&mut self, hit: IdeSearchMatch, cx: &mut Context<Self>) {
         let Some(node_id) = self.node_id.clone() else {
             return;
@@ -552,6 +688,76 @@ impl IdeSurface {
         self.pending_search_queries
             .insert(path.clone(), self.search.query.clone());
         self.open_remote_file(IdeLocation::remote(node_id, path), cx);
+    }
+
+    fn go_to_symbol_definition(&mut self, word: String, cx: &mut Context<Self>) {
+        let Some(root_path) = self.root_path.clone() else {
+            return;
+        };
+        let Some(buffer) = self
+            .workspace
+            .active_tab()
+            .and_then(|tab_id| self.workspace.buffer(tab_id))
+            .cloned()
+        else {
+            return;
+        };
+        let IdeLocation::Remote { node_id, .. } = buffer.location else {
+            return;
+        };
+        let fs = self.fs.clone();
+        let backend_runtime = self.backend_runtime.clone();
+        let generation = self.generation;
+
+        cx.spawn(async move |weak, cx| {
+            let result = backend_runtime
+                .spawn(async move {
+                    // Tauri runs symbol lookup as an agent-side best-effort
+                    // RPC. Keep failures non-fatal so modifier-click remains
+                    // a lightweight editor gesture.
+                    fs.node_agent_symbol_definitions(node_id, root_path, word)
+                        .await
+                })
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+            let _ = weak.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(definitions) => {
+                        if let Some(definition) = definitions.into_iter().next() {
+                            this.open_symbol_definition(definition, cx);
+                        }
+                    }
+                    Err(_error) => {
+                        // Tauri treats modifier-click symbol lookup as a
+                        // best-effort editor gesture, so failed lookups should
+                        // not interrupt normal editing.
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn open_symbol_definition(
+        &mut self,
+        definition: oxideterm_ide_fs::NodeAgentSymbolInfo,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(node_id) = self.node_id.clone() else {
+            return;
+        };
+        self.pending_editor_reveals.insert(
+            definition.path.clone(),
+            PendingEditorReveal {
+                line: definition.line,
+                column: definition.column,
+            },
+        );
+        self.open_remote_file(IdeLocation::remote(node_id, definition.path), cx);
     }
 
     fn apply_pending_search_query_for_location(
@@ -576,6 +782,33 @@ impl IdeSurface {
         };
         if let Some(editor) = self.editors.get(&tab_id) {
             editor.update(cx, |editor, cx| editor.set_find_query(query, cx));
+        }
+    }
+
+    fn apply_pending_editor_reveal_for_location(
+        &mut self,
+        location: &IdeLocation,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(path) = remote_path(location).map(ToOwned::to_owned) else {
+            return;
+        };
+        let Some(reveal) = self.pending_editor_reveals.remove(&path) else {
+            return;
+        };
+        let Some(tab_id) = self
+            .workspace
+            .tabs()
+            .iter()
+            .find(|tab| tab.location == *location)
+            .map(|tab| tab.id)
+        else {
+            return;
+        };
+        if let Some(editor) = self.editors.get(&tab_id) {
+            editor.update(cx, |editor, cx| {
+                editor.reveal_line_column(reveal.line, reveal.column, cx)
+            });
         }
     }
 
@@ -615,6 +848,7 @@ impl IdeSurface {
             let _ = self.workspace.set_active_tab(tab_id);
             self.apply_pending_reconnect_dirty_for_tab(tab_id, cx);
             self.apply_pending_search_query_for_location(&location, cx);
+            self.apply_pending_editor_reveal_for_location(&location, cx);
             cx.notify();
             return;
         }
@@ -675,6 +909,7 @@ impl IdeSurface {
                             this.apply_reconnect_dirty_text(tab_id, dirty_text, cx);
                         }
                         this.apply_pending_search_query_for_location(&result.location, cx);
+                        this.apply_pending_editor_reveal_for_location(&result.location, cx);
                     }
                     Err(error) => {
                         if this
@@ -705,6 +940,8 @@ impl IdeSurface {
         let runtime_settings = self.runtime_settings;
         let language = language_for_location(location, &text);
         let surface = cx.entity();
+        let save_surface = surface.clone();
+        let symbol_surface = surface.clone();
         let editor = cx.new(|cx| {
             let mut editor = TextEditorView::new(text, &tokens, cx);
             editor.apply_ide_runtime_settings(
@@ -718,8 +955,14 @@ impl IdeSurface {
             editor.set_language(language, cx);
             editor.set_on_save(Box::new(move |text, _window, cx| {
                 let text = text.to_string();
-                let _ = surface.update(cx, |surface, cx| {
+                let _ = save_surface.update(cx, |surface, cx| {
                     surface.save_tab_with_text(tab_id, text, cx);
+                });
+                Ok(())
+            }));
+            editor.set_on_modified_word_click(Box::new(move |word, _window, cx| {
+                let _ = symbol_surface.update(cx, |surface, cx| {
+                    surface.go_to_symbol_definition(word, cx);
                 });
                 Ok(())
             }));

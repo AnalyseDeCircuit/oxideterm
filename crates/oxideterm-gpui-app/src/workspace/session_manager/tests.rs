@@ -24,6 +24,50 @@ mod tests {
     }
 
     #[test]
+    fn oxide_export_logical_scroll_change_detects_inner_consumption() {
+        // GPUI ListState owns measured row heights internally, so scroll-chain
+        // decisions must compare actual logical movement instead of estimates.
+        assert!(!oxide_export_logical_scroll_changed(0, 0.0, 0, 0.0));
+        assert!(!oxide_export_logical_scroll_changed(0, 12.0, 0, 12.004));
+        assert!(oxide_export_logical_scroll_changed(0, 0.0, 0, 24.0));
+        assert!(oxide_export_logical_scroll_changed(0, 24.0, 1, 0.0));
+    }
+
+    #[test]
+    fn oxide_export_selection_count_label_uses_locale_placeholders() {
+        assert_eq!(
+            oxide_export_selection_count_label(
+                "Select Connections to Export ({{selected}}/{{total}})".to_string(),
+                2,
+                5,
+            ),
+            "Select Connections to Export (2/5)"
+        );
+    }
+
+    #[test]
+    fn oxide_export_native_i18n_keys_resolve_without_tauri_namespace() {
+        // Native modals.json flattens the export dialog as `export.*`; using
+        // Tauri's `modals.export.*` namespace renders raw keys in the dialog.
+        let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::ZhCn);
+        for key in [
+            "export.select_connections",
+            "export.select_all",
+            "export.new_since_last_export",
+            "export.badge_new",
+            "export.credential_material",
+            "export.content_summary_title",
+            "export.app_settings_section_terminal_appearance",
+        ] {
+            assert_ne!(i18n.t(key), key, "unresolved export i18n key: {key}");
+        }
+        assert_eq!(
+            i18n.t("modals.export.select_connections"),
+            "modals.export.select_connections"
+        );
+    }
+
+    #[test]
     fn new_connection_save_password_false_does_not_request_keychain_storage() {
         let form = NewConnectionForm {
             password: "secret".to_string(),
