@@ -70,6 +70,21 @@ pub enum TerminalInputInterceptorResult {
     Suppress,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct TerminalEventEffect {
+    needs_notify: bool,
+}
+
+impl TerminalEventEffect {
+    fn notify() -> Self {
+        Self { needs_notify: true }
+    }
+
+    fn combine(&mut self, effect: Self) {
+        self.needs_notify |= effect.needs_notify;
+    }
+}
+
 pub struct TerminalPane {
     terminal: Arc<Mutex<TerminalSession>>,
     focus_handle: FocusHandle,
@@ -674,15 +689,20 @@ impl TerminalPane {
         }
         self.update_render_stats(&report, now);
 
+        let mut event_effect = TerminalEventEffect::default();
         for event in events {
-            self.handle_terminal_event(event, cx);
+            event_effect.combine(self.handle_terminal_event(event, cx));
         }
 
         let cleared_command_mark_selection = self.clear_command_mark_selection_for_tui_mode(mode);
+        let mut needs_notify = event_effect.needs_notify;
         if let Some(snapshot) = next_snapshot {
             self.snapshot = snapshot;
-            cx.notify();
+            needs_notify = true;
         } else if self.preferences.show_fps_overlay || cleared_command_mark_selection {
+            needs_notify = true;
+        }
+        if needs_notify {
             cx.notify();
         }
 
@@ -747,24 +767,28 @@ impl TerminalPane {
         }
     }
 
-    fn handle_terminal_event(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
+    fn handle_terminal_event(
+        &mut self,
+        event: TerminalEvent,
+        cx: &mut Context<Self>,
+    ) -> TerminalEventEffect {
         match event {
             TerminalEvent::Output(bytes) => {
                 if let Some(recorder) = self.recorder.as_mut() {
                     recorder.record_output(&bytes);
                 }
+                TerminalEventEffect::default()
             }
             TerminalEvent::TitleChanged(title) => {
                 self.title = title.into();
-                cx.notify();
+                TerminalEventEffect::notify()
             }
             TerminalEvent::TitleReset => {
                 self.title = SharedString::from("OxideTerm");
-                cx.notify();
+                TerminalEventEffect::notify()
             }
             TerminalEvent::Bell => {
                 self.bell_flash = true;
-                cx.notify();
                 cx.spawn(async move |weak, cx| {
                     Timer::after(Duration::from_millis(180)).await;
                     let _ = weak.update(cx, |this, cx| {
@@ -773,14 +797,13 @@ impl TerminalPane {
                     });
                 })
                 .detach();
+                TerminalEventEffect::notify()
             }
-            TerminalEvent::Wakeup => {
-                cx.notify();
-            }
+            TerminalEvent::Wakeup => TerminalEventEffect::notify(),
             TerminalEvent::BlinkChanged(blinking) => {
                 self.cursor_blink_terminal_enabled = blinking;
                 self.reset_cursor_blink();
-                cx.notify();
+                TerminalEventEffect::notify()
             }
             TerminalEvent::ChildExited(code) => {
                 self.notify_trzsz_connection_lost_if_active();
@@ -789,10 +812,11 @@ impl TerminalPane {
                     Some(code) => format!("Process exited ({code})").into(),
                     None => "Process exited".into(),
                 };
-                cx.notify();
+                TerminalEventEffect::notify()
             }
             TerminalEvent::MagicDetected(kind) => {
                 let _ = kind;
+                TerminalEventEffect::default()
             }
             TerminalEvent::TrzszTransferPrompt {
                 direction,
@@ -807,9 +831,11 @@ impl TerminalPane {
                     },
                     cx,
                 );
+                TerminalEventEffect::notify()
             }
             TerminalEvent::EncodingHint(hint) => {
                 let _ = hint;
+                TerminalEventEffect::default()
             }
             TerminalEvent::ShellIntegration(event) => {
                 self.shell_integration_status = ShellIntegrationStatus {
@@ -836,7 +862,7 @@ impl TerminalPane {
                             .unwrap_or_default(),
                     ),
                 };
-                cx.notify();
+                TerminalEventEffect::notify()
             }
             TerminalEvent::CommandMark(event) => {
                 if !self.settings.command_marks_enabled {
@@ -890,17 +916,18 @@ impl TerminalPane {
                         self.selected_command_mark_id = None;
                     }
                 }
-                cx.notify();
+                TerminalEventEffect::notify()
             }
             TerminalEvent::CwdChanged { cwd, host } => {
                 self.cwd = Some(cwd);
                 self.cwd_host = host;
-                cx.notify();
+                TerminalEventEffect::notify()
             }
             TerminalEvent::ClipboardStore(text) => {
                 if self.settings.osc52_clipboard {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
+                TerminalEventEffect::default()
             }
             TerminalEvent::ClipboardLoad(formatter) => {
                 if self.settings.osc52_clipboard
@@ -909,6 +936,7 @@ impl TerminalPane {
                     let response = formatter(&text);
                     self.send_protocol_bytes(response.as_bytes(), cx);
                 }
+                TerminalEventEffect::default()
             }
         }
     }

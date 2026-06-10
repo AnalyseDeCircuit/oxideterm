@@ -346,7 +346,7 @@ impl SerialSession {
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
         let processed_output = apply_terminal_output_processor(&self.output_processor, bytes);
-        let bytes = processed_output.as_slice();
+        let bytes = processed_output.as_ref();
         for kind in self.magic_scan.scan(bytes) {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }

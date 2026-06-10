@@ -12,7 +12,7 @@ use oxideterm_editor_core::{BufferOffset, Selection};
 use oxideterm_editor_syntax::SyntaxScope;
 
 use super::{
-    EditorBoundsProbe, TextEditorView, colored_text,
+    EditorBoundsProbe, HighlightChunkCacheKey, LineChunkSpec, TextEditorView, colored_text,
     coords::{
         byte_column_for_visual_column, selection_columns_for_line, visual_column_for_byte_column,
     },
@@ -409,11 +409,33 @@ impl TextEditorView {
         let mut row = div().flex().items_center();
         let mut cursor_drawn = false;
 
-        for chunk in self.highlighted_line_chunks(line, line_text, line_range) {
+        if line_text.is_empty() {
+            if show_cursor {
+                row = row.child(self.render_cursor());
+                if let Some(marked_text) = marked_text {
+                    row = row.child(
+                        div()
+                            .underline()
+                            .text_color(rgb(self.appearance.accent_hex))
+                            .child(marked_text.to_string()),
+                    );
+                }
+            }
+            row = self.append_rendered_text(row, " ", self.appearance.text_hex);
+            return self.append_fold_token(row, folded);
+        }
+
+        for chunk in self
+            .highlighted_line_chunks(line, line_text, line_range)
+            .iter()
+        {
+            let Some(chunk_text) = line_text.get(chunk.start..chunk.end) else {
+                continue;
+            };
             if show_cursor && !cursor_drawn && byte_column <= chunk.end {
                 let split = byte_column.saturating_sub(chunk.start);
-                let split = split.min(chunk.text.len());
-                let (before, after) = chunk.text.split_at(split);
+                let split = split.min(chunk_text.len());
+                let (before, after) = chunk_text.split_at(split);
                 row = self.append_rendered_text(row, before, chunk.color);
                 row = row.child(self.render_cursor());
                 if let Some(marked_text) = marked_text {
@@ -427,7 +449,7 @@ impl TextEditorView {
                 row = self.append_rendered_text(row, after, chunk.color);
                 cursor_drawn = true;
             } else {
-                row = self.append_rendered_text(row, &chunk.text, chunk.color);
+                row = self.append_rendered_text(row, chunk_text, chunk.color);
             }
         }
 
@@ -442,16 +464,7 @@ impl TextEditorView {
                 );
             }
         }
-        if folded {
-            row = row.child(
-                div()
-                    .text_color(rgba(
-                        (self.appearance.muted_text_hex << 8) | CM_FOLD_TOKEN_ALPHA,
-                    ))
-                    .child(CM_FOLDED_TOKEN.to_string()),
-            );
-        }
-        row
+        self.append_fold_token(row, folded)
     }
 
     fn append_rendered_text(&self, mut row: Div, text: &str, color: u32) -> Div {
@@ -481,6 +494,19 @@ impl TextEditorView {
             row = row.child(colored_text(&plain, color));
         }
         row
+    }
+
+    fn append_fold_token(&self, row: Div, folded: bool) -> Div {
+        if !folded {
+            return row;
+        }
+        row.child(
+            div()
+                .text_color(rgba(
+                    (self.appearance.muted_text_hex << 8) | CM_FOLD_TOKEN_ALPHA,
+                ))
+                .child(CM_FOLDED_TOKEN.to_string()),
+        )
     }
 
     fn indentation_marker_columns(&self, line_text: &str, display_row: DisplayRow) -> Vec<usize> {
@@ -595,21 +621,33 @@ impl TextEditorView {
         }
     }
 
-    fn highlighted_line_chunks<'a>(
+    fn highlighted_line_chunks(
         &self,
         line: usize,
-        line_text: &'a str,
+        line_text: &str,
         line_range: Range<usize>,
-    ) -> Vec<LineChunk<'a>> {
-        if line_text.is_empty() {
-            return vec![LineChunk {
-                start: 0,
-                end: 1,
-                text: " ",
-                color: self.appearance.text_hex,
-            }];
+    ) -> std::sync::Arc<Vec<LineChunkSpec>> {
+        let key = HighlightChunkCacheKey {
+            buffer_version: self.buffer.version(),
+            line,
+            range_start: line_range.start,
+            range_end: line_range.end,
+        };
+        if let Some(chunks) = self.highlight_chunk_cache.borrow().get(&key) {
+            return chunks;
         }
 
+        let chunks =
+            std::sync::Arc::new(self.build_highlighted_line_chunks(line, line_text, line_range));
+        self.highlight_chunk_cache.borrow_mut().insert(key, chunks)
+    }
+
+    fn build_highlighted_line_chunks(
+        &self,
+        line: usize,
+        line_text: &str,
+        line_range: Range<usize>,
+    ) -> Vec<LineChunkSpec> {
         let mut chunks = Vec::new();
         let mut cursor = 0;
         let span_range = self
@@ -668,16 +706,9 @@ impl TextEditorView {
     }
 }
 
-struct LineChunk<'a> {
-    start: usize,
-    end: usize,
-    text: &'a str,
-    color: u32,
-}
-
-fn push_chunk<'a>(
-    chunks: &mut Vec<LineChunk<'a>>,
-    line_text: &'a str,
+fn push_chunk(
+    chunks: &mut Vec<LineChunkSpec>,
+    line_text: &str,
     start: usize,
     end: usize,
     color: u32,
@@ -689,12 +720,7 @@ fn push_chunk<'a>(
     if !line_text.is_char_boundary(start) || !line_text.is_char_boundary(end) {
         return;
     }
-    chunks.push(LineChunk {
-        start,
-        end,
-        text: &line_text[start..end],
-        color,
-    });
+    chunks.push(LineChunkSpec { start, end, color });
 }
 
 fn contains_special_char(text: &str) -> bool {

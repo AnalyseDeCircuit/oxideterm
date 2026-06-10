@@ -123,14 +123,14 @@ pub(crate) fn clear_terminal_buffer<T: EventListener>(term: &mut Term<T>) {
     Handler::clear_screen(term, ansi::ClearMode::Saved);
 }
 
-fn apply_terminal_output_processor(
+fn apply_terminal_output_processor<'a>(
     processor: &Option<TerminalOutputProcessor>,
-    bytes: &[u8],
-) -> Vec<u8> {
+    bytes: &'a [u8],
+) -> std::borrow::Cow<'a, [u8]> {
     let Some(processor) = processor else {
-        return bytes.to_vec();
+        return std::borrow::Cow::Borrowed(bytes);
     };
-    processor(bytes)
+    std::borrow::Cow::Owned(processor(bytes))
 }
 
 // Session backends are kept in this module scope so the TerminalSession

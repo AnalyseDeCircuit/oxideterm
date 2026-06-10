@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use gpui::{
     App, Bounds, ContentMask, CursorStyle, Element, ElementId, Entity, FocusHandle,
@@ -40,7 +40,7 @@ pub(crate) struct TerminalElement {
     selected_search_match: Option<usize>,
     command_marks: Vec<TerminalCommandMark>,
     selected_command_mark_id: Option<String>,
-    highlight_rules: Vec<TerminalHighlightRule>,
+    highlight_rules: Arc<[TerminalHighlightRule]>,
     hovered_link: Option<TerminalLinkRange>,
     bidi_enabled: bool,
     input: Option<TerminalElementInput>,
@@ -204,7 +204,7 @@ impl TerminalElement {
             selected_search_match,
             command_marks: Vec::new(),
             selected_command_mark_id: None,
-            highlight_rules: Vec::new(),
+            highlight_rules: Arc::from(Vec::<TerminalHighlightRule>::new()),
             hovered_link,
             bidi_enabled,
             input,
@@ -213,8 +213,11 @@ impl TerminalElement {
         }
     }
 
-    pub(crate) fn highlight_rules(mut self, rules: Vec<TerminalHighlightRule>) -> Self {
-        self.highlight_rules = rules;
+    pub(crate) fn highlight_rules(
+        mut self,
+        rules: impl Into<Arc<[TerminalHighlightRule]>>,
+    ) -> Self {
+        self.highlight_rules = rules.into();
         self
     }
 

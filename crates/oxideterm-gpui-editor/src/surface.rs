@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{cell::RefCell, ops::Range, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, ops::Range, sync::Arc};
 
 use gpui::{
     AnyElement, App, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity,
@@ -154,6 +154,53 @@ struct DisplayRowsCache {
     rows: Arc<Vec<DisplayRow>>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) struct HighlightChunkCacheKey {
+    pub buffer_version: u64,
+    pub line: usize,
+    pub range_start: usize,
+    pub range_end: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct LineChunkSpec {
+    pub start: usize,
+    pub end: usize,
+    pub color: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+struct HighlightChunkCache {
+    entries: HashMap<HighlightChunkCacheKey, Arc<Vec<LineChunkSpec>>>,
+}
+
+impl HighlightChunkCache {
+    // Keep roughly several large viewports of rendered rows. The cache is a
+    // scroll hot-path helper, so clearing it wholesale is cheaper than managing
+    // a per-entry LRU list in the render path.
+    const MAX_ENTRIES: usize = 2048;
+
+    fn get(&self, key: &HighlightChunkCacheKey) -> Option<Arc<Vec<LineChunkSpec>>> {
+        self.entries.get(key).cloned()
+    }
+
+    fn insert(
+        &mut self,
+        key: HighlightChunkCacheKey,
+        chunks: Arc<Vec<LineChunkSpec>>,
+    ) -> Arc<Vec<LineChunkSpec>> {
+        if self.entries.len() >= Self::MAX_ENTRIES {
+            self.entries.clear();
+        }
+        self.entries.insert(key, chunks.clone());
+        chunks
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SelectionDrag {
     anchor: BufferOffset,
@@ -195,6 +242,7 @@ pub struct TextEditorView {
     folded_ranges: Vec<FoldRange>,
     fold_revision: u64,
     display_rows_cache: RefCell<Option<DisplayRowsCache>>,
+    highlight_chunk_cache: RefCell<HighlightChunkCache>,
     selection_drag: Option<SelectionDrag>,
     transparent_background: bool,
 }
@@ -231,6 +279,7 @@ impl TextEditorView {
             folded_ranges: Vec::new(),
             fold_revision: 0,
             display_rows_cache: RefCell::new(None),
+            highlight_chunk_cache: RefCell::new(HighlightChunkCache::default()),
             selection_drag: None,
             transparent_background: false,
         }
@@ -322,6 +371,7 @@ impl TextEditorView {
         self.metrics =
             EditorMetrics::from_theme_with_editor_typography(tokens, font_size, line_height);
         self.transparent_background = background_active;
+        self.highlight_chunk_cache.borrow_mut().clear();
         // Tauri wires Settings.ide.wordWrap into CodeMirror's lineWrapping
         // compartment. Keep that as editor settings, not a one-off render flag.
         self.settings.soft_wrap = word_wrap;
@@ -615,6 +665,7 @@ impl TextEditorView {
                 .map(|syntax| syntax.bracket_pairs(text))
                 .unwrap_or_default()
         });
+        self.highlight_chunk_cache.borrow_mut().clear();
     }
 
     fn build_highlight_line_spans(&self) -> Vec<Range<usize>> {
@@ -884,4 +935,57 @@ impl Focusable for TextEditorView {
 
 fn colored_text(text: &str, color: u32) -> Div {
     div().text_color(rgb(color)).child(text.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec};
+
+    fn cache_key(line: usize) -> HighlightChunkCacheKey {
+        HighlightChunkCacheKey {
+            buffer_version: 7,
+            line,
+            range_start: 0,
+            range_end: 16,
+        }
+    }
+
+    #[test]
+    fn highlight_chunk_cache_reuses_arc_for_same_visible_row_segment() {
+        let mut cache = HighlightChunkCache::default();
+        let key = cache_key(3);
+        let chunks = Arc::new(vec![LineChunkSpec {
+            start: 0,
+            end: 4,
+            color: 0xff00ff,
+        }]);
+
+        let inserted = cache.insert(key, chunks.clone());
+        let cached = cache.get(&key).expect("highlight chunks should be cached");
+
+        assert!(Arc::ptr_eq(&inserted, &cached));
+        assert!(Arc::ptr_eq(&chunks, &cached));
+    }
+
+    #[test]
+    fn highlight_chunk_cache_clears_when_scroll_window_exceeds_limit() {
+        let mut cache = HighlightChunkCache::default();
+        for line in 0..HighlightChunkCache::MAX_ENTRIES {
+            cache.insert(cache_key(line), Arc::new(Vec::new()));
+        }
+
+        cache.insert(
+            cache_key(HighlightChunkCache::MAX_ENTRIES),
+            Arc::new(Vec::new()),
+        );
+
+        assert!(cache.get(&cache_key(0)).is_none());
+        assert!(
+            cache
+                .get(&cache_key(HighlightChunkCache::MAX_ENTRIES))
+                .is_some()
+        );
+    }
 }

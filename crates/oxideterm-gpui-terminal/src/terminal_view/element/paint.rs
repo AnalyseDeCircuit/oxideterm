@@ -152,7 +152,7 @@ pub(crate) fn paint_terminal_image(
         window.paint_quad(fill(bounds, rgba(0x528bff29)));
         return;
     };
-    let data = image.image.snapshot.data.as_ref();
+    let data = image.image.snapshot.data.as_deref();
     let frame_index =
         terminal_image_frame_index(render_image, data, image.image.animation_started_at);
     if terminal_image_should_request_frame(render_image, data, image.image.animation_started_at) {

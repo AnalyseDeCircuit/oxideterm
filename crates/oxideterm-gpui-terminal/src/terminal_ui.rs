@@ -67,7 +67,7 @@ pub struct TerminalUiPreferences {
     pub command_selection_labels: TerminalCommandSelectionLabels,
     pub trzsz_labels: TerminalTrzszLabels,
     pub notice_sink: Option<Arc<dyn Fn(TerminalNotice) + Send + Sync + 'static>>,
-    pub highlight_rules: Vec<TerminalHighlightRule>,
+    pub highlight_rules: Arc<[TerminalHighlightRule]>,
     pub trzsz_policy: Option<TrzszTransferPolicy>,
 }
 
@@ -100,7 +100,7 @@ impl Default for TerminalUiPreferences {
             command_selection_labels: TerminalCommandSelectionLabels::default(),
             trzsz_labels: TerminalTrzszLabels::default(),
             notice_sink: None,
-            highlight_rules: Vec::new(),
+            highlight_rules: Arc::from(Vec::<TerminalHighlightRule>::new()),
             trzsz_policy: None,
         }
     }

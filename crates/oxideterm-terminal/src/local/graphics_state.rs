@@ -1,5 +1,5 @@
 pub(crate) struct TerminalGraphicsState {
-    images: HashMap<TerminalImageId, TerminalImageData>,
+    images: HashMap<TerminalImageId, Arc<TerminalImageData>>,
     image_versions: HashMap<TerminalImageId, u64>,
     placements: Vec<TerminalImagePlacement>,
     image_order: VecDeque<TerminalImageId>,
@@ -41,7 +41,7 @@ impl TerminalGraphicsState {
                 self.image_versions.insert(image.id, next_version);
                 self.storage_bytes += image_storage_bytes(&image);
                 self.image_order.push_back(image.id);
-                self.images.insert(image.id, image);
+                self.images.insert(image.id, Arc::new(image));
                 self.evict_images_over_budget();
                 None
             }
@@ -63,7 +63,7 @@ impl TerminalGraphicsState {
                 if !self.image_order.iter().any(|id| *id == image.id) {
                     self.image_order.push_back(image.id);
                 }
-                self.images.insert(image.id, image);
+                self.images.insert(image.id, Arc::new(image));
                 self.evict_images_over_budget();
                 None
             }
