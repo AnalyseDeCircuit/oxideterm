@@ -584,11 +584,13 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
 ) -> TerminalSnapshot {
     let content = term.renderable_content();
     let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
-    let mut rows = vec![
-        TerminalRow {
+    let mut rows = (0..size.rows)
+        .map(|row| TerminalRow {
+            absolute_line: row as i64 - content.display_offset as i64,
             wrapped: false,
             active_input: false,
-            cells: vec![
+            signature: 0,
+            cells: Arc::new(vec![
                 TerminalCell {
                     ch: ' ',
                     zerowidth: String::new(),
@@ -600,10 +602,9 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
                     cursor: false,
                 };
                 size.cols
-            ],
-        };
-        size.rows
-    ];
+            ]),
+        })
+        .collect::<Vec<_>>();
 
     for indexed in content.display_iter {
         let Some(row) = viewport_row_for_grid_line(indexed.point.line.0, content.display_offset)
@@ -636,7 +637,7 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
         let attrs = attrs_from_flags(cell.flags);
         let (fg, bg) = style_colors_for_cell(cell.fg, cell.bg, ch, attrs);
 
-        rows[row].cells[col] = TerminalCell {
+        rows[row].cells_mut()[col] = TerminalCell {
             ch,
             zerowidth: cell.zerowidth().into_iter().flatten().copied().collect(),
             wide: cell.flags.contains(Flags::WIDE_CHAR),
@@ -654,11 +655,16 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
     let cursor_col = content.cursor.point.column.0;
 
     if cursor_row < rows.len() && cursor_col < size.cols {
-        rows[cursor_row].cells[cursor_col].cursor = true;
+        rows[cursor_row].cells_mut()[cursor_col].cursor = true;
         mark_active_input_rows(&mut rows, cursor_row);
     }
 
+    for row in &mut rows {
+        row.refresh_signature();
+    }
+
     TerminalSnapshot {
+        generation: 0,
         cols: size.cols,
         rows: size.rows,
         cursor_col,

@@ -42,6 +42,7 @@ fn triple_click_line_selection_expands_across_wrapped_visual_rows() {
     let mut snapshot = multirow_snapshot(&["hello", "world", "next"]);
     snapshot.cols = 5;
     snapshot.lines[0].wrapped = true;
+    snapshot.lines[0].refresh_signature();
 
     let selection = line_selection_at_point(&snapshot, TerminalPoint { row: 1, col: 2 })
         .expect("line selection");
@@ -60,6 +61,7 @@ fn selected_text_joins_soft_wrapped_rows_without_newline() {
     let mut snapshot = multirow_snapshot(&["hello", "world", "next"]);
     snapshot.cols = 5;
     snapshot.lines[0].wrapped = true;
+    snapshot.lines[0].refresh_signature();
     let selection = TerminalSelection {
         anchor: TerminalGridPoint { line: 0, col: 0 },
         head: TerminalGridPoint { line: 1, col: 4 },
@@ -147,7 +149,8 @@ fn selection_rects_track_grid_lines_when_scrollback_offset_changes() {
 #[test]
 fn selected_text_preserves_zero_width_marks() {
     let mut snapshot = selection_snapshot("e");
-    snapshot.lines[0].cells[0].zerowidth = "\u{301}".to_string();
+    snapshot.lines[0].cells_mut()[0].zerowidth = "\u{301}".to_string();
+    snapshot.lines[0].refresh_signature();
     let selection = TerminalSelection {
         anchor: TerminalGridPoint { line: 0, col: 0 },
         head: TerminalGridPoint { line: 0, col: 0 },
@@ -165,6 +168,7 @@ fn semantic_word_selection_crosses_soft_wrapped_rows() {
     let mut snapshot = multirow_snapshot(&["hello", "world"]);
     snapshot.cols = 5;
     snapshot.lines[0].wrapped = true;
+    snapshot.lines[0].refresh_signature();
 
     let selection = word_selection_at_point(&snapshot, TerminalPoint { row: 1, col: 1 })
         .expect("semantic selection");

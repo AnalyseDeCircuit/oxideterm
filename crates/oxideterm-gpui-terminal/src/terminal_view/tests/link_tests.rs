@@ -60,6 +60,7 @@ fn display_cell_width(ch: char) -> usize {
 fn display_links_skip_path_like_text_on_active_input_row() {
     let mut snapshot = selection_snapshot("cd ../");
     snapshot.lines[0].active_input = true;
+    snapshot.lines[0].refresh_signature();
 
     let links = detect_link_ranges(&snapshot);
     let display_links = display_link_ranges(&snapshot);
@@ -74,6 +75,8 @@ fn display_links_skip_path_like_text_on_wrapped_active_input_rows() {
     let mut snapshot = multirow_snapshot(&["echo ./src/", "main.rs"]);
     snapshot.lines[0].active_input = true;
     snapshot.lines[1].active_input = true;
+    snapshot.lines[0].refresh_signature();
+    snapshot.lines[1].refresh_signature();
 
     let links = detect_link_ranges(&snapshot);
     let display_links = display_link_ranges(&snapshot);
@@ -85,9 +88,10 @@ fn display_links_skip_path_like_text_on_wrapped_active_input_rows() {
 #[test]
 fn link_detection_prefers_osc8_hyperlink_ranges() {
     let mut snapshot = selection_snapshot("click");
-    for cell in &mut snapshot.lines[0].cells[..5] {
+    for cell in &mut snapshot.lines[0].cells_mut()[..5] {
         cell.hyperlink = Some("https://example.com/osc8".to_string());
     }
+    snapshot.lines[0].refresh_signature();
 
     let links = detect_link_ranges(&snapshot);
 
@@ -101,9 +105,10 @@ fn link_detection_prefers_osc8_hyperlink_ranges() {
 #[test]
 fn link_detection_does_not_duplicate_url_inside_osc8_range() {
     let mut snapshot = selection_snapshot("https://example.com");
-    for cell in &mut snapshot.lines[0].cells[..19] {
+    for cell in &mut snapshot.lines[0].cells_mut()[..19] {
         cell.hyperlink = Some("https://example.com/osc8".to_string());
     }
+    snapshot.lines[0].refresh_signature();
 
     let links = detect_link_ranges(&snapshot);
 
@@ -114,10 +119,11 @@ fn link_detection_does_not_duplicate_url_inside_osc8_range() {
 #[test]
 fn terminal_element_underlines_osc8_links_even_on_colored_cells() {
     let mut snapshot = selection_snapshot("click");
-    for cell in &mut snapshot.lines[0].cells[..5] {
+    for cell in &mut snapshot.lines[0].cells_mut()[..5] {
         cell.bg = TerminalColor::rgb(0x61, 0xaf, 0xef);
         cell.hyperlink = Some("https://example.com/osc8".to_string());
     }
+    snapshot.lines[0].refresh_signature();
 
     let layout = TerminalElement::new(
         snapshot,
@@ -183,10 +189,11 @@ fn terminal_element_underlines_detected_links() {
 #[test]
 fn terminal_element_does_not_recolor_path_like_prompt_segments() {
     let mut snapshot = selection_snapshot("~/Documents/OxideTerm");
-    for cell in &mut snapshot.lines[0].cells[..21] {
+    for cell in &mut snapshot.lines[0].cells_mut()[..21] {
         cell.bg = TerminalColor::rgb(0x61, 0xaf, 0xef);
         cell.fg = TerminalColor::rgb(0xff, 0xff, 0xff);
     }
+    snapshot.lines[0].refresh_signature();
 
     let layout = TerminalElement::new(
         snapshot,

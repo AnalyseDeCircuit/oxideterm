@@ -351,28 +351,35 @@ fn reordered_cluster_indices(levels: &[u8]) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalRow};
 
     use super::*;
 
     fn row(text: &str) -> TerminalRow {
-        TerminalRow {
-            cells: text
-                .chars()
-                .map(|ch| TerminalCell {
-                    ch,
-                    zerowidth: String::new(),
-                    wide: false,
-                    fg: TerminalColor::rgb(0xff, 0xff, 0xff),
-                    bg: TerminalColor::rgb(0, 0, 0),
-                    attrs: TerminalAttrs::default(),
-                    hyperlink: None,
-                    cursor: false,
-                })
-                .collect(),
+        let mut row = TerminalRow {
+            absolute_line: 0,
+            cells: Arc::new(
+                text.chars()
+                    .map(|ch| TerminalCell {
+                        ch,
+                        zerowidth: String::new(),
+                        wide: false,
+                        fg: TerminalColor::rgb(0xff, 0xff, 0xff),
+                        bg: TerminalColor::rgb(0, 0, 0),
+                        attrs: TerminalAttrs::default(),
+                        hyperlink: None,
+                        cursor: false,
+                    })
+                    .collect(),
+            ),
             wrapped: false,
             active_input: false,
-        }
+            signature: 0,
+        };
+        row.refresh_signature();
+        row
     }
 
     #[test]
@@ -419,7 +426,7 @@ mod tests {
     fn rtl_content_ignores_terminal_trailing_blanks() {
         let mut row = row("שלום");
         while row.cells.len() < 16 {
-            row.cells.push(TerminalCell {
+            row.cells_mut().push(TerminalCell {
                 ch: ' ',
                 zerowidth: String::new(),
                 wide: false,
@@ -430,6 +437,7 @@ mod tests {
                 cursor: false,
             });
         }
+        row.refresh_signature();
 
         let line = visual_line_for_row(&row);
 

@@ -55,11 +55,12 @@ impl TerminalPane {
     }
 
     pub fn reset_recording_playback(&mut self, cols: usize, rows: usize, cx: &mut Context<Self>) {
-        self.snapshot = {
+        let snapshot = {
             let mut terminal = self.terminal.lock();
             terminal.reset_recording_playback(cols, rows);
             terminal.snapshot()
         };
+        self.snapshot = self.stamp_snapshot(snapshot);
         self.selection = None;
         self.search_query = None;
         self.selected_search_match = None;
@@ -67,21 +68,23 @@ impl TerminalPane {
     }
 
     pub fn feed_recording_output(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        self.snapshot = {
+        let snapshot = {
             let mut terminal = self.terminal.lock();
             terminal.feed_recording_output(bytes);
             let _ = terminal.take_events();
             terminal.snapshot()
         };
+        self.snapshot = self.stamp_snapshot(snapshot);
         cx.notify();
     }
 
     pub fn resize_recording_playback(&mut self, cols: usize, rows: usize, cx: &mut Context<Self>) {
-        self.snapshot = {
+        let snapshot = {
             let mut terminal = self.terminal.lock();
             let _ = terminal.resize_with_cell_size(cols, rows, 0, 0);
             terminal.snapshot()
         };
+        self.snapshot = self.stamp_snapshot(snapshot);
         cx.notify();
     }
 

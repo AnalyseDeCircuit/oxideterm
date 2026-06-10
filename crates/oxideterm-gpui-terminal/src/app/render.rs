@@ -80,7 +80,8 @@ impl Render for TerminalPane {
         )
         .highlight_rules(self.preferences.highlight_rules.clone())
         .transparent_background(background.is_some())
-        .ghost_text(self.autosuggest_ghost_text());
+        .ghost_text(self.autosuggest_ghost_text())
+        .layout_cache(self.layout_cache.clone());
 
         div()
             .id("terminal-pane")
@@ -671,7 +672,15 @@ fn apply_theme_defaults_to_snapshot(snapshot: &mut TerminalSnapshot, theme: &Ter
     let themed_foreground = terminal_color_from_hex(theme.foreground);
 
     for row in &mut snapshot.lines {
-        for cell in &mut row.cells {
+        let uses_default_theme = row
+            .cells
+            .iter()
+            .any(|cell| cell.bg == default_background || cell.fg == default_foreground);
+        if !uses_default_theme {
+            continue;
+        }
+
+        for cell in row.cells_mut() {
             if cell.bg == default_background {
                 cell.bg = themed_background;
             }
@@ -679,5 +688,6 @@ fn apply_theme_defaults_to_snapshot(snapshot: &mut TerminalSnapshot, theme: &Ter
                 cell.fg = themed_foreground;
             }
         }
+        row.refresh_signature();
     }
 }

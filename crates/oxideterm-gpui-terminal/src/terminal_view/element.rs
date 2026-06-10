@@ -1,4 +1,9 @@
-use std::{ops::Range, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet, hash_map::DefaultHasher},
+    hash::{Hash, Hasher},
+    ops::Range,
+    sync::Arc,
+};
 
 use gpui::{
     App, Bounds, ContentMask, CursorStyle, Element, ElementId, Entity, FocusHandle,
@@ -9,6 +14,7 @@ use oxideterm_terminal::{
     TerminalColor, TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
 };
 use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row};
+use parking_lot::Mutex;
 
 use crate::app::{TerminalInputHandler, TerminalPane, TerminalRenderedImage};
 use crate::terminal_ui::*;
@@ -45,6 +51,7 @@ pub(crate) struct TerminalElement {
     bidi_enabled: bool,
     input: Option<TerminalElementInput>,
     transparent_background: bool,
+    layout_cache: Option<Arc<Mutex<TerminalLayoutCache>>>,
 }
 
 #[derive(Clone)]
@@ -54,6 +61,7 @@ pub(crate) struct TerminalElementInput {
 }
 
 #[allow(dead_code)]
+#[derive(Clone)]
 pub(crate) struct TerminalElementLayout {
     pub(crate) backgrounds: Vec<TerminalRect>,
     pub(crate) highlight_backgrounds: Vec<TerminalRect>,
@@ -113,6 +121,144 @@ pub(crate) struct TerminalCursor {
 pub(crate) struct TerminalScrollbar {
     pub(crate) top: f32,
     pub(crate) height: f32,
+}
+
+#[derive(Clone)]
+struct TerminalRowLayout {
+    backgrounds: Vec<TerminalRowRect>,
+    selections: Vec<TerminalRowRect>,
+    text_runs: Vec<TerminalRowTextRun>,
+    cursor: Option<TerminalRowCursor>,
+}
+
+#[derive(Clone)]
+struct TerminalRowRect {
+    col: usize,
+    cells: usize,
+    color: Hsla,
+}
+
+#[derive(Clone)]
+struct TerminalRowTextRun {
+    col: usize,
+    text: String,
+    cells: usize,
+    style: TextRun,
+}
+
+#[derive(Clone, Copy)]
+struct TerminalRowCursor {
+    col: usize,
+    shape: TerminalCursorShape,
+}
+
+struct TerminalLogicalHighlightLayout {
+    backgrounds: Vec<TerminalRowOffsetRect>,
+    underlines: Vec<TerminalRowOffsetRect>,
+    outlines: Vec<TerminalRowOffsetRect>,
+    foregrounds: HashMap<(usize, usize), Hsla>,
+}
+
+struct TerminalRowOffsetRect {
+    row_offset: usize,
+    col: usize,
+    cells: usize,
+    color: Hsla,
+}
+
+struct TerminalRowLinkLayout {
+    ranges: Vec<TerminalRelativeLinkRange>,
+}
+
+struct TerminalRelativeLinkRange {
+    start_col: usize,
+    end_col: usize,
+    target: String,
+    kind: TerminalLinkKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct TerminalRowLayoutCacheKey {
+    signature: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+struct TerminalLogicalHighlightCacheKey {
+    signature: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+struct TerminalRowLinkCacheKey {
+    signature: u64,
+}
+
+#[derive(Default)]
+pub(crate) struct TerminalLayoutCache {
+    rows: HashMap<TerminalRowLayoutCacheKey, Arc<TerminalRowLayout>>,
+    highlights: HashMap<TerminalLogicalHighlightCacheKey, Arc<TerminalLogicalHighlightLayout>>,
+    links: HashMap<TerminalRowLinkCacheKey, Arc<TerminalRowLinkLayout>>,
+}
+
+impl TerminalLayoutCache {
+    fn get_or_insert_row_with(
+        &mut self,
+        key: TerminalRowLayoutCacheKey,
+        build: impl FnOnce() -> TerminalRowLayout,
+    ) -> Arc<TerminalRowLayout> {
+        if let Some(row_layout) = self.rows.get(&key) {
+            return row_layout.clone();
+        }
+
+        if self.rows.len() > 4096 {
+            // Keep the cache bounded across long scrollback sessions. This is a
+            // coarse eviction policy, but row layout is cheap to rebuild safely.
+            self.rows.clear();
+        }
+
+        let layout = Arc::new(build());
+        self.rows.insert(key, layout.clone());
+        layout
+    }
+
+    fn get_or_insert_highlight_with(
+        &mut self,
+        key: TerminalLogicalHighlightCacheKey,
+        build: impl FnOnce() -> TerminalLogicalHighlightLayout,
+    ) -> Arc<TerminalLogicalHighlightLayout> {
+        if let Some(layout) = self.highlights.get(&key) {
+            return layout.clone();
+        }
+
+        if self.highlights.len() > 1024 {
+            // Highlight entries are per logical line and can grow while
+            // scrolling through large output; clear coarsely to stay bounded.
+            self.highlights.clear();
+        }
+
+        let layout = Arc::new(build());
+        self.highlights.insert(key, layout.clone());
+        layout
+    }
+
+    fn get_or_insert_links_with(
+        &mut self,
+        key: TerminalRowLinkCacheKey,
+        build: impl FnOnce() -> TerminalRowLinkLayout,
+    ) -> Arc<TerminalRowLinkLayout> {
+        if let Some(layout) = self.links.get(&key) {
+            return layout.clone();
+        }
+
+        if self.links.len() > 4096 {
+            // Link detection is row-local, so coarse eviction is cheap and
+            // avoids unbounded cache growth across long scrollback.
+            self.links.clear();
+        }
+
+        let layout = Arc::new(build());
+        self.links.insert(key, layout.clone());
+        layout
+    }
 }
 
 impl TerminalElement {
@@ -210,6 +356,7 @@ impl TerminalElement {
             input,
             transparent_background: false,
             ghost_text: None,
+            layout_cache: None,
         }
     }
 
@@ -241,22 +388,38 @@ impl TerminalElement {
         self
     }
 
+    pub(crate) fn layout_cache(mut self, cache: Arc<Mutex<TerminalLayoutCache>>) -> Self {
+        self.layout_cache = Some(cache);
+        self
+    }
+
     #[allow(dead_code)]
     pub(crate) fn layout(&self) -> TerminalElementLayout {
-        self.layout_for_rows(0..self.snapshot.rows)
+        self.layout_for_rows(0..self.snapshot.rows, None)
     }
 
     pub(crate) fn layout_for_bounds(&self, bounds: Bounds<Pixels>) -> TerminalElementLayout {
-        self.layout_for_rows(terminal_visible_rows(bounds, &self.snapshot, &self.metrics))
+        self.layout_for_rows(
+            terminal_visible_rows(bounds, &self.snapshot, &self.metrics),
+            None,
+        )
     }
 
-    fn layout_for_rows(&self, visible_rows: Range<usize>) -> TerminalElementLayout {
+    fn layout_for_rows(
+        &self,
+        visible_rows: Range<usize>,
+        mut cache: Option<&mut TerminalLayoutCache>,
+    ) -> TerminalElementLayout {
         let mut backgrounds = Vec::new();
-        let highlight_layout = terminal_highlights_for_rows(
-            &self.snapshot,
-            &self.highlight_rules,
-            visible_rows.clone(),
-        );
+        let highlight_layout = if let Some(cache) = cache.as_deref_mut() {
+            self.cached_highlight_layout_for_rows(visible_rows.clone(), cache)
+        } else {
+            terminal_highlights_for_rows(
+                &self.snapshot,
+                &self.highlight_rules,
+                visible_rows.clone(),
+            )
+        };
         let search_matches = map_rects_to_visual(
             &self.snapshot,
             self.bidi_enabled,
@@ -301,165 +464,44 @@ impl TerminalElement {
         let ime_cursor_bounds = cursor_row_visible
             .then(|| ime_cursor_bounds_for_snapshot(&self.snapshot, &self.metrics))
             .flatten();
-        let link_ranges = display_link_ranges_for_rows(&self.snapshot, visible_rows.clone());
-        let mut current_run: Option<BatchedTextRun> = None;
+        let link_ranges = if let Some(cache) = cache.as_deref_mut() {
+            self.cached_link_ranges_for_rows(visible_rows.clone(), cache)
+        } else {
+            display_link_ranges_for_rows(&self.snapshot, visible_rows.clone())
+        };
 
         for row_index in visible_rows {
             let Some(row) = self.snapshot.lines.get(row_index) else {
                 continue;
             };
-            let mut current_background: Option<TerminalRect> = None;
-            let mut current_selection: Option<TerminalRect> = None;
-            let visual_line = visual_line_for_row_with_bidi(row, self.bidi_enabled);
-
-            for (col_index, cell) in row.cells.iter().enumerate() {
-                let paint_col = if visual_line.has_bidi {
-                    visual_line.visual_col_for_logical_col(col_index)
-                } else {
-                    col_index
-                };
-                if self.cursor_visible
-                    && cell.cursor
-                    && self.snapshot.cursor_shape != TerminalCursorShape::Hidden
-                {
-                    cursor = Some(TerminalCursor {
-                        row: row_index,
-                        col: paint_col,
-                        shape: self.snapshot.cursor_shape,
-                    });
-                }
-
-                let block_cursor = self.cursor_visible
-                    && cell.cursor
-                    && self.snapshot.cursor_shape == TerminalCursorShape::Block;
-                let fg = if block_cursor {
-                    to_hsla(terminal_color_from_hex(self.theme.background))
-                } else if let Some(highlight_fg) =
-                    highlight_layout.foreground_for_cell(row_index, col_index)
-                {
-                    highlight_fg
-                } else {
-                    to_hsla(cell.fg)
-                };
-                let bg = if block_cursor {
-                    to_hsla(terminal_color_from_hex(self.theme.header_foreground))
-                } else {
-                    to_hsla(cell.bg)
-                };
-                let cell_width = if cell.wide { 2 } else { 1 };
-
-                if bg != terminal_background {
-                    extend_or_push_rect(
-                        &mut current_background,
-                        &mut backgrounds,
+            let row_layout = if let Some(cache) = cache.as_deref_mut() {
+                let key = self.row_layout_cache_key(row_index);
+                cache.get_or_insert_row_with(key, || {
+                    self.row_layout(
                         row_index,
-                        paint_col,
-                        cell_width,
-                        bg,
-                    );
-                } else if let Some(rect) = current_background.take() {
-                    backgrounds.push(rect);
-                }
-
-                if self.selection.is_some_and(|selection| {
-                    selection.contains_viewport_cell(
-                        row_index,
-                        col_index,
-                        self.snapshot.display_offset,
+                        row,
+                        &highlight_layout,
+                        &link_ranges,
+                        terminal_background,
                     )
-                }) {
-                    extend_or_push_rect(
-                        &mut current_selection,
-                        &mut selections,
-                        row_index,
-                        paint_col,
-                        cell_width,
-                        to_hsla(TerminalColor::rgb(0x2d, 0x4f, 0x7f)),
-                    );
-                } else if let Some(rect) = current_selection.take() {
-                    selections.push(rect);
-                }
-
-                if visual_line.has_bidi {
-                    continue;
-                }
-
-                if cell.ch != ' '
-                    || !cell.zerowidth.is_empty()
-                    || (self.cursor_visible && cell.cursor)
-                {
-                    let link = !block_cursor
-                        && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
-                        && link_ranges_contain(&link_ranges, row_index, col_index);
-                    let style = text_run_for_cell(cell, fg, link, &self.metrics);
-                    let cell_text = cell_text(cell);
-                    if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
-                        if let Some(run) = current_run.take() {
-                            text_runs.push(run);
-                        }
-                        text_runs.push(BatchedTextRun {
-                            row: row_index,
-                            col: col_index,
-                            text: cell_text,
-                            cells: cell_width,
-                            style,
-                        });
-                        continue;
-                    }
-                    if let Some(run) = &mut current_run {
-                        if run.row == row_index
-                            && run.col + run.cells == col_index
-                            && text_run_style_matches(&run.style, &style)
-                        {
-                            run.text.push_str(&cell_text);
-                            run.cells += cell_width;
-                            run.style.len += cell_text.len();
-                            continue;
-                        }
-                    }
-
-                    if let Some(run) = current_run.take() {
-                        text_runs.push(run);
-                    }
-                    current_run = Some(BatchedTextRun {
-                        row: row_index,
-                        col: col_index,
-                        text: cell_text,
-                        cells: cell_width,
-                        style,
-                    });
-                } else if let Some(run) = current_run.take() {
-                    text_runs.push(run);
-                }
-            }
-
-            if visual_line.has_bidi {
-                if let Some(run) = current_run.take() {
-                    text_runs.push(run);
-                }
-                push_visual_text_runs(
+                })
+            } else {
+                Arc::new(self.row_layout(
                     row_index,
                     row,
-                    &visual_line,
-                    &link_ranges,
-                    &self.metrics,
-                    self.cursor_visible,
-                    self.snapshot.cursor_shape,
-                    &self.theme,
                     &highlight_layout,
-                    &mut text_runs,
-                );
-            }
-
-            if let Some(rect) = current_background.take() {
-                backgrounds.push(rect);
-            }
-            if let Some(rect) = current_selection.take() {
-                selections.push(rect);
-            }
-            if let Some(run) = current_run.take() {
-                text_runs.push(run);
-            }
+                    &link_ranges,
+                    terminal_background,
+                ))
+            };
+            append_cached_row_layout(
+                row_index,
+                &row_layout,
+                &mut backgrounds,
+                &mut selections,
+                &mut text_runs,
+                &mut cursor,
+            );
         }
 
         TerminalElementLayout {
@@ -509,6 +551,287 @@ impl TerminalElement {
         }
     }
 
+    fn cached_layout_for_bounds(&self, bounds: Bounds<Pixels>) -> Arc<TerminalElementLayout> {
+        let Some(cache) = &self.layout_cache else {
+            return Arc::new(self.layout_for_bounds(bounds));
+        };
+        let visible_rows = terminal_visible_rows(bounds, &self.snapshot, &self.metrics);
+        let mut cache = cache.lock();
+        Arc::new(self.layout_for_rows(visible_rows, Some(&mut cache)))
+    }
+
+    fn cached_highlight_layout_for_rows(
+        &self,
+        visible_rows: Range<usize>,
+        cache: &mut TerminalLayoutCache,
+    ) -> TerminalHighlightLayout {
+        let mut layout = TerminalHighlightLayout::empty();
+        let mut seen_ranges = HashSet::new();
+
+        for row_index in visible_rows {
+            let Some(line_range) = logical_line_range_for_row(&self.snapshot, row_index) else {
+                continue;
+            };
+            if !seen_ranges.insert(line_range.clone()) {
+                continue;
+            }
+
+            let key = self.logical_highlight_cache_key(line_range.clone());
+            let relative_layout = cache.get_or_insert_highlight_with(key, || {
+                let line_layout = terminal_highlights_for_rows(
+                    &self.snapshot,
+                    &self.highlight_rules,
+                    line_range.clone(),
+                );
+                relative_highlight_layout(line_range.start, line_layout)
+            });
+            append_relative_highlight_layout(line_range.start, &relative_layout, &mut layout);
+        }
+
+        layout
+    }
+
+    fn cached_link_ranges_for_rows(
+        &self,
+        visible_rows: Range<usize>,
+        cache: &mut TerminalLayoutCache,
+    ) -> Vec<TerminalLinkRange> {
+        let mut ranges = Vec::new();
+        for row_index in visible_rows {
+            if self.snapshot.lines.get(row_index).is_none() {
+                continue;
+            }
+            let key = self.row_link_cache_key(row_index);
+            let row_layout = cache.get_or_insert_links_with(key, || {
+                relative_link_layout(display_link_ranges_for_rows(
+                    &self.snapshot,
+                    row_index..row_index + 1,
+                ))
+            });
+            ranges.extend(row_layout.ranges.iter().map(|range| TerminalLinkRange {
+                row: row_index,
+                start_col: range.start_col,
+                end_col: range.end_col,
+                target: range.target.clone(),
+                kind: range.kind,
+            }));
+        }
+        ranges
+    }
+
+    fn row_layout(
+        &self,
+        row_index: usize,
+        row: &oxideterm_terminal::TerminalRow,
+        highlight_layout: &TerminalHighlightLayout,
+        link_ranges: &[TerminalLinkRange],
+        terminal_background: Hsla,
+    ) -> TerminalRowLayout {
+        let mut backgrounds = Vec::new();
+        let mut selections = Vec::new();
+        let mut text_runs = Vec::new();
+        let mut cursor = None;
+        let mut current_background: Option<TerminalRowRect> = None;
+        let mut current_selection: Option<TerminalRowRect> = None;
+        let mut current_run: Option<TerminalRowTextRun> = None;
+        let visual_line = visual_line_for_row_with_bidi(row, self.bidi_enabled);
+
+        for (col_index, cell) in row.cells.iter().enumerate() {
+            let paint_col = if visual_line.has_bidi {
+                visual_line.visual_col_for_logical_col(col_index)
+            } else {
+                col_index
+            };
+            if self.cursor_visible
+                && cell.cursor
+                && self.snapshot.cursor_shape != TerminalCursorShape::Hidden
+            {
+                cursor = Some(TerminalRowCursor {
+                    col: paint_col,
+                    shape: self.snapshot.cursor_shape,
+                });
+            }
+
+            let block_cursor = self.cursor_visible
+                && cell.cursor
+                && self.snapshot.cursor_shape == TerminalCursorShape::Block;
+            let fg = if block_cursor {
+                to_hsla(terminal_color_from_hex(self.theme.background))
+            } else if let Some(highlight_fg) =
+                highlight_layout.foreground_for_cell(row_index, col_index)
+            {
+                highlight_fg
+            } else {
+                to_hsla(cell.fg)
+            };
+            let bg = if block_cursor {
+                to_hsla(terminal_color_from_hex(self.theme.header_foreground))
+            } else {
+                to_hsla(cell.bg)
+            };
+            let cell_width = if cell.wide { 2 } else { 1 };
+
+            if bg != terminal_background {
+                extend_or_push_row_rect(
+                    &mut current_background,
+                    &mut backgrounds,
+                    paint_col,
+                    cell_width,
+                    bg,
+                );
+            } else if let Some(rect) = current_background.take() {
+                backgrounds.push(rect);
+            }
+
+            if self.selection.is_some_and(|selection| {
+                selection.contains_viewport_cell(row_index, col_index, self.snapshot.display_offset)
+            }) {
+                extend_or_push_row_rect(
+                    &mut current_selection,
+                    &mut selections,
+                    paint_col,
+                    cell_width,
+                    to_hsla(TerminalColor::rgb(0x2d, 0x4f, 0x7f)),
+                );
+            } else if let Some(rect) = current_selection.take() {
+                selections.push(rect);
+            }
+
+            if visual_line.has_bidi {
+                continue;
+            }
+
+            if cell.ch != ' ' || !cell.zerowidth.is_empty() || (self.cursor_visible && cell.cursor)
+            {
+                let link = !block_cursor
+                    && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
+                    && link_ranges_contain(link_ranges, row_index, col_index);
+                let style = text_run_for_cell(cell, fg, link, &self.metrics);
+                let cell_text = cell_text(cell);
+                if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
+                    if let Some(run) = current_run.take() {
+                        text_runs.push(run);
+                    }
+                    text_runs.push(TerminalRowTextRun {
+                        col: col_index,
+                        text: cell_text,
+                        cells: cell_width,
+                        style,
+                    });
+                    continue;
+                }
+                if let Some(run) = &mut current_run
+                    && run.col + run.cells == col_index
+                    && text_run_style_matches(&run.style, &style)
+                {
+                    run.text.push_str(&cell_text);
+                    run.cells += cell_width;
+                    run.style.len += cell_text.len();
+                    continue;
+                }
+
+                if let Some(run) = current_run.take() {
+                    text_runs.push(run);
+                }
+                current_run = Some(TerminalRowTextRun {
+                    col: col_index,
+                    text: cell_text,
+                    cells: cell_width,
+                    style,
+                });
+            } else if let Some(run) = current_run.take() {
+                text_runs.push(run);
+            }
+        }
+
+        if visual_line.has_bidi {
+            push_visual_text_runs(
+                row_index,
+                row,
+                &visual_line,
+                link_ranges,
+                &self.metrics,
+                self.cursor_visible,
+                self.snapshot.cursor_shape,
+                &self.theme,
+                highlight_layout,
+                &mut text_runs,
+            );
+        }
+
+        if let Some(rect) = current_background.take() {
+            backgrounds.push(rect);
+        }
+        if let Some(rect) = current_selection.take() {
+            selections.push(rect);
+        }
+        if let Some(run) = current_run.take() {
+            text_runs.push(run);
+        }
+
+        TerminalRowLayout {
+            backgrounds,
+            selections,
+            text_runs,
+            cursor,
+        }
+    }
+
+    fn row_layout_cache_key(&self, row_index: usize) -> TerminalRowLayoutCacheKey {
+        let mut hasher = DefaultHasher::new();
+        self.snapshot.cols.hash(&mut hasher);
+        self.snapshot.cursor_shape.hash(&mut hasher);
+        if let Some(row) = self.snapshot.lines.get(row_index) {
+            row.absolute_line.hash(&mut hasher);
+            row.signature.hash(&mut hasher);
+        }
+        hash_logical_line_signatures(&self.snapshot, row_index, &mut hasher);
+        f32::from(self.metrics.font_size)
+            .to_bits()
+            .hash(&mut hasher);
+        f32::from(self.metrics.cell_width)
+            .to_bits()
+            .hash(&mut hasher);
+        f32::from(self.metrics.line_height)
+            .to_bits()
+            .hash(&mut hasher);
+        self.theme.background.hash(&mut hasher);
+        self.theme.foreground.hash(&mut hasher);
+        self.theme.header_foreground.hash(&mut hasher);
+        self.cursor_visible.hash(&mut hasher);
+        self.bidi_enabled.hash(&mut hasher);
+        hash_selection(self.selection, &mut hasher);
+        hash_highlight_rules(&self.highlight_rules, &mut hasher);
+        TerminalRowLayoutCacheKey {
+            signature: hasher.finish(),
+        }
+    }
+
+    fn logical_highlight_cache_key(&self, rows: Range<usize>) -> TerminalLogicalHighlightCacheKey {
+        let mut hasher = DefaultHasher::new();
+        self.snapshot.cols.hash(&mut hasher);
+        hash_highlight_rules(&self.highlight_rules, &mut hasher);
+        rows.len().hash(&mut hasher);
+        for row in self.snapshot.lines.get(rows).unwrap_or(&[]) {
+            row.absolute_line.hash(&mut hasher);
+            row.signature.hash(&mut hasher);
+        }
+        TerminalLogicalHighlightCacheKey {
+            signature: hasher.finish(),
+        }
+    }
+
+    fn row_link_cache_key(&self, row_index: usize) -> TerminalRowLinkCacheKey {
+        let mut hasher = DefaultHasher::new();
+        if let Some(row) = self.snapshot.lines.get(row_index) {
+            row.absolute_line.hash(&mut hasher);
+            row.signature.hash(&mut hasher);
+        }
+        TerminalRowLinkCacheKey {
+            signature: hasher.finish(),
+        }
+    }
+
     fn ghost_text_run(&self, cursor_row_visible: bool) -> Option<BatchedTextRun> {
         if self.marked_text.is_some()
             || !cursor_row_visible
@@ -553,6 +876,229 @@ fn visual_line_for_row_with_bidi(
         visual_line_for_row(row)
     } else {
         TerminalVisualLine::identity(row)
+    }
+}
+
+fn append_cached_row_layout(
+    row_index: usize,
+    row_layout: &TerminalRowLayout,
+    backgrounds: &mut Vec<TerminalRect>,
+    selections: &mut Vec<TerminalRect>,
+    text_runs: &mut Vec<BatchedTextRun>,
+    cursor: &mut Option<TerminalCursor>,
+) {
+    backgrounds.extend(row_layout.backgrounds.iter().map(|rect| TerminalRect {
+        row: row_index,
+        col: rect.col,
+        cells: rect.cells,
+        color: rect.color,
+    }));
+    selections.extend(row_layout.selections.iter().map(|rect| TerminalRect {
+        row: row_index,
+        col: rect.col,
+        cells: rect.cells,
+        color: rect.color,
+    }));
+    text_runs.extend(row_layout.text_runs.iter().map(|run| BatchedTextRun {
+        row: row_index,
+        col: run.col,
+        text: run.text.clone(),
+        cells: run.cells,
+        style: run.style.clone(),
+    }));
+    if let Some(row_cursor) = row_layout.cursor {
+        *cursor = Some(TerminalCursor {
+            row: row_index,
+            col: row_cursor.col,
+            shape: row_cursor.shape,
+        });
+    }
+}
+
+fn extend_or_push_row_rect(
+    current: &mut Option<TerminalRowRect>,
+    rects: &mut Vec<TerminalRowRect>,
+    col: usize,
+    cells: usize,
+    color: Hsla,
+) {
+    if let Some(rect) = current
+        && rect.col + rect.cells == col
+        && rect.color == color
+    {
+        rect.cells += cells;
+        return;
+    }
+
+    if let Some(rect) = current.take() {
+        rects.push(rect);
+    }
+    *current = Some(TerminalRowRect { col, cells, color });
+}
+
+fn hash_logical_line_signatures(
+    snapshot: &TerminalSnapshot,
+    row_index: usize,
+    hasher: &mut impl Hasher,
+) {
+    let Some(line_range) = logical_line_range_for_row(snapshot, row_index) else {
+        return;
+    };
+    for row in &snapshot.lines[line_range] {
+        row.absolute_line.hash(hasher);
+        row.signature.hash(hasher);
+    }
+}
+
+fn logical_line_range_for_row(
+    snapshot: &TerminalSnapshot,
+    row_index: usize,
+) -> Option<Range<usize>> {
+    if row_index >= snapshot.lines.len() {
+        return None;
+    }
+
+    let mut start = row_index;
+    while start > 0 && snapshot.lines.get(start).is_some_and(|line| line.wrapped) {
+        start -= 1;
+    }
+
+    let mut end = row_index + 1;
+    while end < snapshot.lines.len() && snapshot.lines.get(end).is_some_and(|line| line.wrapped) {
+        end += 1;
+    }
+
+    Some(start..end)
+}
+
+fn relative_highlight_layout(
+    start_row: usize,
+    layout: TerminalHighlightLayout,
+) -> TerminalLogicalHighlightLayout {
+    TerminalLogicalHighlightLayout {
+        backgrounds: relative_highlight_rects(start_row, layout.backgrounds),
+        underlines: relative_highlight_rects(start_row, layout.underlines),
+        outlines: relative_highlight_rects(start_row, layout.outlines),
+        foregrounds: layout
+            .foregrounds
+            .into_iter()
+            .filter_map(|((row, col), color)| {
+                row.checked_sub(start_row)
+                    .map(|row_offset| ((row_offset, col), color))
+            })
+            .collect(),
+    }
+}
+
+fn relative_highlight_rects(
+    start_row: usize,
+    rects: Vec<TerminalRect>,
+) -> Vec<TerminalRowOffsetRect> {
+    rects
+        .into_iter()
+        .filter_map(|rect| {
+            rect.row
+                .checked_sub(start_row)
+                .map(|row_offset| TerminalRowOffsetRect {
+                    row_offset,
+                    col: rect.col,
+                    cells: rect.cells,
+                    color: rect.color,
+                })
+        })
+        .collect()
+}
+
+fn append_relative_highlight_layout(
+    start_row: usize,
+    relative: &TerminalLogicalHighlightLayout,
+    layout: &mut TerminalHighlightLayout,
+) {
+    layout.backgrounds.extend(
+        relative
+            .backgrounds
+            .iter()
+            .map(|rect| absolute_highlight_rect(start_row, rect)),
+    );
+    layout.underlines.extend(
+        relative
+            .underlines
+            .iter()
+            .map(|rect| absolute_highlight_rect(start_row, rect)),
+    );
+    layout.outlines.extend(
+        relative
+            .outlines
+            .iter()
+            .map(|rect| absolute_highlight_rect(start_row, rect)),
+    );
+    layout.foregrounds.extend(
+        relative
+            .foregrounds
+            .iter()
+            .map(|((row_offset, col), color)| ((start_row + row_offset, *col), *color)),
+    );
+}
+
+fn absolute_highlight_rect(start_row: usize, rect: &TerminalRowOffsetRect) -> TerminalRect {
+    TerminalRect {
+        row: start_row + rect.row_offset,
+        col: rect.col,
+        cells: rect.cells,
+        color: rect.color,
+    }
+}
+
+fn relative_link_layout(ranges: Vec<TerminalLinkRange>) -> TerminalRowLinkLayout {
+    TerminalRowLinkLayout {
+        ranges: ranges
+            .into_iter()
+            .map(|range| TerminalRelativeLinkRange {
+                start_col: range.start_col,
+                end_col: range.end_col,
+                target: range.target,
+                kind: range.kind,
+            })
+            .collect(),
+    }
+}
+
+fn hash_selection(selection: Option<TerminalSelection>, hasher: &mut impl Hasher) {
+    let Some(selection) = selection else {
+        0u8.hash(hasher);
+        return;
+    };
+    1u8.hash(hasher);
+    selection.anchor.line.hash(hasher);
+    selection.anchor.col.hash(hasher);
+    selection.head.line.hash(hasher);
+    selection.head.col.hash(hasher);
+    match selection.mode {
+        crate::terminal_view::selection::TerminalSelectionMode::Simple => 0u8,
+        crate::terminal_view::selection::TerminalSelectionMode::Block => 1,
+        crate::terminal_view::selection::TerminalSelectionMode::Semantic => 2,
+        crate::terminal_view::selection::TerminalSelectionMode::Lines => 3,
+    }
+    .hash(hasher);
+}
+
+fn hash_highlight_rules(rules: &[TerminalHighlightRule], hasher: &mut impl Hasher) {
+    rules.len().hash(hasher);
+    for rule in rules {
+        rule.id.hash(hasher);
+        rule.pattern.hash(hasher);
+        rule.is_regex.hash(hasher);
+        rule.case_sensitive.hash(hasher);
+        rule.foreground.hash(hasher);
+        rule.background.hash(hasher);
+        match rule.render_mode {
+            TerminalHighlightRenderMode::Background => 0u8,
+            TerminalHighlightRenderMode::Underline => 1,
+            TerminalHighlightRenderMode::Outline => 2,
+        }
+        .hash(hasher);
+        rule.enabled.hash(hasher);
+        rule.priority.hash(hasher);
     }
 }
 
@@ -691,7 +1237,7 @@ fn has_clock_like_text(text: &str) -> bool {
 }
 
 fn push_visual_text_runs(
-    row_index: usize,
+    source_row_index: usize,
     row: &oxideterm_terminal::TerminalRow,
     visual_line: &TerminalVisualLine,
     link_ranges: &[TerminalLinkRange],
@@ -700,9 +1246,9 @@ fn push_visual_text_runs(
     cursor_shape: TerminalCursorShape,
     theme: &TerminalUiTheme,
     highlight_layout: &TerminalHighlightLayout,
-    text_runs: &mut Vec<BatchedTextRun>,
+    text_runs: &mut Vec<TerminalRowTextRun>,
 ) {
-    let mut current_run: Option<BatchedTextRun> = None;
+    let mut current_run: Option<TerminalRowTextRun> = None;
     for cluster in &visual_line.clusters {
         let Some(cell) = row.cells.get(cluster.logical_col) else {
             continue;
@@ -719,7 +1265,7 @@ fn push_visual_text_runs(
         let fg = if block_cursor {
             to_hsla(terminal_color_from_hex(theme.background))
         } else if let Some(highlight_fg) =
-            highlight_layout.foreground_for_cell(row_index, cluster.logical_col)
+            highlight_layout.foreground_for_cell(source_row_index, cluster.logical_col)
         {
             highlight_fg
         } else {
@@ -727,14 +1273,13 @@ fn push_visual_text_runs(
         };
         let link = !block_cursor
             && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
-            && link_ranges_contain(link_ranges, row_index, cluster.logical_col);
+            && link_ranges_contain(link_ranges, source_row_index, cluster.logical_col);
         let style = text_run_for_cell(cell, fg, link, metrics);
         if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
             if let Some(run) = current_run.take() {
                 text_runs.push(run);
             }
-            text_runs.push(BatchedTextRun {
-                row: row_index,
+            text_runs.push(TerminalRowTextRun {
                 col: cluster.visual_col,
                 text: cluster.text.clone(),
                 cells: cluster.cells,
@@ -757,8 +1302,7 @@ fn push_visual_text_runs(
         if let Some(run) = current_run.take() {
             text_runs.push(run);
         }
-        current_run = Some(BatchedTextRun {
-            row: row_index,
+        current_run = Some(TerminalRowTextRun {
             col: cluster.visual_col,
             text: cluster.text.clone(),
             cells: cluster.cells,
@@ -820,7 +1364,7 @@ impl IntoElement for TerminalElement {
 
 impl Element for TerminalElement {
     type RequestLayoutState = ();
-    type PrepaintState = TerminalElementLayout;
+    type PrepaintState = Arc<TerminalElementLayout>;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -852,7 +1396,7 @@ impl Element for TerminalElement {
         _window: &mut Window,
         _cx: &mut App,
     ) -> Self::PrepaintState {
-        self.layout_for_bounds(bounds)
+        self.cached_layout_for_bounds(bounds)
     }
 
     fn paint(
@@ -970,5 +1514,139 @@ impl Element for TerminalElement {
                 window,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use std::sync::Arc;
+
+    use gpui::px;
+    use oxideterm_terminal::{
+        TerminalCell, TerminalColor, TerminalCursorShape, TerminalRow, TerminalSnapshot,
+    };
+
+    use super::*;
+
+    fn empty_row_layout() -> TerminalRowLayout {
+        TerminalRowLayout {
+            backgrounds: Vec::new(),
+            selections: Vec::new(),
+            text_runs: Vec::new(),
+            cursor: None,
+        }
+    }
+
+    fn test_metrics() -> TerminalMetrics {
+        TerminalMetrics {
+            font: terminal_font(),
+            font_size: px(14.0),
+            cell_width: px(8.0),
+            line_height: px(10.0),
+        }
+    }
+
+    fn row(absolute_line: i64, ch: char) -> TerminalRow {
+        let mut row = TerminalRow {
+            absolute_line,
+            cells: Arc::new(vec![TerminalCell {
+                ch,
+                zerowidth: String::new(),
+                wide: false,
+                fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
+                bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+                attrs: Default::default(),
+                hyperlink: None,
+                cursor: false,
+            }]),
+            wrapped: false,
+            active_input: false,
+            signature: 0,
+        };
+        row.refresh_signature();
+        row
+    }
+
+    fn snapshot(display_offset: usize, lines: Vec<TerminalRow>) -> TerminalSnapshot {
+        TerminalSnapshot {
+            generation: 1,
+            cols: 1,
+            rows: lines.len(),
+            cursor_col: 0,
+            cursor_row: 0,
+            cursor_shape: TerminalCursorShape::Block,
+            display_offset,
+            scrollback_lines: display_offset,
+            lines,
+            images: Vec::new(),
+        }
+    }
+
+    fn element(snapshot: TerminalSnapshot) -> TerminalElement {
+        TerminalElement::new(
+            snapshot,
+            None,
+            test_metrics(),
+            true,
+            None,
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn terminal_layout_cache_reuses_matching_row_key() {
+        let mut cache = TerminalLayoutCache::default();
+        let key = TerminalRowLayoutCacheKey { signature: 1 };
+
+        let first = cache.get_or_insert_row_with(key.clone(), empty_row_layout);
+        let second = cache.get_or_insert_row_with(key, empty_row_layout);
+
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn terminal_layout_cache_replaces_changed_row_key() {
+        let mut cache = TerminalLayoutCache::default();
+
+        let first = cache
+            .get_or_insert_row_with(TerminalRowLayoutCacheKey { signature: 1 }, empty_row_layout);
+        let second = cache
+            .get_or_insert_row_with(TerminalRowLayoutCacheKey { signature: 2 }, empty_row_layout);
+
+        assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn row_layout_cache_key_survives_scroll_position_changes() {
+        let before = element(snapshot(1, vec![row(-1, 'a'), row(0, 'b')]));
+        let after = element(snapshot(0, vec![row(0, 'b'), row(1, 'c')]));
+
+        assert_eq!(
+            before.row_layout_cache_key(1),
+            after.row_layout_cache_key(0)
+        );
+    }
+
+    #[test]
+    fn row_link_cache_key_survives_scroll_position_changes() {
+        let before = element(snapshot(1, vec![row(-1, 'a'), row(0, 'b')]));
+        let after = element(snapshot(0, vec![row(0, 'b'), row(1, 'c')]));
+
+        assert_eq!(before.row_link_cache_key(1), after.row_link_cache_key(0));
+    }
+
+    #[test]
+    fn logical_highlight_cache_key_survives_scroll_position_changes() {
+        let before = element(snapshot(1, vec![row(-1, 'a'), row(0, 'b')]));
+        let after = element(snapshot(0, vec![row(0, 'b'), row(1, 'c')]));
+
+        assert_eq!(
+            before.logical_highlight_cache_key(1..2),
+            after.logical_highlight_cache_key(0..1)
+        );
     }
 }

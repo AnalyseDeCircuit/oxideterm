@@ -17,7 +17,7 @@ impl TerminalPane {
             return;
         }
 
-        self.snapshot = snapshot;
+        self.snapshot = self.stamp_snapshot(snapshot);
         let now = now_millis();
         let command_line = self.absolute_cursor_line();
         let start_line = self.prompt_block_start_line(command_line);

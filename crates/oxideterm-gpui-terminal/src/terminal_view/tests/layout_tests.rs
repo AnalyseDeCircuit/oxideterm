@@ -27,7 +27,8 @@ fn terminal_element_lays_out_autosuggest_ghost_text_at_cursor() {
     let mut snapshot = selection_snapshot("git");
     snapshot.cursor_row = 0;
     snapshot.cursor_col = 3;
-    snapshot.lines[0].cells[3].cursor = true;
+    snapshot.lines[0].cells_mut()[3].cursor = true;
+    snapshot.lines[0].refresh_signature();
 
     let layout = TerminalElement::new(
         snapshot,
@@ -61,10 +62,11 @@ fn terminal_element_lays_out_autosuggest_ghost_text_at_cursor() {
 fn terminal_element_truncates_autosuggest_ghost_text_to_visible_columns() {
     let mut snapshot = selection_snapshot("git");
     snapshot.cols = 5;
-    snapshot.lines[0].cells.truncate(5);
+    snapshot.lines[0].cells_mut().truncate(5);
     snapshot.cursor_row = 0;
     snapshot.cursor_col = 3;
-    snapshot.lines[0].cells[3].cursor = true;
+    snapshot.lines[0].cells_mut()[3].cursor = true;
+    snapshot.lines[0].refresh_signature();
 
     let layout = TerminalElement::new(
         snapshot,
@@ -91,7 +93,8 @@ fn terminal_element_hides_autosuggest_ghost_text_during_ime_composition() {
     let mut snapshot = selection_snapshot("git");
     snapshot.cursor_row = 0;
     snapshot.cursor_col = 3;
-    snapshot.lines[0].cells[3].cursor = true;
+    snapshot.lines[0].cells_mut()[3].cursor = true;
+    snapshot.lines[0].refresh_signature();
 
     let layout = TerminalElement::new(
         snapshot,
@@ -115,7 +118,8 @@ fn terminal_element_hides_autosuggest_ghost_text_during_ime_composition() {
 #[test]
 fn terminal_element_shapes_zero_width_marks_with_base_cell() {
     let mut snapshot = selection_snapshot("e");
-    snapshot.lines[0].cells[0].zerowidth = "\u{301}".to_string();
+    snapshot.lines[0].cells_mut()[0].zerowidth = "\u{301}".to_string();
+    snapshot.lines[0].refresh_signature();
     let layout = TerminalElement::new(
         snapshot,
         None,
@@ -139,9 +143,10 @@ fn terminal_element_shapes_zero_width_marks_with_base_cell() {
 #[test]
 fn terminal_element_keeps_emoji_zwj_cluster_in_one_wide_cell() {
     let mut snapshot = selection_snapshot(" ");
-    snapshot.lines[0].cells[0].ch = '👨';
-    snapshot.lines[0].cells[0].zerowidth = "\u{200d}👩\u{200d}👧\u{200d}👦".to_string();
-    snapshot.lines[0].cells[0].wide = true;
+    snapshot.lines[0].cells_mut()[0].ch = '👨';
+    snapshot.lines[0].cells_mut()[0].zerowidth = "\u{200d}👩\u{200d}👧\u{200d}👦".to_string();
+    snapshot.lines[0].cells_mut()[0].wide = true;
+    snapshot.lines[0].refresh_signature();
     let layout = TerminalElement::new(
         snapshot,
         None,
@@ -221,7 +226,8 @@ fn terminal_element_maps_rtl_cursor_to_visual_column() {
     let mut snapshot = selection_snapshot("abc שלום def");
     snapshot.cursor_row = 0;
     snapshot.cursor_col = 4;
-    snapshot.lines[0].cells[4].cursor = true;
+    snapshot.lines[0].cells_mut()[4].cursor = true;
+    snapshot.lines[0].refresh_signature();
     let expected_col = oxideterm_terminal_unicode::visual_line_for_row(&snapshot.lines[0])
         .visual_col_for_logical_col(4);
     let layout = TerminalElement::new(
@@ -329,10 +335,11 @@ fn terminal_element_prepaint_clips_layout_to_visible_rows() {
         "hidden two cargo",
         "hidden three",
     ]);
-    snapshot.lines[3].cells[0].bg = TerminalColor::rgb(0xff, 0, 0);
+    snapshot.lines[3].cells_mut()[0].bg = TerminalColor::rgb(0xff, 0, 0);
     snapshot.cursor_row = 3;
     snapshot.cursor_col = 0;
-    snapshot.lines[3].cells[0].cursor = true;
+    snapshot.lines[3].cells_mut()[0].cursor = true;
+    snapshot.lines[3].refresh_signature();
 
     let layout = TerminalElement::new(
         snapshot,

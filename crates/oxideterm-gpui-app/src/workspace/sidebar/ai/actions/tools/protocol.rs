@@ -1239,6 +1239,7 @@ mod tests {
     #[test]
     fn terminal_screen_payload_uses_tauri_cursor_and_buffer_shape() {
         let snapshot = oxideterm_terminal::TerminalSnapshot {
+            generation: 0,
             cols: 80,
             rows: 24,
             cursor_col: 2,

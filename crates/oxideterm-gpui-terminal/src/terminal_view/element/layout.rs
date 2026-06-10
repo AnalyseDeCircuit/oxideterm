@@ -1,39 +1,11 @@
 use std::ops::Range;
 
-use gpui::{Bounds, Hsla, Pixels, point, px, rgba, size};
+use gpui::{Bounds, Pixels, point, px, rgba, size};
 use oxideterm_terminal::{TerminalSearchMatch, TerminalSnapshot};
 use oxideterm_terminal_unicode::visual_line_for_row;
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{TerminalRect, TerminalScrollbar};
-
-pub(crate) fn extend_or_push_rect(
-    current: &mut Option<TerminalRect>,
-    rects: &mut Vec<TerminalRect>,
-    row: usize,
-    col: usize,
-    cells: usize,
-    color: Hsla,
-) {
-    if let Some(rect) = current
-        && rect.row == row
-        && rect.col + rect.cells == col
-        && rect.color == color
-    {
-        rect.cells += cells;
-        return;
-    }
-
-    if let Some(rect) = current.take() {
-        rects.push(rect);
-    }
-    *current = Some(TerminalRect {
-        row,
-        col,
-        cells,
-        color,
-    });
-}
 
 pub(crate) fn terminal_scrollbar(
     snapshot: &TerminalSnapshot,

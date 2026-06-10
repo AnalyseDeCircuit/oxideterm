@@ -146,11 +146,12 @@ impl TerminalPane {
                 // Tauri writes TextProgressBar VT output into the local terminal
                 // renderer. Sending it back to the remote PTY would corrupt the
                 // trzsz protocol stream, so native has a dedicated local feed.
-                self.snapshot = {
+                let snapshot = {
                     let mut terminal = self.terminal.lock();
                     terminal.feed_trzsz_terminal_output(&bytes);
                     terminal.snapshot()
                 };
+                self.snapshot = self.stamp_snapshot(snapshot);
                 cx.notify();
             }
             TrzszWorkerEvent::Completed => {

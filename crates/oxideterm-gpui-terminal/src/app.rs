@@ -92,6 +92,7 @@ pub struct TerminalPane {
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
     snapshot: TerminalSnapshot,
+    snapshot_generation: u64,
     metrics: TerminalMetrics,
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
@@ -133,6 +134,7 @@ pub struct TerminalPane {
     render_stats_window_frames: u32,
     render_stats_window_writes: usize,
     image_cache: ImageRenderCache,
+    layout_cache: Arc<Mutex<TerminalLayoutCache>>,
     background_image_cache: BackgroundImageRenderCache,
     bounds: Option<Bounds<Pixels>>,
     last_pty_resize: Option<(usize, usize, u16, u16)>,
@@ -305,7 +307,7 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
-        let snapshot = terminal.lock().snapshot();
+        let snapshot = terminal.lock().snapshot().with_generation(1);
         let focus_handle = cx.focus_handle();
         let metrics = TerminalMetrics::measure_with_preferences(window, &preferences);
         window.focus(&focus_handle);
@@ -344,6 +346,7 @@ impl TerminalPane {
             settings: TerminalUiSettings::from_preferences(&preferences),
             theme: preferences.theme.clone(),
             snapshot,
+            snapshot_generation: 1,
             metrics,
             selection: None,
             pending_paste: None,
@@ -394,6 +397,7 @@ impl TerminalPane {
                 cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
                 cache
             },
+            layout_cache: Arc::new(Mutex::new(TerminalLayoutCache::default())),
             background_image_cache: {
                 let mut cache = BackgroundImageRenderCache::default();
                 cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
@@ -413,6 +417,17 @@ impl TerminalPane {
 
     pub fn title(&self) -> SharedString {
         self.title.clone()
+    }
+
+    fn stamp_snapshot(&mut self, mut snapshot: TerminalSnapshot) -> TerminalSnapshot {
+        // Raw backend snapshots are stateless; the pane owns frame generation
+        // so future render caches can invalidate without changing backends.
+        snapshot.reuse_unchanged_rows_from(&self.snapshot);
+        self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
+        if self.snapshot_generation == 0 {
+            self.snapshot_generation = 1;
+        }
+        snapshot.with_generation(self.snapshot_generation)
     }
 
     pub fn shared_session(&self) -> SharedTerminalSession {
@@ -627,11 +642,12 @@ impl TerminalPane {
         // send Ctrl-L or other bytes to the running shell. The emulator and the
         // command fact ledger are both owned by this pane, so keep the mutation
         // on the GPUI entity thread.
-        self.snapshot = {
+        let snapshot = {
             let mut terminal = self.terminal.lock();
             terminal.clear_buffer();
             terminal.snapshot()
         };
+        self.snapshot = self.stamp_snapshot(snapshot);
         self.selection = None;
         self.search_query = None;
         self.selected_search_match = None;
@@ -697,7 +713,7 @@ impl TerminalPane {
         let cleared_command_mark_selection = self.clear_command_mark_selection_for_tui_mode(mode);
         let mut needs_notify = event_effect.needs_notify;
         if let Some(snapshot) = next_snapshot {
-            self.snapshot = snapshot;
+            self.snapshot = self.stamp_snapshot(snapshot);
             needs_notify = true;
         } else if self.preferences.show_fps_overlay || cleared_command_mark_selection {
             needs_notify = true;
@@ -1153,7 +1169,7 @@ impl TerminalPane {
             if let Some(recorder) = self.recorder.as_mut() {
                 recorder.record_resize(cols, rows);
             }
-            self.snapshot = snapshot;
+            self.snapshot = self.stamp_snapshot(snapshot);
             cx.notify();
         }
     }

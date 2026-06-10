@@ -1,5 +1,5 @@
 use super::*;
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use gpui::{Bounds, FontFeatures, Keystroke, Modifiers, MouseButton, Pixels, point, px, rgb, size};
 use oxideterm_terminal::{
@@ -20,6 +20,7 @@ fn test_metrics() -> TerminalMetrics {
 
 fn test_snapshot(display_offset: usize, scrollback_lines: usize) -> TerminalSnapshot {
     TerminalSnapshot {
+        generation: 0,
         cols: 80,
         rows: 10,
         cursor_col: 0,
@@ -39,9 +40,11 @@ fn cursor_snapshot() -> TerminalSnapshot {
     snapshot.cursor_col = 0;
     snapshot.cursor_row = 0;
     snapshot.lines = vec![oxideterm_terminal::TerminalRow {
+        absolute_line: 0,
         wrapped: false,
         active_input: false,
-        cells: vec![
+        signature: 0,
+        cells: Arc::new(vec![
             TerminalCell {
                 ch: ' ',
                 zerowidth: String::new(),
@@ -62,8 +65,11 @@ fn cursor_snapshot() -> TerminalSnapshot {
                 hyperlink: None,
                 cursor: false,
             },
-        ],
+        ]),
     }];
+    for row in &mut snapshot.lines {
+        row.refresh_signature();
+    }
     snapshot
 }
 
@@ -93,11 +99,15 @@ fn row_from_text(text: &str, cols: usize) -> oxideterm_terminal::TerminalRow {
             cursor: false,
         });
     }
-    oxideterm_terminal::TerminalRow {
-        cells,
+    let mut row = oxideterm_terminal::TerminalRow {
+        absolute_line: 0,
+        cells: Arc::new(cells),
         wrapped: false,
         active_input: false,
-    }
+        signature: 0,
+    };
+    row.refresh_signature();
+    row
 }
 
 fn selection_snapshot(text: &str) -> TerminalSnapshot {
@@ -145,11 +155,15 @@ fn row_from_text_with_wide_spacers(text: &str) -> oxideterm_terminal::TerminalRo
             });
         }
     }
-    oxideterm_terminal::TerminalRow {
-        cells,
+    let mut row = oxideterm_terminal::TerminalRow {
+        absolute_line: 0,
+        cells: Arc::new(cells),
         wrapped: false,
         active_input: false,
-    }
+        signature: 0,
+    };
+    row.refresh_signature();
+    row
 }
 
 fn wide_snapshot(text: &str) -> TerminalSnapshot {
@@ -184,6 +198,10 @@ fn multirow_snapshot(rows: &[&str]) -> TerminalSnapshot {
         .iter()
         .map(|row| row_from_text(row, snapshot.cols))
         .collect();
+    for (row_index, row) in snapshot.lines.iter_mut().enumerate() {
+        row.absolute_line = row_index as i64 - snapshot.display_offset as i64;
+        row.refresh_signature();
+    }
     snapshot
 }
 
@@ -268,8 +286,9 @@ fn ime_cursor_bounds_track_terminal_cursor_even_when_cursor_blink_is_hidden() {
 #[test]
 fn ime_cursor_bounds_expand_for_wide_cursor_cell() {
     let mut snapshot = cursor_snapshot();
-    snapshot.lines[0].cells[0].ch = '界';
-    snapshot.lines[0].cells[0].wide = true;
+    snapshot.lines[0].cells_mut()[0].ch = '界';
+    snapshot.lines[0].cells_mut()[0].wide = true;
+    snapshot.lines[0].refresh_signature();
 
     let bounds = ime_cursor_bounds_for_snapshot(&snapshot, &test_metrics()).unwrap();
 
