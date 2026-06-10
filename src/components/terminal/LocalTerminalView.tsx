@@ -1646,8 +1646,11 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const handleContextPaste = useCallback(() => {
     void readSystemClipboardText().then((text) => {
       processTerminalPaste(text, false);
+      requestAnimationFrame(() => {
+        focusTerminal('strong');
+      });
     });
-  }, [processTerminalPaste]);
+  }, [focusTerminal, processTerminalPaste]);
 
   const handleHighlightRulesAutoDisabled = useCallback((ruleIds: string[], reason: 'timeout' | 'error') => {
     markRuntimeDisabledHighlightRules(
