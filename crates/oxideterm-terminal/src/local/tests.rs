@@ -331,6 +331,55 @@ mod tests {
     }
 
     #[test]
+    fn image_snapshots_share_terminal_image_data() {
+        let size = TerminalSize {
+            cols: 4,
+            rows: 4,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let term = Term::new(Config::default(), &size, VoidListener);
+        let mut graphics = TerminalGraphicsState::default();
+        graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
+            id: TerminalImageId(9),
+            protocol: TerminalImageProtocol::Kitty,
+            version: 0,
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0, 255].into(),
+            frames: Vec::new(),
+            animation: TerminalImageAnimationState::default(),
+            name: None,
+        }));
+        graphics.handle_event(TerminalGraphicsEvent::Place(TerminalImagePlacement {
+            id: TerminalImageId(9),
+            protocol: TerminalImageProtocol::Kitty,
+            line: 0,
+            row: 0,
+            col: 0,
+            cols: 1,
+            rows: 1,
+            pixel_width: 1,
+            pixel_height: 1,
+            source_x: 0,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
+            z_index: 0,
+            placeholder: false,
+        }));
+
+        let first = snapshot_from_term(&term, size, &graphics);
+        let second = snapshot_from_term(&term, size, &graphics);
+        let first_data = first.images[0].data.as_ref().expect("image data");
+        let second_data = second.images[0].data.as_ref().expect("image data");
+
+        // Snapshot construction runs every changed tick; image payloads must stay
+        // shared so ordinary terminal output does not clone frame metadata.
+        assert!(Arc::ptr_eq(first_data, second_data));
+    }
+
+    #[test]
     fn yazi_kgp_old_sequence_anchors_image_at_moved_cursor_in_snapshot() {
         let size = TerminalSize {
             cols: 80,

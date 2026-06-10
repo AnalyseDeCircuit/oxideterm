@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use alacritty_terminal::vte::ansi::CursorShape as AlacCursorShape;
 pub use oxideterm_terminal_graphics::{
     GraphicsOptions, TerminalImageAnimationState, TerminalImageData, TerminalImageFrame,
@@ -87,7 +89,7 @@ pub struct TerminalImageSnapshot {
     pub z_index: i32,
     pub placeholder: bool,
     pub version: u64,
-    pub data: Option<TerminalImageData>,
+    pub data: Option<Arc<TerminalImageData>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

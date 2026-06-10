@@ -1092,29 +1092,31 @@ impl WorkspaceApp {
                     let _ = tx.send(notice);
                 })
             }),
-            highlight_rules: terminal
-                .highlight_rules
-                .iter()
-                .map(|rule| UiHighlightRule {
-                    id: rule.id.clone(),
-                    pattern: rule.pattern.clone(),
-                    is_regex: rule.is_regex,
-                    case_sensitive: rule.case_sensitive,
-                    foreground: rule.foreground.clone(),
-                    background: rule.background.clone(),
-                    render_mode: match rule.render_mode {
-                        HighlightRuleRenderMode::Background => {
-                            TerminalHighlightRenderMode::Background
-                        }
-                        HighlightRuleRenderMode::Underline => {
-                            TerminalHighlightRenderMode::Underline
-                        }
-                        HighlightRuleRenderMode::Outline => TerminalHighlightRenderMode::Outline,
-                    },
-                    enabled: rule.enabled,
-                    priority: rule.priority,
-                })
-                .collect(),
+            highlight_rules: Arc::from(
+                terminal
+                    .highlight_rules
+                    .iter()
+                    .map(|rule| UiHighlightRule {
+                        id: rule.id.clone(),
+                        pattern: rule.pattern.clone(),
+                        is_regex: rule.is_regex,
+                        case_sensitive: rule.case_sensitive,
+                        foreground: rule.foreground.clone(),
+                        background: rule.background.clone(),
+                        render_mode: match rule.render_mode {
+                            HighlightRuleRenderMode::Background => {
+                                TerminalHighlightRenderMode::Background
+                            }
+                            HighlightRuleRenderMode::Underline => {
+                                TerminalHighlightRenderMode::Underline
+                            }
+                            HighlightRuleRenderMode::Outline => TerminalHighlightRenderMode::Outline,
+                        },
+                        enabled: rule.enabled,
+                        priority: rule.priority,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
             trzsz_policy,
             theme: TerminalUiTheme::new(
                 self.tokens.terminal.background,

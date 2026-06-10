@@ -593,13 +593,13 @@ impl LocalGraphicsState {
         self.encoding_detector.set_encoding(encoding);
     }
 
-    fn process_output(&self, bytes: &[u8]) -> Vec<u8> {
+    fn process_output<'a>(&self, bytes: &'a [u8]) -> Cow<'a, [u8]> {
         let Some(processor) = &self.output_processor else {
-            return bytes.to_vec();
+            return Cow::Borrowed(bytes);
         };
         // Output processors sit before UTF-8 buffering and ANSI parsing so
         // transformed bytes, including suppression, are what the terminal sees.
-        processor(bytes)
+        Cow::Owned(processor(bytes))
     }
 
     fn ensure_next(&mut self) {

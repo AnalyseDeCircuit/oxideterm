@@ -362,7 +362,7 @@ impl TelnetSession {
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
         let processed_output = self.process_terminal_output(bytes);
-        let bytes = processed_output.as_slice();
+        let bytes = processed_output.as_ref();
         for kind in self.magic_scan.scan(bytes) {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }
@@ -405,7 +405,7 @@ impl TelnetSession {
         }
     }
 
-    fn process_terminal_output(&self, bytes: &[u8]) -> Vec<u8> {
+    fn process_terminal_output<'a>(&self, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
         apply_terminal_output_processor(&self.output_processor, bytes)
     }
 
@@ -874,12 +874,14 @@ mod telnet_tests {
         let transform: Option<TerminalOutputProcessor> =
             Some(Arc::new(|bytes| bytes.iter().map(u8::to_ascii_uppercase).collect()));
         assert_eq!(
-            apply_terminal_output_processor(&transform, b"prompt"),
+            apply_terminal_output_processor(&transform, b"prompt").as_ref(),
             b"PROMPT"
         );
 
         let suppress: Option<TerminalOutputProcessor> = Some(Arc::new(|_| Vec::new()));
         assert!(apply_terminal_output_processor(&suppress, b"hidden").is_empty());
-        assert_eq!(apply_terminal_output_processor(&None, b"raw"), b"raw");
+        let raw = apply_terminal_output_processor(&None, b"raw");
+        assert!(matches!(raw, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(raw.as_ref(), b"raw");
     }
 }

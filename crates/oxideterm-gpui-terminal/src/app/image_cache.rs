@@ -107,7 +107,7 @@ impl ImageRenderCache {
                 .map(|cached| (cached.image.clone(), cached.animation_started_at));
         }
 
-        let data = snapshot.data.as_ref()?;
+        let data = snapshot.data.as_deref()?;
         let (frames, byte_len) = render_frames_for_snapshot(data, snapshot)?;
         let render_image = Arc::new(RenderImage::new(frames));
         let animation_started_at = (render_image.frame_count() > 1).then(Instant::now);
@@ -241,7 +241,7 @@ mod tests {
             z_index: 0,
             placeholder: true,
             version: 1,
-            data: Some(TerminalImageData {
+            data: Some(Arc::new(TerminalImageData {
                 id: TerminalImageId(7),
                 protocol: TerminalImageProtocol::Kitty,
                 version: 1,
@@ -251,7 +251,7 @@ mod tests {
                 frames: Vec::new(),
                 animation: TerminalImageAnimationState::default(),
                 name: None,
-            }),
+            })),
         };
 
         let first = cache.render_images(std::slice::from_ref(&snapshot), true);
@@ -281,7 +281,7 @@ mod tests {
             z_index: 0,
             placeholder: true,
             version: 1,
-            data: Some(TerminalImageData {
+            data: Some(Arc::new(TerminalImageData {
                 id: TerminalImageId(9),
                 protocol: TerminalImageProtocol::Kitty,
                 version: 1,
@@ -291,7 +291,7 @@ mod tests {
                 frames: Vec::new(),
                 animation: TerminalImageAnimationState::default(),
                 name: None,
-            }),
+            })),
         };
 
         let rendered = cache.render_images(&[snapshot], true);
@@ -319,7 +319,7 @@ mod tests {
             z_index: 0,
             placeholder: true,
             version: 1,
-            data: Some(TerminalImageData {
+            data: Some(Arc::new(TerminalImageData {
                 id: TerminalImageId(10),
                 protocol: TerminalImageProtocol::Kitty,
                 version: 1,
@@ -329,7 +329,7 @@ mod tests {
                 frames: Vec::new(),
                 animation: TerminalImageAnimationState::default(),
                 name: None,
-            }),
+            })),
         };
 
         let rendered = cache.render_images(&[snapshot], true);
@@ -357,7 +357,7 @@ mod tests {
             z_index: 0,
             placeholder: true,
             version: 1,
-            data: Some(TerminalImageData {
+            data: Some(Arc::new(TerminalImageData {
                 id: TerminalImageId(12),
                 protocol: TerminalImageProtocol::Kitty,
                 version: 1,
@@ -385,7 +385,7 @@ mod tests {
                     loop_limit: None,
                 },
                 name: None,
-            }),
+            })),
         };
 
         let rendered = cache.render_images(&[snapshot], true);
@@ -425,7 +425,7 @@ mod tests {
             z_index: 0,
             placeholder: true,
             version: 1,
-            data: Some(TerminalImageData {
+            data: Some(Arc::new(TerminalImageData {
                 id: TerminalImageId(11),
                 protocol: TerminalImageProtocol::Kitty,
                 version: 1,
@@ -435,7 +435,7 @@ mod tests {
                 frames: Vec::new(),
                 animation: TerminalImageAnimationState::default(),
                 name: None,
-            }),
+            })),
         };
 
         let rendered = cache.render_images(&[snapshot], false);

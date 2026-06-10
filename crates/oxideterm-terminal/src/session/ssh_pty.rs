@@ -179,7 +179,7 @@ impl SshPtySession {
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
         let processed_output = self.process_terminal_output(bytes);
-        let bytes = processed_output.as_slice();
+        let bytes = processed_output.as_ref();
         if self.trzsz_consumer.is_some() {
             self.feed_trzsz_transport_output(bytes);
             return;
@@ -187,7 +187,7 @@ impl SshPtySession {
         self.feed_transport_output_to_terminal(bytes);
     }
 
-    fn process_terminal_output(&self, bytes: &[u8]) -> Vec<u8> {
+    fn process_terminal_output<'a>(&self, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
         apply_terminal_output_processor(&self.output_processor, bytes)
     }
 
