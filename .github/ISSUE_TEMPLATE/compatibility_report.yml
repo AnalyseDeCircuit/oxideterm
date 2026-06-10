@@ -1,0 +1,111 @@
+name: SSH Compatibility Report
+description: Cannot connect or authenticate with a specific SSH server / 无法连接或认证特定 SSH 服务端
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template when OxideTerm **fails to connect or authenticate** but another SSH client (e.g. `ssh`, PuTTY) succeeds with the same credentials.
+        当 OxideTerm **无法连接或认证**，但其他 SSH 客户端（如 `ssh`、PuTTY）使用相同凭据可以成功时，请使用此模板。
+
+        **One issue per server config.** Do not combine multiple unrelated connection problems.
+        **每个 Issue 只报一种服务端配置的问题。** 请勿合并多个不相关的连接故障。
+
+  - type: input
+    id: version
+    attributes:
+      label: OxideTerm version / 版本
+      description: "e.g. `1.1.13` — from Settings → Help & About, or the title bar"
+      placeholder: "1.1.13"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Client platform / 客户端平台
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: auth_method
+    attributes:
+      label: Authentication method / 认证方式
+      options:
+        - Password
+        - Private key (RSA)
+        - Private key (Ed25519 / ECDSA)
+        - SSH Agent
+        - SSH Certificate
+        - Keyboard-interactive / 2FA
+        - GSSAPI / Kerberos
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: server_info
+    attributes:
+      label: SSH server details / 服务端信息
+      description: |
+        Server OS, SSH server software & version, any relevant sshd_config snippets (redact sensitive values).
+        服务端操作系统、SSH 服务端软件及版本、相关 sshd_config 配置片段（请隐去敏感信息）。
+      placeholder: |
+        - Server OS: Ubuntu 24.04
+        - SSH server: OpenSSH 9.6
+        - sshd_config: PubkeyAcceptedAlgorithms rsa-sha2-256,rsa-sha2-512
+    validations:
+      required: true
+
+  - type: textarea
+    id: error_message
+    attributes:
+      label: Error message or behavior / 错误信息或现象
+      description: |
+        Copy the exact error shown by OxideTerm. Include server-side sshd logs if available (`journalctl -u sshd`).
+        请复制 OxideTerm 显示的完整错误信息。如有服务端 sshd 日志（`journalctl -u sshd`），请一并提供。
+    validations:
+      required: true
+
+  - type: textarea
+    id: working_client
+    attributes:
+      label: Working client comparison / 可正常连接的客户端对比
+      description: |
+        Which SSH client can connect successfully? Paste the command used (redact host/user if needed).
+        哪个 SSH 客户端可以正常连接？请贴出使用的命令（可隐去主机名/用户名）。
+      placeholder: |
+        ssh -v user@host works with OpenSSH 9.6 client on macOS
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: OxideTerm logs / OxideTerm 日志
+      description: |
+        Paste relevant log output. Redact hostnames, IPs, and secrets.
+        请粘贴相关日志输出。请隐去主机名、IP、密钥。
+        Tip: Settings → Help & About → Diagnostics → Open Log Directory
+        提示：设置 → 帮助与关于 → 诊断 → 打开日志目录
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I tested with the latest release, the issue persists, and another SSH client can connect with the same credentials and server / 我已使用最新正式版测试，问题仍然存在，且其他 SSH 客户端使用相同凭据和服务端可以正常连接
+          required: true
+        - label: I searched existing issues and provided server details, error messages, and a working-client comparison / 我已搜索过已有 Issue，并提供了服务端信息、错误信息和可正常连接的客户端对比
+          required: true
+        - label: |
+            I understand vague, incomplete, or inactive issues may be closed.
+            我理解描述模糊、信息不足或长期无回复的 Issue 可能会被关闭。
+          required: true

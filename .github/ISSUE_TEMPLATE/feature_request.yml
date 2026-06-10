@@ -1,0 +1,85 @@
+name: Feature Request
+description: Suggest an improvement or new capability / 功能建议或改进
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Pull requests:** PRs are welcome, but please [open an Issue first](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/CONTRIBUTING.md) to discuss the approach. For extensions, consider a [plugin](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/reference/PLUGIN_DEVELOPMENT.md).
+
+        **PR：** 欢迎提交 PR，但请先[开 Issue 讨论方案](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/CONTRIBUTING.md)。扩展能力可优先考虑[插件](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/reference/PLUGIN_DEVELOPMENT.md)。
+
+        ---
+
+        **Scope:** OxideTerm is an SSH-based terminal and DevOps platform (local shells, SSH, SFTP, remote IDE, port forwarding, AI, plugins). Requests for unrelated remote-access protocols are out of scope and will be closed.
+        **范围：** OxideTerm 是基于 SSH 的终端与 DevOps 平台（本地终端、SSH、SFTP、远程 IDE、端口转发、AI、插件）。与此无关的远程访问协议不在项目范围内，相关请求将被直接关闭。
+
+        **One request per issue.** Multiple unrelated suggestions in a single issue will be closed — please open separate issues.
+        **每个 Issue 只提一个建议。** 在同一 Issue 中混合多条不相关建议将被直接关闭，请分别提交。
+
+  - type: input
+    id: version
+    attributes:
+      label: OxideTerm version / 版本
+      description: "e.g. `1.1.13` — from Settings → Help & About, or the title bar"
+      placeholder: "1.1.13"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case / 问题或使用场景
+      description: What are you trying to do? What is painful today?
+      placeholder: When managing many jump hosts, I wish …
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution / 期望方案
+      description: |
+        How would you like it to work? Mockups or examples welcome.
+        Answers like "N/A", "none", "you figure it out" will cause the issue to be closed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered / 已考虑的替代方案
+      description: Other tools, workflows, or workarounds you already use.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area (best guess) / 大致领域
+      options:
+        - Terminal (local / SSH)
+        - SFTP / file manager
+        - IDE mode
+        - Port forwarding / topology
+        - AI / OxideSens / MCP / RAG
+        - Plugins
+        - Settings / themes / i18n
+        - Windows / WSL / graphics
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I am using the latest release, confirmed this feature does not already exist, and searched existing issues / 我正在使用最新正式版，已确认该功能尚不存在，并已搜索过已有 Issue
+          required: true
+        - label: This is one focused request within OxideTerm's scope / 这是一个聚焦且属于 OxideTerm 范围内的请求
+          required: true
+        - label: |
+            I have described a concrete problem/use case and proposed solution; I understand feature requests are handled best-effort, and vague or inactive issues may be closed.
+            我已描述具体问题/使用场景和期望方案；我理解功能请求会尽力处理，描述模糊或长期无回复的 Issue 可能会被关闭。
+          required: true

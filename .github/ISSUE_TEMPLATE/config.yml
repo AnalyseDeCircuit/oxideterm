@@ -1,0 +1,15 @@
+# Issue picker configuration — https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & support
+    url: https://github.com/AnalyseDeCircuit/oxideterm/discussions/categories/q-a
+    about: >
+      For "how do I …?" questions, please use Discussions instead of opening an issue.
+  - name: Security vulnerability
+    url: https://github.com/AnalyseDeCircuit/OxideTerm/security/advisories/new
+    about: >
+      Report privately via GitHub — do not open a public issue for undisclosed vulnerabilities.
+  - name: Contributing & PR policy
+    url: https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/CONTRIBUTING.md
+    about: >
+      PRs are welcome, but please open an Issue first to discuss the approach. Read CONTRIBUTING.md for details.
