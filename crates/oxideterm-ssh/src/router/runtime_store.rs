@@ -58,6 +58,22 @@ impl NodeRuntimeStore {
         })
     }
 
+    fn connection_runtime(&self, node_id: &NodeId) -> Result<NodeConnectionRuntime, RouteError> {
+        let route = self
+            .nodes
+            .get(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        let connection_id = route
+            .connection_id
+            .clone()
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        Ok(NodeConnectionRuntime {
+            connection_id,
+            terminal_session_id: route.terminal_session_id.clone(),
+            sftp_session_id: route.sftp_session_id.clone(),
+        })
+    }
+
     pub fn upsert_child_node(
         &self,
         parent_id: NodeId,
@@ -632,13 +648,22 @@ impl NodeRuntimeStore {
         connection: &ConnectionInfo,
         reason: impl Into<String>,
     ) -> Result<NodeStateEvent, RouteError> {
+        self.update_connection_state_from_parts(node_id, &connection.state, reason)
+    }
+
+    fn update_connection_state_from_parts(
+        &self,
+        node_id: &NodeId,
+        state: &ConnectionState,
+        reason: impl Into<String>,
+    ) -> Result<NodeStateEvent, RouteError> {
         let mut route = self
             .nodes
             .get_mut(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
         route.generation += 1;
-        route.state.readiness = readiness_for_connection(connection);
-        route.state.error = match &connection.state {
+        route.state.readiness = readiness_for_connection_state(state);
+        route.state.error = match state {
             ConnectionState::Error(error) => Some(error.clone()),
             ConnectionState::LinkDown => Some("Link down".to_string()),
             _ => None,

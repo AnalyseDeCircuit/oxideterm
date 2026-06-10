@@ -5,6 +5,7 @@ pub struct SshSessionConfig {
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
     managed_key_resolver: Option<ManagedKeyResolver>,
     trzsz_policy: Option<TrzszTransferPolicy>,
+    runtime_handle: Option<tokio::runtime::Handle>,
     defer_pty_until_resize: bool,
     post_connect_command: Option<String>,
 }
@@ -20,6 +21,7 @@ impl SshSessionConfig {
             prompt_handler: None,
             managed_key_resolver: None,
             trzsz_policy: None,
+            runtime_handle: None,
             defer_pty_until_resize: false,
             post_connect_command: None,
         }
@@ -59,6 +61,11 @@ impl SshSessionConfig {
 
     pub fn with_trzsz_policy(mut self, policy: Option<TrzszTransferPolicy>) -> Self {
         self.trzsz_policy = policy;
+        self
+    }
+
+    pub fn with_runtime_handle(mut self, handle: tokio::runtime::Handle) -> Self {
+        self.runtime_handle = Some(handle);
         self
     }
 
@@ -102,6 +109,7 @@ impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
             prompt_handler: None,
             managed_key_resolver: None,
             trzsz_policy: None,
+            runtime_handle: None,
             defer_pty_until_resize: false,
         }
     }
@@ -169,6 +177,19 @@ mod ssh_config_tests {
 
         assert_eq!(session_config.post_connect_command(), None);
     }
+
+    #[test]
+    fn runtime_handle_is_optional_and_injectable() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        assert!(SshSessionConfig::new("example.com", 22, "alice")
+            .runtime_handle
+            .is_none());
+        assert!(SshSessionConfig::new("example.com", 22, "alice")
+            .with_runtime_handle(runtime.handle().clone())
+            .runtime_handle
+            .is_some());
+    }
 }
 
 impl std::fmt::Debug for SshSessionConfig {
@@ -180,6 +201,7 @@ impl std::fmt::Debug for SshSessionConfig {
             .field("prompt_handler", &self.prompt_handler.is_some())
             .field("managed_key_resolver", &self.managed_key_resolver.is_some())
             .field("trzsz_policy", &self.trzsz_policy)
+            .field("runtime_handle", &self.runtime_handle.is_some())
             .field("defer_pty_until_resize", &self.defer_pty_until_resize)
             .field("post_connect_command", &self.post_connect_command.is_some())
             .finish()

@@ -183,8 +183,8 @@ impl SshTransportClient {
             }
 
             let stream = {
-                let parent_handle = parent_pooled.target.lock().await;
-                open_direct_tcpip_stream(&parent_handle, &self.config.host, self.config.port)
+                let parent_handle = &parent_pooled.target;
+                open_direct_tcpip_stream(parent_handle, &self.config.host, self.config.port)
                     .await?
             };
             let handler = NativeClientHandler::new(
@@ -475,7 +475,7 @@ impl SshTransportClient {
         ssh_connection: Option<SshConnectionHandle>,
     ) -> Result<SshPtyHandle, SshTransportError> {
         let mut channel = {
-            let handle = pooled.target.lock().await;
+            let handle = &pooled.target;
             handle
                 .channel_open_session()
                 .await

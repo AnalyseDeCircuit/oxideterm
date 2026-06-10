@@ -206,4 +206,36 @@ mod tests {
         assert!(!buffer.contains("row-000"));
         assert!(buffer.contains("row-519"));
     }
+
+    #[test]
+    fn ssh_output_events_are_emitted_only_when_enabled() {
+        let mut session = SshPtySession::new(
+            SshSessionConfig::new("127.0.0.1", 9, "nobody"),
+            80,
+            24,
+            GraphicsOptions::default(),
+            TerminalEncoding::Utf8,
+            1000,
+        );
+
+        // TerminalEvent::Output duplicates decoded display bytes for recording,
+        // so SSH keeps it disabled on the normal render path.
+        session.feed_utf8_terminal_output(b"not recorded");
+        assert!(
+            session
+                .take_events()
+                .into_iter()
+                .all(|event| !matches!(event, TerminalEvent::Output(_)))
+        );
+
+        TerminalSessionBackend::set_output_events_enabled(&mut session, true);
+        session.feed_utf8_terminal_output(b"recorded");
+
+        assert!(
+            session
+                .take_events()
+                .into_iter()
+                .any(|event| matches!(event, TerminalEvent::Output(bytes) if bytes == b"recorded"))
+        );
+    }
 }

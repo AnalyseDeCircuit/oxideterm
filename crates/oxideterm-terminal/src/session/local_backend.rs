@@ -55,6 +55,10 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::set_output_processor(self, processor);
     }
 
+    fn set_output_events_enabled(&mut self, enabled: bool) {
+        LocalPtySession::set_output_events_enabled(self, enabled);
+    }
+
     fn mode(&self) -> TermMode {
         LocalPtySession::mode(self)
     }

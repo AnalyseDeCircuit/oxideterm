@@ -9,12 +9,15 @@ impl TerminalPane {
         if command.is_empty() || !self.settings.command_marks_enabled {
             return;
         }
-        let mode = self.terminal.lock().mode();
+        let (mode, snapshot) = {
+            let terminal = self.terminal.lock();
+            (terminal.mode(), terminal.snapshot())
+        };
         if mode.contains(TermMode::ALT_SCREEN) || mode.intersects(TermMode::MOUSE_MODE) {
             return;
         }
 
-        self.snapshot = self.terminal.lock().snapshot();
+        self.snapshot = snapshot;
         let now = now_millis();
         let command_line = self.absolute_cursor_line();
         let start_line = self.prompt_block_start_line(command_line);

@@ -444,20 +444,40 @@ async fn load_remote_sftp_listing(
     node_id: &NodeId,
     path: &str,
 ) -> Result<RemoteSftpListing, String> {
-    let sftp = router
-        .acquire_sftp(node_id)
+    let transfer = router
+        .acquire_transfer_sftp_with_meta(node_id)
         .await
         .map_err(|error| error.to_string())?;
-    match list_remote_sftp_once(&sftp, path).await {
-        Ok(listing) => Ok(listing),
+    match list_remote_sftp_once(&transfer.session, path).await {
+        Ok(listing) => {
+            router
+                .mark_sftp_ready_from_listing(
+                    node_id,
+                    &transfer.connection_id,
+                    Some(listing.cwd.clone()),
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(listing)
+        }
         Err(error) if error.is_channel_recoverable() => {
-            let sftp = router
-                .invalidate_and_reacquire_sftp(node_id)
+            // Retry directory listing on a new transfer channel. The shared
+            // SFTP owner is not part of this path, so a slow list cannot block
+            // preview/save operations that already use their own channels.
+            let transfer = router
+                .acquire_transfer_sftp_with_meta(node_id)
                 .await
                 .map_err(|route_error| route_error.to_string())?;
-            list_remote_sftp_once(&sftp, path)
+            let listing = list_remote_sftp_once(&transfer.session, path)
                 .await
-                .map_err(|retry_error| retry_error.to_string())
+                .map_err(|retry_error| retry_error.to_string())?;
+            router
+                .mark_sftp_ready_from_listing(
+                    node_id,
+                    &transfer.connection_id,
+                    Some(listing.cwd.clone()),
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(listing)
         }
         Err(error) => Err(error.to_string()),
     }
@@ -469,17 +489,16 @@ async fn load_remote_sftp_preview(
     path: &str,
 ) -> Result<PreviewContent, String> {
     let sftp = router
-        .acquire_sftp(node_id)
+        .acquire_transfer_sftp(node_id)
         .await
         .map_err(|error| error.to_string())?;
     match load_remote_sftp_preview_once(&sftp, path).await {
         Ok(preview) => Ok(preview),
         Err(error) if error.is_channel_recoverable() => {
-            // Tauri wraps node_sftp_preview in sftp_with_retry!, so stale shared
-            // SFTP channels are invalidated and rebuilt once before surfacing an
-            // error. Keep preview on that same silent-rebuild path as listing.
+            // Preview can be slow and must not hold the shared directory-owner
+            // SFTP mutex; retry once with a fresh short-lived SFTP channel.
             let sftp = router
-                .invalidate_and_reacquire_sftp(node_id)
+                .acquire_transfer_sftp(node_id)
                 .await
                 .map_err(|route_error| route_error.to_string())?;
             load_remote_sftp_preview_once(&sftp, path)
@@ -491,10 +510,9 @@ async fn load_remote_sftp_preview(
 }
 
 async fn load_remote_sftp_preview_once(
-    sftp: &std::sync::Arc<tokio::sync::Mutex<SftpSession>>,
+    sftp: &SftpSession,
     path: &str,
 ) -> Result<PreviewContent, SftpError> {
-    let sftp = sftp.lock().await;
     sftp.preview(path).await
 }
 
@@ -505,16 +523,16 @@ async fn load_remote_sftp_preview_hex(
     offset: u64,
 ) -> Result<PreviewContent, String> {
     let sftp = router
-        .acquire_sftp(node_id)
+        .acquire_transfer_sftp(node_id)
         .await
         .map_err(|error| error.to_string())?;
     match load_remote_sftp_preview_hex_once(&sftp, path, offset).await {
         Ok(preview) => Ok(preview),
         Err(error) if error.is_channel_recoverable() => {
-            // Mirrors Tauri node_sftp_preview_hex: retry once after rebuilding
-            // the shared SFTP owner when the channel itself is stale.
+            // Hex preview uses its own channel for the same reason as text
+            // preview: large reads should not block directory navigation.
             let sftp = router
-                .invalidate_and_reacquire_sftp(node_id)
+                .acquire_transfer_sftp(node_id)
                 .await
                 .map_err(|route_error| route_error.to_string())?;
             load_remote_sftp_preview_hex_once(&sftp, path, offset)
@@ -526,11 +544,10 @@ async fn load_remote_sftp_preview_hex(
 }
 
 async fn load_remote_sftp_preview_hex_once(
-    sftp: &std::sync::Arc<tokio::sync::Mutex<SftpSession>>,
+    sftp: &SftpSession,
     path: &str,
     offset: u64,
 ) -> Result<PreviewContent, SftpError> {
-    let sftp = sftp.lock().await;
     sftp.preview_with_offset(path, offset).await
 }
 
@@ -548,10 +565,11 @@ async fn save_remote_sftp_preview(
     };
     let encoded = encode_to_encoding(content, target_encoding);
     let sftp = router
-        .acquire_sftp(node_id)
+        .acquire_transfer_sftp(node_id)
         .await
         .map_err(|error| error.to_string())?;
-    let sftp = sftp.lock().await;
+    // Saving uses a short-lived SFTP channel so a large write/stat round trip
+    // cannot stall the shared directory listing owner.
     let write_result = sftp
         .write_content(path, &encoded)
         .await
@@ -582,10 +600,9 @@ fn sftp_preview_editor_is_network_error(error: &str) -> bool {
 }
 
 async fn list_remote_sftp_once(
-    sftp: &std::sync::Arc<tokio::sync::Mutex<SftpSession>>,
+    sftp: &SftpSession,
     path: &str,
 ) -> Result<RemoteSftpListing, SftpError> {
-    let sftp = sftp.lock().await;
     // Tauri's node_sftp_list_dir performs one SFTP path resolution inside
     // list_dir. Native used to canonicalize here and then list_dir canonicalized
     // again, adding a visible RTT on every folder change.

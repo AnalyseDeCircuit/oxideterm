@@ -164,6 +164,19 @@ pub struct ResolvedConnection {
     pub sftp_session_id: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct AcquiredTransferSftp {
+    pub connection_id: String,
+    pub session: SftpSession,
+}
+
+#[derive(Clone, Debug)]
+struct NodeConnectionRuntime {
+    connection_id: String,
+    terminal_session_id: Option<String>,
+    sftp_session_id: Option<String>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum NodeStateEvent {

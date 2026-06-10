@@ -113,17 +113,15 @@ impl NodeRouter {
     ) -> Result<ResolvedConnection, RouteError> {
         let runtime = self
             .runtime
-            .snapshot(node_id)
-            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        let connection_id = runtime
-            .connection_id
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+            .connection_runtime(node_id)?;
+        let connection_id = runtime.connection_id;
 
         let handle = self
             .registry
             .get(&connection_id)
             .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        self.require_resolvable_state(node_id, &handle.info())?;
+        let state = handle.state();
+        self.require_resolvable_state(node_id, &connection_id, &state)?;
         self.require_physical_transport(node_id, &connection_id, &handle)?;
         Ok(ResolvedConnection {
             connection_id,
@@ -140,26 +138,27 @@ impl NodeRouter {
     ) -> Result<ResolvedConnection, RouteError> {
         let runtime = self
             .runtime
-            .snapshot(node_id)
-            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        let connection_id = runtime
-            .connection_id
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+            .connection_runtime(node_id)?;
+        let connection_id = runtime.connection_id;
         let handle = self
             .registry
             .get(&connection_id)
             .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        self.require_resolvable_state(node_id, &handle.info())?;
+        let state = handle.state();
+        self.require_resolvable_state(node_id, &connection_id, &state)?;
         self.require_physical_transport(node_id, &connection_id, &handle)?;
         let handle = self
             .registry
             .acquire_consumer_for_connection(&connection_id, consumer)
             .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        let _ =
-            self.runtime
-                .update_connection_state(node_id, &handle.info(), "connection acquired");
+        let state = handle.state();
+        let _ = self.runtime.update_connection_state_from_parts(
+            node_id,
+            &state,
+            "connection acquired",
+        );
 
-        self.require_resolvable_state(node_id, &handle.info())?;
+        self.require_resolvable_state(node_id, &connection_id, &state)?;
         self.require_physical_transport(node_id, &connection_id, &handle)?;
         Ok(ResolvedConnection {
             connection_id,
@@ -317,15 +316,46 @@ impl NodeRouter {
         Ok(session)
     }
 
-    pub async fn acquire_transfer_sftp(&self, node_id: &NodeId) -> Result<SftpSession, RouteError> {
+    pub async fn acquire_transfer_sftp(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<SftpSession, RouteError> {
+        Ok(self.acquire_transfer_sftp_with_meta(node_id).await?.session)
+    }
+
+    pub async fn acquire_transfer_sftp_with_meta(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<AcquiredTransferSftp, RouteError> {
         let resolved = self
             .resolve_connection_wait(node_id, Duration::from_secs(15))
             .await?;
-        resolved
+        let connection_id = resolved.connection_id;
+        let session = resolved
             .handle
             .acquire_transfer_sftp()
             .await
-            .map_err(|error| sftp_route_error("Transfer SFTP init failed", error))
+            .map_err(|error| sftp_route_error("Transfer SFTP init failed", error))?;
+        Ok(AcquiredTransferSftp {
+            connection_id,
+            session,
+        })
+    }
+
+    pub fn mark_sftp_ready_from_listing(
+        &self,
+        node_id: &NodeId,
+        connection_id: &str,
+        cwd: Option<String>,
+    ) -> Result<NodeStateEvent, RouteError> {
+        // Directory listing now uses a short-lived SFTP channel. Keep the shared
+        // node/registry state in sync without borrowing the shared session mutex.
+        let _ = self
+            .registry
+            .mark_sftp_session(connection_id, true, cwd.clone());
+        let event = self.runtime.set_sftp_ready(node_id, true, cwd)?;
+        self.emitter.dispatch(&event);
+        Ok(event)
     }
 
     pub async fn invalidate_and_reacquire_sftp(
@@ -450,14 +480,12 @@ impl NodeRouter {
         loop {
             let runtime = self
                 .runtime
-                .snapshot(node_id)
-                .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-            let connection_id = runtime
-                .connection_id
-                .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+                .connection_runtime(node_id)?;
+            let connection_id = runtime.connection_id;
 
             if let Some(handle) = self.registry.get(&connection_id) {
-                match handle.state() {
+                let state = handle.state();
+                match state {
                     ConnectionState::Active | ConnectionState::Idle => {
                         let transport_status = handle.transport_status().await;
                         match transport_status {
@@ -471,9 +499,10 @@ impl NodeRouter {
                                 } else {
                                     handle
                                 };
-                                let _ = self.runtime.update_connection_state(
+                                let state = handle.state();
+                                let _ = self.runtime.update_connection_state_from_parts(
                                     node_id,
-                                    &handle.info(),
+                                    &state,
                                     "connection acquired",
                                 );
                                 return Ok(ResolvedConnection {
@@ -528,20 +557,21 @@ impl NodeRouter {
     fn require_resolvable_state(
         &self,
         node_id: &NodeId,
-        connection: &ConnectionInfo,
+        connection_id: &str,
+        state: &ConnectionState,
     ) -> Result<(), RouteError> {
-        match &connection.state {
+        match state {
             ConnectionState::Active | ConnectionState::Idle => Ok(()),
             ConnectionState::Connecting | ConnectionState::Reconnecting => {
                 Err(RouteError::ConnectionTimeout(format!(
                     "Connection {} for node {} is still {:?}",
-                    connection.connection_id, node_id.0, connection.state
+                    connection_id, node_id.0, state
                 )))
             }
             ConnectionState::Error(error) => Err(RouteError::ConnectionError(error.clone())),
             ConnectionState::LinkDown => Err(RouteError::NotConnected(format!(
                 "Node {} connection {} is link_down",
-                node_id.0, connection.connection_id
+                node_id.0, connection_id
             ))),
             ConnectionState::Disconnecting | ConnectionState::Disconnected => {
                 Err(RouteError::NotConnected(node_id.0.clone()))

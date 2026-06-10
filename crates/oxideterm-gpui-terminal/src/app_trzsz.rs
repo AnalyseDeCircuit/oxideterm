@@ -146,8 +146,11 @@ impl TerminalPane {
                 // Tauri writes TextProgressBar VT output into the local terminal
                 // renderer. Sending it back to the remote PTY would corrupt the
                 // trzsz protocol stream, so native has a dedicated local feed.
-                self.terminal.lock().feed_trzsz_terminal_output(&bytes);
-                self.snapshot = self.terminal.lock().snapshot();
+                self.snapshot = {
+                    let mut terminal = self.terminal.lock();
+                    terminal.feed_trzsz_terminal_output(&bytes);
+                    terminal.snapshot()
+                };
                 cx.notify();
             }
             TrzszWorkerEvent::Completed => {
@@ -364,4 +367,3 @@ fn format_binary_size(bytes: u64) -> String {
         format!("{value:.2} {}", UNITS[unit])
     }
 }
-

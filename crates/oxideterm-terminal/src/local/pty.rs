@@ -285,6 +285,15 @@ impl LocalPtySession {
             .send(LocalGraphicsMsg::SetOutputProcessor(processor));
     }
 
+    pub fn set_output_events_enabled(&mut self, enabled: bool) {
+        // Output events are only needed while recording. Let the reader thread
+        // skip allocating TerminalEvent::Output on the normal render path.
+        let _ = self
+            .notifier
+            .0
+            .send(LocalGraphicsMsg::SetOutputEventsEnabled(enabled));
+    }
+
     pub fn lifecycle(&self) -> TerminalLifecycle {
         self.lifecycle.clone()
     }

@@ -479,6 +479,9 @@ impl WorkspaceApp {
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
             .with_managed_key_resolver(managed_key_resolver)
+            // SSH terminal connect tasks share the workspace backend runtime so
+            // opening many SSH tabs does not create one Tokio runtime per pane.
+            .with_runtime_handle(self.forwarding_runtime.handle().clone())
             .with_deferred_pty(true)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
@@ -625,6 +628,9 @@ impl WorkspaceApp {
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
             .with_managed_key_resolver(managed_key_resolver)
+            // Reopened node terminals are consumers of the same backend runtime
+            // as the node-owned SSH transport.
+            .with_runtime_handle(self.forwarding_runtime.handle().clone())
             .with_deferred_pty(true)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
