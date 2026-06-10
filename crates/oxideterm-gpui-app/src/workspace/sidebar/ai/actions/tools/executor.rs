@@ -445,92 +445,14 @@ impl AiOrchestratorRuntimeSnapshot {
                     .await
             }
             "ssh-node" => {
-                let Some(handle) = target.ssh_handle.clone() else {
-                    return self.fail(
-                        "SSH node is not connected.",
-                        "target_not_ready",
-                        "This SSH node has no active transport. Connect it first, then retry run_command.",
-                        "execute",
-                    ).with_target(target.clone());
-                };
-                let cwd = args.get("cwd").and_then(serde_json::Value::as_str);
-                let remote_command = ai_command_with_cwd(command, cwd);
-                match handle
-                    // Tauri leaves direct remote command output uncapped here;
-                    // the AI tool envelope owns model-facing truncation.
-                    .run_command_capture(&remote_command, Duration::from_secs(timeout_secs), usize::MAX)
-                    .await
-                {
-                    Ok(result) => {
-                        let has_output = !result.stdout.trim().is_empty() || !result.stderr.trim().is_empty();
-                        let ok = result.exit_code == Some(0) || (result.exit_code.is_none() && has_output);
-                        let output = ai_command_output(&result.stdout, &result.stderr, result.exit_code);
-                        let summary = if result.exit_code == Some(0) {
-                            "Remote command completed.".to_string()
-                        } else if result.exit_code.is_none() && has_output {
-                            "Remote command output captured; exit code was not reported.".to_string()
-                        } else {
-                            format!(
-                                "Remote command exited with {}.",
-                                result.exit_code
-                                    .map(|code| code.to_string())
-                                    .unwrap_or_else(|| "unknown".to_string())
-                            )
-                        };
-                        let execution_state =
-                            if result.exit_code.is_some() || result.truncated {
-                                "completed"
-                            } else if has_output {
-                                "output_captured"
-                            } else {
-                                "unknown"
-                            };
-                        let mut data = serde_json::json!({
-                            "exitCode": result.exit_code,
-                            "executionState": execution_state,
-                            "visibleInTerminal": false,
-                        });
-                        if result.truncated
-                            && let Some(object) = data.as_object_mut()
-                        {
-                            object.insert("truncated".to_string(), serde_json::json!(true));
-                        }
-                        let action = self
-                            .ok(summary, output, data, "execute")
-                            .with_target(target.clone())
-                            .with_observations(
-                                (result.exit_code.is_none() && has_output)
-                                    .then(|| "The remote command produced output, but the backend did not report an exit code.".to_string())
-                                    .into_iter()
-                                    .collect(),
-                            );
-                        if ok {
-                            action
-                        } else {
-                            AiActionResultLite {
-                                ok: false,
-                                summary: action.summary,
-                                output: action.output,
-                                data: action.data,
-                                error_code: Some("remote_command_failed".to_string()),
-                                error_message: Some(format!(
-                                    "Exit code: {}",
-                                    result.exit_code
-                                        .map(|code| code.to_string())
-                                        .unwrap_or_else(|| "unknown".to_string())
-                                )),
-                                risk: "execute",
-                                target: action.target,
-                                targets: action.targets,
-                                next_actions: action.next_actions,
-                                observations: action.observations,
-                                verified: action.verified,
-                                state_version: action.state_version,
-                            }
-                        }
-                    }
-                    Err(error) => self.fail("Remote command failed.", "remote_command_error", error.to_string(), "execute").with_target(target.clone()),
-                }
+                // SSH commands are visible terminal side effects in the native app.
+                // If this async executor is reached, the UI-thread dispatcher was bypassed.
+                self.fail(
+                    "SSH command requires the native UI executor.",
+                    "ui_thread_required",
+                    "The chat tool loop must dispatch ssh-node run_command through the native UI executor so the command is shown in a visible terminal.",
+                    "interactive",
+                ).with_target(target.clone())
             }
             "terminal-session" => self.fail(
                 "Terminal command requires the native UI executor.",

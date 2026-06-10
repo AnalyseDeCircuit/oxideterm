@@ -155,6 +155,17 @@ pub fn ai_should_retry_required_tool_round(
     !looks_like_clarification
 }
 
+pub fn ai_should_retry_required_tool_round_for_turn(
+    obligation: &AiOrchestratorObligation,
+    assistant_text: &str,
+    has_tool_result_this_turn: bool,
+) -> bool {
+    if has_tool_result_this_turn {
+        return false;
+    }
+    ai_should_retry_required_tool_round(obligation, assistant_text)
+}
+
 pub fn ai_text_contains_tauri_action_claim(text: &str) -> bool {
     static ACTION_CLAIM_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         // Keep this in sync with Tauri's ACTION_CLAIM_RE in aiChatStore.ts.

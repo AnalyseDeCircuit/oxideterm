@@ -76,7 +76,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "run_command",
-            "Run a command on an explicit target. Use ssh-node:* for direct remote execution, local-shell:default for local one-shot commands, or terminal-session:* when visible shell state matters.",
+            "Run a command on an explicit target. In the native app, ssh-node:* and terminal-session:* commands are sent through a visible terminal; saved connections must be connected first.",
             json!({
                 "type": "object",
                 "properties": {

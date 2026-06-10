@@ -64,6 +64,7 @@ async fn run_ai_chat_tool_loop(
     let user_requested_json = ai_user_explicitly_requested_json(&request_text);
     let mut required_tool_retry_count = 0usize;
     let mut hard_deny_retry_count = 0usize;
+    let mut has_required_tool_result_this_turn = false;
 
     let mut awaiting_summary_round_id: Option<String> = None;
 
@@ -457,7 +458,11 @@ async fn run_ai_chat_tool_loop(
                 continue;
             }
             if required_tool_retry_count < AI_MAX_REQUIRED_TOOL_RETRIES
-                && ai_should_retry_required_tool_round(&tool_obligation, &round_content)
+                && oxideterm_ai::ai_should_retry_required_tool_round_for_turn(
+                    &tool_obligation,
+                    &round_content,
+                    has_required_tool_result_this_turn,
+                )
             {
                 let retry_attempt = required_tool_retry_count.saturating_add(1);
                 let _ = send_ai_guardrail(
@@ -667,6 +672,7 @@ async fn run_ai_chat_tool_loop(
                     summary: executed_summary(&executed),
                 });
                 history.push(ai_tool_result_message(executed));
+                has_required_tool_result_this_turn = true;
                 continue;
             }
             let parsed_args = parse_ai_tool_args(&call.arguments);
@@ -896,6 +902,7 @@ async fn run_ai_chat_tool_loop(
                 summary: executed_summary(&executed),
             });
             history.push(ai_tool_result_message(executed));
+            has_required_tool_result_this_turn = true;
         }
 
         if round_index >= 1 {

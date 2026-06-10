@@ -166,6 +166,10 @@ fn ai_tool_result_model_content(result: &AiExecutedToolResult) -> String {
             payload.insert(key.to_string(), value.clone());
         }
     }
+    let evidence_facts = ai_tool_result_evidence_facts_for_model(result, &envelope);
+    if !evidence_facts.is_empty() {
+        payload.insert("evidenceFacts".to_string(), serde_json::json!(evidence_facts));
+    }
 
     let mut meta = envelope
         .get("meta")
@@ -176,6 +180,37 @@ fn ai_tool_result_model_content(result: &AiExecutedToolResult) -> String {
     payload.insert("meta".to_string(), serde_json::Value::Object(meta));
 
     serde_json::Value::Object(payload).to_string()
+}
+
+fn ai_tool_result_evidence_facts_for_model(
+    result: &AiExecutedToolResult,
+    envelope: &serde_json::Value,
+) -> Vec<serde_json::Value> {
+    let mut facts = Vec::new();
+    for (source_kind, pointer) in [
+        ("summary", "/summary"),
+        ("output", "/output"),
+        ("execution.exit_code", "/execution/exitCode"),
+        (
+            "execution.visible_in_terminal",
+            "/execution/visibleInTerminal",
+        ),
+        ("execution.state", "/execution/state"),
+    ] {
+        let Some(value) = envelope.pointer(pointer) else {
+            continue;
+        };
+        if value.as_str().is_some_and(|value| value.trim().is_empty()) {
+            continue;
+        }
+        facts.push(serde_json::json!({
+            "factId": format!("{}.{}", result.tool_call_id, source_kind),
+            "toolCallId": result.tool_call_id,
+            "toolName": result.tool_name,
+            "sourceKind": source_kind,
+        }));
+    }
+    facts
 }
 
 fn ai_tool_result_envelope_or_legacy(result: &AiExecutedToolResult) -> serde_json::Value {
@@ -713,7 +748,6 @@ mod tests {
             }),
             terminal_buffer: None,
             terminal_screen: None,
-            ssh_handle: None,
         }
     }
 
@@ -931,6 +965,14 @@ mod tests {
         assert_eq!(
             value.pointer("/meta/truncated"),
             Some(&serde_json::json!(false))
+        );
+        assert_eq!(
+            value.pointer("/evidenceFacts/0/factId"),
+            Some(&serde_json::json!("tool-1.summary"))
+        );
+        assert_eq!(
+            value.pointer("/evidenceFacts/1/factId"),
+            Some(&serde_json::json!("tool-1.output"))
         );
     }
 
@@ -1324,32 +1366,6 @@ mod tests {
 
         assert_eq!(result.verified, Some(false));
         assert!(result.data.is_null());
-    }
-
-    #[test]
-    fn command_result_preserves_tauri_observations() {
-        let result = AiActionResultLite {
-            ok: true,
-            summary: "Remote command output captured; exit code was not reported.".to_string(),
-            output: "hello\n[exit_code: unknown]".to_string(),
-            data: serde_json::json!({ "exitCode": serde_json::Value::Null }),
-            error_code: None,
-            error_message: None,
-            risk: "execute",
-            target: None,
-            targets: Vec::new(),
-            next_actions: Vec::new(),
-            observations: Vec::new(),
-            verified: None,
-            state_version: None,
-        }
-        .with_observations(vec![
-            "The remote command produced output, but the backend did not report an exit code."
-                .to_string(),
-        ]);
-
-        assert_eq!(result.observations.len(), 1);
-        assert!(result.observations[0].contains("did not report an exit code"));
     }
 
     #[test]

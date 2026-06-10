@@ -53,24 +53,39 @@ impl WorkspaceApp {
         true
     }
 
-    pub(super) fn start_sidebar_resize(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+    pub(super) fn start_sidebar_resize(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         let was_resizing = self.sidebar_resizing;
         self.sidebar_resizing = true;
-        let width_changed = self.set_sidebar_width(f32::from(event.position.x), cx);
+        let width_changed =
+            self.set_sidebar_width(self.sidebar_width_from_cursor(event.position.x, window), cx);
         if !was_resizing && !width_changed {
             cx.notify();
         }
     }
 
-    pub(super) fn update_sidebar_resize(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    pub(super) fn update_sidebar_resize(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.sidebar_resizing {
             return;
         }
-        // The root view acts as our pointer-capture owner. GPUI may report no
-        // element-local pressed button once the cursor leaves the narrow resize
-        // handle, so the active resize flag is the browser-style capture source
-        // of truth until root mouse-up finishes it.
-        self.set_sidebar_width(f32::from(event.position.x), cx);
+        if !event.dragging() {
+            // Browser resize handles release as soon as the platform reports
+            // the button is no longer down, even if GPUI missed mouse-up.
+            self.finish_sidebar_resize(cx);
+            return;
+        }
+        // Match the AI sidebar: root-level movement owns the captured drag,
+        // and the visible width is derived from the current window cursor.
+        self.set_sidebar_width(self.sidebar_width_from_cursor(event.position.x, window), cx);
     }
 
     pub(super) fn finish_sidebar_resize(&mut self, cx: &mut Context<Self>) {
@@ -79,6 +94,17 @@ impl WorkspaceApp {
             self.persist_sidebar_settings();
             cx.notify();
         }
+    }
+
+    fn sidebar_width_from_cursor(&self, cursor_x: Pixels, window: &Window) -> f32 {
+        let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
+        f32::from(cursor_x).clamp(
+            self.tokens.metrics.sidebar_min_width,
+            self.tokens
+                .metrics
+                .sidebar_max_width
+                .min(window_width.max(self.tokens.metrics.sidebar_min_width)),
+        )
     }
 
     pub(super) fn toggle_ai_sidebar(&mut self, cx: &mut Context<Self>) -> bool {
@@ -141,6 +167,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if !self.ai_sidebar_resizing {
+            return;
+        }
+        if !event.dragging() {
+            // Keep both sidebars on the same release contract: a missed
+            // mouse-up cannot leave the resize state latched.
+            self.finish_ai_sidebar_resize(cx);
             return;
         }
         // Continue from the root capture even after the pointer leaves the AI

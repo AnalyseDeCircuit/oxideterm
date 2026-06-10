@@ -331,7 +331,7 @@ impl Render for WorkspaceApp {
                 this.handle_workspace_key(event, window, cx);
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.update_sidebar_resize(event, cx);
+                this.update_sidebar_resize(event, window, cx);
                 this.update_ai_sidebar_resize(event, window, cx);
                 this.update_split_drag(event, window, cx);
                 this.update_settings_slider_drag(event, cx);
@@ -376,30 +376,16 @@ impl Render for WorkspaceApp {
                     cx.notify();
                 }
             }))
+            .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                if event.button == MouseButton::Left && this.browser_pointer_capture_owner().is_some()
+                {
+                    this.finish_workspace_pointer_captures(event, window, cx);
+                }
+            }))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, window, cx| {
-                    let capture_owner = this.browser_pointer_capture_owner();
-                    let was_read_only_dragging = this.read_only_selection_drag_active();
-                    this.finish_sidebar_resize(cx);
-                    this.finish_ai_sidebar_resize(cx);
-                    this.finish_split_drag(cx);
-                    this.finish_settings_slider_drag(cx);
-                    this.finish_terminal_cast_seek_drag(cx);
-                    this.finish_ime_selection_drag(cx);
-                    this.stop_selectable_text_autoscroll();
-                    this.finish_tab_drag(event, window, cx);
-                    let cancelled_sftp_drag = this.cancel_sftp_drag_capture();
-                    let cleared_launcher_press = this.launcher.pressed_app_path.take().is_some();
-                    if cleared_launcher_press || cancelled_sftp_drag {
-                        // A single mouse-up can clear both transient states;
-                        // repaint once after composing those no-longer-visible
-                        // captures instead of notifying per flag.
-                        cx.notify();
-                    }
-                    if capture_owner.is_some() || was_read_only_dragging || cancelled_sftp_drag {
-                        cx.stop_propagation();
-                    }
+                    this.finish_workspace_pointer_captures(event, window, cx);
                 }),
             )
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| {
@@ -774,6 +760,35 @@ impl Render for WorkspaceApp {
 }
 
 impl WorkspaceApp {
+    fn finish_workspace_pointer_captures(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let capture_owner = self.browser_pointer_capture_owner();
+        let was_read_only_dragging = self.read_only_selection_drag_active();
+        self.finish_sidebar_resize(cx);
+        self.finish_ai_sidebar_resize(cx);
+        self.finish_split_drag(cx);
+        self.finish_settings_slider_drag(cx);
+        self.finish_terminal_cast_seek_drag(cx);
+        self.finish_ime_selection_drag(cx);
+        self.stop_selectable_text_autoscroll();
+        self.finish_tab_drag(event, window, cx);
+        let cancelled_sftp_drag = self.cancel_sftp_drag_capture();
+        let cleared_launcher_press = self.launcher.pressed_app_path.take().is_some();
+        if cleared_launcher_press || cancelled_sftp_drag {
+            // A single mouse-up can clear both transient states; repaint once
+            // after composing those no-longer-visible captures instead of
+            // notifying per flag.
+            cx.notify();
+        }
+        if capture_owner.is_some() || was_read_only_dragging || cancelled_sftp_drag {
+            cx.stop_propagation();
+        }
+    }
+
     fn render_mermaid_zoom_modal(
         &self,
         window: &mut Window,

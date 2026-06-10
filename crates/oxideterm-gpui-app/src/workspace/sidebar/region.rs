@@ -1,3 +1,5 @@
+const AI_SIDEBAR_RESIZE_HIT_SLOP: f32 = 2.0;
+
 impl WorkspaceApp {
     pub(super) fn render_sidebar_region(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
@@ -27,7 +29,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event, window, cx| {
-                            this.start_sidebar_resize(event, cx);
+                            this.start_sidebar_resize(event, window, cx);
                             window.prevent_default();
                             cx.stop_propagation();
                         }),
@@ -144,10 +146,14 @@ impl WorkspaceApp {
                     .left_0()
                     .top_0()
                     .bottom_0()
-                    .w(px(self.tokens.metrics.sidebar_resize_handle_width))
+                    .w(px(
+                        self.tokens.metrics.sidebar_resize_handle_width
+                            + AI_SIDEBAR_RESIZE_HIT_SLOP,
+                    ))
                     .cursor(CursorStyle::ResizeColumn)
-                    // The titlebar/content regions are full-width hitboxes; the
-                    // resize strip must explicitly occlude their left edge.
+                    // The AI panel sits against scrollable terminal/content
+                    // surfaces. Add a tiny hit slop so resize remains
+                    // reachable without stealing a visible strip of the panel.
                     .occlude()
                     .bg(if self.ai_sidebar_resizing {
                         rgb(theme.accent)

@@ -60,11 +60,6 @@ impl AiActionResultLite {
         self
     }
 
-    fn with_observations(mut self, observations: Vec<String>) -> Self {
-        self.observations = observations;
-        self
-    }
-
     fn with_verified(mut self, verified: bool) -> Self {
         self.verified = Some(verified);
         self
@@ -297,25 +292,6 @@ fn ai_command_with_cwd(command: &str, cwd: Option<&str>) -> String {
         }
         None => command.to_string(),
     }
-}
-
-fn ai_command_output(stdout: &str, stderr: &str, exit_code: Option<i32>) -> String {
-    [
-        stdout.to_string(),
-        (!stderr.trim().is_empty())
-            .then(|| format!("[stderr]\n{stderr}"))
-            .unwrap_or_default(),
-        format!(
-            "[exit_code: {}]",
-            exit_code
-                .map(|code| code.to_string())
-                .unwrap_or_else(|| "unknown".to_string())
-        ),
-    ]
-    .into_iter()
-    .filter(|part| !part.is_empty())
-    .collect::<Vec<_>>()
-    .join("\n")
 }
 
 fn ai_target_is_local_terminal(target: &AiOrchestratorTarget) -> bool {

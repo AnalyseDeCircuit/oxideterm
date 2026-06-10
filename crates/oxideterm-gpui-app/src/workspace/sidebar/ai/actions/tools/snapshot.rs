@@ -30,7 +30,6 @@ fn ai_sftp_target_for_node(
         }),
         terminal_buffer: None,
         terminal_screen: None,
-        ssh_handle: None,
     }
 }
 
@@ -62,7 +61,6 @@ fn ai_connect_result_terminal_target(
         metadata: serde_json::json!({ "terminalType": "terminal" }),
         terminal_buffer: target.terminal_buffer.clone(),
         terminal_screen: target.terminal_screen.clone(),
-        ssh_handle: None,
     }
 }
 
@@ -83,7 +81,6 @@ fn ai_opened_local_terminal_target(target: &AiOrchestratorTarget) -> AiOrchestra
         metadata: serde_json::json!({ "terminalType": "local_terminal" }),
         terminal_buffer: None,
         terminal_screen: None,
-        ssh_handle: None,
     }
 }
 
@@ -129,7 +126,6 @@ fn ai_ide_workspace_target_for_node(
         metadata: serde_json::Value::Object(metadata),
         terminal_buffer: None,
         terminal_screen: None,
-        ssh_handle: None,
     }
 }
 
@@ -163,7 +159,6 @@ impl WorkspaceApp {
                 }),
                 terminal_buffer: None,
                 terminal_screen: None,
-                ssh_handle: None,
             });
         }
 
@@ -198,7 +193,6 @@ impl WorkspaceApp {
                 metadata: serde_json::json!({ "tabType": ai_tab_kind_label(&tab.kind) }),
                 terminal_buffer: None,
                 terminal_screen: None,
-                ssh_handle: None,
             });
         }
 
@@ -215,14 +209,6 @@ impl WorkspaceApp {
                     NodeReadiness::Error => "error",
                     NodeReadiness::Disconnected => "disconnected",
                 };
-                let ssh_handle = resolved_connection
-                    .as_ref()
-                    .map(|resolved| resolved.handle.clone())
-                    .or_else(|| {
-                        terminal_id
-                            .and_then(|session_id| self.terminal_endpoint_sessions.get(&session_id))
-                            .and_then(|endpoint| endpoint.session.lock().ssh_connection_handle())
-                    });
                 let mut refs = BTreeMap::new();
                 refs.insert("nodeId".to_string(), node_id.0.clone());
                 if let Some(saved_connection_id) = node.saved_connection_id.as_ref() {
@@ -272,7 +258,6 @@ impl WorkspaceApp {
                     metadata,
                     terminal_buffer: None,
                     terminal_screen: None,
-                    ssh_handle,
                 });
             }
             if let Some(sftp_session_id) = sftp_session_id {
@@ -414,7 +399,6 @@ impl WorkspaceApp {
                     metadata,
                     terminal_buffer: Some(terminal_buffer),
                     terminal_screen: Some(terminal_screen),
-                    ssh_handle: None,
                 });
             }
         }
@@ -433,7 +417,6 @@ impl WorkspaceApp {
             metadata: serde_json::json!({}),
             terminal_buffer: None,
             terminal_screen: None,
-            ssh_handle: None,
         });
         targets.push(AiOrchestratorTarget {
             id: "settings:app".to_string(),
@@ -450,7 +433,6 @@ impl WorkspaceApp {
             metadata: serde_json::json!({}),
             terminal_buffer: None,
             terminal_screen: None,
-            ssh_handle: None,
         });
         targets.push(AiOrchestratorTarget {
             id: "rag-index:default".to_string(),
@@ -462,7 +444,6 @@ impl WorkspaceApp {
             metadata: serde_json::json!({}),
             terminal_buffer: None,
             terminal_screen: None,
-            ssh_handle: None,
         });
 
         // Tauri deduplicates targets by id after discovery; keep the first

@@ -44,6 +44,55 @@ mod ai_turn_order_tests {
         }
     }
 
+    fn test_tool_result_fact(fact_id: &str, output_preview: &str) -> AiToolResultFact {
+        test_tool_result_fact_for_assistant(fact_id, "assistant-1", output_preview)
+    }
+
+    fn test_tool_result_fact_for_assistant(
+        fact_id: &str,
+        assistant_message_id: &str,
+        output_preview: &str,
+    ) -> AiToolResultFact {
+        AiToolResultFact {
+            fact_id: fact_id.to_string(),
+            conversation_id: "conversation-1".to_string(),
+            assistant_message_id: assistant_message_id.to_string(),
+            tool_call_id: "tool-1".to_string(),
+            tool_name: "run_command".to_string(),
+            source_kind: "output".to_string(),
+            text_hash: ai_tool_fact_hash(output_preview),
+            summary: output_preview.lines().next().unwrap_or_default().to_string(),
+            output_preview: output_preview.to_string(),
+            created_at: 1,
+            runtime_epoch: "epoch-1".to_string(),
+        }
+    }
+
+    fn test_tool_execution_record(tool_call_id: &str) -> AiToolExecutionRecord {
+        AiToolExecutionRecord {
+            record_id: format!("tool-exec-{tool_call_id}"),
+            conversation_id: "conversation-1".to_string(),
+            assistant_message_id: "assistant-1".to_string(),
+            tool_call_id: tool_call_id.to_string(),
+            tool_name: "run_command".to_string(),
+            argument_summary: "target=local-shell:default command=df -h /".to_string(),
+            target_id: Some("local-shell:default".to_string()),
+            target_kind: Some("local-shell".to_string()),
+            risk: "execute".to_string(),
+            approval_source: Some("policy_allowed".to_string()),
+            execution_surface: "visible_terminal".to_string(),
+            visible_in_terminal: Some(true),
+            status: "completed".to_string(),
+            success: Some(true),
+            error_code: None,
+            result_summary: Some("Remote command completed.".to_string()),
+            duration_ms: Some(12),
+            started_at: 1,
+            finished_at: Some(2),
+            runtime_epoch: "epoch-1".to_string(),
+        }
+    }
+
     #[test]
     fn history_trimming_uses_tauri_history_budget_ratio() {
         let cjk_100 = "你".repeat(100);
@@ -325,7 +374,6 @@ mod ai_turn_order_tests {
             }),
             terminal_buffer: None,
             terminal_screen: None,
-            ssh_handle: None,
         };
 
         let target = ai_connect_result_terminal_target(
@@ -755,6 +803,214 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn tool_execution_argument_summary_omits_write_content() {
+        let args = serde_json::json!({
+            "target_id": "ssh-node:node-1",
+            "resource": "file",
+            "path": "/tmp/report.txt",
+            "content": "super secret draft",
+        });
+
+        let summary = ai_tool_argument_summary("write_resource", Some(&args));
+
+        assert!(summary.contains("ssh-node:node-1"));
+        assert!(summary.contains("/tmp/report.txt"));
+        assert!(!summary.contains("super secret draft"));
+    }
+
+    #[test]
+    fn tool_execution_surface_prefers_visible_terminal_result() {
+        let result = serde_json::json!({
+            "execution": {
+                "visibleInTerminal": true,
+                "target": { "id": "ssh-node:node-1", "kind": "ssh-node" }
+            }
+        });
+        let args = serde_json::json!({
+            "target_id": "ssh-node:node-1",
+            "command": "uptime",
+        });
+
+        assert_eq!(
+            ai_tool_execution_surface("run_command", Some(&args), Some(&result)),
+            "visible_terminal"
+        );
+    }
+
+    #[test]
+    fn result_binding_guard_replaces_unbacked_fact_claim() {
+        let mut message = assistant_message();
+        message.content = "我刚才真正的系统状态：运行时间 12 days。".to_string();
+        let facts = Vec::new();
+
+        let guardrail = apply_ai_result_binding_guard(&mut message, &facts);
+
+        assert!(guardrail.is_some());
+        assert!(message.content.contains("tool-result evidence"));
+        let parts = message
+            .turn
+            .as_ref()
+            .and_then(|turn| turn.get("parts"))
+            .and_then(serde_json::Value::as_array)
+            .expect("turn parts");
+        assert_eq!(parts[0]["type"], "guardrail");
+        assert_eq!(parts[0]["code"], "result_binding_required");
+    }
+
+    #[test]
+    fn result_binding_guard_allows_tool_backed_fact_claim() {
+        let mut message = assistant_message();
+        message.content = "磁盘是 468G，已用 72G。".to_string();
+        let facts = vec![test_tool_result_fact(
+            "tool-1.output",
+            "Filesystem Size Used Avail Use%\n/ 468G 72G 373G 17%",
+        )];
+
+        let guardrail = apply_ai_result_binding_guard(&mut message, &facts);
+
+        assert!(guardrail.is_none());
+        assert!(message.turn.is_none());
+    }
+
+    #[test]
+    fn result_binding_accepts_structured_evidence_claim_block() {
+        let mut message = assistant_message();
+        message.content = concat!(
+            "磁盘是 468G，已用 72G。",
+            "\n<evidence_claims>",
+            r#"{"claims":[{"text":"磁盘是 468G，已用 72G。","evidence":["tool-1.output"],"confidence":"verified"}]}"#,
+            "</evidence_claims>"
+        )
+        .to_string();
+        let streamed_content = message.content.clone();
+        append_ai_turn_text_part(&mut message, "text", &streamed_content, false);
+        let facts = vec![test_tool_result_fact(
+            "tool-1.output",
+            "Filesystem Size Used Avail Use%\n/ 468G 72G 373G 17%",
+        )];
+
+        let guardrail = apply_ai_result_binding_guard(&mut message, &facts);
+
+        assert!(guardrail.is_none());
+        assert_eq!(message.content, "磁盘是 468G，已用 72G。");
+        let parts = message
+            .turn
+            .as_ref()
+            .and_then(|turn| turn.get("parts"))
+            .and_then(serde_json::Value::as_array)
+            .expect("turn parts");
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "磁盘是 468G，已用 72G。");
+        assert_eq!(parts[1]["type"], "claim");
+        assert_eq!(parts[1]["evidence"][0], "tool-1.output");
+    }
+
+    #[test]
+    fn result_binding_rejects_structured_claim_with_unknown_fact_id() {
+        let mut message = assistant_message();
+        message.content = concat!(
+            "磁盘是 468G。",
+            "\n<evidence_claims>",
+            r#"{"claims":[{"text":"磁盘是 468G。","evidence":["old-tool.output"],"confidence":"verified"}]}"#,
+            "</evidence_claims>"
+        )
+        .to_string();
+        let facts = vec![test_tool_result_fact(
+            "tool-1.output",
+            "Filesystem Size Used Avail Use%\n/ 468G 72G 373G 17%",
+        )];
+
+        let guardrail = apply_ai_result_binding_guard(&mut message, &facts);
+
+        assert!(guardrail.is_some());
+        assert!(message.content.contains("tool-result evidence"));
+    }
+
+    #[test]
+    fn result_binding_guard_rejects_claim_without_extractable_evidence_tokens() {
+        let mut message = assistant_message();
+        message.content = "我已经检查过系统状态，结果正常。".to_string();
+        let facts = vec![test_tool_result_fact(
+            "tool-1.output",
+            "uptime ok\nload average: 0.20, 0.19, 0.24",
+        )];
+
+        let guardrail = apply_ai_result_binding_guard(&mut message, &facts);
+
+        assert!(guardrail.is_some());
+        assert!(message.content.contains("tool-result evidence"));
+    }
+
+    #[test]
+    fn result_binding_guard_rejects_tool_result_number_mismatch() {
+        let mut message = assistant_message();
+        message.content = "磁盘是 915G，已用 72G。".to_string();
+        let facts = vec![test_tool_result_fact(
+            "tool-1.output",
+            "Filesystem Size Used Avail Use%\n/ 468G 72G 373G 17%",
+        )];
+
+        let guardrail = apply_ai_result_binding_guard(&mut message, &facts);
+
+        assert!(guardrail.is_some());
+        assert_eq!(
+            message
+                .turn
+                .as_ref()
+                .and_then(|turn| turn.get("parts"))
+                .and_then(serde_json::Value::as_array)
+                .and_then(|parts| parts.first())
+                .and_then(|part| part.get("code"))
+                .and_then(serde_json::Value::as_str),
+            Some("result_binding_required")
+        );
+    }
+
+    #[test]
+    fn result_binding_filters_facts_to_current_assistant_turn() {
+        let facts = VecDeque::from([
+            test_tool_result_fact_for_assistant(
+                "old-tool.output",
+                "assistant-old",
+                "Filesystem Size Used Avail Use%\n/ 468G 72G 373G 17%",
+            ),
+            test_tool_result_fact_for_assistant(
+                "current-tool.output",
+                "assistant-1",
+                "load average: 0.20, 0.19, 0.24",
+            ),
+        ]);
+
+        let filtered =
+            ai_tool_result_facts_for_message(&facts, "conversation-1", "assistant-1");
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].fact_id, "current-tool.output");
+        assert!(!filtered[0].output_preview.contains("468G"));
+    }
+
+    #[test]
+    fn tool_result_fact_extraction_hashes_output_and_execution_values() {
+        let record = test_tool_execution_record("tool-1");
+        let result = serde_json::json!({
+            "summary": "Remote command completed.",
+            "output": "Filesystem Size Used\n/ 468G 72G",
+            "execution": {
+                "exitCode": 0,
+                "visibleInTerminal": true,
+                "state": "output_captured"
+            }
+        });
+
+        let facts = extract_ai_tool_result_facts(&record, Some(&result), 42);
+
+        assert!(facts.iter().any(|fact| fact.fact_id == "tool-1.output"));
+        assert!(facts.iter().any(|fact| fact.fact_id == "tool-1.execution.exit_code"));
+        assert!(facts.iter().all(|fact| fact.text_hash.starts_with("sha256:")));
+        assert!(facts.iter().any(|fact| fact.output_preview.contains("468G")));
+    }
+
+    #[test]
     fn pending_round_summary_attaches_when_round_arrives() {
         let mut message = assistant_message();
 
@@ -942,13 +1198,18 @@ mod ai_turn_order_tests {
         assert!(ai_orchestrator_obligation_prompt(&obligation)
             .expect("prompt")
             .contains("Required Tool Call"));
-        assert!(ai_should_retry_required_tool_round(
+        assert!(oxideterm_ai::ai_should_retry_required_tool_round(
             &obligation,
             "我已经打开了本地终端。"
         ));
-        assert!(!ai_should_retry_required_tool_round(
+        assert!(!oxideterm_ai::ai_should_retry_required_tool_round(
             &obligation,
             "需要你确认打开哪一个终端？"
+        ));
+        assert!(!oxideterm_ai::ai_should_retry_required_tool_round_for_turn(
+            &obligation,
+            "好的，已经通过工具确认当前状态。",
+            true,
         ));
     }
 

@@ -43,7 +43,6 @@ struct AiOrchestratorTarget {
     metadata: serde_json::Value,
     terminal_buffer: Option<String>,
     terminal_screen: Option<serde_json::Value>,
-    ssh_handle: Option<SshConnectionHandle>,
 }
 
 #[derive(Clone, Debug)]

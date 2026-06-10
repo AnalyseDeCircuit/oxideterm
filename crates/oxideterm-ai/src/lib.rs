@@ -111,8 +111,9 @@ pub use suggestions::{
 pub use tool_protocol::{
     AiOrchestratorObligation, AiOrchestratorObligationMode, ai_classify_orchestrator_obligation,
     ai_orchestrator_obligation_prompt, ai_required_tool_retry_prompt,
-    ai_should_retry_required_tool_round, ai_should_trigger_hard_deny,
-    ai_text_contains_tauri_action_claim, ai_user_explicitly_requested_json,
+    ai_should_retry_required_tool_round, ai_should_retry_required_tool_round_for_turn,
+    ai_should_trigger_hard_deny, ai_text_contains_tauri_action_claim,
+    ai_user_explicitly_requested_json,
 };
 pub use types::{
     AiChatMessage, AiChatMessageMetadata, AiChatRole, AiChatState, AiChatStreamConfig,

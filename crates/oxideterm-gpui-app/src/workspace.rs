@@ -129,8 +129,8 @@ use oxideterm_ssh::{
     PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRule,
     ReconnectForwardRuleSnapshot, ReconnectJob, ReconnectNodeConnectionSnapshot,
     ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
-    ReconnectPhase, ReconnectSnapshot, ReconnectTiming, SshConfig, SshConnectionHandle,
-    SshConnectionRegistry, SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
+    ReconnectPhase, ReconnectSnapshot, ReconnectTiming, SshConfig, SshConnectionRegistry,
+    SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
 };
 use oxideterm_terminal::{
     LocalPtyConfig, SerialSessionConfig, ShellInfo, SshSessionConfig, TelnetSessionConfig,
@@ -635,6 +635,8 @@ pub(crate) struct WorkspaceApp {
     ai_runtime_epoch: String,
     ai_command_record_sequence: u64,
     ai_command_records: VecDeque<AiRuntimeCommandRecord>,
+    ai_tool_execution_records: VecDeque<AiToolExecutionRecord>,
+    ai_tool_result_facts: VecDeque<AiToolResultFact>,
     ai_cli_agent_sessions: HashMap<String, AiCliAgentSession>,
     ai_conversation_list_open: bool,
     ai_chat_menu_open: bool,
@@ -1036,6 +1038,45 @@ pub(crate) struct AiRuntimeCommandRecord {
     pub(crate) runtime_epoch: String,
     pub(crate) approval_mode: Option<String>,
     pub(crate) risk: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AiToolExecutionRecord {
+    pub(crate) record_id: String,
+    pub(crate) conversation_id: String,
+    pub(crate) assistant_message_id: String,
+    pub(crate) tool_call_id: String,
+    pub(crate) tool_name: String,
+    pub(crate) argument_summary: String,
+    pub(crate) target_id: Option<String>,
+    pub(crate) target_kind: Option<String>,
+    pub(crate) risk: String,
+    pub(crate) approval_source: Option<String>,
+    pub(crate) execution_surface: String,
+    pub(crate) visible_in_terminal: Option<bool>,
+    pub(crate) status: String,
+    pub(crate) success: Option<bool>,
+    pub(crate) error_code: Option<String>,
+    pub(crate) result_summary: Option<String>,
+    pub(crate) duration_ms: Option<u64>,
+    pub(crate) started_at: i64,
+    pub(crate) finished_at: Option<i64>,
+    pub(crate) runtime_epoch: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AiToolResultFact {
+    pub(crate) fact_id: String,
+    pub(crate) conversation_id: String,
+    pub(crate) assistant_message_id: String,
+    pub(crate) tool_call_id: String,
+    pub(crate) tool_name: String,
+    pub(crate) source_kind: String,
+    pub(crate) text_hash: String,
+    pub(crate) summary: String,
+    pub(crate) output_preview: String,
+    pub(crate) created_at: i64,
+    pub(crate) runtime_epoch: String,
 }
 
 #[derive(Clone, Debug)]

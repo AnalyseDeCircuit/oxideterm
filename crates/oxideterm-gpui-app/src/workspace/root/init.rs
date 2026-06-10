@@ -356,6 +356,8 @@ impl WorkspaceApp {
             ai_runtime_epoch: uuid::Uuid::new_v4().to_string(),
             ai_command_record_sequence: 0,
             ai_command_records: VecDeque::new(),
+            ai_tool_execution_records: VecDeque::new(),
+            ai_tool_result_facts: VecDeque::new(),
             ai_cli_agent_sessions: HashMap::new(),
             ai_conversation_list_open: false,
             ai_chat_menu_open: false,

@@ -452,7 +452,7 @@ fn ai_orchestrator_system_prompt(tool_use_enabled: bool) -> String {
             "- Every action that runs, writes, transfers, or sends input must use an explicit target_id.",
             "- For knowledge-base, documentation, runbook, SOP, or plugin-development-document queries, select or use `rag-index:default`, then call `read_resource` with `resource=\"rag\"` and `query`. Do not use local shell, terminal commands, or connection discovery for knowledge searches.",
             "- Do not pass command text such as `pwd`, `docker ps`, `ls -la`, or `sudo ...` to `select_target`; first select the execution target, then call `run_command`.",
-            "- Saved SSH connections are not live shells. To run a command there, call `connect_target` first, then `run_command` on the returned `ssh-node:*` or `terminal-session:*` target.",
+            "- Saved SSH connections are not live shells. To run a command there, call `connect_target` first, then `run_command` on the returned `terminal-session:*` target so the command is visible to the user.",
             "- If `run_command` returns `execution.visibleInTerminal: true`, the command was sent through a visible terminal session. If it returns `false`, it was a backend capture and you must not say it appeared in the terminal.",
             "- Treat `execution.state: \"sent\"` as dispatch only. Do not summarize command results until tool output, `exitCode`, or `execution.state: \"completed\"` / `\"output_captured\"` proves what happened.",
             "- Use `send_terminal_input` only for literal interactive text after `observe_terminal` shows a prompt such as password, TUI, or confirmation input. Do not use it for commands or control keys; use `run_command` for commands.",
@@ -488,6 +488,12 @@ fn ai_orchestrator_system_prompt(tool_use_enabled: bool) -> String {
         "### Output Handling",
         "- If tool output is truncated, sampled, or incomplete, explicitly say what part you could see and that conclusions are limited by truncation.",
         "- Do not ask the user to manually create, copy, or paste files to report results when tools can read or write them. Use tool calls or answer directly.",
+        "",
+        "### Evidence Binding",
+        "- Tool results may include `evidenceFacts` with `factId` values. When your final answer states facts derived from tool results, append an exact `<evidence_claims>...</evidence_claims>` block after the visible answer.",
+        "- The block content must be JSON shaped as `{ \"claims\": [{ \"text\": \"visible factual claim\", \"evidence\": [\"tool-call-id.output\"], \"confidence\": \"verified\" }] }`.",
+        "- Every verified claim must cite only fact IDs from the current turn's tool results. Do not cite old transcript facts for a new claim.",
+        "- Do not put guesses, plans, or unsupported prose in `evidence_claims`; if no fact proves a claim, say it is not verified instead of marking it verified.",
     ]
     .join("\n")
 }
