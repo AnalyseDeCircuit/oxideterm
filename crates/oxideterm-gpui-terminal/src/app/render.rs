@@ -143,8 +143,13 @@ impl Render for TerminalPane {
                     this.handle_mouse_up(event, cx);
                 }),
             )
-            .on_key_down(cx.listener(|this, event, _window, cx| {
-                this.handle_key(event, cx);
+            .on_key_down(cx.listener(|this, event, window, cx| {
+                if this.handle_key(event, cx) {
+                    // Terminal-owned shortcuts and control keys must not fall
+                    // through to GPUI defaults after being sent to the PTY.
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
             }))
             .on_key_up(cx.listener(|this, event, _window, cx| {
                 this.handle_key_up(event, cx);

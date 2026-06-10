@@ -1189,8 +1189,8 @@ fn tabbar_legacy_actions_width_for_state(
         width += TABBAR_LEGACY_ACTION_BUTTON_SIZE * 2.0;
 
         if pane_count > 1 {
-            children += 1;
-            width += TABBAR_LEGACY_PANE_BADGE_MIN_WIDTH;
+            children += 2;
+            width += TABBAR_LEGACY_PANE_BADGE_MIN_WIDTH + TABBAR_LEGACY_ACTION_BUTTON_SIZE;
         }
     }
 
@@ -1275,7 +1275,7 @@ mod tests {
         assert_eq!(local_actions, 153.0);
 
         let split_local_actions = tabbar_legacy_actions_width_for_state(true, 2, None, ratio);
-        assert_eq!(split_local_actions, 177.0);
+        assert_eq!(split_local_actions, 205.0);
 
         let broadcast_actions =
             tabbar_legacy_actions_width_for_state(false, 1, Some("All"), ratio);

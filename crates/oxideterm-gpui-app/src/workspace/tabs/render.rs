@@ -494,20 +494,35 @@ impl WorkspaceApp {
                             ),
                         )
                         .when(pane_count > 1, |actions| {
-                            actions.child(
-                                div()
-                                    .h(px(20.0))
-                                    .min_w(px(TABBAR_LEGACY_PANE_BADGE_MIN_WIDTH))
-                                    .px(px(5.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded_full()
-                                    .bg(rgba((theme.bg_panel << 8) | 0xcc))
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(pane_count.to_string()),
-                            )
+                            actions
+                                .child(
+                                    div()
+                                        .h(px(20.0))
+                                        .min_w(px(TABBAR_LEGACY_PANE_BADGE_MIN_WIDTH))
+                                        .px(px(5.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded_full()
+                                        .bg(rgba((theme.bg_panel << 8) | 0xcc))
+                                        .text_size(px(11.0))
+                                        .text_color(rgb(theme.text_muted))
+                                        .child(pane_count.to_string()),
+                                )
+                                .child(
+                                    self.terminal_legacy_icon_button(
+                                        LucideIcon::X,
+                                        true,
+                                        |this, _event, window, cx| {
+                                            // Split tabs already expose close-pane through the menu and
+                                            // keybinding; the visible toolbar button gives mouse users the
+                                            // same direct affordance as the split controls.
+                                            this.close_active_pane(window, cx);
+                                            cx.stop_propagation();
+                                        },
+                                        cx,
+                                    ),
+                                )
                         })
                 })
                 .child(select_anchor_probe(

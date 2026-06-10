@@ -15,14 +15,14 @@ const TERMINAL_SELECTION_AUTOSCROLL_INTERVAL_MS: u64 = 16;
 const TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS: i32 = 4;
 
 impl TerminalPane {
-    pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
         if self.context_menu.take().is_some() {
             cx.notify();
             if key == "escape" {
-                return;
+                return true;
             }
         }
 
@@ -30,11 +30,11 @@ impl TerminalPane {
             match key {
                 "enter" => {
                     self.confirm_pending_paste(cx);
-                    return;
+                    return true;
                 }
                 "escape" => {
                     self.cancel_pending_paste(cx);
-                    return;
+                    return true;
                 }
                 _ => {}
             }
@@ -49,35 +49,42 @@ impl TerminalPane {
             if result.is_ok() {
                 cx.notify();
             }
-            return;
+            return true;
         }
 
         if key == "end" && modifiers.platform {
             self.terminal.lock().scroll_to_bottom();
             self.snapshot = self.terminal.lock().snapshot();
             cx.notify();
-            return;
+            return true;
         }
 
         if key == "home" && modifiers.platform {
             self.terminal.lock().scroll_to_top();
             self.snapshot = self.terminal.lock().snapshot();
             cx.notify();
-            return;
+            return true;
         }
 
         let mode = self.terminal.lock().mode();
+        if is_platform_copy_shortcut(event) {
+            // macOS terminals reserve Cmd+C for copy; Ctrl+C remains the
+            // protocol interrupt path below.
+            self.copy_current_selection_or_snapshot(cx);
+            return true;
+        }
+
         if self.settings.smart_copy
             && is_smart_copy_shortcut(event)
             && smart_copy_selection_is_owned_by_terminal_ui(mode)
             && self.copy_selection_to_clipboard_if_present(cx)
         {
-            return;
+            return true;
         }
 
         if let Some(action) = oxideterm_terminal_scroll_action(&event.keystroke) {
             self.apply_scroll_action(action, cx);
-            return;
+            return true;
         }
 
         let key_event_type = if event.is_held {
@@ -89,7 +96,10 @@ impl TerminalPane {
             oxideterm_key_escape_sequence(&event.keystroke, &mode, false, key_event_type)
         {
             self.send_user_protocol_bytes(sequence.as_bytes(), cx);
+            return true;
         }
+
+        false
     }
 
     pub(crate) fn handle_key_up(&mut self, event: &KeyUpEvent, cx: &mut Context<Self>) {
@@ -809,6 +819,18 @@ fn is_smart_copy_shortcut(event: &KeyDownEvent) -> bool {
     let modifiers = event.keystroke.modifiers;
     modifiers.control
         && !modifiers.platform
+        && !modifiers.alt
+        && !modifiers.shift
+        && event.keystroke.key.eq_ignore_ascii_case("c")
+}
+
+fn is_platform_copy_shortcut(event: &KeyDownEvent) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    let modifiers = event.keystroke.modifiers;
+    modifiers.platform
+        && !modifiers.control
         && !modifiers.alt
         && !modifiers.shift
         && event.keystroke.key.eq_ignore_ascii_case("c")

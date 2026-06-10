@@ -86,6 +86,21 @@ fn plain_printable_keys_are_left_for_gpui_text_input() {
 }
 
 #[test]
+fn plain_tab_emits_tab_character_for_shell_completion() {
+    let sequence = oxideterm_key_escape_sequence(
+        &Keystroke {
+            key: "tab".to_string(),
+            ..Default::default()
+        },
+        &TermMode::default(),
+        false,
+        KittyKeyEventType::Press,
+    );
+
+    assert_eq!(sequence.as_deref(), Some("\t"));
+}
+
+#[test]
 fn ctrl_alpha_keys_emit_ascii_control_codes() {
     for byte in b'a'..=b'z' {
         let sequence = oxideterm_key_escape_sequence(
