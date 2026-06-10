@@ -56,6 +56,7 @@ pub(crate) enum LocalGraphicsMsg {
     Resize(WindowSize),
     SetEncoding(TerminalEncoding),
     SetOutputProcessor(Option<TerminalOutputProcessor>),
+    SetOutputEventsEnabled(bool),
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -141,7 +142,7 @@ where
                 }
                 let decoded = state.output_decoder.decode_to_utf8_bytes(terminal_bytes);
                 parsed_bytes += terminal_bytes.len();
-                if !decoded.is_empty() {
+                if state.output_events_enabled && !decoded.is_empty() {
                     // Tauri feeds decoded display text into TerminalRecorder after xterm
                     // receives it. Keep the native recorder on the same side of encoding
                     // detection instead of recording raw PTY bytes.
@@ -202,6 +203,9 @@ where
                 LocalGraphicsMsg::SetOutputProcessor(processor) => {
                     state.output_processor = processor;
                     state.utf8_guard = Utf8ResidualGuard::default();
+                }
+                LocalGraphicsMsg::SetOutputEventsEnabled(enabled) => {
+                    state.output_events_enabled = enabled;
                 }
                 LocalGraphicsMsg::Shutdown => return false,
             }
@@ -560,6 +564,7 @@ struct LocalGraphicsState {
     utf8_guard: Utf8ResidualGuard,
     magic_scan: MagicScanWindow,
     output_processor: Option<TerminalOutputProcessor>,
+    output_events_enabled: bool,
     output_decoder: TerminalOutputDecoder,
     encoding_detector: EncodingMismatchDetector,
     shell_integration: TerminalShellIntegration,
@@ -575,6 +580,7 @@ impl LocalGraphicsState {
             utf8_guard: Utf8ResidualGuard::default(),
             magic_scan: MagicScanWindow::default(),
             output_processor: None,
+            output_events_enabled: false,
             output_decoder: TerminalOutputDecoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             shell_integration: TerminalShellIntegration::default(),

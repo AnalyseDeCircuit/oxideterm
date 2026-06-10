@@ -162,6 +162,7 @@ pub struct SerialSession {
     encoding: TerminalEncoding,
     output_decoder: TerminalOutputDecoder,
     output_processor: Option<TerminalOutputProcessor>,
+    output_events_enabled: bool,
     input_encoder: TerminalInputEncoder,
     encoding_detector: EncodingMismatchDetector,
     shell_integration: TerminalShellIntegration,
@@ -252,6 +253,7 @@ impl SerialSession {
             encoding,
             output_decoder: TerminalOutputDecoder::new(encoding),
             output_processor: None,
+            output_events_enabled: false,
             input_encoder: TerminalInputEncoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             shell_integration: TerminalShellIntegration::default(),
@@ -363,7 +365,9 @@ impl SerialSession {
                     self.pending_events.push(TerminalEvent::EncodingHint(hint));
                 }
                 let decoded = self.output_decoder.decode_to_utf8_bytes(terminal_bytes);
-                if !decoded.is_empty() {
+                if self.output_events_enabled && !decoded.is_empty() {
+                    // Terminal recording observes decoded display bytes, not
+                    // transport bytes, and is disabled on the normal path.
                     self.pending_events
                         .push(TerminalEvent::Output(decoded.as_ref().to_vec()));
                 }
@@ -386,14 +390,20 @@ impl SerialSession {
     }
 
     fn feed_utf8_terminal_output(&mut self, bytes: &[u8]) {
-        if !bytes.is_empty() {
-            self.pending_events.push(TerminalEvent::Output(bytes.to_vec()));
-        }
+        self.push_output_event(bytes);
         let mut term = self.term.lock();
         self.shell_integration
             .advance(&mut self.parser, &mut *term, bytes, |event| {
                 self.pending_events.push(event);
             });
+    }
+
+    fn push_output_event(&mut self, bytes: &[u8]) {
+        if self.output_events_enabled && !bytes.is_empty() {
+            // Terminal recording is the only consumer of raw display-output events;
+            // keep this allocation off the normal rendering path.
+            self.pending_events.push(TerminalEvent::Output(bytes.to_vec()));
+        }
     }
 
     fn handle_alacritty_event(&mut self, event: AlacEvent) -> bool {
@@ -529,6 +539,10 @@ impl TerminalSessionBackend for SerialSession {
         self.output_processor = processor;
         self.output_decoder.reset();
         self.encoding_detector.set_encoding(self.encoding);
+    }
+
+    fn set_output_events_enabled(&mut self, enabled: bool) {
+        self.output_events_enabled = enabled;
     }
 
     fn mode(&self) -> TermMode {

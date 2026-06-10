@@ -215,6 +215,10 @@ impl TerminalSession {
         self.backend.set_output_processor(processor);
     }
 
+    pub fn set_output_events_enabled(&mut self, enabled: bool) {
+        self.backend.set_output_events_enabled(enabled);
+    }
+
     pub fn set_trzsz_policy(&mut self, policy: Option<TrzszTransferPolicy>) {
         self.backend.set_trzsz_policy(policy);
     }

@@ -18,6 +18,7 @@ pub struct SshPtySession {
     encoding: TerminalEncoding,
     output_decoder: TerminalOutputDecoder,
     output_processor: Option<TerminalOutputProcessor>,
+    output_events_enabled: bool,
     input_encoder: TerminalInputEncoder,
     encoding_detector: EncodingMismatchDetector,
     trzsz_consumer: Option<TrzszConsumer>,
@@ -52,9 +53,19 @@ impl SshPtySession {
             listener.clone(),
         )));
 
-        let runtime = Runtime::new().ok();
+        // GPUI owns a backend runtime for SSH-adjacent work; standalone
+        // terminal sessions keep this fallback runtime alive for compatibility.
+        let runtime = if config.runtime_handle.is_some() {
+            None
+        } else {
+            Runtime::new().ok()
+        };
+        let runtime_handle = config
+            .runtime_handle
+            .clone()
+            .or_else(|| runtime.as_ref().map(|runtime| runtime.handle().clone()));
         let (connect_tx, connect_rx) = unbounded();
-        if let Some(runtime) = runtime.as_ref() {
+        if let Some(runtime_handle) = runtime_handle {
             let mut ssh_config = config.config.clone();
             if config.defer_pty_until_resize() {
                 ssh_config.cols = 0;
@@ -67,7 +78,7 @@ impl SshPtySession {
             let consumer = config.consumer.clone();
             let prompt_handler = config.prompt_handler.clone();
             let managed_key_resolver = config.managed_key_resolver.clone();
-            runtime.spawn(async move {
+            runtime_handle.spawn(async move {
                 let mut client = SshTransportClient::new(ssh_config);
                 if let Some(prompt_handler) = prompt_handler {
                     client = client.with_prompt_handler(prompt_handler);
@@ -110,6 +121,7 @@ impl SshPtySession {
             encoding,
             output_decoder: TerminalOutputDecoder::new(encoding),
             output_processor: None,
+            output_events_enabled: false,
             input_encoder: TerminalInputEncoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             trzsz_consumer,
@@ -179,6 +191,14 @@ impl SshPtySession {
         apply_terminal_output_processor(&self.output_processor, bytes)
     }
 
+    fn push_output_event(&mut self, bytes: &[u8]) {
+        if self.output_events_enabled && !bytes.is_empty() {
+            // Terminal recording is the only consumer of raw display-output events;
+            // keep this allocation off the normal rendering path.
+            self.pending_events.push(TerminalEvent::Output(bytes.to_vec()));
+        }
+    }
+
     fn feed_transport_output_to_terminal(&mut self, bytes: &[u8]) {
         for kind in self.magic_scan.scan(bytes) {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
@@ -198,9 +218,9 @@ impl SshPtySession {
                     self.pending_events.push(TerminalEvent::EncodingHint(hint));
                 }
                 let decoded = self.output_decoder.decode_to_utf8_bytes(terminal_bytes);
-                if !decoded.is_empty() {
-                    // Match the Tauri hook boundary: recording observes UTF-8 display
-                    // output after terminal decoding, not the SSH transport bytes.
+                if self.output_events_enabled && !decoded.is_empty() {
+                    // Match the Tauri hook boundary: recording observes UTF-8
+                    // display output after terminal decoding, not SSH bytes.
                     self.pending_events
                         .push(TerminalEvent::Output(decoded.as_ref().to_vec()));
                 }
@@ -280,10 +300,7 @@ impl SshPtySession {
     }
 
     fn feed_utf8_terminal_output(&mut self, bytes: &[u8]) {
-        if !bytes.is_empty() {
-            self.pending_events
-                .push(TerminalEvent::Output(bytes.to_vec()));
-        }
+        self.push_output_event(bytes);
         let mut term = self.term.lock();
         self.shell_integration
             .advance(&mut self.parser, &mut *term, bytes, |event| {
@@ -528,6 +545,10 @@ impl TerminalSessionBackend for SshPtySession {
         self.output_processor = processor;
         self.output_decoder.reset();
         self.encoding_detector.set_encoding(self.encoding);
+    }
+
+    fn set_output_events_enabled(&mut self, enabled: bool) {
+        self.output_events_enabled = enabled;
     }
 
     fn set_trzsz_policy(&mut self, policy: Option<TrzszTransferPolicy>) {

@@ -612,8 +612,11 @@ impl TerminalPane {
         // send Ctrl-L or other bytes to the running shell. The emulator and the
         // command fact ledger are both owned by this pane, so keep the mutation
         // on the GPUI entity thread.
-        self.terminal.lock().clear_buffer();
-        self.snapshot = self.terminal.lock().snapshot();
+        self.snapshot = {
+            let mut terminal = self.terminal.lock();
+            terminal.clear_buffer();
+            terminal.snapshot()
+        };
         self.selection = None;
         self.search_query = None;
         self.selected_search_match = None;
@@ -656,11 +659,14 @@ impl TerminalPane {
     fn tick(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
         let budget = self.next_drain_budget();
-        let (report, events) = {
+        let (report, events, mode, next_snapshot) = {
             let mut terminal = self.terminal.lock();
             terminal.refresh_process_info();
             let report = terminal.read_pending_with_budget(budget);
-            (report, terminal.take_events())
+            let events = terminal.take_events();
+            let mode = terminal.mode();
+            let next_snapshot = report.changed.then(|| terminal.snapshot());
+            (report, events, mode, next_snapshot)
         };
         self.last_drain_budget_exhausted = report.budget_exhausted;
         if report.changed {
@@ -672,9 +678,9 @@ impl TerminalPane {
             self.handle_terminal_event(event, cx);
         }
 
-        let cleared_command_mark_selection = self.clear_command_mark_selection_for_tui_mode();
-        if report.changed {
-            self.snapshot = self.terminal.lock().snapshot();
+        let cleared_command_mark_selection = self.clear_command_mark_selection_for_tui_mode(mode);
+        if let Some(snapshot) = next_snapshot {
+            self.snapshot = snapshot;
             cx.notify();
         } else if self.preferences.show_fps_overlay || cleared_command_mark_selection {
             cx.notify();
@@ -683,8 +689,7 @@ impl TerminalPane {
         self.update_cursor_blink(cx);
     }
 
-    fn clear_command_mark_selection_for_tui_mode(&mut self) -> bool {
-        let mode = self.terminal.lock().mode();
+    fn clear_command_mark_selection_for_tui_mode(&mut self, mode: TermMode) -> bool {
         if self.selected_command_mark_id.is_none()
             || !(mode.contains(TermMode::ALT_SCREEN) || mode.intersects(TermMode::MOUSE_MODE))
         {
@@ -1108,18 +1113,19 @@ impl TerminalPane {
             return;
         }
 
-        let resized = {
+        let next_snapshot = {
             let mut terminal = self.terminal.lock();
             terminal
                 .resize_with_cell_size(cols, rows, cell_width_px, cell_height_px)
                 .is_ok()
+                .then(|| terminal.snapshot())
         };
-        if resized {
+        if let Some(snapshot) = next_snapshot {
             self.last_pty_resize = Some(resize);
             if let Some(recorder) = self.recorder.as_mut() {
                 recorder.record_resize(cols, rows);
             }
-            self.snapshot = self.terminal.lock().snapshot();
+            self.snapshot = snapshot;
             cx.notify();
         }
     }

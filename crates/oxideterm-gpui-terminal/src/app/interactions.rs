@@ -53,15 +53,21 @@ impl TerminalPane {
         }
 
         if key == "end" && modifiers.platform {
-            self.terminal.lock().scroll_to_bottom();
-            self.snapshot = self.terminal.lock().snapshot();
+            self.snapshot = {
+                let mut terminal = self.terminal.lock();
+                terminal.scroll_to_bottom();
+                terminal.snapshot()
+            };
             cx.notify();
             return true;
         }
 
         if key == "home" && modifiers.platform {
-            self.terminal.lock().scroll_to_top();
-            self.snapshot = self.terminal.lock().snapshot();
+            self.snapshot = {
+                let mut terminal = self.terminal.lock();
+                terminal.scroll_to_top();
+                terminal.snapshot()
+            };
             cx.notify();
             return true;
         }
@@ -144,10 +150,11 @@ impl TerminalPane {
             return;
         }
 
-        self.terminal
-            .lock()
-            .scroll_lines(terminal_scroll_delta(rows));
-        self.snapshot = self.terminal.lock().snapshot();
+        self.snapshot = {
+            let mut terminal = self.terminal.lock();
+            terminal.scroll_lines(terminal_scroll_delta(rows));
+            terminal.snapshot()
+        };
         cx.notify();
     }
 
@@ -371,8 +378,11 @@ impl TerminalPane {
         let scroll_fraction = f32::from(y / available);
         let history = self.snapshot.scrollback_lines;
         let offset = ((1.0 - scroll_fraction) * history as f32).round() as usize;
-        self.terminal.lock().scroll_to_display_offset(offset);
-        self.snapshot = self.terminal.lock().snapshot();
+        self.snapshot = {
+            let mut terminal = self.terminal.lock();
+            terminal.scroll_to_display_offset(offset);
+            terminal.snapshot()
+        };
         cx.notify();
     }
 
@@ -496,8 +506,11 @@ impl TerminalPane {
             return;
         }
 
-        self.terminal.lock().scroll_to_display_offset(target_offset);
-        self.snapshot = self.terminal.lock().snapshot();
+        self.snapshot = {
+            let mut terminal = self.terminal.lock();
+            terminal.scroll_to_display_offset(target_offset);
+            terminal.snapshot()
+        };
         self.update_selection(position, cx);
         self.schedule_selection_autoscroll(cx);
     }
@@ -510,7 +523,7 @@ impl TerminalPane {
     }
 
     fn apply_scroll_action(&mut self, action: TerminalScrollAction, cx: &mut Context<Self>) {
-        {
+        self.snapshot = {
             let mut terminal = self.terminal.lock();
             match action {
                 TerminalScrollAction::PageUp => terminal.page_up(),
@@ -520,8 +533,8 @@ impl TerminalPane {
                 TerminalScrollAction::Top => terminal.scroll_to_top(),
                 TerminalScrollAction::Bottom => terminal.scroll_to_bottom(),
             }
-        }
-        self.snapshot = self.terminal.lock().snapshot();
+            terminal.snapshot()
+        };
         cx.notify();
     }
 
@@ -572,8 +585,11 @@ impl TerminalPane {
     ) {
         let desired_row = (self.snapshot.rows / 3).max(1) as i32;
         let target_offset = desired_row.saturating_sub(search_match.line).max(0) as usize;
-        self.terminal.lock().scroll_to_display_offset(target_offset);
-        self.snapshot = self.terminal.lock().snapshot();
+        self.snapshot = {
+            let mut terminal = self.terminal.lock();
+            terminal.scroll_to_display_offset(target_offset);
+            terminal.snapshot()
+        };
         cx.notify();
     }
 

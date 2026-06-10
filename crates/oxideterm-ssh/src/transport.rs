@@ -22,7 +22,7 @@ use ssh_encoding::Encode;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::Semaphore,
-    sync::{Mutex, mpsc},
+    sync::mpsc,
     time::{Instant, sleep_until, timeout},
 };
 use zeroize::Zeroizing;

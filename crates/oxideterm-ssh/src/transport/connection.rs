@@ -1,5 +1,5 @@
 struct PooledSshConnection {
-    target: Mutex<client::Handle<NativeClientHandler>>,
+    target: client::Handle<NativeClientHandler>,
     _jump_handles: Vec<client::Handle<NativeClientHandler>>,
     remote_forward_handler: RemoteForwardHandlerSlot,
     auth_banners: AuthBannerSink,
@@ -34,7 +34,7 @@ impl PooledSshConnection {
         auth_banners: AuthBannerSink,
     ) -> Self {
         Self {
-            target: Mutex::new(handle),
+            target: handle,
             _jump_handles: Vec::new(),
             remote_forward_handler,
             auth_banners,
@@ -48,7 +48,7 @@ impl PooledSshConnection {
         auth_banners: AuthBannerSink,
     ) -> Self {
         Self {
-            target: Mutex::new(target),
+            target,
             _jump_handles: jump_handles,
             remote_forward_handler,
             auth_banners,
@@ -56,7 +56,7 @@ impl PooledSshConnection {
     }
 
     async fn is_closed(&self) -> bool {
-        self.target.lock().await.is_closed()
+        self.target.is_closed()
     }
 }
 
@@ -93,7 +93,7 @@ impl SshConnectionHandle {
             return KeepaliveProbeResult::IoError;
         }
 
-        let handle = pooled.target.lock().await;
+        let handle = &pooled.target;
         // Tauri's app-level heartbeat calls russh `send_keepalive(true)`.
         // Use the same API and frame (`keepalive@openssh.com` with
         // want_reply=true) so native preserves Tauri's timeout/error surface
@@ -130,9 +130,9 @@ impl SshConnectionHandle {
             ));
         }
 
-        let handle = pooled.target.lock().await;
+        let handle = &pooled.target;
         let stream =
-            open_direct_tcpip_stream_with_origin(&handle, host, port, origin_host, origin_port)
+            open_direct_tcpip_stream_with_origin(handle, host, port, origin_host, origin_port)
                 .await?;
         Ok(Box::new(stream))
     }
@@ -156,12 +156,12 @@ impl SshConnectionHandle {
             };
         }
 
-        let handle = pooled.target.lock().await;
+        let handle = &pooled.target;
         // Tauri `preflightTreeNode` verifies a child host key through the
         // already-connected parent node. Keep the stream type inside the SSH
         // crate so GPUI can request node-scoped preflight without depending on
         // russh internals.
-        match open_direct_tcpip_stream_with_origin(&handle, host, port, "127.0.0.1", 0).await {
+        match open_direct_tcpip_stream_with_origin(handle, host, port, "127.0.0.1", 0).await {
             Ok(stream) => check_host_key_via_stream(host, port, stream, timeout_secs).await,
             Err(error) => HostKeyStatus::Error {
                 message: error.to_string(),
@@ -185,7 +185,7 @@ impl SshConnectionHandle {
             ));
         }
 
-        let handle = pooled.target.lock().await;
+        let handle = &pooled.target;
         handle
             .tcpip_forward(bind_address, bind_port as u32)
             .await
@@ -203,7 +203,7 @@ impl SshConnectionHandle {
                 "no active SSH connection is available for remote port forwarding".to_string(),
             ));
         };
-        let handle = pooled.target.lock().await;
+        let handle = &pooled.target;
         handle
             .cancel_tcpip_forward(bind_address, bind_port as u32)
             .await
@@ -232,7 +232,7 @@ impl SshConnectionHandle {
         }
 
         let mut channel = {
-            let handle = pooled.target.lock().await;
+            let handle = &pooled.target;
             handle
                 .channel_open_session()
                 .await
@@ -303,7 +303,7 @@ impl SshConnectionHandle {
         }
 
         let mut channel = {
-            let handle = pooled.target.lock().await;
+            let handle = &pooled.target;
             handle
                 .channel_open_session()
                 .await
@@ -376,7 +376,7 @@ impl SshConnectionHandle {
             ));
         }
 
-        let handle = pooled.target.lock().await;
+        let handle = &pooled.target;
         handle
             .channel_open_session()
             .await
