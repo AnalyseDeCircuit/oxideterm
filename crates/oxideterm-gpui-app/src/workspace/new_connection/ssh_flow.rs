@@ -13,8 +13,8 @@ use oxideterm_connections::{
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionState, HostKeyStatus,
     KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, NodeId, NodeReadiness,
-    ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler, SshTransportClient,
-    check_host_key_with_upstream_proxy,
+    NodeTreeExpansion, ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler,
+    SshTransportClient, check_host_key_with_upstream_proxy,
 };
 use tokio::sync::oneshot;
 
@@ -985,6 +985,102 @@ impl WorkspaceApp {
             upstream_proxy,
         });
         self.continue_active_proxy_session_tree_connect(window, cx);
+    }
+
+    pub(in crate::workspace) fn start_existing_session_tree_connect(
+        &mut self,
+        target_node_id: NodeId,
+        title: String,
+        intent: SshConnectionIntent,
+        save_after_open: Option<SaveConnectionRequest>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.active_proxy_connect_run.is_some() || self.active_connection_chain.is_some() {
+            self.report_proxy_session_tree_error(
+                "CHAIN_LOCK_BUSY: Another connection chain is in progress".to_string(),
+                cx,
+            );
+            return true;
+        }
+
+        let Ok(path_node_ids) = self.node_runtime_store.path_to_node(&target_node_id) else {
+            self.report_proxy_session_tree_error(
+                format!("Node path not found for {}", target_node_id.0),
+                cx,
+            );
+            return true;
+        };
+        if path_node_ids.len() <= 1 {
+            return false;
+        }
+
+        let start_index = path_node_ids
+            .iter()
+            .position(|candidate| !self.connection_trace_node_is_ready(candidate))
+            .unwrap_or(path_node_ids.len());
+        let nodes_to_connect = path_node_ids[start_index..].to_vec();
+        if nodes_to_connect.is_empty() {
+            return false;
+        }
+        if nodes_to_connect
+            .iter()
+            .any(|node_id| self.connecting_node_locks.contains(node_id))
+        {
+            self.report_proxy_session_tree_error(
+                "NODE_LOCK_BUSY: Node is already connecting".to_string(),
+                cx,
+            );
+            return true;
+        }
+
+        let mut endpoints = Vec::with_capacity(nodes_to_connect.len());
+        for node_id in &nodes_to_connect {
+            let Some(node) = self.ssh_nodes.get(node_id) else {
+                self.report_proxy_session_tree_error(
+                    format!("SSH node {} not found", node_id.0),
+                    cx,
+                );
+                return true;
+            };
+            endpoints.push(NativeSessionTreeConnectEndpoint::new(
+                node.config.host.clone(),
+                node.config.port,
+            ));
+        }
+
+        let upstream_proxy = nodes_to_connect.first().and_then(|node_id| {
+            self.node_runtime_store
+                .snapshot(node_id)
+                .filter(|snapshot| snapshot.parent_id.is_none())
+                .and_then(|_| {
+                    self.ssh_nodes
+                        .get(node_id)
+                        .and_then(|node| node.config.upstream_proxy.clone())
+                })
+        });
+        let expansion = NodeTreeExpansion {
+            target_node_id: target_node_id.clone(),
+            path_node_ids: nodes_to_connect,
+            chain_depth: path_node_ids.len() as u32,
+        };
+        let plan = match NativeSessionTreeConnectPlan::from_expansion(&expansion, endpoints, None) {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.report_proxy_session_tree_error(error, cx);
+                return true;
+            }
+        };
+
+        self.active_proxy_connect_run = Some(NativeProxyConnectRun {
+            plan,
+            title,
+            intent,
+            save_after_open,
+            upstream_proxy,
+        });
+        self.continue_active_proxy_session_tree_connect(window, cx);
+        true
     }
 
     fn handle_session_tree_preflight_result(
