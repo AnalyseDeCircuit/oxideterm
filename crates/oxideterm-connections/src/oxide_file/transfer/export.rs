@@ -283,7 +283,45 @@ fn export_connection(
         upstream_proxy: export_upstream_proxy_policy(&conn.upstream_proxy),
         proxy_chain,
         forwards,
+        privilege_credentials: export_privilege_credentials(store, conn, options)?,
     })
+}
+
+fn export_privilege_credentials(
+    store: &ConnectionStore,
+    conn: &SavedConnection,
+    options: &OxideExportOptions,
+) -> Result<Vec<EncryptedPrivilegeCredential>, OxideFileError> {
+    if !options.include_passwords {
+        return Ok(Vec::new());
+    }
+
+    conn.privilege_credentials
+        .iter()
+        .map(|credential| {
+            let secret = if credential.keychain_id.is_some() {
+                store
+                    .get_privilege_credential_secret(&conn.id, &credential.id)
+                    .ok()
+                    .map(SecretString::into_zeroizing)
+            } else {
+                None
+            };
+            Ok(EncryptedPrivilegeCredential {
+                id: credential.id.clone(),
+                connection_id: conn.id.clone(),
+                label: credential.label.clone(),
+                kind: credential.kind,
+                username_hint: credential.username_hint.clone(),
+                prompt_patterns: credential.prompt_patterns.clone(),
+                secret,
+                enabled: credential.enabled,
+                require_click_to_send: credential.require_click_to_send,
+                created_at: credential.created_at,
+                updated_at: credential.updated_at,
+            })
+        })
+        .collect()
 }
 
 fn export_upstream_proxy_policy(policy: &SavedUpstreamProxyPolicy) -> EncryptedUpstreamProxyPolicy {

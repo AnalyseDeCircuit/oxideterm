@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 use anyhow::{Context, Result};
 use oxideterm_connections::{
     ApplySavedConnectionsSyncOutcome, ConnectionStore, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot, oxide_file::EncryptedPluginSetting,
+    SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot, oxide_file::EncryptedPluginSetting,
 };
 use oxideterm_forwarding::{
     ApplySavedForwardsSyncSnapshotResult, ForwardingRegistry, SavedForwardsSyncSnapshot,
@@ -29,6 +29,9 @@ pub struct CloudSyncLocalSnapshot {
     pub upload_units: usize,
     pub connections_record_count: usize,
     pub forwards_record_count: usize,
+    pub quick_commands_record_count: usize,
+    pub serial_profiles_record_count: usize,
+    pub sensitive_credentials_record_count: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +39,8 @@ pub struct CloudSyncLocalSnapshot {
 pub struct CloudSyncApplyOutcome {
     pub connections: Option<ApplySavedConnectionsSyncOutcome>,
     pub forwards: Option<ApplySavedForwardsSyncSnapshotResult>,
+    pub quick_commands_applied: usize,
+    pub serial_profiles_applied: usize,
     pub app_settings_applied: usize,
     pub plugin_settings_applied: usize,
 }
@@ -56,16 +61,30 @@ pub fn build_local_snapshot(
 
     let connections_snapshot = connection_store.export_saved_connections_snapshot()?;
     let forwards_snapshot = forwarding_registry.export_saved_forwards_snapshot()?;
+    let quick_commands_json = oxideterm_quick_commands::export_snapshot_json(settings_store.path())
+        .map_err(anyhow::Error::msg)?;
+    let quick_commands_snapshot: oxideterm_quick_commands::QuickCommandsSnapshot =
+        serde_json::from_str(&quick_commands_json)
+            .context("failed to decode quick commands snapshot")?;
+    let serial_profiles_snapshot = connection_store.export_serial_profiles_snapshot()?;
     let app_settings_section_revisions =
         build_app_settings_section_revision_map(settings_store, &scope)?;
     let plugin_settings_revisions =
         plugin_settings::plugin_settings_revision_map(settings_store.path())
             .map_err(anyhow::Error::msg)?;
     let syncable_settings_payload = build_syncable_settings_payload(settings_store);
+    let sensitive_credentials_revision =
+        tauri_simple_stable_hash(&build_sensitive_credentials_revision_payload(
+            &connections_snapshot,
+            &settings_store.settings().ai.providers,
+        )?)?;
 
     let metadata = LocalSyncMetadata {
         saved_connections_revision: Some(connections_snapshot.revision.clone()),
         saved_forwards_revision: Some(forwards_snapshot.revision.clone()),
+        quick_commands_revision: Some(tauri_simple_stable_hash(&quick_commands_json)?),
+        serial_profiles_revision: Some(serial_profiles_snapshot.revision.clone()),
+        sensitive_credentials_revision: Some(sensitive_credentials_revision),
         settings_revision: Some(tauri_simple_stable_hash(&syncable_settings_payload)?),
         app_settings_section_revisions,
         plugin_settings_revisions,
@@ -80,6 +99,9 @@ pub fn build_local_snapshot(
         upload_units,
         connections_record_count: connections_snapshot.records.len(),
         forwards_record_count: forwards_snapshot.records.len(),
+        quick_commands_record_count: quick_commands_snapshot.commands.len(),
+        serial_profiles_record_count: serial_profiles_snapshot.records.len(),
+        sensitive_credentials_record_count: connections_snapshot.records.len(),
     })
 }
 
@@ -90,6 +112,8 @@ pub fn apply_structured_snapshots(
     settings_store: &mut SettingsStore,
     connections_snapshot: Option<SavedConnectionsSyncSnapshot>,
     forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
+    quick_commands_snapshot_json: Option<String>,
+    serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
     app_settings_snapshots: BTreeMap<String, String>,
     plugin_settings_snapshot: Vec<EncryptedPluginSetting>,
     conflict_strategy: SavedConnectionsConflictStrategy,
@@ -123,6 +147,29 @@ pub fn apply_structured_snapshots(
         None
     };
 
+    let quick_commands_applied = if let Some(snapshot_json) = quick_commands_snapshot_json {
+        let result = oxideterm_quick_commands::apply_snapshot_json(
+            settings_store.path(),
+            &snapshot_json,
+            oxideterm_quick_commands::QuickCommandImportStrategy::Merge,
+        );
+        if !result.errors.is_empty() {
+            anyhow::bail!(
+                "failed to apply quick commands snapshot: {}",
+                result.errors.join("; ")
+            );
+        }
+        result.imported
+    } else {
+        0
+    };
+
+    let serial_profiles_applied = if let Some(snapshot) = serial_profiles_snapshot {
+        connection_store.apply_serial_profiles_snapshot(snapshot)?
+    } else {
+        0
+    };
+
     let mut app_settings_applied = 0usize;
     for (section_id, snapshot_json) in app_settings_snapshots {
         let selected = HashSet::from([section_id]);
@@ -142,6 +189,8 @@ pub fn apply_structured_snapshots(
     Ok(CloudSyncApplyOutcome {
         connections,
         forwards,
+        quick_commands_applied,
+        serial_profiles_applied,
         app_settings_applied,
         plugin_settings_applied,
     })
@@ -181,6 +230,21 @@ fn build_syncable_settings_payload(settings_store: &SettingsStore) -> Value {
             "autoReconnect": settings.reconnect.enabled,
         },
     })
+}
+
+fn build_sensitive_credentials_revision_payload(
+    connections_snapshot: &SavedConnectionsSyncSnapshot,
+    ai_providers: &[Value],
+) -> Result<Value> {
+    let provider_ids = ai_providers
+        .iter()
+        .filter_map(|provider| provider.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "connectionsRevision": connections_snapshot.revision,
+        "aiProviderIds": provider_ids,
+    }))
 }
 
 fn tauri_simple_stable_hash<T: Serialize>(value: &T) -> Result<String> {

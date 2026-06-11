@@ -198,7 +198,8 @@
         "restore_selected_backup": "Restaurar copia seleccionada",
         "clear_secret": "Borrar valor almacenado",
         "save_settings": "Guardar ajustes",
-        "saving": "Guardando…"
+        "saving": "Guardando…",
+        "enable_sensitive_sync": "Activar sincronización sensible"
       },
       "fields": {
         "backend": "Backend",
@@ -220,6 +221,7 @@
       "sections": {
         "quick_start": "Inicio rápido",
         "connection_settings": "Ajustes de conexión",
+        "sync_scope": "Alcance de sincronización",
         "conflict_recovery": "Recuperación ante conflictos",
         "import_preview": "Vista previa de importación",
         "rollback_preview": "Vista previa de reversión",
@@ -269,7 +271,15 @@
         "sync_password": "Contraseña de sincronización",
         "auto_upload_enabled": "Activar subida automática",
         "auto_upload_interval": "Intervalo de subida automática (minutos)",
-        "default_conflict_strategy": "Estrategia de conflicto predeterminada"
+        "default_conflict_strategy": "Estrategia de conflicto predeterminada",
+        "sync_connections": "Sincronizar conexiones",
+        "sync_forwards": "Sincronizar reenvíos guardados",
+        "sync_quick_commands": "Sincronizar comandos rápidos",
+        "sync_serial_profiles": "Sincronizar perfiles serie",
+        "sync_app_settings": "Sincronizar ajustes de la aplicación",
+        "include_local_terminal_env_vars": "Incluir variables de entorno del terminal local",
+        "sync_plugin_settings": "Sincronizar ajustes de plugins",
+        "sync_sensitive_credentials": "Sincronizar credenciales sensibles"
       },
       "auth": {
         "bearer": "Bearer",
@@ -299,13 +309,13 @@
       },
       "backup": {
         "description": "Copia de respaldo de Oxide Cloud Sync",
-        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{pluginSettingsCount}} ajustes de plugins, {{size}}"
+        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{size}}, {{sensitiveCredentials}} sensitive credentials"
       },
       "history": {
         "action_upload": "Subir",
         "action_pull": "Descargar",
         "action_restore": "Restaurar",
-        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{pluginSettingsCount}} ajustes de plugins"
+        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{sensitiveCredentials}} sensitive credentials"
       },
       "errors": {
         "operation_in_progress": "Ya se está ejecutando otra operación de Cloud Sync.",
@@ -370,6 +380,8 @@
         "summary_header": "Resumen de la vista previa remota",
         "connection_count": "Conexiones",
         "total_forwards": "Reenvíos",
+        "quick_commands_label": "Comandos rápidos",
+        "serial_profiles_label": "Perfiles serie",
         "will_import": "Se importará",
         "will_merge": "Se fusionará",
         "will_replace": "Se reemplazará",
@@ -386,14 +398,19 @@
         "toggle_app_settings": "Importar ajustes de la aplicación",
         "toggle_plugin_settings": "Importar ajustes de plugins ({{count}})",
         "toggle_forwards": "Importar reenvíos guardados ({{count}})",
+        "toggle_quick_commands": "Importar comandos rápidos ({{count}})",
+        "toggle_serial_profiles": "Importar perfiles serie ({{count}})",
         "section_field_count": "{{count}} campos",
         "section_general": "General",
         "section_terminal_appearance": "Apariencia del terminal",
         "section_terminal_behavior": "Comportamiento del terminal",
         "section_appearance": "Apariencia",
         "section_connections": "Conexiones",
+        "section_network": "Red",
         "section_file_and_editor": "Archivos y editor",
+        "section_ai": "IA",
         "section_local_terminal": "Terminal local",
+        "section_native_preferences": "Preferencias nativas",
         "local_changes_warning": "Hay cambios locales sin sincronizar. El plugin creará una copia de respaldo antes de importar.",
         "records_header": "Cambios planificados a nivel de registro",
         "more_items": "...y {{count}} más",
@@ -401,14 +418,18 @@
         "record_rename": "{{name}}: renombrar a {{target}} porque el nombre local ya existe",
         "record_skip": "{{name}}: omitir porque ya existe una conexión local con el mismo nombre",
         "record_replace": "{{name}}: reemplazar la conexión local existente {{target}}",
-        "record_merge": "{{name}}: fusionar en la conexión local existente {{target}}"
+        "record_merge": "{{name}}: fusionar en la conexión local existente {{target}}",
+        "sensitive_credentials_label": "Credenciales sensibles",
+        "toggle_sensitive_credentials": "Importar credenciales sensibles ({{count}})"
       },
       "confirm": {
         "import_title": "¿Importar snapshot remoto?",
         "clear_secret_title": "¿Borrar secreto almacenado?",
         "clear_secret_description": "Esto elimina el valor almacenado para {{label}} del almacenamiento seguro. Esta acción no se puede deshacer.",
         "restore_backup_title": "¿Restaurar la copia de seguridad local anterior?",
-        "restore_backup_description": "Esto importa la copia de respaldo creada el {{createdAt}} en modo reemplazo."
+        "restore_backup_description": "Esto importa la copia de respaldo creada el {{createdAt}} en modo reemplazo.",
+        "enable_sensitive_sync_title": "¿Activar la sincronización de credenciales sensibles?",
+        "enable_sensitive_sync_description": "Las contraseñas de conexión, frases de paso de claves, claves privadas administradas, claves de IA y credenciales de elevación se subirán dentro de un objeto cifrado de Cloud Sync. Mantén esta opción desactivada en almacenamiento compartido o no confiable."
       },
       "snapshot_description": "Snapshot de Oxide Cloud Sync",
       "placeholders": {

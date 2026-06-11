@@ -17,6 +17,7 @@ keyring.workspace = true
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding", default-features = false }
+oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 reqwest.workspace = true
 serde.workspace = true

@@ -18,6 +18,7 @@ pub enum CloudSyncConfirm {
     ImportPreview,
     ClearSecret { key: String, label: String },
     RestoreBackup { id: String, created_at: String },
+    EnableSensitiveSync,
 }
 
 pub fn cloud_sync_backend_label_key(backend: &BackendType) -> &'static str {
@@ -165,6 +166,9 @@ pub enum CloudSyncRollbackBackupSummarySpec {
     Metadata {
         connections: usize,
         forwards: usize,
+        quick_commands: usize,
+        serial_profiles: usize,
+        sensitive_credentials: usize,
         plugin_settings_count: usize,
         size: String,
     },
@@ -179,6 +183,9 @@ pub fn cloud_sync_rollback_backup_summary_spec(
         Some(metadata) => CloudSyncRollbackBackupSummarySpec::Metadata {
             connections: metadata.num_connections,
             forwards: metadata.forwards,
+            quick_commands: metadata.quick_commands,
+            serial_profiles: metadata.serial_profiles,
+            sensitive_credentials: metadata.sensitive_credentials,
             plugin_settings_count: metadata.plugin_settings_count,
             size,
         },
@@ -208,6 +215,7 @@ pub enum CloudSyncConfirmDescription {
     None,
     ClearSecret { label: String },
     RestoreBackup { created_at: String },
+    EnableSensitiveSync,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -265,6 +273,12 @@ pub fn cloud_sync_confirm_copy_spec(confirm: &CloudSyncConfirm) -> CloudSyncConf
             },
             confirm_label_key: "plugin.cloud_sync.actions.restore_backup",
         },
+        CloudSyncConfirm::EnableSensitiveSync => CloudSyncConfirmCopySpec {
+            variant: ConfirmDialogVariant::Danger,
+            title_key: "plugin.cloud_sync.confirm.enable_sensitive_sync_title",
+            description: CloudSyncConfirmDescription::EnableSensitiveSync,
+            confirm_label_key: "plugin.cloud_sync.actions.enable_sensitive_sync",
+        },
     }
 }
 
@@ -300,6 +314,9 @@ mod tests {
                 has_app_settings: true,
                 plugin_settings_count: 2,
                 forwards: 4,
+                quick_commands: 5,
+                serial_profiles: 6,
+                sensitive_credentials: 7,
             }),
         };
 
@@ -308,6 +325,9 @@ mod tests {
             CloudSyncRollbackBackupSummarySpec::Metadata {
                 connections: 3,
                 forwards: 4,
+                quick_commands: 5,
+                serial_profiles: 6,
+                sensitive_credentials: 7,
                 plugin_settings_count: 2,
                 size: "1.5 KB".to_string()
             }

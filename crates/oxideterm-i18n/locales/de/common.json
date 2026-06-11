@@ -198,7 +198,8 @@
         "restore_selected_backup": "Ausgewählte Sicherung wiederherstellen",
         "clear_secret": "Gespeicherten Wert löschen",
         "save_settings": "Einstellungen speichern",
-        "saving": "Wird gespeichert…"
+        "saving": "Wird gespeichert…",
+        "enable_sensitive_sync": "Sensible Synchronisierung aktivieren"
       },
       "fields": {
         "backend": "Backend",
@@ -220,6 +221,7 @@
       "sections": {
         "quick_start": "Schnellstart",
         "connection_settings": "Verbindungseinstellungen",
+        "sync_scope": "Synchronisierungsumfang",
         "conflict_recovery": "Konfliktbehebung",
         "import_preview": "Importvorschau",
         "rollback_preview": "Rollback-Vorschau",
@@ -269,7 +271,15 @@
         "sync_password": "Sync-Passwort",
         "auto_upload_enabled": "Automatisches Hochladen aktivieren",
         "auto_upload_interval": "Intervall für automatisches Hochladen (Minuten)",
-        "default_conflict_strategy": "Standard-Konfliktstrategie"
+        "default_conflict_strategy": "Standard-Konfliktstrategie",
+        "sync_connections": "Verbindungen synchronisieren",
+        "sync_forwards": "Gespeicherte Weiterleitungen synchronisieren",
+        "sync_quick_commands": "Schnellbefehle synchronisieren",
+        "sync_serial_profiles": "Serielle Profile synchronisieren",
+        "sync_app_settings": "Anwendungseinstellungen synchronisieren",
+        "include_local_terminal_env_vars": "Umgebungsvariablen des lokalen Terminals einschließen",
+        "sync_plugin_settings": "Plugin-Einstellungen synchronisieren",
+        "sync_sensitive_credentials": "Sensible Anmeldedaten synchronisieren"
       },
       "auth": {
         "bearer": "Bearer",
@@ -299,13 +309,13 @@
       },
       "backup": {
         "description": "Oxide Cloud Sync Rollback-Sicherung",
-        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{pluginSettingsCount}} Plugin-Einstellungen, {{size}}"
+        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{size}}, {{sensitiveCredentials}} sensible Anmeldedaten"
       },
       "history": {
         "action_upload": "Hochladen",
         "action_pull": "Abrufen",
         "action_restore": "Wiederherstellen",
-        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{pluginSettingsCount}} Plugin-Einstellungen"
+        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{sensitiveCredentials}} sensible Anmeldedaten"
       },
       "errors": {
         "operation_in_progress": "Ein anderer Cloud-Sync-Vorgang wird bereits ausgeführt.",
@@ -370,6 +380,8 @@
         "summary_header": "Remote-Vorschau Zusammenfassung",
         "connection_count": "Verbindungen",
         "total_forwards": "Weiterleitungen",
+        "quick_commands_label": "Schnellbefehle",
+        "serial_profiles_label": "Serielle Profile",
         "will_import": "Wird importiert",
         "will_merge": "Wird zusammengeführt",
         "will_replace": "Wird ersetzt",
@@ -386,14 +398,19 @@
         "toggle_app_settings": "Anwendungseinstellungen importieren",
         "toggle_plugin_settings": "Plugin-Einstellungen importieren ({{count}})",
         "toggle_forwards": "Gespeicherte Weiterleitungen importieren ({{count}})",
+        "toggle_quick_commands": "Schnellbefehle importieren ({{count}})",
+        "toggle_serial_profiles": "Serielle Profile importieren ({{count}})",
         "section_field_count": "{{count}} Felder",
         "section_general": "Allgemein",
         "section_terminal_appearance": "Terminal-Darstellung",
         "section_terminal_behavior": "Terminal-Verhalten",
         "section_appearance": "Erscheinungsbild",
         "section_connections": "Verbindungen",
+        "section_network": "Netzwerk",
         "section_file_and_editor": "Dateien und Editor",
+        "section_ai": "KI",
         "section_local_terminal": "Lokales Terminal",
+        "section_native_preferences": "Native Einstellungen",
         "local_changes_warning": "Lokale nicht synchronisierte Änderungen sind noch vorhanden. Das Plugin erstellt vor dem Import eine Rollback-Sicherung.",
         "records_header": "Geplante Änderungen auf Datensatzebene",
         "more_items": "...und {{count}} weitere",
@@ -401,14 +418,18 @@
         "record_rename": "{{name}}: in {{target}} umbenennen, da der lokale Name bereits existiert",
         "record_skip": "{{name}}: überspringen, da bereits eine lokale Verbindung mit demselben Namen existiert",
         "record_replace": "{{name}}: die vorhandene lokale Verbindung {{target}} ersetzen",
-        "record_merge": "{{name}}: in die vorhandene lokale Verbindung {{target}} zusammenführen"
+        "record_merge": "{{name}}: in die vorhandene lokale Verbindung {{target}} zusammenführen",
+        "sensitive_credentials_label": "Sensible Anmeldedaten",
+        "toggle_sensitive_credentials": "Sensible Anmeldedaten importieren ({{count}})"
       },
       "confirm": {
         "import_title": "Remote-Snapshot importieren?",
         "clear_secret_title": "Gespeichertes Geheimnis löschen?",
         "clear_secret_description": "Dies entfernt den gespeicherten Wert für {{label}} aus dem sicheren Speicher. Diese Aktion kann nicht rückgängig gemacht werden.",
         "restore_backup_title": "Vorherige lokale Sicherung wiederherstellen?",
-        "restore_backup_description": "Dies importiert die Rollback-Sicherung vom {{createdAt}} im Ersetzungsmodus."
+        "restore_backup_description": "Dies importiert die Rollback-Sicherung vom {{createdAt}} im Ersetzungsmodus.",
+        "enable_sensitive_sync_title": "Synchronisierung sensibler Anmeldedaten aktivieren?",
+        "enable_sensitive_sync_description": "Verbindungspasswörter, Schlüssel-Passphrasen, verwaltete private Schlüssel, KI-Schlüssel und Rechteerhöhungs-Zugangsdaten werden in einem verschlüsselten Cloud-Sync-Objekt hochgeladen. Auf geteiltem oder nicht vertrauenswürdigem Speicher sollte dies deaktiviert bleiben."
       },
       "snapshot_description": "Oxide Cloud Sync Snapshot",
       "placeholders": {

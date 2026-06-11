@@ -40,8 +40,11 @@ pub const APP_SECTION_TERMINAL_APPEARANCE: &str = "terminalAppearance";
 pub const APP_SECTION_TERMINAL_BEHAVIOR: &str = "terminalBehavior";
 pub const APP_SECTION_APPEARANCE: &str = "appearance";
 pub const APP_SECTION_CONNECTIONS: &str = "connections";
+pub const APP_SECTION_NETWORK: &str = "network";
 pub const APP_SECTION_FILE_AND_EDITOR: &str = "fileAndEditor";
+pub const APP_SECTION_AI: &str = "ai";
 pub const APP_SECTION_LOCAL_TERMINAL: &str = "localTerminal";
+pub const APP_SECTION_NATIVE_PREFERENCES: &str = "nativePreferences";
 
 pub const OXIDE_APP_SETTINGS_SECTION_IDS: &[&str] = &[
     APP_SECTION_GENERAL,
@@ -49,8 +52,11 @@ pub const OXIDE_APP_SETTINGS_SECTION_IDS: &[&str] = &[
     APP_SECTION_TERMINAL_BEHAVIOR,
     APP_SECTION_APPEARANCE,
     APP_SECTION_CONNECTIONS,
+    APP_SECTION_NETWORK,
     APP_SECTION_FILE_AND_EDITOR,
+    APP_SECTION_AI,
     APP_SECTION_LOCAL_TERMINAL,
+    APP_SECTION_NATIVE_PREFERENCES,
 ];
 
 pub const DEFAULT_APP_SETTINGS_SECTIONS: &[&str] = &[
@@ -59,6 +65,7 @@ pub const DEFAULT_APP_SETTINGS_SECTIONS: &[&str] = &[
     APP_SECTION_TERMINAL_BEHAVIOR,
     APP_SECTION_APPEARANCE,
     APP_SECTION_CONNECTIONS,
+    APP_SECTION_NETWORK,
     APP_SECTION_FILE_AND_EDITOR,
 ];
 
@@ -206,6 +213,12 @@ pub struct RawSyncScope {
     #[serde(default)]
     pub sync_forwards: Option<bool>,
     #[serde(default)]
+    pub sync_quick_commands: Option<bool>,
+    #[serde(default)]
+    pub sync_serial_profiles: Option<bool>,
+    #[serde(default)]
+    pub sync_sensitive_credentials: Option<bool>,
+    #[serde(default)]
     pub sync_app_settings: Option<bool>,
     #[serde(default)]
     pub app_settings_sections: Option<Vec<String>>,
@@ -220,12 +233,25 @@ pub struct RawSyncScope {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncScope {
+    #[serde(default = "default_true")]
     pub sync_connections: bool,
+    #[serde(default = "default_true")]
     pub sync_forwards: bool,
+    #[serde(default = "default_true")]
+    pub sync_quick_commands: bool,
+    #[serde(default = "default_true")]
+    pub sync_serial_profiles: bool,
+    #[serde(default)]
+    pub sync_sensitive_credentials: bool,
+    #[serde(default = "default_true")]
     pub sync_app_settings: bool,
+    #[serde(default = "default_app_settings_section_ids")]
     pub app_settings_sections: Vec<String>,
+    #[serde(default)]
     pub include_local_terminal_env_vars: bool,
+    #[serde(default = "default_true")]
     pub sync_plugin_settings: bool,
+    #[serde(default)]
     pub plugin_ids: Option<Vec<String>>,
 }
 
@@ -243,6 +269,12 @@ pub struct LocalSyncMetadata {
     #[serde(default)]
     pub saved_forwards_revision: Option<String>,
     #[serde(default)]
+    pub quick_commands_revision: Option<String>,
+    #[serde(default)]
+    pub serial_profiles_revision: Option<String>,
+    #[serde(default)]
+    pub sensitive_credentials_revision: Option<String>,
+    #[serde(default)]
     pub settings_revision: Option<String>,
     #[serde(default)]
     pub app_settings_section_revisions: BTreeMap<String, String>,
@@ -253,18 +285,38 @@ pub struct LocalSyncMetadata {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StructuredLocalState {
+    #[serde(default)]
     pub connections: Option<String>,
+    #[serde(default)]
     pub forwards: Option<String>,
+    #[serde(default)]
+    pub quick_commands: Option<String>,
+    #[serde(default)]
+    pub serial_profiles: Option<String>,
+    #[serde(default)]
+    pub sensitive_credentials: Option<String>,
+    #[serde(default)]
     pub app_settings: BTreeMap<String, Option<String>>,
+    #[serde(default)]
     pub plugin_settings: BTreeMap<String, Option<String>>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StructuredDirtySections {
+    #[serde(default)]
     pub connections: bool,
+    #[serde(default)]
     pub forwards: bool,
+    #[serde(default)]
+    pub quick_commands: bool,
+    #[serde(default)]
+    pub serial_profiles: bool,
+    #[serde(default)]
+    pub sensitive_credentials: bool,
+    #[serde(default)]
     pub app_settings: BTreeMap<String, bool>,
+    #[serde(default)]
     pub plugin_settings: BTreeMap<String, bool>,
 }
 
@@ -279,18 +331,38 @@ pub struct StructuredDirtyInfo {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StructuredSectionRevisions {
+    #[serde(default)]
     pub connections: Option<String>,
+    #[serde(default)]
     pub forwards: Option<String>,
+    #[serde(default)]
+    pub quick_commands: Option<String>,
+    #[serde(default)]
+    pub serial_profiles: Option<String>,
+    #[serde(default)]
+    pub sensitive_credentials: Option<String>,
+    #[serde(default)]
     pub app_settings: BTreeMap<String, String>,
+    #[serde(default)]
     pub plugin_settings: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StructuredApplySelection {
+    #[serde(default)]
     pub connections: bool,
+    #[serde(default)]
     pub forwards: bool,
+    #[serde(default)]
+    pub quick_commands: bool,
+    #[serde(default)]
+    pub serial_profiles: bool,
+    #[serde(default)]
+    pub sensitive_credentials: bool,
+    #[serde(default)]
     pub app_settings_sections: Vec<String>,
+    #[serde(default)]
     pub plugin_ids: Vec<String>,
 }
 
@@ -311,6 +383,12 @@ pub struct StructuredManifestSections {
     pub connections: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forwards: Option<StructuredObjectEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick_commands: Option<StructuredObjectEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial_profiles: Option<StructuredObjectEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitive_credentials: Option<StructuredObjectEntry>,
     #[serde(default)]
     pub app_settings: BTreeMap<String, StructuredObjectEntry>,
     #[serde(default)]
@@ -362,6 +440,15 @@ pub fn normalize_sync_scope(
             .and_then(|scope| scope.sync_connections)
             .unwrap_or(true),
         sync_forwards: scope.and_then(|scope| scope.sync_forwards).unwrap_or(true),
+        sync_quick_commands: scope
+            .and_then(|scope| scope.sync_quick_commands)
+            .unwrap_or(true),
+        sync_serial_profiles: scope
+            .and_then(|scope| scope.sync_serial_profiles)
+            .unwrap_or(true),
+        sync_sensitive_credentials: scope
+            .and_then(|scope| scope.sync_sensitive_credentials)
+            .unwrap_or(false),
         sync_app_settings: scope
             .and_then(|scope| scope.sync_app_settings)
             .unwrap_or(true),
@@ -427,6 +514,18 @@ pub fn build_structured_local_state(
             .sync_forwards
             .then(|| local_metadata.saved_forwards_revision.clone())
             .flatten(),
+        quick_commands: scope
+            .sync_quick_commands
+            .then(|| local_metadata.quick_commands_revision.clone())
+            .flatten(),
+        serial_profiles: scope
+            .sync_serial_profiles
+            .then(|| local_metadata.serial_profiles_revision.clone())
+            .flatten(),
+        sensitive_credentials: scope
+            .sync_sensitive_credentials
+            .then(|| local_metadata.sensitive_credentials_revision.clone())
+            .flatten(),
         app_settings,
         plugin_settings,
     }
@@ -444,6 +543,15 @@ pub fn compute_structured_dirty_sections(
                 != baseline_state.and_then(|state| state.connections.clone()),
         forwards: scope.sync_forwards
             && current_state.forwards != baseline_state.and_then(|state| state.forwards.clone()),
+        quick_commands: scope.sync_quick_commands
+            && current_state.quick_commands
+                != baseline_state.and_then(|state| state.quick_commands.clone()),
+        serial_profiles: scope.sync_serial_profiles
+            && current_state.serial_profiles
+                != baseline_state.and_then(|state| state.serial_profiles.clone()),
+        sensitive_credentials: scope.sync_sensitive_credentials
+            && current_state.sensitive_credentials
+                != baseline_state.and_then(|state| state.sensitive_credentials.clone()),
         ..StructuredDirtySections::default()
     };
 
@@ -493,6 +601,9 @@ pub fn compute_structured_dirty_sections(
 
     let has_dirty = dirty_sections.connections
         || dirty_sections.forwards
+        || dirty_sections.quick_commands
+        || dirty_sections.serial_profiles
+        || dirty_sections.sensitive_credentials
         || dirty_sections.app_settings.values().any(|dirty| *dirty)
         || dirty_sections.plugin_settings.values().any(|dirty| *dirty);
 
@@ -535,6 +646,21 @@ pub fn build_manifest_section_revisions(
             .forwards
             .as_ref()
             .map(|entry| entry.revision.clone()),
+        quick_commands: manifest
+            .sections
+            .quick_commands
+            .as_ref()
+            .map(|entry| entry.revision.clone()),
+        serial_profiles: manifest
+            .sections
+            .serial_profiles
+            .as_ref()
+            .map(|entry| entry.revision.clone()),
+        sensitive_credentials: manifest
+            .sections
+            .sensitive_credentials
+            .as_ref()
+            .map(|entry| entry.revision.clone()),
         app_settings: manifest
             .sections
             .app_settings
@@ -563,6 +689,15 @@ pub fn merge_structured_baseline(
     if selection.forwards {
         merged.forwards = next_state.forwards.clone();
     }
+    if selection.quick_commands {
+        merged.quick_commands = next_state.quick_commands.clone();
+    }
+    if selection.serial_profiles {
+        merged.serial_profiles = next_state.serial_profiles.clone();
+    }
+    if selection.sensitive_credentials {
+        merged.sensitive_credentials = next_state.sensitive_credentials.clone();
+    }
     for section_id in &selection.app_settings_sections {
         merged.app_settings.insert(
             section_id.clone(),
@@ -589,6 +724,15 @@ pub fn count_structured_upload_plan_units(
     }
     if scope.sync_forwards {
         total += 1;
+    }
+    if scope.sync_quick_commands {
+        total += usize::from(local_metadata.quick_commands_revision.is_some());
+    }
+    if scope.sync_serial_profiles {
+        total += usize::from(local_metadata.serial_profiles_revision.is_some());
+    }
+    if scope.sync_sensitive_credentials {
+        total += usize::from(local_metadata.sensitive_credentials_revision.is_some());
     }
     if scope.sync_app_settings {
         total += scope
@@ -620,6 +764,18 @@ pub fn connections_object_path(revision: &str) -> String {
 
 pub fn forwards_object_path(revision: &str) -> String {
     format!("structured/forwards/{revision}.json")
+}
+
+pub fn quick_commands_object_path(revision: &str) -> String {
+    format!("structured/quick-commands/{revision}.json")
+}
+
+pub fn serial_profiles_object_path(revision: &str) -> String {
+    format!("structured/serial-profiles/{revision}.json")
+}
+
+pub fn sensitive_credentials_object_path(revision: &str) -> String {
+    format!("structured/sensitive-credentials/{revision}.oxide")
 }
 
 pub fn app_settings_object_path(section_id: &str, revision: &str) -> String {
@@ -677,6 +833,19 @@ pub fn next_revision(
 
 fn default_namespace() -> String {
     "default".to_string()
+}
+
+fn default_true() -> bool {
+    // Legacy persisted sync scopes predate several optional structured sections.
+    true
+}
+
+fn default_app_settings_section_ids() -> Vec<String> {
+    // Missing app section lists should behave like a newly created sync scope.
+    DEFAULT_APP_SETTINGS_SECTIONS
+        .iter()
+        .map(|section_id| (*section_id).to_string())
+        .collect()
 }
 
 fn default_s3_region() -> String {
@@ -825,6 +994,9 @@ mod tests {
         let baseline = StructuredLocalState {
             connections: Some("conn-1".into()),
             forwards: Some("fwd-1".into()),
+            quick_commands: None,
+            serial_profiles: None,
+            sensitive_credentials: None,
             app_settings: BTreeMap::from([
                 ("general".into(), Some("gen-1".into())),
                 ("appearance".into(), Some("app-1".into())),
@@ -904,6 +1076,9 @@ mod tests {
         let previous = StructuredLocalState {
             connections: Some("conn-old".into()),
             forwards: Some("fwd-old".into()),
+            quick_commands: None,
+            serial_profiles: None,
+            sensitive_credentials: None,
             app_settings: BTreeMap::from([
                 ("general".into(), Some("gen-old".into())),
                 ("appearance".into(), Some("app-old".into())),
@@ -913,6 +1088,9 @@ mod tests {
         let next = StructuredLocalState {
             connections: Some("conn-new".into()),
             forwards: Some("fwd-new".into()),
+            quick_commands: None,
+            serial_profiles: None,
+            sensitive_credentials: None,
             app_settings: BTreeMap::from([
                 ("general".into(), Some("gen-new".into())),
                 ("appearance".into(), Some("app-new".into())),

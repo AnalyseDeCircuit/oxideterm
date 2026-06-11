@@ -3,7 +3,9 @@ mod tests {
     use super::*;
     use std::fs;
 
-    use crate::SavedUpstreamProxyProtocol;
+    use crate::{
+        PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SavedUpstreamProxyProtocol,
+    };
     use russh::keys::ssh_key::LineEnding;
     use rand10::{rand_core::UnwrapErr, rngs::SysRng};
     use russh::keys::{Algorithm, PrivateKey};
@@ -160,6 +162,62 @@ mod tests {
                 .get_connection_passphrase(&imported.id)
                 .unwrap()
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn encrypted_export_import_restores_privilege_credential_secret() {
+        let mut source = temp_store("privilege-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+        source
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("sudo-prod".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: Some("deploy".to_string()),
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("sudo-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions {
+                include_passwords: true,
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+        let mut target = temp_store("privilege-target");
+        apply_oxide_import_with_options(
+            &mut target,
+            &bytes,
+            "secret!",
+            OxideImportOptions {
+                conflict_strategy: ImportConflictStrategy::Replace,
+                ..OxideImportOptions::default()
+            },
+        )
+        .unwrap();
+        let imported = target
+            .connections()
+            .into_iter()
+            .find(|connection| connection.name == "Prod")
+            .unwrap();
+
+        assert_eq!(imported.privilege_credentials.len(), 1);
+        assert_eq!(
+            target
+                .get_privilege_credential_secret(&imported.id, "sudo-prod")
+                .unwrap(),
+            "sudo-secret"
         );
     }
 
@@ -373,6 +431,7 @@ mod tests {
             upstream_proxy: EncryptedUpstreamProxyPolicy::UseGlobal,
             proxy_chain: Vec::new(),
             forwards: Vec::new(),
+            privilege_credentials: Vec::new(),
         }];
 
         let plans = plan_import(&store, &payload, ImportConflictStrategy::Rename);
@@ -807,6 +866,7 @@ mod tests {
             upstream_proxy: EncryptedUpstreamProxyPolicy::UseGlobal,
             proxy_chain: Vec::new(),
             forwards: Vec::new(),
+            privilege_credentials: Vec::new(),
         }
     }
 }

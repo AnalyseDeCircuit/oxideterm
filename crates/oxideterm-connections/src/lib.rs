@@ -36,5 +36,5 @@ pub use store::{
     SavedConnectionSyncRecord, SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
     SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
     SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SerialFlowControl, SerialParity,
-    SerialProfile, validate_group_name,
+    SerialProfile, SerialProfilesSyncSnapshot, validate_group_name,
 };

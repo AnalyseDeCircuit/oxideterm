@@ -198,7 +198,8 @@
         "restore_selected_backup": "선택한 백업 복원",
         "clear_secret": "저장된 값 지우기",
         "save_settings": "설정 저장",
-        "saving": "저장 중..."
+        "saving": "저장 중...",
+        "enable_sensitive_sync": "민감 동기화 켜기"
       },
       "fields": {
         "backend": "백엔드",
@@ -220,6 +221,7 @@
       "sections": {
         "quick_start": "사용 방법",
         "connection_settings": "연결 설정",
+        "sync_scope": "동기화 범위",
         "conflict_recovery": "충돌 복구",
         "import_preview": "가져오기 미리보기",
         "rollback_preview": "롤백 미리보기",
@@ -269,7 +271,15 @@
         "sync_password": "동기화 비밀번호",
         "auto_upload_enabled": "자동 업로드 활성화",
         "auto_upload_interval": "자동 업로드 간격 (분)",
-        "default_conflict_strategy": "기본 충돌 해결 방법"
+        "default_conflict_strategy": "기본 충돌 해결 방법",
+        "sync_connections": "연결 동기화",
+        "sync_forwards": "저장된 포워딩 동기화",
+        "sync_quick_commands": "빠른 명령 동기화",
+        "sync_serial_profiles": "시리얼 프로필 동기화",
+        "sync_app_settings": "앱 설정 동기화",
+        "include_local_terminal_env_vars": "로컬 터미널 환경 변수 포함",
+        "sync_plugin_settings": "플러그인 설정 동기화",
+        "sync_sensitive_credentials": "민감한 자격 증명 동기화"
       },
       "auth": {
         "bearer": "Bearer",
@@ -299,13 +309,13 @@
       },
       "backup": {
         "description": "Oxide 클라우드 동기화 롤백 백업",
-        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 플러그인 설정 {{pluginSettingsCount}}개, {{size}}"
+        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, {{size}}, 민감한 자격 증명 {{sensitiveCredentials}}개"
       },
       "history": {
         "action_upload": "업로드",
         "action_pull": "가져오기",
         "action_restore": "복원",
-        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 플러그인 설정 {{pluginSettingsCount}}개"
+        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, 민감한 자격 증명 {{sensitiveCredentials}}개"
       },
       "errors": {
         "operation_in_progress": "다른 클라우드 동기화 작업이 실행 중입니다. 잠시 후 다시 시도하세요.",
@@ -370,6 +380,8 @@
         "summary_header": "원격 미리보기 요약",
         "connection_count": "연결 수",
         "total_forwards": "포워딩 수",
+        "quick_commands_label": "빠른 명령",
+        "serial_profiles_label": "시리얼 프로필",
         "will_import": "가져올 항목",
         "will_merge": "병합 대상",
         "will_replace": "대체 대상",
@@ -386,14 +398,19 @@
         "toggle_app_settings": "애플리케이션 설정 가져오기",
         "toggle_plugin_settings": "플러그인 설정 가져오기 ({{count}})",
         "toggle_forwards": "저장된 포워딩 가져오기 ({{count}})",
+        "toggle_quick_commands": "빠른 명령 가져오기 ({{count}})",
+        "toggle_serial_profiles": "시리얼 프로필 가져오기 ({{count}})",
         "section_field_count": "{{count}}개 필드",
         "section_general": "일반",
         "section_terminal_appearance": "터미널 모양",
         "section_terminal_behavior": "터미널 동작",
         "section_appearance": "모양",
         "section_connections": "연결",
+        "section_network": "네트워크",
         "section_file_and_editor": "파일 및 에디터",
+        "section_ai": "AI",
         "section_local_terminal": "로컬 터미널",
+        "section_native_preferences": "네이티브 환경설정",
         "local_changes_warning": "로컬에 미동기화 변경 사항이 있습니다. 플러그인이 가져오기 전에 롤백 백업을 생성합니다.",
         "records_header": "예정된 레코드 수준 변경",
         "more_items": "...외 {{count}}개",
@@ -401,14 +418,18 @@
         "record_rename": "{{name}}: 로컬에 같은 이름이 이미 있어 {{target}}(으)로 이름 변경",
         "record_skip": "{{name}}: 같은 이름의 로컬 연결이 이미 있어 건너뜀",
         "record_replace": "{{name}}: 기존 로컬 연결 {{target}} 대체",
-        "record_merge": "{{name}}: 기존 로컬 연결 {{target}}에 병합"
+        "record_merge": "{{name}}: 기존 로컬 연결 {{target}}에 병합",
+        "sensitive_credentials_label": "민감한 자격 증명",
+        "toggle_sensitive_credentials": "민감한 자격 증명 가져오기({{count}})"
       },
       "confirm": {
         "import_title": "원격 스냅샷을 가져올까요?",
         "clear_secret_title": "저장된 시크릿을 지울까요?",
         "clear_secret_description": "보안 저장소에서 {{label}}의 저장된 값을 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
         "restore_backup_title": "이전 로컬 백업을 복원할까요?",
-        "restore_backup_description": "{{createdAt}}에 생성된 롤백 백업을 replace 모드로 가져옵니다."
+        "restore_backup_description": "{{createdAt}}에 생성된 롤백 백업을 replace 모드로 가져옵니다.",
+        "enable_sensitive_sync_title": "민감한 자격 증명 동기화를 켤까요?",
+        "enable_sensitive_sync_description": "연결 비밀번호, 키 암호, 관리형 개인 키, AI 키, 권한 상승 자격 증명을 암호화된 클라우드 동기화 객체에 넣어 업로드합니다. 공유되거나 신뢰할 수 없는 동기화 저장소에서는 꺼 두는 것이 좋습니다."
       },
       "snapshot_description": "Oxide 클라우드 동기화 스냅샷",
       "placeholders": {

@@ -198,7 +198,8 @@
         "restore_selected_backup": "選択したバックアップを復元",
         "clear_secret": "保存済みの値を消去",
         "save_settings": "設定を保存",
-        "saving": "保存中..."
+        "saving": "保存中...",
+        "enable_sensitive_sync": "機密同期を有効化"
       },
       "fields": {
         "backend": "バックエンド",
@@ -220,6 +221,7 @@
       "sections": {
         "quick_start": "使い方",
         "connection_settings": "接続設定",
+        "sync_scope": "同期範囲",
         "conflict_recovery": "コンフリクト復旧",
         "import_preview": "インポートプレビュー",
         "rollback_preview": "ロールバックプレビュー",
@@ -269,7 +271,15 @@
         "sync_password": "同期パスワード",
         "auto_upload_enabled": "自動アップロードを有効にする",
         "auto_upload_interval": "自動アップロード間隔（分）",
-        "default_conflict_strategy": "デフォルトのコンフリクト解決方法"
+        "default_conflict_strategy": "デフォルトのコンフリクト解決方法",
+        "sync_connections": "接続を同期",
+        "sync_forwards": "保存済みフォワードを同期",
+        "sync_quick_commands": "クイックコマンドを同期",
+        "sync_serial_profiles": "シリアルプロファイルを同期",
+        "sync_app_settings": "アプリ設定を同期",
+        "include_local_terminal_env_vars": "ローカル端末の環境変数を含める",
+        "sync_plugin_settings": "プラグイン設定を同期",
+        "sync_sensitive_credentials": "機密資格情報を同期"
       },
       "auth": {
         "bearer": "Bearer",
@@ -299,13 +309,13 @@
       },
       "backup": {
         "description": "Oxide クラウド同期ロールバックバックアップ",
-        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{pluginSettingsCount}} 件のプラグイン設定、{{size}}"
+        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{size}}、{{sensitiveCredentials}} 件の機密資格情報"
       },
       "history": {
         "action_upload": "アップロード",
         "action_pull": "プル",
         "action_restore": "復元",
-        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{pluginSettingsCount}} 件のプラグイン設定"
+        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{sensitiveCredentials}} 件の機密資格情報"
       },
       "errors": {
         "operation_in_progress": "別のクラウド同期操作が実行中です。しばらくしてから再試行してください。",
@@ -370,6 +380,8 @@
         "summary_header": "リモートプレビュー概要",
         "connection_count": "接続数",
         "total_forwards": "フォワード数",
+        "quick_commands_label": "クイックコマンド",
+        "serial_profiles_label": "シリアルプロファイル",
         "will_import": "インポート対象",
         "will_merge": "マージ対象",
         "will_replace": "置換対象",
@@ -386,14 +398,19 @@
         "toggle_app_settings": "アプリケーション設定をインポート",
         "toggle_plugin_settings": "プラグイン設定をインポート ({{count}})",
         "toggle_forwards": "保存済みフォワードをインポート ({{count}})",
+        "toggle_quick_commands": "クイックコマンドをインポート ({{count}})",
+        "toggle_serial_profiles": "シリアルプロファイルをインポート ({{count}})",
         "section_field_count": "{{count}} 項目",
         "section_general": "一般",
         "section_terminal_appearance": "ターミナル表示",
         "section_terminal_behavior": "ターミナル動作",
         "section_appearance": "外観",
         "section_connections": "接続",
+        "section_network": "ネットワーク",
         "section_file_and_editor": "ファイルとエディター",
+        "section_ai": "AI",
         "section_local_terminal": "ローカルターミナル",
+        "section_native_preferences": "ネイティブ設定",
         "local_changes_warning": "ローカルに未同期の変更があります。インポート前にプラグインがロールバックバックアップを作成します。",
         "records_header": "予定されているレコード単位の変更",
         "more_items": "...ほか {{count}} 件",
@@ -401,14 +418,18 @@
         "record_rename": "{{name}}：ローカル名が既にあるため {{target}} にリネーム",
         "record_skip": "{{name}}：同名のローカル接続が既にあるためスキップ",
         "record_replace": "{{name}}：既存のローカル接続 {{target}} を置換",
-        "record_merge": "{{name}}：既存のローカル接続 {{target}} にマージ"
+        "record_merge": "{{name}}：既存のローカル接続 {{target}} にマージ",
+        "sensitive_credentials_label": "機密資格情報",
+        "toggle_sensitive_credentials": "機密資格情報をインポート（{{count}}）"
       },
       "confirm": {
         "import_title": "リモートスナップショットをインポートしますか？",
         "clear_secret_title": "保存済みシークレットを消去しますか？",
         "clear_secret_description": "{{label}} の保存済みの値をセキュアストレージから削除します。この操作は取り消せません。",
         "restore_backup_title": "以前のローカルバックアップを復元しますか？",
-        "restore_backup_description": "{{createdAt}} に作成されたロールバックバックアップを replace モードでインポートします。"
+        "restore_backup_description": "{{createdAt}} に作成されたロールバックバックアップを replace モードでインポートします。",
+        "enable_sensitive_sync_title": "機密資格情報の同期を有効にしますか？",
+        "enable_sensitive_sync_description": "接続パスワード、キーパスフレーズ、管理対象秘密鍵、AI キー、権限昇格用資格情報を暗号化されたクラウド同期オブジェクトに入れてアップロードします。共有または信頼できない同期ストレージではオフのままにしてください。"
       },
       "snapshot_description": "Oxide クラウド同期スナップショット",
       "placeholders": {

@@ -65,6 +65,10 @@ impl WorkspaceApp {
                 "plugin.cloud_sync.confirm.restore_backup_description",
                 &[("createdAt", created_at)],
             )),
+            CloudSyncConfirmDescription::EnableSensitiveSync => Some(
+                self.i18n
+                    .t("plugin.cloud_sync.confirm.enable_sensitive_sync_description"),
+            ),
         };
         confirm_dialog_with_focus(
             &self.tokens,

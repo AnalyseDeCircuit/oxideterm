@@ -7,9 +7,10 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use oxideterm_connections::{
     ConnectionStore, SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
+    SerialProfilesSyncSnapshot,
     oxide_file::{
-        AppSettingsSectionPreview, ImportConflictStrategy, ImportPreview, ImportResultEnvelope,
-        OxideExportOptions, OxideFile, OxideImportOptions, OxideMetadata,
+        AppSettingsSectionPreview, EncryptedPortableSecret, ImportConflictStrategy, ImportPreview,
+        ImportResultEnvelope, OxideExportOptions, OxideFile, OxideImportOptions, OxideMetadata,
         apply_oxide_import_with_options_with_progress, export_connections_to_oxide_with_progress,
         preflight_export, preview_oxide_import_with_progress,
     },
@@ -27,8 +28,9 @@ use crate::{
     progress::{
         CloudSyncProgressSink, CloudSyncProgressStage, report_fractional_progress, report_progress,
     },
-    revision_id,
+    quick_commands_object_path, revision_id,
     secrets::{CloudSyncSecretProvider, SecretReadMode, get_action_secrets},
+    sensitive_credentials_object_path, serial_profiles_object_path,
     service::{
         CloudSyncApplyOutcome, CloudSyncLocalSnapshot, apply_structured_snapshots,
         build_local_snapshot,
@@ -176,8 +178,9 @@ impl CloudSyncOperationService {
             options.last_synced_structured_state.as_ref(),
             options.raw_sync_scope.as_ref(),
         )?;
-        let requires_password =
-            local_snapshot.scope.sync_app_settings || local_snapshot.scope.sync_plugin_settings;
+        let requires_password = local_snapshot.scope.sync_app_settings
+            || local_snapshot.scope.sync_plugin_settings
+            || local_snapshot.scope.sync_sensitive_credentials;
         let secrets = get_action_secrets(
             settings,
             secret_provider,
@@ -252,6 +255,7 @@ impl CloudSyncOperationService {
                     .sync_password
                     .as_ref()
                     .map(|password| password.as_str()),
+                options.portable_secrets.clone(),
                 progress,
                 total,
             )
@@ -378,6 +382,12 @@ impl CloudSyncOperationService {
                 .and_then(|sections| sections.get("pluginSettings"))
                 .and_then(|value| value.as_object())
                 .is_some_and(|entries| !entries.is_empty());
+        let needs_password = needs_password
+            || metadata
+                .sections
+                .as_ref()
+                .and_then(|sections| sections.get("sensitiveCredentials"))
+                .is_some();
         let sync_password = if needs_password {
             let secrets =
                 get_action_secrets(settings, secret_provider, true, SecretReadMode::Prompt)?;
@@ -398,8 +408,9 @@ impl CloudSyncOperationService {
 
         let manifest = manifest_from_metadata(&metadata)
             .context("failed to decode structured cloud sync manifest")?;
-        let encrypted_entry_count =
-            manifest.sections.app_settings.len() + manifest.sections.plugin_settings.len();
+        let encrypted_entry_count = manifest.sections.app_settings.len()
+            + manifest.sections.plugin_settings.len()
+            + usize::from(manifest.sections.sensitive_credentials.is_some());
         let total_units = 4.0;
         report_progress(
             progress,
@@ -412,6 +423,10 @@ impl CloudSyncOperationService {
             manifest,
             connections_snapshot: None,
             forwards_snapshot: None,
+            quick_commands_snapshot_json: None,
+            serial_profiles_snapshot: None,
+            sensitive_credentials_entry: None,
+            sensitive_credentials_preview: None,
             app_settings_entries: std::collections::BTreeMap::new(),
             app_settings_sections: std::collections::BTreeMap::new(),
             plugin_settings_entries: std::collections::BTreeMap::new(),
@@ -430,6 +445,49 @@ impl CloudSyncOperationService {
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
             preview.forwards_snapshot = Some(serde_json::from_slice(&object.bytes)?);
+        }
+        if let Some(entry) = preview.manifest.sections.quick_commands.as_ref() {
+            let object = self
+                .read_required_object(settings, &metadata_secrets, entry)
+                .await?;
+            // Keep the structured payload as JSON text so the quick-command
+            // store can reuse its own sanitizer and conflict merge code.
+            preview.quick_commands_snapshot_json = Some(String::from_utf8(object.bytes)?);
+        }
+        if let Some(entry) = preview.manifest.sections.serial_profiles.as_ref() {
+            let object = self
+                .read_required_object(settings, &metadata_secrets, entry)
+                .await?;
+            preview.serial_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
+        }
+        if let Some(entry) = preview.manifest.sections.sensitive_credentials.as_ref() {
+            let object = self
+                .read_required_object(settings, &metadata_secrets, entry)
+                .await?;
+            if let Some(password) = sync_password.as_ref().map(|password| password.as_str()) {
+                let import_preview = preview_oxide_import_with_progress(
+                    connection_store,
+                    &object.bytes,
+                    password,
+                    ImportConflictStrategy::Merge,
+                    |stage, current, total| {
+                        let fraction = fractional_import_progress(current, total);
+                        report_fractional_progress(
+                            progress,
+                            host_import_progress_stage(stage, true),
+                            structured_preview_progress_current(
+                                completed_encrypted_entries,
+                                encrypted_entry_count.max(1),
+                                fraction,
+                            ),
+                            total_units,
+                        );
+                    },
+                )
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                preview.sensitive_credentials_preview = Some(import_preview);
+            }
+            preview.sensitive_credentials_entry = Some(object.bytes);
         }
         for (section_id, entry) in &preview.manifest.sections.app_settings {
             let object = self
@@ -626,7 +684,14 @@ impl CloudSyncOperationService {
             .filter(|plugin_id| preview.plugin_settings_entries.contains_key(*plugin_id))
             .cloned()
             .collect::<Vec<_>>();
+        let apply_quick_commands =
+            selection.quick_commands && preview.quick_commands_snapshot_json.is_some();
+        let apply_serial_profiles =
+            selection.serial_profiles && preview.serial_profiles_snapshot.is_some();
+        let apply_sensitive_credentials =
+            selection.sensitive_credentials && preview.sensitive_credentials_entry.is_some();
         let needs_password = !app_settings_entry_ids.is_empty() || !plugin_entry_ids.is_empty();
+        let needs_password = needs_password || apply_sensitive_credentials;
         let sync_password = if needs_password {
             Some(required_sync_password(sync_password)?)
         } else {
@@ -636,7 +701,10 @@ impl CloudSyncOperationService {
         let total = (app_settings_entry_ids.len()
             + plugin_entry_ids.len()
             + usize::from(selection.connections && preview.connections_snapshot.is_some())
-            + usize::from(selection.forwards && preview.forwards_snapshot.is_some()))
+            + usize::from(selection.forwards && preview.forwards_snapshot.is_some())
+            + usize::from(apply_quick_commands)
+            + usize::from(apply_serial_profiles)
+            + usize::from(apply_sensitive_credentials))
         .max(1);
         report_progress(progress, CloudSyncProgressStage::Importing, 0, total);
 
@@ -652,6 +720,25 @@ impl CloudSyncOperationService {
                 .as_ref()
                 .map(|snapshot| snapshot.records.len())
                 .unwrap_or(0),
+            quick_commands: preview
+                .quick_commands_snapshot_json
+                .as_deref()
+                .and_then(|json| {
+                    serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(json)
+                        .ok()
+                        .map(|snapshot| snapshot.commands.len())
+                })
+                .unwrap_or(0),
+            serial_profiles: preview
+                .serial_profiles_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.records.len())
+                .unwrap_or(0),
+            sensitive_credentials: preview
+                .sensitive_credentials_preview
+                .as_ref()
+                .map(|preview| preview.total_connections + preview.portable_secret_count)
+                .unwrap_or(0),
             has_app_settings: !preview.app_settings_entries.is_empty(),
             plugin_settings_count: preview
                 .plugin_settings_counts
@@ -662,7 +749,44 @@ impl CloudSyncOperationService {
         };
         let mut app_settings_snapshots = std::collections::BTreeMap::new();
         let mut plugin_settings_snapshot = Vec::new();
+        let mut sensitive_credentials_envelope = None;
         if let Some(password) = sync_password {
+            if apply_sensitive_credentials {
+                if let Some(bytes) = preview.sensitive_credentials_entry.as_ref() {
+                    let envelope = apply_oxide_import_with_options_with_progress(
+                        connection_store,
+                        bytes,
+                        password,
+                        OxideImportOptions {
+                            selected_names: None,
+                            selected_forward_ids: None,
+                            conflict_strategy: ImportConflictStrategy::Merge,
+                            import_forwards: false,
+                            import_portable_secrets: true,
+                            restore_managed_keys: true,
+                            restore_managed_key_passphrases: true,
+                        },
+                        |stage, current, import_total| {
+                            let fraction = fractional_import_progress(current, import_total);
+                            report_fractional_progress(
+                                progress,
+                                host_import_progress_stage(stage, false),
+                                (completed as f64 + fraction).min(total as f64),
+                                total as f64,
+                            );
+                        },
+                    )
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                    sensitive_credentials_envelope = Some(envelope);
+                    completed += 1;
+                    report_progress(
+                        progress,
+                        CloudSyncProgressStage::Importing,
+                        completed,
+                        total,
+                    );
+                }
+            }
             for section_id in &app_settings_entry_ids {
                 let Some(bytes) = preview.app_settings_entries.get(section_id) else {
                     continue;
@@ -750,6 +874,16 @@ impl CloudSyncOperationService {
         } else {
             None
         };
+        let quick_commands_snapshot_json = if selection.quick_commands {
+            preview.quick_commands_snapshot_json
+        } else {
+            None
+        };
+        let serial_profiles_snapshot = if selection.serial_profiles {
+            preview.serial_profiles_snapshot
+        } else {
+            None
+        };
         let connection_conflict_strategy = match conflict_strategy {
             ConflictStrategy::Skip => SavedConnectionsConflictStrategy::Skip,
             ConflictStrategy::Replace => SavedConnectionsConflictStrategy::Replace,
@@ -763,12 +897,16 @@ impl CloudSyncOperationService {
             settings_store,
             connections_snapshot,
             forwards_snapshot,
+            quick_commands_snapshot_json,
+            serial_profiles_snapshot,
             app_settings_snapshots,
             plugin_settings_snapshot,
             connection_conflict_strategy,
         )?;
-        completed +=
-            usize::from(applied.connections.is_some()) + usize::from(applied.forwards.is_some());
+        completed += usize::from(applied.connections.is_some())
+            + usize::from(applied.forwards.is_some())
+            + usize::from(apply_quick_commands)
+            + usize::from(apply_serial_profiles);
         report_progress(
             progress,
             CloudSyncProgressStage::Importing,
@@ -793,6 +931,9 @@ impl CloudSyncOperationService {
                 .forwards
                 .as_ref()
                 .is_some_and(|outcome| outcome.skipped == 0),
+            quick_commands: apply_quick_commands,
+            serial_profiles: apply_serial_profiles,
+            sensitive_credentials: apply_sensitive_credentials,
             app_settings_sections: app_settings_entry_ids,
             plugin_ids: plugin_entry_ids,
         };
@@ -800,6 +941,7 @@ impl CloudSyncOperationService {
         Ok(Some(ApplyStructuredPreviewOutcome {
             local_snapshot,
             applied,
+            sensitive_credentials_envelope,
             content_summary,
             manifest: preview.manifest,
             remote_metadata: preview.remote_metadata,
@@ -883,6 +1025,7 @@ impl CloudSyncOperationService {
         uploaded_at: &str,
         device_id: &str,
         sync_password: Option<&str>,
+        portable_secrets: Vec<EncryptedPortableSecret>,
         progress: &mut dyn CloudSyncProgressSink,
         total: usize,
     ) -> Result<StructuredUploadPlan> {
@@ -941,6 +1084,121 @@ impl CloudSyncOperationService {
                 2 + completed_exports,
                 total,
             );
+        }
+
+        if local_snapshot.scope.sync_quick_commands {
+            if let Some(revision) = local_snapshot.metadata.quick_commands_revision.as_ref() {
+                let snapshot_json =
+                    oxideterm_quick_commands::export_snapshot_json(settings_store.path())
+                        .map_err(anyhow::Error::msg)?;
+                let record_count = serde_json::from_str::<
+                    oxideterm_quick_commands::QuickCommandsSnapshot,
+                >(&snapshot_json)
+                .map(|snapshot| snapshot.commands.len())
+                .unwrap_or(0);
+                let path = quick_commands_object_path(revision);
+                manifest.sections.quick_commands = Some(crate::StructuredObjectEntry {
+                    revision: revision.clone(),
+                    path: path.clone(),
+                    record_count: Some(record_count),
+                    content_type: "application/json".to_string(),
+                });
+                objects.push(StructuredUploadObject {
+                    path,
+                    bytes: snapshot_json.into_bytes(),
+                    content_type: "application/json".to_string(),
+                });
+                completed_exports += 1;
+                report_progress(
+                    progress,
+                    CloudSyncProgressStage::Exporting,
+                    2 + completed_exports,
+                    total,
+                );
+            }
+        }
+
+        if local_snapshot.scope.sync_serial_profiles {
+            let snapshot = connection_store.export_serial_profiles_snapshot()?;
+            let bytes = serde_json::to_vec(&snapshot)?;
+            let path = serial_profiles_object_path(&snapshot.revision);
+            manifest.sections.serial_profiles = Some(crate::StructuredObjectEntry {
+                revision: snapshot.revision.clone(),
+                path: path.clone(),
+                record_count: Some(snapshot.records.len()),
+                content_type: "application/json".to_string(),
+            });
+            objects.push(StructuredUploadObject {
+                path,
+                bytes,
+                content_type: "application/json".to_string(),
+            });
+            completed_exports += 1;
+            report_progress(
+                progress,
+                CloudSyncProgressStage::Exporting,
+                2 + completed_exports,
+                total,
+            );
+        }
+
+        if local_snapshot.scope.sync_sensitive_credentials {
+            let password =
+                sync_password.context("missing_sync_password: cloud sync password is required")?;
+            if let Some(revision) = local_snapshot
+                .metadata
+                .sensitive_credentials_revision
+                .as_ref()
+            {
+                let connection_ids = connection_store
+                    .connections()
+                    .iter()
+                    .map(|connection| connection.id.clone())
+                    .collect::<Vec<_>>();
+                let bytes = export_connections_to_oxide_with_progress(
+                    connection_store,
+                    &connection_ids,
+                    password,
+                    OxideExportOptions {
+                        description: Some("Cloud Sync sensitive credentials".to_string()),
+                        embed_keys: false,
+                        include_passwords: true,
+                        include_key_passphrases: true,
+                        include_managed_keys: true,
+                        include_managed_key_passphrases: true,
+                        portable_secrets,
+                        ..OxideExportOptions::default()
+                    },
+                    |_stage, current, export_total| {
+                        report_fractional_progress(
+                            progress,
+                            CloudSyncProgressStage::Exporting,
+                            export_progress_current(completed_exports, current, export_total),
+                            total as f64,
+                        );
+                    },
+                )
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let path = sensitive_credentials_object_path(revision);
+                manifest.sections.sensitive_credentials = Some(crate::StructuredObjectEntry {
+                    revision: revision.clone(),
+                    path: path.clone(),
+                    record_count: Some(local_snapshot.sensitive_credentials_record_count),
+                    content_type: crate::OXIDE_CONTENT_TYPE.to_string(),
+                });
+                objects.push(StructuredUploadObject {
+                    path,
+                    bytes,
+                    content_type: crate::OXIDE_CONTENT_TYPE.to_string(),
+                });
+                completed_exports += 1;
+                report_progress(
+                    progress,
+                    CloudSyncProgressStage::Exporting,
+                    2 + completed_exports,
+                    total,
+                );
+            }
         }
 
         if local_snapshot.scope.sync_app_settings {
@@ -1087,6 +1345,7 @@ pub struct UploadOptions {
     pub previous_remote_sections: Option<StructuredSectionRevisions>,
     pub last_synced_structured_state: Option<StructuredLocalState>,
     pub raw_sync_scope: Option<RawSyncScope>,
+    pub portable_secrets: Vec<EncryptedPortableSecret>,
 }
 
 #[derive(Clone, Debug)]
@@ -1222,6 +1481,10 @@ pub struct StructuredPreview {
     pub manifest: StructuredManifest,
     pub connections_snapshot: Option<SavedConnectionsSyncSnapshot>,
     pub forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
+    pub quick_commands_snapshot_json: Option<String>,
+    pub serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    pub sensitive_credentials_entry: Option<Vec<u8>>,
+    pub sensitive_credentials_preview: Option<ImportPreview>,
     pub app_settings_entries: std::collections::BTreeMap<String, Vec<u8>>,
     pub app_settings_sections: std::collections::BTreeMap<String, AppSettingsSectionPreview>,
     pub plugin_settings_entries: std::collections::BTreeMap<String, Vec<u8>>,
@@ -1240,6 +1503,7 @@ pub struct LegacyPreview {
 pub struct ApplyStructuredPreviewOutcome {
     pub local_snapshot: CloudSyncLocalSnapshot,
     pub applied: CloudSyncApplyOutcome,
+    pub sensitive_credentials_envelope: Option<ImportResultEnvelope>,
     pub content_summary: CloudSyncHistorySummary,
     pub manifest: StructuredManifest,
     pub remote_metadata: RemoteMetadata,
@@ -1256,6 +1520,9 @@ impl StructuredPreview {
         StructuredApplySelection {
             connections: self.connections_snapshot.is_some(),
             forwards: self.forwards_snapshot.is_some(),
+            quick_commands: self.quick_commands_snapshot_json.is_some(),
+            serial_profiles: self.serial_profiles_snapshot.is_some(),
+            sensitive_credentials: self.sensitive_credentials_entry.is_some(),
             app_settings_sections: self.app_settings_entries.keys().cloned().collect(),
             plugin_ids: self.plugin_settings_entries.keys().cloned().collect(),
         }
@@ -1341,6 +1608,8 @@ fn has_structured_conflict(
     let Some(previous) = previous_remote_sections else {
         return dirty_sections.connections
             || dirty_sections.forwards
+            || dirty_sections.quick_commands
+            || dirty_sections.serial_profiles
             || dirty_sections.app_settings.values().any(|dirty| *dirty)
             || dirty_sections.plugin_settings.values().any(|dirty| *dirty);
     };
@@ -1349,6 +1618,12 @@ fn has_structured_conflict(
         return true;
     }
     if dirty_sections.forwards && remote.forwards != previous.forwards {
+        return true;
+    }
+    if dirty_sections.quick_commands && remote.quick_commands != previous.quick_commands {
+        return true;
+    }
+    if dirty_sections.serial_profiles && remote.serial_profiles != previous.serial_profiles {
         return true;
     }
     for (section_id, dirty) in &dirty_sections.app_settings {
@@ -1432,6 +1707,9 @@ mod tests {
             upload_units: 0,
             connections_record_count: 0,
             forwards_record_count: 0,
+            quick_commands_record_count: 0,
+            serial_profiles_record_count: 0,
+            sensitive_credentials_record_count: 0,
         }
     }
 

@@ -281,6 +281,7 @@ fn encrypted_connection_to_saved(
     import_options: &OxideImportOptions,
 ) -> Result<(SavedConnection, Vec<OxideForwardRecord>), OxideFileError> {
     let id = id_override.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let credential_connection_id = id.clone();
     let forward_records = import_forwards(&id, conn.forwards);
     let mut options = conn.options;
     options.jump_host = None;
@@ -322,10 +323,36 @@ fn encrypted_connection_to_saved(
             color: conn.color,
             tags: conn.tags,
             post_connect_command: None,
-            privilege_credentials: Vec::new(),
+            privilege_credentials: import_privilege_credentials(
+                &credential_connection_id,
+                conn.privilege_credentials,
+            ),
         },
         forward_records,
     ))
+}
+
+fn import_privilege_credentials(
+    connection_id: &str,
+    credentials: Vec<EncryptedPrivilegeCredential>,
+) -> Vec<SavedPrivilegeCredential> {
+    credentials
+        .into_iter()
+        .map(|credential| SavedPrivilegeCredential {
+            id: credential.id,
+            connection_id: connection_id.to_string(),
+            label: credential.label,
+            kind: credential.kind,
+            username_hint: credential.username_hint,
+            prompt_patterns: credential.prompt_patterns,
+            keychain_id: None,
+            plaintext_secret: credential.secret.map(SecretString::from),
+            enabled: credential.enabled,
+            require_click_to_send: credential.require_click_to_send,
+            created_at: credential.created_at,
+            updated_at: credential.updated_at,
+        })
+        .collect()
 }
 
 fn import_forwards(

@@ -207,6 +207,8 @@ pub struct SavedPrivilegeCredential {
     pub prompt_patterns: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keychain_id: Option<String>,
+    #[serde(default, skip)]
+    pub plaintext_secret: Option<SecretString>,
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default = "default_true")]
@@ -545,6 +547,15 @@ impl Default for ConnectionStoreData {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerialProfilesSyncSnapshot {
+    pub revision: String,
+    pub exported_at: String,
+    #[serde(default)]
+    pub records: Vec<SerialProfile>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ManagedSshKeyOrigin {
     ImportedFile,
@@ -702,5 +713,6 @@ pub struct ManagedSshKeyDeleteResult {
 struct StagedImportedConnection {
     id: String,
     touched_keychain_ids: Vec<String>,
+    touched_privilege_keychain_ids: Vec<String>,
     stale_old_keychain_ids: Vec<String>,
 }

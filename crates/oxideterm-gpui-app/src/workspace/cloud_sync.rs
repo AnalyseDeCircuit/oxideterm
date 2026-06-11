@@ -5,6 +5,7 @@ use chrono::Utc;
 use gpui::prelude::*;
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,
+    OXIDE_APP_SETTINGS_SECTION_IDS, RawSyncScope, normalize_sync_scope,
     operation::{
         ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, LegacyPreview, UploadOptions,
         UploadOutcome,
@@ -1093,6 +1094,9 @@ impl WorkspaceApp {
             CloudSyncRollbackBackupSummarySpec::Metadata {
                 connections,
                 forwards,
+                quick_commands,
+                serial_profiles,
+                sensitive_credentials,
                 plugin_settings_count,
                 size,
             } => self.i18n_replace(
@@ -1100,6 +1104,9 @@ impl WorkspaceApp {
                 &[
                     ("connections", connections.to_string()),
                     ("forwards", forwards.to_string()),
+                    ("quickCommands", quick_commands.to_string()),
+                    ("serialProfiles", serial_profiles.to_string()),
+                    ("sensitiveCredentials", sensitive_credentials.to_string()),
                     ("pluginSettingsCount", plugin_settings_count.to_string()),
                     ("size", size),
                 ],
@@ -1244,6 +1251,12 @@ impl WorkspaceApp {
             &[
                 ("connections", entry.summary.connections.to_string()),
                 ("forwards", entry.summary.forwards.to_string()),
+                ("quickCommands", entry.summary.quick_commands.to_string()),
+                ("serialProfiles", entry.summary.serial_profiles.to_string()),
+                (
+                    "sensitiveCredentials",
+                    entry.summary.sensitive_credentials.to_string(),
+                ),
                 (
                     "pluginSettingsCount",
                     entry.summary.plugin_settings_count.to_string(),
@@ -1324,28 +1337,30 @@ impl WorkspaceApp {
 
     fn render_cloud_sync_config(&self, cx: &mut Context<Self>) -> AnyElement {
         let form = &self.cloud_sync_form;
-        let mut card =
+        let mut connection_card =
             cloud_sync_card(&self.tokens).child(self.render_cloud_sync_section_title(
                 "plugin.cloud_sync.sections.connection_settings",
                 cx,
             ));
         for row in cloud_sync_config_rows(&form.backend_type, &form.auth_mode) {
-            card = match row {
+            connection_card = match row {
                 CloudSyncConfigRow::BackendSelect => {
-                    card.child(self.render_cloud_sync_backend_select(cx))
+                    connection_card.child(self.render_cloud_sync_backend_select(cx))
                 }
                 CloudSyncConfigRow::AuthModeSelect => {
-                    card.child(self.render_cloud_sync_auth_mode_select(cx))
+                    connection_card.child(self.render_cloud_sync_auth_mode_select(cx))
                 }
-                CloudSyncConfigRow::Text(field) => card.child(self.render_cloud_sync_text_field(
-                    field.label_key,
-                    field.input,
-                    field.placeholder_key,
-                    false,
-                    cx,
-                )),
+                CloudSyncConfigRow::Text(field) => {
+                    connection_card.child(self.render_cloud_sync_text_field(
+                        field.label_key,
+                        field.input,
+                        field.placeholder_key,
+                        false,
+                        cx,
+                    ))
+                }
                 CloudSyncConfigRow::Secret(field) => {
-                    card.child(self.render_cloud_sync_secret_field(
+                    connection_card.child(self.render_cloud_sync_secret_field(
                         field.label_key,
                         field.input,
                         field.placeholder_key,
@@ -1353,29 +1368,195 @@ impl WorkspaceApp {
                         cx,
                     ))
                 }
-                CloudSyncConfigRow::AutoUploadToggle => card.child(self.render_cloud_sync_toggle(
-                    "plugin.cloud_sync.settings.auto_upload_enabled",
-                    form.auto_upload_enabled,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync_form.auto_upload_enabled =
-                                !this.cloud_sync_form.auto_upload_enabled;
-                            this.clear_cloud_sync_select_focus();
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    ),
-                    cx,
-                )),
+                CloudSyncConfigRow::AutoUploadToggle => {
+                    connection_card.child(self.render_cloud_sync_toggle(
+                        "plugin.cloud_sync.settings.auto_upload_enabled",
+                        form.auto_upload_enabled,
+                        cx.listener(
+                            |this: &mut WorkspaceApp,
+                             _event,
+                             _window,
+                             cx: &mut Context<WorkspaceApp>| {
+                                this.cloud_sync_form.auto_upload_enabled =
+                                    !this.cloud_sync_form.auto_upload_enabled;
+                                this.clear_cloud_sync_select_focus();
+                                cx.stop_propagation();
+                                cx.notify();
+                            },
+                        ),
+                        cx,
+                    ))
+                }
                 CloudSyncConfigRow::ConflictSelect => {
-                    card.child(self.render_cloud_sync_conflict_select(cx))
+                    connection_card.child(self.render_cloud_sync_conflict_select(cx))
                 }
             };
         }
-        card.into_any_element()
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(connection_card)
+            .child(self.render_cloud_sync_scope_card(cx))
+            .into_any_element()
+    }
+
+    fn render_cloud_sync_scope_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let raw_scope = &self.cloud_sync_store.state().sync_scope;
+        let scope = normalize_sync_scope(Some(raw_scope), &[]);
+        let mut card = cloud_sync_card(&self.tokens).child(
+            self.render_cloud_sync_section_title("plugin.cloud_sync.sections.sync_scope", cx),
+        );
+
+        card = card
+            .child(self.render_cloud_sync_scope_bool_toggle(
+                "plugin.cloud_sync.settings.sync_connections",
+                scope.sync_connections,
+                |scope, next| scope.sync_connections = Some(next),
+                cx,
+            ))
+            .child(self.render_cloud_sync_scope_bool_toggle(
+                "plugin.cloud_sync.settings.sync_forwards",
+                scope.sync_forwards,
+                |scope, next| scope.sync_forwards = Some(next),
+                cx,
+            ))
+            .child(self.render_cloud_sync_scope_bool_toggle(
+                "plugin.cloud_sync.settings.sync_quick_commands",
+                scope.sync_quick_commands,
+                |scope, next| scope.sync_quick_commands = Some(next),
+                cx,
+            ))
+            .child(self.render_cloud_sync_scope_bool_toggle(
+                "plugin.cloud_sync.settings.sync_serial_profiles",
+                scope.sync_serial_profiles,
+                |scope, next| scope.sync_serial_profiles = Some(next),
+                cx,
+            ))
+            .child(self.render_cloud_sync_scope_bool_toggle(
+                "plugin.cloud_sync.settings.sync_sensitive_credentials",
+                scope.sync_sensitive_credentials,
+                |scope, next| scope.sync_sensitive_credentials = Some(next),
+                cx,
+            ))
+            .child(self.render_cloud_sync_scope_bool_toggle(
+                "plugin.cloud_sync.settings.sync_app_settings",
+                scope.sync_app_settings,
+                |scope, next| scope.sync_app_settings = Some(next),
+                cx,
+            ));
+
+        if scope.sync_app_settings {
+            for section_id in OXIDE_APP_SETTINGS_SECTION_IDS {
+                let section_id = (*section_id).to_string();
+                let label = cloud_sync_app_settings_section_label_key(&section_id)
+                    .map(|key| self.i18n.t(key))
+                    .unwrap_or_else(|| section_id.clone());
+                card = card.child(self.render_cloud_sync_scope_section_toggle(
+                    format!("cloud-sync-scope-section-{section_id}"),
+                    label,
+                    scope.app_settings_sections.contains(&section_id),
+                    section_id,
+                    cx,
+                ));
+            }
+            card = card.child(self.render_cloud_sync_scope_bool_toggle(
+                "plugin.cloud_sync.settings.include_local_terminal_env_vars",
+                scope.include_local_terminal_env_vars,
+                |scope, next| scope.include_local_terminal_env_vars = Some(next),
+                cx,
+            ));
+        }
+
+        card.child(self.render_cloud_sync_scope_bool_toggle(
+            "plugin.cloud_sync.settings.sync_plugin_settings",
+            scope.sync_plugin_settings,
+            |scope, next| scope.sync_plugin_settings = Some(next),
+            cx,
+        ))
+        .into_any_element()
+    }
+
+    fn render_cloud_sync_scope_bool_toggle(
+        &self,
+        label_key: &'static str,
+        checked: bool,
+        update: fn(&mut RawSyncScope, bool),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_cloud_sync_toggle(
+            label_key,
+            checked,
+            cx.listener(
+                move |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
+                    if label_key == "plugin.cloud_sync.settings.sync_sensitive_credentials"
+                        && !checked
+                    {
+                        this.cloud_sync_confirm = Some(CloudSyncConfirm::EnableSensitiveSync);
+                        this.cloud_sync_confirm_focused_action = Some(ConfirmDialogAction::Cancel);
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
+                    }
+                    update(&mut this.cloud_sync_store.state_mut().sync_scope, !checked);
+                    this.finish_cloud_sync_scope_edit(cx);
+                    cx.stop_propagation();
+                },
+            ),
+            cx,
+        )
+    }
+
+    fn render_cloud_sync_scope_section_toggle(
+        &self,
+        label_identity: String,
+        label: String,
+        checked: bool,
+        section_id: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        cloud_sync_toggle(
+            &self.tokens,
+            self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "cloud-sync-scope-section-toggle",
+                label_identity,
+                label,
+                theme.text_muted,
+                cx,
+            ),
+            checked,
+            cx.listener(
+                move |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
+                    this.toggle_cloud_sync_app_settings_section(&section_id);
+                    this.finish_cloud_sync_scope_edit(cx);
+                    cx.stop_propagation();
+                },
+            ),
+        )
+    }
+
+    fn toggle_cloud_sync_app_settings_section(&mut self, section_id: &str) {
+        let mut sections =
+            normalize_sync_scope(Some(&self.cloud_sync_store.state().sync_scope), &[])
+                .app_settings_sections;
+        if sections.iter().any(|section| section == section_id) {
+            sections.retain(|section| section != section_id);
+        } else {
+            sections.push(section_id.to_string());
+        }
+        self.cloud_sync_store
+            .state_mut()
+            .sync_scope
+            .app_settings_sections = Some(sections);
+    }
+
+    fn finish_cloud_sync_scope_edit(&mut self, cx: &mut Context<Self>) {
+        self.clear_cloud_sync_select_focus();
+        self.refresh_cloud_sync_local_dirty_state();
+        self.save_cloud_sync_state();
+        cx.notify();
     }
 
     fn render_cloud_sync_text_field(
@@ -1989,6 +2170,13 @@ impl WorkspaceApp {
             Some(CloudSyncConfirm::RestoreBackup { id, .. }) => {
                 self.start_cloud_sync_restore_backup(id, cx)
             }
+            Some(CloudSyncConfirm::EnableSensitiveSync) => {
+                self.cloud_sync_store
+                    .state_mut()
+                    .sync_scope
+                    .sync_sensitive_credentials = Some(true);
+                self.finish_cloud_sync_scope_edit(cx);
+            }
             None => {}
         }
     }
@@ -2174,6 +2362,14 @@ impl WorkspaceApp {
             .last_synced_structured_state
             .clone();
         let raw_sync_scope = self.cloud_sync_store.state().sync_scope.clone();
+        let portable_secrets =
+            match self.collect_cloud_sync_sensitive_portable_secrets(&raw_sync_scope) {
+                Ok(secrets) => secrets,
+                Err(error) => {
+                    self.finish_cloud_sync_error("upload", error);
+                    return;
+                }
+            };
         let connection_store = self.connection_store.clone();
         let forwarding_registry = self.forwarding_registry.clone();
         let settings_store = self.settings_store.clone();
@@ -2198,12 +2394,44 @@ impl WorkspaceApp {
                 previous_remote_sections,
                 last_synced_structured_state,
                 raw_sync_scope: Some(raw_sync_scope),
+                portable_secrets,
                 automatic,
                 skip_if_busy,
                 ..UploadOptions::default()
             },
             automatic,
         ));
+    }
+
+    fn collect_cloud_sync_sensitive_portable_secrets(
+        &self,
+        raw_sync_scope: &RawSyncScope,
+    ) -> Result<Vec<oxideterm_connections::oxide_file::EncryptedPortableSecret>, String> {
+        let scope = normalize_sync_scope(Some(raw_sync_scope), &[]);
+        if !scope.sync_sensitive_credentials {
+            return Ok(Vec::new());
+        }
+        let provider_ids =
+            oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
+                .into_iter()
+                .map(|provider| provider.id)
+                .filter(|provider_id| self.ai_key_store.has_provider_key(provider_id))
+                .collect::<Vec<_>>();
+        self.ai_key_store
+            .get_provider_keys(&provider_ids)
+            .map_err(|error| error.to_string())
+            .map(|secrets| {
+                secrets
+                    .into_iter()
+                    .map(|(id, secret)| {
+                        oxideterm_connections::oxide_file::EncryptedPortableSecret {
+                            kind: "ai_provider_key".to_string(),
+                            id,
+                            secret,
+                        }
+                    })
+                    .collect()
+            })
     }
 
     fn start_cloud_sync_pull_preview(&mut self, cx: &mut Context<Self>) {
@@ -2575,6 +2803,10 @@ impl WorkspaceApp {
     }
 
     fn finish_structured_cloud_sync_apply(&mut self, outcome: ApplyStructuredPreviewOutcome) {
+        let mut outcome = outcome;
+        if let Some(envelope) = outcome.sensitive_credentials_envelope.as_mut() {
+            self.apply_oxide_import_portable_secrets(envelope);
+        }
         let previous_local_baseline = self
             .cloud_sync_store
             .state()
@@ -2633,7 +2865,7 @@ impl WorkspaceApp {
         let (_imported_quick_commands, _skipped_quick_commands, _quick_command_errors) = self
             .apply_oxide_import_quick_commands(
                 outcome.envelope.quick_commands_json.as_deref(),
-                true,
+                selection.import_quick_commands,
                 QuickCommandImportStrategy::Merge,
             );
         self.apply_oxide_import_plugin_settings(
@@ -2736,6 +2968,9 @@ impl WorkspaceApp {
         CloudSyncHistorySummary {
             connections: self.connection_store.connections().len(),
             forwards: self.forwarding_registry.list_all_saved_forwards().len(),
+            quick_commands: 0,
+            serial_profiles: self.connection_store.serial_profiles().len(),
+            sensitive_credentials: 0,
             has_app_settings: true,
             plugin_settings_count: 0,
         }

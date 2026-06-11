@@ -50,6 +50,9 @@ impl CloudSyncPreviewSource {
 pub struct CloudSyncPreviewSummary {
     pub connections: usize,
     pub forwards: usize,
+    pub quick_commands: usize,
+    pub serial_profiles: usize,
+    pub sensitive_credentials: usize,
     pub has_app_settings: bool,
     pub app_settings_sections: Vec<CloudSyncAppSettingsSection>,
     pub plugin_settings_count: usize,
@@ -323,28 +326,46 @@ pub fn cloud_sync_preview_card_copy_spec(
 pub fn cloud_sync_preview_fact_rows(
     summary: &CloudSyncPreviewSummary,
 ) -> Vec<Vec<CloudSyncPreviewFactSpec>> {
-    vec![
-        vec![
+    let mut rows = vec![vec![
+        CloudSyncPreviewFactSpec {
+            label_key: "plugin.cloud_sync.preview.connection_count",
+            value: CloudSyncPreviewFactValue::Count(summary.connections),
+        },
+        CloudSyncPreviewFactSpec {
+            label_key: "plugin.cloud_sync.preview.total_forwards",
+            value: CloudSyncPreviewFactValue::Count(summary.forwards),
+        },
+    ]];
+    if summary.quick_commands > 0
+        || summary.serial_profiles > 0
+        || summary.sensitive_credentials > 0
+    {
+        rows.push(vec![
             CloudSyncPreviewFactSpec {
-                label_key: "plugin.cloud_sync.preview.connection_count",
-                value: CloudSyncPreviewFactValue::Count(summary.connections),
+                label_key: "plugin.cloud_sync.preview.quick_commands_label",
+                value: CloudSyncPreviewFactValue::Count(summary.quick_commands),
             },
             CloudSyncPreviewFactSpec {
-                label_key: "plugin.cloud_sync.preview.total_forwards",
-                value: CloudSyncPreviewFactValue::Count(summary.forwards),
-            },
-        ],
-        vec![
-            CloudSyncPreviewFactSpec {
-                label_key: "plugin.cloud_sync.preview.plugin_settings_label",
-                value: CloudSyncPreviewFactValue::Count(summary.plugin_settings_count),
+                label_key: "plugin.cloud_sync.preview.serial_profiles_label",
+                value: CloudSyncPreviewFactValue::Count(summary.serial_profiles),
             },
             CloudSyncPreviewFactSpec {
-                label_key: "plugin.cloud_sync.preview.embedded_keys_label",
-                value: CloudSyncPreviewFactValue::YesNo(summary.has_embedded_keys),
+                label_key: "plugin.cloud_sync.preview.sensitive_credentials_label",
+                value: CloudSyncPreviewFactValue::Count(summary.sensitive_credentials),
             },
-        ],
-    ]
+        ]);
+    }
+    rows.push(vec![
+        CloudSyncPreviewFactSpec {
+            label_key: "plugin.cloud_sync.preview.plugin_settings_label",
+            value: CloudSyncPreviewFactValue::Count(summary.plugin_settings_count),
+        },
+        CloudSyncPreviewFactSpec {
+            label_key: "plugin.cloud_sync.preview.embedded_keys_label",
+            value: CloudSyncPreviewFactValue::YesNo(summary.has_embedded_keys),
+        },
+    ]);
+    rows
 }
 
 /// A rollback backup is only needed when applying remote content over local changes.
@@ -387,9 +408,29 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                 })
                 .collect();
             let plugin_settings_count = preview.plugin_settings_counts.values().sum();
+            let quick_commands = preview
+                .quick_commands_snapshot_json
+                .as_deref()
+                .and_then(|json| {
+                    serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(json)
+                        .ok()
+                        .map(|snapshot| snapshot.commands.len())
+                })
+                .unwrap_or(0);
             CloudSyncPreviewSummary {
                 connections,
                 forwards,
+                quick_commands,
+                serial_profiles: preview
+                    .serial_profiles_snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.records.len())
+                    .unwrap_or(0),
+                sensitive_credentials: preview
+                    .sensitive_credentials_preview
+                    .as_ref()
+                    .map(|preview| preview.total_connections + preview.portable_secret_count)
+                    .unwrap_or(0),
                 has_app_settings: !preview.app_settings_entries.is_empty(),
                 app_settings_sections: preview
                     .app_settings_entries
@@ -416,6 +457,9 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
         CloudSyncPendingPreview::Legacy { preview, .. } => CloudSyncPreviewSummary {
             connections: preview.metadata.num_connections,
             forwards: preview.preview.total_forwards,
+            quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
+            serial_profiles: 0,
+            sensitive_credentials: preview.metadata.portable_secret_count.unwrap_or(0),
             has_app_settings: preview.preview.has_app_settings,
             app_settings_sections: preview
                 .preview
@@ -467,8 +511,11 @@ pub fn cloud_sync_app_settings_section_label_key(section_id: &str) -> Option<&'s
         "terminalBehavior" => Some("plugin.cloud_sync.preview.section_terminal_behavior"),
         "appearance" => Some("plugin.cloud_sync.preview.section_appearance"),
         "connections" => Some("plugin.cloud_sync.preview.section_connections"),
+        "network" => Some("plugin.cloud_sync.preview.section_network"),
         "fileAndEditor" => Some("plugin.cloud_sync.preview.section_file_and_editor"),
+        "ai" => Some("plugin.cloud_sync.preview.section_ai"),
         "localTerminal" => Some("plugin.cloud_sync.preview.section_local_terminal"),
+        "nativePreferences" => Some("plugin.cloud_sync.preview.section_native_preferences"),
         _ => None,
     }
 }

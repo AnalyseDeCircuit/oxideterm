@@ -743,6 +743,7 @@ mod tests {
                     "sudo password".to_string(),
                 ],
                 keychain_id: None,
+                plaintext_secret: None,
                 enabled: true,
                 require_click_to_send: true,
                 created_at: now,

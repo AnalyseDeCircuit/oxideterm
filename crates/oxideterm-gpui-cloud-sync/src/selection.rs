@@ -19,6 +19,9 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CloudSyncPreviewSelectionAction {
     ToggleConnections,
+    ToggleQuickCommands,
+    ToggleSerialProfiles,
+    ToggleSensitiveCredentials,
     ToggleAppSettings,
     ToggleAppSettingsSection(String),
     TogglePluginSettings,
@@ -68,6 +71,9 @@ pub struct CloudSyncLegacyApplyPlan {
 pub struct CloudSyncPreviewSelection {
     pub import_connections: bool,
     pub selected_connection_names: BTreeSet<String>,
+    pub import_quick_commands: bool,
+    pub import_serial_profiles: bool,
+    pub import_sensitive_credentials: bool,
     pub import_app_settings: bool,
     pub selected_app_settings_sections: BTreeSet<String>,
     pub import_plugin_settings: bool,
@@ -142,6 +148,9 @@ impl CloudSyncPreviewSelection {
         Self {
             import_connections: summary.connections > 0,
             selected_connection_names: summary.connection_record_names(),
+            import_quick_commands: summary.quick_commands > 0,
+            import_serial_profiles: summary.serial_profiles > 0,
+            import_sensitive_credentials: summary.sensitive_credentials > 0,
             import_app_settings: summary.has_app_settings,
             selected_app_settings_sections: summary
                 .app_settings_sections
@@ -198,6 +207,9 @@ impl CloudSyncPreviewSelection {
     pub fn can_apply(&self, summary: &CloudSyncPreviewSummary) -> bool {
         self.effective_import_connections(summary)
             || self.import_forwards
+            || self.import_quick_commands
+            || self.import_serial_profiles
+            || self.import_sensitive_credentials
             || self.effective_import_app_settings(summary)
             || self.effective_import_plugin_settings()
     }
@@ -206,6 +218,9 @@ impl CloudSyncPreviewSelection {
         StructuredApplySelection {
             connections: self.import_connections,
             forwards: self.import_forwards,
+            quick_commands: self.import_quick_commands,
+            serial_profiles: self.import_serial_profiles,
+            sensitive_credentials: self.import_sensitive_credentials,
             app_settings_sections: if self.import_app_settings {
                 self.selected_app_settings_sections
                     .iter()
@@ -268,6 +283,45 @@ impl CloudSyncPreviewSelection {
                 checked: self.import_connections,
                 disabled: false,
                 action: CloudSyncPreviewSelectionAction::ToggleConnections,
+            });
+        }
+        if summary.quick_commands > 0 {
+            rows.push(CloudSyncPreviewSelectionRow {
+                label: CloudSyncPreviewSelectionLabel::I18nCount {
+                    key: "plugin.cloud_sync.preview.toggle_quick_commands",
+                    count_name: "count",
+                    count: summary.quick_commands,
+                },
+                meta: None,
+                checked: self.import_quick_commands,
+                disabled: false,
+                action: CloudSyncPreviewSelectionAction::ToggleQuickCommands,
+            });
+        }
+        if summary.serial_profiles > 0 {
+            rows.push(CloudSyncPreviewSelectionRow {
+                label: CloudSyncPreviewSelectionLabel::I18nCount {
+                    key: "plugin.cloud_sync.preview.toggle_serial_profiles",
+                    count_name: "count",
+                    count: summary.serial_profiles,
+                },
+                meta: None,
+                checked: self.import_serial_profiles,
+                disabled: false,
+                action: CloudSyncPreviewSelectionAction::ToggleSerialProfiles,
+            });
+        }
+        if summary.sensitive_credentials > 0 {
+            rows.push(CloudSyncPreviewSelectionRow {
+                label: CloudSyncPreviewSelectionLabel::I18nCount {
+                    key: "plugin.cloud_sync.preview.toggle_sensitive_credentials",
+                    count_name: "count",
+                    count: summary.sensitive_credentials,
+                },
+                meta: None,
+                checked: self.import_sensitive_credentials,
+                disabled: false,
+                action: CloudSyncPreviewSelectionAction::ToggleSensitiveCredentials,
             });
         }
         if summary.has_app_settings {
@@ -355,6 +409,15 @@ impl CloudSyncPreviewSelection {
                     self.selected_connection_names = all_connection_names;
                 }
             }
+            CloudSyncPreviewSelectionAction::ToggleQuickCommands => {
+                self.import_quick_commands = !self.import_quick_commands;
+            }
+            CloudSyncPreviewSelectionAction::ToggleSerialProfiles => {
+                self.import_serial_profiles = !self.import_serial_profiles;
+            }
+            CloudSyncPreviewSelectionAction::ToggleSensitiveCredentials => {
+                self.import_sensitive_credentials = !self.import_sensitive_credentials;
+            }
             CloudSyncPreviewSelectionAction::ToggleAppSettings => {
                 self.import_app_settings = !self.import_app_settings;
             }
@@ -384,6 +447,9 @@ pub fn structured_apply_covers_full_remote(
 ) -> bool {
     (manifest.sections.connections.is_none() || selection.connections)
         && (manifest.sections.forwards.is_none() || selection.forwards)
+        && (manifest.sections.quick_commands.is_none() || selection.quick_commands)
+        && (manifest.sections.serial_profiles.is_none() || selection.serial_profiles)
+        && (manifest.sections.sensitive_credentials.is_none() || selection.sensitive_credentials)
         && manifest
             .sections
             .app_settings
@@ -408,6 +474,15 @@ pub fn merge_structured_remote_baseline(
     }
     if selection.forwards {
         merged.forwards = next.forwards.clone();
+    }
+    if selection.quick_commands {
+        merged.quick_commands = next.quick_commands.clone();
+    }
+    if selection.serial_profiles {
+        merged.serial_profiles = next.serial_profiles.clone();
+    }
+    if selection.sensitive_credentials {
+        merged.sensitive_credentials = next.sensitive_credentials.clone();
     }
     for section_id in &selection.app_settings_sections {
         if let Some(revision) = next.app_settings.get(section_id) {
@@ -449,6 +524,9 @@ pub fn legacy_apply_covers_full_remote(
                     .iter()
                     .all(|name| selection.selected_connection_names.contains(name)))))
         && (summary.forwards == 0 || selection.import_forwards)
+        && (summary.quick_commands == 0 || selection.import_quick_commands)
+        && (summary.serial_profiles == 0 || selection.import_serial_profiles)
+        && (summary.sensitive_credentials == 0 || selection.import_sensitive_credentials)
         && (!summary.has_app_settings
             || (selection.effective_import_app_settings(summary)
                 && remote_app_section_ids
@@ -472,6 +550,18 @@ pub fn cloud_sync_apply_total_units(
             let structured_selection = selection.structured_selection();
             usize::from(structured_selection.connections && preview.connections_snapshot.is_some())
                 + usize::from(structured_selection.forwards && preview.forwards_snapshot.is_some())
+                + usize::from(
+                    structured_selection.quick_commands
+                        && preview.quick_commands_snapshot_json.is_some(),
+                )
+                + usize::from(
+                    structured_selection.serial_profiles
+                        && preview.serial_profiles_snapshot.is_some(),
+                )
+                + usize::from(
+                    structured_selection.sensitive_credentials
+                        && preview.sensitive_credentials_entry.is_some(),
+                )
                 + structured_selection
                     .app_settings_sections
                     .iter()
@@ -502,6 +592,24 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
+        quick_commands: manifest
+            .sections
+            .quick_commands
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
+        serial_profiles: manifest
+            .sections
+            .serial_profiles
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
+        sensitive_credentials: manifest
+            .sections
+            .sensitive_credentials
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
         has_app_settings: !manifest.sections.app_settings.is_empty(),
         plugin_settings_count: manifest.sections.plugin_settings.len(),
     }
@@ -511,6 +619,9 @@ pub fn history_summary_from_legacy_preview(preview: &LegacyPreview) -> CloudSync
     CloudSyncHistorySummary {
         connections: preview.metadata.num_connections,
         forwards: preview.preview.total_forwards,
+        quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
+        serial_profiles: 0,
+        sensitive_credentials: preview.metadata.portable_secret_count.unwrap_or(0),
         has_app_settings: preview.preview.has_app_settings,
         plugin_settings_count: preview.preview.plugin_settings_count,
     }
@@ -524,6 +635,9 @@ pub fn has_cloud_sync_structured_conflict(
     let Some(previous) = previous else {
         return dirty.connections
             || dirty.forwards
+            || dirty.quick_commands
+            || dirty.serial_profiles
+            || dirty.sensitive_credentials
             || dirty.app_settings.values().any(|value| *value)
             || dirty.plugin_settings.values().any(|value| *value);
     };
@@ -532,6 +646,16 @@ pub fn has_cloud_sync_structured_conflict(
         return true;
     }
     if dirty.forwards && remote.forwards != previous.forwards {
+        return true;
+    }
+    if dirty.quick_commands && remote.quick_commands != previous.quick_commands {
+        return true;
+    }
+    if dirty.serial_profiles && remote.serial_profiles != previous.serial_profiles {
+        return true;
+    }
+    if dirty.sensitive_credentials && remote.sensitive_credentials != previous.sensitive_credentials
+    {
         return true;
     }
     dirty.app_settings.iter().any(|(section_id, value)| {
@@ -570,6 +694,9 @@ mod tests {
         let mut selection = CloudSyncPreviewSelection {
             import_connections: true,
             selected_connection_names: BTreeSet::from(["Prod".to_string()]),
+            import_quick_commands: false,
+            import_serial_profiles: false,
+            import_sensitive_credentials: false,
             import_app_settings: false,
             selected_app_settings_sections: BTreeSet::new(),
             import_plugin_settings: false,
@@ -597,6 +724,9 @@ mod tests {
         let selection = CloudSyncPreviewSelection {
             import_connections: true,
             selected_connection_names: BTreeSet::new(),
+            import_quick_commands: false,
+            import_serial_profiles: false,
+            import_sensitive_credentials: false,
             import_app_settings: false,
             selected_app_settings_sections: BTreeSet::new(),
             import_plugin_settings: false,

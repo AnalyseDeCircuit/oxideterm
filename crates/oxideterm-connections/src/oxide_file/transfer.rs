@@ -16,16 +16,17 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::store::{ImportedManagedSshKey, ManagedSshKey, ManagedSshKeyOrigin};
 use crate::{
     AuthType, CONFIG_VERSION, ConnectionOptions, ConnectionStore, SavedAuth, SavedConnection,
-    SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SecretString,
+    SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
+    SavedUpstreamProxyPolicy, SecretString,
 };
 
 use super::{
     EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedManagedKeyMetadata,
-    EncryptedPayload, EncryptedPluginSetting, EncryptedPortableSecret, EncryptedProxyHop,
-    EncryptedUpstreamProxyAuth, EncryptedUpstreamProxyConfig, EncryptedUpstreamProxyPolicy,
-    OxideFile, OxideFileError, OxideMetadata, compute_checksum, decrypt_oxide_file_with_progress,
-    encrypt_oxide_file, encrypt_oxide_file_with_progress,
+    EncryptedPayload, EncryptedPluginSetting, EncryptedPortableSecret,
+    EncryptedPrivilegeCredential, EncryptedProxyHop, EncryptedUpstreamProxyAuth,
+    EncryptedUpstreamProxyConfig, EncryptedUpstreamProxyPolicy, OxideFile, OxideFileError,
+    OxideMetadata, compute_checksum, decrypt_oxide_file_with_progress, encrypt_oxide_file,
+    encrypt_oxide_file_with_progress,
 };
 
 const EMBEDDED_KEY_MAX_BYTES: u64 = 1_048_576;

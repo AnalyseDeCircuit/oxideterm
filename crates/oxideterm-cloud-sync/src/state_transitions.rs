@@ -31,6 +31,24 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
+        quick_commands: manifest
+            .sections
+            .quick_commands
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
+        serial_profiles: manifest
+            .sections
+            .serial_profiles
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
+        sensitive_credentials: manifest
+            .sections
+            .sensitive_credentials
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
         has_app_settings: !manifest.sections.app_settings.is_empty(),
         plugin_settings_count: manifest.sections.plugin_settings.len(),
     }
@@ -292,6 +310,9 @@ mod tests {
         let local_state = StructuredLocalState {
             connections: Some("conn-rev-2".to_string()),
             forwards: None,
+            quick_commands: None,
+            serial_profiles: None,
+            sensitive_credentials: None,
             app_settings: BTreeMap::from([(
                 "appearance".to_string(),
                 Some("appearance-rev-2".to_string()),
@@ -312,6 +333,9 @@ mod tests {
             upload_units: 2,
             connections_record_count: 3,
             forwards_record_count: 0,
+            quick_commands_record_count: 0,
+            serial_profiles_record_count: 0,
+            sensitive_credentials_record_count: 0,
         };
         let outcome = UploadOutcome {
             revision: "rev-2".to_string(),
@@ -380,6 +404,9 @@ mod tests {
         let local_state = StructuredLocalState {
             connections: Some("conn-remote".to_string()),
             forwards: None,
+            quick_commands: None,
+            serial_profiles: None,
+            sensitive_credentials: None,
             app_settings: BTreeMap::from([(
                 "appearance".to_string(),
                 Some("appearance-remote".to_string()),
@@ -397,21 +424,30 @@ mod tests {
             upload_units: 0,
             connections_record_count: 2,
             forwards_record_count: 0,
+            quick_commands_record_count: 0,
+            serial_profiles_record_count: 0,
+            sensitive_credentials_record_count: 0,
         };
         let outcome = ApplyStructuredPreviewOutcome {
             local_snapshot: snapshot.clone(),
             applied: CloudSyncApplyOutcome {
                 connections: None,
                 forwards: None,
+                quick_commands_applied: 0,
+                serial_profiles_applied: 0,
                 app_settings_applied: 0,
                 plugin_settings_applied: 0,
             },
+            sensitive_credentials_envelope: None,
             content_summary: Default::default(),
             manifest,
             remote_metadata: Default::default(),
             selection: crate::StructuredApplySelection {
                 connections: true,
                 forwards: false,
+                quick_commands: false,
+                serial_profiles: false,
+                sensitive_credentials: false,
                 app_settings_sections: Vec::new(),
                 plugin_ids: Vec::new(),
             },
@@ -460,6 +496,9 @@ mod tests {
             upload_units: 0,
             connections_record_count: 1,
             forwards_record_count: 0,
+            quick_commands_record_count: 0,
+            serial_profiles_record_count: 0,
+            sensitive_credentials_record_count: 0,
         };
         let metadata = RemoteMetadata {
             exists: true,

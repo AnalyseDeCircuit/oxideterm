@@ -3,6 +3,10 @@ impl ConnectionStore {
         build_saved_connections_sync_snapshot(&self.data)
     }
 
+    pub fn export_serial_profiles_snapshot(&self) -> Result<SerialProfilesSyncSnapshot> {
+        build_serial_profiles_sync_snapshot(&self.data)
+    }
+
     pub fn local_sync_metadata(&self) -> Result<LocalSyncMetadata> {
         let snapshot = self.export_saved_connections_snapshot()?;
         let saved_connections_updated_at = snapshot
@@ -164,6 +168,35 @@ impl ConnectionStore {
             deleted_connection_ids,
         })
     }
+
+    pub fn apply_serial_profiles_snapshot(
+        &mut self,
+        snapshot: SerialProfilesSyncSnapshot,
+    ) -> Result<usize> {
+        let mut applied = 0usize;
+        for profile in snapshot.records {
+            profile.validate()?;
+            if let Some(existing) = self
+                .data
+                .serial_profiles
+                .iter_mut()
+                .find(|existing| existing.id == profile.id)
+            {
+                if profile.updated_at >= existing.updated_at {
+                    *existing = profile;
+                    applied += 1;
+                }
+            } else {
+                self.data.serial_profiles.push(profile);
+                applied += 1;
+            }
+        }
+        if applied > 0 {
+            self.normalize();
+            self.save()?;
+        }
+        Ok(applied)
+    }
 }
 
 fn build_saved_connection_from_sync_payload(
@@ -237,6 +270,25 @@ fn build_saved_connections_sync_snapshot(
     )?;
 
     Ok(SavedConnectionsSyncSnapshot {
+        revision,
+        exported_at: Utc::now().to_rfc3339(),
+        records,
+    })
+}
+
+fn build_serial_profiles_sync_snapshot(
+    data: &ConnectionStoreData,
+) -> Result<SerialProfilesSyncSnapshot> {
+    let mut records = data.serial_profiles.clone();
+    records.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(
+        &records
+            .iter()
+            .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
+            .collect::<Vec<_>>(),
+    )?;
+
+    Ok(SerialProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,

@@ -559,8 +559,10 @@ impl ConnectionStore {
     ) -> Result<Vec<ConnectionInfo>> {
         let original_data = self.data.clone();
         let original_keychain = self.snapshot_keychain_entries(&original_data);
+        let original_privilege_keychain = self.snapshot_privilege_keychain_entries(&original_data);
         let original_managed_keychain = self.snapshot_managed_keychain_entries(&original_data);
         let mut touched_keychain_ids = HashSet::new();
+        let mut touched_privilege_keychain_ids = HashSet::new();
         let mut touched_managed_secret_ids = HashSet::new();
         let mut created_managed_secret_config_key = false;
         let mut stale_old_keychain_ids = HashSet::new();
@@ -580,6 +582,7 @@ impl ConnectionStore {
             for connection in connections {
                 let staged = self.stage_imported_connection(connection)?;
                 touched_keychain_ids.extend(staged.touched_keychain_ids);
+                touched_privilege_keychain_ids.extend(staged.touched_privilege_keychain_ids);
                 stale_old_keychain_ids.extend(staged.stale_old_keychain_ids);
                 imported_ids.push(staged.id);
             }
@@ -592,6 +595,10 @@ impl ConnectionStore {
             self.data = original_data;
             let _ = self.save();
             self.rollback_keychain_entries(&touched_keychain_ids, &original_keychain);
+            self.rollback_privilege_keychain_entries(
+                &touched_privilege_keychain_ids,
+                &original_privilege_keychain,
+            );
             self.rollback_managed_keychain_entries(
                 &touched_managed_secret_ids,
                 &original_managed_keychain,
@@ -681,6 +688,7 @@ impl ConnectionStore {
                 .map(ToOwned::to_owned),
             prompt_patterns,
             keychain_id,
+            plaintext_secret: None,
             enabled: request.enabled,
             require_click_to_send: request.require_click_to_send,
             created_at: existing
@@ -1331,13 +1339,18 @@ impl ConnectionStore {
         if let Some(existing) = existing.as_ref() {
             connection.created_at = existing.created_at;
             connection.last_used_at = existing.last_used_at;
-            // Transaction imports mirror Tauri's merge semantics: connection
-            // metadata may update, but locally configured privilege-helper
-            // credentials remain attached to the existing connection.
-            connection.privilege_credentials = existing.privilege_credentials.clone();
+            if connection.privilege_credentials.is_empty() {
+                // Transaction imports mirror Tauri's merge semantics: ordinary
+                // connection imports leave locally configured privilege helpers
+                // attached unless an encrypted import explicitly carries them.
+                connection.privilege_credentials = existing.privilege_credentials.clone();
+            }
         } else if connection.created_at.timestamp() <= 0 {
             connection.created_at = now;
         }
+        let (privilege_credentials, touched_privilege_keychain_ids) =
+            self.materialize_privilege_credentials(&connection.id, connection.privilege_credentials)?;
+        connection.privilege_credentials = privilege_credentials;
         connection.updated_at = Some(now);
 
         let next_keychain_ids = collect_keychain_ids_for_parts(
@@ -1367,6 +1380,7 @@ impl ConnectionStore {
         Ok(StagedImportedConnection {
             id,
             touched_keychain_ids,
+            touched_privilege_keychain_ids,
             stale_old_keychain_ids,
         })
     }
@@ -1380,6 +1394,25 @@ impl ConnectionStore {
             .flat_map(collect_connection_keychain_ids)
             .map(|keychain_id| {
                 let value = self.keychain.get(&keychain_id).ok();
+                (keychain_id, value)
+            })
+            .collect()
+    }
+
+    fn snapshot_privilege_keychain_entries(
+        &self,
+        data: &ConnectionStoreData,
+    ) -> HashMap<String, Option<SecretString>> {
+        data.connections
+            .iter()
+            .flat_map(collect_privilege_keychain_ids)
+            .chain(
+                data.local_privilege_credentials
+                    .iter()
+                    .filter_map(|credential| credential.keychain_id.clone()),
+            )
+            .map(|keychain_id| {
+                let value = self.privilege_keychain.get(&keychain_id).ok();
                 (keychain_id, value)
             })
             .collect()
@@ -1415,6 +1448,23 @@ impl ConnectionStore {
         }
     }
 
+    fn rollback_privilege_keychain_entries(
+        &self,
+        touched_keychain_ids: &HashSet<String>,
+        original_keychain: &HashMap<String, Option<SecretString>>,
+    ) {
+        for keychain_id in touched_keychain_ids {
+            match original_keychain.get(keychain_id) {
+                Some(Some(secret)) => {
+                    let _ = self.privilege_keychain.store(keychain_id, secret);
+                }
+                Some(None) | None => {
+                    let _ = self.privilege_keychain.delete(keychain_id);
+                }
+            }
+        }
+    }
+
     fn rollback_managed_keychain_entries(
         &self,
         touched_secret_ids: &HashSet<String>,
@@ -1430,6 +1480,28 @@ impl ConnectionStore {
                 }
             }
         }
+    }
+
+    fn materialize_privilege_credentials(
+        &self,
+        connection_id: &str,
+        credentials: Vec<SavedPrivilegeCredential>,
+    ) -> Result<(Vec<SavedPrivilegeCredential>, Vec<String>)> {
+        let mut touched_keychain_ids = Vec::new();
+        let mut materialized = Vec::with_capacity(credentials.len());
+        for mut credential in credentials {
+            if credential.connection_id.trim().is_empty() {
+                credential.connection_id = connection_id.to_string();
+            }
+            if let Some(secret) = credential.plaintext_secret.take() {
+                let keychain_id = privilege_keychain_id(&credential.connection_id, &credential.id);
+                self.privilege_keychain.store(&keychain_id, &secret)?;
+                credential.keychain_id = Some(keychain_id.clone());
+                touched_keychain_ids.push(keychain_id);
+            }
+            materialized.push(credential);
+        }
+        Ok((materialized, touched_keychain_ids))
     }
 
     fn clone_auth_secret(&self, auth: &SavedAuth) -> Result<SavedAuth> {

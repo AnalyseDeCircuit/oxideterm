@@ -190,7 +190,8 @@
         "restore_selected_backup": "Restore Selected Backup",
         "clear_secret": "Clear Stored",
         "save_settings": "Save Settings",
-        "saving": "Saving..."
+        "saving": "Saving...",
+        "enable_sensitive_sync": "Enable Sensitive Sync"
       },
       "fields": {
         "backend": "Backend",
@@ -212,6 +213,7 @@
       "sections": {
         "quick_start": "Quick Start",
         "connection_settings": "Connection Settings",
+        "sync_scope": "Sync Scope",
         "conflict_recovery": "Conflict Recovery",
         "import_preview": "Import Preview",
         "rollback_preview": "Rollback Preview",
@@ -261,7 +263,15 @@
         "sync_password": "Sync Password",
         "auto_upload_enabled": "Enable auto upload",
         "auto_upload_interval": "Auto upload interval (minutes)",
-        "default_conflict_strategy": "Default conflict strategy"
+        "default_conflict_strategy": "Default conflict strategy",
+        "sync_connections": "Sync connections",
+        "sync_forwards": "Sync saved forwards",
+        "sync_quick_commands": "Sync quick commands",
+        "sync_serial_profiles": "Sync serial profiles",
+        "sync_app_settings": "Sync application settings",
+        "include_local_terminal_env_vars": "Include local terminal environment variables",
+        "sync_plugin_settings": "Sync plugin settings",
+        "sync_sensitive_credentials": "Sync sensitive credentials"
       },
       "auth": {
         "bearer": "Bearer",
@@ -291,13 +301,13 @@
       },
       "backup": {
         "description": "Oxide Cloud Sync rollback backup",
-        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{pluginSettingsCount}} plugin settings, {{size}}"
+        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{pluginSettingsCount}} plugin settings, {{size}}, {{sensitiveCredentials}} sensitive credentials"
       },
       "history": {
         "action_upload": "Upload",
         "action_pull": "Pull",
         "action_restore": "Restore",
-        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{pluginSettingsCount}} plugin settings"
+        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{pluginSettingsCount}} plugin settings, {{sensitiveCredentials}} sensitive credentials"
       },
       "errors": {
         "operation_in_progress": "Another cloud sync operation is already running.",
@@ -362,6 +372,8 @@
         "summary_header": "Remote preview summary",
         "connection_count": "Connections",
         "total_forwards": "Forwards",
+        "quick_commands_label": "Quick Commands",
+        "serial_profiles_label": "Serial Profiles",
         "will_import": "Will import",
         "will_merge": "Will merge",
         "will_replace": "Will replace",
@@ -378,14 +390,19 @@
         "toggle_app_settings": "Import application settings",
         "toggle_plugin_settings": "Import plugin settings ({{count}})",
         "toggle_forwards": "Import saved forwards ({{count}})",
+        "toggle_quick_commands": "Import quick commands ({{count}})",
+        "toggle_serial_profiles": "Import serial profiles ({{count}})",
         "section_field_count": "{{count}} fields",
         "section_general": "General",
         "section_terminal_appearance": "Terminal Appearance",
         "section_terminal_behavior": "Terminal Behavior",
         "section_appearance": "Appearance",
         "section_connections": "Connections",
+        "section_network": "Network",
         "section_file_and_editor": "Files and Editor",
+        "section_ai": "AI",
         "section_local_terminal": "Local Terminal",
+        "section_native_preferences": "Native Preferences",
         "local_changes_warning": "Local unsynced changes are still present. The plugin will create a rollback backup before import.",
         "records_header": "Planned record-level changes",
         "more_items": "...and {{count}} more",
@@ -393,14 +410,18 @@
         "record_rename": "{{name}}: rename to {{target}} because the local name already exists",
         "record_skip": "{{name}}: skip because a local connection with the same name already exists",
         "record_replace": "{{name}}: replace the existing local connection {{target}}",
-        "record_merge": "{{name}}: merge into the existing local connection {{target}}"
+        "record_merge": "{{name}}: merge into the existing local connection {{target}}",
+        "sensitive_credentials_label": "Sensitive Credentials",
+        "toggle_sensitive_credentials": "Import sensitive credentials ({{count}})"
       },
       "confirm": {
         "import_title": "Import remote snapshot?",
         "clear_secret_title": "Clear stored secret?",
         "clear_secret_description": "This removes the stored value for {{label}} from secure storage. This action cannot be undone.",
         "restore_backup_title": "Restore the previous local backup?",
-        "restore_backup_description": "This imports the rollback backup created at {{createdAt}} using replace mode."
+        "restore_backup_description": "This imports the rollback backup created at {{createdAt}} using replace mode.",
+        "enable_sensitive_sync_title": "Enable sensitive credential sync?",
+        "enable_sensitive_sync_description": "This uploads connection passwords, key passphrases, managed private keys, AI keys, and privilege credentials inside an encrypted Cloud Sync object. Keep it off on shared or untrusted sync storage."
       },
       "snapshot_description": "Oxide Cloud Sync snapshot",
       "placeholders": {

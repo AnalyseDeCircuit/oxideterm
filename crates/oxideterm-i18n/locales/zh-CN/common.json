@@ -190,7 +190,8 @@
         "restore_selected_backup": "恢复所选备份",
         "clear_secret": "清除已存值",
         "save_settings": "保存设置",
-        "saving": "保存中..."
+        "saving": "保存中...",
+        "enable_sensitive_sync": "启用敏感同步"
       },
       "fields": {
         "backend": "后端类型",
@@ -212,6 +213,7 @@
       "sections": {
         "quick_start": "使用方法",
         "connection_settings": "连接设置",
+        "sync_scope": "同步范围",
         "conflict_recovery": "冲突恢复",
         "import_preview": "导入预览",
         "rollback_preview": "回滚预览",
@@ -261,7 +263,15 @@
         "sync_password": "同步密码",
         "auto_upload_enabled": "启用自动上传",
         "auto_upload_interval": "自动上传间隔（分钟）",
-        "default_conflict_strategy": "默认冲突策略"
+        "default_conflict_strategy": "默认冲突策略",
+        "sync_connections": "同步连接",
+        "sync_forwards": "同步已保存的转发",
+        "sync_quick_commands": "同步快捷命令",
+        "sync_serial_profiles": "同步串口配置",
+        "sync_app_settings": "同步应用设置",
+        "include_local_terminal_env_vars": "包含本地终端环境变量",
+        "sync_plugin_settings": "同步插件设置",
+        "sync_sensitive_credentials": "同步敏感凭据"
       },
       "auth": {
         "bearer": "Bearer",
@@ -291,13 +301,13 @@
       },
       "backup": {
         "description": "Oxide 云同步回滚备份",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{pluginSettingsCount}} 项插件设置，{{size}}"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
       },
       "history": {
         "action_upload": "上传",
         "action_pull": "拉取",
         "action_restore": "恢复",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{pluginSettingsCount}} 项插件设置"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
       },
       "errors": {
         "operation_in_progress": "另一个云同步操作正在运行，请稍后再试。",
@@ -362,6 +372,8 @@
         "summary_header": "远端预览摘要",
         "connection_count": "连接数",
         "total_forwards": "转发数",
+        "quick_commands_label": "快捷命令",
+        "serial_profiles_label": "串口配置",
         "will_import": "将导入",
         "will_merge": "将合并",
         "will_replace": "将替换",
@@ -378,14 +390,19 @@
         "toggle_app_settings": "导入应用设置",
         "toggle_plugin_settings": "导入插件设置（{{count}}）",
         "toggle_forwards": "导入已保存的转发（{{count}}）",
+        "toggle_quick_commands": "导入快捷命令（{{count}}）",
+        "toggle_serial_profiles": "导入串口配置（{{count}}）",
         "section_field_count": "{{count}} 个字段",
         "section_general": "常规",
         "section_terminal_appearance": "终端外观",
         "section_terminal_behavior": "终端行为",
         "section_appearance": "外观",
         "section_connections": "连接",
+        "section_network": "网络",
         "section_file_and_editor": "文件与编辑器",
+        "section_ai": "AI",
         "section_local_terminal": "本地终端",
+        "section_native_preferences": "原生偏好",
         "local_changes_warning": "本地仍有未同步改动。插件会在导入前先创建一份回滚备份。",
         "records_header": "计划执行的记录级变更",
         "more_items": "...以及另外 {{count}} 项",
@@ -393,14 +410,18 @@
         "record_rename": "{{name}}：重命名为 {{target}}，因为本地已存在同名连接",
         "record_skip": "{{name}}：跳过，因为本地已存在同名连接",
         "record_replace": "{{name}}：替换现有本地连接 {{target}}",
-        "record_merge": "{{name}}：合并到现有本地连接 {{target}}"
+        "record_merge": "{{name}}：合并到现有本地连接 {{target}}",
+        "sensitive_credentials_label": "敏感凭据",
+        "toggle_sensitive_credentials": "导入敏感凭据（{{count}}）"
       },
       "confirm": {
         "import_title": "确认导入远端快照？",
         "clear_secret_title": "确认清除已存 secret？",
         "clear_secret_description": "这会从安全存储中删除 {{label}} 的已存值，而且无法撤销。",
         "restore_backup_title": "确认恢复之前的本地备份？",
-        "restore_backup_description": "这会导入 {{createdAt}} 创建的回滚备份，并使用 replace 模式恢复。"
+        "restore_backup_description": "这会导入 {{createdAt}} 创建的回滚备份，并使用 replace 模式恢复。",
+        "enable_sensitive_sync_title": "要启用敏感凭据同步吗？",
+        "enable_sensitive_sync_description": "这会把连接密码、密钥密码、托管私钥、AI 密钥和提权凭据放入加密的云同步对象中上传。共享或不可信同步存储上建议保持关闭。"
       },
       "snapshot_description": "Oxide 云同步快照",
       "placeholders": {

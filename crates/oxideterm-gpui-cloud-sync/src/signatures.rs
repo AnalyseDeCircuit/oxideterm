@@ -85,6 +85,22 @@ pub fn cloud_sync_section_signature(
             format!("{backend_type:?}").hash(&mut hasher);
             format!("{auth_mode:?}").hash(&mut hasher);
             format!("{conflict_strategy:?}").hash(&mut hasher);
+            state.sync_scope.sync_connections.hash(&mut hasher);
+            state.sync_scope.sync_forwards.hash(&mut hasher);
+            state.sync_scope.sync_quick_commands.hash(&mut hasher);
+            state.sync_scope.sync_serial_profiles.hash(&mut hasher);
+            state
+                .sync_scope
+                .sync_sensitive_credentials
+                .hash(&mut hasher);
+            state.sync_scope.sync_app_settings.hash(&mut hasher);
+            state.sync_scope.app_settings_sections.hash(&mut hasher);
+            state
+                .sync_scope
+                .include_local_terminal_env_vars
+                .hash(&mut hasher);
+            state.sync_scope.sync_plugin_settings.hash(&mut hasher);
+            state.sync_scope.plugin_ids.hash(&mut hasher);
         }
         CloudSyncSection::Notes => {
             state.sync_scope.sync_connections.hash(&mut hasher);
@@ -109,6 +125,9 @@ pub fn cloud_sync_rollback_backup_signature(backup: &CloudSyncRollbackBackup) ->
         metadata.has_app_settings.hash(&mut hasher);
         metadata.plugin_settings_count.hash(&mut hasher);
         metadata.forwards.hash(&mut hasher);
+        metadata.quick_commands.hash(&mut hasher);
+        metadata.serial_profiles.hash(&mut hasher);
+        metadata.sensitive_credentials.hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -122,6 +141,9 @@ pub fn cloud_sync_history_signature(entry: &CloudSyncHistoryEntry) -> u64 {
     entry.success.hash(&mut hasher);
     entry.summary.connections.hash(&mut hasher);
     entry.summary.forwards.hash(&mut hasher);
+    entry.summary.quick_commands.hash(&mut hasher);
+    entry.summary.serial_profiles.hash(&mut hasher);
+    entry.summary.sensitive_credentials.hash(&mut hasher);
     entry.summary.has_app_settings.hash(&mut hasher);
     entry.summary.plugin_settings_count.hash(&mut hasher);
     entry.error.hash(&mut hasher);

@@ -595,6 +595,9 @@ fn create_cloud_sync_rollback_backup(
                 .unwrap_or(preview.has_app_settings),
             plugin_settings_count: preview.plugin_settings_count,
             forwards: preview.total_forwards,
+            quick_commands: metadata.quick_commands_count.unwrap_or(0),
+            serial_profiles: 0,
+            sensitive_credentials: metadata.portable_secret_count.unwrap_or(0),
         }),
     }))
 }

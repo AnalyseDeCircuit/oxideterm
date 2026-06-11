@@ -198,7 +198,8 @@
         "restore_selected_backup": "還原所選備份",
         "clear_secret": "清除已儲存值",
         "save_settings": "儲存設定",
-        "saving": "儲存中..."
+        "saving": "儲存中...",
+        "enable_sensitive_sync": "啟用敏感同步"
       },
       "fields": {
         "backend": "後端類型",
@@ -220,6 +221,7 @@
       "sections": {
         "quick_start": "使用方法",
         "connection_settings": "連線設定",
+        "sync_scope": "同步範圍",
         "conflict_recovery": "衝突復原",
         "import_preview": "匯入預覽",
         "rollback_preview": "回滾預覽",
@@ -269,7 +271,15 @@
         "sync_password": "同步密碼",
         "auto_upload_enabled": "啟用自動上傳",
         "auto_upload_interval": "自動上傳間隔（分鐘）",
-        "default_conflict_strategy": "預設衝突策略"
+        "default_conflict_strategy": "預設衝突策略",
+        "sync_connections": "同步連線",
+        "sync_forwards": "同步已儲存的轉送",
+        "sync_quick_commands": "同步快捷命令",
+        "sync_serial_profiles": "同步序列埠設定",
+        "sync_app_settings": "同步應用程式設定",
+        "include_local_terminal_env_vars": "包含本機終端環境變數",
+        "sync_plugin_settings": "同步外掛設定",
+        "sync_sensitive_credentials": "同步敏感憑證"
       },
       "auth": {
         "bearer": "Bearer",
@@ -299,13 +309,13 @@
       },
       "backup": {
         "description": "Oxide 雲端同步回滾備份",
-        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{pluginSettingsCount}} 項外掛偏好設定，{{size}}"
+        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{pluginSettingsCount}} 項外掛偏好設定，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
       },
       "history": {
         "action_upload": "上傳",
         "action_pull": "拉取",
         "action_restore": "還原",
-        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{pluginSettingsCount}} 項外掛偏好設定"
+        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{pluginSettingsCount}} 項外掛偏好設定，{{sensitiveCredentials}} 个敏感凭据"
       },
       "errors": {
         "operation_in_progress": "另一個雲端同步操作正在執行，請稍後再試。",
@@ -370,6 +380,8 @@
         "summary_header": "遠端預覽摘要",
         "connection_count": "連線數",
         "total_forwards": "轉送數",
+        "quick_commands_label": "快捷命令",
+        "serial_profiles_label": "序列埠設定",
         "will_import": "將匯入",
         "will_merge": "將合併",
         "will_replace": "將取代",
@@ -386,14 +398,19 @@
         "toggle_app_settings": "匯入應用程式設定",
         "toggle_plugin_settings": "匯入外掛設定（{{count}}）",
         "toggle_forwards": "匯入已儲存的轉送（{{count}}）",
+        "toggle_quick_commands": "匯入快捷命令（{{count}}）",
+        "toggle_serial_profiles": "匯入序列埠設定（{{count}}）",
         "section_field_count": "{{count}} 個欄位",
         "section_general": "一般",
         "section_terminal_appearance": "終端外觀",
         "section_terminal_behavior": "終端行為",
         "section_appearance": "外觀",
         "section_connections": "連線",
+        "section_network": "網路",
         "section_file_and_editor": "檔案與編輯器",
+        "section_ai": "AI",
         "section_local_terminal": "本機終端",
+        "section_native_preferences": "原生偏好",
         "local_changes_warning": "本機仍有未同步改動。外掛程式會在匯入前先建立一份回滾備份。",
         "records_header": "預計執行的紀錄層級變更",
         "more_items": "...以及另外 {{count}} 項",
@@ -401,14 +418,18 @@
         "record_rename": "{{name}}：重新命名為 {{target}}，因為本機已存在同名連線",
         "record_skip": "{{name}}：略過，因為本機已存在同名連線",
         "record_replace": "{{name}}：取代現有本機連線 {{target}}",
-        "record_merge": "{{name}}：合併到現有本機連線 {{target}}"
+        "record_merge": "{{name}}：合併到現有本機連線 {{target}}",
+        "sensitive_credentials_label": "敏感憑證",
+        "toggle_sensitive_credentials": "匯入敏感憑證（{{count}}）"
       },
       "confirm": {
         "import_title": "確認匯入遠端快照？",
         "clear_secret_title": "確認清除已儲存的 secret？",
         "clear_secret_description": "這會從安全儲存中刪除 {{label}} 的已儲存值，而且無法復原。",
         "restore_backup_title": "確認還原之前的本機備份？",
-        "restore_backup_description": "這會匯入 {{createdAt}} 建立的回滾備份，並使用 replace 模式還原。"
+        "restore_backup_description": "這會匯入 {{createdAt}} 建立的回滾備份，並使用 replace 模式還原。",
+        "enable_sensitive_sync_title": "要啟用敏感憑證同步嗎？",
+        "enable_sensitive_sync_description": "這會將連線密碼、金鑰密碼、受管理私鑰、AI 金鑰和提權憑證放入加密的雲端同步物件中上傳。共用或不可信的同步儲存空間建議保持關閉。"
       },
       "snapshot_description": "Oxide 雲端同步快照",
       "placeholders": {

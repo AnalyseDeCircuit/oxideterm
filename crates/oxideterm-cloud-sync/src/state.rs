@@ -30,6 +30,12 @@ pub struct CloudSyncConflictDetails {
 pub struct CloudSyncHistorySummary {
     pub connections: usize,
     pub forwards: usize,
+    #[serde(default)]
+    pub quick_commands: usize,
+    #[serde(default)]
+    pub serial_profiles: usize,
+    #[serde(default)]
+    pub sensitive_credentials: usize,
     pub has_app_settings: bool,
     pub plugin_settings_count: usize,
 }
@@ -55,6 +61,12 @@ pub struct CloudSyncRollbackBackupMetadata {
     pub has_app_settings: bool,
     pub plugin_settings_count: usize,
     pub forwards: usize,
+    #[serde(default)]
+    pub quick_commands: usize,
+    #[serde(default)]
+    pub serial_profiles: usize,
+    #[serde(default)]
+    pub sensitive_credentials: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -317,6 +329,54 @@ mod tests {
         assert_eq!(
             state.sync_history[0].id,
             format!("id-{}", MAX_SYNC_HISTORY + 2)
+        );
+    }
+
+    #[test]
+    fn persisted_state_accepts_structured_state_before_optional_sections() {
+        let state: CloudSyncPersistedState = serde_json::from_value(serde_json::json!({
+            "lastSyncedStructuredState": {
+                "connections": "conn-rev",
+                "forwards": "fwd-rev",
+                "appSettings": {
+                    "general": "general-rev"
+                },
+                "pluginSettings": {}
+            },
+            "lastSyncedRemoteSections": {
+                "connections": "conn-rev",
+                "forwards": "fwd-rev",
+                "appSettings": {
+                    "general": "general-rev"
+                },
+                "pluginSettings": {}
+            },
+            "localDirtySections": {
+                "connections": false,
+                "forwards": false,
+                "appSettings": {},
+                "pluginSettings": {}
+            }
+        }))
+        .expect("old cloud sync state should deserialize");
+
+        let structured_state = state.last_synced_structured_state.expect("state");
+        assert_eq!(structured_state.connections.as_deref(), Some("conn-rev"));
+        assert!(structured_state.quick_commands.is_none());
+        assert!(structured_state.serial_profiles.is_none());
+        assert!(structured_state.sensitive_credentials.is_none());
+        assert!(
+            state
+                .last_synced_remote_sections
+                .expect("remote sections")
+                .quick_commands
+                .is_none()
+        );
+        assert!(
+            !state
+                .local_dirty_sections
+                .expect("dirty sections")
+                .sensitive_credentials
         );
     }
 

@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::{ConnectionOptions, SavedUpstreamProxyProtocol};
+use crate::{ConnectionOptions, PrivilegeCredentialKind, SavedUpstreamProxyProtocol};
 
 use super::OxideFileError;
 
@@ -207,6 +207,8 @@ pub struct EncryptedConnection {
     pub proxy_chain: Vec<EncryptedProxyHop>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forwards: Vec<EncryptedForward>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub privilege_credentials: Vec<EncryptedPrivilegeCredential>,
 }
 
 impl fmt::Debug for EncryptedConnection {
@@ -224,6 +226,49 @@ impl fmt::Debug for EncryptedConnection {
             .field("upstream_proxy", &self.upstream_proxy)
             .field("proxy_chain_len", &self.proxy_chain.len())
             .field("forwards_len", &self.forwards.len())
+            .field(
+                "privilege_credentials_len",
+                &self.privilege_credentials.len(),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedPrivilegeCredential {
+    pub id: String,
+    pub connection_id: String,
+    pub label: String,
+    pub kind: PrivilegeCredentialKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompt_patterns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<Zeroizing<String>>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub require_click_to_send: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for EncryptedPrivilegeCredential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EncryptedPrivilegeCredential")
+            .field("id", &self.id)
+            .field("connection_id", &self.connection_id)
+            .field("label", &self.label)
+            .field("kind", &self.kind)
+            .field("username_hint", &self.username_hint)
+            .field("prompt_patterns", &self.prompt_patterns)
+            .field("secret", &self.secret.as_ref().map(|_| "<redacted>"))
+            .field("enabled", &self.enabled)
+            .field("require_click_to_send", &self.require_click_to_send)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
             .finish()
     }
 }
@@ -276,6 +321,10 @@ impl Default for EncryptedUpstreamProxyAuth {
 }
 
 fn default_upstream_proxy_remote_dns() -> bool {
+    true
+}
+
+fn default_true() -> bool {
     true
 }
 

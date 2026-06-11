@@ -12,6 +12,7 @@ gpui.workspace = true
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-settings = { path = "../oxideterm-settings" }

@@ -198,7 +198,8 @@
         "restore_selected_backup": "Khôi phục bản sao lưu đã chọn",
         "clear_secret": "Xóa thông tin đã lưu",
         "save_settings": "Lưu cài đặt",
-        "saving": "Đang lưu..."
+        "saving": "Đang lưu...",
+        "enable_sensitive_sync": "Bật đồng bộ nhạy cảm"
       },
       "fields": {
         "backend": "Backend",
@@ -220,6 +221,7 @@
       "sections": {
         "quick_start": "Bắt đầu nhanh",
         "connection_settings": "Cài đặt kết nối",
+        "sync_scope": "Phạm vi đồng bộ",
         "conflict_recovery": "Xử lý xung đột",
         "import_preview": "Xem trước nhập",
         "rollback_preview": "Xem trước hoàn tác",
@@ -269,7 +271,15 @@
         "sync_password": "Mật khẩu đồng bộ",
         "auto_upload_enabled": "Bật tải lên tự động",
         "auto_upload_interval": "Khoảng thời gian tải lên tự động (phút)",
-        "default_conflict_strategy": "Chiến lược xử lý xung đột mặc định"
+        "default_conflict_strategy": "Chiến lược xử lý xung đột mặc định",
+        "sync_connections": "Đồng bộ kết nối",
+        "sync_forwards": "Đồng bộ chuyển tiếp đã lưu",
+        "sync_quick_commands": "Đồng bộ lệnh nhanh",
+        "sync_serial_profiles": "Đồng bộ hồ sơ serial",
+        "sync_app_settings": "Đồng bộ cài đặt ứng dụng",
+        "include_local_terminal_env_vars": "Bao gồm biến môi trường terminal cục bộ",
+        "sync_plugin_settings": "Đồng bộ cài đặt plugin",
+        "sync_sensitive_credentials": "Đồng bộ thông tin xác thực nhạy cảm"
       },
       "auth": {
         "bearer": "Bearer",
@@ -299,13 +309,13 @@
       },
       "backup": {
         "description": "Bản sao lưu khôi phục Oxide Cloud Sync",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{pluginSettingsCount}} cài đặt plugin, {{size}}"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{pluginSettingsCount}} cài đặt plugin, {{size}}, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "history": {
         "action_upload": "Tải lên",
         "action_pull": "Tải xuống",
         "action_restore": "Khôi phục",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{pluginSettingsCount}} cài đặt plugin"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "errors": {
         "operation_in_progress": "Một thao tác đồng bộ đám mây khác đang chạy.",
@@ -370,6 +380,8 @@
         "summary_header": "Tóm tắt xem trước từ xa",
         "connection_count": "Kết nối",
         "total_forwards": "Chuyển tiếp",
+        "quick_commands_label": "Lệnh nhanh",
+        "serial_profiles_label": "Hồ sơ serial",
         "will_import": "Sẽ nhập",
         "will_merge": "Sẽ được gộp",
         "will_replace": "Sẽ được thay thế",
@@ -386,14 +398,19 @@
         "toggle_app_settings": "Nhập cài đặt ứng dụng",
         "toggle_plugin_settings": "Nhập cài đặt plugin ({{count}})",
         "toggle_forwards": "Nhập chuyển tiếp đã lưu ({{count}})",
+        "toggle_quick_commands": "Nhập lệnh nhanh ({{count}})",
+        "toggle_serial_profiles": "Nhập hồ sơ serial ({{count}})",
         "section_field_count": "{{count}} trường",
         "section_general": "Chung",
         "section_terminal_appearance": "Giao diện terminal",
         "section_terminal_behavior": "Hành vi terminal",
         "section_appearance": "Giao diện",
         "section_connections": "Kết nối",
+        "section_network": "Mạng",
         "section_file_and_editor": "Tệp và trình soạn thảo",
+        "section_ai": "AI",
         "section_local_terminal": "Terminal cục bộ",
+        "section_native_preferences": "Tùy chọn native",
         "local_changes_warning": "Vẫn còn thay đổi cục bộ chưa đồng bộ. Plugin sẽ tạo bản sao lưu khôi phục trước khi nhập.",
         "records_header": "Các thay đổi cấp bản ghi dự kiến",
         "more_items": "...và thêm {{count}} mục",
@@ -401,14 +418,18 @@
         "record_rename": "{{name}}: đổi tên thành {{target}} vì tên cục bộ đã tồn tại",
         "record_skip": "{{name}}: bỏ qua vì đã có kết nối cục bộ cùng tên",
         "record_replace": "{{name}}: thay thế kết nối cục bộ hiện có {{target}}",
-        "record_merge": "{{name}}: gộp vào kết nối cục bộ hiện có {{target}}"
+        "record_merge": "{{name}}: gộp vào kết nối cục bộ hiện có {{target}}",
+        "sensitive_credentials_label": "Thông tin xác thực nhạy cảm",
+        "toggle_sensitive_credentials": "Nhập thông tin xác thực nhạy cảm ({{count}})"
       },
       "confirm": {
         "import_title": "Nhập ảnh chụp từ xa?",
         "clear_secret_title": "Xóa thông tin đã lưu?",
         "clear_secret_description": "Thao tác này sẽ xóa giá trị đã lưu cho {{label}} khỏi bộ nhớ bảo mật. Hành động này không thể hoàn tác.",
         "restore_backup_title": "Khôi phục bản sao lưu cục bộ trước đó?",
-        "restore_backup_description": "Thao tác này nhập bản sao lưu khôi phục được tạo lúc {{createdAt}} ở chế độ thay thế."
+        "restore_backup_description": "Thao tác này nhập bản sao lưu khôi phục được tạo lúc {{createdAt}} ở chế độ thay thế.",
+        "enable_sensitive_sync_title": "Bật đồng bộ thông tin xác thực nhạy cảm?",
+        "enable_sensitive_sync_description": "Mật khẩu kết nối, mật khẩu khóa, khóa riêng được quản lý, khóa AI và thông tin xác thực nâng quyền sẽ được tải lên trong một đối tượng Cloud Sync đã mã hóa. Hãy tắt tùy chọn này trên kho đồng bộ dùng chung hoặc không đáng tin cậy."
       },
       "snapshot_description": "Ảnh chụp Oxide Cloud Sync",
       "placeholders": {

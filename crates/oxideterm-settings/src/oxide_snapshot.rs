@@ -20,6 +20,7 @@ pub const DEFAULT_OXIDE_SETTINGS_SECTIONS: &[&str] = &[
     "terminalBehavior",
     "appearance",
     "connections",
+    "network",
     "fileAndEditor",
 ];
 pub const ALL_OXIDE_SETTINGS_SECTIONS: &[&str] = &[
@@ -28,9 +29,11 @@ pub const ALL_OXIDE_SETTINGS_SECTIONS: &[&str] = &[
     "terminalBehavior",
     "appearance",
     "connections",
+    "network",
     "fileAndEditor",
     "ai",
     "localTerminal",
+    "nativePreferences",
 ];
 
 const GENERAL_KEYS: &[&str] = &["language", "updateChannel"];
@@ -62,8 +65,12 @@ const TERMINAL_BEHAVIOR_KEYS: &[&str] = &[
     "selectionRequiresShift",
     "autosuggest",
     "commandBar",
+    "commandMarks",
     "highlightRules",
     "inBandTransfer",
+    "terminalEncoding",
+    "graphics",
+    "unicode",
 ];
 const APPEARANCE_KEYS: &[&str] = &[
     "sidebarCollapsedDefault",
@@ -72,10 +79,12 @@ const APPEARANCE_KEYS: &[&str] = &[
     "uiFontFamily",
     "animationSpeed",
     "frostedGlass",
+    "renderProfile",
 ];
 const CONNECTION_DEFAULT_KEYS: &[&str] = &["username", "port"];
 const RECONNECT_KEYS: &[&str] = &["enabled", "maxAttempts", "baseDelayMs", "maxDelayMs"];
 const CONNECTION_POOL_KEYS: &[&str] = &["idleTimeoutSecs"];
+const NETWORK_KEYS: &[&str] = &["upstreamProxy", "upstreamProxyDisclaimerAccepted"];
 const AI_KEYS: &[&str] = &[
     "enabled",
     "enabledConfirmed",
@@ -99,8 +108,10 @@ const AI_KEYS: &[&str] = &[
     "toolUse",
     "contextSources",
     "mcpServers",
+    "acpAgents",
     "embeddingConfig",
     "agentRoles",
+    "executionProfiles",
 ];
 const SFTP_KEYS: &[&str] = &[
     "maxConcurrentTransfers",
@@ -124,6 +135,13 @@ const LOCAL_TERMINAL_KEYS: &[&str] = &[
     "loadShellProfile",
     "ohMyPoshEnabled",
     "ohMyPoshTheme",
+];
+const NATIVE_PREFERENCES_KEYS: &[&str] = &[
+    "keybindings",
+    "customThemes",
+    "launcher",
+    "experimental",
+    "newConnection",
 ];
 
 pub fn export_oxide_settings_snapshot_json(
@@ -259,6 +277,7 @@ fn copy_section(
             copy_object_keys(source, target, &["reconnect"], RECONNECT_KEYS);
             copy_object_keys(source, target, &["connectionPool"], CONNECTION_POOL_KEYS);
         }
+        "network" => copy_object_keys(source, target, &["network"], NETWORK_KEYS),
         "ai" => copy_object_keys(source, target, &["ai"], AI_KEYS),
         "fileAndEditor" => {
             copy_sftp_keys(source, target);
@@ -270,6 +289,7 @@ fn copy_section(
                 copy_object_keys(source, target, &["localTerminal"], &["customEnvVars"]);
             }
         }
+        "nativePreferences" => copy_root_keys(source, target, NATIVE_PREFERENCES_KEYS),
         _ => {}
     }
 }
@@ -297,6 +317,20 @@ fn copy_object_keys(source: &Value, target: &mut Value, path: &[&str], keys: &[&
         return;
     };
     let target_obj = ensure_object_path(target, path);
+    for key in keys {
+        if let Some(value) = source_obj.get(*key) {
+            target_obj.insert((*key).to_string(), value.clone());
+        }
+    }
+}
+
+fn copy_root_keys(source: &Value, target: &mut Value, keys: &[&str]) {
+    let Some(source_obj) = source.as_object() else {
+        return;
+    };
+    let target_obj = target
+        .as_object_mut()
+        .expect("settings root must be an object");
     for key in keys {
         if let Some(value) = source_obj.get(*key) {
             target_obj.insert((*key).to_string(), value.clone());
@@ -380,6 +414,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(section_ids.contains(&"general"));
+        assert!(section_ids.contains(&"network"));
         assert!(!section_ids.contains(&"ai"));
         assert!(!section_ids.contains(&"localTerminal"));
         assert!(parsed["settings"].get("ai").is_none());
@@ -387,16 +422,17 @@ mod tests {
         assert!(
             parsed["settings"]["terminal"]
                 .get("terminalEncoding")
-                .is_none()
+                .is_some()
         );
-        assert!(parsed["settings"]["terminal"].get("commandMarks").is_none());
-        assert!(parsed["settings"]["terminal"].get("graphics").is_none());
-        assert!(parsed["settings"]["terminal"].get("unicode").is_none());
+        assert!(parsed["settings"]["terminal"].get("commandMarks").is_some());
+        assert!(parsed["settings"]["terminal"].get("graphics").is_some());
+        assert!(parsed["settings"]["terminal"].get("unicode").is_some());
         assert!(
             parsed["settings"]["appearance"]
                 .get("renderProfile")
-                .is_none()
+                .is_some()
         );
+        assert!(parsed["settings"].get("network").is_some());
         assert!(parsed["settings"]["sftp"].get("speedLimitKBps").is_some());
         assert!(parsed["settings"]["sftp"].get("speedLimitKbps").is_none());
     }
@@ -410,7 +446,7 @@ mod tests {
             .local_terminal
             .custom_env_vars
             .insert("FOO".to_string(), Value::String("bar".to_string()));
-        let selected = ["ai", "localTerminal"]
+        let selected = ["ai", "localTerminal", "nativePreferences"]
             .into_iter()
             .map(str::to_string)
             .collect::<HashSet<_>>();
@@ -425,13 +461,22 @@ mod tests {
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
 
-        assert_eq!(section_ids, vec!["ai", "localTerminal"]);
+        assert_eq!(
+            section_ids,
+            vec!["ai", "localTerminal", "nativePreferences"]
+        );
         assert!(parsed["settings"].get("ai").is_some());
-        assert!(parsed["settings"]["ai"].get("executionProfiles").is_none());
+        assert!(parsed["settings"]["ai"].get("acpAgents").is_some());
+        assert!(parsed["settings"]["ai"].get("executionProfiles").is_some());
         assert_eq!(
             parsed["settings"]["localTerminal"]["defaultCwd"].as_str(),
             Some("/tmp")
         );
+        assert!(parsed["settings"].get("keybindings").is_some());
+        assert!(parsed["settings"].get("customThemes").is_some());
+        assert!(parsed["settings"].get("launcher").is_some());
+        assert!(parsed["settings"].get("experimental").is_some());
+        assert!(parsed["settings"].get("newConnection").is_some());
         assert!(
             parsed["settings"]["localTerminal"]
                 .get("customEnvVars")
