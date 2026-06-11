@@ -49,11 +49,19 @@ import { DrillDownDialog } from '../modals/DrillDownDialog';
 import { SavePathAsPresetDialog } from '../modals/SavePathAsPresetDialog';
 import { AddRootNodeDialog } from '../modals/AddRootNodeDialog';
 import { connectToSaved } from '../../lib/connectToSaved';
+import {
+  buildExistingSessionTreeConnectPlan,
+  continueSessionTreeConnectPlan,
+  type SessionTreeConnectPlan,
+} from '../../lib/sessionTreeConnectPlan';
 import { notifyConnectionIssue } from '../../lib/notificationCenter';
+import { api } from '../../lib/api';
+import type { HostKeyStatus } from '../../types';
 
 import { PluginSidebarRenderer } from '../plugin/PluginSidebarRenderer';
 import { PluginTargetContextMenu } from '../plugin/PluginTargetContextMenu';
 import { BackgroundSessionsPopover } from '../terminal/BackgroundSessionsPopover';
+import { HostKeyConfirmDialog } from '../modals/HostKeyConfirmDialog';
 
 const SAVED_CONNECTION_ROW_HEIGHT = 43;
 
@@ -140,6 +148,9 @@ export const Sidebar = () => {
   });
   const [addRootNodeOpen, setAddRootNodeOpen] = useState(false);
   const [bgPopoverOpen, setBgPopoverOpen] = useState(false);
+  const [pendingTreeConnectPlan, setPendingTreeConnectPlan] = useState<SessionTreeConnectPlan | null>(null);
+  const [treeConnectHostKeyStatus, setTreeConnectHostKeyStatus] = useState<HostKeyStatus | null>(null);
+  const [treeConnectHostKeyLoading, setTreeConnectHostKeyLoading] = useState(false);
 
   // Local terminal store
   const createLocalTerminal = useLocalTerminalStore((s) => s.createTerminal);
@@ -266,22 +277,47 @@ export const Sidebar = () => {
     }
   }, [getNode]);
 
+  const finalizeTreeConnectPlan = useCallback(async (nodeId: string) => {
+    await fetchTree();
+    const node = getNode(nodeId);
+    if (!node?.runtime.connectionId) {
+      throw new Error('Connection ID not found after connect');
+    }
+
+    const terminalId = await createTerminalForNode(nodeId, 0, 0);
+    await fetchTree();
+    createTab('terminal', terminalId);
+  }, [createTab, createTerminalForNode, fetchTree, getNode]);
+
+  const continueTreeConnectPlan = useCallback(async (plan: SessionTreeConnectPlan): Promise<boolean> => {
+    const challenge = await continueSessionTreeConnectPlan(plan);
+
+    if (challenge) {
+      setPendingTreeConnectPlan(challenge.plan);
+      setTreeConnectHostKeyStatus(challenge.status);
+      return false;
+    }
+
+    await finalizeTreeConnectPlan(plan.targetNodeId);
+    setPendingTreeConnectPlan(null);
+    setTreeConnectHostKeyStatus(null);
+    return true;
+  }, [finalizeTreeConnectPlan]);
+
+  const resetPendingTreeConnectPlan = useCallback(() => {
+    setPendingTreeConnectPlan(null);
+    setTreeConnectHostKeyStatus(null);
+  }, []);
+
   /**
-   * Phase 3.3: 使用 connectNodeWithAncestors 线性连接器
-   * 
-   * 执行流程：
-   * 1. 通过 sessionTreeStore.connectNodeWithAncestors 建立连接链
-   * 2. 连接成功后创建终端会话
-   * 3. 关联终端到节点
-   * 4. 打开终端 Tab
-   * 
-   * 错误处理：
-   * - CHAIN_LOCK_BUSY: 提示用户稍后重试
-   * - NODE_LOCK_BUSY: 提示节点正在连接中
-   * - CONNECTION_CHAIN_FAILED: 显示失败节点信息
+   * Connect an existing tree node through the shared host-key preflight plan.
+   *
+   * The plan keeps jump-host behavior aligned with the new-connection flow:
+   * each hop is verified before connecting, and unknown or changed host keys
+   * are surfaced through the standard confirmation dialog.
    */
   const handleTreeConnect = useCallback(async (nodeId: string) => {
-    const { connectNodeWithAncestors, isNodeConnecting, isConnectingChain } = useSessionTreeStore.getState();
+    const { isNodeConnecting, isConnectingChain } = useSessionTreeStore.getState();
     
     // 前端预检查（避免不必要的请求）
     if (isConnectingChain) {
@@ -303,20 +339,8 @@ export const Sidebar = () => {
     }
     
     try {
-      // 1. 使用线性连接器建立 SSH 连接链
-      const connectedNodeIds = await connectNodeWithAncestors(nodeId);
-      console.log(`[handleTreeConnect] Connected ${connectedNodeIds.length} nodes`);
-      
-      // 2. 获取目标节点的连接 ID
-      await fetchTree(); // 确保状态同步
-      const node = getNode(nodeId);
-      if (!node?.runtime.connectionId) {
-        throw new Error('Connection ID not found after connect');
-      }
-      
-      const terminalId = await createTerminalForNode(nodeId, 0, 0);
-      await fetchTree();
-      createTab('terminal', terminalId);
+      const plan = await buildExistingSessionTreeConnectPlan(nodeId);
+      await continueTreeConnectPlan(plan);
       
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -416,7 +440,81 @@ export const Sidebar = () => {
       // 刷新树以显示错误状态
       await fetchTree();
     }
-  }, [createTab, createTerminalForNode, fetchTree, getNode, toast, t]);
+  }, [continueTreeConnectPlan, fetchTree, toast, t]);
+
+  const handleAcceptTreeConnectHostKey = useCallback(async (persist: boolean) => {
+    if (!pendingTreeConnectPlan || !treeConnectHostKeyStatus || treeConnectHostKeyStatus.status !== 'unknown') {
+      return;
+    }
+
+    setTreeConnectHostKeyLoading(true);
+    try {
+      const { currentIndex, steps } = pendingTreeConnectPlan;
+      await continueTreeConnectPlan({
+        ...pendingTreeConnectPlan,
+        steps: steps.map((step, index) => index === currentIndex ? {
+          ...step,
+          trustHostKey: persist,
+          expectedHostKeyFingerprint: treeConnectHostKeyStatus.fingerprint,
+        } : step),
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      const title = t('connection.errors.generic_title', { defaultValue: 'Connection Error' });
+      toast({
+        title,
+        description: errorMsg,
+        variant: 'error',
+      });
+      notifyConnectionIssue({
+        title,
+        body: errorMsg,
+        nodeId: pendingTreeConnectPlan.targetNodeId,
+        severity: 'error',
+        dedupeKey: `connect-host-key-accept-failed:${pendingTreeConnectPlan.targetNodeId}`,
+      });
+      await fetchTree();
+    } finally {
+      setTreeConnectHostKeyLoading(false);
+    }
+  }, [continueTreeConnectPlan, fetchTree, pendingTreeConnectPlan, toast, t, treeConnectHostKeyStatus]);
+
+  const handleRemoveChangedTreeConnectHostKey = useCallback(async () => {
+    if (!pendingTreeConnectPlan || !treeConnectHostKeyStatus || treeConnectHostKeyStatus.status !== 'changed') {
+      return;
+    }
+
+    const currentStep = pendingTreeConnectPlan.steps[pendingTreeConnectPlan.currentIndex];
+    setTreeConnectHostKeyLoading(true);
+    try {
+      await api.sshRemoveHostKey({
+        host: currentStep.host,
+        port: currentStep.port,
+        keyType: treeConnectHostKeyStatus.keyType,
+        expectedFingerprint: treeConnectHostKeyStatus.expectedFingerprint,
+      });
+
+      await continueTreeConnectPlan(pendingTreeConnectPlan);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      const title = t('connection.errors.generic_title', { defaultValue: 'Connection Error' });
+      toast({
+        title,
+        description: errorMsg,
+        variant: 'error',
+      });
+      notifyConnectionIssue({
+        title,
+        body: errorMsg,
+        nodeId: pendingTreeConnectPlan.targetNodeId,
+        severity: 'error',
+        dedupeKey: `connect-host-key-remove-failed:${pendingTreeConnectPlan.targetNodeId}`,
+      });
+      await fetchTree();
+    } finally {
+      setTreeConnectHostKeyLoading(false);
+    }
+  }, [continueTreeConnectPlan, fetchTree, pendingTreeConnectPlan, toast, t, treeConnectHostKeyStatus]);
 
   const handleTreeDisconnect = useCallback(async (nodeId: string) => {
     const node = getNode(nodeId);
@@ -1154,6 +1252,18 @@ export const Sidebar = () => {
         onSuccess={async () => {
           await fetchTree();
         }}
+      />
+
+      <HostKeyConfirmDialog
+        open={!!treeConnectHostKeyStatus && treeConnectHostKeyStatus.status !== 'verified'}
+        onClose={resetPendingTreeConnectPlan}
+        status={treeConnectHostKeyStatus}
+        host={pendingTreeConnectPlan?.steps[pendingTreeConnectPlan.currentIndex]?.host ?? ''}
+        port={pendingTreeConnectPlan?.steps[pendingTreeConnectPlan.currentIndex]?.port ?? 22}
+        onAccept={handleAcceptTreeConnectHostKey}
+        onRemoveSavedKey={handleRemoveChangedTreeConnectHostKey}
+        onCancel={resetPendingTreeConnectPlan}
+        loading={treeConnectHostKeyLoading}
       />
 
       {/* Resize Handle */}

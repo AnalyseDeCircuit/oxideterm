@@ -24,6 +24,42 @@ export type SessionTreeConnectChallenge = {
   step: SessionTreeConnectStep;
 };
 
+export async function buildExistingSessionTreeConnectPlan(
+  targetNodeId: string,
+  rootUpstreamProxy?: UpstreamProxyForConnect,
+): Promise<SessionTreeConnectPlan> {
+  const pathNodes = await useSessionTreeStore.getState().getNodePath(targetNodeId);
+
+  if (pathNodes.length === 0) {
+    throw new Error(`Node path not found for ${targetNodeId}`);
+  }
+
+  const treeStore = useSessionTreeStore.getState();
+  const firstDisconnectedIndex = pathNodes.findIndex((pathNode) => {
+    const currentNode = treeStore.getRawNode(pathNode.id) ?? pathNode;
+    const isConnected = currentNode.state.status === 'connected';
+    const hasConnectionId = !!currentNode.sshConnectionId;
+    const isLinkDown = treeStore.linkDownNodeIds.has(pathNode.id);
+
+    return !isConnected || !hasConnectionId || isLinkDown;
+  });
+  const startIndex = firstDisconnectedIndex === -1 ? pathNodes.length : firstDisconnectedIndex;
+  const nodesToConnect = pathNodes.slice(startIndex);
+
+  return {
+    targetNodeId,
+    steps: nodesToConnect.map((node, index) => ({
+      nodeId: node.id,
+      host: node.host,
+      port: node.port,
+      // Only the root hop can use the configured upstream proxy. Child hops
+      // must preflight over their already-connected parent tunnel.
+      upstreamProxy: startIndex === 0 && index === 0 ? rootUpstreamProxy : undefined,
+    })),
+    currentIndex: 0,
+  };
+}
+
 const hasAcceptedFingerprint = (step: SessionTreeConnectStep) =>
   typeof step.expectedHostKeyFingerprint === 'string' && typeof step.trustHostKey === 'boolean';
 
