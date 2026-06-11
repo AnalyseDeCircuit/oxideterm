@@ -729,6 +729,29 @@ impl WorkspaceApp {
             }
             return Ok(());
         }
+        let target_has_parent = self
+            .node_runtime_store
+            .snapshot(&node_id)
+            .and_then(|snapshot| snapshot.parent_id)
+            .is_some();
+        if target_has_parent && self.node_router.connection_id_for_node(&node_id).is_none() {
+            let intent = mark_used_connection_id
+                .clone()
+                .or_else(|| saved_connection_id.clone())
+                .map(SshConnectionIntent::ConnectSaved)
+                .unwrap_or(SshConnectionIntent::Connect);
+            if self.start_existing_session_tree_connect(
+                node_id.clone(),
+                title.clone(),
+                intent,
+                save_after_open.clone(),
+                window,
+                cx,
+            ) {
+                cx.notify();
+                return Ok(());
+            }
+        }
         if let Some(existing) = self
             .pending_ssh_terminal_opens
             .iter()
