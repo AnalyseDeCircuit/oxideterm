@@ -231,6 +231,7 @@
         "sync_scope": "同期範囲",
         "conflict_recovery": "コンフリクト復旧",
         "import_preview": "インポートプレビュー",
+        "upload_preview": "アップロードプレビュー",
         "rollback_preview": "ロールバックプレビュー",
         "rollback_backups": "ロールバックバックアップ",
         "sync_history": "同期履歴",
@@ -304,6 +305,7 @@
         "rename": "リネーム",
         "blocked_description": "ローカルに未同期の変更が残っている一方で、リモートの変更は前回同期したリビジョンより新しくなっています。リモートを再確認するか、先にプルするか、強制的に上書きしてください。",
         "details_title": "競合の詳細",
+        "plain_summary": "リモートデータは {{remoteDevice}} により {{remoteTime}} に変更されました。ローカルの前回アップロードは {{localTime}} です。今アップロードすると、そのリモート変更を上書きする可能性があります。",
         "detail_recommendation": "再アップロードする前にリモートスナップショットをプルしてプレビューしてください。上書きする場合は、ローカル変更を確認してから明示的に実行してください。"
       },
       "common": {
@@ -409,6 +411,7 @@
       "preview": {
         "summary_header": "リモートプレビュー概要",
         "apply_plan_title": "適用計画",
+        "upload_scope_title": "アップロード範囲",
         "item_count": "{{count}} 件",
         "connection_count": "接続数",
         "total_forwards": "フォワード数",
@@ -452,7 +455,10 @@
         "record_replace": "{{name}}：既存のローカル接続 {{target}} を置換",
         "record_merge": "{{name}}：既存のローカル接続 {{target}} にマージ",
         "sensitive_credentials_label": "機密資格情報",
-        "toggle_sensitive_credentials": "機密資格情報をインポート（{{count}}）"
+        "toggle_sensitive_credentials": "機密資格情報をインポート（{{count}}）",
+        "sensitive_summary_title": "機密資格情報",
+        "sensitive_remote_summary": "リモートの暗号化資格情報には {{connections}} 件の接続レコードと {{portableSecrets}} 件のポータブルシークレットが含まれます。値は常に非表示です。",
+        "sensitive_upload_summary": "{{passwords}} 件のパスワード、{{keyPassphrases}} 件の鍵パスフレーズ、{{managedKeys}} 件の管理鍵、{{managedKeyPassphrases}} 件の管理鍵パスフレーズ、{{portableSecrets}} 件のポータブルシークレットをアップロードします。"
       },
       "confirm": {
         "import_title": "リモートスナップショットをインポートしますか？",
@@ -532,6 +538,50 @@
         "remote_removed_by_scope": "範囲により除外",
         "remote_excluded": "除外",
         "remote_unknown": "不明"
+      },
+      "field_diff": {
+        "title": "フィールド差分",
+        "status_added": "追加",
+        "status_modified": "変更",
+        "status_deleted": "削除",
+        "field_change": "{{field}}: {{before}} → {{after}}",
+        "item_action_meta": "{{section}} · {{status}}",
+        "empty_value": "空",
+        "redacted": "非表示"
+      },
+      "diff_fields": {
+        "name": "名前",
+        "group": "グループ",
+        "host": "ホスト",
+        "port": "ポート",
+        "username": "ユーザー名",
+        "auth_type": "認証タイプ",
+        "key_path": "鍵のパス",
+        "cert_path": "証明書のパス",
+        "managed_key": "管理鍵",
+        "proxy_chain": "プロキシチェーン",
+        "agent_forwarding": "エージェント転送",
+        "post_connect_command": "接続後コマンド",
+        "color": "色",
+        "tags": "タグ",
+        "forward_type": "転送タイプ",
+        "bind_address": "待受アドレス",
+        "bind_port": "待受ポート",
+        "target_host": "転送先ホスト",
+        "target_port": "転送先ポート",
+        "description": "説明",
+        "auto_start": "自動開始",
+        "command": "コマンド",
+        "category": "カテゴリ",
+        "host_pattern": "ホストパターン",
+        "port_path": "シリアルポートパス",
+        "baud_rate": "ボーレート",
+        "data_bits": "データビット",
+        "stop_bits": "ストップビット",
+        "parity": "パリティ",
+        "flow_control": "フロー制御",
+        "connect_on_open": "開いたら接続",
+        "setting_field": "設定フィールド"
       }
     },
     "refresh": "更新",

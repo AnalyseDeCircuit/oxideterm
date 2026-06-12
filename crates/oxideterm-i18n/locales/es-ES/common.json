@@ -231,6 +231,7 @@
         "sync_scope": "Alcance de sincronización",
         "conflict_recovery": "Recuperación ante conflictos",
         "import_preview": "Vista previa de importación",
+        "upload_preview": "Vista previa de subida",
         "rollback_preview": "Vista previa de reversión",
         "rollback_backups": "Copias de reversión",
         "sync_history": "Historial de sincronización",
@@ -304,6 +305,7 @@
         "rename": "Renombrar",
         "blocked_description": "Los cambios remotos son más recientes que la última revisión sincronizada, mientras que los cambios locales siguen pendientes. Vuelva a comprobar el remoto, descargue primero o fuerce la sobrescritura.",
         "details_title": "Detalles del conflicto",
+        "plain_summary": "{{remoteDevice}} modificó los datos remotos a las {{remoteTime}}. Tu última subida local fue {{localTime}}; subir ahora puede sobrescribir esos cambios remotos.",
         "detail_recommendation": "Descargue y previsualice el snapshot remoto antes de volver a subir. Fuerce la sobrescritura solo después de revisar los cambios locales."
       },
       "common": {
@@ -339,13 +341,13 @@
       },
       "backup": {
         "description": "Copia de respaldo de Oxide Cloud Sync",
-        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{size}}, {{sensitiveCredentials}} sensitive credentials"
+        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{size}}, {{sensitiveCredentials}} credenciales sensibles"
       },
       "history": {
         "action_upload": "Subir",
         "action_pull": "Descargar",
         "action_restore": "Restaurar",
-        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{sensitiveCredentials}} sensitive credentials"
+        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{sensitiveCredentials}} credenciales sensibles"
       },
       "errors": {
         "operation_in_progress": "Ya se está ejecutando otra operación de Cloud Sync.",
@@ -409,6 +411,7 @@
       "preview": {
         "summary_header": "Resumen de la vista previa remota",
         "apply_plan_title": "Plan de aplicación",
+        "upload_scope_title": "Alcance de subida",
         "item_count": "{{count}} elemento(s)",
         "connection_count": "Conexiones",
         "total_forwards": "Reenvíos",
@@ -452,7 +455,10 @@
         "record_replace": "{{name}}: reemplazar la conexión local existente {{target}}",
         "record_merge": "{{name}}: fusionar en la conexión local existente {{target}}",
         "sensitive_credentials_label": "Credenciales sensibles",
-        "toggle_sensitive_credentials": "Importar credenciales sensibles ({{count}})"
+        "toggle_sensitive_credentials": "Importar credenciales sensibles ({{count}})",
+        "sensitive_summary_title": "Credenciales sensibles",
+        "sensitive_remote_summary": "Las credenciales remotas cifradas incluyen {{connections}} registro(s) de conexión y {{portableSecrets}} secreto(s) portátiles. Los valores permanecen ocultos.",
+        "sensitive_upload_summary": "Se subirán {{passwords}} contraseña(s), {{keyPassphrases}} frase(s) de contraseña de clave, {{managedKeys}} clave(s) gestionada(s), {{managedKeyPassphrases}} frase(s) de claves gestionadas y {{portableSecrets}} secreto(s) portátiles."
       },
       "confirm": {
         "import_title": "¿Importar snapshot remoto?",
@@ -532,6 +538,50 @@
         "remote_removed_by_scope": "quitado por alcance",
         "remote_excluded": "excluido",
         "remote_unknown": "desconocido"
+      },
+      "field_diff": {
+        "title": "Diferencias de campos",
+        "status_added": "Añadido",
+        "status_modified": "Modificado",
+        "status_deleted": "Eliminado",
+        "field_change": "{{field}}: {{before}} → {{after}}",
+        "item_action_meta": "{{section}} · {{status}}",
+        "empty_value": "vacío",
+        "redacted": "oculto"
+      },
+      "diff_fields": {
+        "name": "Nombre",
+        "group": "Grupo",
+        "host": "Host",
+        "port": "Puerto",
+        "username": "Usuario",
+        "auth_type": "Tipo de autenticación",
+        "key_path": "Ruta de clave",
+        "cert_path": "Ruta del certificado",
+        "managed_key": "Clave gestionada",
+        "proxy_chain": "Cadena de proxy",
+        "agent_forwarding": "Reenvío de agente",
+        "post_connect_command": "Comando posterior a la conexión",
+        "color": "Color",
+        "tags": "Etiquetas",
+        "forward_type": "Tipo de reenvío",
+        "bind_address": "Dirección de escucha",
+        "bind_port": "Puerto de escucha",
+        "target_host": "Host destino",
+        "target_port": "Puerto destino",
+        "description": "Descripción",
+        "auto_start": "Inicio automático",
+        "command": "Comando",
+        "category": "Categoría",
+        "host_pattern": "Patrón de host",
+        "port_path": "Ruta del puerto serie",
+        "baud_rate": "Baudios",
+        "data_bits": "Bits de datos",
+        "stop_bits": "Bits de parada",
+        "parity": "Paridad",
+        "flow_control": "Control de flujo",
+        "connect_on_open": "Conectar al abrir",
+        "setting_field": "Campo de ajuste"
       }
     },
     "refresh": "Actualizar",

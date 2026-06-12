@@ -223,6 +223,7 @@
         "sync_scope": "Sync Scope",
         "conflict_recovery": "Conflict Recovery",
         "import_preview": "Import Preview",
+        "upload_preview": "Upload Preview",
         "rollback_preview": "Rollback Preview",
         "rollback_backups": "Rollback Backups",
         "sync_history": "Sync History",
@@ -296,6 +297,7 @@
         "rename": "Rename",
         "blocked_description": "Remote changes are newer than your last synced revision while local changes are still pending. Re-check the remote, pull first, or force an overwrite.",
         "details_title": "Conflict Details",
+        "plain_summary": "Remote data was changed by {{remoteDevice}} at {{remoteTime}}. Your last local upload was {{localTime}}; uploading now may overwrite those remote changes.",
         "detail_recommendation": "Pull and preview the remote snapshot before uploading again, or intentionally force an overwrite after reviewing local changes."
       },
       "common": {
@@ -401,6 +403,7 @@
       "preview": {
         "summary_header": "Remote preview summary",
         "apply_plan_title": "Apply plan",
+        "upload_scope_title": "Upload scope",
         "item_count": "{{count}} item(s)",
         "connection_count": "Connections",
         "total_forwards": "Forwards",
@@ -444,7 +447,10 @@
         "record_replace": "{{name}}: replace the existing local connection {{target}}",
         "record_merge": "{{name}}: merge into the existing local connection {{target}}",
         "sensitive_credentials_label": "Sensitive Credentials",
-        "toggle_sensitive_credentials": "Import sensitive credentials ({{count}})"
+        "toggle_sensitive_credentials": "Import sensitive credentials ({{count}})",
+        "sensitive_summary_title": "Sensitive credentials",
+        "sensitive_remote_summary": "Remote encrypted credentials include {{connections}} connection record(s) and {{portableSecrets}} portable secret(s). Values stay hidden.",
+        "sensitive_upload_summary": "Will upload {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), and {{portableSecrets}} portable secret(s)."
       },
       "confirm": {
         "import_title": "Import remote snapshot?",
@@ -524,6 +530,50 @@
         "remote_removed_by_scope": "removed by scope",
         "remote_excluded": "excluded",
         "remote_unknown": "unknown"
+      },
+      "field_diff": {
+        "title": "Field differences",
+        "status_added": "Added",
+        "status_modified": "Modified",
+        "status_deleted": "Deleted",
+        "field_change": "{{field}}: {{before}} → {{after}}",
+        "item_action_meta": "{{section}} · {{status}}",
+        "empty_value": "empty",
+        "redacted": "redacted"
+      },
+      "diff_fields": {
+        "name": "Name",
+        "group": "Group",
+        "host": "Host",
+        "port": "Port",
+        "username": "Username",
+        "auth_type": "Auth type",
+        "key_path": "Key path",
+        "cert_path": "Certificate path",
+        "managed_key": "Managed key",
+        "proxy_chain": "Proxy chain",
+        "agent_forwarding": "Agent forwarding",
+        "post_connect_command": "Post-connect command",
+        "color": "Color",
+        "tags": "Tags",
+        "forward_type": "Forward type",
+        "bind_address": "Bind address",
+        "bind_port": "Bind port",
+        "target_host": "Target host",
+        "target_port": "Target port",
+        "description": "Description",
+        "auto_start": "Auto start",
+        "command": "Command",
+        "category": "Category",
+        "host_pattern": "Host pattern",
+        "port_path": "Port path",
+        "baud_rate": "Baud rate",
+        "data_bits": "Data bits",
+        "stop_bits": "Stop bits",
+        "parity": "Parity",
+        "flow_control": "Flow control",
+        "connect_on_open": "Connect on open",
+        "setting_field": "Setting field"
       }
     },
     "native_description": "Native plugin hosting is not enabled yet.",

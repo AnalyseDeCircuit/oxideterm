@@ -231,6 +231,7 @@
         "sync_scope": "同步範圍",
         "conflict_recovery": "衝突復原",
         "import_preview": "匯入預覽",
+        "upload_preview": "上傳預覽",
         "rollback_preview": "回滾預覽",
         "rollback_backups": "回滾備份",
         "sync_history": "同步歷程",
@@ -304,6 +305,7 @@
         "rename": "重新命名",
         "blocked_description": "遠端變更比你上次同步的版本更新，而本機仍有待同步的變更。請重新檢查遠端、先拉取，或強制覆寫遠端。",
         "details_title": "衝突詳情",
+        "plain_summary": "遠端資料由 {{remoteDevice}} 於 {{remoteTime}} 修改。本機上次上傳時間是 {{localTime}}；現在上傳可能會覆寫那些遠端變更。",
         "detail_recommendation": "再次上傳前請先拉取並預覽遠端快照；如果確認要覆寫，請在檢查本機變更後再主動強制覆寫。"
       },
       "common": {
@@ -409,6 +411,7 @@
       "preview": {
         "summary_header": "遠端預覽摘要",
         "apply_plan_title": "本次套用計畫",
+        "upload_scope_title": "上傳範圍",
         "item_count": "{{count}} 項",
         "connection_count": "連線數",
         "total_forwards": "轉送數",
@@ -452,7 +455,10 @@
         "record_replace": "{{name}}：取代現有本機連線 {{target}}",
         "record_merge": "{{name}}：合併到現有本機連線 {{target}}",
         "sensitive_credentials_label": "敏感憑證",
-        "toggle_sensitive_credentials": "匯入敏感憑證（{{count}}）"
+        "toggle_sensitive_credentials": "匯入敏感憑證（{{count}}）",
+        "sensitive_summary_title": "敏感憑證",
+        "sensitive_remote_summary": "遠端加密憑證包含 {{connections}} 個連線記錄和 {{portableSecrets}} 個可攜密鑰。具體值一律隱藏。",
+        "sensitive_upload_summary": "將上傳 {{passwords}} 個密碼、{{keyPassphrases}} 個密鑰口令、{{managedKeys}} 個託管密鑰、{{managedKeyPassphrases}} 個託管密鑰口令和 {{portableSecrets}} 個可攜密鑰。"
       },
       "confirm": {
         "import_title": "確認匯入遠端快照？",
@@ -532,6 +538,50 @@
         "remote_removed_by_scope": "被範圍排除",
         "remote_excluded": "已排除",
         "remote_unknown": "未知"
+      },
+      "field_diff": {
+        "title": "欄位差異",
+        "status_added": "新增",
+        "status_modified": "修改",
+        "status_deleted": "刪除",
+        "field_change": "{{field}}：{{before}} → {{after}}",
+        "item_action_meta": "{{section}} · {{status}}",
+        "empty_value": "空",
+        "redacted": "已隱藏"
+      },
+      "diff_fields": {
+        "name": "名稱",
+        "group": "分組",
+        "host": "主機",
+        "port": "連接埠",
+        "username": "使用者名稱",
+        "auth_type": "鑑權類型",
+        "key_path": "密鑰路徑",
+        "cert_path": "憑證路徑",
+        "managed_key": "託管密鑰",
+        "proxy_chain": "代理鏈",
+        "agent_forwarding": "Agent 轉發",
+        "post_connect_command": "連線後命令",
+        "color": "顏色",
+        "tags": "標籤",
+        "forward_type": "轉發類型",
+        "bind_address": "監聽位址",
+        "bind_port": "監聽連接埠",
+        "target_host": "目標主機",
+        "target_port": "目標連接埠",
+        "description": "描述",
+        "auto_start": "自動啟動",
+        "command": "命令",
+        "category": "分類",
+        "host_pattern": "主機匹配",
+        "port_path": "序列埠路徑",
+        "baud_rate": "鮑率",
+        "data_bits": "資料位元",
+        "stop_bits": "停止位元",
+        "parity": "同位檢查",
+        "flow_control": "流量控制",
+        "connect_on_open": "開啟後連線",
+        "setting_field": "設定欄位"
       }
     },
     "refresh": "重新整理",

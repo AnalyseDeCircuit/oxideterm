@@ -231,6 +231,7 @@
         "sync_scope": "Synchronisierungsumfang",
         "conflict_recovery": "Konfliktbehebung",
         "import_preview": "Importvorschau",
+        "upload_preview": "Uploadvorschau",
         "rollback_preview": "Rollback-Vorschau",
         "rollback_backups": "Rollback-Sicherungen",
         "sync_history": "Synchronisierungsverlauf",
@@ -304,6 +305,7 @@
         "rename": "Umbenennen",
         "blocked_description": "Die Remote-Änderungen sind neuer als Ihre zuletzt synchronisierte Revision, während lokal noch ausstehende Änderungen vorhanden sind. Prüfen Sie das Remote erneut, rufen Sie zuerst ab oder erzwingen Sie ein Überschreiben.",
         "details_title": "Konfliktdetails",
+        "plain_summary": "Die Remote-Daten wurden von {{remoteDevice}} um {{remoteTime}} geändert. Dein letzter lokaler Upload war {{localTime}}; ein Upload jetzt kann diese Remote-Änderungen überschreiben.",
         "detail_recommendation": "Rufen Sie den Remote-Snapshot vor dem erneuten Hochladen ab und prüfen Sie die Vorschau. Erzwingen Sie ein Überschreiben nur nach Prüfung der lokalen Änderungen."
       },
       "common": {
@@ -409,6 +411,7 @@
       "preview": {
         "summary_header": "Remote-Vorschau Zusammenfassung",
         "apply_plan_title": "Anwendungsplan",
+        "upload_scope_title": "Uploadumfang",
         "item_count": "{{count}} Element(e)",
         "connection_count": "Verbindungen",
         "total_forwards": "Weiterleitungen",
@@ -452,7 +455,10 @@
         "record_replace": "{{name}}: die vorhandene lokale Verbindung {{target}} ersetzen",
         "record_merge": "{{name}}: in die vorhandene lokale Verbindung {{target}} zusammenführen",
         "sensitive_credentials_label": "Sensible Anmeldedaten",
-        "toggle_sensitive_credentials": "Sensible Anmeldedaten importieren ({{count}})"
+        "toggle_sensitive_credentials": "Sensible Anmeldedaten importieren ({{count}})",
+        "sensitive_summary_title": "Sensible Anmeldedaten",
+        "sensitive_remote_summary": "Die verschlüsselten Remote-Anmeldedaten enthalten {{connections}} Verbindungsdatensatz/-sätze und {{portableSecrets}} portable Geheimnis(se). Werte bleiben verborgen.",
+        "sensitive_upload_summary": "Es werden {{passwords}} Passwort/Passwörter, {{keyPassphrases}} Schlüssel-Passphrase(n), {{managedKeys}} verwaltete Schlüssel, {{managedKeyPassphrases}} Passphrase(n) für verwaltete Schlüssel und {{portableSecrets}} portable Geheimnis(se) hochgeladen."
       },
       "confirm": {
         "import_title": "Remote-Snapshot importieren?",
@@ -532,6 +538,50 @@
         "remote_removed_by_scope": "durch Umfang entfernt",
         "remote_excluded": "ausgeschlossen",
         "remote_unknown": "unbekannt"
+      },
+      "field_diff": {
+        "title": "Felddifferenzen",
+        "status_added": "Hinzugefügt",
+        "status_modified": "Geändert",
+        "status_deleted": "Gelöscht",
+        "field_change": "{{field}}: {{before}} → {{after}}",
+        "item_action_meta": "{{section}} · {{status}}",
+        "empty_value": "leer",
+        "redacted": "ausgeblendet"
+      },
+      "diff_fields": {
+        "name": "Name",
+        "group": "Gruppe",
+        "host": "Host",
+        "port": "Port",
+        "username": "Benutzername",
+        "auth_type": "Authentifizierungstyp",
+        "key_path": "Schlüsselpfad",
+        "cert_path": "Zertifikatspfad",
+        "managed_key": "Verwalteter Schlüssel",
+        "proxy_chain": "Proxy-Kette",
+        "agent_forwarding": "Agent-Weiterleitung",
+        "post_connect_command": "Befehl nach Verbindung",
+        "color": "Farbe",
+        "tags": "Tags",
+        "forward_type": "Weiterleitungstyp",
+        "bind_address": "Bind-Adresse",
+        "bind_port": "Bind-Port",
+        "target_host": "Zielhost",
+        "target_port": "Zielport",
+        "description": "Beschreibung",
+        "auto_start": "Automatisch starten",
+        "command": "Befehl",
+        "category": "Kategorie",
+        "host_pattern": "Host-Muster",
+        "port_path": "Serieller Portpfad",
+        "baud_rate": "Baudrate",
+        "data_bits": "Datenbits",
+        "stop_bits": "Stoppbits",
+        "parity": "Parität",
+        "flow_control": "Flusskontrolle",
+        "connect_on_open": "Beim Öffnen verbinden",
+        "setting_field": "Einstellungsfeld"
       }
     },
     "refresh": "Aktualisieren",

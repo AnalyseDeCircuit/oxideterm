@@ -19,18 +19,21 @@ use oxideterm_cloud_sync::{
     },
 };
 use oxideterm_gpui_cloud_sync::{
-    CLOUD_SYNC_GUIDE_STEP_KEYS, CloudSyncApplyOutcome, CloudSyncApplyUiOutcome, CloudSyncConfigRow,
-    CloudSyncConfirmDescription, CloudSyncCoverageDetail, CloudSyncCoverageStatus,
-    CloudSyncDiffLabel, CloudSyncErrorMessageSpec, CloudSyncForwardDetail,
-    CloudSyncGuideExampleElements, CloudSyncHealthStatus, CloudSyncLocalDiffStatus,
-    CloudSyncPreviewBodySection, CloudSyncPreviewFactValue, CloudSyncPreviewImpactItem,
-    CloudSyncPreviewRecord, CloudSyncPreviewRecordRow, CloudSyncPreviewSelectionAction,
-    CloudSyncPreviewSelectionLabel, CloudSyncPreviewSource, CloudSyncPreviewSummary,
-    CloudSyncRemoteDiffStatus, CloudSyncRollbackBackupSummarySpec, CloudSyncSection,
-    CloudSyncSectionDiffItem, CloudSyncSelectAction, CloudSyncSelectKeyEffect,
-    CloudSyncSelectKeyState, CloudSyncSelectOption, close_cloud_sync_select_on_container_scroll,
-    cloud_sync_action_grid, cloud_sync_action_panel, cloud_sync_app_settings_section_label_key,
-    cloud_sync_apply_diff_items, cloud_sync_backend_label_key, cloud_sync_card,
+    CLOUD_SYNC_FIELD_REDACTED_VALUE, CLOUD_SYNC_GUIDE_STEP_KEYS, CloudSyncApplyOutcome,
+    CloudSyncApplyUiOutcome, CloudSyncConfigRow, CloudSyncConfirmDescription,
+    CloudSyncCoverageDetail, CloudSyncCoverageStatus, CloudSyncDiffLabel,
+    CloudSyncErrorMessageSpec, CloudSyncFieldDiffItem, CloudSyncFieldDiffStatus,
+    CloudSyncForwardDetail, CloudSyncGuideExampleElements, CloudSyncHealthStatus,
+    CloudSyncLocalDiffStatus, CloudSyncLocalFieldDiffSnapshot, CloudSyncPreviewBodySection,
+    CloudSyncPreviewFactValue, CloudSyncPreviewImpactItem, CloudSyncPreviewRecord,
+    CloudSyncPreviewRecordRow, CloudSyncPreviewSelectionAction, CloudSyncPreviewSelectionLabel,
+    CloudSyncPreviewSource, CloudSyncPreviewSummary, CloudSyncRemoteDiffStatus,
+    CloudSyncRollbackBackupSummarySpec, CloudSyncSection, CloudSyncSectionDiffItem,
+    CloudSyncSelectAction, CloudSyncSelectKeyEffect, CloudSyncSelectKeyState,
+    CloudSyncSelectOption, CloudSyncUploadSelectionAction,
+    close_cloud_sync_select_on_container_scroll, cloud_sync_action_grid, cloud_sync_action_panel,
+    cloud_sync_app_settings_section_label_key, cloud_sync_apply_diff_items,
+    cloud_sync_apply_field_diff_items, cloud_sync_backend_label_key, cloud_sync_card,
     cloud_sync_check_row, cloud_sync_config_rows, cloud_sync_confirm_copy_spec,
     cloud_sync_conflict_info, cloud_sync_coverage_model, cloud_sync_error_message_spec,
     cloud_sync_error_view, cloud_sync_fact_card, cloud_sync_fact_grid, cloud_sync_field_row,
@@ -54,20 +57,21 @@ use oxideterm_gpui_cloud_sync::{
     cloud_sync_settings_from_form, cloud_sync_should_create_rollback_backup,
     cloud_sync_sidebar_empty, cloud_sync_status_card, cloud_sync_status_label_key,
     cloud_sync_status_list, cloud_sync_status_row, cloud_sync_toggle, cloud_sync_toggle_grid,
-    cloud_sync_upload_diff_items, cloud_sync_value_prefers_mono, cloud_sync_version_info_rows,
-    deliver_cloud_sync_apply_preview, deliver_cloud_sync_check, deliver_cloud_sync_pull_preview,
+    cloud_sync_upload_diff_items, cloud_sync_upload_field_diff_items,
+    cloud_sync_value_prefers_mono, cloud_sync_version_info_rows, deliver_cloud_sync_apply_preview,
+    deliver_cloud_sync_check, deliver_cloud_sync_pull_preview,
     deliver_cloud_sync_restore_backup_preview, deliver_cloud_sync_upload,
-    finish_cloud_sync_automatic_upload_error_state, finish_cloud_sync_check_state,
-    finish_cloud_sync_error_state, finish_cloud_sync_pull_preview_state,
-    finish_cloud_sync_upload_state, finish_legacy_cloud_sync_apply_state,
-    finish_structured_cloud_sync_apply_state,
+    deliver_cloud_sync_upload_preview, finish_cloud_sync_automatic_upload_error_state,
+    finish_cloud_sync_check_state, finish_cloud_sync_error_state,
+    finish_cloud_sync_pull_preview_state, finish_cloud_sync_upload_state,
+    finish_legacy_cloud_sync_apply_state, finish_structured_cloud_sync_apply_state,
     handle_cloud_sync_select_key as reduce_cloud_sync_select_key,
     normalize_cloud_sync_interval_draft, persist_remote_metadata, reset_cloud_sync_secret_drafts,
     store_cloud_sync_touched_secrets,
 };
 pub(super) use oxideterm_gpui_cloud_sync::{
     CloudSyncConfirm, CloudSyncDelivery, CloudSyncPendingPreview, CloudSyncPreviewSelection,
-    CloudSyncSelect,
+    CloudSyncSelect, CloudSyncUploadSelection,
 };
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::button::ButtonVariant;
@@ -187,7 +191,7 @@ impl WorkspaceApp {
     fn cloud_sync_sections(&self) -> Vec<CloudSyncSection> {
         cloud_sync_sections(
             self.cloud_sync_store.state(),
-            self.cloud_sync_pending_preview.is_some(),
+            self.cloud_sync_has_pending_preview(),
         )
     }
 
@@ -206,10 +210,14 @@ impl WorkspaceApp {
             &self.cloud_sync_form.auth_mode,
             &self.cloud_sync_form.default_conflict_strategy,
             self.cloud_sync_rx.is_some(),
-            self.cloud_sync_pending_preview.is_some(),
+            self.cloud_sync_has_pending_preview(),
             self.cloud_sync_preview_selection.is_some(),
             self.cloud_sync_progress.is_some(),
         )
+    }
+
+    fn cloud_sync_has_pending_preview(&self) -> bool {
+        self.cloud_sync_pending_preview.is_some() || self.cloud_sync_upload_preview.is_some()
     }
 
     fn render_cloud_sync_section_item(
@@ -239,11 +247,16 @@ impl WorkspaceApp {
             }
             CloudSyncSection::Status => self.render_cloud_sync_status_card(&state, cx),
             CloudSyncSection::Actions => self.render_cloud_sync_actions(&state, busy, cx),
-            CloudSyncSection::Preview => self
-                .cloud_sync_pending_preview
-                .as_ref()
-                .map(|preview| self.render_cloud_sync_preview(preview, &state, busy, cx))
-                .unwrap_or_else(|| div().into_any_element()),
+            CloudSyncSection::Preview => {
+                if let Some(preview) = self.cloud_sync_upload_preview.as_ref() {
+                    self.render_cloud_sync_upload_preview(preview, &state, busy, cx)
+                } else {
+                    self.cloud_sync_pending_preview
+                        .as_ref()
+                        .map(|preview| self.render_cloud_sync_preview(preview, &state, busy, cx))
+                        .unwrap_or_else(|| div().into_any_element())
+                }
+            }
             CloudSyncSection::Rollback => self.render_cloud_sync_rollback_backups(&state, busy, cx),
             CloudSyncSection::History => self.render_cloud_sync_history(&state, cx),
             CloudSyncSection::Config => self.render_cloud_sync_config(cx),
@@ -266,6 +279,54 @@ impl WorkspaceApp {
             Some(&state.sync_scope),
         )
         .map_err(|error| error.to_string())
+    }
+
+    fn cloud_sync_local_field_diff_snapshot(&self) -> CloudSyncLocalFieldDiffSnapshot {
+        let scope = normalize_sync_scope(Some(&self.cloud_sync_store.state().sync_scope), &[]);
+        let app_settings_sections = if scope.sync_app_settings {
+            scope
+                .app_settings_sections
+                .iter()
+                .filter_map(|section_id| {
+                    let selected = std::collections::HashSet::from([section_id.clone()]);
+                    oxideterm_settings::export_oxide_settings_snapshot_json(
+                        self.settings_store.settings(),
+                        Some(&selected),
+                        scope.include_local_terminal_env_vars,
+                    )
+                    .ok()
+                    .and_then(|json| {
+                        oxideterm_connections::oxide_file::preview_oxide_app_settings_sections(
+                            &json,
+                        )
+                        .into_iter()
+                        .find(|section| section.id == *section_id)
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let quick_commands =
+            oxideterm_quick_commands::export_snapshot_json(self.settings_store.path())
+                .ok()
+                .and_then(|json| {
+                    serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(&json)
+                        .ok()
+                });
+        CloudSyncLocalFieldDiffSnapshot {
+            connections: self
+                .connection_store
+                .export_saved_connections_snapshot()
+                .ok(),
+            forwards: self
+                .forwarding_registry
+                .export_saved_forwards_snapshot()
+                .ok(),
+            quick_commands,
+            serial_profiles: self.connection_store.export_serial_profiles_snapshot().ok(),
+            app_settings_sections,
+        }
     }
 
     fn render_cloud_sync_status_card(
@@ -343,7 +404,7 @@ impl WorkspaceApp {
                          _event,
                          _window,
                          cx: &mut Context<WorkspaceApp>| {
-                            this.start_cloud_sync_upload_with_options(false, false, false, cx);
+                            this.start_cloud_sync_upload_preview(cx);
                             this.clear_cloud_sync_select_focus();
                             cx.stop_propagation();
                         },
@@ -683,6 +744,16 @@ impl WorkspaceApp {
                 .into_iter()
                 .map(|row| self.render_cloud_sync_meta_line(row.label_key, row.value, cx))
                 .collect::<Vec<_>>();
+            rows.insert(
+                0,
+                cloud_sync_meta_line(self.render_selectable_text_scoped(
+                    "cloud-sync-conflict-info",
+                    "plain-summary",
+                    self.cloud_sync_conflict_plain_summary(state),
+                    self.tokens.ui.text,
+                    cx,
+                )),
+            );
             rows.push(cloud_sync_meta_line(self.render_selectable_text_scoped(
                 "cloud-sync-conflict-info",
                 "recommendation",
@@ -693,6 +764,35 @@ impl WorkspaceApp {
             block = block.child(cloud_sync_status_list(&self.tokens, conflict_title, rows));
         }
         block.into_any_element()
+    }
+
+    fn cloud_sync_conflict_plain_summary(&self, state: &CloudSyncPersistedState) -> String {
+        let remote_device = state
+            .conflict_details
+            .as_ref()
+            .and_then(|details| details.device_id.clone())
+            .or_else(|| state.remote_device_id.clone())
+            .unwrap_or_else(|| "—".to_string());
+        let remote_time = state
+            .conflict_details
+            .as_ref()
+            .and_then(|details| details.updated_at.clone())
+            .or_else(|| state.remote_updated_at.clone())
+            .map(|value| cloud_sync_format_timestamp(&value))
+            .unwrap_or_else(|| "—".to_string());
+        let local_time = state
+            .last_upload_at
+            .as_ref()
+            .map(|value| cloud_sync_format_timestamp(value))
+            .unwrap_or_else(|| "—".to_string());
+        self.i18n_replace(
+            "plugin.cloud_sync.conflict.plain_summary",
+            &[
+                ("remoteDevice", remote_device),
+                ("remoteTime", remote_time),
+                ("localTime", local_time),
+            ],
+        )
     }
 
     fn render_cloud_sync_meta_line(
@@ -761,6 +861,17 @@ impl WorkspaceApp {
                 cx,
             ));
         }
+        let field_diff_items = cloud_sync_apply_field_diff_items(
+            preview,
+            &model.selection,
+            &self.cloud_sync_local_field_diff_snapshot(),
+        );
+        if !field_diff_items.is_empty() {
+            body.push(self.render_cloud_sync_apply_field_diff_card(&field_diff_items, cx));
+        }
+        if let Some(card) = self.render_cloud_sync_remote_sensitive_summary(preview, cx) {
+            body.push(card);
+        }
         if !model.impact_items.is_empty() {
             body.push(self.render_cloud_sync_preview_impact(&model.impact_items, cx));
         }
@@ -821,6 +932,122 @@ impl WorkspaceApp {
         )
     }
 
+    fn render_cloud_sync_upload_preview(
+        &self,
+        remote_preview: &CloudSyncPendingPreview,
+        state: &CloudSyncPersistedState,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let title = self.render_display_text_with_role(
+            SelectableTextRole::PlainDocument,
+            "cloud-sync-upload-preview-title",
+            "upload",
+            self.i18n.t("plugin.cloud_sync.sections.upload_preview"),
+            theme.text_heading,
+            cx,
+        );
+        let mut body = Vec::new();
+        if let Some(selection) = self.cloud_sync_upload_selection.as_ref() {
+            body.push(self.render_cloud_sync_upload_selection(selection, cx));
+        }
+        if let Ok(local_snapshot) = self.cloud_sync_local_snapshot(state) {
+            let mut preview_state = state.clone();
+            if let CloudSyncPendingPreview::Structured(preview) = remote_preview {
+                preview_state.remote_exists = true;
+                preview_state.remote_section_revisions =
+                    Some(preview.manifest.section_revisions.clone());
+            }
+            if let Some(selection) = self.cloud_sync_upload_selection.as_ref() {
+                preview_state.sync_scope = selection.raw_scope(&state.sync_scope);
+            }
+            let section_diff_items = cloud_sync_upload_diff_items(&local_snapshot, &preview_state);
+            if !section_diff_items.is_empty() {
+                body.push(self.render_cloud_sync_section_diff_card(
+                    "cloud-sync-upload-preview-diff",
+                    "plugin.cloud_sync.preflight.upload_diff_title",
+                    &section_diff_items,
+                    cx,
+                ));
+            }
+        }
+        let raw_scope = self
+            .cloud_sync_upload_selection
+            .as_ref()
+            .map(|selection| selection.raw_scope(&state.sync_scope))
+            .unwrap_or_else(|| state.sync_scope.clone());
+        let scope = normalize_sync_scope(Some(&raw_scope), &[]);
+        let field_diff_items = cloud_sync_upload_field_diff_items(
+            remote_preview,
+            &self.cloud_sync_local_field_diff_snapshot(),
+            &scope,
+        );
+        if !field_diff_items.is_empty() {
+            body.push(self.render_cloud_sync_upload_field_diff_card(&field_diff_items, cx));
+        }
+        let summary = cloud_sync_preview_summary(remote_preview);
+        let fact_rows = if matches!(remote_preview, CloudSyncPendingPreview::Structured(_)) {
+            Vec::new()
+        } else {
+            vec![cloud_sync_fact_grid([
+                self.render_cloud_sync_fact(
+                    "plugin.cloud_sync.preview.connection_count",
+                    summary.connections.to_string(),
+                    cx,
+                ),
+                self.render_cloud_sync_fact(
+                    "plugin.cloud_sync.preview.quick_commands_label",
+                    summary.quick_commands.to_string(),
+                    cx,
+                ),
+            ])]
+        };
+        cloud_sync_preview_card(
+            &self.tokens,
+            title,
+            fact_rows,
+            None,
+            body,
+            cloud_sync_action_grid([
+                self.render_cloud_sync_action_button(
+                    "plugin.cloud_sync.actions.upload_now",
+                    ButtonVariant::Default,
+                    busy,
+                    cx.listener(
+                        |this: &mut WorkspaceApp,
+                         _event,
+                         _window,
+                         cx: &mut Context<WorkspaceApp>| {
+                            this.cloud_sync_upload_preview = None;
+                            this.start_cloud_sync_upload_with_options(false, false, false, cx);
+                            this.clear_cloud_sync_select_focus();
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ),
+                ),
+                self.render_cloud_sync_action_button(
+                    "plugin.cloud_sync.actions.cancel_preview",
+                    ButtonVariant::Outline,
+                    busy,
+                    cx.listener(
+                        |this: &mut WorkspaceApp,
+                         _event,
+                         _window,
+                         cx: &mut Context<WorkspaceApp>| {
+                            this.cloud_sync_upload_preview = None;
+                            this.cloud_sync_upload_selection = None;
+                            this.clear_cloud_sync_select_focus();
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ),
+                ),
+            ]),
+        )
+    }
+
     fn render_cloud_sync_preview_impact(
         &self,
         items: &[CloudSyncPreviewImpactItem],
@@ -845,6 +1072,227 @@ impl WorkspaceApp {
             )
         });
         cloud_sync_status_list(&self.tokens, title, rows)
+    }
+
+    fn render_cloud_sync_remote_sensitive_summary(
+        &self,
+        preview: &CloudSyncPendingPreview,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (connections, portable_secrets) = match preview {
+            CloudSyncPendingPreview::Structured(preview) => {
+                let preview = preview.sensitive_credentials_preview.as_ref()?;
+                (preview.total_connections, preview.portable_secret_count)
+            }
+            CloudSyncPendingPreview::Legacy { preview, .. } => (
+                preview.preview.total_connections,
+                preview.metadata.portable_secret_count.unwrap_or(0),
+            ),
+        };
+        if connections == 0 && portable_secrets == 0 {
+            return None;
+        }
+        let title = self.render_selectable_text_scoped(
+            "cloud-sync-sensitive-summary-title",
+            "title",
+            self.i18n
+                .t("plugin.cloud_sync.preview.sensitive_summary_title"),
+            self.tokens.ui.text_heading,
+            cx,
+        );
+        let summary = self.i18n_replace(
+            "plugin.cloud_sync.preview.sensitive_remote_summary",
+            &[
+                ("connections", connections.to_string()),
+                ("portableSecrets", portable_secrets.to_string()),
+            ],
+        );
+        Some(cloud_sync_status_list(
+            &self.tokens,
+            title,
+            [cloud_sync_meta_line(self.render_selectable_text_scoped(
+                "cloud-sync-sensitive-summary",
+                "summary",
+                summary,
+                self.tokens.ui.text,
+                cx,
+            ))],
+        ))
+    }
+
+    fn render_cloud_sync_upload_selection(
+        &self,
+        selection: &CloudSyncUploadSelection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title = self.render_selectable_text_scoped(
+            "cloud-sync-upload-selection-title",
+            "title",
+            self.i18n.t("plugin.cloud_sync.preview.upload_scope_title"),
+            self.tokens.ui.text_heading,
+            cx,
+        );
+        let rows = [
+            (
+                "plugin.cloud_sync.settings.sync_connections",
+                CloudSyncUploadSelectionAction::ToggleConnections,
+            ),
+            (
+                "plugin.cloud_sync.settings.sync_forwards",
+                CloudSyncUploadSelectionAction::ToggleForwards,
+            ),
+            (
+                "plugin.cloud_sync.settings.sync_quick_commands",
+                CloudSyncUploadSelectionAction::ToggleQuickCommands,
+            ),
+            (
+                "plugin.cloud_sync.settings.sync_serial_profiles",
+                CloudSyncUploadSelectionAction::ToggleSerialProfiles,
+            ),
+            (
+                "plugin.cloud_sync.settings.sync_sensitive_credentials",
+                CloudSyncUploadSelectionAction::ToggleSensitiveCredentials,
+            ),
+            (
+                "plugin.cloud_sync.settings.sync_app_settings",
+                CloudSyncUploadSelectionAction::ToggleAppSettings,
+            ),
+            (
+                "plugin.cloud_sync.settings.sync_plugin_settings",
+                CloudSyncUploadSelectionAction::TogglePluginSettings,
+            ),
+        ];
+        let mut block = div().flex().flex_col().gap(px(8.0));
+        for (label_key, action) in rows {
+            if !self.cloud_sync_upload_section_visible(selection, &action) {
+                continue;
+            }
+            let checked = selection.is_item_checked(&action);
+            block = block.child(self.render_cloud_sync_check_row(
+                self.i18n.t(label_key),
+                self.cloud_sync_upload_selection_meta(selection, &action),
+                checked,
+                false,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.apply_cloud_sync_upload_selection_action(action.clone());
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+                cx,
+            ));
+        }
+        cloud_sync_status_list(&self.tokens, title, [block.into_any_element()])
+    }
+
+    fn cloud_sync_upload_section_visible(
+        &self,
+        selection: &CloudSyncUploadSelection,
+        action: &CloudSyncUploadSelectionAction,
+    ) -> bool {
+        match action {
+            CloudSyncUploadSelectionAction::ToggleConnections => {
+                selection.sync_connections || !selection.connection_item_ids.is_empty()
+            }
+            CloudSyncUploadSelectionAction::ToggleForwards => {
+                selection.sync_forwards || !selection.forward_item_ids.is_empty()
+            }
+            CloudSyncUploadSelectionAction::ToggleQuickCommands => {
+                selection.sync_quick_commands || !selection.quick_command_item_ids.is_empty()
+            }
+            CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
+                selection.sync_serial_profiles || !selection.serial_profile_item_ids.is_empty()
+            }
+            CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
+                selection.sync_sensitive_credentials
+            }
+            CloudSyncUploadSelectionAction::ToggleAppSettings => selection.sync_app_settings,
+            CloudSyncUploadSelectionAction::TogglePluginSettings => selection.sync_plugin_settings,
+            _ => true,
+        }
+    }
+
+    fn cloud_sync_upload_selection_meta(
+        &self,
+        selection: &CloudSyncUploadSelection,
+        action: &CloudSyncUploadSelectionAction,
+    ) -> Option<String> {
+        let count = match action {
+            CloudSyncUploadSelectionAction::ToggleConnections => {
+                selection.connection_item_ids.len()
+            }
+            CloudSyncUploadSelectionAction::ToggleForwards => selection.forward_item_ids.len(),
+            CloudSyncUploadSelectionAction::ToggleQuickCommands => {
+                selection.quick_command_item_ids.len()
+            }
+            CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
+                selection.serial_profile_item_ids.len()
+            }
+            CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
+                return self.cloud_sync_upload_sensitive_summary(selection);
+            }
+            CloudSyncUploadSelectionAction::ToggleAppSettings => {
+                selection.selected_app_settings_sections.len()
+            }
+            _ => 0,
+        };
+        (count > 0).then(|| {
+            self.i18n_replace(
+                "plugin.cloud_sync.preview.item_count",
+                &[("count", count.to_string())],
+            )
+        })
+    }
+
+    fn cloud_sync_upload_sensitive_summary(
+        &self,
+        selection: &CloudSyncUploadSelection,
+    ) -> Option<String> {
+        if !selection.sync_sensitive_credentials {
+            return None;
+        }
+        let connection_ids = self
+            .connection_store
+            .connections()
+            .iter()
+            .map(|connection| connection.id.clone())
+            .filter(|connection_id| {
+                selection
+                    .selected_connection_ids
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(connection_id))
+            })
+            .collect::<Vec<_>>();
+        let portable_secret_count =
+            oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
+                .into_iter()
+                .filter(|provider| self.ai_key_store.has_provider_key(&provider.id))
+                .count();
+        let preflight = oxideterm_connections::oxide_file::preflight_export(
+            &self.connection_store,
+            &connection_ids,
+            true,
+            true,
+            portable_secret_count,
+        );
+        Some(self.i18n_replace(
+            "plugin.cloud_sync.preview.sensitive_upload_summary",
+            &[
+                (
+                    "passwords",
+                    preflight.connections_with_passwords.to_string(),
+                ),
+                ("keyPassphrases", preflight.key_passphrase_count.to_string()),
+                ("managedKeys", preflight.managed_key_count.to_string()),
+                (
+                    "managedKeyPassphrases",
+                    preflight.managed_key_passphrase_count.to_string(),
+                ),
+                (
+                    "portableSecrets",
+                    preflight.portable_secret_count.to_string(),
+                ),
+            ],
+        ))
     }
 
     fn render_cloud_sync_section_diff_card(
@@ -980,6 +1428,291 @@ impl WorkspaceApp {
         }
     }
 
+    fn render_cloud_sync_apply_field_diff_card(
+        &self,
+        items: &[CloudSyncFieldDiffItem],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title = self.render_selectable_text_scoped(
+            "cloud-sync-apply-field-diff",
+            "title",
+            self.i18n.t("plugin.cloud_sync.field_diff.title"),
+            self.tokens.ui.text_heading,
+            cx,
+        );
+        let rows = items
+            .iter()
+            .map(|item| self.render_cloud_sync_apply_field_diff_item(item, cx));
+        cloud_sync_status_list(&self.tokens, title, rows)
+    }
+
+    fn render_cloud_sync_apply_field_diff_item(
+        &self,
+        item: &CloudSyncFieldDiffItem,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(action) = self.cloud_sync_apply_action_for_field_item(item) else {
+            return self.render_cloud_sync_field_diff_item(item, cx);
+        };
+        let checked = self
+            .cloud_sync_preview_selection
+            .as_ref()
+            .is_none_or(|selection| self.cloud_sync_apply_field_item_checked(selection, &action));
+        let label = self.cloud_sync_field_diff_item_name(item);
+        let meta = Some(
+            self.i18n_replace(
+                "plugin.cloud_sync.field_diff.item_action_meta",
+                &[
+                    ("section", self.i18n.t(item.section_label_key)),
+                    (
+                        "status",
+                        self.i18n
+                            .t(self.cloud_sync_field_diff_status_key(item.status)),
+                    ),
+                ],
+            ),
+        );
+        self.render_cloud_sync_check_row(
+            label,
+            meta,
+            checked,
+            false,
+            cx.listener(move |this, _event, _window, cx| {
+                this.apply_cloud_sync_preview_selection_action(action.clone());
+                cx.stop_propagation();
+                cx.notify();
+            }),
+            cx,
+        )
+    }
+
+    fn cloud_sync_apply_action_for_field_item(
+        &self,
+        item: &CloudSyncFieldDiffItem,
+    ) -> Option<CloudSyncPreviewSelectionAction> {
+        match item.section_label_key {
+            "plugin.cloud_sync.settings.sync_connections" => Some(
+                CloudSyncPreviewSelectionAction::ToggleConnectionItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_forwards" => Some(
+                CloudSyncPreviewSelectionAction::ToggleForwardItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_quick_commands" => Some(
+                CloudSyncPreviewSelectionAction::ToggleQuickCommandItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_serial_profiles" => Some(
+                CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_app_settings" => Some(
+                CloudSyncPreviewSelectionAction::ToggleAppSettingsSection(item.item_key.clone()),
+            ),
+            _ => None,
+        }
+    }
+
+    fn cloud_sync_apply_field_item_checked(
+        &self,
+        selection: &CloudSyncPreviewSelection,
+        action: &CloudSyncPreviewSelectionAction,
+    ) -> bool {
+        match action {
+            CloudSyncPreviewSelectionAction::ToggleConnectionItem(id) => {
+                selection.selected_connection_ids.contains(id)
+            }
+            CloudSyncPreviewSelectionAction::ToggleForwardItem(id) => {
+                selection.selected_forward_ids.contains(id)
+            }
+            CloudSyncPreviewSelectionAction::ToggleQuickCommandItem(id) => {
+                selection.selected_quick_command_ids.contains(id)
+            }
+            CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(id) => {
+                selection.selected_serial_profile_ids.contains(id)
+            }
+            CloudSyncPreviewSelectionAction::ToggleAppSettingsSection(id) => {
+                selection.selected_app_settings_sections.contains(id)
+            }
+            _ => true,
+        }
+    }
+
+    fn render_cloud_sync_upload_field_diff_card(
+        &self,
+        items: &[CloudSyncFieldDiffItem],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title = self.render_selectable_text_scoped(
+            "cloud-sync-upload-field-diff",
+            "title",
+            self.i18n.t("plugin.cloud_sync.field_diff.title"),
+            self.tokens.ui.text_heading,
+            cx,
+        );
+        let rows = items
+            .iter()
+            .map(|item| self.render_cloud_sync_upload_field_diff_item(item, cx));
+        cloud_sync_status_list(&self.tokens, title, rows)
+    }
+
+    fn render_cloud_sync_upload_field_diff_item(
+        &self,
+        item: &CloudSyncFieldDiffItem,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(action) = self.cloud_sync_upload_action_for_field_item(item) else {
+            return self.render_cloud_sync_field_diff_item(item, cx);
+        };
+        let checked = self
+            .cloud_sync_upload_selection
+            .as_ref()
+            .is_none_or(|selection| selection.is_item_checked(&action));
+        let label = self.cloud_sync_field_diff_item_name(item);
+        let meta = Some(
+            self.i18n_replace(
+                "plugin.cloud_sync.field_diff.item_action_meta",
+                &[
+                    ("section", self.i18n.t(item.section_label_key)),
+                    (
+                        "status",
+                        self.i18n
+                            .t(self.cloud_sync_field_diff_status_key(item.status)),
+                    ),
+                ],
+            ),
+        );
+        self.render_cloud_sync_check_row(
+            label,
+            meta,
+            checked,
+            false,
+            cx.listener(move |this, _event, _window, cx| {
+                this.apply_cloud_sync_upload_selection_action(action.clone());
+                cx.stop_propagation();
+                cx.notify();
+            }),
+            cx,
+        )
+    }
+
+    fn cloud_sync_upload_action_for_field_item(
+        &self,
+        item: &CloudSyncFieldDiffItem,
+    ) -> Option<CloudSyncUploadSelectionAction> {
+        match item.section_label_key {
+            "plugin.cloud_sync.settings.sync_connections" => Some(
+                CloudSyncUploadSelectionAction::ToggleConnectionItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_forwards" => Some(
+                CloudSyncUploadSelectionAction::ToggleForwardItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_quick_commands" => Some(
+                CloudSyncUploadSelectionAction::ToggleQuickCommandItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_serial_profiles" => Some(
+                CloudSyncUploadSelectionAction::ToggleSerialProfileItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_app_settings" => Some(
+                CloudSyncUploadSelectionAction::ToggleAppSettingsSection(item.item_key.clone()),
+            ),
+            _ => None,
+        }
+    }
+
+    fn render_cloud_sync_field_diff_item(
+        &self,
+        item: &CloudSyncFieldDiffItem,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let status_key = self.cloud_sync_field_diff_status_key(item.status);
+        let item_name = self.cloud_sync_field_diff_item_name(item);
+        let fields =
+            item.fields
+                .iter()
+                .fold(div().flex().flex_col().gap(px(2.0)), |fields, field| {
+                    fields.child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .line_height(px(18.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n_replace(
+                                "plugin.cloud_sync.field_diff.field_change",
+                                &[
+                                    ("field", self.i18n.t(field.label_key)),
+                                    (
+                                        "before",
+                                        self.cloud_sync_field_diff_value(field.before.as_deref()),
+                                    ),
+                                    (
+                                        "after",
+                                        self.cloud_sync_field_diff_value(field.after.as_deref()),
+                                    ),
+                                ],
+                            )),
+                    )
+                });
+        let detail = div()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n.t(item.section_label_key)),
+            )
+            .when(!item.fields.is_empty(), |detail| detail.child(fields));
+        cloud_sync_status_row(
+            &self.tokens,
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-field-diff-row",
+                (item.section_label_key, item.item_name.as_str(), "label"),
+                item_name,
+                self.tokens.ui.text,
+                cx,
+            ),
+            Some(detail.into_any_element()),
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-field-diff-row",
+                (item.section_label_key, item.item_name.as_str(), "status"),
+                self.i18n.t(status_key),
+                self.tokens.ui.accent,
+                cx,
+            ),
+            true,
+        )
+    }
+
+    fn cloud_sync_field_diff_item_name(&self, item: &CloudSyncFieldDiffItem) -> String {
+        if item.section_label_key == "plugin.cloud_sync.settings.sync_app_settings" {
+            cloud_sync_app_settings_section_label_key(&item.item_name)
+                .map(|key| self.i18n.t(key))
+                .unwrap_or_else(|| item.item_name.clone())
+        } else {
+            item.item_name.clone()
+        }
+    }
+
+    fn cloud_sync_field_diff_status_key(&self, status: CloudSyncFieldDiffStatus) -> &'static str {
+        match status {
+            CloudSyncFieldDiffStatus::Added => "plugin.cloud_sync.field_diff.status_added",
+            CloudSyncFieldDiffStatus::Modified => "plugin.cloud_sync.field_diff.status_modified",
+            CloudSyncFieldDiffStatus::Deleted => "plugin.cloud_sync.field_diff.status_deleted",
+        }
+    }
+
+    fn cloud_sync_field_diff_value(&self, value: Option<&str>) -> String {
+        match value {
+            Some(CLOUD_SYNC_FIELD_REDACTED_VALUE) => {
+                self.i18n.t("plugin.cloud_sync.field_diff.redacted")
+            }
+            Some(value) if !value.trim().is_empty() => value.to_string(),
+            _ => self.i18n.t("plugin.cloud_sync.field_diff.empty_value"),
+        }
+    }
+
     fn render_cloud_sync_preview_selection(
         &self,
         summary: &CloudSyncPreviewSummary,
@@ -1020,6 +1753,12 @@ impl WorkspaceApp {
             .unwrap_or_default();
         if let Some(selection) = self.cloud_sync_preview_selection.as_mut() {
             selection.apply_action(action, all_connection_names);
+        }
+    }
+
+    fn apply_cloud_sync_upload_selection_action(&mut self, action: CloudSyncUploadSelectionAction) {
+        if let Some(selection) = self.cloud_sync_upload_selection.as_mut() {
+            selection.apply_action(action);
         }
     }
 
@@ -2773,6 +3512,8 @@ impl WorkspaceApp {
             state.last_error = None;
             (device_id, revision_sequence)
         };
+        self.cloud_sync_upload_preview = None;
+        self.cloud_sync_upload_selection = None;
         self.save_cloud_sync_state();
         let settings = self.cloud_sync_store.state().settings.clone();
         let hints = self.cloud_sync_store.state().secret_hints.clone();
@@ -2791,7 +3532,17 @@ impl WorkspaceApp {
             .state()
             .last_synced_structured_state
             .clone();
-        let raw_sync_scope = self.cloud_sync_store.state().sync_scope.clone();
+        let upload_selection = (!automatic)
+            .then(|| self.cloud_sync_upload_selection.clone())
+            .flatten();
+        let raw_sync_scope = upload_selection
+            .as_ref()
+            .map(|selection| selection.raw_scope(&self.cloud_sync_store.state().sync_scope))
+            .unwrap_or_else(|| self.cloud_sync_store.state().sync_scope.clone());
+        let item_filter = upload_selection
+            .as_ref()
+            .map(CloudSyncUploadSelection::item_filter)
+            .unwrap_or_default();
         let portable_secrets =
             match self.collect_cloud_sync_sensitive_portable_secrets(&raw_sync_scope) {
                 Ok(secrets) => secrets,
@@ -2807,6 +3558,7 @@ impl WorkspaceApp {
         let (tx, rx) = mpsc::channel();
         self.cloud_sync_rx = Some(rx);
         self.cloud_sync_active_action = Some("upload");
+        self.cloud_sync_upload_selection = None;
         self.schedule_cloud_sync_poll(cx);
         self.forwarding_runtime.spawn(deliver_cloud_sync_upload(
             tx,
@@ -2824,6 +3576,7 @@ impl WorkspaceApp {
                 previous_remote_sections,
                 last_synced_structured_state,
                 raw_sync_scope: Some(raw_sync_scope),
+                item_filter,
                 portable_secrets,
                 automatic,
                 skip_if_busy,
@@ -2831,6 +3584,42 @@ impl WorkspaceApp {
             },
             automatic,
         ));
+    }
+
+    fn start_cloud_sync_upload_preview(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_sync_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress();
+            return;
+        }
+        self.cloud_sync_store.state_mut().status = CloudSyncStatus::Checking;
+        self.cloud_sync_store.state_mut().last_error = None;
+        self.cloud_sync_upload_preview = None;
+        self.cloud_sync_upload_selection = None;
+        self.cloud_sync_pending_preview = None;
+        self.cloud_sync_preview_selection = None;
+        self.save_cloud_sync_state();
+        let settings = self.cloud_sync_store.state().settings.clone();
+        let hints = self.cloud_sync_store.state().secret_hints.clone();
+        let previous_remote_sections = self
+            .cloud_sync_store
+            .state()
+            .last_synced_remote_sections
+            .clone();
+        let connection_store = self.connection_store.clone();
+        let service = self.cloud_sync_service.clone();
+        let (tx, rx) = mpsc::channel();
+        self.cloud_sync_rx = Some(rx);
+        self.cloud_sync_active_action = Some("upload_preview");
+        self.schedule_cloud_sync_poll(cx);
+        self.forwarding_runtime
+            .spawn(deliver_cloud_sync_upload_preview(
+                tx,
+                service,
+                connection_store,
+                settings,
+                hints,
+                previous_remote_sections,
+            ));
     }
 
     fn collect_cloud_sync_sensitive_portable_secrets(
@@ -2871,11 +3660,18 @@ impl WorkspaceApp {
         }
         self.cloud_sync_store.state_mut().status = CloudSyncStatus::Checking;
         self.cloud_sync_store.state_mut().last_error = None;
+        self.cloud_sync_upload_preview = None;
+        self.cloud_sync_upload_selection = None;
         self.cloud_sync_pending_preview = None;
         self.cloud_sync_preview_selection = None;
         self.save_cloud_sync_state();
         let settings = self.cloud_sync_store.state().settings.clone();
         let hints = self.cloud_sync_store.state().secret_hints.clone();
+        let previous_remote_sections = self
+            .cloud_sync_store
+            .state()
+            .last_synced_remote_sections
+            .clone();
         let connection_store = self.connection_store.clone();
         let service = self.cloud_sync_service.clone();
         let (tx, rx) = mpsc::channel();
@@ -2889,6 +3685,7 @@ impl WorkspaceApp {
                 connection_store,
                 settings,
                 hints,
+                previous_remote_sections,
             ));
     }
 
@@ -3045,9 +3842,8 @@ impl WorkspaceApp {
                 self.cloud_sync_store.state_mut().status = CloudSyncStatus::Idle;
                 self.save_cloud_sync_state();
             }
-            if self.cloud_sync_upload_after_current {
-                self.cloud_sync_upload_after_current = false;
-                self.start_cloud_sync_upload_with_options(false, true, true, cx);
+            if let Some(automatic) = self.cloud_sync_upload_after_current.take() {
+                self.start_cloud_sync_upload_with_options(false, automatic, true, cx);
             }
         }
         cx.notify();
@@ -3102,6 +3898,16 @@ impl WorkspaceApp {
                             self.finish_cloud_sync_error("upload", error);
                         }
                     }
+                }
+            }
+            CloudSyncDelivery::UploadPreviewFinished(action) => {
+                self.cloud_sync_store.state_mut().secret_hints = action.secret_hints;
+                match action.result {
+                    Ok(preview) => self.finish_cloud_sync_upload_preview(preview),
+                    Err(error) if error.starts_with("remote_not_found") => {
+                        self.cloud_sync_upload_after_current = Some(false);
+                    }
+                    Err(error) => self.finish_cloud_sync_error("upload_preview", error),
                 }
             }
             CloudSyncDelivery::PullPreviewFinished(action) => {
@@ -3174,6 +3980,8 @@ impl WorkspaceApp {
         let revision = finish_cloud_sync_upload_state(self.cloud_sync_store.state_mut(), &outcome);
         self.cloud_sync_progress = None;
         self.cloud_sync_pending_preview = None;
+        self.cloud_sync_upload_preview = None;
+        self.cloud_sync_upload_selection = None;
         self.save_cloud_sync_state();
         if !automatic {
             self.push_cloud_sync_toast(
@@ -3207,7 +4015,23 @@ impl WorkspaceApp {
                 .default_conflict_strategy
                 .clone(),
         ));
+        self.cloud_sync_upload_preview = None;
+        self.cloud_sync_upload_selection = None;
         self.cloud_sync_pending_preview = Some(preview);
+        self.cloud_sync_progress = None;
+        self.save_cloud_sync_state();
+    }
+
+    fn finish_cloud_sync_upload_preview(&mut self, preview: CloudSyncPendingPreview) {
+        finish_cloud_sync_pull_preview_state(self.cloud_sync_store.state_mut(), &preview);
+        let scope = normalize_sync_scope(Some(&self.cloud_sync_store.state().sync_scope), &[]);
+        let local = self.cloud_sync_local_field_diff_snapshot();
+        self.cloud_sync_upload_selection = Some(
+            CloudSyncUploadSelection::from_scope_and_local_snapshot(&scope, &local),
+        );
+        self.cloud_sync_pending_preview = None;
+        self.cloud_sync_preview_selection = None;
+        self.cloud_sync_upload_preview = Some(preview);
         self.cloud_sync_progress = None;
         self.save_cloud_sync_state();
     }
@@ -3257,10 +4081,12 @@ impl WorkspaceApp {
             Utc::now().to_rfc3339(),
         );
         self.cloud_sync_pending_preview = None;
+        self.cloud_sync_upload_preview = None;
+        self.cloud_sync_upload_selection = None;
         self.cloud_sync_preview_selection = None;
         self.cloud_sync_progress = None;
         if should_trigger_upload_after {
-            self.cloud_sync_upload_after_current = true;
+            self.cloud_sync_upload_after_current = Some(true);
         }
         self.save_cloud_sync_state();
         self.push_cloud_sync_toast(
@@ -3329,10 +4155,12 @@ impl WorkspaceApp {
             Utc::now().to_rfc3339(),
         );
         self.cloud_sync_pending_preview = None;
+        self.cloud_sync_upload_preview = None;
+        self.cloud_sync_upload_selection = None;
         self.cloud_sync_preview_selection = None;
         self.cloud_sync_progress = None;
         if should_trigger_upload_after {
-            self.cloud_sync_upload_after_current = true;
+            self.cloud_sync_upload_after_current = Some(true);
         }
         self.save_cloud_sync_state();
         let copy = plan.success_copy;
@@ -3361,6 +4189,10 @@ impl WorkspaceApp {
             upload_history_summary,
         );
         self.cloud_sync_progress = None;
+        if action == "upload_preview" {
+            self.cloud_sync_upload_preview = None;
+            self.cloud_sync_upload_selection = None;
+        }
         self.save_cloud_sync_state();
         let title_key = match action {
             "upload" => Some("plugin.cloud_sync.toast.upload_failed_title"),

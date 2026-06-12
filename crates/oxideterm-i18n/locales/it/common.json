@@ -231,6 +231,7 @@
         "sync_scope": "Ambito di sincronizzazione",
         "conflict_recovery": "Recupero conflitti",
         "import_preview": "Anteprima di importazione",
+        "upload_preview": "Anteprima caricamento",
         "rollback_preview": "Anteprima rollback",
         "rollback_backups": "Backup di rollback",
         "sync_history": "Cronologia sincronizzazione",
@@ -304,6 +305,7 @@
         "rename": "Rinomina",
         "blocked_description": "Le modifiche remote sono più recenti dell'ultima revisione sincronizzata, mentre sono ancora presenti modifiche locali in sospeso. Ricontrolla il remoto, scarica prima o forza la sovrascrittura.",
         "details_title": "Dettagli conflitto",
+        "plain_summary": "I dati remoti sono stati modificati da {{remoteDevice}} alle {{remoteTime}}. L’ultimo caricamento locale era {{localTime}}; caricare ora può sovrascrivere quelle modifiche remote.",
         "detail_recommendation": "Scarica e visualizza lo snapshot remoto prima di caricare di nuovo. Forza la sovrascrittura solo dopo aver controllato le modifiche locali."
       },
       "common": {
@@ -409,6 +411,7 @@
       "preview": {
         "summary_header": "Riepilogo anteprima remota",
         "apply_plan_title": "Piano di applicazione",
+        "upload_scope_title": "Ambito caricamento",
         "item_count": "{{count}} elemento/i",
         "connection_count": "Connessioni",
         "total_forwards": "Inoltri",
@@ -452,7 +455,10 @@
         "record_replace": "{{name}}: sostituisci la connessione locale esistente {{target}}",
         "record_merge": "{{name}}: unisci alla connessione locale esistente {{target}}",
         "sensitive_credentials_label": "Credenziali sensibili",
-        "toggle_sensitive_credentials": "Importa credenziali sensibili ({{count}})"
+        "toggle_sensitive_credentials": "Importa credenziali sensibili ({{count}})",
+        "sensitive_summary_title": "Credenziali sensibili",
+        "sensitive_remote_summary": "Le credenziali remote cifrate includono {{connections}} record di connessione e {{portableSecrets}} segreti portabili. I valori restano nascosti.",
+        "sensitive_upload_summary": "Caricherà {{passwords}} password, {{keyPassphrases}} passphrase di chiavi, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite e {{portableSecrets}} segreti portabili."
       },
       "confirm": {
         "import_title": "Importare lo snapshot remoto?",
@@ -532,6 +538,50 @@
         "remote_removed_by_scope": "rimosso dall’ambito",
         "remote_excluded": "escluso",
         "remote_unknown": "sconosciuto"
+      },
+      "field_diff": {
+        "title": "Differenze dei campi",
+        "status_added": "Aggiunto",
+        "status_modified": "Modificato",
+        "status_deleted": "Eliminato",
+        "field_change": "{{field}}: {{before}} → {{after}}",
+        "item_action_meta": "{{section}} · {{status}}",
+        "empty_value": "vuoto",
+        "redacted": "nascosto"
+      },
+      "diff_fields": {
+        "name": "Nome",
+        "group": "Gruppo",
+        "host": "Host",
+        "port": "Porta",
+        "username": "Nome utente",
+        "auth_type": "Tipo di autenticazione",
+        "key_path": "Percorso chiave",
+        "cert_path": "Percorso certificato",
+        "managed_key": "Chiave gestita",
+        "proxy_chain": "Catena proxy",
+        "agent_forwarding": "Inoltro agente",
+        "post_connect_command": "Comando post-connessione",
+        "color": "Colore",
+        "tags": "Tag",
+        "forward_type": "Tipo di inoltro",
+        "bind_address": "Indirizzo di ascolto",
+        "bind_port": "Porta di ascolto",
+        "target_host": "Host di destinazione",
+        "target_port": "Porta di destinazione",
+        "description": "Descrizione",
+        "auto_start": "Avvio automatico",
+        "command": "Comando",
+        "category": "Categoria",
+        "host_pattern": "Pattern host",
+        "port_path": "Percorso porta seriale",
+        "baud_rate": "Baud rate",
+        "data_bits": "Bit dati",
+        "stop_bits": "Bit stop",
+        "parity": "Parità",
+        "flow_control": "Controllo di flusso",
+        "connect_on_open": "Connetti all’apertura",
+        "setting_field": "Campo impostazione"
       }
     },
     "refresh": "Aggiorna",

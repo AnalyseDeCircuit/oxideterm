@@ -41,6 +41,7 @@ oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
 oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-preview = { path = "../oxideterm-preview" }
+oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }

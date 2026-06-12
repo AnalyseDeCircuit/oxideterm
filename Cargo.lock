@@ -7573,6 +7573,7 @@ dependencies = [
  "oxideterm-plugin-registry",
  "oxideterm-portable-runtime",
  "oxideterm-preview",
+ "oxideterm-quick-commands",
  "oxideterm-render-policy",
  "oxideterm-session-adapter",
  "oxideterm-settings",

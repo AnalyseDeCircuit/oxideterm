@@ -6,14 +6,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use oxideterm_cloud_sync::{
-    OXIDE_APP_SETTINGS_SECTION_IDS, PREVIEW_RECORD_LIMIT, RawSyncScope, StructuredSectionRevisions,
-    SyncScope, normalize_sync_scope,
-    operation::{LegacyPreview, StructuredPreview},
+    ConflictStrategy, OXIDE_APP_SETTINGS_SECTION_IDS, PREVIEW_RECORD_LIMIT, RawSyncScope,
+    StructuredSectionRevisions, SyncScope, normalize_sync_scope,
+    operation::{LegacyPreview, StructuredPreview, merge_structured_model_fields},
     service::CloudSyncLocalSnapshot,
     state::CloudSyncPersistedState,
 };
+use oxideterm_connections::{
+    ConnectionInfo, SavedConnectionsSyncSnapshot, SerialProfile, SerialProfilesSyncSnapshot,
+    oxide_file::AppSettingsSectionPreview,
+};
+use oxideterm_forwarding::{PersistedForwardDto, SavedForwardsSyncSnapshot};
+use oxideterm_quick_commands::{QuickCommand, QuickCommandsSnapshot};
 
 use crate::selection::CloudSyncPreviewSelection;
+
+pub const CLOUD_SYNC_FIELD_REDACTED_VALUE: &str = "<redacted>";
 
 #[derive(Clone, Debug)]
 pub enum CloudSyncPendingPreview {
@@ -195,6 +203,38 @@ pub struct CloudSyncSectionDiffItem {
     pub local_status: CloudSyncLocalDiffStatus,
     pub remote_status: CloudSyncRemoteDiffStatus,
     pub count: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CloudSyncLocalFieldDiffSnapshot {
+    pub connections: Option<SavedConnectionsSyncSnapshot>,
+    pub forwards: Option<SavedForwardsSyncSnapshot>,
+    pub quick_commands: Option<QuickCommandsSnapshot>,
+    pub serial_profiles: Option<SerialProfilesSyncSnapshot>,
+    pub app_settings_sections: Vec<AppSettingsSectionPreview>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CloudSyncFieldDiffStatus {
+    Added,
+    Modified,
+    Deleted,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CloudSyncFieldDiffItem {
+    pub section_label_key: &'static str,
+    pub item_key: String,
+    pub item_name: String,
+    pub status: CloudSyncFieldDiffStatus,
+    pub fields: Vec<CloudSyncFieldDiffField>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CloudSyncFieldDiffField {
+    pub label_key: &'static str,
+    pub before: Option<String>,
+    pub after: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -676,6 +716,130 @@ pub fn cloud_sync_apply_diff_items(
     items
 }
 
+/// Builds item/field-level diffs for the selected structured apply preview.
+///
+/// Only selected sections are expanded. Secret material is intentionally not
+/// included; auth and managed-key changes are represented by metadata fields.
+pub fn cloud_sync_apply_field_diff_items(
+    preview: &CloudSyncPendingPreview,
+    selection: &CloudSyncPreviewSelection,
+    local: &CloudSyncLocalFieldDiffSnapshot,
+) -> Vec<CloudSyncFieldDiffItem> {
+    let CloudSyncPendingPreview::Structured(preview) = preview else {
+        return Vec::new();
+    };
+    let mut items = Vec::new();
+    if selection.import_connections
+        && let Some(remote) = preview.connections_snapshot.as_ref()
+    {
+        push_connection_field_diffs(
+            &mut items,
+            remote,
+            preview.base_connections_snapshot.as_ref(),
+            local.connections.as_ref(),
+            &selection.conflict_strategy,
+        );
+    }
+    if selection.import_forwards
+        && let Some(remote) = preview.forwards_snapshot.as_ref()
+    {
+        push_forward_field_diffs(
+            &mut items,
+            remote,
+            preview.base_forwards_snapshot.as_ref(),
+            local.forwards.as_ref(),
+            &selection.conflict_strategy,
+        );
+    }
+    if selection.import_quick_commands
+        && let Some(remote_json) = preview.quick_commands_snapshot_json.as_deref()
+        && let Ok(remote) = serde_json::from_str::<QuickCommandsSnapshot>(remote_json)
+    {
+        let base = preview
+            .base_quick_commands_snapshot_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<QuickCommandsSnapshot>(json).ok());
+        push_quick_command_field_diffs(
+            &mut items,
+            &remote,
+            base.as_ref(),
+            local.quick_commands.as_ref(),
+            &selection.conflict_strategy,
+        );
+    }
+    if selection.import_serial_profiles
+        && let Some(remote) = preview.serial_profiles_snapshot.as_ref()
+    {
+        push_serial_profile_field_diffs(
+            &mut items,
+            remote,
+            preview.base_serial_profiles_snapshot.as_ref(),
+            local.serial_profiles.as_ref(),
+            &selection.conflict_strategy,
+        );
+    }
+    if selection.import_app_settings {
+        push_app_settings_field_diffs(&mut items, preview, selection, local);
+    }
+    items
+}
+
+/// Builds item/field-level diffs for an upload preview.
+///
+/// The remote structured preview is the before side and the current local
+/// snapshot is the after side. Secret-bearing sections remain section-level
+/// only; this function only expands non-secret content.
+pub fn cloud_sync_upload_field_diff_items(
+    remote_preview: &CloudSyncPendingPreview,
+    local: &CloudSyncLocalFieldDiffSnapshot,
+    scope: &SyncScope,
+) -> Vec<CloudSyncFieldDiffItem> {
+    let CloudSyncPendingPreview::Structured(remote_preview) = remote_preview else {
+        return Vec::new();
+    };
+    let mut items = Vec::new();
+    if scope.sync_connections
+        && let Some(local) = local.connections.as_ref()
+    {
+        push_upload_connection_field_diffs(
+            &mut items,
+            remote_preview.connections_snapshot.as_ref(),
+            local,
+        );
+    }
+    if scope.sync_forwards
+        && let Some(local) = local.forwards.as_ref()
+    {
+        push_upload_forward_field_diffs(
+            &mut items,
+            remote_preview.forwards_snapshot.as_ref(),
+            local,
+        );
+    }
+    if scope.sync_quick_commands
+        && let Some(local) = local.quick_commands.as_ref()
+    {
+        let remote = remote_preview
+            .quick_commands_snapshot_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<QuickCommandsSnapshot>(json).ok());
+        push_upload_quick_command_field_diffs(&mut items, remote.as_ref(), local);
+    }
+    if scope.sync_serial_profiles
+        && let Some(local) = local.serial_profiles.as_ref()
+    {
+        push_upload_serial_profile_field_diffs(
+            &mut items,
+            remote_preview.serial_profiles_snapshot.as_ref(),
+            local,
+        );
+    }
+    if scope.sync_app_settings {
+        push_upload_app_settings_field_diffs(&mut items, remote_preview, local, scope);
+    }
+    items
+}
+
 fn push_preview_impact(
     items: &mut Vec<CloudSyncPreviewImpactItem>,
     label_key: &'static str,
@@ -690,6 +854,1022 @@ fn push_preview_impact(
         count,
         status: coverage_status_from_bool(selected),
     });
+}
+
+fn push_upload_connection_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: Option<&SavedConnectionsSyncSnapshot>,
+    local: &SavedConnectionsSyncSnapshot,
+) {
+    let remote_records = remote
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|record| (record.id.as_str(), record))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen_ids = BTreeSet::new();
+    for record in &local.records {
+        let Some(local_payload) = record.payload.as_ref().filter(|_| !record.deleted) else {
+            continue;
+        };
+        seen_ids.insert(record.id.as_str());
+        let remote_payload = remote_records
+            .get(record.id.as_str())
+            .copied()
+            .filter(|record| !record.deleted)
+            .and_then(|record| record.payload.as_ref());
+        let fields = remote_payload
+            .map(|remote_payload| connection_changed_fields(remote_payload, local_payload))
+            .unwrap_or_else(|| connection_summary_fields(local_payload));
+        let status = if remote_payload.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_connections",
+            record.id.clone(),
+            local_payload.name.clone(),
+            status,
+            fields,
+        );
+    }
+    for (id, remote_record) in remote_records {
+        if seen_ids.contains(id) || remote_record.deleted {
+            continue;
+        }
+        let item_name = remote_record
+            .payload
+            .as_ref()
+            .map(|payload| payload.name.clone())
+            .unwrap_or_else(|| remote_record.id.clone());
+        items.push(field_diff_item_with_key(
+            "plugin.cloud_sync.settings.sync_connections",
+            remote_record.id.clone(),
+            item_name,
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
+    }
+}
+
+fn push_connection_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: &SavedConnectionsSyncSnapshot,
+    base: Option<&SavedConnectionsSyncSnapshot>,
+    local: Option<&SavedConnectionsSyncSnapshot>,
+    conflict_strategy: &ConflictStrategy,
+) {
+    let base_records = base
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|record| (record.id.as_str(), record))
+        .collect::<BTreeMap<_, _>>();
+    let local_records = local
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|record| (record.id.as_str(), record))
+        .collect::<BTreeMap<_, _>>();
+    for record in &remote.records {
+        let local_record = local_records.get(record.id.as_str()).copied();
+        let item_name = record
+            .payload
+            .as_ref()
+            .map(|payload| payload.name.clone())
+            .or_else(|| {
+                local_record
+                    .and_then(|record| record.payload.as_ref().map(|payload| payload.name.clone()))
+            })
+            .unwrap_or_else(|| record.id.clone());
+        if record.deleted {
+            if local_record.is_some() {
+                items.push(field_diff_item_with_key(
+                    "plugin.cloud_sync.settings.sync_connections",
+                    record.id.clone(),
+                    item_name,
+                    CloudSyncFieldDiffStatus::Deleted,
+                    Vec::new(),
+                ));
+            }
+            continue;
+        }
+        let Some(remote_payload) = record.payload.as_ref() else {
+            continue;
+        };
+        let local_payload = local_record.and_then(|record| record.payload.as_ref());
+        let effective_remote = local_payload
+            .and_then(|local_payload| {
+                base_records
+                    .get(record.id.as_str())
+                    .and_then(|record| record.payload.as_ref())
+                    .and_then(|base_payload| {
+                        merge_structured_model_fields(
+                            base_payload,
+                            local_payload,
+                            remote_payload,
+                            conflict_strategy,
+                        )
+                        .ok()
+                        .flatten()
+                    })
+            })
+            .unwrap_or_else(|| remote_payload.clone());
+        let fields = local_payload
+            .map(|local_payload| connection_changed_fields(local_payload, &effective_remote))
+            .unwrap_or_else(|| connection_summary_fields(remote_payload));
+        let status = if local_payload.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_connections",
+            record.id.clone(),
+            item_name,
+            status,
+            fields,
+        );
+    }
+}
+
+fn push_upload_forward_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: Option<&SavedForwardsSyncSnapshot>,
+    local: &SavedForwardsSyncSnapshot,
+) {
+    let remote_records = remote
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|record| (record.id.as_str(), record))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen_ids = BTreeSet::new();
+    for record in &local.records {
+        let Some(local_payload) = record.payload.as_ref().filter(|_| !record.deleted) else {
+            continue;
+        };
+        seen_ids.insert(record.id.as_str());
+        let remote_payload = remote_records
+            .get(record.id.as_str())
+            .copied()
+            .filter(|record| !record.deleted)
+            .and_then(|record| record.payload.as_ref());
+        let fields = remote_payload
+            .map(|remote_payload| forward_changed_fields(remote_payload, local_payload))
+            .unwrap_or_else(|| forward_summary_fields(local_payload));
+        let status = if remote_payload.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_forwards",
+            record.id.clone(),
+            forward_item_name(local_payload),
+            status,
+            fields,
+        );
+    }
+    for (id, remote_record) in remote_records {
+        if seen_ids.contains(id) || remote_record.deleted {
+            continue;
+        }
+        let item_name = remote_record
+            .payload
+            .as_ref()
+            .map(forward_item_name)
+            .unwrap_or_else(|| remote_record.id.clone());
+        items.push(field_diff_item_with_key(
+            "plugin.cloud_sync.settings.sync_forwards",
+            remote_record.id.clone(),
+            item_name,
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
+    }
+}
+
+fn push_forward_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: &SavedForwardsSyncSnapshot,
+    base: Option<&SavedForwardsSyncSnapshot>,
+    local: Option<&SavedForwardsSyncSnapshot>,
+    conflict_strategy: &ConflictStrategy,
+) {
+    let base_records = base
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|record| (record.id.as_str(), record))
+        .collect::<BTreeMap<_, _>>();
+    let local_records = local
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|record| (record.id.as_str(), record))
+        .collect::<BTreeMap<_, _>>();
+    for record in &remote.records {
+        let local_record = local_records.get(record.id.as_str()).copied();
+        let item_name = record
+            .payload
+            .as_ref()
+            .map(forward_item_name)
+            .or_else(|| {
+                local_record.and_then(|record| record.payload.as_ref().map(forward_item_name))
+            })
+            .unwrap_or_else(|| record.id.clone());
+        if record.deleted {
+            if local_record.is_some() {
+                items.push(field_diff_item_with_key(
+                    "plugin.cloud_sync.settings.sync_forwards",
+                    record.id.clone(),
+                    item_name,
+                    CloudSyncFieldDiffStatus::Deleted,
+                    Vec::new(),
+                ));
+            }
+            continue;
+        }
+        let Some(remote_payload) = record.payload.as_ref() else {
+            continue;
+        };
+        let local_payload = local_record.and_then(|record| record.payload.as_ref());
+        let effective_remote = local_payload
+            .and_then(|local_payload| {
+                base_records
+                    .get(record.id.as_str())
+                    .and_then(|record| record.payload.as_ref())
+                    .and_then(|base_payload| {
+                        merge_structured_model_fields(
+                            base_payload,
+                            local_payload,
+                            remote_payload,
+                            conflict_strategy,
+                        )
+                        .ok()
+                        .flatten()
+                    })
+            })
+            .unwrap_or_else(|| remote_payload.clone());
+        let fields = local_payload
+            .map(|local_payload| forward_changed_fields(local_payload, &effective_remote))
+            .unwrap_or_else(|| forward_summary_fields(remote_payload));
+        let status = if local_payload.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_forwards",
+            record.id.clone(),
+            item_name,
+            status,
+            fields,
+        );
+    }
+}
+
+fn push_upload_quick_command_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: Option<&QuickCommandsSnapshot>,
+    local: &QuickCommandsSnapshot,
+) {
+    let remote_commands = remote
+        .into_iter()
+        .flat_map(|snapshot| snapshot.commands.iter())
+        .map(|command| (command.id.as_str(), command))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen_ids = BTreeSet::new();
+    for local_command in &local.commands {
+        seen_ids.insert(local_command.id.as_str());
+        let remote_command = remote_commands.get(local_command.id.as_str()).copied();
+        let fields = remote_command
+            .map(|remote_command| quick_command_changed_fields(remote_command, local_command))
+            .unwrap_or_else(|| quick_command_summary_fields(local_command));
+        let status = if remote_command.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_quick_commands",
+            local_command.id.clone(),
+            local_command.name.clone(),
+            status,
+            fields,
+        );
+    }
+    for (id, remote_command) in remote_commands {
+        if seen_ids.contains(id) {
+            continue;
+        }
+        items.push(field_diff_item_with_key(
+            "plugin.cloud_sync.settings.sync_quick_commands",
+            remote_command.id.clone(),
+            remote_command.name.clone(),
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
+    }
+}
+
+fn push_quick_command_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: &QuickCommandsSnapshot,
+    base: Option<&QuickCommandsSnapshot>,
+    local: Option<&QuickCommandsSnapshot>,
+    conflict_strategy: &ConflictStrategy,
+) {
+    let base_commands = base
+        .into_iter()
+        .flat_map(|snapshot| snapshot.commands.iter())
+        .map(|command| (command.id.as_str(), command))
+        .collect::<BTreeMap<_, _>>();
+    let local_commands = local
+        .into_iter()
+        .flat_map(|snapshot| snapshot.commands.iter())
+        .map(|command| (command.id.as_str(), command))
+        .collect::<BTreeMap<_, _>>();
+    for remote_command in &remote.commands {
+        let local_command = local_commands.get(remote_command.id.as_str()).copied();
+        let effective_remote = local_command
+            .and_then(|local_command| {
+                base_commands
+                    .get(remote_command.id.as_str())
+                    .and_then(|base_command| {
+                        merge_structured_model_fields(
+                            *base_command,
+                            local_command,
+                            remote_command,
+                            conflict_strategy,
+                        )
+                        .ok()
+                        .flatten()
+                    })
+            })
+            .unwrap_or_else(|| remote_command.clone());
+        let fields = local_command
+            .map(|local_command| quick_command_changed_fields(local_command, &effective_remote))
+            .unwrap_or_else(|| quick_command_summary_fields(remote_command));
+        let status = if local_command.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_quick_commands",
+            remote_command.id.clone(),
+            remote_command.name.clone(),
+            status,
+            fields,
+        );
+    }
+}
+
+fn push_upload_serial_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: Option<&SerialProfilesSyncSnapshot>,
+    local: &SerialProfilesSyncSnapshot,
+) {
+    let remote_profiles = remote
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen_ids = BTreeSet::new();
+    for local_profile in &local.records {
+        seen_ids.insert(local_profile.id.as_str());
+        let remote_profile = remote_profiles.get(local_profile.id.as_str()).copied();
+        let fields = remote_profile
+            .map(|remote_profile| serial_profile_changed_fields(remote_profile, local_profile))
+            .unwrap_or_else(|| serial_profile_summary_fields(local_profile));
+        let status = if remote_profile.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_serial_profiles",
+            local_profile.id.clone(),
+            local_profile.name.clone(),
+            status,
+            fields,
+        );
+    }
+    for (id, remote_profile) in remote_profiles {
+        if seen_ids.contains(id) {
+            continue;
+        }
+        items.push(field_diff_item_with_key(
+            "plugin.cloud_sync.settings.sync_serial_profiles",
+            remote_profile.id.clone(),
+            remote_profile.name.clone(),
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
+    }
+}
+
+fn push_serial_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: &SerialProfilesSyncSnapshot,
+    base: Option<&SerialProfilesSyncSnapshot>,
+    local: Option<&SerialProfilesSyncSnapshot>,
+    conflict_strategy: &ConflictStrategy,
+) {
+    let base_profiles = base
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let local_profiles = local
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    for remote_profile in &remote.records {
+        let local_profile = local_profiles.get(remote_profile.id.as_str()).copied();
+        let effective_remote = local_profile
+            .and_then(|local_profile| {
+                base_profiles
+                    .get(remote_profile.id.as_str())
+                    .and_then(|base_profile| {
+                        merge_structured_model_fields(
+                            *base_profile,
+                            local_profile,
+                            remote_profile,
+                            conflict_strategy,
+                        )
+                        .ok()
+                        .flatten()
+                    })
+            })
+            .unwrap_or_else(|| remote_profile.clone());
+        let fields = local_profile
+            .map(|local_profile| serial_profile_changed_fields(local_profile, &effective_remote))
+            .unwrap_or_else(|| serial_profile_summary_fields(remote_profile));
+        let status = if local_profile.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_serial_profiles",
+            remote_profile.id.clone(),
+            remote_profile.name.clone(),
+            status,
+            fields,
+        );
+    }
+}
+
+fn push_upload_app_settings_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote_preview: &StructuredPreview,
+    local: &CloudSyncLocalFieldDiffSnapshot,
+    scope: &SyncScope,
+) {
+    let local_sections = local
+        .app_settings_sections
+        .iter()
+        .filter(|section| scope.app_settings_sections.contains(&section.id))
+        .map(|section| (section.id.as_str(), section))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen_ids = BTreeSet::new();
+    for (section_id, local_section) in &local_sections {
+        seen_ids.insert(*section_id);
+        let remote_section = remote_preview.app_settings_sections.get(*section_id);
+        let fields = remote_section
+            .map(|remote_section| {
+                app_settings_changed_fields(
+                    &remote_section.field_values,
+                    &local_section.field_values,
+                )
+            })
+            .unwrap_or_else(|| app_settings_summary_fields(&local_section.field_values));
+        let status = if remote_section.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_app_settings",
+            (*section_id).to_string(),
+            (*section_id).to_string(),
+            status,
+            fields,
+        );
+    }
+    for (section_id, remote_section) in &remote_preview.app_settings_sections {
+        if seen_ids.contains(section_id.as_str())
+            || !scope.app_settings_sections.contains(section_id)
+        {
+            continue;
+        }
+        if remote_section.field_values.is_empty() {
+            continue;
+        }
+        items.push(field_diff_item_with_key(
+            "plugin.cloud_sync.settings.sync_app_settings",
+            section_id.clone(),
+            section_id.clone(),
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
+    }
+}
+
+fn push_app_settings_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    preview: &StructuredPreview,
+    selection: &CloudSyncPreviewSelection,
+    local: &CloudSyncLocalFieldDiffSnapshot,
+) {
+    let local_sections = local
+        .app_settings_sections
+        .iter()
+        .map(|section| (section.id.as_str(), section))
+        .collect::<BTreeMap<_, _>>();
+    for (section_id, remote_section) in &preview.app_settings_sections {
+        if !selection
+            .selected_app_settings_sections
+            .contains(section_id)
+        {
+            continue;
+        }
+        let local_section = local_sections.get(section_id.as_str()).copied();
+        let fields = local_section
+            .map(|local_section| {
+                app_settings_changed_fields(
+                    &local_section.field_values,
+                    &remote_section.field_values,
+                )
+            })
+            .unwrap_or_else(|| app_settings_summary_fields(&remote_section.field_values));
+        let status = if local_section.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_app_settings",
+            section_id.clone(),
+            section_id.clone(),
+            status,
+            fields,
+        );
+    }
+}
+
+fn app_settings_changed_fields(
+    before: &std::collections::HashMap<String, String>,
+    after: &std::collections::HashMap<String, String>,
+) -> Vec<CloudSyncFieldDiffField> {
+    before
+        .keys()
+        .chain(after.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|field_key| {
+            let before = before
+                .get(&field_key)
+                .map(|value| format!("{field_key}: {value}"));
+            let after = after
+                .get(&field_key)
+                .map(|value| format!("{field_key}: {value}"));
+            (before != after)
+                .then(|| field("plugin.cloud_sync.diff_fields.setting_field", before, after))
+        })
+        .collect()
+}
+
+fn app_settings_summary_fields(
+    values: &std::collections::HashMap<String, String>,
+) -> Vec<CloudSyncFieldDiffField> {
+    values
+        .iter()
+        .map(|(field_key, value)| {
+            field(
+                "plugin.cloud_sync.diff_fields.setting_field",
+                None,
+                Some(format!("{field_key}: {value}")),
+            )
+        })
+        .collect()
+}
+
+fn connection_changed_fields(
+    before: &ConnectionInfo,
+    after: &ConnectionInfo,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(before.name.clone()),
+        Some(after.name.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        before.group.clone(),
+        after.group.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.host",
+        Some(before.host.clone()),
+        Some(after.host.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.port",
+        Some(before.port.to_string()),
+        Some(after.port.to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.username",
+        Some(before.username.clone()),
+        Some(after.username.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.auth_type",
+        Some(format!("{:?}", before.auth_type)),
+        Some(format!("{:?}", after.auth_type)),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.key_path",
+        before.key_path.clone(),
+        after.key_path.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.cert_path",
+        before.cert_path.clone(),
+        after.cert_path.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.managed_key",
+        before.managed_key_id.clone(),
+        after.managed_key_id.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.proxy_chain",
+        Some(before.proxy_chain.len().to_string()),
+        Some(after.proxy_chain.len().to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.agent_forwarding",
+        Some(before.agent_forwarding.to_string()),
+        Some(after.agent_forwarding.to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.post_connect_command",
+        before
+            .post_connect_command
+            .as_ref()
+            .map(|_| redacted_changed_value()),
+        after
+            .post_connect_command
+            .as_ref()
+            .map(|_| redacted_changed_value()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.color",
+        before.color.clone(),
+        after.color.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.tags",
+        Some(before.tags.join(", ")),
+        Some(after.tags.join(", ")),
+    );
+    fields
+}
+
+fn connection_summary_fields(value: &ConnectionInfo) -> Vec<CloudSyncFieldDiffField> {
+    vec![
+        field(
+            "plugin.cloud_sync.diff_fields.host",
+            None,
+            Some(value.host.clone()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.port",
+            None,
+            Some(value.port.to_string()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.username",
+            None,
+            Some(value.username.clone()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.auth_type",
+            None,
+            Some(format!("{:?}", value.auth_type)),
+        ),
+    ]
+}
+
+fn forward_changed_fields(
+    before: &PersistedForwardDto,
+    after: &PersistedForwardDto,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.forward_type",
+        Some(before.forward_type.clone()),
+        Some(after.forward_type.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.bind_address",
+        Some(before.bind_address.clone()),
+        Some(after.bind_address.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.bind_port",
+        Some(before.bind_port.to_string()),
+        Some(after.bind_port.to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.target_host",
+        Some(before.target_host.clone()),
+        Some(after.target_host.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.target_port",
+        Some(before.target_port.to_string()),
+        Some(after.target_port.to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.description",
+        before.description.clone(),
+        after.description.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.auto_start",
+        Some(before.auto_start.to_string()),
+        Some(after.auto_start.to_string()),
+    );
+    fields
+}
+
+fn forward_summary_fields(value: &PersistedForwardDto) -> Vec<CloudSyncFieldDiffField> {
+    vec![
+        field(
+            "plugin.cloud_sync.diff_fields.forward_type",
+            None,
+            Some(value.forward_type.clone()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.bind_address",
+            None,
+            Some(value.bind_address.clone()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.bind_port",
+            None,
+            Some(value.bind_port.to_string()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.target_host",
+            None,
+            Some(value.target_host.clone()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.target_port",
+            None,
+            Some(value.target_port.to_string()),
+        ),
+    ]
+}
+
+fn quick_command_changed_fields(
+    before: &QuickCommand,
+    after: &QuickCommand,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(before.name.clone()),
+        Some(after.name.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.command",
+        Some(before.command.clone()),
+        Some(after.command.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.category",
+        Some(before.category.clone()),
+        Some(after.category.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.description",
+        before.description.clone(),
+        after.description.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.host_pattern",
+        before.host_pattern.clone(),
+        after.host_pattern.clone(),
+    );
+    fields
+}
+
+fn quick_command_summary_fields(value: &QuickCommand) -> Vec<CloudSyncFieldDiffField> {
+    vec![
+        field(
+            "plugin.cloud_sync.diff_fields.command",
+            None,
+            Some(value.command.clone()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.category",
+            None,
+            Some(value.category.clone()),
+        ),
+    ]
+}
+
+fn serial_profile_changed_fields(
+    before: &SerialProfile,
+    after: &SerialProfile,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(before.name.clone()),
+        Some(after.name.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        before.group.clone(),
+        after.group.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.port_path",
+        Some(before.port_path.clone()),
+        Some(after.port_path.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.baud_rate",
+        Some(before.baud_rate.to_string()),
+        Some(after.baud_rate.to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.data_bits",
+        Some(before.data_bits.to_string()),
+        Some(after.data_bits.to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.stop_bits",
+        Some(before.stop_bits.to_string()),
+        Some(after.stop_bits.to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.parity",
+        Some(format!("{:?}", before.parity)),
+        Some(format!("{:?}", after.parity)),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.flow_control",
+        Some(format!("{:?}", before.flow_control)),
+        Some(format!("{:?}", after.flow_control)),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.connect_on_open",
+        Some(before.connect_on_open.to_string()),
+        Some(after.connect_on_open.to_string()),
+    );
+    fields
+}
+
+fn serial_profile_summary_fields(value: &SerialProfile) -> Vec<CloudSyncFieldDiffField> {
+    vec![
+        field(
+            "plugin.cloud_sync.diff_fields.port_path",
+            None,
+            Some(value.port_path.clone()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.baud_rate",
+            None,
+            Some(value.baud_rate.to_string()),
+        ),
+    ]
+}
+
+fn forward_item_name(value: &PersistedForwardDto) -> String {
+    format!(
+        "{} {}:{} -> {}:{}",
+        value.forward_type,
+        value.bind_address,
+        value.bind_port,
+        value.target_host,
+        value.target_port
+    )
+}
+
+fn push_non_empty_field_diff(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    section_label_key: &'static str,
+    item_key: String,
+    item_name: String,
+    status: CloudSyncFieldDiffStatus,
+    fields: Vec<CloudSyncFieldDiffField>,
+) {
+    if fields.is_empty() && status == CloudSyncFieldDiffStatus::Modified {
+        return;
+    }
+    items.push(field_diff_item_with_key(
+        section_label_key,
+        item_key,
+        item_name,
+        status,
+        fields,
+    ));
+}
+
+fn field_diff_item_with_key(
+    section_label_key: &'static str,
+    item_key: String,
+    item_name: String,
+    status: CloudSyncFieldDiffStatus,
+    fields: Vec<CloudSyncFieldDiffField>,
+) -> CloudSyncFieldDiffItem {
+    CloudSyncFieldDiffItem {
+        section_label_key,
+        item_key,
+        item_name,
+        status,
+        fields,
+    }
+}
+
+fn push_changed(
+    fields: &mut Vec<CloudSyncFieldDiffField>,
+    label_key: &'static str,
+    before: Option<String>,
+    after: Option<String>,
+) {
+    if before != after {
+        fields.push(field(label_key, before, after));
+    }
+}
+
+fn field(
+    label_key: &'static str,
+    before: Option<String>,
+    after: Option<String>,
+) -> CloudSyncFieldDiffField {
+    CloudSyncFieldDiffField {
+        label_key,
+        before,
+        after,
+    }
+}
+
+fn redacted_changed_value() -> String {
+    CLOUD_SYNC_FIELD_REDACTED_VALUE.to_string()
 }
 
 fn push_app_settings_diff_items(
@@ -1247,14 +2427,18 @@ mod tests {
         let mut selection = CloudSyncPreviewSelection {
             import_connections: true,
             selected_connection_names: summary.connection_record_names(),
+            selected_connection_ids: Default::default(),
             import_quick_commands: false,
+            selected_quick_command_ids: Default::default(),
             import_serial_profiles: false,
+            selected_serial_profile_ids: Default::default(),
             import_sensitive_credentials: false,
             import_app_settings: true,
             selected_app_settings_sections: ["general".to_string()].into_iter().collect(),
             import_plugin_settings: false,
             selected_plugin_ids: Default::default(),
             import_forwards: true,
+            selected_forward_ids: Default::default(),
             conflict_strategy: ConflictStrategy::Merge,
         };
 
@@ -1357,6 +2541,220 @@ mod tests {
         );
     }
 
+    #[test]
+    fn apply_field_diff_items_show_changed_quick_command_fields() {
+        let preview = CloudSyncPendingPreview::Structured(StructuredPreview {
+            remote_metadata: Default::default(),
+            manifest: oxideterm_cloud_sync::create_manifest_base(
+                "rev-1",
+                "2026-06-12T00:00:00Z",
+                "device",
+                SyncScope::default(),
+            ),
+            connections_snapshot: None,
+            forwards_snapshot: None,
+            quick_commands_snapshot_json: Some(
+                serde_json::to_string(&QuickCommandsSnapshot {
+                    version: 1,
+                    categories: Vec::new(),
+                    commands: vec![quick_command("cmd-1", "Deploy", "deploy --prod")],
+                    updated_at: 2,
+                })
+                .expect("remote quick commands"),
+            ),
+            serial_profiles_snapshot: None,
+            base_connections_snapshot: None,
+            base_forwards_snapshot: None,
+            base_quick_commands_snapshot_json: None,
+            base_serial_profiles_snapshot: None,
+            sensitive_credentials_entry: None,
+            sensitive_credentials_preview: None,
+            app_settings_entries: Default::default(),
+            app_settings_sections: Default::default(),
+            plugin_settings_entries: Default::default(),
+            plugin_settings_counts: Default::default(),
+        });
+        let selection = CloudSyncPreviewSelection {
+            import_connections: false,
+            selected_connection_names: Default::default(),
+            selected_connection_ids: Default::default(),
+            import_quick_commands: true,
+            selected_quick_command_ids: Default::default(),
+            import_serial_profiles: false,
+            selected_serial_profile_ids: Default::default(),
+            import_sensitive_credentials: false,
+            import_app_settings: false,
+            selected_app_settings_sections: Default::default(),
+            import_plugin_settings: false,
+            selected_plugin_ids: Default::default(),
+            import_forwards: false,
+            selected_forward_ids: Default::default(),
+            conflict_strategy: ConflictStrategy::Merge,
+        };
+        let local = CloudSyncLocalFieldDiffSnapshot {
+            quick_commands: Some(QuickCommandsSnapshot {
+                version: 1,
+                categories: Vec::new(),
+                commands: vec![quick_command("cmd-1", "Deploy", "deploy --staging")],
+                updated_at: 1,
+            }),
+            ..CloudSyncLocalFieldDiffSnapshot::default()
+        };
+
+        let items = cloud_sync_apply_field_diff_items(&preview, &selection, &local);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].status, CloudSyncFieldDiffStatus::Modified);
+        assert!(items[0].fields.iter().any(|field| {
+            field.label_key == "plugin.cloud_sync.diff_fields.command"
+                && field.before.as_deref() == Some("deploy --staging")
+                && field.after.as_deref() == Some("deploy --prod")
+        }));
+    }
+
+    #[test]
+    fn apply_field_diff_items_show_effective_field_merge_result() {
+        let base_command = quick_command("cmd-1", "Deploy", "deploy --old");
+        let mut local_command = base_command.clone();
+        local_command.description = Some("local note".to_string());
+        let mut remote_command = base_command.clone();
+        remote_command.command = "deploy --prod".to_string();
+        let preview = CloudSyncPendingPreview::Structured(StructuredPreview {
+            remote_metadata: Default::default(),
+            manifest: oxideterm_cloud_sync::create_manifest_base(
+                "rev-1",
+                "2026-06-12T00:00:00Z",
+                "device",
+                SyncScope::default(),
+            ),
+            connections_snapshot: None,
+            forwards_snapshot: None,
+            quick_commands_snapshot_json: Some(
+                serde_json::to_string(&QuickCommandsSnapshot {
+                    version: 1,
+                    categories: Vec::new(),
+                    commands: vec![remote_command],
+                    updated_at: 2,
+                })
+                .expect("remote quick commands"),
+            ),
+            serial_profiles_snapshot: None,
+            base_connections_snapshot: None,
+            base_forwards_snapshot: None,
+            base_quick_commands_snapshot_json: Some(
+                serde_json::to_string(&QuickCommandsSnapshot {
+                    version: 1,
+                    categories: Vec::new(),
+                    commands: vec![base_command],
+                    updated_at: 1,
+                })
+                .expect("base quick commands"),
+            ),
+            base_serial_profiles_snapshot: None,
+            sensitive_credentials_entry: None,
+            sensitive_credentials_preview: None,
+            app_settings_entries: Default::default(),
+            app_settings_sections: Default::default(),
+            plugin_settings_entries: Default::default(),
+            plugin_settings_counts: Default::default(),
+        });
+        let selection = CloudSyncPreviewSelection {
+            import_connections: false,
+            selected_connection_names: Default::default(),
+            selected_connection_ids: Default::default(),
+            import_quick_commands: true,
+            selected_quick_command_ids: Default::default(),
+            import_serial_profiles: false,
+            selected_serial_profile_ids: Default::default(),
+            import_sensitive_credentials: false,
+            import_app_settings: false,
+            selected_app_settings_sections: Default::default(),
+            import_plugin_settings: false,
+            selected_plugin_ids: Default::default(),
+            import_forwards: false,
+            selected_forward_ids: Default::default(),
+            conflict_strategy: ConflictStrategy::Merge,
+        };
+        let local = CloudSyncLocalFieldDiffSnapshot {
+            quick_commands: Some(QuickCommandsSnapshot {
+                version: 1,
+                categories: Vec::new(),
+                commands: vec![local_command],
+                updated_at: 3,
+            }),
+            ..CloudSyncLocalFieldDiffSnapshot::default()
+        };
+
+        let items = cloud_sync_apply_field_diff_items(&preview, &selection, &local);
+
+        assert_eq!(items.len(), 1);
+        assert!(items[0].fields.iter().any(|field| {
+            field.label_key == "plugin.cloud_sync.diff_fields.command"
+                && field.before.as_deref() == Some("deploy --old")
+                && field.after.as_deref() == Some("deploy --prod")
+        }));
+        assert!(
+            !items[0]
+                .fields
+                .iter()
+                .any(|field| field.label_key == "plugin.cloud_sync.diff_fields.description")
+        );
+    }
+
+    #[test]
+    fn upload_field_diff_items_show_local_after_remote_before() {
+        let preview = CloudSyncPendingPreview::Structured(StructuredPreview {
+            remote_metadata: Default::default(),
+            manifest: oxideterm_cloud_sync::create_manifest_base(
+                "rev-1",
+                "2026-06-12T00:00:00Z",
+                "device",
+                SyncScope::default(),
+            ),
+            connections_snapshot: None,
+            forwards_snapshot: None,
+            quick_commands_snapshot_json: Some(
+                serde_json::to_string(&QuickCommandsSnapshot {
+                    version: 1,
+                    categories: Vec::new(),
+                    commands: vec![quick_command("cmd-1", "Deploy", "deploy --prod")],
+                    updated_at: 2,
+                })
+                .expect("remote quick commands"),
+            ),
+            serial_profiles_snapshot: None,
+            base_connections_snapshot: None,
+            base_forwards_snapshot: None,
+            base_quick_commands_snapshot_json: None,
+            base_serial_profiles_snapshot: None,
+            sensitive_credentials_entry: None,
+            sensitive_credentials_preview: None,
+            app_settings_entries: Default::default(),
+            app_settings_sections: Default::default(),
+            plugin_settings_entries: Default::default(),
+            plugin_settings_counts: Default::default(),
+        });
+        let local = CloudSyncLocalFieldDiffSnapshot {
+            quick_commands: Some(QuickCommandsSnapshot {
+                version: 1,
+                categories: Vec::new(),
+                commands: vec![quick_command("cmd-1", "Deploy", "deploy --staging")],
+                updated_at: 3,
+            }),
+            ..CloudSyncLocalFieldDiffSnapshot::default()
+        };
+
+        let items = cloud_sync_upload_field_diff_items(&preview, &local, &SyncScope::default());
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].status, CloudSyncFieldDiffStatus::Modified);
+        assert!(items[0].fields.iter().any(|field| {
+            field.label_key == "plugin.cloud_sync.diff_fields.command"
+                && field.before.as_deref() == Some("deploy --prod")
+                && field.after.as_deref() == Some("deploy --staging")
+        }));
+    }
+
     fn test_snapshot(
         scope: SyncScope,
         current_state: StructuredLocalState,
@@ -1375,6 +2773,19 @@ mod tests {
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
+        }
+    }
+
+    fn quick_command(id: &str, name: &str, command: &str) -> QuickCommand {
+        QuickCommand {
+            id: id.to_string(),
+            name: name.to_string(),
+            command: command.to_string(),
+            category: "default".to_string(),
+            description: None,
+            host_pattern: None,
+            created_at: 1,
+            updated_at: 1,
         }
     }
 }

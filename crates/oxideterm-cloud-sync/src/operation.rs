@@ -1,7 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, Mutex},
+};
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
@@ -16,7 +19,10 @@ use oxideterm_connections::{
     },
 };
 use oxideterm_forwarding::{ForwardingRegistry, SavedForwardsSyncSnapshot};
+use oxideterm_quick_commands::{QuickCommand, QuickCommandCategory, QuickCommandsSnapshot};
 use oxideterm_settings::{SettingsStore, export_oxide_settings_snapshot_json};
+use serde::{Serialize, de::DeserializeOwned};
+use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::{
@@ -233,6 +239,13 @@ impl CloudSyncOperationService {
                 .connections()
                 .iter()
                 .map(|connection| connection.id.clone())
+                .filter(|connection_id| {
+                    options
+                        .item_filter
+                        .connection_ids
+                        .as_ref()
+                        .is_none_or(|ids| ids.contains(connection_id))
+                })
                 .collect::<Vec<_>>();
             let preflight = preflight_export(connection_store, &connection_ids, false, false, 0);
             if !preflight.can_export {
@@ -256,6 +269,7 @@ impl CloudSyncOperationService {
                     .as_ref()
                     .map(|password| password.as_str()),
                 options.portable_secrets.clone(),
+                &options.item_filter,
                 progress,
                 total,
             )
@@ -350,6 +364,7 @@ impl CloudSyncOperationService {
         connection_store: &ConnectionStore,
         settings: &CloudSyncSettings,
         secret_provider: &mut impl CloudSyncSecretProvider,
+        previous_remote_sections: Option<&StructuredSectionRevisions>,
         progress: Option<&mut dyn CloudSyncProgressSink>,
     ) -> Result<Option<StructuredPreview>> {
         let Some(_permit) = self.guard.begin(CloudSyncOperationKind::Pull, false)? else {
@@ -425,6 +440,10 @@ impl CloudSyncOperationService {
             forwards_snapshot: None,
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
+            base_connections_snapshot: None,
+            base_forwards_snapshot: None,
+            base_quick_commands_snapshot_json: None,
+            base_serial_profiles_snapshot: None,
             sensitive_credentials_entry: None,
             sensitive_credentials_preview: None,
             app_settings_entries: std::collections::BTreeMap::new(),
@@ -459,6 +478,40 @@ impl CloudSyncOperationService {
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
             preview.serial_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
+        }
+        if let Some(previous) = previous_remote_sections {
+            preview.base_connections_snapshot = read_optional_snapshot_at_revision(
+                self,
+                settings,
+                &metadata_secrets,
+                previous.connections.as_deref(),
+                connections_object_path,
+            )
+            .await?;
+            preview.base_forwards_snapshot = read_optional_snapshot_at_revision(
+                self,
+                settings,
+                &metadata_secrets,
+                previous.forwards.as_deref(),
+                forwards_object_path,
+            )
+            .await?;
+            preview.base_quick_commands_snapshot_json = read_optional_text_at_revision(
+                self,
+                settings,
+                &metadata_secrets,
+                previous.quick_commands.as_deref(),
+                quick_commands_object_path,
+            )
+            .await?;
+            preview.base_serial_profiles_snapshot = read_optional_snapshot_at_revision(
+                self,
+                settings,
+                &metadata_secrets,
+                previous.serial_profiles.as_deref(),
+                serial_profiles_object_path,
+            )
+            .await?;
         }
         if let Some(entry) = preview.manifest.sections.sensitive_credentials.as_ref() {
             let object = self
@@ -658,7 +711,7 @@ impl CloudSyncOperationService {
         forwarding_registry: &ForwardingRegistry,
         settings_store: &mut SettingsStore,
         _settings: &CloudSyncSettings,
-        preview: StructuredPreview,
+        mut preview: StructuredPreview,
         selection: StructuredApplySelection,
         conflict_strategy: ConflictStrategy,
         sync_password: Option<&str>,
@@ -864,6 +917,15 @@ impl CloudSyncOperationService {
             }
         }
 
+        merge_structured_preview_fields(
+            connection_store,
+            forwarding_registry,
+            settings_store,
+            &mut preview,
+            &selection,
+            &conflict_strategy,
+        )?;
+
         let connections_snapshot = if selection.connections {
             preview.connections_snapshot
         } else {
@@ -1015,6 +1077,17 @@ impl CloudSyncOperationService {
             })
     }
 
+    async fn read_optional_object(
+        &self,
+        settings: &CloudSyncSettings,
+        secrets: &crate::secrets::CloudSyncSecrets,
+        path: &str,
+    ) -> Result<Option<crate::backend::RemoteObject>> {
+        self.backend
+            .read_remote_object(settings, secrets, path)
+            .await
+    }
+
     async fn build_structured_upload_plan(
         &self,
         connection_store: &ConnectionStore,
@@ -1026,6 +1099,7 @@ impl CloudSyncOperationService {
         device_id: &str,
         sync_password: Option<&str>,
         portable_secrets: Vec<EncryptedPortableSecret>,
+        item_filter: &StructuredUploadItemFilter,
         progress: &mut dyn CloudSyncProgressSink,
         total: usize,
     ) -> Result<StructuredUploadPlan> {
@@ -1039,7 +1113,8 @@ impl CloudSyncOperationService {
         let mut completed_exports = 0usize;
 
         if local_snapshot.scope.sync_connections {
-            let snapshot = connection_store.export_saved_connections_snapshot()?;
+            let mut snapshot = connection_store.export_saved_connections_snapshot()?;
+            filter_saved_connection_snapshot(&mut snapshot, item_filter.connection_ids.as_ref());
             let bytes = serde_json::to_vec(&snapshot)?;
             let path = connections_object_path(&snapshot.revision);
             manifest.sections.connections = Some(crate::StructuredObjectEntry {
@@ -1063,7 +1138,8 @@ impl CloudSyncOperationService {
         }
 
         if local_snapshot.scope.sync_forwards {
-            let snapshot = forwarding_registry.export_saved_forwards_snapshot()?;
+            let mut snapshot = forwarding_registry.export_saved_forwards_snapshot()?;
+            filter_saved_forwards_snapshot(&mut snapshot, item_filter.forward_ids.as_ref());
             let bytes = serde_json::to_vec(&snapshot)?;
             let path = forwards_object_path(&snapshot.revision);
             manifest.sections.forwards = Some(crate::StructuredObjectEntry {
@@ -1088,14 +1164,13 @@ impl CloudSyncOperationService {
 
         if local_snapshot.scope.sync_quick_commands {
             if let Some(revision) = local_snapshot.metadata.quick_commands_revision.as_ref() {
-                let snapshot_json =
+                let mut snapshot_json =
                     oxideterm_quick_commands::export_snapshot_json(settings_store.path())
                         .map_err(anyhow::Error::msg)?;
-                let record_count = serde_json::from_str::<
-                    oxideterm_quick_commands::QuickCommandsSnapshot,
-                >(&snapshot_json)
-                .map(|snapshot| snapshot.commands.len())
-                .unwrap_or(0);
+                let record_count = filter_quick_commands_snapshot_json(
+                    &mut snapshot_json,
+                    item_filter.quick_command_ids.as_ref(),
+                );
                 let path = quick_commands_object_path(revision);
                 manifest.sections.quick_commands = Some(crate::StructuredObjectEntry {
                     revision: revision.clone(),
@@ -1119,7 +1194,8 @@ impl CloudSyncOperationService {
         }
 
         if local_snapshot.scope.sync_serial_profiles {
-            let snapshot = connection_store.export_serial_profiles_snapshot()?;
+            let mut snapshot = connection_store.export_serial_profiles_snapshot()?;
+            filter_serial_profiles_snapshot(&mut snapshot, item_filter.serial_profile_ids.as_ref());
             let bytes = serde_json::to_vec(&snapshot)?;
             let path = serial_profiles_object_path(&snapshot.revision);
             manifest.sections.serial_profiles = Some(crate::StructuredObjectEntry {
@@ -1154,6 +1230,12 @@ impl CloudSyncOperationService {
                     .connections()
                     .iter()
                     .map(|connection| connection.id.clone())
+                    .filter(|connection_id| {
+                        item_filter
+                            .connection_ids
+                            .as_ref()
+                            .is_none_or(|ids| ids.contains(connection_id))
+                    })
                     .collect::<Vec<_>>();
                 let bytes = export_connections_to_oxide_with_progress(
                     connection_store,
@@ -1345,7 +1427,17 @@ pub struct UploadOptions {
     pub previous_remote_sections: Option<StructuredSectionRevisions>,
     pub last_synced_structured_state: Option<StructuredLocalState>,
     pub raw_sync_scope: Option<RawSyncScope>,
+    pub item_filter: StructuredUploadItemFilter,
     pub portable_secrets: Vec<EncryptedPortableSecret>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct StructuredUploadItemFilter {
+    // A missing set means the whole resource group is selected; an empty set means upload no items.
+    pub connection_ids: Option<BTreeSet<String>>,
+    pub forward_ids: Option<BTreeSet<String>>,
+    pub quick_command_ids: Option<BTreeSet<String>>,
+    pub serial_profile_ids: Option<BTreeSet<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1411,6 +1503,427 @@ fn upload_error_after_revision(
         remote_metadata: None,
         revision_sequence_consumed: Some(revision_sequence),
     }
+}
+
+async fn read_optional_snapshot_at_revision<T>(
+    service: &CloudSyncOperationService,
+    settings: &CloudSyncSettings,
+    secrets: &crate::secrets::CloudSyncSecrets,
+    revision: Option<&str>,
+    path_for_revision: impl FnOnce(&str) -> String,
+) -> Result<Option<T>>
+where
+    T: DeserializeOwned,
+{
+    let Some(revision) = revision.filter(|revision| !revision.is_empty()) else {
+        return Ok(None);
+    };
+    let path = path_for_revision(revision);
+    service
+        .read_optional_object(settings, secrets, &path)
+        .await?
+        .map(|object| serde_json::from_slice(&object.bytes).map_err(anyhow::Error::from))
+        .transpose()
+}
+
+async fn read_optional_text_at_revision(
+    service: &CloudSyncOperationService,
+    settings: &CloudSyncSettings,
+    secrets: &crate::secrets::CloudSyncSecrets,
+    revision: Option<&str>,
+    path_for_revision: impl FnOnce(&str) -> String,
+) -> Result<Option<String>> {
+    let Some(revision) = revision.filter(|revision| !revision.is_empty()) else {
+        return Ok(None);
+    };
+    let path = path_for_revision(revision);
+    service
+        .read_optional_object(settings, secrets, &path)
+        .await?
+        .map(|object| String::from_utf8(object.bytes).map_err(anyhow::Error::from))
+        .transpose()
+}
+
+fn merge_structured_preview_fields(
+    connection_store: &ConnectionStore,
+    forwarding_registry: &ForwardingRegistry,
+    settings_store: &SettingsStore,
+    preview: &mut StructuredPreview,
+    selection: &StructuredApplySelection,
+    conflict_strategy: &ConflictStrategy,
+) -> Result<()> {
+    let now_rfc3339 = Utc::now().to_rfc3339();
+    if selection.connections
+        && let (Some(remote), Some(base)) = (
+            preview.connections_snapshot.as_mut(),
+            preview.base_connections_snapshot.as_ref(),
+        )
+    {
+        let local = connection_store.export_saved_connections_snapshot()?;
+        merge_connection_records(remote, base, &local, conflict_strategy, &now_rfc3339)?;
+    }
+    if selection.forwards
+        && let (Some(remote), Some(base)) = (
+            preview.forwards_snapshot.as_mut(),
+            preview.base_forwards_snapshot.as_ref(),
+        )
+    {
+        let local = forwarding_registry.export_saved_forwards_snapshot()?;
+        merge_forward_records(remote, base, &local, conflict_strategy, &now_rfc3339)?;
+    }
+    if selection.quick_commands
+        && let (Some(remote_json), Some(base_json)) = (
+            preview.quick_commands_snapshot_json.as_mut(),
+            preview.base_quick_commands_snapshot_json.as_deref(),
+        )
+    {
+        let local_json = oxideterm_quick_commands::export_snapshot_json(settings_store.path())
+            .map_err(anyhow::Error::msg)?;
+        merge_quick_command_records(
+            remote_json,
+            base_json,
+            &local_json,
+            conflict_strategy,
+            Utc::now().timestamp_millis().max(0) as u64,
+        )?;
+    }
+    if selection.serial_profiles
+        && let (Some(remote), Some(base)) = (
+            preview.serial_profiles_snapshot.as_mut(),
+            preview.base_serial_profiles_snapshot.as_ref(),
+        )
+    {
+        let local = connection_store.export_serial_profiles_snapshot()?;
+        merge_serial_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
+    }
+    Ok(())
+}
+
+fn merge_connection_records(
+    remote: &mut SavedConnectionsSyncSnapshot,
+    base: &SavedConnectionsSyncSnapshot,
+    local: &SavedConnectionsSyncSnapshot,
+    conflict_strategy: &ConflictStrategy,
+    merged_at: &str,
+) -> Result<()> {
+    let base_records = sync_records_by_id(&base.records);
+    let local_records = sync_records_by_id(&local.records);
+    for remote_record in &mut remote.records {
+        if remote_record.deleted {
+            continue;
+        }
+        let Some(remote_payload) = remote_record.payload.as_ref() else {
+            continue;
+        };
+        let Some(base_payload) = base_records
+            .get(remote_record.id.as_str())
+            .filter(|record| !record.deleted)
+            .and_then(|record| record.payload.as_ref())
+        else {
+            continue;
+        };
+        let Some(local_payload) = local_records
+            .get(remote_record.id.as_str())
+            .filter(|record| !record.deleted)
+            .and_then(|record| record.payload.as_ref())
+        else {
+            continue;
+        };
+        if let Some(merged_payload) = merge_structured_model_fields(
+            base_payload,
+            local_payload,
+            remote_payload,
+            conflict_strategy,
+        )? {
+            remote_record.payload = Some(merged_payload);
+            remote_record.updated_at = merged_at.to_string();
+        }
+    }
+    Ok(())
+}
+
+fn merge_forward_records(
+    remote: &mut SavedForwardsSyncSnapshot,
+    base: &SavedForwardsSyncSnapshot,
+    local: &SavedForwardsSyncSnapshot,
+    conflict_strategy: &ConflictStrategy,
+    merged_at: &str,
+) -> Result<()> {
+    let base_records = forward_records_by_id(&base.records);
+    let local_records = forward_records_by_id(&local.records);
+    for remote_record in &mut remote.records {
+        if remote_record.deleted {
+            continue;
+        }
+        let Some(remote_payload) = remote_record.payload.as_ref() else {
+            continue;
+        };
+        let Some(base_payload) = base_records
+            .get(remote_record.id.as_str())
+            .filter(|record| !record.deleted)
+            .and_then(|record| record.payload.as_ref())
+        else {
+            continue;
+        };
+        let Some(local_payload) = local_records
+            .get(remote_record.id.as_str())
+            .filter(|record| !record.deleted)
+            .and_then(|record| record.payload.as_ref())
+        else {
+            continue;
+        };
+        if let Some(merged_payload) = merge_structured_model_fields(
+            base_payload,
+            local_payload,
+            remote_payload,
+            conflict_strategy,
+        )? {
+            remote_record.payload = Some(merged_payload);
+            remote_record.updated_at = merged_at.to_string();
+        }
+    }
+    Ok(())
+}
+
+fn merge_serial_profile_records(
+    remote: &mut SerialProfilesSyncSnapshot,
+    base: &SerialProfilesSyncSnapshot,
+    local: &SerialProfilesSyncSnapshot,
+    conflict_strategy: &ConflictStrategy,
+    merged_at: chrono::DateTime<Utc>,
+) -> Result<()> {
+    let base_records = base
+        .records
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let local_records = local
+        .records
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    for remote_profile in &mut remote.records {
+        let Some(base_profile) = base_records.get(remote_profile.id.as_str()).copied() else {
+            continue;
+        };
+        let Some(local_profile) = local_records.get(remote_profile.id.as_str()).copied() else {
+            continue;
+        };
+        if let Some(mut merged_profile) = merge_structured_model_fields(
+            base_profile,
+            local_profile,
+            remote_profile,
+            conflict_strategy,
+        )? {
+            merged_profile.updated_at = merged_at;
+            *remote_profile = merged_profile;
+        }
+    }
+    Ok(())
+}
+
+fn merge_quick_command_records(
+    remote_json: &mut String,
+    base_json: &str,
+    local_json: &str,
+    conflict_strategy: &ConflictStrategy,
+    merged_at: u64,
+) -> Result<()> {
+    let base = serde_json::from_str::<QuickCommandsSnapshot>(base_json)?;
+    let local = serde_json::from_str::<QuickCommandsSnapshot>(local_json)?;
+    let mut remote = serde_json::from_str::<QuickCommandsSnapshot>(remote_json)?;
+    let mut changed = false;
+    changed |= merge_quick_command_categories(
+        &mut remote.categories,
+        &base.categories,
+        &local.categories,
+        conflict_strategy,
+    )?;
+    changed |= merge_quick_commands(
+        &mut remote.commands,
+        &base.commands,
+        &local.commands,
+        conflict_strategy,
+        merged_at,
+    )?;
+    if changed {
+        remote.updated_at = merged_at;
+        *remote_json = serde_json::to_string(&remote)?;
+    }
+    Ok(())
+}
+
+fn merge_quick_command_categories(
+    remote: &mut [QuickCommandCategory],
+    base: &[QuickCommandCategory],
+    local: &[QuickCommandCategory],
+    conflict_strategy: &ConflictStrategy,
+) -> Result<bool> {
+    let base_records = base
+        .iter()
+        .map(|category| (category.id.as_str(), category))
+        .collect::<BTreeMap<_, _>>();
+    let local_records = local
+        .iter()
+        .map(|category| (category.id.as_str(), category))
+        .collect::<BTreeMap<_, _>>();
+    let mut changed = false;
+    for remote_category in remote {
+        let Some(base_category) = base_records.get(remote_category.id.as_str()).copied() else {
+            continue;
+        };
+        let Some(local_category) = local_records.get(remote_category.id.as_str()).copied() else {
+            continue;
+        };
+        if let Some(merged_category) = merge_structured_model_fields(
+            base_category,
+            local_category,
+            remote_category,
+            conflict_strategy,
+        )? {
+            *remote_category = merged_category;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+fn merge_quick_commands(
+    remote: &mut [QuickCommand],
+    base: &[QuickCommand],
+    local: &[QuickCommand],
+    conflict_strategy: &ConflictStrategy,
+    merged_at: u64,
+) -> Result<bool> {
+    let base_records = base
+        .iter()
+        .map(|command| (command.id.as_str(), command))
+        .collect::<BTreeMap<_, _>>();
+    let local_records = local
+        .iter()
+        .map(|command| (command.id.as_str(), command))
+        .collect::<BTreeMap<_, _>>();
+    let mut changed = false;
+    for remote_command in remote {
+        let Some(base_command) = base_records.get(remote_command.id.as_str()).copied() else {
+            continue;
+        };
+        let Some(local_command) = local_records.get(remote_command.id.as_str()).copied() else {
+            continue;
+        };
+        if let Some(mut merged_command) = merge_structured_model_fields(
+            base_command,
+            local_command,
+            remote_command,
+            conflict_strategy,
+        )? {
+            merged_command.updated_at = merged_at;
+            *remote_command = merged_command;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+fn sync_records_by_id(
+    records: &[oxideterm_connections::SavedConnectionSyncRecord],
+) -> BTreeMap<&str, &oxideterm_connections::SavedConnectionSyncRecord> {
+    records
+        .iter()
+        .map(|record| (record.id.as_str(), record))
+        .collect()
+}
+
+fn forward_records_by_id(
+    records: &[oxideterm_forwarding::SavedForwardSyncRecord],
+) -> BTreeMap<&str, &oxideterm_forwarding::SavedForwardSyncRecord> {
+    records
+        .iter()
+        .map(|record| (record.id.as_str(), record))
+        .collect()
+}
+
+/// Three-way merges a structured sync model using base/local/remote values.
+///
+/// Returns `None` when the remote model already represents the effective result.
+pub fn merge_structured_model_fields<T>(
+    base: &T,
+    local: &T,
+    remote: &T,
+    conflict_strategy: &ConflictStrategy,
+) -> Result<Option<T>>
+where
+    T: Serialize + DeserializeOwned,
+{
+    let base_value = serde_json::to_value(base)?;
+    let local_value = serde_json::to_value(local)?;
+    let remote_value = serde_json::to_value(remote)?;
+    let (Some(merged_value), used_local) = merge_structured_json_value(
+        Some(&base_value),
+        Some(&local_value),
+        Some(&remote_value),
+        conflict_strategy,
+    ) else {
+        return Ok(None);
+    };
+    if !used_local || merged_value == remote_value {
+        return Ok(None);
+    }
+    serde_json::from_value(merged_value)
+        .map(Some)
+        .map_err(anyhow::Error::from)
+}
+
+fn merge_structured_json_value(
+    base: Option<&Value>,
+    local: Option<&Value>,
+    remote: Option<&Value>,
+    conflict_strategy: &ConflictStrategy,
+) -> (Option<Value>, bool) {
+    if local == remote {
+        return (remote.cloned(), false);
+    }
+    if base == local {
+        return (remote.cloned(), false);
+    }
+    if base == remote {
+        return (local.cloned(), true);
+    }
+    if let (
+        Some(Value::Object(base_object)),
+        Some(Value::Object(local_object)),
+        Some(Value::Object(remote_object)),
+    ) = (base, local, remote)
+    {
+        let mut keys = BTreeSet::new();
+        keys.extend(base_object.keys().map(String::as_str));
+        keys.extend(local_object.keys().map(String::as_str));
+        keys.extend(remote_object.keys().map(String::as_str));
+        let mut merged = serde_json::Map::new();
+        let mut used_local = false;
+        for key in keys {
+            let (value, child_used_local) = merge_structured_json_value(
+                base_object.get(key),
+                local_object.get(key),
+                remote_object.get(key),
+                conflict_strategy,
+            );
+            used_local |= child_used_local;
+            if let Some(value) = value {
+                merged.insert(key.to_string(), value);
+            }
+        }
+        return (Some(Value::Object(merged)), used_local);
+    }
+    if merge_conflict_prefers_local(conflict_strategy) {
+        (local.cloned(), true)
+    } else {
+        (remote.cloned(), false)
+    }
+}
+
+fn merge_conflict_prefers_local(conflict_strategy: &ConflictStrategy) -> bool {
+    !matches!(conflict_strategy, ConflictStrategy::Replace)
 }
 
 fn fractional_import_progress(current: usize, total: usize) -> f64 {
@@ -1483,6 +1996,10 @@ pub struct StructuredPreview {
     pub forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     pub quick_commands_snapshot_json: Option<String>,
     pub serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    pub base_connections_snapshot: Option<SavedConnectionsSyncSnapshot>,
+    pub base_forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
+    pub base_quick_commands_snapshot_json: Option<String>,
+    pub base_serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
     pub sensitive_credentials_entry: Option<Vec<u8>>,
     pub sensitive_credentials_preview: Option<ImportPreview>,
     pub app_settings_entries: std::collections::BTreeMap<String, Vec<u8>>,
@@ -1553,6 +2070,60 @@ fn legacy_preview_selected_names(
     } else {
         Some(Vec::new())
     }
+}
+
+fn filter_saved_connection_snapshot(
+    snapshot: &mut SavedConnectionsSyncSnapshot,
+    selected_ids: Option<&BTreeSet<String>>,
+) {
+    if let Some(selected_ids) = selected_ids {
+        snapshot
+            .records
+            .retain(|record| selected_ids.contains(&record.id));
+    }
+}
+
+fn filter_saved_forwards_snapshot(
+    snapshot: &mut SavedForwardsSyncSnapshot,
+    selected_ids: Option<&BTreeSet<String>>,
+) {
+    if let Some(selected_ids) = selected_ids {
+        snapshot
+            .records
+            .retain(|record| selected_ids.contains(&record.id));
+    }
+}
+
+fn filter_serial_profiles_snapshot(
+    snapshot: &mut SerialProfilesSyncSnapshot,
+    selected_ids: Option<&BTreeSet<String>>,
+) {
+    if let Some(selected_ids) = selected_ids {
+        snapshot
+            .records
+            .retain(|profile| selected_ids.contains(&profile.id));
+    }
+}
+
+fn filter_quick_commands_snapshot_json(
+    snapshot_json: &mut String,
+    selected_ids: Option<&BTreeSet<String>>,
+) -> usize {
+    // Keep filtering at the serialized snapshot boundary so upload writes exactly the chosen object.
+    let Ok(mut snapshot) =
+        serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(snapshot_json)
+    else {
+        return 0;
+    };
+    if let Some(selected_ids) = selected_ids {
+        snapshot
+            .commands
+            .retain(|command| selected_ids.contains(&command.id));
+        if let Ok(filtered_json) = serde_json::to_string(&snapshot) {
+            *snapshot_json = filtered_json;
+        }
+    }
+    snapshot.commands.len()
 }
 
 #[derive(Clone, Debug)]
@@ -1711,6 +2282,52 @@ mod tests {
             serial_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
         }
+    }
+
+    #[test]
+    fn field_merge_preserves_independent_local_and_remote_changes() {
+        let base = serde_json::json!({
+            "name": "Prod",
+            "host": "old.example.test",
+            "username": "ops"
+        });
+        let local = serde_json::json!({
+            "name": "Production",
+            "host": "old.example.test",
+            "username": "ops"
+        });
+        let remote = serde_json::json!({
+            "name": "Prod",
+            "host": "new.example.test",
+            "username": "ops"
+        });
+
+        let merged =
+            merge_structured_model_fields(&base, &local, &remote, &ConflictStrategy::Merge)
+                .expect("field merge should succeed")
+                .expect("independent local field should be preserved");
+
+        assert_eq!(merged["name"], "Production");
+        assert_eq!(merged["host"], "new.example.test");
+        assert_eq!(merged["username"], "ops");
+    }
+
+    #[test]
+    fn field_merge_uses_strategy_for_same_field_conflicts() {
+        let base = serde_json::json!({ "host": "old.example.test" });
+        let local = serde_json::json!({ "host": "local.example.test" });
+        let remote = serde_json::json!({ "host": "remote.example.test" });
+
+        let merge_result =
+            merge_structured_model_fields(&base, &local, &remote, &ConflictStrategy::Merge)
+                .expect("merge strategy should succeed")
+                .expect("merge strategy should preserve local conflict");
+        let replace_result =
+            merge_structured_model_fields(&base, &local, &remote, &ConflictStrategy::Replace)
+                .expect("replace strategy should succeed");
+
+        assert_eq!(merge_result["host"], "local.example.test");
+        assert!(replace_result.is_none());
     }
 
     #[test]

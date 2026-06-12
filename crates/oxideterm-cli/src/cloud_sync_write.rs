@@ -138,6 +138,7 @@ fn run_push(write: WriteArgs, force: bool) -> CliResult<()> {
         previous_remote_sections: state_store.state().last_synced_remote_sections.clone(),
         last_synced_structured_state: state_store.state().last_synced_structured_state.clone(),
         raw_sync_scope: Some(state_store.state().sync_scope.clone()),
+        item_filter: Default::default(),
         portable_secrets,
     };
     let outcome = runtime(json)?.block_on(service.upload_now(
@@ -213,6 +214,7 @@ fn run_pull(
         &connection_store,
         &state_store.state().settings,
         &mut provider,
+        state_store.state().last_synced_remote_sections.as_ref(),
         None,
     ));
     let preview = match preview {

@@ -25,6 +25,7 @@ pub use transfer::{
     ImportPreview, ImportPreviewRecord, ImportResultEnvelope, OxideExportOptions,
     OxideForwardRecord, OxideImportOptions, apply_oxide_import, apply_oxide_import_with_options,
     apply_oxide_import_with_options_with_progress, export_connections_to_oxide,
-    export_connections_to_oxide_with_progress, preflight_export, preview_oxide_import,
-    preview_oxide_import_with_options, preview_oxide_import_with_progress,
+    export_connections_to_oxide_with_progress, preflight_export,
+    preview_oxide_app_settings_sections, preview_oxide_import, preview_oxide_import_with_options,
+    preview_oxide_import_with_progress,
 };

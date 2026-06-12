@@ -223,6 +223,7 @@
         "sync_scope": "同步范围",
         "conflict_recovery": "冲突恢复",
         "import_preview": "导入预览",
+        "upload_preview": "上传预览",
         "rollback_preview": "回滚预览",
         "rollback_backups": "回滚备份",
         "sync_history": "同步历史",
@@ -296,6 +297,7 @@
         "rename": "重命名",
         "blocked_description": "远端变更比你上次同步的版本更新，而本地仍有待同步的变更。请重新检查远端、先拉取，或强制覆盖远端。",
         "details_title": "冲突详情",
+        "plain_summary": "远端数据由 {{remoteDevice}} 在 {{remoteTime}} 修改。本机上次上传时间是 {{localTime}}；现在上传可能会覆盖这些远端改动。",
         "detail_recommendation": "再次上传前请先拉取并预览远端快照；如果确认要覆盖，请在检查本地改动后再主动强制覆盖。"
       },
       "common": {
@@ -401,6 +403,7 @@
       "preview": {
         "summary_header": "远端预览摘要",
         "apply_plan_title": "本次应用计划",
+        "upload_scope_title": "上传范围",
         "item_count": "{{count}} 项",
         "connection_count": "连接数",
         "total_forwards": "转发数",
@@ -444,7 +447,10 @@
         "record_replace": "{{name}}：替换现有本地连接 {{target}}",
         "record_merge": "{{name}}：合并到现有本地连接 {{target}}",
         "sensitive_credentials_label": "敏感凭据",
-        "toggle_sensitive_credentials": "导入敏感凭据（{{count}}）"
+        "toggle_sensitive_credentials": "导入敏感凭据（{{count}}）",
+        "sensitive_summary_title": "敏感凭据",
+        "sensitive_remote_summary": "远端加密凭据包含 {{connections}} 个连接记录和 {{portableSecrets}} 个可移植密钥。具体值始终隐藏。",
+        "sensitive_upload_summary": "将上传 {{passwords}} 个密码、{{keyPassphrases}} 个密钥口令、{{managedKeys}} 个托管密钥、{{managedKeyPassphrases}} 个托管密钥口令和 {{portableSecrets}} 个可移植密钥。"
       },
       "confirm": {
         "import_title": "确认导入远端快照？",
@@ -524,6 +530,50 @@
         "remote_removed_by_scope": "被范围排除",
         "remote_excluded": "已排除",
         "remote_unknown": "未知"
+      },
+      "field_diff": {
+        "title": "字段差异",
+        "status_added": "新增",
+        "status_modified": "修改",
+        "status_deleted": "删除",
+        "field_change": "{{field}}：{{before}} → {{after}}",
+        "item_action_meta": "{{section}} · {{status}}",
+        "empty_value": "空",
+        "redacted": "已隐藏"
+      },
+      "diff_fields": {
+        "name": "名称",
+        "group": "分组",
+        "host": "主机",
+        "port": "端口",
+        "username": "用户名",
+        "auth_type": "鉴权类型",
+        "key_path": "密钥路径",
+        "cert_path": "证书路径",
+        "managed_key": "托管密钥",
+        "proxy_chain": "代理链",
+        "agent_forwarding": "Agent 转发",
+        "post_connect_command": "连接后命令",
+        "color": "颜色",
+        "tags": "标签",
+        "forward_type": "转发类型",
+        "bind_address": "监听地址",
+        "bind_port": "监听端口",
+        "target_host": "目标主机",
+        "target_port": "目标端口",
+        "description": "描述",
+        "auto_start": "自动启动",
+        "command": "命令",
+        "category": "分类",
+        "host_pattern": "主机匹配",
+        "port_path": "串口路径",
+        "baud_rate": "波特率",
+        "data_bits": "数据位",
+        "stop_bits": "停止位",
+        "parity": "校验位",
+        "flow_control": "流控",
+        "connect_on_open": "打开后连接",
+        "setting_field": "设置字段"
       }
     },
     "native_description": "native 插件宿主尚未启用。",

@@ -76,6 +76,10 @@ fn preview_app_settings(snapshot_json: &str) -> AppSettingsPreviewParts {
     }
 }
 
+pub fn preview_oxide_app_settings_sections(snapshot_json: &str) -> Vec<AppSettingsSectionPreview> {
+    preview_app_settings(snapshot_json).sections
+}
+
 fn build_sectioned_app_settings_sections(
     settings: &serde_json::Map<String, Value>,
     section_ids: &[String],

@@ -231,6 +231,7 @@
         "sync_scope": "Phạm vi đồng bộ",
         "conflict_recovery": "Xử lý xung đột",
         "import_preview": "Xem trước nhập",
+        "upload_preview": "Xem trước tải lên",
         "rollback_preview": "Xem trước hoàn tác",
         "rollback_backups": "Bản sao lưu hoàn tác",
         "sync_history": "Lịch sử đồng bộ",
@@ -304,6 +305,7 @@
         "rename": "Đổi tên",
         "blocked_description": "Các thay đổi từ xa mới hơn lần đồng bộ gần nhất của bạn trong khi các thay đổi cục bộ vẫn đang chờ xử lý. Hãy kiểm tra lại từ xa, tải xuống trước hoặc buộc ghi đè.",
         "details_title": "Chi tiết xung đột",
+        "plain_summary": "Dữ liệu từ xa đã được {{remoteDevice}} thay đổi lúc {{remoteTime}}. Lần tải lên cục bộ gần nhất là {{localTime}}; tải lên bây giờ có thể ghi đè các thay đổi từ xa đó.",
         "detail_recommendation": "Hãy tải xuống và xem trước snapshot từ xa trước khi tải lên lại. Chỉ buộc ghi đè sau khi đã kiểm tra các thay đổi cục bộ."
       },
       "common": {
@@ -409,6 +411,7 @@
       "preview": {
         "summary_header": "Tóm tắt xem trước từ xa",
         "apply_plan_title": "Kế hoạch áp dụng",
+        "upload_scope_title": "Phạm vi tải lên",
         "item_count": "{{count}} mục",
         "connection_count": "Kết nối",
         "total_forwards": "Chuyển tiếp",
@@ -452,7 +455,10 @@
         "record_replace": "{{name}}: thay thế kết nối cục bộ hiện có {{target}}",
         "record_merge": "{{name}}: gộp vào kết nối cục bộ hiện có {{target}}",
         "sensitive_credentials_label": "Thông tin xác thực nhạy cảm",
-        "toggle_sensitive_credentials": "Nhập thông tin xác thực nhạy cảm ({{count}})"
+        "toggle_sensitive_credentials": "Nhập thông tin xác thực nhạy cảm ({{count}})",
+        "sensitive_summary_title": "Thông tin xác thực nhạy cảm",
+        "sensitive_remote_summary": "Thông tin xác thực từ xa đã mã hóa gồm {{connections}} bản ghi kết nối và {{portableSecrets}} bí mật di động. Giá trị luôn được ẩn.",
+        "sensitive_upload_summary": "Sẽ tải lên {{passwords}} mật khẩu, {{keyPassphrases}} mật khẩu khóa, {{managedKeys}} khóa được quản lý, {{managedKeyPassphrases}} mật khẩu khóa được quản lý và {{portableSecrets}} bí mật di động."
       },
       "confirm": {
         "import_title": "Nhập ảnh chụp từ xa?",
@@ -532,6 +538,50 @@
         "remote_removed_by_scope": "bị loại bởi phạm vi",
         "remote_excluded": "bị loại trừ",
         "remote_unknown": "không rõ"
+      },
+      "field_diff": {
+        "title": "Khác biệt trường",
+        "status_added": "Thêm mới",
+        "status_modified": "Đã sửa",
+        "status_deleted": "Đã xóa",
+        "field_change": "{{field}}: {{before}} → {{after}}",
+        "item_action_meta": "{{section}} · {{status}}",
+        "empty_value": "trống",
+        "redacted": "đã ẩn"
+      },
+      "diff_fields": {
+        "name": "Tên",
+        "group": "Nhóm",
+        "host": "Máy chủ",
+        "port": "Cổng",
+        "username": "Tên người dùng",
+        "auth_type": "Kiểu xác thực",
+        "key_path": "Đường dẫn khóa",
+        "cert_path": "Đường dẫn chứng chỉ",
+        "managed_key": "Khóa được quản lý",
+        "proxy_chain": "Chuỗi proxy",
+        "agent_forwarding": "Chuyển tiếp agent",
+        "post_connect_command": "Lệnh sau khi kết nối",
+        "color": "Màu",
+        "tags": "Thẻ",
+        "forward_type": "Kiểu chuyển tiếp",
+        "bind_address": "Địa chỉ lắng nghe",
+        "bind_port": "Cổng lắng nghe",
+        "target_host": "Máy chủ đích",
+        "target_port": "Cổng đích",
+        "description": "Mô tả",
+        "auto_start": "Tự động khởi động",
+        "command": "Lệnh",
+        "category": "Danh mục",
+        "host_pattern": "Mẫu máy chủ",
+        "port_path": "Đường dẫn cổng serial",
+        "baud_rate": "Tốc độ baud",
+        "data_bits": "Bit dữ liệu",
+        "stop_bits": "Bit dừng",
+        "parity": "Chẵn lẻ",
+        "flow_control": "Điều khiển luồng",
+        "connect_on_open": "Kết nối khi mở",
+        "setting_field": "Trường cài đặt"
       }
     },
     "refresh": "Làm mới",

@@ -12,10 +12,10 @@ use std::{collections::BTreeMap, sync::mpsc::Sender};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use chrono::Utc;
 use oxideterm_cloud_sync::{
-    CloudSyncSettings, MAX_ROLLBACK_BACKUP_BYTES,
+    CloudSyncSettings, MAX_ROLLBACK_BACKUP_BYTES, StructuredSectionRevisions,
     operation::{
         ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, CloudSyncOperationService,
-        LegacyPreview, UploadOptions, UploadOutcome,
+        LegacyPreview, StructuredPreview, UploadOptions, UploadOutcome,
     },
     progress::{CloudSyncProgress, CloudSyncProgressSink, CloudSyncProgressStage},
     secrets::{
@@ -47,6 +47,7 @@ pub enum CloudSyncDelivery {
         action: CloudSyncUploadActionResult,
         automatic: bool,
     },
+    UploadPreviewFinished(CloudSyncActionResult<CloudSyncPendingPreview>),
     PullPreviewFinished(CloudSyncActionResult<CloudSyncPendingPreview>),
     RestoreBackupPreviewFinished(CloudSyncActionResult<CloudSyncPendingPreview>),
     ApplyPreviewFinished(CloudSyncActionResult<CloudSyncApplyUiOutcome>),
@@ -157,12 +158,13 @@ pub async fn deliver_cloud_sync_upload(
     });
 }
 
-pub async fn deliver_cloud_sync_pull_preview(
+pub async fn deliver_cloud_sync_upload_preview(
     tx: Sender<CloudSyncDelivery>,
     service: CloudSyncOperationService,
     connection_store: ConnectionStore,
     settings: CloudSyncSettings,
     hints: BTreeMap<String, bool>,
+    previous_remote_sections: Option<StructuredSectionRevisions>,
 ) {
     let mut provider = CloudSyncKeychainSecretProvider::new(hints);
     let progress_tx = tx.clone();
@@ -174,6 +176,55 @@ pub async fn deliver_cloud_sync_pull_preview(
             &connection_store,
             &settings,
             &mut provider,
+            previous_remote_sections.as_ref(),
+            Some(&mut progress),
+        )
+        .await
+    {
+        Ok(Some(preview)) => Ok(CloudSyncPendingPreview::Structured(preview)),
+        Ok(None) => service
+            .pull_legacy_preview(
+                &connection_store,
+                &settings,
+                &mut provider,
+                settings.default_conflict_strategy.clone(),
+                Some(&mut progress),
+            )
+            .await
+            .map(|preview| CloudSyncPendingPreview::Legacy {
+                preview,
+                source: CloudSyncPreviewSource::Remote,
+            }),
+        Err(error) => Err(error),
+    }
+    .map_err(|error| error.to_string());
+    send_action_result(
+        tx,
+        CloudSyncDelivery::UploadPreviewFinished,
+        result,
+        &provider,
+    );
+}
+
+pub async fn deliver_cloud_sync_pull_preview(
+    tx: Sender<CloudSyncDelivery>,
+    service: CloudSyncOperationService,
+    connection_store: ConnectionStore,
+    settings: CloudSyncSettings,
+    hints: BTreeMap<String, bool>,
+    previous_remote_sections: Option<StructuredSectionRevisions>,
+) {
+    let mut provider = CloudSyncKeychainSecretProvider::new(hints);
+    let progress_tx = tx.clone();
+    let mut progress = move |progress| {
+        let _ = progress_tx.send(CloudSyncDelivery::Progress(progress));
+    };
+    let result = match service
+        .pull_structured_preview(
+            &connection_store,
+            &settings,
+            &mut provider,
+            previous_remote_sections.as_ref(),
             Some(&mut progress),
         )
         .await
@@ -334,23 +385,26 @@ pub async fn deliver_cloud_sync_apply_preview(
         });
     };
     let result = match preview {
-        CloudSyncPendingPreview::Structured(preview) => service
-            .apply_structured_preview(
-                &mut connection_store,
-                &forwarding_registry,
-                &mut settings_store,
-                &settings,
-                preview,
-                selection.structured_selection(),
-                selection.conflict_strategy.clone(),
-                sync_password.as_ref().map(|password| password.as_str()),
-                Some(&mut apply_progress),
-            )
-            .map(|outcome| {
-                CloudSyncApplyOutcome::Structured(
-                    outcome.expect("cloud sync structured apply unexpectedly skipped"),
+        CloudSyncPendingPreview::Structured(mut preview) => {
+            filter_structured_preview_for_selection(&mut preview, &selection);
+            service
+                .apply_structured_preview(
+                    &mut connection_store,
+                    &forwarding_registry,
+                    &mut settings_store,
+                    &settings,
+                    preview,
+                    selection.structured_selection(),
+                    selection.conflict_strategy.clone(),
+                    sync_password.as_ref().map(|password| password.as_str()),
+                    Some(&mut apply_progress),
                 )
-            }),
+                .map(|outcome| {
+                    CloudSyncApplyOutcome::Structured(
+                        outcome.expect("cloud sync structured apply unexpectedly skipped"),
+                    )
+                })
+        }
         CloudSyncPendingPreview::Legacy { preview, source } => {
             let summary = cloud_sync_preview_summary(&CloudSyncPendingPreview::Legacy {
                 preview: preview.clone(),
@@ -388,6 +442,39 @@ pub async fn deliver_cloud_sync_apply_preview(
         result,
         &provider,
     );
+}
+
+fn filter_structured_preview_for_selection(
+    preview: &mut StructuredPreview,
+    selection: &CloudSyncPreviewSelection,
+) {
+    // Apply only selected structured records while preserving the downloaded preview metadata.
+    if let Some(snapshot) = preview.connections_snapshot.as_mut() {
+        snapshot
+            .records
+            .retain(|record| selection.selected_connection_ids.contains(&record.id));
+    }
+    if let Some(snapshot) = preview.forwards_snapshot.as_mut() {
+        snapshot
+            .records
+            .retain(|record| selection.selected_forward_ids.contains(&record.id));
+    }
+    if let Some(json) = preview.quick_commands_snapshot_json.as_mut()
+        && let Ok(mut snapshot) =
+            serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(json)
+    {
+        snapshot
+            .commands
+            .retain(|command| selection.selected_quick_command_ids.contains(&command.id));
+        if let Ok(next_json) = serde_json::to_string(&snapshot) {
+            *json = next_json;
+        }
+    }
+    if let Some(snapshot) = preview.serial_profiles_snapshot.as_mut() {
+        snapshot
+            .records
+            .retain(|profile| selection.selected_serial_profile_ids.contains(&profile.id));
+    }
 }
 
 fn read_apply_sync_password(
