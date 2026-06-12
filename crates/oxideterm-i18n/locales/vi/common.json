@@ -174,7 +174,8 @@
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
         "git": "Kho Git",
-        "s3": "Tương thích S3"
+        "s3": "Tương thích S3",
+        "github_gist": "GitHub Gist"
       },
       "status": {
         "ready": "Sẵn sàng đồng bộ",
@@ -199,7 +200,8 @@
         "clear_secret": "Xóa thông tin đã lưu",
         "save_settings": "Lưu cài đặt",
         "saving": "Đang lưu...",
-        "enable_sensitive_sync": "Bật đồng bộ nhạy cảm"
+        "enable_sensitive_sync": "Bật đồng bộ nhạy cảm",
+        "github_oauth_login": "Đăng nhập GitHub"
       },
       "fields": {
         "backend": "Backend",
@@ -259,7 +261,8 @@
         "webdav_example_password": "Mật khẩu ứng dụng bên thứ ba của Jianguoyun",
         "http_json_example_endpoint": "https://example.com/oxideterm-sync",
         "http_json_example_namespace": "personal",
-        "webdav_duplicate_warning": "Không đặt cùng đường dẫn thư mục trong cả Endpoint và Namespace. Nếu Endpoint đã kết thúc bằng thư mục đồng bộ, hãy sử dụng Namespace khác thay vì lặp lại cùng đường dẫn."
+        "webdav_duplicate_warning": "Không đặt cùng đường dẫn thư mục trong cả Endpoint và Namespace. Nếu Endpoint đã kết thúc bằng thư mục đồng bộ, hãy sử dụng Namespace khác thay vì lặp lại cùng đường dẫn.",
+        "backend_github_gist": "GitHub Gist lưu các đối tượng đồng bộ OxideTerm dưới dạng tệp đã mã hóa trong một Gist riêng tư có sẵn hoặc được tạo tự động. Nhập ID Gist hoặc để trống để tạo khi tải lên lần đầu; dùng GitHub token có quyền gist, hoặc đăng nhập bằng OAuth Client ID đã cấu hình."
       },
       "settings": {
         "backend_type": "Loại backend",
@@ -291,7 +294,10 @@
         "sync_app_settings": "Đồng bộ cài đặt ứng dụng",
         "include_local_terminal_env_vars": "Bao gồm biến môi trường terminal cục bộ",
         "sync_plugin_settings": "Đồng bộ cài đặt plugin",
-        "sync_sensitive_credentials": "Đồng bộ thông tin xác thực nhạy cảm"
+        "sync_sensitive_credentials": "Đồng bộ thông tin xác thực nhạy cảm",
+        "gist_id": "ID Gist",
+        "github_access_token": "Token truy cập GitHub",
+        "github_oauth_client_id": "GitHub OAuth Client ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -337,7 +343,8 @@
         "secrets_leave_blank": "Các trường bí mật hiển thị trống khi tải. Để trống để giữ nguyên giá trị đã lưu, hoặc nhập giá trị mới để thay thế bí mật đã lưu.",
         "backend_dropbox": "Dropbox sử dụng trường namespace làm đường dẫn thư mục và yêu cầu token truy cập ứng dụng.",
         "backend_git": "Git sử dụng endpoint tương thích với GitHub Contents API. Đặt Endpoint là gốc API, Repository là owner/repo, Branch là nhánh đích và Namespace là đường dẫn thư mục tùy chọn bên trong kho lưu trữ.",
-        "backend_s3": "S3 Compatible sử dụng endpoint làm gốc dịch vụ, bucket làm bộ chứa và namespace làm tiền tố đối tượng tùy chọn."
+        "backend_s3": "S3 Compatible sử dụng endpoint làm gốc dịch vụ, bucket làm bộ chứa và namespace làm tiền tố đối tượng tùy chọn.",
+        "backend_github_gist": "GitHub Gist lưu các đối tượng đồng bộ OxideTerm dưới dạng tệp đã mã hóa trong một Gist hiện có. Nhập ID Gist và GitHub token có quyền gist; Namespace được dùng làm tiền tố tên tệp."
       },
       "backup": {
         "description": "Bản sao lưu khôi phục Oxide Cloud Sync",
@@ -372,7 +379,18 @@
         "secret_unlock_required": "Các bí mật đồng bộ đã lưu cần được mở khóa một lần bằng thao tác thủ công trước khi tải lên tự động có thể tiếp tục.",
         "secret_access_cancelled": "Truy cập chuỗi khóa đã bị hủy. Thử lại thao tác và phê duyệt Touch ID hoặc xác thực hệ thống.",
         "secret_access_failed": "Không thể đọc bí mật đã lưu từ bộ nhớ bảo mật.",
-        "preflight_failed": "Kiểm tra sơ bộ xuất khẩu thất bại. Kiểm tra xem tất cả tài liệu mật mã cần thiết có sẵn không."
+        "preflight_failed": "Kiểm tra sơ bộ xuất khẩu thất bại. Kiểm tra xem tất cả tài liệu mật mã cần thiết có sẵn không.",
+        "missing_gist_id": "Cấu hình ID GitHub Gist trước khi đồng bộ.",
+        "missing_github_oauth_client_id": "Hãy cấu hình GitHub OAuth Client ID trước khi bắt đầu đăng nhập thiết bị.",
+        "github_gist_bad_credentials": "GitHub đã từ chối Gist token. Hãy đăng nhập lại hoặc cung cấp token hợp lệ.",
+        "github_gist_missing_scope": "GitHub token thiếu quyền gist hoặc không thể truy cập Gist này.",
+        "github_gist_rate_limited": "Đã chạm giới hạn tốc độ của GitHub. Hãy chờ một lát rồi thử lại.",
+        "github_oauth_expired": "Đăng nhập thiết bị GitHub đã hết hạn. Hãy bắt đầu lại.",
+        "github_oauth_denied": "Đăng nhập thiết bị GitHub đã bị từ chối.",
+        "github_oauth_bad_client": "GitHub OAuth Client ID không hợp lệ hoặc ứng dụng chưa bật device flow.",
+        "github_oauth_start_failed": "GitHub đã từ chối yêu cầu đăng nhập thiết bị.",
+        "github_oauth_poll_failed": "GitHub đã từ chối yêu cầu thăm dò đăng nhập thiết bị.",
+        "github_oauth_empty_response": "GitHub không trả về access token."
       },
       "toast": {
         "check_failed_title": "Kiểm tra từ xa thất bại",
@@ -390,7 +408,11 @@
         "restore_success_description": "Đã nhập {{imported}} mục, gộp {{merged}} mục từ bản sao lưu khôi phục.",
         "restore_failed_title": "Khôi phục thất bại",
         "settings_saved_title": "Đã lưu cài đặt đồng bộ đám mây",
-        "settings_saved_failed_title": "Không thể lưu cài đặt đồng bộ đám mây"
+        "settings_saved_failed_title": "Không thể lưu cài đặt đồng bộ đám mây",
+        "github_oauth_code_title": "Đã bắt đầu đăng nhập GitHub",
+        "github_oauth_code_description": "Nhập mã {{code}} tại {{url}} trong vòng {{seconds}} giây. Trang xác minh đã được mở.",
+        "github_oauth_success_title": "Đã lưu GitHub token",
+        "github_oauth_failed_title": "Đăng nhập GitHub thất bại"
       },
       "progress": {
         "checking": "Đang kiểm tra ảnh chụp từ xa",
@@ -489,7 +511,10 @@
         "git_access_token": "GitHub PAT hoặc token nội dung tương thích",
         "access_key_id": "Access key ID",
         "secret_access_key": "Secret access key",
-        "session_token": "Token phiên tùy chọn"
+        "session_token": "Token phiên tùy chọn",
+        "gist_id": "ID Gist hoặc https://gist.github.com/...",
+        "github_access_token": "GitHub token có quyền gist",
+        "github_oauth_client_id": "OAuth App client ID cho đăng nhập thiết bị"
       },
       "history_empty": "Chưa có lịch sử đồng bộ.",
       "native_description": "Đồng bộ tự lưu trữ được mã hóa cho OxideTerm.",

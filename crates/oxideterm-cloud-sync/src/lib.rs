@@ -121,6 +121,7 @@ pub enum BackendType {
     Webdav,
     HttpJson,
     Dropbox,
+    GithubGist,
     S3,
     Git,
 }
@@ -165,6 +166,8 @@ pub struct CloudSyncSettings {
     #[serde(default = "default_git_branch")]
     pub git_branch: String,
     #[serde(default)]
+    pub github_oauth_client_id: String,
+    #[serde(default)]
     pub auto_upload_enabled: bool,
     #[serde(default = "default_auto_upload_interval_mins")]
     pub auto_upload_interval_mins: f64,
@@ -183,6 +186,7 @@ impl Default for CloudSyncSettings {
             s3_region: default_s3_region(),
             git_repository: String::new(),
             git_branch: default_git_branch(),
+            github_oauth_client_id: String::new(),
             auto_upload_enabled: false,
             auto_upload_interval_mins: default_auto_upload_interval_mins(),
             default_conflict_strategy: ConflictStrategy::default(),

@@ -49,7 +49,7 @@ pub fn cloud_sync_config_rows(
     if backend_uses_auth_mode(backend) {
         rows.push(CloudSyncConfigRow::AuthModeSelect);
     }
-    if !matches!(backend, BackendType::Dropbox) {
+    if !matches!(backend, BackendType::Dropbox | BackendType::GithubGist) {
         rows.push(CloudSyncConfigRow::Text(CloudSyncTextFieldSpec {
             label_key: "plugin.cloud_sync.settings.endpoint",
             input: SettingsInput::CloudSyncEndpoint,
@@ -72,6 +72,20 @@ pub fn cloud_sync_config_rows(
                 label_key: "plugin.cloud_sync.settings.git_branch",
                 input: SettingsInput::CloudSyncGitBranch,
                 placeholder_key: "plugin.cloud_sync.placeholders.git_branch",
+            }),
+        ]);
+    }
+    if matches!(backend, BackendType::GithubGist) {
+        rows.extend([
+            CloudSyncConfigRow::Text(CloudSyncTextFieldSpec {
+                label_key: "plugin.cloud_sync.settings.gist_id",
+                input: SettingsInput::CloudSyncGitRepository,
+                placeholder_key: "plugin.cloud_sync.placeholders.gist_id",
+            }),
+            CloudSyncConfigRow::Text(CloudSyncTextFieldSpec {
+                label_key: "plugin.cloud_sync.settings.github_oauth_client_id",
+                input: SettingsInput::CloudSyncGithubOauthClientId,
+                placeholder_key: "plugin.cloud_sync.placeholders.github_oauth_client_id",
             }),
         ]);
     }
@@ -99,9 +113,9 @@ pub fn cloud_sync_config_rows(
     }
     if backend_uses_git_token(backend) {
         rows.push(CloudSyncConfigRow::Secret(CloudSyncSecretFieldSpec {
-            label_key: "plugin.cloud_sync.settings.git_access_token",
+            label_key: cloud_sync_git_token_label_key(backend),
             input: SettingsInput::CloudSyncGitToken,
-            placeholder_key: "plugin.cloud_sync.placeholders.git_access_token",
+            placeholder_key: cloud_sync_git_token_placeholder_key(backend),
             secret_key: secret_keys::GIT_TOKEN,
         }));
     }
@@ -165,6 +179,7 @@ pub fn cloud_sync_endpoint_placeholder_key(backend: &BackendType) -> &'static st
     match backend {
         BackendType::S3 => "plugin.cloud_sync.placeholders.endpoint_s3",
         BackendType::Git => "plugin.cloud_sync.placeholders.endpoint_git",
+        BackendType::GithubGist => "plugin.cloud_sync.placeholders.endpoint_git",
         BackendType::HttpJson => "plugin.cloud_sync.placeholders.endpoint_http_json",
         BackendType::Dropbox => "plugin.cloud_sync.placeholders.endpoint_http_json",
         BackendType::Webdav => "plugin.cloud_sync.placeholders.endpoint_webdav",
@@ -172,7 +187,10 @@ pub fn cloud_sync_endpoint_placeholder_key(backend: &BackendType) -> &'static st
 }
 
 pub fn cloud_sync_namespace_label_key(backend: &BackendType) -> &'static str {
-    if matches!(backend, BackendType::Dropbox | BackendType::Git) {
+    if matches!(
+        backend,
+        BackendType::Dropbox | BackendType::Git | BackendType::GithubGist
+    ) {
         "plugin.cloud_sync.settings.path_prefix"
     } else if matches!(backend, BackendType::S3) {
         "plugin.cloud_sync.settings.object_prefix"
@@ -186,5 +204,21 @@ pub fn cloud_sync_token_label_key(backend: &BackendType) -> &'static str {
         "plugin.cloud_sync.settings.access_token"
     } else {
         "plugin.cloud_sync.settings.token"
+    }
+}
+
+pub fn cloud_sync_git_token_label_key(backend: &BackendType) -> &'static str {
+    if matches!(backend, BackendType::GithubGist) {
+        "plugin.cloud_sync.settings.github_access_token"
+    } else {
+        "plugin.cloud_sync.settings.git_access_token"
+    }
+}
+
+pub fn cloud_sync_git_token_placeholder_key(backend: &BackendType) -> &'static str {
+    if matches!(backend, BackendType::GithubGist) {
+        "plugin.cloud_sync.placeholders.github_access_token"
+    } else {
+        "plugin.cloud_sync.placeholders.git_access_token"
     }
 }

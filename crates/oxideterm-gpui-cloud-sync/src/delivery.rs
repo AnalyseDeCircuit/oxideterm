@@ -7,17 +7,23 @@
 //! request/response glue between the Cloud Sync service, local stores, rollback
 //! backup encoding, keychain hints, and UI delivery messages.
 
-use std::{collections::BTreeMap, sync::mpsc::Sender};
+use std::{
+    collections::BTreeMap,
+    sync::mpsc::Sender,
+    time::{Duration, Instant},
+};
 
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use chrono::Utc;
 use oxideterm_cloud_sync::{
     CloudSyncSettings, MAX_ROLLBACK_BACKUP_BYTES, StructuredSectionRevisions,
+    backend::{CloudSyncBackend, GithubDeviceTokenPoll},
     operation::{
         ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, CloudSyncOperationService,
         LegacyPreview, StructuredPreview, UploadOptions, UploadOutcome,
     },
     progress::{CloudSyncProgress, CloudSyncProgressSink, CloudSyncProgressStage},
+    secret_keys,
     secrets::{
         CloudSyncKeychainSecretProvider, CloudSyncSecretValue, SecretReadMode, get_action_secrets,
     },
@@ -51,12 +57,21 @@ pub enum CloudSyncDelivery {
     PullPreviewFinished(CloudSyncActionResult<CloudSyncPendingPreview>),
     RestoreBackupPreviewFinished(CloudSyncActionResult<CloudSyncPendingPreview>),
     ApplyPreviewFinished(CloudSyncActionResult<CloudSyncApplyUiOutcome>),
+    GithubOauthCode(GithubOauthDevicePrompt),
+    GithubOauthFinished(CloudSyncActionResult<()>),
 }
 
 #[derive(Debug)]
 pub struct CloudSyncActionResult<T> {
     pub result: Result<T, String>,
     pub secret_hints: BTreeMap<String, bool>,
+}
+
+#[derive(Debug)]
+pub struct GithubOauthDevicePrompt {
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in: u64,
 }
 
 #[derive(Debug)]
@@ -108,6 +123,58 @@ pub async fn deliver_cloud_sync_check(
         .await
         .map_err(|error| error.to_string());
     send_action_result(tx, CloudSyncDelivery::CheckFinished, result, &provider);
+}
+
+pub async fn deliver_cloud_sync_github_oauth(
+    tx: Sender<CloudSyncDelivery>,
+    client_id: String,
+    hints: BTreeMap<String, bool>,
+) {
+    let mut provider = CloudSyncKeychainSecretProvider::new(hints);
+    let backend = CloudSyncBackend::new();
+    let result = async {
+        let device = backend.start_github_device_flow(&client_id).await?;
+        let _ = tx.send(CloudSyncDelivery::GithubOauthCode(
+            GithubOauthDevicePrompt {
+                user_code: device.user_code.clone(),
+                verification_uri: device.verification_uri.clone(),
+                expires_in: device.expires_in,
+            },
+        ));
+        let deadline = Instant::now() + Duration::from_secs(device.expires_in);
+        let mut interval = device.interval.max(1);
+        loop {
+            if Instant::now() >= deadline {
+                anyhow::bail!("github_oauth_expired: GitHub device code expired");
+            }
+            tokio::time::sleep(Duration::from_secs(interval)).await;
+            match backend
+                .poll_github_device_flow(&client_id, &device.device_code, interval)
+                .await?
+            {
+                GithubDeviceTokenPoll::Pending { interval: next } => {
+                    interval = next.max(1);
+                }
+                GithubDeviceTokenPoll::SlowDown { interval: next } => {
+                    interval = next.max(1);
+                }
+                GithubDeviceTokenPoll::Token { access_token } => {
+                    // Store the zeroizing OAuth token at the keychain boundary;
+                    // never echo it back to the UI or progress messages.
+                    provider.store_secret(secret_keys::GIT_TOKEN, Some(access_token.as_str()))?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+    .await
+    .map_err(|error: anyhow::Error| error.to_string());
+    send_action_result(
+        tx,
+        CloudSyncDelivery::GithubOauthFinished,
+        result,
+        &provider,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

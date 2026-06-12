@@ -174,7 +174,8 @@
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
         "git": "Git 儲存庫",
-        "s3": "S3 相容物件儲存"
+        "s3": "S3 相容物件儲存",
+        "github_gist": "GitHub Gist"
       },
       "status": {
         "ready": "同步就緒",
@@ -199,7 +200,8 @@
         "clear_secret": "清除已儲存值",
         "save_settings": "儲存設定",
         "saving": "儲存中...",
-        "enable_sensitive_sync": "啟用敏感同步"
+        "enable_sensitive_sync": "啟用敏感同步",
+        "github_oauth_login": "GitHub 登入"
       },
       "fields": {
         "backend": "後端類型",
@@ -259,7 +261,8 @@
         "webdav_example_password": "堅果雲第三方應用程式密碼",
         "http_json_example_endpoint": "https://example.com/oxideterm-sync",
         "http_json_example_namespace": "personal",
-        "webdav_duplicate_warning": "不要把同一個目錄路徑同時寫進 Endpoint 和命名空間。如果 Endpoint 已經以同步目錄結尾，就不要在命名空間裡再重複同一路徑。"
+        "webdav_duplicate_warning": "不要把同一個目錄路徑同時寫進 Endpoint 和命名空間。如果 Endpoint 已經以同步目錄結尾，就不要在命名空間裡再重複同一路徑。",
+        "backend_github_gist": "GitHub Gist 會把 OxideTerm 同步物件作為編碼後的檔案存放在既有或自動建立的私有 Gist 中。可以填入 Gist ID，也可以留空並在首次上傳時自動建立；請提供具 gist 權限的 GitHub token，或設定 OAuth Client ID 後登入。"
       },
       "settings": {
         "backend_type": "後端類型",
@@ -291,7 +294,10 @@
         "sync_app_settings": "同步應用程式設定",
         "include_local_terminal_env_vars": "包含本機終端環境變數",
         "sync_plugin_settings": "同步外掛設定",
-        "sync_sensitive_credentials": "同步敏感憑證"
+        "sync_sensitive_credentials": "同步敏感憑證",
+        "gist_id": "Gist ID",
+        "github_access_token": "GitHub 存取權杖",
+        "github_oauth_client_id": "GitHub OAuth Client ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -337,7 +343,8 @@
         "secrets_leave_blank": "面板載入時不會主動回填 secret。保持為空表示沿用已儲存的值，輸入新值則會取代已儲存的 secret。",
         "backend_dropbox": "Dropbox 會把命名空間欄位當作資料夾路徑使用，並要求提供應用程式存取權杖。",
         "backend_git": "Git 後端使用相容 GitHub Contents API 的介面。Endpoint 填 API 根網址，儲存庫填 owner/repo，分支填目標分支，命名空間則作為儲存庫內的選用資料夾前綴。",
-        "backend_s3": "S3 相容後端會把 Endpoint 當作服務根網址，Bucket 當作容器，命名空間則作為選用物件前綴。"
+        "backend_s3": "S3 相容後端會把 Endpoint 當作服務根網址，Bucket 當作容器，命名空間則作為選用物件前綴。",
+        "backend_github_gist": "GitHub Gist 會把 OxideTerm 同步物件作為編碼後的檔案存放在既有 Gist 中。填入 Gist ID，並提供具 gist 權限的 GitHub token；命名空間會作為檔名前綴使用。"
       },
       "backup": {
         "description": "Oxide 雲端同步回滾備份",
@@ -372,7 +379,18 @@
         "secret_unlock_required": "自動上傳繼續前，需要先透過一次手動操作解鎖已儲存的同步 secret。",
         "secret_access_cancelled": "存取系統鑰匙圈時被取消。請重試該操作，並完成 Touch ID 或系統驗證。",
         "secret_access_failed": "讀取安全儲存中的 secret 失敗。",
-        "preflight_failed": "匯出預檢查失敗，請先確認所有必需的 key material 都可用。"
+        "preflight_failed": "匯出預檢查失敗，請先確認所有必需的 key material 都可用。",
+        "missing_gist_id": "請先設定 GitHub Gist ID，再執行同步。",
+        "missing_github_oauth_client_id": "請先設定 GitHub OAuth Client ID，再啟動裝置登入。",
+        "github_gist_bad_credentials": "GitHub 拒絕了 Gist token。請重新登入或提供有效 token。",
+        "github_gist_missing_scope": "GitHub token 缺少 gist 權限，或該 token 無法存取此 Gist。",
+        "github_gist_rate_limited": "已觸發 GitHub 速率限制。請稍後再試。",
+        "github_oauth_expired": "GitHub 裝置登入已過期。請重新開始登入。",
+        "github_oauth_denied": "GitHub 裝置登入已被拒絕。",
+        "github_oauth_bad_client": "GitHub OAuth Client ID 無效，或該應用程式未啟用裝置流程。",
+        "github_oauth_start_failed": "GitHub 拒絕了裝置登入請求。",
+        "github_oauth_poll_failed": "GitHub 拒絕了裝置登入輪詢請求。",
+        "github_oauth_empty_response": "GitHub 沒有回傳存取權杖。"
       },
       "toast": {
         "check_failed_title": "檢查遠端失敗",
@@ -390,7 +408,11 @@
         "restore_success_description": "已從回滾備份匯入 {{imported}} 項，合併 {{merged}} 項。",
         "restore_failed_title": "還原失敗",
         "settings_saved_title": "雲端同步設定已儲存",
-        "settings_saved_failed_title": "儲存雲端同步設定失敗"
+        "settings_saved_failed_title": "儲存雲端同步設定失敗",
+        "github_oauth_code_title": "GitHub 登入已開始",
+        "github_oauth_code_description": "請在 {{seconds}} 秒內到 {{url}} 輸入代碼 {{code}}。驗證頁面已開啟。",
+        "github_oauth_success_title": "GitHub token 已儲存",
+        "github_oauth_failed_title": "GitHub 登入失敗"
       },
       "progress": {
         "checking": "正在檢查遠端快照",
@@ -489,7 +511,10 @@
         "git_access_token": "GitHub PAT 或相容的 contents token",
         "access_key_id": "Access Key ID",
         "secret_access_key": "Secret Access Key",
-        "session_token": "選用的 Session Token"
+        "session_token": "選用的 Session Token",
+        "gist_id": "Gist ID 或 https://gist.github.com/...",
+        "github_access_token": "具 gist 權限的 GitHub token",
+        "github_oauth_client_id": "用於裝置登入的 OAuth App client ID"
       },
       "history_empty": "尚無同步記錄。",
       "native_description": "用於 OxideTerm 的加密自託管同步。",

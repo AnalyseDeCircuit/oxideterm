@@ -72,6 +72,10 @@ pub fn cloud_sync_guide_spec(backend_type: &BackendType) -> CloudSyncGuideSpec {
             "plugin.cloud_sync.backend.dropbox",
             "plugin.cloud_sync.notes.backend_dropbox",
         ),
+        BackendType::GithubGist => backend_notes_spec(
+            "plugin.cloud_sync.backend.github_gist",
+            "plugin.cloud_sync.notes.backend_github_gist",
+        ),
         BackendType::Git => backend_notes_spec(
             "plugin.cloud_sync.backend.git",
             "plugin.cloud_sync.notes.backend_git",

@@ -345,6 +345,7 @@ mod tests {
             etag: Some("etag-2".to_string()),
             local_snapshot: snapshot,
             manifest,
+            created_remote_id: None,
         };
         let mut state = CloudSyncPersistedState {
             status: CloudSyncStatus::Conflict,

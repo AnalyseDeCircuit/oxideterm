@@ -166,7 +166,8 @@
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
         "git": "Git Repository",
-        "s3": "S3 Compatible"
+        "s3": "S3 Compatible",
+        "github_gist": "GitHub Gist"
       },
       "status": {
         "ready": "Sync Ready",
@@ -191,7 +192,8 @@
         "clear_secret": "Clear Stored",
         "save_settings": "Save Settings",
         "saving": "Saving...",
-        "enable_sensitive_sync": "Enable Sensitive Sync"
+        "enable_sensitive_sync": "Enable Sensitive Sync",
+        "github_oauth_login": "GitHub Login"
       },
       "fields": {
         "backend": "Backend",
@@ -251,7 +253,8 @@
         "webdav_example_password": "Jianguoyun third-party app password",
         "http_json_example_endpoint": "https://example.com/oxideterm-sync",
         "http_json_example_namespace": "personal",
-        "webdav_duplicate_warning": "Do not put the same folder path in both Endpoint and Namespace. If Endpoint already ends with your sync folder, keep Namespace unique instead of duplicating the same path."
+        "webdav_duplicate_warning": "Do not put the same folder path in both Endpoint and Namespace. If Endpoint already ends with your sync folder, keep Namespace unique instead of duplicating the same path.",
+        "backend_github_gist": "GitHub Gist stores OxideTerm sync objects as encoded files inside an existing or automatically created private Gist. Paste a Gist ID or leave it empty for the first upload to create one; use a GitHub token with gist access, or sign in with a configured OAuth client ID."
       },
       "settings": {
         "backend_type": "Backend Type",
@@ -283,7 +286,10 @@
         "sync_app_settings": "Sync application settings",
         "include_local_terminal_env_vars": "Include local terminal environment variables",
         "sync_plugin_settings": "Sync plugin settings",
-        "sync_sensitive_credentials": "Sync sensitive credentials"
+        "sync_sensitive_credentials": "Sync sensitive credentials",
+        "gist_id": "Gist ID",
+        "github_access_token": "GitHub Access Token",
+        "github_oauth_client_id": "GitHub OAuth Client ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -329,7 +335,8 @@
         "secrets_leave_blank": "Secret fields stay blank on load. Leave them blank to keep stored values unchanged, or enter a new value to replace the stored secret.",
         "backend_dropbox": "Dropbox uses the namespace field as a folder path and requires an app access token.",
         "backend_git": "Git uses a GitHub Contents API compatible endpoint. Set Endpoint to your API root, Repository to owner/repo, Branch to the target branch, and Namespace as an optional folder path inside the repository.",
-        "backend_s3": "S3 Compatible uses the endpoint as the service root, bucket as the container, and namespace as an optional object prefix."
+        "backend_s3": "S3 Compatible uses the endpoint as the service root, bucket as the container, and namespace as an optional object prefix.",
+        "backend_github_gist": "GitHub Gist stores OxideTerm sync objects as encoded files inside an existing Gist. Paste the Gist ID and a GitHub token with gist access; Namespace is used as a filename prefix."
       },
       "backup": {
         "description": "Oxide Cloud Sync rollback backup",
@@ -364,7 +371,18 @@
         "secret_unlock_required": "Stored sync secrets need to be unlocked once with a manual action before auto upload can continue.",
         "secret_access_cancelled": "Keychain access was canceled. Retry the action and approve Touch ID or system authentication.",
         "secret_access_failed": "Failed to read the stored secret from secure storage.",
-        "preflight_failed": "Export preflight failed. Check whether all required key material is available."
+        "preflight_failed": "Export preflight failed. Check whether all required key material is available.",
+        "missing_gist_id": "Configure the GitHub Gist ID before syncing.",
+        "missing_github_oauth_client_id": "Configure a GitHub OAuth client ID before starting device login.",
+        "github_gist_bad_credentials": "GitHub rejected the Gist token. Sign in again or provide a valid token.",
+        "github_gist_missing_scope": "GitHub token is missing gist permission, or the token cannot access this Gist.",
+        "github_gist_rate_limited": "GitHub rate limit was reached. Wait a moment and try again.",
+        "github_oauth_expired": "GitHub device login expired. Start login again.",
+        "github_oauth_denied": "GitHub device login was denied.",
+        "github_oauth_bad_client": "GitHub OAuth client ID is invalid or device flow is not enabled for that app.",
+        "github_oauth_start_failed": "GitHub rejected the device login request.",
+        "github_oauth_poll_failed": "GitHub rejected the device login polling request.",
+        "github_oauth_empty_response": "GitHub did not return an access token."
       },
       "toast": {
         "check_failed_title": "Remote check failed",
@@ -382,7 +400,11 @@
         "restore_success_description": "Imported {{imported}} items, merged {{merged}} items from the rollback backup.",
         "restore_failed_title": "Restore failed",
         "settings_saved_title": "Cloud sync settings saved",
-        "settings_saved_failed_title": "Failed to save cloud sync settings"
+        "settings_saved_failed_title": "Failed to save cloud sync settings",
+        "github_oauth_code_title": "GitHub login started",
+        "github_oauth_code_description": "Enter code {{code}} at {{url}} within {{seconds}} seconds. The verification page has been opened.",
+        "github_oauth_success_title": "GitHub token saved",
+        "github_oauth_failed_title": "GitHub login failed"
       },
       "progress": {
         "checking": "Checking remote snapshot",
@@ -481,7 +503,10 @@
         "git_access_token": "GitHub PAT or compatible contents token",
         "access_key_id": "Access key ID",
         "secret_access_key": "Secret access key",
-        "session_token": "Optional session token"
+        "session_token": "Optional session token",
+        "gist_id": "Gist ID or https://gist.github.com/...",
+        "github_access_token": "GitHub token with gist access",
+        "github_oauth_client_id": "OAuth App client ID for device login"
       },
       "native_description": "Encrypted self-hosted sync for OxideTerm.",
       "native_service_pending": "The built-in sync service is being connected to the compatibility layer.",

@@ -63,12 +63,12 @@ use oxideterm_gpui_cloud_sync::{
     cloud_sync_status_row, cloud_sync_toggle, cloud_sync_toggle_grid, cloud_sync_upload_diff_items,
     cloud_sync_upload_field_diff_items, cloud_sync_value_prefers_mono,
     cloud_sync_version_info_rows, deliver_cloud_sync_apply_preview, deliver_cloud_sync_check,
-    deliver_cloud_sync_pull_preview, deliver_cloud_sync_restore_backup_preview,
-    deliver_cloud_sync_upload, deliver_cloud_sync_upload_preview,
-    finish_cloud_sync_automatic_upload_error_state, finish_cloud_sync_check_state,
-    finish_cloud_sync_error_state, finish_cloud_sync_pull_preview_state,
-    finish_cloud_sync_upload_state, finish_legacy_cloud_sync_apply_state,
-    finish_structured_cloud_sync_apply_state,
+    deliver_cloud_sync_github_oauth, deliver_cloud_sync_pull_preview,
+    deliver_cloud_sync_restore_backup_preview, deliver_cloud_sync_upload,
+    deliver_cloud_sync_upload_preview, finish_cloud_sync_automatic_upload_error_state,
+    finish_cloud_sync_check_state, finish_cloud_sync_error_state,
+    finish_cloud_sync_pull_preview_state, finish_cloud_sync_upload_state,
+    finish_legacy_cloud_sync_apply_state, finish_structured_cloud_sync_apply_state,
     handle_cloud_sync_select_key as reduce_cloud_sync_select_key,
     normalize_cloud_sync_interval_draft, persist_remote_metadata, reset_cloud_sync_secret_drafts,
     store_cloud_sync_touched_secrets,
@@ -559,6 +559,8 @@ impl WorkspaceApp {
             .map(cloud_sync_format_timestamp)
             .unwrap_or_else(|| "—".to_string());
         let has_rollback_backup = !state.rollback_backups.is_empty();
+        let show_github_oauth = matches!(settings.backend_type, BackendType::GithubGist);
+        let github_oauth_disabled = busy || settings.github_oauth_client_id.trim().is_empty();
 
         let mut card = self
             .cloud_sync_plugin_card(has_background)
@@ -616,6 +618,24 @@ impl WorkspaceApp {
                             .items_center()
                             .justify_end()
                             .gap(px(8.0))
+                            .when(show_github_oauth, |toolbar| {
+                                toolbar.child(self.render_cloud_sync_toolbar_button(
+                                    LucideIcon::KeyRound,
+                                    "plugin.cloud_sync.actions.github_oauth_login",
+                                    CloudSyncActionTone::Muted,
+                                    github_oauth_disabled,
+                                    cx.listener(
+                                        |this: &mut WorkspaceApp,
+                                         _event,
+                                         _window,
+                                         cx: &mut Context<WorkspaceApp>| {
+                                            this.start_cloud_sync_github_oauth(cx);
+                                            this.clear_cloud_sync_select_focus();
+                                            cx.stop_propagation();
+                                        },
+                                    ),
+                                ))
+                            })
                             .child(self.render_cloud_sync_toolbar_button(
                                 LucideIcon::Upload,
                                 "plugin.cloud_sync.actions.upload_now",
@@ -3528,7 +3548,10 @@ impl WorkspaceApp {
                 self.cloud_sync_form.backend_type = backend.clone();
                 if matches!(backend, BackendType::Dropbox) {
                     self.cloud_sync_form.auth_mode = AuthMode::Bearer;
-                } else if matches!(backend, BackendType::Git | BackendType::S3) {
+                } else if matches!(
+                    backend,
+                    BackendType::GithubGist | BackendType::Git | BackendType::S3
+                ) {
                     self.cloud_sync_form.auth_mode = AuthMode::None;
                 }
                 CloudSyncSelect::Backend
@@ -4012,6 +4035,39 @@ impl WorkspaceApp {
         self.start_cloud_sync_check_with_options(false, cx);
     }
 
+    fn start_cloud_sync_github_oauth(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_sync_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress();
+            return;
+        }
+        self.save_cloud_sync_configuration(cx);
+        let client_id = self
+            .cloud_sync_store
+            .state()
+            .settings
+            .github_oauth_client_id
+            .trim()
+            .to_string();
+        if client_id.is_empty() {
+            self.finish_cloud_sync_error(
+                "github_oauth",
+                "missing_github_oauth_client_id: GitHub OAuth client ID is not configured"
+                    .to_string(),
+            );
+            return;
+        }
+        self.cloud_sync_store.state_mut().status = CloudSyncStatus::Checking;
+        self.cloud_sync_store.state_mut().last_error = None;
+        self.save_cloud_sync_state();
+        let hints = self.cloud_sync_store.state().secret_hints.clone();
+        let (tx, rx) = mpsc::channel();
+        self.cloud_sync_rx = Some(rx);
+        self.cloud_sync_active_action = Some("github_oauth");
+        self.schedule_cloud_sync_poll(cx);
+        self.forwarding_runtime
+            .spawn(deliver_cloud_sync_github_oauth(tx, client_id, hints));
+    }
+
     fn start_cloud_sync_check_with_options(&mut self, skip_if_busy: bool, cx: &mut Context<Self>) {
         if self.cloud_sync_rx.is_some() {
             if !skip_if_busy {
@@ -4135,6 +4191,20 @@ impl WorkspaceApp {
     fn start_cloud_sync_upload_preview(&mut self, cx: &mut Context<Self>) {
         if self.cloud_sync_rx.is_some() {
             self.mark_cloud_sync_operation_in_progress();
+            return;
+        }
+        if matches!(
+            self.cloud_sync_store.state().settings.backend_type,
+            BackendType::GithubGist
+        ) && self
+            .cloud_sync_store
+            .state()
+            .settings
+            .git_repository
+            .trim()
+            .is_empty()
+        {
+            self.start_cloud_sync_upload_with_options(false, false, false, cx);
             return;
         }
         self.cloud_sync_store.state_mut().status = CloudSyncStatus::Checking;
@@ -4482,6 +4552,29 @@ impl WorkspaceApp {
                     Err(error) => self.finish_cloud_sync_error("apply", error),
                 }
             }
+            CloudSyncDelivery::GithubOauthCode(prompt) => {
+                cx.open_url(&prompt.verification_uri);
+                self.push_cloud_sync_toast(
+                    self.i18n
+                        .t("plugin.cloud_sync.toast.github_oauth_code_title"),
+                    Some(self.i18n_replace(
+                        "plugin.cloud_sync.toast.github_oauth_code_description",
+                        &[
+                            ("code", prompt.user_code),
+                            ("url", prompt.verification_uri),
+                            ("seconds", prompt.expires_in.to_string()),
+                        ],
+                    )),
+                    TerminalNoticeVariant::Default,
+                );
+            }
+            CloudSyncDelivery::GithubOauthFinished(action) => {
+                self.cloud_sync_store.state_mut().secret_hints = action.secret_hints;
+                match action.result {
+                    Ok(()) => self.finish_cloud_sync_github_oauth(),
+                    Err(error) => self.finish_cloud_sync_error("github_oauth", error),
+                }
+            }
         }
     }
 
@@ -4528,6 +4621,10 @@ impl WorkspaceApp {
     }
 
     fn finish_cloud_sync_upload(&mut self, outcome: UploadOutcome, automatic: bool) {
+        if let Some(gist_id) = outcome.created_remote_id.as_ref() {
+            self.cloud_sync_store.state_mut().settings.git_repository = gist_id.clone();
+            self.cloud_sync_form.git_repository = gist_id.clone();
+        }
         let revision = finish_cloud_sync_upload_state(self.cloud_sync_store.state_mut(), &outcome);
         self.cloud_sync_progress = None;
         self.cloud_sync_pending_preview = None;
@@ -4541,6 +4638,21 @@ impl WorkspaceApp {
                 TerminalNoticeVariant::Success,
             );
         }
+    }
+
+    fn finish_cloud_sync_github_oauth(&mut self) {
+        self.cloud_sync_progress = None;
+        self.cloud_sync_form.git_token.clear();
+        self.cloud_sync_form.git_token_touched = false;
+        self.cloud_sync_store.state_mut().last_error = None;
+        self.cloud_sync_store.state_mut().status = CloudSyncStatus::Idle;
+        self.save_cloud_sync_state();
+        self.push_cloud_sync_toast(
+            self.i18n
+                .t("plugin.cloud_sync.toast.github_oauth_success_title"),
+            None,
+            TerminalNoticeVariant::Success,
+        );
     }
 
     fn finish_cloud_sync_automatic_upload_error(&mut self, error: String) {
@@ -4837,6 +4949,7 @@ impl WorkspaceApp {
                     "plugin.cloud_sync.toast.pull_failed_title"
                 },
             ),
+            "github_oauth" => Some("plugin.cloud_sync.toast.github_oauth_failed_title"),
             _ => None,
         };
         if let Some(title_key) = title_key {

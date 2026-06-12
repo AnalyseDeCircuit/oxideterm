@@ -174,7 +174,8 @@
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
         "git": "Dépôt Git",
-        "s3": "Compatible S3"
+        "s3": "Compatible S3",
+        "github_gist": "GitHub Gist"
       },
       "status": {
         "ready": "Synchronisation prête",
@@ -199,7 +200,8 @@
         "clear_secret": "Effacer la valeur stockée",
         "save_settings": "Enregistrer les paramètres",
         "saving": "Enregistrement…",
-        "enable_sensitive_sync": "Activer la synchro sensible"
+        "enable_sensitive_sync": "Activer la synchro sensible",
+        "github_oauth_login": "Connexion GitHub"
       },
       "fields": {
         "backend": "Backend",
@@ -259,7 +261,8 @@
         "webdav_example_password": "Mot de passe d'application tierce Jianguoyun",
         "http_json_example_endpoint": "https://example.com/oxideterm-sync",
         "http_json_example_namespace": "personal",
-        "webdav_duplicate_warning": "Ne mettez pas le même chemin de dossier dans le Endpoint et le Namespace. Si le Endpoint se termine déjà par votre dossier de synchronisation, choisissez un Namespace différent au lieu de dupliquer le même chemin."
+        "webdav_duplicate_warning": "Ne mettez pas le même chemin de dossier dans le Endpoint et le Namespace. Si le Endpoint se termine déjà par votre dossier de synchronisation, choisissez un Namespace différent au lieu de dupliquer le même chemin.",
+        "backend_github_gist": "GitHub Gist stocke les objets de synchronisation OxideTerm comme fichiers encodés dans un Gist privé existant ou créé automatiquement. Saisissez un ID de Gist ou laissez-le vide pour le créer au premier envoi ; utilisez un token GitHub avec accès gist, ou connectez-vous avec un OAuth Client ID configuré."
       },
       "settings": {
         "backend_type": "Type de backend",
@@ -291,7 +294,10 @@
         "sync_app_settings": "Synchroniser les paramètres de l’application",
         "include_local_terminal_env_vars": "Inclure les variables d’environnement du terminal local",
         "sync_plugin_settings": "Synchroniser les paramètres de plugin",
-        "sync_sensitive_credentials": "Synchroniser les identifiants sensibles"
+        "sync_sensitive_credentials": "Synchroniser les identifiants sensibles",
+        "gist_id": "ID du Gist",
+        "github_access_token": "Jeton d’accès GitHub",
+        "github_oauth_client_id": "GitHub OAuth Client ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -337,7 +343,8 @@
         "secrets_leave_blank": "Les champs secrets restent vides au chargement. Laissez-les vides pour conserver les valeurs stockées, ou saisissez une nouvelle valeur pour remplacer le secret stocké.",
         "backend_dropbox": "Dropbox utilise le champ Namespace comme chemin de dossier et nécessite un jeton d'accès d'application.",
         "backend_git": "Git utilise un endpoint compatible avec l'API GitHub Contents. Définissez le Endpoint sur la racine de votre API, le dépôt sur owner/repo, la branche sur la branche cible et le Namespace comme chemin de dossier optionnel dans le dépôt.",
-        "backend_s3": "S3 Compatible utilise le Endpoint comme racine du service, le Bucket comme conteneur et le Namespace comme préfixe d'objet optionnel."
+        "backend_s3": "S3 Compatible utilise le Endpoint comme racine du service, le Bucket comme conteneur et le Namespace comme préfixe d'objet optionnel.",
+        "backend_github_gist": "GitHub Gist stocke les objets de synchronisation OxideTerm comme fichiers encodés dans un Gist existant. Indiquez l’ID du Gist et un token GitHub avec accès gist ; le Namespace sert de préfixe de nom de fichier."
       },
       "backup": {
         "description": "Sauvegarde de restauration Oxide Cloud Sync",
@@ -372,7 +379,18 @@
         "secret_unlock_required": "Les secrets de synchronisation stockés doivent être déverrouillés une fois par une action manuelle avant que l'envoi automatique puisse continuer.",
         "secret_access_cancelled": "L'accès au trousseau a été annulé. Réessayez l'action et approuvez Touch ID ou l'authentification système.",
         "secret_access_failed": "Impossible de lire le secret stocké depuis le stockage sécurisé.",
-        "preflight_failed": "La vérification préalable à l'export a échoué. Vérifiez que tout le matériel cryptographique requis est disponible."
+        "preflight_failed": "La vérification préalable à l'export a échoué. Vérifiez que tout le matériel cryptographique requis est disponible.",
+        "missing_gist_id": "Configurez l’ID GitHub Gist avant de synchroniser.",
+        "missing_github_oauth_client_id": "Configurez un GitHub OAuth Client ID avant de lancer la connexion appareil.",
+        "github_gist_bad_credentials": "GitHub a refusé le token Gist. Reconnectez-vous ou fournissez un token valide.",
+        "github_gist_missing_scope": "Le token GitHub n’a pas la permission gist, ou ne peut pas accéder à ce Gist.",
+        "github_gist_rate_limited": "La limite de débit GitHub est atteinte. Attendez un moment puis réessayez.",
+        "github_oauth_expired": "La connexion appareil GitHub a expiré. Relancez la connexion.",
+        "github_oauth_denied": "La connexion appareil GitHub a été refusée.",
+        "github_oauth_bad_client": "Le GitHub OAuth Client ID est invalide, ou le flux appareil n’est pas activé pour cette application.",
+        "github_oauth_start_failed": "GitHub a refusé la demande de connexion appareil.",
+        "github_oauth_poll_failed": "GitHub a refusé la requête de suivi de connexion appareil.",
+        "github_oauth_empty_response": "GitHub n’a pas renvoyé de token d’accès."
       },
       "toast": {
         "check_failed_title": "Échec de la vérification distante",
@@ -390,7 +408,11 @@
         "restore_success_description": "{{imported}} éléments importés, {{merged}} éléments fusionnés depuis la sauvegarde de restauration.",
         "restore_failed_title": "Échec de la restauration",
         "settings_saved_title": "Paramètres Cloud Sync enregistrés",
-        "settings_saved_failed_title": "Impossible d'enregistrer les paramètres Cloud Sync"
+        "settings_saved_failed_title": "Impossible d'enregistrer les paramètres Cloud Sync",
+        "github_oauth_code_title": "Connexion GitHub lancée",
+        "github_oauth_code_description": "Saisissez le code {{code}} sur {{url}} dans les {{seconds}} secondes. La page de vérification a été ouverte.",
+        "github_oauth_success_title": "Token GitHub enregistré",
+        "github_oauth_failed_title": "Échec de la connexion GitHub"
       },
       "progress": {
         "checking": "Vérification du snapshot distant",
@@ -489,7 +511,10 @@
         "git_access_token": "PAT GitHub ou jeton Contents compatible",
         "access_key_id": "Access Key ID",
         "secret_access_key": "Secret Access Key",
-        "session_token": "Session Token optionnel"
+        "session_token": "Session Token optionnel",
+        "gist_id": "ID du Gist ou https://gist.github.com/...",
+        "github_access_token": "Token GitHub avec accès gist",
+        "github_oauth_client_id": "OAuth App client ID pour la connexion appareil"
       },
       "history_empty": "Aucun historique de synchronisation pour le moment.",
       "native_description": "Synchronisation chiffrée auto-hébergée pour OxideTerm.",

@@ -99,6 +99,11 @@ pub fn run(command: CloudSyncCommand) -> CliResult<()> {
                     configure_backend(CloudSyncBackendArg::Webdav, args)
                 }
             },
+            CloudSyncBackendAction::GithubGist(command) => match command.action {
+                CloudSyncBackendConfigureAction::Configure(args) => {
+                    configure_backend(CloudSyncBackendArg::GithubGist, args)
+                }
+            },
             CloudSyncBackendAction::S3(command) => match command.action {
                 CloudSyncBackendConfigureAction::Configure(args) => {
                     configure_backend(CloudSyncBackendArg::S3, args)
@@ -184,7 +189,9 @@ fn validate_backend_configure_args(
             "--git-repository is required for Git backend configuration",
             args.write.json,
         ),
-        CloudSyncBackendArg::HttpJson | CloudSyncBackendArg::Dropbox => Ok(()),
+        CloudSyncBackendArg::HttpJson
+        | CloudSyncBackendArg::Dropbox
+        | CloudSyncBackendArg::GithubGist => Ok(()),
     }
 }
 
@@ -238,6 +245,7 @@ fn apply_configure_args(settings: &mut CloudSyncSettings, args: &CloudSyncConfig
             CloudSyncBackendArg::Webdav => BackendType::Webdav,
             CloudSyncBackendArg::HttpJson => BackendType::HttpJson,
             CloudSyncBackendArg::Dropbox => BackendType::Dropbox,
+            CloudSyncBackendArg::GithubGist => BackendType::GithubGist,
             CloudSyncBackendArg::S3 => BackendType::S3,
             CloudSyncBackendArg::Git => BackendType::Git,
         };
@@ -255,6 +263,10 @@ fn apply_configure_args(settings: &mut CloudSyncSettings, args: &CloudSyncConfig
     assign_optional_string(&mut settings.s3_region, &args.s3_region);
     assign_optional_string(&mut settings.git_repository, &args.git_repository);
     assign_optional_string(&mut settings.git_branch, &args.git_branch);
+    assign_optional_string(
+        &mut settings.github_oauth_client_id,
+        &args.github_oauth_client_id,
+    );
     if let Some(enabled) = args.auto_upload_enabled {
         settings.auto_upload_enabled = enabled;
     }
@@ -350,6 +362,12 @@ fn cloud_sync_configure_changes(
         "gitBranch",
         before.git_branch.clone(),
         after.git_branch.clone(),
+    );
+    push_configure_change(
+        &mut changes,
+        "githubOauthClientId",
+        before.github_oauth_client_id.clone(),
+        after.github_oauth_client_id.clone(),
     );
     push_configure_change(
         &mut changes,
@@ -530,6 +548,9 @@ mod tests {
             summary: oxideterm_cloud_sync::state::CloudSyncHistorySummary {
                 connections: 2,
                 forwards: 1,
+                quick_commands: 0,
+                serial_profiles: 0,
+                sensitive_credentials: 0,
                 has_app_settings: true,
                 plugin_settings_count: 3,
             },

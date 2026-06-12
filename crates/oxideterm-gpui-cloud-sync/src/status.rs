@@ -5,7 +5,9 @@
 
 use oxideterm_cloud_sync::{
     BackendType, CloudSyncStatus, RawSyncScope, normalize_sync_scope, secret_keys,
-    secrets::{backend_uses_basic, backend_uses_s3_credentials, backend_uses_token},
+    secrets::{
+        backend_uses_basic, backend_uses_git_token, backend_uses_s3_credentials, backend_uses_token,
+    },
     state::CloudSyncPersistedState,
 };
 use oxideterm_settings_model::CloudSyncFormDraft;
@@ -265,6 +267,7 @@ fn sync_scope_health_item(raw_scope: &RawSyncScope) -> CloudSyncHealthItem {
 fn required_backend_text_fields_present(form: &CloudSyncFormDraft) -> bool {
     match form.backend_type {
         BackendType::Dropbox => true,
+        BackendType::GithubGist => true,
         BackendType::Git => has_text(&form.git_repository),
         BackendType::S3 => {
             has_text(&form.endpoint) && has_text(&form.s3_bucket) && has_text(&form.s3_region)
@@ -279,6 +282,11 @@ fn required_backend_secrets_present(
 ) -> bool {
     if backend_uses_token(&form.backend_type, &form.auth_mode)
         && !secret_present(state, secret_keys::TOKEN, &form.token)
+    {
+        return false;
+    }
+    if backend_uses_git_token(&form.backend_type)
+        && !secret_present(state, secret_keys::GIT_TOKEN, &form.git_token)
     {
         return false;
     }
@@ -453,6 +461,28 @@ mod tests {
         }));
         assert!(items.iter().any(|item| {
             item.label_key == "plugin.cloud_sync.health.remote_check"
+                && item.status == CloudSyncHealthStatus::Pass
+        }));
+    }
+
+    #[test]
+    fn health_items_allow_empty_gist_id_for_first_upload_creation() {
+        let mut settings = CloudSyncSettings::default();
+        settings.backend_type = BackendType::GithubGist;
+        settings.git_repository.clear();
+        let form = CloudSyncFormDraft::from_settings(&settings);
+        let mut state = CloudSyncPersistedState::default();
+        state
+            .secret_hints
+            .insert(secret_keys::GIT_TOKEN.to_string(), true);
+        state
+            .secret_hints
+            .insert(secret_keys::SYNC_PASSWORD.to_string(), true);
+
+        let items = cloud_sync_health_items(&form, &state);
+
+        assert!(items.iter().any(|item| {
+            item.label_key == "plugin.cloud_sync.health.backend_config"
                 && item.status == CloudSyncHealthStatus::Pass
         }));
     }

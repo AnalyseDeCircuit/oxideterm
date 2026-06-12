@@ -493,7 +493,7 @@ pub fn backend_uses_token(backend_type: &BackendType, auth_mode: &AuthMode) -> b
 }
 
 pub fn backend_uses_git_token(backend_type: &BackendType) -> bool {
-    matches!(backend_type, BackendType::Git)
+    matches!(backend_type, BackendType::Git | BackendType::GithubGist)
 }
 
 pub fn backend_uses_basic(backend_type: &BackendType, auth_mode: &AuthMode) -> bool {

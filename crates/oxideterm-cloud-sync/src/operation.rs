@@ -26,10 +26,11 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::{
-    CloudSyncSettings, ConflictStrategy, RawSyncScope, STRUCTURED_MANIFEST_CONTENT_TYPE,
-    STRUCTURED_MANIFEST_FORMAT, StructuredApplySelection, StructuredLocalState, StructuredManifest,
-    StructuredManifestSections, StructuredObjectEntry, StructuredSectionRevisions,
-    backend::{CloudSyncBackend, RemoteMetadata},
+    BackendType, CloudSyncSettings, ConflictStrategy, RawSyncScope,
+    STRUCTURED_MANIFEST_CONTENT_TYPE, STRUCTURED_MANIFEST_FORMAT, StructuredApplySelection,
+    StructuredLocalState, StructuredManifest, StructuredManifestSections, StructuredObjectEntry,
+    StructuredSectionRevisions,
+    backend::{CloudSyncBackend, RemoteMetadata, RemoteUploadObject},
     connections_object_path, forwards_object_path,
     progress::{
         CloudSyncProgressSink, CloudSyncProgressStage, report_fractional_progress, report_progress,
@@ -214,9 +215,23 @@ impl CloudSyncOperationService {
         let upload_units = export_units + 1;
         let total = 4 + export_units + upload_units;
         report_progress(progress, CloudSyncProgressStage::FetchMetadata, 1, total);
+        let mut effective_settings = settings.clone();
+        let created_remote_id = if matches!(settings.backend_type, BackendType::GithubGist)
+            && settings.git_repository.trim().is_empty()
+        {
+            let gist_id = self
+                .backend
+                .create_github_gist(&effective_settings, &secrets)
+                .await
+                .map_err(|error| upload_error_after_revision(error, options.revision_sequence))?;
+            effective_settings.git_repository = gist_id.clone();
+            Some(gist_id)
+        } else {
+            None
+        };
         let remote_metadata = self
             .backend
-            .fetch_remote_metadata(settings, &secrets)
+            .fetch_remote_metadata(&effective_settings, &secrets)
             .await?;
         if !options.force && remote_metadata.exists {
             if let Err(error) = ensure_no_remote_conflict(
@@ -283,37 +298,68 @@ impl CloudSyncOperationService {
             2 + export_units,
             total,
         );
-        for object in &plan.objects {
-            self.backend
-                .write_remote_object(
-                    settings,
+        let manifest_value = serde_json::to_value(&plan.manifest)
+            .map_err(|error| upload_error_after_revision(error, options.revision_sequence))?;
+        let metadata_write = if matches!(effective_settings.backend_type, BackendType::GithubGist) {
+            let objects = plan
+                .objects
+                .iter()
+                .map(|object| RemoteUploadObject {
+                    path: object.path.clone(),
+                    bytes: object.bytes.clone(),
+                })
+                .collect::<Vec<_>>();
+            let write = self
+                .backend
+                .write_gist_objects_and_metadata(
+                    &effective_settings,
                     &secrets,
-                    &object.path,
-                    object.bytes.clone(),
-                    Some(&object.content_type),
+                    &objects,
+                    &manifest_value,
+                    remote_metadata.etag.as_deref(),
                 )
                 .await
                 .map_err(|error| upload_error_after_revision(error, options.revision_sequence))?;
-            completed_uploads += 1;
+            completed_uploads += plan.objects.len();
             report_progress(
                 progress,
                 CloudSyncProgressStage::UploadingBlob,
                 2 + export_units + completed_uploads,
                 total,
             );
-        }
-
-        let metadata_write = self
-            .backend
-            .write_remote_metadata(
-                settings,
-                &secrets,
-                &serde_json::to_value(&plan.manifest).map_err(|error| {
-                    upload_error_after_revision(error, options.revision_sequence)
-                })?,
-            )
-            .await
-            .map_err(|error| upload_error_after_revision(error, options.revision_sequence))?;
+            write
+        } else {
+            for object in &plan.objects {
+                self.backend
+                    .write_remote_object(
+                        &effective_settings,
+                        &secrets,
+                        &object.path,
+                        object.bytes.clone(),
+                        Some(&object.content_type),
+                    )
+                    .await
+                    .map_err(|error| {
+                        upload_error_after_revision(error, options.revision_sequence)
+                    })?;
+                completed_uploads += 1;
+                report_progress(
+                    progress,
+                    CloudSyncProgressStage::UploadingBlob,
+                    2 + export_units + completed_uploads,
+                    total,
+                );
+            }
+            self.backend
+                .write_remote_metadata(
+                    &effective_settings,
+                    &secrets,
+                    &manifest_value,
+                    remote_metadata.etag.as_deref(),
+                )
+                .await
+                .map_err(|error| upload_error_after_revision(error, options.revision_sequence))?
+        };
         completed_uploads += 1;
         report_progress(
             progress,
@@ -329,6 +375,7 @@ impl CloudSyncOperationService {
             etag: metadata_write.etag,
             local_snapshot,
             manifest: plan.manifest,
+            created_remote_id,
         }))
     }
 
@@ -1448,6 +1495,7 @@ pub struct UploadOutcome {
     pub etag: Option<String>,
     pub local_snapshot: CloudSyncLocalSnapshot,
     pub manifest: crate::StructuredManifest,
+    pub created_remote_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]

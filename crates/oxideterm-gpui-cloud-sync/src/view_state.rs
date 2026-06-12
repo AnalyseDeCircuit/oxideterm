@@ -46,6 +46,7 @@ pub enum CloudSyncSelectLabelKey {
     BackendWebdav,
     BackendHttpJson,
     BackendDropbox,
+    BackendGithubGist,
     BackendGit,
     BackendS3,
     AuthBearer,
@@ -78,6 +79,10 @@ pub fn cloud_sync_select_options(
             (
                 BackendType::Dropbox,
                 CloudSyncSelectLabelKey::BackendDropbox,
+            ),
+            (
+                BackendType::GithubGist,
+                CloudSyncSelectLabelKey::BackendGithubGist,
             ),
             (BackendType::Git, CloudSyncSelectLabelKey::BackendGit),
             (BackendType::S3, CloudSyncSelectLabelKey::BackendS3),

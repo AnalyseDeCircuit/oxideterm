@@ -26,6 +26,7 @@ pub fn cloud_sync_backend_label_key(backend: &BackendType) -> &'static str {
         BackendType::Webdav => "plugin.cloud_sync.backend.webdav",
         BackendType::HttpJson => "plugin.cloud_sync.backend.http_json",
         BackendType::Dropbox => "plugin.cloud_sync.backend.dropbox",
+        BackendType::GithubGist => "plugin.cloud_sync.backend.github_gist",
         BackendType::S3 => "plugin.cloud_sync.backend.s3",
         BackendType::Git => "plugin.cloud_sync.backend.git",
     }
@@ -103,6 +104,9 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         "missing_backend_token" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_backend_token")
         }
+        "missing_github_oauth_client_id" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.missing_github_oauth_client_id",
+        ),
         "http_unauthorized" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.http_unauthorized")
         }
@@ -111,6 +115,36 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         }
         "missing_git_repository" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_git_repository")
+        }
+        "missing_gist_id" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_gist_id")
+        }
+        "github_gist_bad_credentials" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_gist_bad_credentials")
+        }
+        "github_gist_missing_scope" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_gist_missing_scope")
+        }
+        "github_gist_rate_limited" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_gist_rate_limited")
+        }
+        "github_oauth_expired" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_oauth_expired")
+        }
+        "github_oauth_denied" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_oauth_denied")
+        }
+        "github_oauth_bad_client" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_oauth_bad_client")
+        }
+        "github_oauth_start_failed" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_oauth_start_failed")
+        }
+        "github_oauth_poll_failed" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_oauth_poll_failed")
+        }
+        "github_oauth_empty_response" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_oauth_empty_response")
         }
         "missing_s3_bucket" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_s3_bucket")
@@ -198,6 +232,7 @@ pub fn cloud_sync_select_label_key(label: CloudSyncSelectLabelKey) -> &'static s
         CloudSyncSelectLabelKey::BackendWebdav => "plugin.cloud_sync.backend.webdav",
         CloudSyncSelectLabelKey::BackendHttpJson => "plugin.cloud_sync.backend.http_json",
         CloudSyncSelectLabelKey::BackendDropbox => "plugin.cloud_sync.backend.dropbox",
+        CloudSyncSelectLabelKey::BackendGithubGist => "plugin.cloud_sync.backend.github_gist",
         CloudSyncSelectLabelKey::BackendGit => "plugin.cloud_sync.backend.git",
         CloudSyncSelectLabelKey::BackendS3 => "plugin.cloud_sync.backend.s3",
         CloudSyncSelectLabelKey::AuthBearer => "plugin.cloud_sync.auth.bearer",

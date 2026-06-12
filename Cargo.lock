@@ -7625,6 +7625,7 @@ dependencies = [
  "oxideterm-settings-model",
  "oxideterm-theme",
  "serde_json",
+ "tokio",
  "uuid",
 ]
 

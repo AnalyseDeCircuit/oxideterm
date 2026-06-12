@@ -174,7 +174,8 @@
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
         "git": "Git リポジトリ",
-        "s3": "S3 互換ストレージ"
+        "s3": "S3 互換ストレージ",
+        "github_gist": "GitHub Gist"
       },
       "status": {
         "ready": "同期準備完了",
@@ -199,7 +200,8 @@
         "clear_secret": "保存済みの値を消去",
         "save_settings": "設定を保存",
         "saving": "保存中...",
-        "enable_sensitive_sync": "機密同期を有効化"
+        "enable_sensitive_sync": "機密同期を有効化",
+        "github_oauth_login": "GitHub ログイン"
       },
       "fields": {
         "backend": "バックエンド",
@@ -259,7 +261,8 @@
         "webdav_example_password": "坚果云のサードパーティアプリパスワード",
         "http_json_example_endpoint": "https://example.com/oxideterm-sync",
         "http_json_example_namespace": "personal",
-        "webdav_duplicate_warning": "同じフォルダパスを Endpoint と Namespace の両方に入力しないでください。Endpoint がすでに同期フォルダで終わっている場合は、Namespace に同じパスを繰り返さず、別の値を使ってください。"
+        "webdav_duplicate_warning": "同じフォルダパスを Endpoint と Namespace の両方に入力しないでください。Endpoint がすでに同期フォルダで終わっている場合は、Namespace に同じパスを繰り返さず、別の値を使ってください。",
+        "backend_github_gist": "GitHub Gist は、既存または自動作成された非公開 Gist 内に OxideTerm の同期オブジェクトをエンコード済みファイルとして保存します。Gist ID を入力するか、空のまま初回アップロードで作成できます。gist 権限を持つ GitHub token を使うか、OAuth Client ID を設定してログインしてください。"
       },
       "settings": {
         "backend_type": "バックエンドタイプ",
@@ -291,7 +294,10 @@
         "sync_app_settings": "アプリ設定を同期",
         "include_local_terminal_env_vars": "ローカル端末の環境変数を含める",
         "sync_plugin_settings": "プラグイン設定を同期",
-        "sync_sensitive_credentials": "機密資格情報を同期"
+        "sync_sensitive_credentials": "機密資格情報を同期",
+        "gist_id": "Gist ID",
+        "github_access_token": "GitHub アクセストークン",
+        "github_oauth_client_id": "GitHub OAuth Client ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -337,7 +343,8 @@
         "secrets_leave_blank": "パネル読み込み時にシークレットの値は自動入力されません。空欄のままにすると保存済みの値がそのまま使われ、新しい値を入力すると既存のシークレットが置き換わります。",
         "backend_dropbox": "Dropbox は Namespace フィールドをフォルダパスとして使用し、アプリアクセストークンが必要です。",
         "backend_git": "Git バックエンドは GitHub Contents API 互換のインターフェースを使用します。Endpoint に API ルートを、リポジトリに owner/repo を、ブランチにターゲットブランチを、Namespace にリポジトリ内の任意のフォルダパスを指定します。",
-        "backend_s3": "S3 互換バックエンドは、Endpoint をサービスルート、Bucket をコンテナ、Namespace をオプションのオブジェクトプレフィックスとして使用します。"
+        "backend_s3": "S3 互換バックエンドは、Endpoint をサービスルート、Bucket をコンテナ、Namespace をオプションのオブジェクトプレフィックスとして使用します。",
+        "backend_github_gist": "GitHub Gist は、既存の Gist 内に OxideTerm の同期オブジェクトをエンコード済みファイルとして保存します。Gist ID と gist 権限を持つ GitHub token を入力してください。Namespace はファイル名の接頭辞として使われます。"
       },
       "backup": {
         "description": "Oxide クラウド同期ロールバックバックアップ",
@@ -372,7 +379,18 @@
         "secret_unlock_required": "自動アップロードを続行するには、手動操作で保存済みの同期シークレットを一度ロック解除する必要があります。",
         "secret_access_cancelled": "キーチェーンへのアクセスがキャンセルされました。操作を再試行し、Touch ID またはシステム認証を承認してください。",
         "secret_access_failed": "セキュアストレージからシークレットの読み取りに失敗しました。",
-        "preflight_failed": "エクスポートの事前チェックに失敗しました。必要なすべてのキーマテリアルが利用可能か確認してください。"
+        "preflight_failed": "エクスポートの事前チェックに失敗しました。必要なすべてのキーマテリアルが利用可能か確認してください。",
+        "missing_gist_id": "同期する前に GitHub Gist ID を設定してください。",
+        "missing_github_oauth_client_id": "デバイスログインを開始する前に GitHub OAuth Client ID を設定してください。",
+        "github_gist_bad_credentials": "GitHub が Gist token を拒否しました。再ログインするか、有効な token を指定してください。",
+        "github_gist_missing_scope": "GitHub token に gist 権限がないか、この Gist へアクセスできません。",
+        "github_gist_rate_limited": "GitHub のレート制限に達しました。しばらく待ってから再試行してください。",
+        "github_oauth_expired": "GitHub デバイスログインの期限が切れました。もう一度開始してください。",
+        "github_oauth_denied": "GitHub デバイスログインが拒否されました。",
+        "github_oauth_bad_client": "GitHub OAuth Client ID が無効、またはそのアプリでデバイスフローが有効ではありません。",
+        "github_oauth_start_failed": "GitHub がデバイスログイン要求を拒否しました。",
+        "github_oauth_poll_failed": "GitHub がデバイスログインのポーリング要求を拒否しました。",
+        "github_oauth_empty_response": "GitHub がアクセストークンを返しませんでした。"
       },
       "toast": {
         "check_failed_title": "リモート確認失敗",
@@ -390,7 +408,11 @@
         "restore_success_description": "ロールバックバックアップから {{imported}} 件をインポート、{{merged}} 件をマージしました。",
         "restore_failed_title": "復元失敗",
         "settings_saved_title": "クラウド同期設定を保存しました",
-        "settings_saved_failed_title": "クラウド同期設定の保存に失敗しました"
+        "settings_saved_failed_title": "クラウド同期設定の保存に失敗しました",
+        "github_oauth_code_title": "GitHub ログインを開始しました",
+        "github_oauth_code_description": "{{seconds}} 秒以内に {{url}} でコード {{code}} を入力してください。確認ページを開きました。",
+        "github_oauth_success_title": "GitHub token を保存しました",
+        "github_oauth_failed_title": "GitHub ログインに失敗しました"
       },
       "progress": {
         "checking": "リモートスナップショットを確認中",
@@ -489,7 +511,10 @@
         "git_access_token": "GitHub PAT または互換の contents token",
         "access_key_id": "Access Key ID",
         "secret_access_key": "Secret Access Key",
-        "session_token": "オプションの Session Token"
+        "session_token": "オプションの Session Token",
+        "gist_id": "Gist ID または https://gist.github.com/...",
+        "github_access_token": "gist 権限を持つ GitHub token",
+        "github_oauth_client_id": "デバイスログイン用 OAuth App client ID"
       },
       "history_empty": "同期履歴はまだありません。",
       "native_description": "OxideTerm 向けの暗号化されたセルフホスト同期。",
