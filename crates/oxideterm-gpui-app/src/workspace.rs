@@ -236,7 +236,7 @@ const AI_MCP_SERVER_LIST_ESTIMATED_HEIGHT: f32 = 156.0;
 const AI_MCP_SERVER_LIST_OVERSCAN: usize = 4;
 const CLOUD_SYNC_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 7;
 const CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 240.0;
-const CLOUD_SYNC_SECTION_LIST_OVERSCAN: usize = 2;
+const CLOUD_SYNC_SECTION_LIST_OVERSCAN: usize = 1;
 const PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT: usize = 4;
 const PLUGIN_MANAGER_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 220.0;
 const PLUGIN_MANAGER_SECTION_LIST_OVERSCAN: usize = 1;
@@ -835,6 +835,8 @@ pub(crate) struct WorkspaceApp {
     cloud_sync_form: CloudSyncFormDraft,
     cloud_sync_section_list_state: ListState,
     cloud_sync_section_list_cache: RefCell<VirtualListSignatureCache>,
+    cloud_sync_local_snapshot_cache: RefCell<Option<cloud_sync::CloudSyncLocalSnapshotCache>>,
+    cloud_sync_upload_diff_cache: RefCell<Option<cloud_sync::CloudSyncUploadDiffCache>>,
     cloud_sync_rollback_backup_list_state: ListState,
     cloud_sync_rollback_backup_list_cache: RefCell<VirtualListSignatureCache>,
     cloud_sync_history_list_state: ListState,

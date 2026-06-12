@@ -645,9 +645,10 @@ impl WorkspaceApp {
                     CLOUD_SYNC_SECTION_LIST_OVERSCAN,
                 )
                 .overdraw(),
-            )
-            .measure_all(),
+            ),
             cloud_sync_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            cloud_sync_local_snapshot_cache: RefCell::new(None),
+            cloud_sync_upload_diff_cache: RefCell::new(None),
             // Cloud Sync rollback backups/history are nested record lists inside
             // the page sections; give each list its own state so they do not
             // share measurements with the outer section list.
@@ -659,8 +660,7 @@ impl WorkspaceApp {
                     CLOUD_SYNC_ROLLBACK_BACKUP_LIST_OVERSCAN,
                 )
                 .overdraw(),
-            )
-            .measure_all(),
+            ),
             cloud_sync_rollback_backup_list_cache: RefCell::new(
                 VirtualListSignatureCache::default(),
             ),
@@ -672,8 +672,7 @@ impl WorkspaceApp {
                     CLOUD_SYNC_HISTORY_LIST_OVERSCAN,
                 )
                 .overdraw(),
-            )
-            .measure_all(),
+            ),
             cloud_sync_history_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             cloud_sync_open_select: None,
             cloud_sync_focused_select: None,

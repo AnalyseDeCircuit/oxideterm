@@ -28,6 +28,7 @@ use oxideterm_theme::ThemeTokens;
 pub const CLOUD_SYNC_PANEL_PADDING: f32 = 16.0;
 pub const CLOUD_SYNC_GRID_GAP: f32 = 12.0;
 pub const CLOUD_SYNC_FORM_GRID_GAP: f32 = 14.0;
+pub const CLOUD_SYNC_FORM_FIELD_MIN_WIDTH: f32 = 320.0;
 pub const CLOUD_SYNC_STAT_PADDING: f32 = 10.0;
 pub const CLOUD_SYNC_SECTION_GAP: f32 = 14.0;
 pub const CLOUD_SYNC_TOGGLE_GRID_GAP: f32 = 8.0;
@@ -331,10 +332,17 @@ pub fn cloud_sync_form_grid(children: impl IntoIterator<Item = AnyElement>) -> A
             div()
                 .w_full()
                 .min_w(px(0.0))
-                .grid()
-                .grid_cols(2)
+                .flex()
+                .flex_wrap()
                 .gap(px(CLOUD_SYNC_FORM_GRID_GAP)),
-            |grid, child| grid.child(child),
+            |grid, child| {
+                grid.child(
+                    div()
+                        .min_w(px(CLOUD_SYNC_FORM_FIELD_MIN_WIDTH))
+                        .flex_1()
+                        .child(child),
+                )
+            },
         )
         .into_any_element()
 }
@@ -1077,9 +1085,12 @@ pub fn cloud_sync_select_trigger(
 ) -> AnyElement {
     select_inline_trigger_chrome(tokens, open, focused, focus_visible)
         .on_mouse_down(MouseButton::Left, listener)
-        .child(value)
+        // Match the shared SelectTrigger primitive: the value owns the flexible
+        // width and truncates instead of being measured at one-character width.
+        .child(div().flex_1().min_w(px(0.0)).truncate().child(value))
         .child(
             div()
+                .flex_shrink_0()
                 .text_size(px(tokens.metrics.ui_text_sm))
                 .text_color(rgb(tokens.ui.text_muted))
                 .child("⌄"),

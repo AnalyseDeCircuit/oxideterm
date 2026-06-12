@@ -19,25 +19,17 @@ pub fn cloud_sync_sections(
     state: &CloudSyncPersistedState,
     has_pending_preview: bool,
 ) -> Vec<CloudSyncSection> {
-    let mut sections = vec![
-        CloudSyncSection::Header,
-        CloudSyncSection::Guide,
-        CloudSyncSection::Status,
-        CloudSyncSection::Actions,
-    ];
+    let mut sections = vec![CloudSyncSection::Header, CloudSyncSection::Status];
     if has_pending_preview {
         sections.push(CloudSyncSection::Preview);
     }
+    sections.push(CloudSyncSection::Config);
     if !state.rollback_backups.is_empty() {
         sections.push(CloudSyncSection::Rollback);
     }
-    sections.extend([
-        CloudSyncSection::Config,
-        CloudSyncSection::Notes,
-        // History is retrospective information, so keep it after all active
-        // configuration, scope, preview, and safety notes sections.
-        CloudSyncSection::History,
-    ]);
+    // History is retrospective information, so keep it after all active
+    // configuration, scope, preview, and recovery sections.
+    sections.push(CloudSyncSection::History);
     sections
 }
 
@@ -176,11 +168,8 @@ mod tests {
             cloud_sync_sections(&state, false),
             vec![
                 CloudSyncSection::Header,
-                CloudSyncSection::Guide,
                 CloudSyncSection::Status,
-                CloudSyncSection::Actions,
                 CloudSyncSection::Config,
-                CloudSyncSection::Notes,
                 CloudSyncSection::History,
             ]
         );
@@ -198,13 +187,10 @@ mod tests {
             sections,
             vec![
                 CloudSyncSection::Header,
-                CloudSyncSection::Guide,
                 CloudSyncSection::Status,
-                CloudSyncSection::Actions,
                 CloudSyncSection::Preview,
-                CloudSyncSection::Rollback,
                 CloudSyncSection::Config,
-                CloudSyncSection::Notes,
+                CloudSyncSection::Rollback,
                 CloudSyncSection::History,
             ]
         );

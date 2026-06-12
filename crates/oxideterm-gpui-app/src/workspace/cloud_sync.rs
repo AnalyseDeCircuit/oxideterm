@@ -1,12 +1,18 @@
-use std::sync::mpsc::{self, TryRecvError};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    sync::mpsc::{self, TryRecvError},
+    time::UNIX_EPOCH,
+};
 
 use crate::workspace::ime::WorkspaceImeTarget;
 use chrono::Utc;
-use gpui::FontWeight;
 use gpui::prelude::*;
+use gpui::{Div, FontWeight, Rgba};
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,
-    OXIDE_APP_SETTINGS_SECTION_IDS, RawSyncScope, normalize_sync_scope,
+    OXIDE_APP_SETTINGS_SECTION_IDS, RawSyncScope, StructuredLocalState, StructuredSectionRevisions,
+    normalize_sync_scope,
     operation::{
         ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, LegacyPreview, UploadOptions,
         UploadOutcome,
@@ -32,40 +38,37 @@ use oxideterm_gpui_cloud_sync::{
     CloudSyncRemoteDiffStatus, CloudSyncRollbackBackupSummarySpec, CloudSyncSection,
     CloudSyncSectionDiffItem, CloudSyncSelectAction, CloudSyncSelectKeyEffect,
     CloudSyncSelectKeyState, CloudSyncSelectOption, CloudSyncUploadSelectionAction,
-    close_cloud_sync_select_on_container_scroll, cloud_sync_action_grid, cloud_sync_action_panel,
+    close_cloud_sync_select_on_container_scroll, cloud_sync_action_grid,
     cloud_sync_app_settings_section_label_key, cloud_sync_apply_diff_items,
-    cloud_sync_apply_field_diff_items, cloud_sync_backend_label_key, cloud_sync_card,
-    cloud_sync_check_row, cloud_sync_config_rows, cloud_sync_confirm_copy_spec,
-    cloud_sync_conflict_info, cloud_sync_coverage_model, cloud_sync_error_message_spec,
-    cloud_sync_error_view, cloud_sync_fact_card, cloud_sync_fact_grid, cloud_sync_field_row,
-    cloud_sync_focusable_selects, cloud_sync_form_grid, cloud_sync_format_timestamp,
-    cloud_sync_forward_detail_rows, cloud_sync_guide_card, cloud_sync_guide_spec,
-    cloud_sync_header, cloud_sync_health_items, cloud_sync_history_action_label_key,
-    cloud_sync_history_card, cloud_sync_history_empty, cloud_sync_history_entry,
+    cloud_sync_apply_field_diff_items, cloud_sync_backend_label_key, cloud_sync_check_row,
+    cloud_sync_config_rows, cloud_sync_confirm_copy_spec, cloud_sync_conflict_info,
+    cloud_sync_coverage_model, cloud_sync_error_message_spec, cloud_sync_error_view,
+    cloud_sync_fact_card, cloud_sync_fact_grid, cloud_sync_field_row, cloud_sync_focusable_selects,
+    cloud_sync_form_grid, cloud_sync_format_timestamp, cloud_sync_forward_detail_rows,
+    cloud_sync_guide_card, cloud_sync_guide_spec, cloud_sync_health_items,
+    cloud_sync_history_action_label_key, cloud_sync_history_empty, cloud_sync_history_entry,
     cloud_sync_history_signature, cloud_sync_inline_button_options, cloud_sync_legacy_apply_plan,
-    cloud_sync_list_item, cloud_sync_list_more, cloud_sync_main_action_grid, cloud_sync_meta_line,
-    cloud_sync_notes_card, cloud_sync_platform_label, cloud_sync_preview_block,
-    cloud_sync_preview_card, cloud_sync_preview_card_model, cloud_sync_preview_record_group_model,
-    cloud_sync_preview_record_label_key, cloud_sync_preview_summary,
-    cloud_sync_progress_stage_label_key, cloud_sync_progress_unit, cloud_sync_progress_view,
-    cloud_sync_rollback_backup_row, cloud_sync_rollback_backup_signature,
-    cloud_sync_rollback_backup_summary_spec, cloud_sync_secret_row, cloud_sync_section_item,
-    cloud_sync_section_signature, cloud_sync_section_title, cloud_sync_sections,
-    cloud_sync_select_field, cloud_sync_select_label_key, cloud_sync_select_menu,
-    cloud_sync_select_option, cloud_sync_select_options as cloud_sync_select_option_specs,
-    cloud_sync_select_trigger,
+    cloud_sync_list_item, cloud_sync_list_more, cloud_sync_meta_line, cloud_sync_platform_label,
+    cloud_sync_preview_block, cloud_sync_preview_card, cloud_sync_preview_card_model,
+    cloud_sync_preview_record_group_model, cloud_sync_preview_record_label_key,
+    cloud_sync_preview_summary, cloud_sync_progress_stage_label_key, cloud_sync_progress_unit,
+    cloud_sync_progress_view, cloud_sync_rollback_backup_row, cloud_sync_rollback_backup_signature,
+    cloud_sync_rollback_backup_summary_spec, cloud_sync_secret_row, cloud_sync_section_signature,
+    cloud_sync_section_title, cloud_sync_sections, cloud_sync_select_field,
+    cloud_sync_select_label_key, cloud_sync_select_menu, cloud_sync_select_option,
+    cloud_sync_select_options as cloud_sync_select_option_specs, cloud_sync_select_trigger,
     cloud_sync_selected_option_index as cloud_sync_selected_option_spec_index,
     cloud_sync_settings_from_form, cloud_sync_should_create_rollback_backup,
-    cloud_sync_sidebar_empty, cloud_sync_status_card, cloud_sync_status_label_key,
-    cloud_sync_status_list, cloud_sync_status_row, cloud_sync_toggle, cloud_sync_toggle_grid,
-    cloud_sync_upload_diff_items, cloud_sync_upload_field_diff_items,
-    cloud_sync_value_prefers_mono, cloud_sync_version_info_rows, deliver_cloud_sync_apply_preview,
-    deliver_cloud_sync_check, deliver_cloud_sync_pull_preview,
-    deliver_cloud_sync_restore_backup_preview, deliver_cloud_sync_upload,
-    deliver_cloud_sync_upload_preview, finish_cloud_sync_automatic_upload_error_state,
-    finish_cloud_sync_check_state, finish_cloud_sync_error_state,
-    finish_cloud_sync_pull_preview_state, finish_cloud_sync_upload_state,
-    finish_legacy_cloud_sync_apply_state, finish_structured_cloud_sync_apply_state,
+    cloud_sync_sidebar_empty, cloud_sync_status_label_key, cloud_sync_status_list,
+    cloud_sync_status_row, cloud_sync_toggle, cloud_sync_toggle_grid, cloud_sync_upload_diff_items,
+    cloud_sync_upload_field_diff_items, cloud_sync_value_prefers_mono,
+    cloud_sync_version_info_rows, deliver_cloud_sync_apply_preview, deliver_cloud_sync_check,
+    deliver_cloud_sync_pull_preview, deliver_cloud_sync_restore_backup_preview,
+    deliver_cloud_sync_upload, deliver_cloud_sync_upload_preview,
+    finish_cloud_sync_automatic_upload_error_state, finish_cloud_sync_check_state,
+    finish_cloud_sync_error_state, finish_cloud_sync_pull_preview_state,
+    finish_cloud_sync_upload_state, finish_legacy_cloud_sync_apply_state,
+    finish_structured_cloud_sync_apply_state,
     handle_cloud_sync_select_key as reduce_cloud_sync_select_key,
     normalize_cloud_sync_interval_draft, persist_remote_metadata, reset_cloud_sync_secret_drafts,
     store_cloud_sync_touched_secrets,
@@ -82,6 +85,18 @@ use super::quick_commands::QuickCommandImportStrategy;
 use super::*;
 
 mod confirm_dialog;
+
+#[derive(Clone)]
+pub(super) struct CloudSyncLocalSnapshotCache {
+    key: u64,
+    result: std::result::Result<CloudSyncLocalSnapshot, String>,
+}
+
+#[derive(Clone)]
+pub(super) struct CloudSyncUploadDiffCache {
+    key: u64,
+    items: Vec<CloudSyncSectionDiffItem>,
+}
 
 impl WorkspaceApp {
     pub(super) fn open_cloud_sync_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -141,6 +156,7 @@ impl WorkspaceApp {
         self.poll_cloud_sync_delivery(cx);
 
         let theme = self.tokens.ui;
+        let has_background = self.cloud_sync_has_background();
         self.sync_cloud_sync_section_list_state();
         let state = self.cloud_sync_section_list_state.clone();
         let spec = self.cloud_sync_section_list_spec();
@@ -154,7 +170,7 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }))
-            .bg(rgb(theme.bg))
+            .bg(cloud_sync_root_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .line_height(px(20.0))
@@ -187,6 +203,10 @@ impl WorkspaceApp {
             px(CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT),
             CLOUD_SYNC_SECTION_LIST_OVERSCAN,
         )
+    }
+
+    fn cloud_sync_has_background(&self) -> bool {
+        self.terminal_background_preferences("cloud_sync").is_some()
     }
 
     fn cloud_sync_sections(&self) -> Vec<CloudSyncSection> {
@@ -230,8 +250,35 @@ impl WorkspaceApp {
         let Some(section) = sections.get(index).copied() else {
             return div().into_any_element();
         };
-        let child = self.render_cloud_sync_section(section, cx);
-        cloud_sync_section_item(&self.tokens, index, sections.len(), child)
+        let padding = self.tokens.metrics.settings_content_padding;
+        let gap = self.tokens.metrics.settings_page_gap;
+        let outer_max_width = self.cloud_sync_content_outer_max_width();
+        let mut content = div()
+            .w_full()
+            .min_w(px(0.0))
+            .max_w(px(outer_max_width))
+            .px(px(padding))
+            .pb(px(gap));
+        if index == 0 {
+            content = content.pt(px(padding));
+        }
+        if index + 1 == sections.len() {
+            content = content.pb(px(padding));
+        }
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .justify_center()
+            .child(content.child(self.render_cloud_sync_section(section, cx)))
+            .into_any_element()
+    }
+
+    fn cloud_sync_content_outer_max_width(&self) -> f32 {
+        // Match the plugin manager's centered `max-w-4xl mx-auto p-10` rhythm.
+        // Virtual-list rows need the width plus external padding explicitly.
+        self.tokens.metrics.settings_content_max_width
+            + self.tokens.metrics.settings_content_padding * 2.0
     }
 
     fn render_cloud_sync_section(
@@ -241,13 +288,16 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let state = self.cloud_sync_store.state().clone();
         let busy = self.cloud_sync_rx.is_some();
+        let has_background = self.cloud_sync_has_background();
         match section {
             CloudSyncSection::Header => self.render_cloud_sync_header(&state, cx),
             CloudSyncSection::Guide => {
                 self.render_cloud_sync_guide(&self.cloud_sync_form.backend_type, cx)
             }
-            CloudSyncSection::Status => self.render_cloud_sync_status_card(&state, cx),
-            CloudSyncSection::Actions => self.render_cloud_sync_actions(&state, busy, cx),
+            CloudSyncSection::Status => {
+                self.render_cloud_sync_overview_card(&state, busy, has_background, cx)
+            }
+            CloudSyncSection::Actions => div().into_any_element(),
             CloudSyncSection::Preview => {
                 if let Some(preview) = self.cloud_sync_upload_preview.as_ref() {
                     self.render_cloud_sync_upload_preview(preview, &state, busy, cx)
@@ -272,14 +322,99 @@ impl WorkspaceApp {
         &self,
         state: &CloudSyncPersistedState,
     ) -> std::result::Result<CloudSyncLocalSnapshot, String> {
-        build_local_snapshot(
+        let key = self.cloud_sync_local_snapshot_cache_key(state);
+        if let Some(cache) = self.cloud_sync_local_snapshot_cache.borrow().as_ref() {
+            if cache.key == key {
+                return cache.result.clone();
+            }
+        }
+        let result = build_local_snapshot(
             &self.connection_store,
             &self.forwarding_registry,
             &self.settings_store,
             state.last_synced_structured_state.as_ref(),
             Some(&state.sync_scope),
         )
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string());
+        *self.cloud_sync_local_snapshot_cache.borrow_mut() = Some(CloudSyncLocalSnapshotCache {
+            key,
+            result: result.clone(),
+        });
+        result
+    }
+
+    fn cloud_sync_upload_diff_items_cached(
+        &self,
+        snapshot: &CloudSyncLocalSnapshot,
+        state: &CloudSyncPersistedState,
+    ) -> Vec<CloudSyncSectionDiffItem> {
+        let key = self.cloud_sync_upload_diff_cache_key(state);
+        if let Some(cache) = self.cloud_sync_upload_diff_cache.borrow().as_ref() {
+            if cache.key == key {
+                return cache.items.clone();
+            }
+        }
+        let items = cloud_sync_upload_diff_items(snapshot, state);
+        *self.cloud_sync_upload_diff_cache.borrow_mut() = Some(CloudSyncUploadDiffCache {
+            key,
+            items: items.clone(),
+        });
+        items
+    }
+
+    fn invalidate_cloud_sync_snapshot_caches(&self) {
+        self.cloud_sync_local_snapshot_cache.borrow_mut().take();
+        self.cloud_sync_upload_diff_cache.borrow_mut().take();
+    }
+
+    fn cloud_sync_local_snapshot_cache_key(&self, state: &CloudSyncPersistedState) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        state.revision_seq.hash(&mut hasher);
+        hash_raw_sync_scope(&state.sync_scope, &mut hasher);
+        hash_structured_local_state_option(
+            state.last_synced_structured_state.as_ref(),
+            &mut hasher,
+        );
+        self.settings_store.updated_at().hash(&mut hasher);
+
+        self.connection_store.connections().len().hash(&mut hasher);
+        for connection in self.connection_store.connections() {
+            connection.id.hash(&mut hasher);
+            connection
+                .updated_at
+                .unwrap_or(connection.created_at)
+                .to_rfc3339()
+                .hash(&mut hasher);
+        }
+        self.connection_store
+            .serial_profiles()
+            .len()
+            .hash(&mut hasher);
+        for profile in self.connection_store.serial_profiles() {
+            profile.id.hash(&mut hasher);
+            profile.updated_at.to_rfc3339().hash(&mut hasher);
+        }
+        let saved_forwards = self.forwarding_registry.list_all_saved_forwards();
+        saved_forwards.len().hash(&mut hasher);
+        for forward in saved_forwards {
+            forward.id.hash(&mut hasher);
+            forward.sync_updated_at().to_rfc3339().hash(&mut hasher);
+        }
+        hash_quick_commands_file_stamp(self.settings_store.path(), &mut hasher);
+        hasher.finish()
+    }
+
+    fn cloud_sync_upload_diff_cache_key(&self, state: &CloudSyncPersistedState) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.cloud_sync_local_snapshot_cache_key(state)
+            .hash(&mut hasher);
+        state.remote_exists.hash(&mut hasher);
+        state.last_check_at.hash(&mut hasher);
+        hash_structured_section_revisions_option(
+            state.remote_section_revisions.as_ref(),
+            &mut hasher,
+        );
+        hasher.finish()
     }
 
     fn cloud_sync_local_field_diff_snapshot(&self) -> CloudSyncLocalFieldDiffSnapshot {
@@ -330,188 +465,301 @@ impl WorkspaceApp {
         }
     }
 
-    fn render_cloud_sync_status_card(
-        &self,
-        state: &CloudSyncPersistedState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let settings = state.settings.clone();
-        let local_snapshot = self.cloud_sync_local_snapshot(state);
-        let backend_label = self
-            .i18n
-            .t(cloud_sync_backend_label_key(&settings.backend_type));
-
-        let facts = cloud_sync_fact_grid([
-            self.render_cloud_sync_fact("plugin.cloud_sync.fields.backend", backend_label, cx),
-            self.render_cloud_sync_fact(
-                "plugin.cloud_sync.fields.namespace",
-                settings.namespace,
-                cx,
-            ),
-            self.render_cloud_sync_fact(
-                "plugin.cloud_sync.fields.local_dirty",
-                local_snapshot
-                    .as_ref()
-                    .map(|snapshot| {
-                        if snapshot.dirty.has_dirty {
-                            self.i18n.t("plugin.cloud_sync.common.yes")
-                        } else {
-                            self.i18n.t("plugin.cloud_sync.common.no")
-                        }
-                    })
-                    .unwrap_or_else(|_| self.i18n.t("plugin.cloud_sync.common.error")),
-                cx,
-            ),
-            self.render_cloud_sync_fact(
-                "plugin.cloud_sync.fields.last_sync",
-                state
-                    .last_sync_at
-                    .as_deref()
-                    .map(cloud_sync_format_timestamp)
-                    .unwrap_or_else(|| "—".to_string()),
-                cx,
-            ),
-        ]);
-        cloud_sync_status_card(
-            &self.tokens,
-            self.cloud_sync_progress
-                .as_ref()
-                .map(|progress| self.render_cloud_sync_progress(progress, cx)),
-            state
-                .last_error
-                .as_ref()
-                .map(|error| self.render_cloud_sync_error(error)),
-            facts,
-            self.render_cloud_sync_meta(state, local_snapshot.as_ref().ok(), cx),
-        )
-    }
-
-    fn render_cloud_sync_actions(
-        &self,
-        state: &CloudSyncPersistedState,
-        busy: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let has_rollback_backup = !state.rollback_backups.is_empty();
-        cloud_sync_action_panel(
-            &self.tokens,
-            cloud_sync_main_action_grid([
-                self.render_cloud_sync_action_button(
-                    "plugin.cloud_sync.actions.upload_now",
-                    ButtonVariant::Default,
-                    busy,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.start_cloud_sync_upload_preview(cx);
-                            this.clear_cloud_sync_select_focus();
-                            cx.stop_propagation();
-                        },
-                    ),
-                ),
-                self.render_cloud_sync_action_button(
-                    "plugin.cloud_sync.actions.check_remote",
-                    ButtonVariant::Outline,
-                    busy,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.start_cloud_sync_check(cx);
-                            this.clear_cloud_sync_select_focus();
-                            cx.stop_propagation();
-                        },
-                    ),
-                ),
-                self.render_cloud_sync_action_button(
-                    "plugin.cloud_sync.actions.pull_preview",
-                    ButtonVariant::Outline,
-                    busy,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.start_cloud_sync_pull_preview(cx);
-                            this.clear_cloud_sync_select_focus();
-                            cx.stop_propagation();
-                        },
-                    ),
-                ),
-                self.render_cloud_sync_action_button(
-                    "plugin.cloud_sync.actions.restore_backup",
-                    ButtonVariant::Outline,
-                    busy || !has_rollback_backup,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.open_cloud_sync_restore_confirm(None);
-                            this.clear_cloud_sync_select_focus();
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    ),
-                ),
-                self.render_cloud_sync_action_button(
-                    "plugin.cloud_sync.actions.save_settings",
-                    ButtonVariant::Outline,
-                    busy,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.save_cloud_sync_configuration(cx);
-                            this.clear_cloud_sync_select_focus();
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    ),
-                ),
-            ]),
-        )
-    }
-
     fn render_cloud_sync_header(
         &self,
         state: &CloudSyncPersistedState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        cloud_sync_header(
-            &self.tokens,
-            Self::render_lucide_icon(LucideIcon::Cloud, 16.0, rgb(theme.accent)),
-            self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "cloud-sync-panel",
-                "title",
-                self.i18n.t("plugin.cloud_sync.panel_title"),
-                theme.text,
-                cx,
-            ),
-            self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "cloud-sync-panel",
-                "subtitle",
-                self.i18n.t("plugin.cloud_sync.native_description"),
-                theme.text_muted,
-                cx,
-            ),
-            self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "cloud-sync-panel",
-                "status",
-                self.i18n
-                    .t(cloud_sync_status_label_key(state.status.clone())),
-                theme.accent,
-                cx,
-            ),
-        )
+        div()
+            .flex()
+            .items_start()
+            .justify_between()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .text_size(px(self.tokens.metrics.ui_text_2xl))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text_heading))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Cloud,
+                                22.0,
+                                rgb(theme.accent),
+                            ))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "cloud-sync-panel",
+                                "title",
+                                self.i18n.t("plugin.cloud_sync.panel_title"),
+                                theme.text_heading,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(680.0))
+                            .text_size(px(self.tokens.metrics.ui_text_base))
+                            .line_height(px(22.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "cloud-sync-panel",
+                                "subtitle",
+                                self.i18n.t("plugin.cloud_sync.native_description"),
+                                theme.text_muted,
+                                cx,
+                            )),
+                    ),
+            )
+            .child(
+                self.render_cloud_sync_status_chip(
+                    self.i18n
+                        .t(cloud_sync_status_label_key(state.status.clone())),
+                    CloudSyncTone::Accent,
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_cloud_sync_overview_card(
+        &self,
+        state: &CloudSyncPersistedState,
+        busy: bool,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let settings = state.settings.clone();
+        let local_snapshot = self.cloud_sync_local_snapshot(state);
+        let backend_label = self
+            .i18n
+            .t(cloud_sync_backend_label_key(&settings.backend_type));
+        let local_dirty = local_snapshot
+            .as_ref()
+            .map(|snapshot| {
+                if snapshot.dirty.has_dirty {
+                    self.i18n.t("plugin.cloud_sync.common.yes")
+                } else {
+                    self.i18n.t("plugin.cloud_sync.common.no")
+                }
+            })
+            .unwrap_or_else(|_| self.i18n.t("plugin.cloud_sync.common.error"));
+        let last_sync = state
+            .last_sync_at
+            .as_deref()
+            .map(cloud_sync_format_timestamp)
+            .unwrap_or_else(|| "—".to_string());
+        let has_rollback_backup = !state.rollback_backups.is_empty();
+
+        let mut card = self
+            .cloud_sync_plugin_card(has_background)
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text))
+                    .child(self.i18n.t("plugin.cloud_sync.panel_title").to_uppercase()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_start()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex_1()
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(10.0))
+                            .child(self.render_cloud_sync_overview_fact(
+                                LucideIcon::Server,
+                                "plugin.cloud_sync.fields.backend",
+                                backend_label,
+                                cx,
+                            ))
+                            .child(self.render_cloud_sync_overview_fact(
+                                LucideIcon::Hash,
+                                "plugin.cloud_sync.fields.namespace",
+                                settings.namespace,
+                                cx,
+                            ))
+                            .child(self.render_cloud_sync_overview_fact(
+                                LucideIcon::Activity,
+                                "plugin.cloud_sync.fields.local_dirty",
+                                local_dirty,
+                                cx,
+                            ))
+                            .child(self.render_cloud_sync_overview_fact(
+                                LucideIcon::Clock,
+                                "plugin.cloud_sync.fields.last_sync",
+                                last_sync,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .min_w(px(300.0))
+                            .flex_1()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .justify_end()
+                            .gap(px(8.0))
+                            .child(self.render_cloud_sync_toolbar_button(
+                                LucideIcon::Upload,
+                                "plugin.cloud_sync.actions.upload_now",
+                                CloudSyncActionTone::Accent,
+                                busy,
+                                cx.listener(
+                                    |this: &mut WorkspaceApp,
+                                     _event,
+                                     _window,
+                                     cx: &mut Context<WorkspaceApp>| {
+                                        this.start_cloud_sync_upload_preview(cx);
+                                        this.clear_cloud_sync_select_focus();
+                                        cx.stop_propagation();
+                                    },
+                                ),
+                            ))
+                            .child(self.render_cloud_sync_toolbar_button(
+                                LucideIcon::RefreshCw,
+                                "plugin.cloud_sync.actions.check_remote",
+                                CloudSyncActionTone::Muted,
+                                busy,
+                                cx.listener(
+                                    |this: &mut WorkspaceApp,
+                                     _event,
+                                     _window,
+                                     cx: &mut Context<WorkspaceApp>| {
+                                        this.start_cloud_sync_check(cx);
+                                        this.clear_cloud_sync_select_focus();
+                                        cx.stop_propagation();
+                                    },
+                                ),
+                            ))
+                            .child(self.render_cloud_sync_toolbar_button(
+                                LucideIcon::Download,
+                                "plugin.cloud_sync.actions.pull_preview",
+                                CloudSyncActionTone::Muted,
+                                busy,
+                                cx.listener(
+                                    |this: &mut WorkspaceApp,
+                                     _event,
+                                     _window,
+                                     cx: &mut Context<WorkspaceApp>| {
+                                        this.start_cloud_sync_pull_preview(cx);
+                                        this.clear_cloud_sync_select_focus();
+                                        cx.stop_propagation();
+                                    },
+                                ),
+                            ))
+                            .child(self.render_cloud_sync_toolbar_button(
+                                LucideIcon::RotateCcw,
+                                "plugin.cloud_sync.actions.restore_backup",
+                                CloudSyncActionTone::Muted,
+                                busy || !has_rollback_backup,
+                                cx.listener(
+                                    |this: &mut WorkspaceApp,
+                                     _event,
+                                     _window,
+                                     cx: &mut Context<WorkspaceApp>| {
+                                        this.open_cloud_sync_restore_confirm(None);
+                                        this.clear_cloud_sync_select_focus();
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    },
+                                ),
+                            ))
+                            .child(self.render_cloud_sync_toolbar_button(
+                                LucideIcon::Save,
+                                "plugin.cloud_sync.actions.save_settings",
+                                CloudSyncActionTone::Muted,
+                                busy,
+                                cx.listener(
+                                    |this: &mut WorkspaceApp,
+                                     _event,
+                                     _window,
+                                     cx: &mut Context<WorkspaceApp>| {
+                                        this.save_cloud_sync_configuration(cx);
+                                        this.clear_cloud_sync_select_focus();
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    },
+                                ),
+                            )),
+                    ),
+            );
+
+        if let Some(progress) = self.cloud_sync_progress.as_ref() {
+            card = card.child(self.render_cloud_sync_progress(progress, cx));
+        }
+        if let Some(error) = state.last_error.as_ref() {
+            card = card.child(self.render_cloud_sync_error(error));
+        }
+        card.child(self.render_cloud_sync_meta(state, local_snapshot.as_ref().ok(), cx))
+            .into_any_element()
+    }
+
+    fn render_cloud_sync_overview_fact(
+        &self,
+        icon: LucideIcon,
+        label_key: &'static str,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let label = self.i18n.t(label_key);
+        div()
+            .min_w(px(170.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(theme.text_muted))
+            .child(Self::render_lucide_icon(icon, 15.0, rgb(theme.accent)))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(div().text_color(rgb(theme.text_muted)).child(
+                        self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "cloud-sync-overview-fact-label",
+                            label_key,
+                            label,
+                            theme.text_muted,
+                            cx,
+                        ),
+                    ))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(theme.text))
+                            .child(self.render_selectable_text(
+                                crate::workspace::selectable_text::selectable_text_id(
+                                    "cloud-sync-overview-fact-value",
+                                    (label_key, &value),
+                                ),
+                                value,
+                                theme.text,
+                                cx,
+                            )),
+                    ),
+            )
+            .into_any_element()
     }
 
     fn render_cloud_sync_guide(
@@ -649,6 +897,103 @@ impl WorkspaceApp {
             listener,
         )
         .into_any_element()
+    }
+
+    fn cloud_sync_plugin_card(&self, has_background: bool) -> Div {
+        let theme = self.tokens.ui;
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(cloud_sync_theme_border(theme.border, has_background))
+            .bg(cloud_sync_theme_card_bg(theme.bg_card, has_background))
+            // Mirrors the plugin manager card surface so Cloud Sync reads as
+            // a peer workspace tool instead of a legacy settings form.
+            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
+            .p(px(self.tokens.metrics.settings_card_padding))
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+    }
+
+    fn render_cloud_sync_toolbar_button(
+        &self,
+        icon: LucideIcon,
+        label_key: &'static str,
+        tone: CloudSyncActionTone,
+        disabled: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let color = if disabled {
+            theme.text_muted
+        } else {
+            tone.color(&self.tokens)
+        };
+        let bg = match tone {
+            CloudSyncActionTone::Accent if !disabled => {
+                cloud_sync_theme_alpha(theme.accent, CLOUD_SYNC_TW_ALPHA_10)
+            }
+            _ => cloud_sync_theme_panel_bg(theme.bg_panel, self.cloud_sync_has_background()),
+        };
+        let mut button = div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(if disabled {
+                cloud_sync_theme_border_half(theme.border, self.cloud_sync_has_background())
+            } else {
+                cloud_sync_theme_alpha(color, CLOUD_SYNC_TW_ALPHA_40)
+            })
+            .bg(bg)
+            .px(px(12.0))
+            .py(px(7.0))
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .whitespace_nowrap()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(if disabled {
+                rgba((theme.text_muted << 8) | CLOUD_SYNC_TW_ALPHA_50)
+            } else {
+                rgb(color)
+            })
+            .child(Self::render_lucide_icon(
+                icon,
+                15.0,
+                if disabled {
+                    rgba((theme.text_muted << 8) | CLOUD_SYNC_TW_ALPHA_50)
+                } else {
+                    rgb(color)
+                },
+            ))
+            .child(self.i18n.t(label_key));
+        if disabled {
+            button = button.cursor(CursorStyle::Arrow);
+        } else {
+            button = button
+                .cursor(CursorStyle::PointingHand)
+                .on_mouse_down(MouseButton::Left, listener);
+        }
+        button.into_any_element()
+    }
+
+    fn render_cloud_sync_status_chip(&self, label: String, tone: CloudSyncTone) -> AnyElement {
+        let color = tone.color(&self.tokens);
+        div()
+            .flex_shrink_0()
+            .rounded(px(999.0))
+            .border_1()
+            .border_color(cloud_sync_theme_alpha(color, CLOUD_SYNC_TW_ALPHA_40))
+            .bg(cloud_sync_theme_alpha(color, CLOUD_SYNC_TW_ALPHA_10))
+            .px(px(10.0))
+            .py(px(4.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(rgb(color))
+            .child(label)
+            .into_any_element()
     }
 
     fn render_cloud_sync_progress(
@@ -963,7 +1308,8 @@ impl WorkspaceApp {
             if let Some(selection) = self.cloud_sync_upload_selection.as_ref() {
                 preview_state.sync_scope = selection.raw_scope(&state.sync_scope);
             }
-            let section_diff_items = cloud_sync_upload_diff_items(&local_snapshot, &preview_state);
+            let section_diff_items =
+                self.cloud_sync_upload_diff_items_cached(&local_snapshot, &preview_state);
             if !section_diff_items.is_empty() {
                 body.push(self.render_cloud_sync_section_diff_card(
                     "cloud-sync-upload-preview-diff",
@@ -1315,28 +1661,41 @@ impl WorkspaceApp {
             .iter()
             .map(|item| self.render_cloud_sync_section_diff_row(item, cx))
             .collect::<Vec<_>>();
-        rows.into_iter()
-            .fold(
+        let grid = rows.into_iter().fold(
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .flex()
+                .flex_wrap()
+                .gap(px(8.0)),
+            |grid, row| {
+                grid.child(
+                    div()
+                        .min_w(px(CLOUD_SYNC_SECTION_DIFF_ITEM_MIN_WIDTH))
+                        .flex_1()
+                        .child(row),
+                )
+            },
+        );
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x55))
+            .bg(rgba((theme.bg_panel << 8) | 0x5F))
+            .p(px(12.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
                 div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgba((theme.border << 8) | 0x55))
-                    .bg(rgba((theme.bg_panel << 8) | 0x5F))
-                    .p(px(12.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(theme.text_muted))
-                            .child(title),
-                    ),
-                |panel, row| panel.child(row),
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text_muted))
+                    .child(title),
             )
+            .child(grid)
             .into_any_element()
     }
 
@@ -2128,7 +2487,7 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let list_height =
             state.rollback_backups.len() as f32 * CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT;
-        cloud_sync_card(&self.tokens)
+        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
             .child(
                 self.render_cloud_sync_section_title(
                     "plugin.cloud_sync.sections.rollback_backups",
@@ -2290,7 +2649,10 @@ impl WorkspaceApp {
                 ))
                 .into_any_element()
         };
-        cloud_sync_history_card(&self.tokens, title, body)
+        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+            .child(title)
+            .child(body)
+            .into_any_element()
     }
 
     fn sync_cloud_sync_history_list_state(&self, history: &[CloudSyncHistoryEntry]) {
@@ -2419,25 +2781,31 @@ impl WorkspaceApp {
             })
             .filter(|sections| !sections.trim().is_empty())
             .unwrap_or_else(|| "—".to_string());
-        cloud_sync_notes_card(
-            &self.tokens,
-            self.render_display_text_with_role(
+        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+            .child(self.render_display_text_with_role(
                 SelectableTextRole::PlainDocument,
                 "cloud-sync-notes",
                 "title",
                 self.i18n.t("plugin.cloud_sync.sections.notes"),
                 theme.text_heading,
                 cx,
-            ),
-            self.i18n_replace(
-                "plugin.cloud_sync.native_scope_summary",
-                &[("sections", sections)],
-            ),
-        )
+            ))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .line_height(px(20.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n_replace(
+                        "plugin.cloud_sync.native_scope_summary",
+                        &[("sections", sections)],
+                    )),
+            )
+            .into_any_element()
     }
 
     fn render_cloud_sync_config(&self, cx: &mut Context<Self>) -> AnyElement {
         let form = &self.cloud_sync_form;
+        let has_background = self.cloud_sync_has_background();
         let mut connection_rows = Vec::new();
         for row in cloud_sync_config_rows(&form.backend_type, &form.auth_mode) {
             connection_rows.push(match row {
@@ -2477,28 +2845,29 @@ impl WorkspaceApp {
                 CloudSyncConfigRow::ConflictSelect => self.render_cloud_sync_conflict_select(cx),
             });
         }
-        let connection_card = cloud_sync_card(&self.tokens)
+        let connection_card = self
+            .cloud_sync_plugin_card(has_background)
             .child(self.render_cloud_sync_section_title(
                 "plugin.cloud_sync.sections.connection_settings",
                 cx,
             ))
             .child(cloud_sync_form_grid(connection_rows));
         let state = self.cloud_sync_store.state();
-        let upload_diff = self
-            .cloud_sync_local_snapshot(state)
-            .ok()
-            .map(|snapshot| cloud_sync_upload_diff_items(&snapshot, state));
+        let local_snapshot = self.cloud_sync_local_snapshot(state).ok();
+        let upload_diff = local_snapshot
+            .as_ref()
+            .map(|snapshot| self.cloud_sync_upload_diff_items_cached(snapshot, state));
 
         let mut content = div()
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(24.0))
             .child(connection_card)
             .child(self.render_cloud_sync_scope_card(cx))
             .child(self.render_cloud_sync_coverage_card(cx));
         if let Some(upload_diff) = upload_diff.as_ref().filter(|items| !items.is_empty()) {
             content = content.child(
-                cloud_sync_card(&self.tokens)
+                self.cloud_sync_plugin_card(has_background)
                     .child(self.render_cloud_sync_section_title(
                         "plugin.cloud_sync.sections.sync_preflight",
                         cx,
@@ -2513,6 +2882,7 @@ impl WorkspaceApp {
         }
         content
             .child(self.render_cloud_sync_health_card(cx))
+            .child(self.render_cloud_sync_notes(local_snapshot.as_ref(), cx))
             .into_any_element()
     }
 
@@ -2526,7 +2896,7 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
 
         let theme = self.tokens.ui;
-        cloud_sync_card(&self.tokens)
+        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
             .child(
                 self.render_cloud_sync_section_title("plugin.cloud_sync.sections.sync_health", cx),
             )
@@ -2636,7 +3006,7 @@ impl WorkspaceApp {
                 )
             })
             .collect::<Vec<_>>();
-        cloud_sync_card(&self.tokens)
+        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
             .child(
                 self.render_cloud_sync_section_title(
                     "plugin.cloud_sync.sections.sync_coverage",
@@ -2815,7 +3185,7 @@ impl WorkspaceApp {
             cx,
         ));
 
-        cloud_sync_card(&self.tokens)
+        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
             .child(
                 self.render_cloud_sync_section_title("plugin.cloud_sync.sections.sync_scope", cx),
             )
@@ -3376,6 +3746,7 @@ impl WorkspaceApp {
     }
 
     fn save_cloud_sync_configuration(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_cloud_sync_snapshot_caches();
         let (settings, interval) = cloud_sync_settings_from_form(&self.cloud_sync_form);
         let mut provider = CloudSyncKeychainSecretProvider::new(
             self.cloud_sync_store.state().secret_hints.clone(),
@@ -3406,6 +3777,7 @@ impl WorkspaceApp {
     }
 
     fn clear_cloud_sync_secret(&mut self, secret_key: &str) {
+        self.invalidate_cloud_sync_snapshot_caches();
         let mut provider = CloudSyncKeychainSecretProvider::new(
             self.cloud_sync_store.state().secret_hints.clone(),
         );
@@ -3607,16 +3979,8 @@ impl WorkspaceApp {
     }
 
     fn refresh_cloud_sync_local_dirty_state(&mut self) {
-        let Ok(snapshot) = build_local_snapshot(
-            &self.connection_store,
-            &self.forwarding_registry,
-            &self.settings_store,
-            self.cloud_sync_store
-                .state()
-                .last_synced_structured_state
-                .as_ref(),
-            Some(&self.cloud_sync_store.state().sync_scope),
-        ) else {
+        self.invalidate_cloud_sync_snapshot_caches();
+        let Ok(snapshot) = self.cloud_sync_local_snapshot(self.cloud_sync_store.state()) else {
             return;
         };
         self.cloud_sync_store.state_mut().local_dirty = snapshot.dirty.has_dirty;
@@ -4505,6 +4869,7 @@ impl WorkspaceApp {
     }
 
     fn save_cloud_sync_state(&mut self) {
+        self.invalidate_cloud_sync_snapshot_caches();
         if let Err(error) = self.cloud_sync_store.save() {
             self.cloud_sync_store.state_mut().last_error = Some(error.to_string());
         }
@@ -4515,6 +4880,29 @@ fn is_cloud_sync_remote_changed_before_upload(error: &str) -> bool {
     error
         .trim_start()
         .starts_with("remote_changed_before_upload")
+}
+
+const CLOUD_SYNC_TW_ALPHA_10: u32 = 0x1a;
+const CLOUD_SYNC_TW_ALPHA_40: u32 = 0x66;
+const CLOUD_SYNC_TW_ALPHA_50: u32 = 0x80;
+const CLOUD_SYNC_BG_ACTIVE_THEME_ALPHA: u32 = 0x66;
+const CLOUD_SYNC_BG_ACTIVE_BORDER_ALPHA: u32 = 0xbf;
+const CLOUD_SYNC_BG_ACTIVE_BORDER_HALF_ALPHA: u32 = 0x60;
+const CLOUD_SYNC_SECTION_DIFF_ITEM_MIN_WIDTH: f32 = 320.0;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CloudSyncActionTone {
+    Accent,
+    Muted,
+}
+
+impl CloudSyncActionTone {
+    fn color(self, tokens: &oxideterm_theme::ThemeTokens) -> u32 {
+        match self {
+            Self::Accent => tokens.ui.accent,
+            Self::Muted => tokens.ui.text_muted,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -4567,4 +4955,112 @@ fn remote_diff_tone(status: CloudSyncRemoteDiffStatus) -> CloudSyncTone {
         }
         CloudSyncRemoteDiffStatus::Unknown => CloudSyncTone::Warning,
     }
+}
+
+fn hash_raw_sync_scope(scope: &RawSyncScope, hasher: &mut DefaultHasher) {
+    scope.sync_connections.hash(hasher);
+    scope.sync_forwards.hash(hasher);
+    scope.sync_quick_commands.hash(hasher);
+    scope.sync_serial_profiles.hash(hasher);
+    scope.sync_sensitive_credentials.hash(hasher);
+    scope.sync_app_settings.hash(hasher);
+    scope.app_settings_sections.hash(hasher);
+    scope.include_local_terminal_env_vars.hash(hasher);
+    scope.sync_plugin_settings.hash(hasher);
+    scope.plugin_ids.hash(hasher);
+}
+
+fn hash_structured_local_state_option(
+    state: Option<&StructuredLocalState>,
+    hasher: &mut DefaultHasher,
+) {
+    let Some(state) = state else {
+        false.hash(hasher);
+        return;
+    };
+    true.hash(hasher);
+    state.connections.hash(hasher);
+    state.forwards.hash(hasher);
+    state.quick_commands.hash(hasher);
+    state.serial_profiles.hash(hasher);
+    state.sensitive_credentials.hash(hasher);
+    state.app_settings.hash(hasher);
+    state.plugin_settings.hash(hasher);
+}
+
+fn hash_structured_section_revisions_option(
+    revisions: Option<&StructuredSectionRevisions>,
+    hasher: &mut DefaultHasher,
+) {
+    let Some(revisions) = revisions else {
+        false.hash(hasher);
+        return;
+    };
+    true.hash(hasher);
+    revisions.connections.hash(hasher);
+    revisions.forwards.hash(hasher);
+    revisions.quick_commands.hash(hasher);
+    revisions.serial_profiles.hash(hasher);
+    revisions.sensitive_credentials.hash(hasher);
+    revisions.app_settings.hash(hasher);
+    revisions.plugin_settings.hash(hasher);
+}
+
+fn hash_quick_commands_file_stamp(settings_path: &std::path::Path, hasher: &mut DefaultHasher) {
+    let path = oxideterm_quick_commands::quick_commands_path(settings_path);
+    let Ok(metadata) = std::fs::metadata(path) else {
+        0_u8.hash(hasher);
+        return;
+    };
+    metadata.len().hash(hasher);
+    if let Ok(modified) = metadata.modified() {
+        modified
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .map(|duration| duration.as_nanos())
+            .hash(hasher);
+    }
+}
+
+fn cloud_sync_root_bg(color: u32, has_background: bool) -> Rgba {
+    if has_background {
+        cloud_sync_theme_alpha(0x000000, 0x00)
+    } else {
+        rgb(color)
+    }
+}
+
+// Tauri switches bg-theme-* surfaces to alpha-backed colors under
+// data-bg-active; Cloud Sync mirrors the plugin manager's native helpers.
+fn cloud_sync_theme_panel_bg(color: u32, has_background: bool) -> Rgba {
+    cloud_sync_theme_card_bg(color, has_background)
+}
+
+fn cloud_sync_theme_card_bg(color: u32, has_background: bool) -> Rgba {
+    oxideterm_gpui_ui::surface::color_for_background(
+        color,
+        has_background,
+        CLOUD_SYNC_BG_ACTIVE_THEME_ALPHA,
+    )
+}
+
+fn cloud_sync_theme_border(color: u32, has_background: bool) -> Rgba {
+    oxideterm_gpui_ui::surface::color_for_background(
+        color,
+        has_background,
+        CLOUD_SYNC_BG_ACTIVE_BORDER_ALPHA,
+    )
+}
+
+fn cloud_sync_theme_border_half(color: u32, has_background: bool) -> Rgba {
+    oxideterm_gpui_ui::surface::color_for_background_or_alpha(
+        color,
+        has_background,
+        CLOUD_SYNC_BG_ACTIVE_BORDER_HALF_ALPHA,
+        CLOUD_SYNC_TW_ALPHA_50,
+    )
+}
+
+fn cloud_sync_theme_alpha(color: u32, alpha: u32) -> Rgba {
+    rgba((color << 8) | alpha)
 }
