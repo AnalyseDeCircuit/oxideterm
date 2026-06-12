@@ -5,7 +5,7 @@ use gpui::{
 use oxideterm_theme::ThemeTokens;
 use std::rc::Rc;
 
-use crate::button::{SplitFooterButtonOptions, split_footer_button};
+use crate::button::{SplitFooterButtonEdge, SplitFooterButtonOptions, split_footer_button};
 use crate::modal::{dismissible_dialog_backdrop, rounded_shell_child_radius};
 
 const CONFIRM_DIALOG_WIDTH: f32 = 384.0; // Tauri useConfirm max-w-sm
@@ -178,6 +178,7 @@ pub fn confirm_dialog_with_focus(
                                     height: Some(CONFIRM_ACTION_HEIGHT),
                                     padding_y: None,
                                     font_size: Some(tokens.metrics.ui_text_sm),
+                                    edge: SplitFooterButtonEdge::Left,
                                 },
                             )
                             .on_mouse_down(
@@ -207,6 +208,7 @@ pub fn confirm_dialog_with_focus(
                                     height: Some(CONFIRM_ACTION_HEIGHT),
                                     padding_y: None,
                                     font_size: Some(tokens.metrics.ui_text_sm),
+                                    edge: SplitFooterButtonEdge::Right,
                                 },
                             )
                             .on_mouse_down(MouseButton::Left, on_confirm),

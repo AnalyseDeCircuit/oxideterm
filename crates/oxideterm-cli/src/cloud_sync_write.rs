@@ -123,6 +123,11 @@ fn run_push(write: WriteArgs, force: bool) -> CliResult<()> {
     let mut provider =
         CloudSyncKeychainSecretProvider::new(state_store.state().secret_hints.clone());
     let service = CloudSyncOperationService::new();
+    let portable_secrets = if local.scope.sync_sensitive_credentials {
+        oxide::export_portable_secrets(json)?
+    } else {
+        Vec::new()
+    };
     let options = UploadOptions {
         automatic: false,
         skip_if_busy: false,
@@ -133,6 +138,7 @@ fn run_push(write: WriteArgs, force: bool) -> CliResult<()> {
         previous_remote_sections: state_store.state().last_synced_remote_sections.clone(),
         last_synced_structured_state: state_store.state().last_synced_structured_state.clone(),
         raw_sync_scope: Some(state_store.state().sync_scope.clone()),
+        portable_secrets,
     };
     let outcome = runtime(json)?.block_on(service.upload_now(
         &connection_store,
@@ -509,6 +515,9 @@ fn history_summary(
     CloudSyncHistorySummary {
         connections,
         forwards,
+        quick_commands: 0,
+        serial_profiles: 0,
+        sensitive_credentials: 0,
         has_app_settings: app_settings_sections > 0,
         plugin_settings_count: plugin_settings,
     }

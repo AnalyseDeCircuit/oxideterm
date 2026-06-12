@@ -220,6 +220,14 @@ pub struct SplitFooterButtonOptions {
     pub height: Option<f32>,
     pub padding_y: Option<f32>,
     pub font_size: Option<f32>,
+    pub edge: SplitFooterButtonEdge,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SplitFooterButtonEdge {
+    None,
+    Left,
+    Right,
 }
 
 impl IconButtonOptions {
@@ -439,6 +447,12 @@ pub fn split_footer_button(
                     .unwrap_or_else(|| rgb(tokens.ui.border)),
             )
         })
+        .when(options.edge == SplitFooterButtonEdge::Left, |button| {
+            button.rounded_bl(px(button_radius_px(tokens, ButtonRadius::Md)))
+        })
+        .when(options.edge == SplitFooterButtonEdge::Right, |button| {
+            button.rounded_br(px(button_radius_px(tokens, ButtonRadius::Md)))
+        })
         .child(label);
 
     button_focus_visible(tokens, button, options.focus_visible)
@@ -622,6 +636,7 @@ mod tests {
             height: Some(40.0),
             padding_y: None,
             font_size: Some(14.0),
+            edge: SplitFooterButtonEdge::Left,
         };
 
         assert_eq!(options.height, Some(40.0));
@@ -630,5 +645,6 @@ mod tests {
         assert!(options.right_separator);
         assert!(!options.disabled);
         assert!(!options.loading);
+        assert_eq!(options.edge, SplitFooterButtonEdge::Left);
     }
 }

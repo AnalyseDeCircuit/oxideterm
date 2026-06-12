@@ -361,6 +361,7 @@ impl WorkspaceApp {
                 height: None,
                 padding_y: Some(10.0),
                 font_size: Some(self.tokens.metrics.ui_text_sm),
+                edge: SplitFooterButtonEdge::None,
             },
         )
     }

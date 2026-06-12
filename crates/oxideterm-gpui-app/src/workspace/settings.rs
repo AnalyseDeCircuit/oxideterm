@@ -78,8 +78,8 @@ use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        SplitFooterButtonOptions, ToolbarButtonIconPosition, ToolbarButtonOptions,
-        split_footer_button,
+        SplitFooterButtonEdge, SplitFooterButtonOptions, ToolbarButtonIconPosition,
+        ToolbarButtonOptions, split_footer_button,
     },
     checkbox::checkbox,
     form_field,

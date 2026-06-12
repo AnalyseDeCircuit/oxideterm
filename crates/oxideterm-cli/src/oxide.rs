@@ -481,7 +481,7 @@ fn owned_forward_import_record(record: &OxideForwardRecord) -> OwnedForwardImpor
     }
 }
 
-fn export_portable_secrets(
+pub(crate) fn export_portable_secrets(
     json: bool,
 ) -> CliResult<Vec<oxideterm_connections::oxide_file::EncryptedPortableSecret>> {
     let settings = settings::load_settings_read_only(json)?;

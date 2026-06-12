@@ -22,28 +22,44 @@ use oxideterm_gpui_ui::select::{
 };
 use oxideterm_theme::ThemeTokens;
 
+// Panel padding is the horizontal gutter around every section inside the
+// virtual list. Card padding comes from the settings metrics token so cards
+// match the rest of the settings UI.
 pub const CLOUD_SYNC_PANEL_PADDING: f32 = 16.0;
-pub const CLOUD_SYNC_CARD_PADDING: f32 = 12.0;
-pub const CLOUD_SYNC_CARD_GAP: f32 = 12.0;
-pub const CLOUD_SYNC_GRID_GAP: f32 = 8.0;
-pub const CLOUD_SYNC_STAT_PADDING: f32 = 8.0;
-pub const CLOUD_SYNC_BG_MIX_ALPHA: u32 = 0x80;
-pub const CLOUD_SYNC_LIST_BORDER_ALPHA: u32 = 0xA6;
-pub const CLOUD_SYNC_LIST_BG_ALPHA: u32 = 0x8C;
+pub const CLOUD_SYNC_GRID_GAP: f32 = 12.0;
+pub const CLOUD_SYNC_FORM_GRID_GAP: f32 = 14.0;
+pub const CLOUD_SYNC_STAT_PADDING: f32 = 10.0;
+pub const CLOUD_SYNC_SECTION_GAP: f32 = 14.0;
+pub const CLOUD_SYNC_TOGGLE_GRID_GAP: f32 = 8.0;
+pub const CLOUD_SYNC_TOGGLE_OPTION_MIN_WIDTH: f32 = 240.0;
+pub const CLOUD_SYNC_TOGGLE_OPTION_PADDING_X: f32 = 10.0;
+pub const CLOUD_SYNC_TOGGLE_OPTION_PADDING_Y: f32 = 4.0;
 
+// Alpha values for translucent soft-surface layering.
+pub const CLOUD_SYNC_LIST_BORDER_ALPHA: u32 = 0x5C;
+pub const CLOUD_SYNC_LIST_BG_ALPHA: u32 = 0x66;
+pub const CLOUD_SYNC_SOFT_SURFACE_ALPHA: u32 = 0x73;
+pub const CLOUD_SYNC_ACCENT_TINT_ALPHA: u32 = 0x1F;
+pub const CLOUD_SYNC_ACCENT_BORDER_ALPHA: u32 = 0x66;
+pub const CLOUD_SYNC_ERROR_TINT_ALPHA: u32 = 0x14;
+
+/// Base card surface.
+///
+/// Uses the standard settings card padding from the design tokens so cloud sync
+/// cards match the rest of the settings UI visually.
 pub fn cloud_sync_card(tokens: &ThemeTokens) -> Div {
     let theme = tokens.ui;
     div()
         .w_full()
         .min_w(px(0.0))
-        .rounded(px(tokens.radii.md))
+        .rounded(px(tokens.radii.lg))
         .border_1()
         .border_color(rgb(theme.border))
-        .bg(rgb(theme.bg_panel))
-        .p(px(CLOUD_SYNC_CARD_PADDING))
+        .bg(rgb(theme.bg_card))
+        .p(px(tokens.metrics.settings_card_padding))
         .flex()
         .flex_col()
-        .gap(px(10.0))
+        .gap(px(tokens.metrics.settings_card_gap))
 }
 
 pub fn cloud_sync_section_item(
@@ -56,7 +72,7 @@ pub fn cloud_sync_section_item(
         .w_full()
         .min_w(px(0.0))
         .px(px(CLOUD_SYNC_PANEL_PADDING))
-        .pb(px(CLOUD_SYNC_CARD_GAP))
+        .pb(px(CLOUD_SYNC_SECTION_GAP))
         .when(index == 0, |item| item.pt(px(CLOUD_SYNC_PANEL_PADDING)))
         .when(index + 1 == section_count, |item| {
             item.pb(px(CLOUD_SYNC_PANEL_PADDING))
@@ -68,26 +84,69 @@ pub fn cloud_sync_section_item(
 
 pub fn cloud_sync_header(
     tokens: &ThemeTokens,
+    icon: AnyElement,
     title: AnyElement,
-    status: impl Into<gpui::SharedString>,
+    subtitle: AnyElement,
+    status: AnyElement,
 ) -> AnyElement {
     let theme = tokens.ui;
     div()
         .flex()
-        .flex_col()
-        .gap(px(4.0))
+        .items_start()
+        .justify_between()
+        .gap(px(12.0))
+        .pt(px(4.0))
+        .pb(px(2.0))
         .child(
             div()
-                .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(theme.text))
-                .child(title),
+                .min_w(px(0.0))
+                .flex_1()
+                .flex()
+                .items_start()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .pt(px(2.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(icon),
+                )
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(3.0))
+                        .child(
+                            div()
+                                .text_size(px(tokens.metrics.ui_text_sm))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(theme.text_heading))
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(tokens.metrics.ui_text_xs))
+                                .line_height(px(18.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(subtitle),
+                        ),
+                ),
         )
         .child(
             div()
+                .flex_shrink_0()
+                .rounded(px(999.0))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgba((theme.bg_panel << 8) | CLOUD_SYNC_SOFT_SURFACE_ALPHA))
+                .px(px(9.0))
+                .py(px(3.0))
                 .text_size(px(tokens.metrics.ui_text_xs))
-                .text_color(rgb(theme.text_muted))
-                .child(status.into()),
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(rgb(theme.accent))
+                .child(status),
         )
         .into_any_element()
 }
@@ -170,9 +229,9 @@ pub fn cloud_sync_guide_card(
         let mut example_card = div()
             .rounded(px(tokens.radii.md))
             .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgba((theme.bg << 8) | CLOUD_SYNC_BG_MIX_ALPHA))
-            .p(px(CLOUD_SYNC_CARD_PADDING))
+            .border_color(rgba((theme.border << 8) | CLOUD_SYNC_LIST_BORDER_ALPHA))
+            .bg(rgba((theme.bg_panel << 8) | CLOUD_SYNC_SOFT_SURFACE_ALPHA))
+            .p(px(CLOUD_SYNC_STAT_PADDING))
             .flex()
             .flex_col()
             .gap(px(8.0))
@@ -240,6 +299,76 @@ pub fn cloud_sync_action_grid(children: impl IntoIterator<Item = AnyElement>) ->
         .into_any_element()
 }
 
+pub fn cloud_sync_main_action_grid(children: impl IntoIterator<Item = AnyElement>) -> AnyElement {
+    children
+        .into_iter()
+        .fold(
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .grid()
+                .grid_cols(3)
+                .gap(px(CLOUD_SYNC_GRID_GAP)),
+            |grid, child| grid.child(child),
+        )
+        .into_any_element()
+}
+
+pub fn cloud_sync_action_panel(tokens: &ThemeTokens, actions: AnyElement) -> AnyElement {
+    // The action strip stays light; the toolbar buttons already own their chrome.
+    div()
+        .w_full()
+        .min_w(px(0.0))
+        .text_size(px(tokens.metrics.ui_text_sm))
+        .child(actions)
+        .into_any_element()
+}
+
+pub fn cloud_sync_form_grid(children: impl IntoIterator<Item = AnyElement>) -> AnyElement {
+    children
+        .into_iter()
+        .fold(
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .grid()
+                .grid_cols(2)
+                .gap(px(CLOUD_SYNC_FORM_GRID_GAP)),
+            |grid, child| grid.child(child),
+        )
+        .into_any_element()
+}
+
+pub fn cloud_sync_toggle_grid(
+    tokens: &ThemeTokens,
+    children: impl IntoIterator<Item = AnyElement>,
+) -> AnyElement {
+    let theme = tokens.ui;
+    children
+        .into_iter()
+        .fold(
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .flex()
+                .flex_wrap()
+                .gap(px(CLOUD_SYNC_TOGGLE_GRID_GAP)),
+            |grid, child| {
+                grid.child(
+                    div()
+                        .min_w(px(CLOUD_SYNC_TOGGLE_OPTION_MIN_WIDTH))
+                        .flex_1()
+                        .rounded(px(tokens.radii.sm))
+                        .bg(rgba((theme.bg_panel << 8) | CLOUD_SYNC_SOFT_SURFACE_ALPHA))
+                        .px(px(CLOUD_SYNC_TOGGLE_OPTION_PADDING_X))
+                        .py(px(CLOUD_SYNC_TOGGLE_OPTION_PADDING_Y))
+                        .child(child),
+                )
+            },
+        )
+        .into_any_element()
+}
+
 pub fn cloud_sync_button_options(variant: ButtonVariant, disabled: bool) -> ToolbarButtonOptions {
     ToolbarButtonOptions {
         button: ButtonOptions {
@@ -280,11 +409,18 @@ pub fn cloud_sync_status_card(
     facts: AnyElement,
     meta: AnyElement,
 ) -> AnyElement {
+    let theme = tokens.ui;
+    // Status card with progress/error above, then stat grid, then metadata.
     cloud_sync_card(tokens)
-        .gap(px(10.0))
         .when_some(progress, |card, progress| card.child(progress))
         .when_some(error, |card, error| card.child(error))
         .child(facts)
+        .child(
+            div()
+                .w_full()
+                .h(px(1.0))
+                .bg(rgba((theme.border << 8) | 0x40)),
+        )
         .child(meta)
         .into_any_element()
 }
@@ -304,6 +440,7 @@ pub fn cloud_sync_fact_grid(children: impl IntoIterator<Item = AnyElement>) -> A
         .into_any_element()
 }
 
+/// A single stat item — label above value, no border, clean typography.
 pub fn cloud_sync_fact_card(
     tokens: &ThemeTokens,
     label: AnyElement,
@@ -314,12 +451,9 @@ pub fn cloud_sync_fact_card(
     let theme = tokens.ui;
     div()
         .min_w(px(0.0))
-        .rounded(px(tokens.radii.md))
-        .bg(rgba((theme.bg << 8) | CLOUD_SYNC_BG_MIX_ALPHA))
-        .p(px(CLOUD_SYNC_STAT_PADDING))
         .flex()
         .flex_col()
-        .gap(px(4.0))
+        .gap(px(2.0))
         .child(
             div()
                 .text_size(px(tokens.metrics.ui_text_xs))
@@ -331,7 +465,7 @@ pub fn cloud_sync_fact_card(
                 .min_w(px(0.0))
                 .text_size(px(tokens.metrics.ui_text_sm))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(theme.text))
+                .text_color(rgb(theme.text_heading))
                 .when(value_uses_mono, |item| {
                     item.font_family(mono_font.unwrap_or_else(|| "monospace".into()))
                 })
@@ -348,18 +482,14 @@ pub fn cloud_sync_progress_view(
 ) -> AnyElement {
     let theme = tokens.ui;
     div()
-        .rounded(px(tokens.radii.md))
-        .border_1()
-        .border_color(rgb(theme.border))
-        .bg(rgb(theme.bg_panel))
-        .p(px(12.0))
         .flex()
         .flex_col()
-        .gap(px(8.0))
+        .gap(px(6.0))
         .child(
             div()
                 .flex()
                 .justify_between()
+                .items_center()
                 .text_size(px(tokens.metrics.ui_text_sm))
                 .text_color(rgb(theme.text))
                 .child(stage)
@@ -392,9 +522,9 @@ pub fn cloud_sync_error_view(
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(rgb(theme.error))
-        .bg(rgba((theme.error << 8) | 0x14))
+        .bg(rgba((theme.error << 8) | CLOUD_SYNC_ERROR_TINT_ALPHA))
         .px(px(12.0))
-        .py(px(10.0))
+        .py(px(8.0))
         .text_size(px(tokens.metrics.ui_text_sm))
         .line_height(px(20.0))
         .text_color(rgb(theme.error))
@@ -412,9 +542,10 @@ pub fn cloud_sync_meta_block(
             div()
                 .w_full()
                 .min_w(px(0.0))
+                .pt(px(4.0))
                 .flex()
                 .flex_col()
-                .gap(px(4.0))
+                .gap(px(3.0))
                 .text_size(px(tokens.metrics.ui_text_xs))
                 .line_height(px(18.0))
                 .text_color(rgb(tokens.ui.text_muted)),
@@ -472,8 +603,8 @@ pub fn cloud_sync_preview_block(tokens: &ThemeTokens, title: AnyElement) -> Div 
         .min_w(px(0.0))
         .rounded(px(tokens.radii.md))
         .border_1()
-        .border_color(rgb(theme.border))
-        .bg(rgba((theme.bg << 8) | CLOUD_SYNC_BG_MIX_ALPHA))
+        .border_color(rgba((theme.border << 8) | CLOUD_SYNC_LIST_BORDER_ALPHA))
+        .bg(rgba((theme.bg_panel << 8) | CLOUD_SYNC_SOFT_SURFACE_ALPHA))
         .p(px(CLOUD_SYNC_STAT_PADDING))
         .flex()
         .flex_col()
@@ -618,8 +749,8 @@ pub fn cloud_sync_rollback_backup_row(
                 .min_w(px(0.0))
                 .rounded(px(tokens.radii.md))
                 .border_1()
-                .border_color(rgb(theme.border))
-                .bg(rgba((theme.bg << 8) | CLOUD_SYNC_BG_MIX_ALPHA))
+                .border_color(rgba((theme.border << 8) | CLOUD_SYNC_LIST_BORDER_ALPHA))
+                .bg(rgba((theme.bg_panel << 8) | CLOUD_SYNC_SOFT_SURFACE_ALPHA))
                 .p(px(CLOUD_SYNC_STAT_PADDING))
                 .flex()
                 .items_center()
@@ -689,7 +820,7 @@ pub fn cloud_sync_history_entry(
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(rgba((theme.border << 8) | CLOUD_SYNC_LIST_BORDER_ALPHA))
-        .bg(rgba((theme.bg << 8) | CLOUD_SYNC_LIST_BG_ALPHA))
+        .bg(rgba((theme.bg_panel << 8) | CLOUD_SYNC_LIST_BG_ALPHA))
         .p(px(10.0))
         .flex()
         .flex_col()
@@ -744,13 +875,17 @@ pub fn cloud_sync_notes_card(
         .into_any_element()
 }
 
-pub fn cloud_sync_field_row(label: AnyElement, control: AnyElement) -> AnyElement {
+pub fn cloud_sync_field_row(
+    tokens: &ThemeTokens,
+    label: AnyElement,
+    control: AnyElement,
+) -> AnyElement {
     div()
         .w_full()
         .min_w(px(0.0))
         .flex()
         .flex_col()
-        .gap(px(4.0))
+        .gap(px(tokens.metrics.settings_row_gap / 4.0))
         .child(label)
         .child(control)
         .into_any_element()
@@ -768,6 +903,7 @@ pub fn cloud_sync_secret_row(input: AnyElement, action: Option<AnyElement>) -> A
         .into_any_element()
 }
 
+/// Clean toggle row matching the settings row pattern — no individual border.
 pub fn cloud_sync_toggle(
     tokens: &ThemeTokens,
     label: AnyElement,
@@ -777,21 +913,29 @@ pub fn cloud_sync_toggle(
     let theme = tokens.ui;
     div()
         .w_full()
+        .min_w(px(0.0))
         .flex()
         .items_center()
         .justify_between()
-        .py(px(2.0))
-        .text_size(px(tokens.metrics.ui_text_xs))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(rgb(theme.text_muted))
+        .gap(px(12.0))
+        .py(px(5.0))
         .cursor_pointer()
         .on_mouse_down(MouseButton::Left, listener)
-        .child(label)
         .child(
             div()
-                .w(px(16.0))
-                .h(px(16.0))
-                .rounded(px(2.0))
+                .min_w(px(0.0))
+                .flex_1()
+                .text_size(px(tokens.metrics.ui_text_sm))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(rgb(theme.text))
+                .child(label),
+        )
+        .child(
+            div()
+                .flex_shrink_0()
+                .w(px(18.0))
+                .h(px(18.0))
+                .rounded(px(tokens.radii.xs))
                 .border_1()
                 .border_color(if checked {
                     rgb(theme.accent)
@@ -806,7 +950,7 @@ pub fn cloud_sync_toggle(
                 .flex()
                 .items_center()
                 .justify_center()
-                .when(checked, |box_el| {
+                .when(checked, |box_el: Div| {
                     box_el.child(
                         div()
                             .text_size(px(11.0))
