@@ -105,6 +105,16 @@ pub trait CloudSyncSecretProvider {
         mode: SecretReadMode,
     ) -> Result<Option<CloudSyncSecretValue>, CloudSyncSecretError>;
 
+    fn store_secret(
+        &mut self,
+        _key: &str,
+        _value: Option<&str>,
+    ) -> Result<(), CloudSyncSecretError> {
+        Err(CloudSyncSecretError::AccessFailed(
+            "secret provider is read-only".to_string(),
+        ))
+    }
+
     fn get_many_secrets(
         &mut self,
         keys: &[&str],
@@ -334,6 +344,11 @@ impl CloudSyncSecretProvider for CloudSyncKeychainSecretProvider {
         Ok(None)
     }
 
+    fn store_secret(&mut self, key: &str, value: Option<&str>) -> Result<(), CloudSyncSecretError> {
+        CloudSyncKeychainSecretProvider::store_secret(self, key, value)
+            .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))
+    }
+
     fn get_many_secrets(
         &mut self,
         keys: &[&str],
@@ -439,6 +454,7 @@ pub struct CloudSyncSecrets {
     pub sync_password: Option<CloudSyncSecretValue>,
     pub token: Option<CloudSyncSecretValue>,
     pub git_token: Option<CloudSyncSecretValue>,
+    pub microsoft_refresh_token: Option<CloudSyncSecretValue>,
     pub basic_username: Option<CloudSyncSecretValue>,
     pub basic_password: Option<CloudSyncSecretValue>,
     pub access_key_id: Option<CloudSyncSecretValue>,
@@ -458,6 +474,13 @@ impl std::fmt::Debug for CloudSyncSecrets {
             .field(
                 "git_token",
                 &self.git_token.as_ref().map(|_| "[redacted secret]"),
+            )
+            .field(
+                "microsoft_refresh_token",
+                &self
+                    .microsoft_refresh_token
+                    .as_ref()
+                    .map(|_| "[redacted secret]"),
             )
             .field(
                 "basic_username",
@@ -504,6 +527,10 @@ pub fn backend_uses_s3_credentials(backend_type: &BackendType) -> bool {
     matches!(backend_type, BackendType::S3)
 }
 
+pub fn backend_uses_microsoft_refresh_token(backend_type: &BackendType) -> bool {
+    matches!(backend_type, BackendType::OneDrive)
+}
+
 pub fn get_action_secrets(
     settings: &crate::CloudSyncSettings,
     provider: &mut impl CloudSyncSecretProvider,
@@ -527,6 +554,11 @@ pub fn get_action_secrets(
     if backend_uses_git_token(&settings.backend_type) {
         reads.push((secret_keys::GIT_TOKEN, |secrets, value| {
             secrets.git_token = value
+        }));
+    }
+    if backend_uses_microsoft_refresh_token(&settings.backend_type) {
+        reads.push((secret_keys::MICROSOFT_REFRESH_TOKEN, |secrets, value| {
+            secrets.microsoft_refresh_token = value
         }));
     }
     if backend_uses_basic(&settings.backend_type, &settings.auth_mode) {
@@ -577,6 +609,7 @@ fn secret_missing(key: &str, secrets: &CloudSyncSecrets) -> bool {
         secret_keys::SYNC_PASSWORD => secrets.sync_password.is_none(),
         secret_keys::TOKEN => secrets.token.is_none(),
         secret_keys::GIT_TOKEN => secrets.git_token.is_none(),
+        secret_keys::MICROSOFT_REFRESH_TOKEN => secrets.microsoft_refresh_token.is_none(),
         secret_keys::BASIC_USERNAME => secrets.basic_username.is_none(),
         secret_keys::BASIC_PASSWORD => secrets.basic_password.is_none(),
         secret_keys::ACCESS_KEY_ID => secrets.access_key_id.is_none(),
@@ -662,6 +695,44 @@ mod tests {
         assert_eq!(
             provider.reads,
             vec![(secret_keys::TOKEN.to_string(), SecretReadMode::Silent)]
+        );
+    }
+
+    #[test]
+    fn onedrive_actions_read_refresh_token_instead_of_short_lived_access_token() {
+        let mut provider = TestSecrets {
+            hints: HashSet::from([
+                secret_keys::TOKEN.to_string(),
+                secret_keys::MICROSOFT_REFRESH_TOKEN.to_string(),
+            ]),
+            values: HashMap::from([(
+                secret_keys::MICROSOFT_REFRESH_TOKEN.to_string(),
+                "refresh".to_string(),
+            )]),
+            ..TestSecrets::default()
+        };
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::OneDrive,
+            ..CloudSyncSettings::default()
+        };
+
+        let secrets =
+            get_action_secrets(&settings, &mut provider, false, SecretReadMode::Prompt).unwrap();
+
+        assert!(secrets.token.is_none());
+        assert_eq!(
+            secrets
+                .microsoft_refresh_token
+                .as_ref()
+                .map(|secret| secret.as_str()),
+            Some("refresh")
+        );
+        assert_eq!(
+            provider.batch_reads,
+            vec![(
+                vec![secret_keys::MICROSOFT_REFRESH_TOKEN.to_string()],
+                SecretReadMode::Prompt,
+            )]
         );
     }
 

@@ -35,7 +35,7 @@ use crate::{
     progress::{
         CloudSyncProgressSink, CloudSyncProgressStage, report_fractional_progress, report_progress,
     },
-    quick_commands_object_path, revision_id,
+    quick_commands_object_path, revision_id, secret_keys,
     secrets::{CloudSyncSecretProvider, SecretReadMode, get_action_secrets},
     sensitive_credentials_object_path, serial_profiles_object_path,
     service::{
@@ -124,6 +124,45 @@ impl CloudSyncOperationService {
         }
     }
 
+    async fn prepare_action_secrets(
+        &self,
+        settings: &CloudSyncSettings,
+        secret_provider: &mut impl CloudSyncSecretProvider,
+        secrets: &mut crate::secrets::CloudSyncSecrets,
+    ) -> Result<()> {
+        if !matches!(settings.backend_type, BackendType::OneDrive) {
+            return Ok(());
+        }
+        let Some(refresh_token) = secrets
+            .microsoft_refresh_token
+            .as_ref()
+            .map(|token| token.as_str())
+            .filter(|token| !token.is_empty())
+        else {
+            anyhow::bail!(
+                "missing_microsoft_refresh_token: Microsoft refresh token is not configured"
+            );
+        };
+        let refreshed = self
+            .backend
+            .refresh_microsoft_access_token(&settings.microsoft_oauth_client_id, refresh_token)
+            .await?;
+        // Refreshed Microsoft tokens cross directly into the keychain-backed
+        // provider and stay in zeroizing owners for the rest of this action.
+        secret_provider.store_secret(secret_keys::TOKEN, Some(refreshed.access_token.as_str()))?;
+        if let Some(next_refresh_token) = refreshed.refresh_token.as_ref() {
+            secret_provider.store_secret(
+                secret_keys::MICROSOFT_REFRESH_TOKEN,
+                Some(next_refresh_token.as_str()),
+            )?;
+        }
+        secrets.token = Some(refreshed.access_token);
+        if let Some(refresh_token) = refreshed.refresh_token {
+            secrets.microsoft_refresh_token = Some(refresh_token);
+        }
+        Ok(())
+    }
+
     pub async fn check_remote(
         &self,
         settings: &CloudSyncSettings,
@@ -140,7 +179,7 @@ impl CloudSyncOperationService {
         };
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
-        let secrets = get_action_secrets(
+        let mut secrets = get_action_secrets(
             settings,
             secret_provider,
             false,
@@ -150,6 +189,8 @@ impl CloudSyncOperationService {
                 SecretReadMode::Prompt
             },
         )?;
+        self.prepare_action_secrets(settings, secret_provider, &mut secrets)
+            .await?;
         report_progress(progress, CloudSyncProgressStage::FetchMetadata, 1, 2);
         let metadata = self
             .backend
@@ -188,7 +229,7 @@ impl CloudSyncOperationService {
         let requires_password = local_snapshot.scope.sync_app_settings
             || local_snapshot.scope.sync_plugin_settings
             || local_snapshot.scope.sync_sensitive_credentials;
-        let secrets = get_action_secrets(
+        let mut secrets = get_action_secrets(
             settings,
             secret_provider,
             requires_password,
@@ -198,6 +239,8 @@ impl CloudSyncOperationService {
                 SecretReadMode::Prompt
             },
         )?;
+        self.prepare_action_secrets(settings, secret_provider, &mut secrets)
+            .await?;
         if requires_password
             && secrets
                 .sync_password
@@ -391,12 +434,14 @@ impl CloudSyncOperationService {
         };
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
-        let secrets = get_action_secrets(
+        let mut secrets = get_action_secrets(
             settings,
             secret_provider,
             include_sync_password,
             SecretReadMode::Prompt,
         )?;
+        self.prepare_action_secrets(settings, secret_provider, &mut secrets)
+            .await?;
         report_progress(progress, CloudSyncProgressStage::Downloading, 1, 2);
         let remote = self
             .backend
@@ -419,8 +464,10 @@ impl CloudSyncOperationService {
         };
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
-        let metadata_secrets =
+        let mut metadata_secrets =
             get_action_secrets(settings, secret_provider, false, SecretReadMode::Prompt)?;
+        self.prepare_action_secrets(settings, secret_provider, &mut metadata_secrets)
+            .await?;
         report_progress(progress, CloudSyncProgressStage::FetchMetadata, 1, 4);
         let metadata = self
             .backend
@@ -451,8 +498,10 @@ impl CloudSyncOperationService {
                 .and_then(|sections| sections.get("sensitiveCredentials"))
                 .is_some();
         let sync_password = if needs_password {
-            let secrets =
+            let mut secrets =
                 get_action_secrets(settings, secret_provider, true, SecretReadMode::Prompt)?;
+            self.prepare_action_secrets(settings, secret_provider, &mut secrets)
+                .await?;
             // Keep the structured preview password in a zeroizing owner while it
             // is reused across per-section decryptions.
             Some(Zeroizing::new(
@@ -711,7 +760,10 @@ impl CloudSyncOperationService {
         let mut noop = |_| {};
         let progress = progress.unwrap_or(&mut noop);
         report_progress(progress, CloudSyncProgressStage::FetchMetadata, 1, 4);
-        let secrets = get_action_secrets(settings, secret_provider, true, SecretReadMode::Prompt)?;
+        let mut secrets =
+            get_action_secrets(settings, secret_provider, true, SecretReadMode::Prompt)?;
+        self.prepare_action_secrets(settings, secret_provider, &mut secrets)
+            .await?;
         let password = secrets
             .sync_password
             .as_ref()

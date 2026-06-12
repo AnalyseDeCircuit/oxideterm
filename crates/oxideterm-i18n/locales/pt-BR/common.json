@@ -175,7 +175,8 @@
         "dropbox": "Dropbox",
         "git": "Repositório Git",
         "s3": "Compatível com S3",
-        "github_gist": "GitHub Gist"
+        "github_gist": "GitHub Gist",
+        "onedrive": "OneDrive"
       },
       "status": {
         "ready": "Sincronização pronta",
@@ -201,7 +202,8 @@
         "save_settings": "Salvar configurações",
         "saving": "Salvando...",
         "enable_sensitive_sync": "Ativar sincronização sensível",
-        "github_oauth_login": "Login no GitHub"
+        "github_oauth_login": "Login no GitHub",
+        "microsoft_oauth_login": "Entrar com Microsoft"
       },
       "fields": {
         "backend": "Backend",
@@ -262,7 +264,19 @@
         "http_json_example_endpoint": "https://example.com/oxideterm-sync",
         "http_json_example_namespace": "personal",
         "webdav_duplicate_warning": "Não coloque o mesmo caminho de pasta tanto no Endpoint quanto no Namespace. Se o Endpoint já termina com a pasta de sincronização, use um Namespace diferente em vez de duplicar o mesmo caminho.",
-        "backend_github_gist": "GitHub Gist armazena os objetos de sincronização do OxideTerm como arquivos codificados dentro de um Gist privado existente ou criado automaticamente. Informe um ID do Gist ou deixe em branco para criar no primeiro upload; use um token do GitHub com acesso gist, ou entre com um OAuth Client ID configurado."
+        "backend_github_gist": "GitHub Gist armazena os objetos de sincronização do OxideTerm como arquivos codificados dentro de um Gist privado existente ou criado automaticamente. Informe um ID do Gist ou deixe em branco para criar no primeiro upload; use um token do GitHub com acesso gist, ou entre com um OAuth Client ID configurado.",
+        "backend_onedrive": "O OneDrive usa a pasta de aplicativo do Microsoft Graph. Entre com um ID de cliente OAuth da Microsoft com Files.ReadWrite.AppFolder; o OxideTerm grava metadata.json e objects/*.oxide nessa pasta.",
+        "onedrive_title": "Configuração da pasta de app do OneDrive",
+        "onedrive_description": "Registre um aplicativo Microsoft Entra para login por desktop/dispositivo, conceda o escopo da pasta de aplicativo e cole aqui o ID do cliente. O OxideTerm armazena apenas objetos de sincronização criptografados nessa pasta.",
+        "onedrive_example_account_type_label": "Contas compatíveis",
+        "onedrive_example_account_type": "Escolha os tipos de conta que deseja oferecer suporte; use uma conta Microsoft pessoal se o tenant bloquear acesso delegado à pasta de aplicativo.",
+        "onedrive_example_permission_label": "Permissão do Graph",
+        "onedrive_example_permission": "Permissão delegada do Microsoft Graph: Files.ReadWrite.AppFolder. Evite Files.ReadWrite.All.",
+        "onedrive_example_public_client_label": "Login por dispositivo",
+        "onedrive_example_public_client": "Authentication > Advanced settings > Allow public client flows: Yes.",
+        "onedrive_example_storage_label": "Caminhos de armazenamento",
+        "onedrive_example_storage": "/me/drive/special/approot/metadata.json e /objects/*.oxide",
+        "onedrive_permission_warning": "Se a Microsoft retornar invalid_scope, consent_required ou insufficient privileges, revise permissões de API, consentimento, tipos de conta compatíveis e configurações de public client flow."
       },
       "settings": {
         "backend_type": "Tipo de backend",
@@ -297,7 +311,9 @@
         "sync_sensitive_credentials": "Sincronizar credenciais sensíveis",
         "gist_id": "ID do Gist",
         "github_access_token": "Token de acesso do GitHub",
-        "github_oauth_client_id": "GitHub OAuth Client ID"
+        "github_oauth_client_id": "GitHub OAuth Client ID",
+        "microsoft_oauth_client_id": "ID de cliente OAuth da Microsoft",
+        "microsoft_access_token": "Token de acesso da Microsoft"
       },
       "auth": {
         "bearer": "Bearer",
@@ -344,7 +360,8 @@
         "backend_dropbox": "Dropbox usa o campo namespace como caminho da pasta e requer um token de acesso do aplicativo.",
         "backend_git": "Git usa um endpoint compatível com a GitHub Contents API. Defina o Endpoint como a raiz da API, o Repository como owner/repo, o Branch como o ramo de destino e o Namespace como um caminho de pasta opcional dentro do repositório.",
         "backend_s3": "S3 Compatible usa o endpoint como raiz do serviço, o bucket como contêiner e o namespace como prefixo de objeto opcional.",
-        "backend_github_gist": "GitHub Gist armazena os objetos de sincronização do OxideTerm como arquivos codificados dentro de um Gist existente. Informe o ID do Gist e um token do GitHub com acesso gist; o Namespace é usado como prefixo do nome do arquivo."
+        "backend_github_gist": "GitHub Gist armazena os objetos de sincronização do OxideTerm como arquivos codificados dentro de um Gist existente. Informe o ID do Gist e um token do GitHub com acesso gist; o Namespace é usado como prefixo do nome do arquivo.",
+        "backend_onedrive": "O OneDrive usa a pasta de aplicativo do Microsoft Graph e requer login por dispositivo Microsoft. Os arquivos ficam isolados como metadata.json e objects/*.oxide."
       },
       "backup": {
         "description": "Backup de reversão Oxide Cloud Sync",
@@ -390,7 +407,28 @@
         "github_oauth_bad_client": "O GitHub OAuth Client ID é inválido ou o fluxo de dispositivo não está ativado para esse app.",
         "github_oauth_start_failed": "O GitHub rejeitou a solicitação de login por dispositivo.",
         "github_oauth_poll_failed": "O GitHub rejeitou a consulta do login por dispositivo.",
-        "github_oauth_empty_response": "O GitHub não retornou um token de acesso."
+        "github_oauth_empty_response": "O GitHub não retornou um token de acesso.",
+        "missing_microsoft_oauth_client_id": "Configure um ID de cliente OAuth da Microsoft antes de iniciar o login por dispositivo.",
+        "missing_microsoft_refresh_token": "O refresh token da Microsoft está ausente. Entre novamente no OneDrive.",
+        "onedrive_bad_credentials": "O Microsoft Graph rejeitou o token do OneDrive. Entre novamente.",
+        "onedrive_missing_scope": "O token da Microsoft não tem Files.ReadWrite.AppFolder, ou o app não consegue acessar sua pasta de aplicativo.",
+        "onedrive_rate_limited": "O limite de taxa do Microsoft Graph foi atingido. Aguarde um pouco e tente novamente.",
+        "onedrive_quota_exceeded": "O OneDrive não tem espaço suficiente para o objeto de sincronização.",
+        "microsoft_oauth_expired": "O login por dispositivo Microsoft expirou. Inicie novamente.",
+        "microsoft_oauth_denied": "O login por dispositivo Microsoft foi recusado.",
+        "microsoft_oauth_bad_code": "A Microsoft rejeitou o código de verificação do dispositivo. Inicie novamente.",
+        "microsoft_oauth_bad_client": "O ID de cliente OAuth da Microsoft é inválido ou o fluxo de dispositivo não está ativado para esse app.",
+        "microsoft_oauth_start_failed": "A Microsoft rejeitou a solicitação de login por dispositivo.",
+        "microsoft_oauth_poll_failed": "A Microsoft rejeitou a consulta do login por dispositivo.",
+        "microsoft_oauth_refresh_failed": "Não foi possível renovar o refresh token da Microsoft. Entre novamente.",
+        "microsoft_oauth_empty_response": "A Microsoft não retornou o token OAuth necessário.",
+        "onedrive_access_denied": "O Microsoft Graph negou acesso à pasta do app. Revise o tipo de conta, a política do tenant e o consentimento do app.",
+        "onedrive_bad_request": "O Microsoft Graph rejeitou a solicitação do OneDrive. Verifique se a pasta do app e o tipo de conta configurado são compatíveis.",
+        "onedrive_locked": "O OneDrive informou que o arquivo ou pasta de sincronização está bloqueado. Aguarde o desbloqueio e tente novamente.",
+        "onedrive_service_unavailable": "Microsoft Graph ou OneDrive está temporariamente indisponível. Tente novamente mais tarde.",
+        "microsoft_oauth_missing_scope": "A Microsoft rejeitou o escopo solicitado. Adicione Files.ReadWrite.AppFolder ao registro do app e conceda consentimento novamente.",
+        "microsoft_oauth_consent_required": "A Microsoft exige consentimento do usuário ou administrador para este app. Conceda o consentimento e inicie o login novamente.",
+        "microsoft_oauth_invalid_request": "A Microsoft rejeitou a solicitação OAuth. Revise o ID do cliente e a configuração do fluxo de dispositivo."
       },
       "toast": {
         "check_failed_title": "Falha na verificação remota",
@@ -412,7 +450,11 @@
         "github_oauth_code_title": "Login no GitHub iniciado",
         "github_oauth_code_description": "Digite o código {{code}} em {{url}} dentro de {{seconds}} segundos. A página de verificação foi aberta.",
         "github_oauth_success_title": "Token do GitHub salvo",
-        "github_oauth_failed_title": "Falha no login do GitHub"
+        "github_oauth_failed_title": "Falha no login do GitHub",
+        "microsoft_oauth_code_title": "Login Microsoft iniciado",
+        "microsoft_oauth_code_description": "Digite o código {{code}} em {{url}} dentro de {{seconds}} segundos. A página de verificação foi aberta.",
+        "microsoft_oauth_success_title": "Token Microsoft salvo",
+        "microsoft_oauth_failed_title": "Falha no login Microsoft"
       },
       "progress": {
         "checking": "Verificando snapshot remoto",
@@ -514,7 +556,8 @@
         "session_token": "Token de sessão opcional",
         "gist_id": "ID do Gist ou https://gist.github.com/...",
         "github_access_token": "Token do GitHub com acesso gist",
-        "github_oauth_client_id": "OAuth App client ID para login por dispositivo"
+        "github_oauth_client_id": "OAuth App client ID para login por dispositivo",
+        "microsoft_oauth_client_id": "ID de cliente do app Microsoft Entra"
       },
       "history_empty": "Ainda não há histórico de sincronização.",
       "native_description": "Sincronização criptografada e auto-hospedada para OxideTerm.",

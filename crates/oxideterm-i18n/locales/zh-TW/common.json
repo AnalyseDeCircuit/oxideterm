@@ -175,7 +175,8 @@
         "dropbox": "Dropbox",
         "git": "Git 儲存庫",
         "s3": "S3 相容物件儲存",
-        "github_gist": "GitHub Gist"
+        "github_gist": "GitHub Gist",
+        "onedrive": "OneDrive"
       },
       "status": {
         "ready": "同步就緒",
@@ -201,7 +202,8 @@
         "save_settings": "儲存設定",
         "saving": "儲存中...",
         "enable_sensitive_sync": "啟用敏感同步",
-        "github_oauth_login": "GitHub 登入"
+        "github_oauth_login": "GitHub 登入",
+        "microsoft_oauth_login": "Microsoft 登入"
       },
       "fields": {
         "backend": "後端類型",
@@ -262,7 +264,19 @@
         "http_json_example_endpoint": "https://example.com/oxideterm-sync",
         "http_json_example_namespace": "personal",
         "webdav_duplicate_warning": "不要把同一個目錄路徑同時寫進 Endpoint 和命名空間。如果 Endpoint 已經以同步目錄結尾，就不要在命名空間裡再重複同一路徑。",
-        "backend_github_gist": "GitHub Gist 會把 OxideTerm 同步物件作為編碼後的檔案存放在既有或自動建立的私有 Gist 中。可以填入 Gist ID，也可以留空並在首次上傳時自動建立；請提供具 gist 權限的 GitHub token，或設定 OAuth Client ID 後登入。"
+        "backend_github_gist": "GitHub Gist 會把 OxideTerm 同步物件作為編碼後的檔案存放在既有或自動建立的私有 Gist 中。可以填入 Gist ID，也可以留空並在首次上傳時自動建立；請提供具 gist 權限的 GitHub token，或設定 OAuth Client ID 後登入。",
+        "backend_onedrive": "OneDrive 使用 Microsoft Graph 應用程式資料夾。請使用具備 Files.ReadWrite.AppFolder 權限的 Microsoft OAuth Client ID 登入；OxideTerm 會在應用程式資料夾中寫入 metadata.json 和 objects/*.oxide。",
+        "onedrive_title": "OneDrive 應用程式資料夾設定",
+        "onedrive_description": "在 Microsoft Entra 中註冊用於桌面/裝置登入的應用程式，授予應用程式資料夾權限，然後把 Client ID 填到這裡。OxideTerm 只會把加密同步物件寫入應用程式資料夾。",
+        "onedrive_example_account_type_label": "支援的帳戶",
+        "onedrive_example_account_type": "選擇要支援的帳戶類型；如果租用戶阻擋應用程式資料夾 delegated access，建議使用個人 Microsoft 帳戶。",
+        "onedrive_example_permission_label": "Graph 權限",
+        "onedrive_example_permission": "Microsoft Graph delegated permission：Files.ReadWrite.AppFolder。不要使用 Files.ReadWrite.All。",
+        "onedrive_example_public_client_label": "裝置登入",
+        "onedrive_example_public_client": "Authentication > Advanced settings > Allow public client flows：Yes。",
+        "onedrive_example_storage_label": "儲存路徑",
+        "onedrive_example_storage": "/me/drive/special/approot/metadata.json 和 /objects/*.oxide",
+        "onedrive_permission_warning": "如果 Microsoft 回傳 invalid_scope、consent_required 或 insufficient privileges，請檢查 API 權限、授權同意、支援的帳戶類型和 public client flow 設定。"
       },
       "settings": {
         "backend_type": "後端類型",
@@ -297,7 +311,9 @@
         "sync_sensitive_credentials": "同步敏感憑證",
         "gist_id": "Gist ID",
         "github_access_token": "GitHub 存取權杖",
-        "github_oauth_client_id": "GitHub OAuth Client ID"
+        "github_oauth_client_id": "GitHub OAuth Client ID",
+        "microsoft_oauth_client_id": "Microsoft OAuth Client ID",
+        "microsoft_access_token": "Microsoft 存取權杖"
       },
       "auth": {
         "bearer": "Bearer",
@@ -344,7 +360,8 @@
         "backend_dropbox": "Dropbox 會把命名空間欄位當作資料夾路徑使用，並要求提供應用程式存取權杖。",
         "backend_git": "Git 後端使用相容 GitHub Contents API 的介面。Endpoint 填 API 根網址，儲存庫填 owner/repo，分支填目標分支，命名空間則作為儲存庫內的選用資料夾前綴。",
         "backend_s3": "S3 相容後端會把 Endpoint 當作服務根網址，Bucket 當作容器，命名空間則作為選用物件前綴。",
-        "backend_github_gist": "GitHub Gist 會把 OxideTerm 同步物件作為編碼後的檔案存放在既有 Gist 中。填入 Gist ID，並提供具 gist 權限的 GitHub token；命名空間會作為檔名前綴使用。"
+        "backend_github_gist": "GitHub Gist 會把 OxideTerm 同步物件作為編碼後的檔案存放在既有 Gist 中。填入 Gist ID，並提供具 gist 權限的 GitHub token；命名空間會作為檔名前綴使用。",
+        "backend_onedrive": "OneDrive 使用 Microsoft Graph 應用程式資料夾並需要 Microsoft 裝置登入。檔案會隔離存放在應用程式資料夾下的 metadata.json 和 objects/*.oxide。"
       },
       "backup": {
         "description": "Oxide 雲端同步回滾備份",
@@ -390,7 +407,28 @@
         "github_oauth_bad_client": "GitHub OAuth Client ID 無效，或該應用程式未啟用裝置流程。",
         "github_oauth_start_failed": "GitHub 拒絕了裝置登入請求。",
         "github_oauth_poll_failed": "GitHub 拒絕了裝置登入輪詢請求。",
-        "github_oauth_empty_response": "GitHub 沒有回傳存取權杖。"
+        "github_oauth_empty_response": "GitHub 沒有回傳存取權杖。",
+        "missing_microsoft_oauth_client_id": "請先設定 Microsoft OAuth Client ID，再啟動裝置登入。",
+        "missing_microsoft_refresh_token": "缺少 Microsoft refresh token。請重新登入 OneDrive。",
+        "onedrive_bad_credentials": "Microsoft Graph 拒絕了 OneDrive token。請重新登入。",
+        "onedrive_missing_scope": "Microsoft token 缺少 Files.ReadWrite.AppFolder 權限，或該應用程式無法存取自己的應用程式資料夾。",
+        "onedrive_rate_limited": "Microsoft Graph 速率限制已觸發。請稍後再試。",
+        "onedrive_quota_exceeded": "OneDrive 空間不足，無法儲存同步物件。",
+        "microsoft_oauth_expired": "Microsoft 裝置登入已過期。請重新開始登入。",
+        "microsoft_oauth_denied": "Microsoft 裝置登入已被拒絕。",
+        "microsoft_oauth_bad_code": "Microsoft 拒絕了裝置驗證碼。請重新開始登入。",
+        "microsoft_oauth_bad_client": "Microsoft OAuth Client ID 無效，或該應用程式未啟用裝置流程。",
+        "microsoft_oauth_start_failed": "Microsoft 拒絕了裝置登入請求。",
+        "microsoft_oauth_poll_failed": "Microsoft 拒絕了裝置登入輪詢請求。",
+        "microsoft_oauth_refresh_failed": "Microsoft refresh token 無法續期。請重新登入。",
+        "microsoft_oauth_empty_response": "Microsoft 沒有返回必要的 OAuth token。",
+        "onedrive_access_denied": "Microsoft Graph 拒絕存取應用程式資料夾。請檢查帳戶類型、租用戶原則和應用程式授權同意。",
+        "onedrive_bad_request": "Microsoft Graph 拒絕了 OneDrive 要求。請確認該帳戶類型和應用程式資料夾設定受支援。",
+        "onedrive_locked": "OneDrive 回報同步檔案或資料夾被鎖定。請等待鎖定釋放後重試。",
+        "onedrive_service_unavailable": "Microsoft Graph 或 OneDrive 暫時無法使用。請稍後重試。",
+        "microsoft_oauth_missing_scope": "Microsoft 拒絕了要求的 scope。請在應用程式註冊中加入 Files.ReadWrite.AppFolder 並重新授權。",
+        "microsoft_oauth_consent_required": "Microsoft 要求使用者或管理員同意此應用程式。請完成授權同意後重新登入。",
+        "microsoft_oauth_invalid_request": "Microsoft 拒絕了 OAuth 要求。請檢查 Client ID 和裝置流程應用程式設定。"
       },
       "toast": {
         "check_failed_title": "檢查遠端失敗",
@@ -412,7 +450,11 @@
         "github_oauth_code_title": "GitHub 登入已開始",
         "github_oauth_code_description": "請在 {{seconds}} 秒內到 {{url}} 輸入代碼 {{code}}。驗證頁面已開啟。",
         "github_oauth_success_title": "GitHub token 已儲存",
-        "github_oauth_failed_title": "GitHub 登入失敗"
+        "github_oauth_failed_title": "GitHub 登入失敗",
+        "microsoft_oauth_code_title": "Microsoft 登入已開始",
+        "microsoft_oauth_code_description": "請在 {{seconds}} 秒內到 {{url}} 輸入代碼 {{code}}。驗證頁面已開啟。",
+        "microsoft_oauth_success_title": "Microsoft token 已儲存",
+        "microsoft_oauth_failed_title": "Microsoft 登入失敗"
       },
       "progress": {
         "checking": "正在檢查遠端快照",
@@ -514,7 +556,8 @@
         "session_token": "選用的 Session Token",
         "gist_id": "Gist ID 或 https://gist.github.com/...",
         "github_access_token": "具 gist 權限的 GitHub token",
-        "github_oauth_client_id": "用於裝置登入的 OAuth App client ID"
+        "github_oauth_client_id": "用於裝置登入的 OAuth App client ID",
+        "microsoft_oauth_client_id": "Microsoft Entra 應用程式 Client ID"
       },
       "history_empty": "尚無同步記錄。",
       "native_description": "用於 OxideTerm 的加密自託管同步。",

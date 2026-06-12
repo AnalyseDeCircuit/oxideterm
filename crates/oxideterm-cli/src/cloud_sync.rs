@@ -99,6 +99,11 @@ pub fn run(command: CloudSyncCommand) -> CliResult<()> {
                     configure_backend(CloudSyncBackendArg::Webdav, args)
                 }
             },
+            CloudSyncBackendAction::OneDrive(command) => match command.action {
+                CloudSyncBackendConfigureAction::Configure(args) => {
+                    configure_backend(CloudSyncBackendArg::OneDrive, args)
+                }
+            },
             CloudSyncBackendAction::GithubGist(command) => match command.action {
                 CloudSyncBackendConfigureAction::Configure(args) => {
                     configure_backend(CloudSyncBackendArg::GithubGist, args)
@@ -191,6 +196,7 @@ fn validate_backend_configure_args(
         ),
         CloudSyncBackendArg::HttpJson
         | CloudSyncBackendArg::Dropbox
+        | CloudSyncBackendArg::OneDrive
         | CloudSyncBackendArg::GithubGist => Ok(()),
     }
 }
@@ -245,6 +251,7 @@ fn apply_configure_args(settings: &mut CloudSyncSettings, args: &CloudSyncConfig
             CloudSyncBackendArg::Webdav => BackendType::Webdav,
             CloudSyncBackendArg::HttpJson => BackendType::HttpJson,
             CloudSyncBackendArg::Dropbox => BackendType::Dropbox,
+            CloudSyncBackendArg::OneDrive => BackendType::OneDrive,
             CloudSyncBackendArg::GithubGist => BackendType::GithubGist,
             CloudSyncBackendArg::S3 => BackendType::S3,
             CloudSyncBackendArg::Git => BackendType::Git,
@@ -266,6 +273,10 @@ fn apply_configure_args(settings: &mut CloudSyncSettings, args: &CloudSyncConfig
     assign_optional_string(
         &mut settings.github_oauth_client_id,
         &args.github_oauth_client_id,
+    );
+    assign_optional_string(
+        &mut settings.microsoft_oauth_client_id,
+        &args.microsoft_oauth_client_id,
     );
     if let Some(enabled) = args.auto_upload_enabled {
         settings.auto_upload_enabled = enabled;
@@ -368,6 +379,12 @@ fn cloud_sync_configure_changes(
         "githubOauthClientId",
         before.github_oauth_client_id.clone(),
         after.github_oauth_client_id.clone(),
+    );
+    push_configure_change(
+        &mut changes,
+        "microsoftOauthClientId",
+        before.microsoft_oauth_client_id.clone(),
+        after.microsoft_oauth_client_id.clone(),
     );
     push_configure_change(
         &mut changes,

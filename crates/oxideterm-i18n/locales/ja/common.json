@@ -175,7 +175,8 @@
         "dropbox": "Dropbox",
         "git": "Git リポジトリ",
         "s3": "S3 互換ストレージ",
-        "github_gist": "GitHub Gist"
+        "github_gist": "GitHub Gist",
+        "onedrive": "OneDrive"
       },
       "status": {
         "ready": "同期準備完了",
@@ -201,7 +202,8 @@
         "save_settings": "設定を保存",
         "saving": "保存中...",
         "enable_sensitive_sync": "機密同期を有効化",
-        "github_oauth_login": "GitHub ログイン"
+        "github_oauth_login": "GitHub ログイン",
+        "microsoft_oauth_login": "Microsoft ログイン"
       },
       "fields": {
         "backend": "バックエンド",
@@ -262,7 +264,19 @@
         "http_json_example_endpoint": "https://example.com/oxideterm-sync",
         "http_json_example_namespace": "personal",
         "webdav_duplicate_warning": "同じフォルダパスを Endpoint と Namespace の両方に入力しないでください。Endpoint がすでに同期フォルダで終わっている場合は、Namespace に同じパスを繰り返さず、別の値を使ってください。",
-        "backend_github_gist": "GitHub Gist は、既存または自動作成された非公開 Gist 内に OxideTerm の同期オブジェクトをエンコード済みファイルとして保存します。Gist ID を入力するか、空のまま初回アップロードで作成できます。gist 権限を持つ GitHub token を使うか、OAuth Client ID を設定してログインしてください。"
+        "backend_github_gist": "GitHub Gist は、既存または自動作成された非公開 Gist 内に OxideTerm の同期オブジェクトをエンコード済みファイルとして保存します。Gist ID を入力するか、空のまま初回アップロードで作成できます。gist 権限を持つ GitHub token を使うか、OAuth Client ID を設定してログインしてください。",
+        "backend_onedrive": "OneDrive は Microsoft Graph のアプリ フォルダーを使用します。Files.ReadWrite.AppFolder 権限を持つ Microsoft OAuth クライアント ID でサインインすると、OxideTerm はアプリ フォルダー内に metadata.json と objects/*.oxide を書き込みます。",
+        "onedrive_title": "OneDrive アプリ フォルダー設定",
+        "onedrive_description": "Microsoft Entra でデスクトップ/デバイス ログイン用アプリを登録し、アプリ フォルダー scope を付与してから、そのクライアント ID をここに貼り付けます。OxideTerm は暗号化された同期オブジェクトだけをアプリ フォルダーに保存します。",
+        "onedrive_example_account_type_label": "対応アカウント",
+        "onedrive_example_account_type": "対応するアカウント種別を選択してください。テナントがアプリ フォルダーの delegated access をブロックする場合は、個人用 Microsoft アカウントを使用してください。",
+        "onedrive_example_permission_label": "Graph 権限",
+        "onedrive_example_permission": "Microsoft Graph delegated permission: Files.ReadWrite.AppFolder。Files.ReadWrite.All は避けてください。",
+        "onedrive_example_public_client_label": "デバイス ログイン",
+        "onedrive_example_public_client": "Authentication > Advanced settings > Allow public client flows: Yes。",
+        "onedrive_example_storage_label": "保存パス",
+        "onedrive_example_storage": "/me/drive/special/approot/metadata.json と /objects/*.oxide",
+        "onedrive_permission_warning": "Microsoft が invalid_scope、consent_required、または insufficient privileges を返す場合は、API 権限、同意、対応アカウント種別、public client flow 設定を確認してください。"
       },
       "settings": {
         "backend_type": "バックエンドタイプ",
@@ -297,7 +311,9 @@
         "sync_sensitive_credentials": "機密資格情報を同期",
         "gist_id": "Gist ID",
         "github_access_token": "GitHub アクセストークン",
-        "github_oauth_client_id": "GitHub OAuth Client ID"
+        "github_oauth_client_id": "GitHub OAuth Client ID",
+        "microsoft_oauth_client_id": "Microsoft OAuth クライアント ID",
+        "microsoft_access_token": "Microsoft アクセストークン"
       },
       "auth": {
         "bearer": "Bearer",
@@ -344,7 +360,8 @@
         "backend_dropbox": "Dropbox は Namespace フィールドをフォルダパスとして使用し、アプリアクセストークンが必要です。",
         "backend_git": "Git バックエンドは GitHub Contents API 互換のインターフェースを使用します。Endpoint に API ルートを、リポジトリに owner/repo を、ブランチにターゲットブランチを、Namespace にリポジトリ内の任意のフォルダパスを指定します。",
         "backend_s3": "S3 互換バックエンドは、Endpoint をサービスルート、Bucket をコンテナ、Namespace をオプションのオブジェクトプレフィックスとして使用します。",
-        "backend_github_gist": "GitHub Gist は、既存の Gist 内に OxideTerm の同期オブジェクトをエンコード済みファイルとして保存します。Gist ID と gist 権限を持つ GitHub token を入力してください。Namespace はファイル名の接頭辞として使われます。"
+        "backend_github_gist": "GitHub Gist は、既存の Gist 内に OxideTerm の同期オブジェクトをエンコード済みファイルとして保存します。Gist ID と gist 権限を持つ GitHub token を入力してください。Namespace はファイル名の接頭辞として使われます。",
+        "backend_onedrive": "OneDrive は Microsoft Graph のアプリ フォルダーを使用し、Microsoft デバイス ログインが必要です。ファイルはアプリ フォルダー内の metadata.json と objects/*.oxide に分離して保存されます。"
       },
       "backup": {
         "description": "Oxide クラウド同期ロールバックバックアップ",
@@ -390,7 +407,28 @@
         "github_oauth_bad_client": "GitHub OAuth Client ID が無効、またはそのアプリでデバイスフローが有効ではありません。",
         "github_oauth_start_failed": "GitHub がデバイスログイン要求を拒否しました。",
         "github_oauth_poll_failed": "GitHub がデバイスログインのポーリング要求を拒否しました。",
-        "github_oauth_empty_response": "GitHub がアクセストークンを返しませんでした。"
+        "github_oauth_empty_response": "GitHub がアクセストークンを返しませんでした。",
+        "missing_microsoft_oauth_client_id": "デバイス ログインを開始する前に Microsoft OAuth クライアント ID を設定してください。",
+        "missing_microsoft_refresh_token": "Microsoft refresh token がありません。OneDrive に再度サインインしてください。",
+        "onedrive_bad_credentials": "Microsoft Graph が OneDrive token を拒否しました。再度サインインしてください。",
+        "onedrive_missing_scope": "Microsoft token に Files.ReadWrite.AppFolder 権限がないか、アプリが自身のアプリ フォルダーへアクセスできません。",
+        "onedrive_rate_limited": "Microsoft Graph のレート制限に達しました。少し待ってから再試行してください。",
+        "onedrive_quota_exceeded": "OneDrive に同期オブジェクトを保存する空き容量がありません。",
+        "microsoft_oauth_expired": "Microsoft デバイス ログインの期限が切れました。もう一度開始してください。",
+        "microsoft_oauth_denied": "Microsoft デバイス ログインが拒否されました。",
+        "microsoft_oauth_bad_code": "Microsoft がデバイス確認コードを拒否しました。もう一度開始してください。",
+        "microsoft_oauth_bad_client": "Microsoft OAuth クライアント ID が無効、またはこのアプリでデバイス フローが有効ではありません。",
+        "microsoft_oauth_start_failed": "Microsoft がデバイス ログイン要求を拒否しました。",
+        "microsoft_oauth_poll_failed": "Microsoft がデバイス ログインのポーリング要求を拒否しました。",
+        "microsoft_oauth_refresh_failed": "Microsoft refresh token を更新できませんでした。再度サインインしてください。",
+        "microsoft_oauth_empty_response": "Microsoft が必要な OAuth token を返しませんでした。",
+        "onedrive_access_denied": "Microsoft Graph がアプリ フォルダーへのアクセスを拒否しました。アカウント種別、テナント ポリシー、アプリの同意を確認してください。",
+        "onedrive_bad_request": "Microsoft Graph が OneDrive 要求を拒否しました。アプリ フォルダーと設定済みアカウント種別が対応しているか確認してください。",
+        "onedrive_locked": "OneDrive は同期ファイルまたはフォルダーがロックされていると報告しました。ロックが解除されてから再試行してください。",
+        "onedrive_service_unavailable": "Microsoft Graph または OneDrive は一時的に利用できません。後でもう一度試してください。",
+        "microsoft_oauth_missing_scope": "Microsoft が要求された scope を拒否しました。アプリ登録に Files.ReadWrite.AppFolder を追加し、再度同意してください。",
+        "microsoft_oauth_consent_required": "Microsoft はこのアプリにユーザーまたは管理者の同意を要求しています。同意してからログインをやり直してください。",
+        "microsoft_oauth_invalid_request": "Microsoft が OAuth 要求を拒否しました。クライアント ID とデバイス フローのアプリ設定を確認してください。"
       },
       "toast": {
         "check_failed_title": "リモート確認失敗",
@@ -412,7 +450,11 @@
         "github_oauth_code_title": "GitHub ログインを開始しました",
         "github_oauth_code_description": "{{seconds}} 秒以内に {{url}} でコード {{code}} を入力してください。確認ページを開きました。",
         "github_oauth_success_title": "GitHub token を保存しました",
-        "github_oauth_failed_title": "GitHub ログインに失敗しました"
+        "github_oauth_failed_title": "GitHub ログインに失敗しました",
+        "microsoft_oauth_code_title": "Microsoft ログインを開始しました",
+        "microsoft_oauth_code_description": "{{seconds}} 秒以内に {{url}} でコード {{code}} を入力してください。確認ページを開きました。",
+        "microsoft_oauth_success_title": "Microsoft token を保存しました",
+        "microsoft_oauth_failed_title": "Microsoft ログインに失敗しました"
       },
       "progress": {
         "checking": "リモートスナップショットを確認中",
@@ -514,7 +556,8 @@
         "session_token": "オプションの Session Token",
         "gist_id": "Gist ID または https://gist.github.com/...",
         "github_access_token": "gist 権限を持つ GitHub token",
-        "github_oauth_client_id": "デバイスログイン用 OAuth App client ID"
+        "github_oauth_client_id": "デバイスログイン用 OAuth App client ID",
+        "microsoft_oauth_client_id": "Microsoft Entra アプリのクライアント ID"
       },
       "history_empty": "同期履歴はまだありません。",
       "native_description": "OxideTerm 向けの暗号化されたセルフホスト同期。",

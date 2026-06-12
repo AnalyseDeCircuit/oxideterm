@@ -6,7 +6,8 @@
 use oxideterm_cloud_sync::{
     BackendType, CloudSyncStatus, RawSyncScope, normalize_sync_scope, secret_keys,
     secrets::{
-        backend_uses_basic, backend_uses_git_token, backend_uses_s3_credentials, backend_uses_token,
+        backend_uses_basic, backend_uses_git_token, backend_uses_microsoft_refresh_token,
+        backend_uses_s3_credentials, backend_uses_token,
     },
     state::CloudSyncPersistedState,
 };
@@ -267,6 +268,7 @@ fn sync_scope_health_item(raw_scope: &RawSyncScope) -> CloudSyncHealthItem {
 fn required_backend_text_fields_present(form: &CloudSyncFormDraft) -> bool {
     match form.backend_type {
         BackendType::Dropbox => true,
+        BackendType::OneDrive => has_text(&form.microsoft_oauth_client_id),
         BackendType::GithubGist => true,
         BackendType::Git => has_text(&form.git_repository),
         BackendType::S3 => {
@@ -280,6 +282,13 @@ fn required_backend_secrets_present(
     form: &CloudSyncFormDraft,
     state: &CloudSyncPersistedState,
 ) -> bool {
+    if backend_uses_microsoft_refresh_token(&form.backend_type) {
+        return state
+            .secret_hints
+            .get(secret_keys::MICROSOFT_REFRESH_TOKEN)
+            .copied()
+            .unwrap_or(false);
+    }
     if backend_uses_token(&form.backend_type, &form.auth_mode)
         && !secret_present(state, secret_keys::TOKEN, &form.token)
     {

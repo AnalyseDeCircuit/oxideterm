@@ -1024,3 +1024,32 @@ fn parses_cloud_sync_backend_configure() {
         _ => panic!("expected cloud-sync command"),
     }
 }
+
+#[test]
+fn parses_cloud_sync_onedrive_backend_configure() {
+    let cli = Cli::parse_from([
+        "oxideterm",
+        "cloud-sync",
+        "backend",
+        "onedrive",
+        "configure",
+        "--microsoft-oauth-client-id",
+        "client-id",
+        "--dry-run",
+    ]);
+    match cli.command {
+        Command::CloudSync(command) => match command.action {
+            CloudSyncAction::Backend(command) => match command.action {
+                CloudSyncBackendAction::OneDrive(command) => match command.action {
+                    CloudSyncBackendConfigureAction::Configure(args) => {
+                        assert_eq!(args.microsoft_oauth_client_id.as_deref(), Some("client-id"));
+                        assert!(args.write.dry_run);
+                    }
+                },
+                _ => panic!("expected onedrive backend"),
+            },
+            _ => panic!("expected cloud-sync backend"),
+        },
+        _ => panic!("expected cloud-sync command"),
+    }
+}

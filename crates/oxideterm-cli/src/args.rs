@@ -166,6 +166,7 @@ fn normalize_command_output_format(command: &mut Command) {
             },
             CloudSyncAction::Backend(command) => match &mut command.action {
                 CloudSyncBackendAction::Webdav(command)
+                | CloudSyncBackendAction::OneDrive(command)
                 | CloudSyncBackendAction::GithubGist(command)
                 | CloudSyncBackendAction::S3(command)
                 | CloudSyncBackendAction::Git(command) => match &mut command.action {

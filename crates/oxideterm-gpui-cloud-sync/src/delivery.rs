@@ -17,7 +17,7 @@ use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use chrono::Utc;
 use oxideterm_cloud_sync::{
     CloudSyncSettings, MAX_ROLLBACK_BACKUP_BYTES, StructuredSectionRevisions,
-    backend::{CloudSyncBackend, GithubDeviceTokenPoll},
+    backend::{CloudSyncBackend, GithubDeviceTokenPoll, MicrosoftDeviceTokenPoll},
     operation::{
         ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, CloudSyncOperationService,
         LegacyPreview, StructuredPreview, UploadOptions, UploadOutcome,
@@ -57,8 +57,10 @@ pub enum CloudSyncDelivery {
     PullPreviewFinished(CloudSyncActionResult<CloudSyncPendingPreview>),
     RestoreBackupPreviewFinished(CloudSyncActionResult<CloudSyncPendingPreview>),
     ApplyPreviewFinished(CloudSyncActionResult<CloudSyncApplyUiOutcome>),
-    GithubOauthCode(GithubOauthDevicePrompt),
+    GithubOauthCode(CloudSyncOauthDevicePrompt),
     GithubOauthFinished(CloudSyncActionResult<()>),
+    MicrosoftOauthCode(CloudSyncOauthDevicePrompt),
+    MicrosoftOauthFinished(CloudSyncActionResult<()>),
 }
 
 #[derive(Debug)]
@@ -68,7 +70,7 @@ pub struct CloudSyncActionResult<T> {
 }
 
 #[derive(Debug)]
-pub struct GithubOauthDevicePrompt {
+pub struct CloudSyncOauthDevicePrompt {
     pub user_code: String,
     pub verification_uri: String,
     pub expires_in: u64,
@@ -135,7 +137,7 @@ pub async fn deliver_cloud_sync_github_oauth(
     let result = async {
         let device = backend.start_github_device_flow(&client_id).await?;
         let _ = tx.send(CloudSyncDelivery::GithubOauthCode(
-            GithubOauthDevicePrompt {
+            CloudSyncOauthDevicePrompt {
                 user_code: device.user_code.clone(),
                 verification_uri: device.verification_uri.clone(),
                 expires_in: device.expires_in,
@@ -172,6 +174,65 @@ pub async fn deliver_cloud_sync_github_oauth(
     send_action_result(
         tx,
         CloudSyncDelivery::GithubOauthFinished,
+        result,
+        &provider,
+    );
+}
+
+pub async fn deliver_cloud_sync_microsoft_oauth(
+    tx: Sender<CloudSyncDelivery>,
+    client_id: String,
+    hints: BTreeMap<String, bool>,
+) {
+    let mut provider = CloudSyncKeychainSecretProvider::new(hints);
+    let backend = CloudSyncBackend::new();
+    let result = async {
+        let device = backend.start_microsoft_device_flow(&client_id).await?;
+        let _ = tx.send(CloudSyncDelivery::MicrosoftOauthCode(
+            CloudSyncOauthDevicePrompt {
+                user_code: device.user_code.clone(),
+                verification_uri: device.verification_uri.clone(),
+                expires_in: device.expires_in,
+            },
+        ));
+        let deadline = Instant::now() + Duration::from_secs(device.expires_in);
+        let mut interval = device.interval.max(1);
+        loop {
+            if Instant::now() >= deadline {
+                anyhow::bail!("microsoft_oauth_expired: Microsoft device code expired");
+            }
+            tokio::time::sleep(Duration::from_secs(interval)).await;
+            match backend
+                .poll_microsoft_device_flow(&client_id, &device.device_code, interval)
+                .await?
+            {
+                MicrosoftDeviceTokenPoll::Pending { interval: next } => {
+                    interval = next.max(1);
+                }
+                MicrosoftDeviceTokenPoll::SlowDown { interval: next } => {
+                    interval = next.max(1);
+                }
+                MicrosoftDeviceTokenPoll::Token {
+                    access_token,
+                    refresh_token,
+                } => {
+                    // Store Microsoft OAuth tokens at the keychain boundary;
+                    // neither token is displayed or copied into UI state.
+                    provider.store_secret(secret_keys::TOKEN, Some(access_token.as_str()))?;
+                    provider.store_secret(
+                        secret_keys::MICROSOFT_REFRESH_TOKEN,
+                        Some(refresh_token.as_str()),
+                    )?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+    .await
+    .map_err(|error: anyhow::Error| error.to_string());
+    send_action_result(
+        tx,
+        CloudSyncDelivery::MicrosoftOauthFinished,
         result,
         &provider,
     );

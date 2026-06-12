@@ -26,6 +26,7 @@ pub fn cloud_sync_backend_label_key(backend: &BackendType) -> &'static str {
         BackendType::Webdav => "plugin.cloud_sync.backend.webdav",
         BackendType::HttpJson => "plugin.cloud_sync.backend.http_json",
         BackendType::Dropbox => "plugin.cloud_sync.backend.dropbox",
+        BackendType::OneDrive => "plugin.cloud_sync.backend.onedrive",
         BackendType::GithubGist => "plugin.cloud_sync.backend.github_gist",
         BackendType::S3 => "plugin.cloud_sync.backend.s3",
         BackendType::Git => "plugin.cloud_sync.backend.git",
@@ -107,6 +108,12 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         "missing_github_oauth_client_id" => CloudSyncErrorMessageSpec::Key(
             "plugin.cloud_sync.errors.missing_github_oauth_client_id",
         ),
+        "missing_microsoft_oauth_client_id" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.missing_microsoft_oauth_client_id",
+        ),
+        "missing_microsoft_refresh_token" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.missing_microsoft_refresh_token",
+        ),
         "http_unauthorized" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.http_unauthorized")
         }
@@ -146,6 +153,63 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         "github_oauth_empty_response" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.github_oauth_empty_response")
         }
+        "onedrive_bad_credentials" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_bad_credentials")
+        }
+        "onedrive_missing_scope" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_missing_scope")
+        }
+        "onedrive_access_denied" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_access_denied")
+        }
+        "onedrive_bad_request" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_bad_request")
+        }
+        "onedrive_locked" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_locked")
+        }
+        "onedrive_rate_limited" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_rate_limited")
+        }
+        "onedrive_quota_exceeded" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_quota_exceeded")
+        }
+        "onedrive_service_unavailable" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_service_unavailable")
+        }
+        "microsoft_oauth_expired" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.microsoft_oauth_expired")
+        }
+        "microsoft_oauth_denied" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.microsoft_oauth_denied")
+        }
+        "microsoft_oauth_bad_code" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.microsoft_oauth_bad_code")
+        }
+        "microsoft_oauth_bad_client" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.microsoft_oauth_bad_client")
+        }
+        "microsoft_oauth_missing_scope" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.microsoft_oauth_missing_scope")
+        }
+        "microsoft_oauth_consent_required" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.microsoft_oauth_consent_required",
+        ),
+        "microsoft_oauth_invalid_request" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.microsoft_oauth_invalid_request",
+        ),
+        "microsoft_oauth_start_failed" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.microsoft_oauth_start_failed")
+        }
+        "microsoft_oauth_poll_failed" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.microsoft_oauth_poll_failed")
+        }
+        "microsoft_oauth_refresh_failed" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.microsoft_oauth_refresh_failed",
+        ),
+        "microsoft_oauth_empty_response" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.microsoft_oauth_empty_response",
+        ),
         "missing_s3_bucket" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_s3_bucket")
         }
@@ -232,6 +296,7 @@ pub fn cloud_sync_select_label_key(label: CloudSyncSelectLabelKey) -> &'static s
         CloudSyncSelectLabelKey::BackendWebdav => "plugin.cloud_sync.backend.webdav",
         CloudSyncSelectLabelKey::BackendHttpJson => "plugin.cloud_sync.backend.http_json",
         CloudSyncSelectLabelKey::BackendDropbox => "plugin.cloud_sync.backend.dropbox",
+        CloudSyncSelectLabelKey::BackendOneDrive => "plugin.cloud_sync.backend.onedrive",
         CloudSyncSelectLabelKey::BackendGithubGist => "plugin.cloud_sync.backend.github_gist",
         CloudSyncSelectLabelKey::BackendGit => "plugin.cloud_sync.backend.git",
         CloudSyncSelectLabelKey::BackendS3 => "plugin.cloud_sync.backend.s3",
@@ -332,6 +397,20 @@ mod tests {
             CloudSyncErrorMessageSpec::SnapshotTooLarge {
                 limit: Some("2.0 MB".to_string())
             }
+        );
+    }
+
+    #[test]
+    fn maps_onedrive_and_microsoft_oauth_errors_to_copy_specs() {
+        assert_eq!(
+            cloud_sync_error_message_spec("onedrive_access_denied: tenant policy blocked access"),
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_access_denied")
+        );
+        assert_eq!(
+            cloud_sync_error_message_spec("microsoft_oauth_consent_required: admin consent needed"),
+            CloudSyncErrorMessageSpec::Key(
+                "plugin.cloud_sync.errors.microsoft_oauth_consent_required"
+            )
         );
     }
 

@@ -72,6 +72,29 @@ pub fn cloud_sync_guide_spec(backend_type: &BackendType) -> CloudSyncGuideSpec {
             "plugin.cloud_sync.backend.dropbox",
             "plugin.cloud_sync.notes.backend_dropbox",
         ),
+        BackendType::OneDrive => CloudSyncGuideSpec {
+            title_key: "plugin.cloud_sync.guide.onedrive_title",
+            description_key: "plugin.cloud_sync.guide.onedrive_description",
+            examples: vec![
+                CloudSyncGuideExampleSpec {
+                    label_key: "plugin.cloud_sync.guide.onedrive_example_account_type_label",
+                    value_key: "plugin.cloud_sync.guide.onedrive_example_account_type",
+                },
+                CloudSyncGuideExampleSpec {
+                    label_key: "plugin.cloud_sync.guide.onedrive_example_permission_label",
+                    value_key: "plugin.cloud_sync.guide.onedrive_example_permission",
+                },
+                CloudSyncGuideExampleSpec {
+                    label_key: "plugin.cloud_sync.guide.onedrive_example_public_client_label",
+                    value_key: "plugin.cloud_sync.guide.onedrive_example_public_client",
+                },
+                CloudSyncGuideExampleSpec {
+                    label_key: "plugin.cloud_sync.guide.onedrive_example_storage_label",
+                    value_key: "plugin.cloud_sync.guide.onedrive_example_storage",
+                },
+            ],
+            warning_key: Some("plugin.cloud_sync.guide.onedrive_permission_warning"),
+        },
         BackendType::GithubGist => backend_notes_spec(
             "plugin.cloud_sync.backend.github_gist",
             "plugin.cloud_sync.notes.backend_github_gist",

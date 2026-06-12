@@ -58,7 +58,7 @@ pub struct CloudSyncConfigureArgs {
     #[arg(
         long,
         value_enum,
-        help = "Backend type: webdav, http-json, dropbox, github-gist, s3, or git"
+        help = "Backend type: webdav, http-json, dropbox, onedrive, github-gist, s3, or git"
     )]
     pub backend: Option<CloudSyncBackendArg>,
     #[arg(long, value_enum, help = "Authentication mode for the backend")]
@@ -77,6 +77,8 @@ pub struct CloudSyncConfigureArgs {
     pub git_branch: Option<String>,
     #[arg(long, help = "GitHub OAuth client ID for Gist device login")]
     pub github_oauth_client_id: Option<String>,
+    #[arg(long, help = "Microsoft OAuth client ID for OneDrive device login")]
+    pub microsoft_oauth_client_id: Option<String>,
     #[arg(long, help = "Enable or disable automatic upload")]
     pub auto_upload_enabled: Option<bool>,
     #[arg(long, help = "Automatic upload interval in minutes")]
@@ -93,6 +95,8 @@ pub enum CloudSyncBackendArg {
     Webdav,
     HttpJson,
     Dropbox,
+    #[value(name = "onedrive", alias = "one-drive")]
+    OneDrive,
     GithubGist,
     S3,
     Git,
@@ -107,6 +111,8 @@ pub struct CloudSyncBackendCommand {
 #[derive(Debug, Subcommand)]
 pub enum CloudSyncBackendAction {
     Webdav(CloudSyncBackendConfigureCommand),
+    #[command(name = "onedrive", alias = "one-drive")]
+    OneDrive(CloudSyncBackendConfigureCommand),
     GithubGist(CloudSyncBackendConfigureCommand),
     S3(CloudSyncBackendConfigureCommand),
     Git(CloudSyncBackendConfigureCommand),

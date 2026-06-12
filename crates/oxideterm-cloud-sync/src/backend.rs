@@ -5,11 +5,12 @@ use std::{collections::BTreeSet, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use chrono::{DateTime, Utc};
 use reqwest::{
     Client, Method, RequestBuilder, Response, StatusCode, Url,
     header::{
         ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ETAG, HeaderMap, HeaderName,
-        HeaderValue, USER_AGENT,
+        HeaderValue, RETRY_AFTER, USER_AGENT,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,11 @@ use crate::{
 
 const DROPBOX_API_BASE: &str = "https://api.dropboxapi.com/2";
 const DROPBOX_CONTENT_BASE: &str = "https://content.dropboxapi.com/2";
+const MICROSOFT_GRAPH_BASE: &str = "https://graph.microsoft.com/v1.0";
+const MICROSOFT_AUTH_TENANT: &str = "common";
+const MICROSOFT_ONEDRIVE_SCOPE: &str = "offline_access Files.ReadWrite.AppFolder";
+const CLOUD_REQUEST_MAX_RETRY_ATTEMPTS: usize = 3;
+const CLOUD_REQUEST_MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 const DEFAULT_GIT_API_ENDPOINT: &str = "https://api.github.com";
 const GITHUB_API_VERSION: &str = "2022-11-28";
 const GIST_OBJECT_PREFIX: &str = "OXIDETERM-GIST-BLOB-V1\n";
@@ -182,6 +188,146 @@ impl CloudSyncBackend {
         }
     }
 
+    pub async fn start_microsoft_device_flow(
+        &self,
+        client_id: &str,
+    ) -> Result<MicrosoftDeviceCode> {
+        let client_id = client_id.trim();
+        if client_id.is_empty() {
+            bail!("missing_microsoft_oauth_client_id: Microsoft OAuth client ID is not configured");
+        }
+        let response = execute_cloud_request(
+            self.client
+                .post(microsoft_device_code_url())
+                .header(ACCEPT, "application/json")
+                .form(&[
+                    ("client_id", client_id),
+                    ("scope", MICROSOFT_ONEDRIVE_SCOPE),
+                ]),
+        )
+        .await?;
+        let status = response.status();
+        let value = response.json::<Value>().await.map_err(anyhow::Error::new)?;
+        if !status.is_success() {
+            return Err(microsoft_oauth_value_error(
+                &value,
+                "microsoft_oauth_start_failed",
+            ));
+        }
+        let value = serde_json::from_value::<MicrosoftDeviceCodeResponse>(value)
+            .map_err(anyhow::Error::new)?;
+        Ok(MicrosoftDeviceCode {
+            device_code: value.device_code,
+            user_code: value.user_code,
+            verification_uri: value.verification_uri,
+            expires_in: value.expires_in,
+            interval: value.interval,
+        })
+    }
+
+    pub async fn poll_microsoft_device_flow(
+        &self,
+        client_id: &str,
+        device_code: &str,
+        interval: u64,
+    ) -> Result<MicrosoftDeviceTokenPoll> {
+        let client_id = client_id.trim();
+        if client_id.is_empty() {
+            bail!("missing_microsoft_oauth_client_id: Microsoft OAuth client ID is not configured");
+        }
+        let response = execute_cloud_request(
+            self.client
+                .post(microsoft_token_url())
+                .header(ACCEPT, "application/json")
+                .form(&[
+                    ("client_id", client_id),
+                    ("device_code", device_code),
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ]),
+        )
+        .await?;
+        let status = response.status();
+        let value = response
+            .json::<MicrosoftTokenResponse>()
+            .await
+            .map_err(anyhow::Error::new)?;
+        if !status.is_success()
+            && !matches!(
+                value.error.as_deref(),
+                Some("authorization_pending" | "slow_down")
+            )
+        {
+            return Err(microsoft_oauth_error(&value, "microsoft_oauth_poll_failed"));
+        }
+        if let Some(access_token) = value.access_token {
+            let refresh_token = value.refresh_token.context(
+                "microsoft_oauth_empty_response: Microsoft did not return a refresh token",
+            )?;
+            // Microsoft returns opaque tokens; move both into zeroizing owners
+            // immediately and never derive behavior from token contents.
+            return Ok(MicrosoftDeviceTokenPoll::Token {
+                access_token: Zeroizing::new(access_token),
+                refresh_token: Zeroizing::new(refresh_token),
+            });
+        }
+        match value.error.as_deref() {
+            Some("authorization_pending") => Ok(MicrosoftDeviceTokenPoll::Pending {
+                interval: value.interval.unwrap_or(interval),
+            }),
+            Some("slow_down") => Ok(MicrosoftDeviceTokenPoll::SlowDown {
+                interval: value.interval.unwrap_or(interval + 5),
+            }),
+            _ => Err(microsoft_oauth_error(
+                &value,
+                "microsoft_oauth_empty_response",
+            )),
+        }
+    }
+
+    pub async fn refresh_microsoft_access_token(
+        &self,
+        client_id: &str,
+        refresh_token: &str,
+    ) -> Result<MicrosoftTokenRefresh> {
+        let client_id = client_id.trim();
+        if client_id.is_empty() {
+            bail!("missing_microsoft_oauth_client_id: Microsoft OAuth client ID is not configured");
+        }
+        if refresh_token.trim().is_empty() {
+            bail!("missing_microsoft_refresh_token: Microsoft refresh token is not configured");
+        }
+        let response = execute_cloud_request(
+            self.client
+                .post(microsoft_token_url())
+                .header(ACCEPT, "application/json")
+                .form(&[
+                    ("client_id", client_id),
+                    ("scope", MICROSOFT_ONEDRIVE_SCOPE),
+                    ("refresh_token", refresh_token),
+                    ("grant_type", "refresh_token"),
+                ]),
+        )
+        .await?;
+        let status = response.status();
+        let value = response
+            .json::<MicrosoftTokenResponse>()
+            .await
+            .map_err(anyhow::Error::new)?;
+        if !status.is_success() {
+            return Err(microsoft_oauth_error(
+                &value,
+                "microsoft_oauth_refresh_failed",
+            ));
+        }
+        let access_token = value
+            .access_token
+            .context("microsoft_oauth_empty_response: Microsoft did not return an access token")?;
+        Ok(MicrosoftTokenRefresh {
+            access_token: Zeroizing::new(access_token),
+            refresh_token: value.refresh_token.map(Zeroizing::new),
+        })
+    }
+
     pub async fn fetch_remote_metadata(
         &self,
         config: &CloudSyncSettings,
@@ -191,6 +337,7 @@ impl CloudSyncBackend {
         match config.backend_type {
             BackendType::HttpJson => self.fetch_http_json_metadata(config, secrets).await,
             BackendType::Dropbox => self.fetch_dropbox_metadata(config, secrets).await,
+            BackendType::OneDrive => self.fetch_onedrive_metadata(config, secrets).await,
             BackendType::GithubGist => self.fetch_gist_metadata(config, secrets).await,
             BackendType::Git => self.fetch_git_metadata(config, secrets).await,
             BackendType::S3 => self.fetch_s3_metadata(config, secrets).await,
@@ -210,6 +357,10 @@ impl CloudSyncBackend {
                     .await
             }
             BackendType::Dropbox => self.upload_dropbox_snapshot(config, secrets, payload).await,
+            BackendType::OneDrive => {
+                self.upload_onedrive_snapshot(config, secrets, payload)
+                    .await
+            }
             BackendType::GithubGist => self.upload_gist_snapshot(config, secrets, payload).await,
             BackendType::Git => self.upload_git_snapshot(config, secrets, payload).await,
             BackendType::S3 => self.upload_s3_snapshot(config, secrets, payload).await,
@@ -233,6 +384,17 @@ impl CloudSyncBackend {
             BackendType::Dropbox => {
                 self.write_dropbox_object(config, secrets, relative_path, bytes, content_type)
                     .await
+            }
+            BackendType::OneDrive => {
+                self.write_onedrive_object(
+                    config,
+                    secrets,
+                    relative_path,
+                    bytes,
+                    content_type,
+                    None,
+                )
+                .await
             }
             BackendType::GithubGist => {
                 self.write_gist_object(config, secrets, relative_path, bytes)
@@ -268,6 +430,10 @@ impl CloudSyncBackend {
                 self.read_dropbox_object(config, secrets, relative_path)
                     .await
             }
+            BackendType::OneDrive => {
+                self.read_onedrive_object(config, secrets, relative_path)
+                    .await
+            }
             BackendType::GithubGist => self.read_gist_object(config, secrets, relative_path).await,
             BackendType::Git => self.read_git_object(config, secrets, relative_path).await,
             BackendType::S3 => self.read_s3_object(config, secrets, relative_path).await,
@@ -293,6 +459,19 @@ impl CloudSyncBackend {
         if matches!(config.backend_type, BackendType::GithubGist) {
             return self
                 .write_gist_metadata(config, secrets, metadata, expected_etag)
+                .await;
+        }
+        if matches!(config.backend_type, BackendType::OneDrive) {
+            let paths = onedrive_paths(config);
+            return self
+                .write_onedrive_object(
+                    config,
+                    secrets,
+                    &paths.metadata_path,
+                    serde_json::to_vec(metadata)?,
+                    Some("application/json"),
+                    expected_etag,
+                )
                 .await;
         }
         self.write_remote_object(
@@ -385,6 +564,7 @@ impl CloudSyncBackend {
         let metadata_source = match config.backend_type {
             BackendType::HttpJson => "HTTP JSON metadata",
             BackendType::Dropbox => "Dropbox metadata",
+            BackendType::OneDrive => "OneDrive metadata",
             BackendType::GithubGist => "GitHub Gist metadata",
             BackendType::Git => "Git metadata",
             BackendType::S3 => "S3 metadata",
@@ -436,6 +616,18 @@ impl CloudSyncBackend {
                     .await?
                     .ok_or_else(|| {
                         anyhow::anyhow!("remote_not_found: no remote Dropbox snapshot found")
+                    })?
+            }
+            BackendType::OneDrive => {
+                let path = metadata
+                    .blob_path
+                    .as_deref()
+                    .unwrap_or(&onedrive_paths(config).blob_path)
+                    .to_string();
+                self.read_onedrive_object(config, secrets, &path)
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("remote_not_found: no remote OneDrive snapshot found")
                     })?
             }
             BackendType::GithubGist => {
@@ -576,6 +768,24 @@ impl CloudSyncBackend {
             value["uploadedAt"] = Value::String(last_modified.to_string());
         }
         normalize_remote_metadata(value, downloaded.etag)
+    }
+
+    async fn fetch_onedrive_metadata(
+        &self,
+        config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+    ) -> Result<RemoteMetadata> {
+        let paths = onedrive_paths(config);
+        let Some(object) = self
+            .read_onedrive_object(config, secrets, &paths.metadata_path)
+            .await?
+        else {
+            return Ok(RemoteMetadata::missing());
+        };
+        let value = serde_json::from_slice::<Value>(&object.bytes)?;
+        let mut metadata = normalize_remote_metadata(value, object.etag)?;
+        metadata.blob_path.get_or_insert(paths.blob_path);
+        Ok(metadata)
     }
 
     async fn fetch_gist_metadata(
@@ -750,6 +960,43 @@ impl CloudSyncBackend {
         Ok(RemoteWriteResult {
             revision: payload.revision,
             etag: payload.etag,
+        })
+    }
+
+    async fn upload_onedrive_snapshot(
+        &self,
+        config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        payload: RemoteSnapshotUpload,
+    ) -> Result<RemoteWriteResult> {
+        let metadata_path = onedrive_paths(config).metadata_path;
+        let blob_path = onedrive_blob_path(&payload);
+        let mut metadata = payload.metadata_json_with_blob_path(&blob_path);
+        metadata["namespace"] = Value::String(config.namespace.clone());
+        self.write_onedrive_object(
+            config,
+            secrets,
+            &blob_path,
+            payload.bytes,
+            Some(OXIDE_CONTENT_TYPE),
+            None,
+        )
+        .await?;
+        let result = self
+            .write_onedrive_object(
+                config,
+                secrets,
+                &metadata_path,
+                serde_json::to_vec(&metadata)?,
+                Some("application/json"),
+                payload.previous_etag.as_deref(),
+            )
+            .await?;
+        self.cleanup_onedrive_objects(config, secrets, &metadata)
+            .await?;
+        Ok(RemoteWriteResult {
+            revision: payload.revision,
+            etag: result.etag.or(payload.etag),
         })
     }
 
@@ -966,6 +1213,194 @@ impl CloudSyncBackend {
     ) -> Result<Option<RemoteObject>> {
         self.download_dropbox_file(&dropbox_object_path(config, relative_path), secrets)
             .await
+    }
+
+    async fn read_onedrive_object(
+        &self,
+        config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        relative_path: &str,
+    ) -> Result<Option<RemoteObject>> {
+        let metadata_response = execute_cloud_request(
+            self.client
+                .get(onedrive_item_url(config, relative_path))
+                .headers(onedrive_headers(secrets)?),
+        )
+        .await?;
+        if metadata_response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let status = metadata_response.status();
+        let metadata = metadata_response
+            .json::<Value>()
+            .await
+            .unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(onedrive_value_error(
+                status,
+                &metadata,
+                "onedrive_download",
+                "Failed to fetch OneDrive item metadata",
+            ));
+        }
+        let response = execute_cloud_request(
+            self.client
+                .get(onedrive_content_url(config, relative_path))
+                .headers(onedrive_headers(secrets)?),
+        )
+        .await?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !response.status().is_success() {
+            let status = response.status();
+            let value = response.json::<Value>().await.unwrap_or(Value::Null);
+            return Err(onedrive_value_error(
+                status,
+                &value,
+                "onedrive_download",
+                "Failed to download OneDrive content",
+            ));
+        }
+        let mut object =
+            response_to_object(response, &format!("OneDrive object {relative_path}")).await?;
+        object.etag = metadata
+            .get("eTag")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or(object.etag);
+        object.last_modified = metadata
+            .get("lastModifiedDateTime")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or(object.last_modified);
+        object.content_type = metadata
+            .get("file")
+            .and_then(|file| file.get("mimeType"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or(object.content_type);
+        Ok(Some(object))
+    }
+
+    async fn write_onedrive_object(
+        &self,
+        config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        relative_path: &str,
+        bytes: Vec<u8>,
+        content_type: Option<&str>,
+        expected_etag: Option<&str>,
+    ) -> Result<RemoteWriteResult> {
+        self.ensure_onedrive_parent(config, secrets, relative_path)
+            .await?;
+        let mut headers = onedrive_headers(secrets)?;
+        insert_header(
+            &mut headers,
+            CONTENT_TYPE.as_str(),
+            content_type.unwrap_or("application/octet-stream"),
+        )?;
+        if let Some(expected_etag) = expected_etag {
+            insert_header(&mut headers, "If-Match", expected_etag)?;
+        } else if relative_path == onedrive_paths(config).metadata_path {
+            headers.insert("If-None-Match", HeaderValue::from_static("*"));
+        }
+        let response = execute_cloud_request(
+            self.client
+                .put(onedrive_content_url(config, relative_path))
+                .headers(headers)
+                .body(bytes),
+        )
+        .await?;
+        let status = response.status();
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
+        if status == StatusCode::PRECONDITION_FAILED {
+            let message = onedrive_error_message(&value)
+                .unwrap_or("OneDrive object changed before upload completed");
+            bail!("etag_conflict_detected: {message}");
+        }
+        if !status.is_success() {
+            return Err(onedrive_value_error(
+                status,
+                &value,
+                "onedrive_write",
+                "Failed to upload OneDrive content",
+            ));
+        }
+        Ok(RemoteWriteResult {
+            revision: value
+                .get("eTag")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            etag: value
+                .get("eTag")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        })
+    }
+
+    async fn cleanup_onedrive_objects(
+        &self,
+        config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        metadata: &Value,
+    ) -> Result<()> {
+        let response = execute_cloud_request(
+            self.client
+                .get(onedrive_children_url(config, "objects"))
+                .headers(onedrive_headers(secrets)?),
+        )
+        .await?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        let status = response.status();
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(onedrive_value_error(
+                status,
+                &value,
+                "onedrive_cleanup",
+                "Failed to list old OneDrive objects",
+            ));
+        }
+        let keep = onedrive_keep_object_paths(metadata);
+        let removals = value
+            .get("value")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("name").and_then(Value::as_str))
+                    .filter(|name| name.ends_with(".oxide"))
+                    .map(|name| format!("objects/{name}"))
+                    .filter(|path| !keep.contains(path))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for path in removals {
+            let response = execute_cloud_request(
+                self.client
+                    .delete(onedrive_item_url(config, &path))
+                    .headers(onedrive_headers(secrets)?),
+            )
+            .await?;
+            let status = response.status();
+            if status == StatusCode::NOT_FOUND {
+                continue;
+            }
+            if !status.is_success() {
+                let value = response.json::<Value>().await.unwrap_or(Value::Null);
+                return Err(onedrive_value_error(
+                    status,
+                    &value,
+                    "onedrive_cleanup",
+                    "Failed to remove old OneDrive object",
+                ));
+            }
+        }
+        Ok(())
     }
 
     async fn write_gist_object(
@@ -1621,6 +2056,60 @@ impl CloudSyncBackend {
         }
         Ok(response.text().await?)
     }
+
+    async fn ensure_onedrive_parent(
+        &self,
+        _config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        relative_path: &str,
+    ) -> Result<()> {
+        let trimmed_path = trim_slashes(relative_path);
+        let parts = trimmed_path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        if parts.len() <= 1 {
+            return Ok(());
+        }
+        let mut parent = Vec::<String>::new();
+        for segment in parts.iter().take(parts.len() - 1) {
+            let children_url = if parent.is_empty() {
+                format!("{MICROSOFT_GRAPH_BASE}/me/drive/special/approot/children")
+            } else {
+                format!(
+                    "{MICROSOFT_GRAPH_BASE}/me/drive/special/approot:/{}:/children",
+                    encode_path_segments(&parent.join("/"))
+                )
+            };
+            let response = execute_cloud_request(
+                self.client
+                    .post(children_url)
+                    .headers(onedrive_headers(secrets)?)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(serde_json::to_vec(&json!({
+                        "name": segment,
+                        "folder": {},
+                        "@microsoft.graph.conflictBehavior": "fail",
+                    }))?),
+            )
+            .await?;
+            let status = response.status();
+            let value = response.json::<Value>().await.unwrap_or(Value::Null);
+            if !status.is_success()
+                && !(status == StatusCode::CONFLICT
+                    && onedrive_error_code(&value).as_deref() == Some("nameAlreadyExists"))
+            {
+                return Err(onedrive_value_error(
+                    status,
+                    &value,
+                    "onedrive_folder",
+                    "Failed to create OneDrive folder",
+                ));
+            }
+            parent.push((*segment).to_string());
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -1721,6 +2210,28 @@ pub struct GithubDeviceCode {
     pub interval: u64,
 }
 
+#[derive(Clone, Eq, PartialEq)]
+pub struct MicrosoftDeviceCode {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+impl std::fmt::Debug for MicrosoftDeviceCode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MicrosoftDeviceCode")
+            .field("device_code", &"[redacted device code]")
+            .field("user_code", &self.user_code)
+            .field("verification_uri", &self.verification_uri)
+            .field("expires_in", &self.expires_in)
+            .field("interval", &self.interval)
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for GithubDeviceCode {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -1734,11 +2245,87 @@ impl std::fmt::Debug for GithubDeviceCode {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub enum GithubDeviceTokenPoll {
     Pending { interval: u64 },
     SlowDown { interval: u64 },
     Token { access_token: Zeroizing<String> },
+}
+
+impl std::fmt::Debug for GithubDeviceTokenPoll {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pending { interval } => formatter
+                .debug_struct("Pending")
+                .field("interval", interval)
+                .finish(),
+            Self::SlowDown { interval } => formatter
+                .debug_struct("SlowDown")
+                .field("interval", interval)
+                .finish(),
+            Self::Token { .. } => formatter
+                .debug_struct("Token")
+                .field("access_token", &"[redacted token]")
+                .finish(),
+        }
+    }
+}
+
+#[derive(Eq, PartialEq)]
+pub enum MicrosoftDeviceTokenPoll {
+    Pending {
+        interval: u64,
+    },
+    SlowDown {
+        interval: u64,
+    },
+    Token {
+        access_token: Zeroizing<String>,
+        refresh_token: Zeroizing<String>,
+    },
+}
+
+impl std::fmt::Debug for MicrosoftDeviceTokenPoll {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pending { interval } => formatter
+                .debug_struct("Pending")
+                .field("interval", interval)
+                .finish(),
+            Self::SlowDown { interval } => formatter
+                .debug_struct("SlowDown")
+                .field("interval", interval)
+                .finish(),
+            Self::Token { .. } => formatter
+                .debug_struct("Token")
+                .field("access_token", &"[redacted token]")
+                .field("refresh_token", &"[redacted token]")
+                .finish(),
+        }
+    }
+}
+
+#[derive(Eq, PartialEq)]
+pub struct MicrosoftTokenRefresh {
+    pub access_token: Zeroizing<String>,
+    pub refresh_token: Option<Zeroizing<String>>,
+}
+
+impl std::fmt::Debug for MicrosoftTokenRefresh {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MicrosoftTokenRefresh")
+            .field("access_token", &"[redacted token]")
+            .field(
+                "refresh_token",
+                &self
+                    .refresh_token
+                    .as_ref()
+                    .map(|_| "[redacted token]")
+                    .unwrap_or("None"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1754,6 +2341,25 @@ struct GithubDeviceCodeResponse {
 #[derive(Debug, Deserialize)]
 struct GithubDeviceTokenResponse {
     access_token: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+    interval: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MicrosoftDeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    #[serde(default = "default_microsoft_device_interval")]
+    interval: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct MicrosoftTokenResponse {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
     error: Option<String>,
     error_description: Option<String>,
     interval: Option<u64>,
@@ -1911,7 +2517,24 @@ fn http_json_value_error(
 }
 
 pub(super) async fn execute_cloud_request(request: RequestBuilder) -> Result<Response> {
-    request.send().await.map_err(normalize_network_error)
+    let mut request = request;
+    for attempt in 0..CLOUD_REQUEST_MAX_RETRY_ATTEMPTS {
+        let retry_request = request.try_clone();
+        let response = request.send().await.map_err(normalize_network_error)?;
+        if !cloud_response_should_retry(response.status()) {
+            return Ok(response);
+        }
+        let Some(next_request) = retry_request else {
+            return Ok(response);
+        };
+        if attempt + 1 >= CLOUD_REQUEST_MAX_RETRY_ATTEMPTS {
+            return Ok(response);
+        }
+        let delay = cloud_retry_delay(&response, attempt);
+        tokio::time::sleep(delay).await;
+        request = next_request;
+    }
+    unreachable!("cloud request retry loop always returns");
 }
 
 fn normalize_network_error(error: reqwest::Error) -> anyhow::Error {
@@ -1923,6 +2546,43 @@ fn normalize_network_error(error: reqwest::Error) -> anyhow::Error {
     } else {
         anyhow::Error::new(error)
     }
+}
+
+fn cloud_response_should_retry(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::GATEWAY_TIMEOUT
+    )
+}
+
+fn cloud_retry_delay(response: &Response, attempt: usize) -> Duration {
+    response
+        .headers()
+        .get(RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(parse_retry_after)
+        .unwrap_or_else(|| Duration::from_secs(1 << attempt))
+        .min(CLOUD_REQUEST_MAX_RETRY_AFTER)
+}
+
+fn parse_retry_after(value: &str) -> Option<Duration> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let retry_at = DateTime::parse_from_rfc2822(value)
+        .ok()?
+        .with_timezone(&Utc);
+    let now = Utc::now();
+    if retry_at <= now {
+        return Some(Duration::ZERO);
+    }
+    retry_at.signed_duration_since(now).to_std().ok()
 }
 
 async fn response_write_result(response: reqwest::Response) -> RemoteWriteResult {
@@ -2191,6 +2851,71 @@ fn dropbox_object_path(config: &CloudSyncSettings, relative_path: &str) -> Strin
     format!("/{}", parts.join("/"))
 }
 
+struct OneDrivePaths {
+    metadata_path: String,
+    blob_path: String,
+}
+
+fn onedrive_paths(_config: &CloudSyncSettings) -> OneDrivePaths {
+    OneDrivePaths {
+        metadata_path: "metadata.json".to_string(),
+        blob_path: "objects/latest.oxide".to_string(),
+    }
+}
+
+fn onedrive_blob_path(payload: &RemoteSnapshotUpload) -> String {
+    let stable_name = payload
+        .etag
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(&payload.revision);
+    format!("objects/{}.oxide", sanitize_remote_object_name(stable_name))
+}
+
+fn sanitize_remote_object_name(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "snapshot".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn onedrive_item_url(_config: &CloudSyncSettings, relative_path: &str) -> String {
+    format!(
+        "{MICROSOFT_GRAPH_BASE}/me/drive/special/approot:/{}",
+        encode_path_segments(&trim_slashes(relative_path))
+    )
+}
+
+fn onedrive_content_url(config: &CloudSyncSettings, relative_path: &str) -> String {
+    format!("{}:/content", onedrive_item_url(config, relative_path))
+}
+
+fn onedrive_children_url(config: &CloudSyncSettings, relative_path: &str) -> String {
+    format!("{}:/children", onedrive_item_url(config, relative_path))
+}
+
+fn onedrive_keep_object_paths(metadata: &Value) -> BTreeSet<String> {
+    let mut keep = BTreeSet::new();
+    if let Some(blob_path) = metadata.get("blobPath").and_then(Value::as_str)
+        && trim_slashes(blob_path).starts_with("objects/")
+    {
+        keep.insert(trim_slashes(blob_path));
+    }
+    keep.insert("objects/latest.oxide".to_string());
+    keep
+}
+
 struct GistPaths {
     metadata_path: String,
     blob_path: String,
@@ -2325,6 +3050,28 @@ fn gist_headers(secrets: &CloudSyncSecrets) -> Result<HeaderMap> {
     Ok(headers)
 }
 
+fn onedrive_headers(secrets: &CloudSyncSecrets) -> Result<HeaderMap> {
+    let token = secrets
+        .token
+        .as_ref()
+        .map(|token| token.as_str())
+        .filter(|token| !token.is_empty())
+        .context("missing_backend_token: Microsoft Graph access token is not configured")?;
+    let mut headers = HeaderMap::new();
+    insert_header(&mut headers, ACCEPT.as_str(), "application/json")?;
+    headers.insert(USER_AGENT, HeaderValue::from_static("OxideTerm"));
+    insert_bearer_auth_header(&mut headers, token)?;
+    Ok(headers)
+}
+
+fn microsoft_device_code_url() -> String {
+    format!("https://login.microsoftonline.com/{MICROSOFT_AUTH_TENANT}/oauth2/v2.0/devicecode")
+}
+
+fn microsoft_token_url() -> String {
+    format!("https://login.microsoftonline.com/{MICROSOFT_AUTH_TENANT}/oauth2/v2.0/token")
+}
+
 fn gist_revision_from_response(value: &Value) -> Option<String> {
     value
         .get("history")
@@ -2398,12 +3145,124 @@ fn gist_value_error(
     anyhow::anyhow!("{code}: {message}")
 }
 
+fn onedrive_value_error(
+    status: StatusCode,
+    value: &Value,
+    code_prefix: &str,
+    fallback: &str,
+) -> anyhow::Error {
+    if status == StatusCode::PRECONDITION_FAILED {
+        let message = onedrive_error_message(value).unwrap_or("OneDrive object changed");
+        return anyhow::anyhow!("etag_conflict_detected: {message}");
+    }
+    let status_code = status.as_u16();
+    let message = onedrive_error_message(value).unwrap_or(fallback);
+    let graph_code = onedrive_error_code(value).unwrap_or_default();
+    let code = match status {
+        StatusCode::BAD_REQUEST => "onedrive_bad_request".to_string(),
+        StatusCode::UNAUTHORIZED => "onedrive_bad_credentials".to_string(),
+        StatusCode::FORBIDDEN => {
+            if onedrive_scope_or_permission_error(&graph_code, message) {
+                "onedrive_missing_scope".to_string()
+            } else {
+                "onedrive_access_denied".to_string()
+            }
+        }
+        StatusCode::TOO_MANY_REQUESTS => "onedrive_rate_limited".to_string(),
+        StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT => {
+            "onedrive_service_unavailable".to_string()
+        }
+        status if status.as_u16() == 423 => "onedrive_locked".to_string(),
+        status if status.as_u16() == 507 => "onedrive_quota_exceeded".to_string(),
+        _ => format!("{code_prefix}_{status_code}"),
+    };
+    anyhow::anyhow!("{code}: {message}")
+}
+
+fn onedrive_error_message(value: &Value) -> Option<&str> {
+    value
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get("message").and_then(Value::as_str))
+}
+
+fn onedrive_error_code(value: &Value) -> Option<String> {
+    value
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn onedrive_scope_or_permission_error(graph_code: &str, message: &str) -> bool {
+    // Graph does not always use a stable status/code pair for app-folder
+    // permission failures, so classify by both machine code and safe text.
+    let graph_code = graph_code.to_ascii_lowercase();
+    let message = message.to_ascii_lowercase();
+    graph_code.contains("invalidscope")
+        || message.contains("files.readwrite.appfolder")
+        || message.contains("insufficient privileges")
+        || message.contains("permission")
+        || message.contains("scope")
+}
+
+fn microsoft_oauth_value_error(value: &Value, fallback_code: &str) -> anyhow::Error {
+    // Device authorization failures share the token endpoint error shape,
+    // but are received before any token exists, so normalize them here.
+    let response = MicrosoftTokenResponse {
+        access_token: None,
+        refresh_token: None,
+        error: value
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        error_description: value
+            .get("error_description")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                value
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(Value::as_str)
+            })
+            .map(str::to_string),
+        interval: None,
+    };
+    microsoft_oauth_error(&response, fallback_code)
+}
+
+fn microsoft_oauth_error(value: &MicrosoftTokenResponse, fallback_code: &str) -> anyhow::Error {
+    let code = match value.error.as_deref() {
+        Some("authorization_declined") | Some("access_denied") => "microsoft_oauth_denied",
+        Some("expired_token") => "microsoft_oauth_expired",
+        Some("bad_verification_code") => "microsoft_oauth_bad_code",
+        Some("invalid_client") | Some("unauthorized_client") => "microsoft_oauth_bad_client",
+        Some("invalid_grant") => "microsoft_oauth_refresh_failed",
+        Some("invalid_scope") => "microsoft_oauth_missing_scope",
+        Some("consent_required") | Some("interaction_required") => {
+            "microsoft_oauth_consent_required"
+        }
+        Some("invalid_request") => "microsoft_oauth_invalid_request",
+        _ => fallback_code,
+    };
+    let message = value
+        .error_description
+        .as_deref()
+        .unwrap_or("Microsoft OAuth failed");
+    anyhow::anyhow!("{code}: {message}")
+}
+
 fn github_rate_limit_exceeded(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("rate limit") || lower.contains("secondary rate limit")
 }
 
 fn default_github_device_interval() -> u64 {
+    5
+}
+
+fn default_microsoft_device_interval() -> u64 {
     5
 }
 
@@ -2696,6 +3555,197 @@ mod tests {
         assert!(debug.contains("redacted"));
         assert!(!debug.contains("secret-device-code"));
         assert!(debug.contains("ABCD-EFGH"));
+    }
+
+    #[test]
+    fn microsoft_device_code_debug_redacts_device_code() {
+        let code = MicrosoftDeviceCode {
+            device_code: "secret-microsoft-device-code".to_string(),
+            user_code: "WXYZ-1234".to_string(),
+            verification_uri: "https://microsoft.com/devicelogin".to_string(),
+            expires_in: 900,
+            interval: 5,
+        };
+        let debug = format!("{code:?}");
+
+        assert!(debug.contains("redacted"));
+        assert!(!debug.contains("secret-microsoft-device-code"));
+        assert!(debug.contains("WXYZ-1234"));
+    }
+
+    #[test]
+    fn oauth_token_debug_redacts_token_values() {
+        let github = GithubDeviceTokenPoll::Token {
+            access_token: Zeroizing::new("github-secret-token".to_string()),
+        };
+        let microsoft = MicrosoftDeviceTokenPoll::Token {
+            access_token: Zeroizing::new("microsoft-access-token".to_string()),
+            refresh_token: Zeroizing::new("microsoft-refresh-token".to_string()),
+        };
+        let refreshed = MicrosoftTokenRefresh {
+            access_token: Zeroizing::new("refreshed-access-token".to_string()),
+            refresh_token: Some(Zeroizing::new("refreshed-refresh-token".to_string())),
+        };
+        let debug = format!("{github:?} {microsoft:?} {refreshed:?}");
+
+        assert!(debug.contains("redacted"));
+        assert!(!debug.contains("github-secret-token"));
+        assert!(!debug.contains("microsoft-access-token"));
+        assert!(!debug.contains("microsoft-refresh-token"));
+        assert!(!debug.contains("refreshed-access-token"));
+        assert!(!debug.contains("refreshed-refresh-token"));
+    }
+
+    #[test]
+    fn onedrive_paths_use_graph_app_folder_layout() {
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::OneDrive,
+            namespace: "ignored".to_string(),
+            ..CloudSyncSettings::default()
+        };
+        let upload = RemoteSnapshotUpload {
+            revision: "rev/one".to_string(),
+            device_id: "device".to_string(),
+            uploaded_at: "2026-06-13T00:00:00Z".to_string(),
+            bytes: Vec::new(),
+            etag: Some("hash:abc".to_string()),
+            previous_etag: None,
+            section_revisions: None,
+        };
+
+        assert_eq!(onedrive_paths(&settings).metadata_path, "metadata.json");
+        assert_eq!(onedrive_blob_path(&upload), "objects/hash-abc.oxide");
+        assert_eq!(
+            onedrive_content_url(&settings, "objects/hash-abc.oxide"),
+            "https://graph.microsoft.com/v1.0/me/drive/special/approot:/objects/hash-abc.oxide:/content"
+        );
+    }
+
+    #[test]
+    fn onedrive_error_mapping_distinguishes_scope_rate_and_conflict() {
+        let scope_error = onedrive_value_error(
+            StatusCode::FORBIDDEN,
+            &json!({ "error": { "message": "Missing Files.ReadWrite.AppFolder" } }),
+            "onedrive",
+            "fallback",
+        )
+        .to_string();
+        let rate_error = onedrive_value_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            &json!({ "error": { "message": "Too many requests" } }),
+            "onedrive",
+            "fallback",
+        )
+        .to_string();
+        let conflict_error = onedrive_value_error(
+            StatusCode::PRECONDITION_FAILED,
+            &json!({ "error": { "message": "ETag changed" } }),
+            "onedrive",
+            "fallback",
+        )
+        .to_string();
+
+        assert!(scope_error.starts_with("onedrive_missing_scope:"));
+        assert!(rate_error.starts_with("onedrive_rate_limited:"));
+        assert!(conflict_error.starts_with("etag_conflict_detected:"));
+    }
+
+    #[test]
+    fn onedrive_error_mapping_distinguishes_graph_configuration_failures() {
+        let access_error = onedrive_value_error(
+            StatusCode::FORBIDDEN,
+            &json!({ "error": { "code": "accessDenied", "message": "Tenant policy blocked this app" } }),
+            "onedrive",
+            "fallback",
+        )
+        .to_string();
+        let bad_request_error = onedrive_value_error(
+            StatusCode::BAD_REQUEST,
+            &json!({ "error": { "message": "Invalid app folder request" } }),
+            "onedrive",
+            "fallback",
+        )
+        .to_string();
+        let locked_error = onedrive_value_error(
+            StatusCode::from_u16(423).unwrap(),
+            &json!({ "error": { "message": "Resource is locked" } }),
+            "onedrive",
+            "fallback",
+        )
+        .to_string();
+        let service_error = onedrive_value_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &json!({ "error": { "message": "Service unavailable" } }),
+            "onedrive",
+            "fallback",
+        )
+        .to_string();
+
+        assert!(access_error.starts_with("onedrive_access_denied:"));
+        assert!(bad_request_error.starts_with("onedrive_bad_request:"));
+        assert!(locked_error.starts_with("onedrive_locked:"));
+        assert!(service_error.starts_with("onedrive_service_unavailable:"));
+    }
+
+    #[test]
+    fn microsoft_oauth_error_mapping_distinguishes_configuration_failures() {
+        let scope_error = microsoft_oauth_value_error(
+            &json!({
+                "error": "invalid_scope",
+                "error_description": "Files.ReadWrite.AppFolder is not configured"
+            }),
+            "microsoft_oauth_start_failed",
+        )
+        .to_string();
+        let consent_error = microsoft_oauth_error(
+            &MicrosoftTokenResponse {
+                access_token: None,
+                refresh_token: None,
+                error: Some("consent_required".to_string()),
+                error_description: Some("Admin consent is required".to_string()),
+                interval: None,
+            },
+            "microsoft_oauth_poll_failed",
+        )
+        .to_string();
+        let invalid_request_error = microsoft_oauth_error(
+            &MicrosoftTokenResponse {
+                access_token: None,
+                refresh_token: None,
+                error: Some("invalid_request".to_string()),
+                error_description: Some("Device flow is not enabled".to_string()),
+                interval: None,
+            },
+            "microsoft_oauth_poll_failed",
+        )
+        .to_string();
+
+        assert!(scope_error.starts_with("microsoft_oauth_missing_scope:"));
+        assert!(consent_error.starts_with("microsoft_oauth_consent_required:"));
+        assert!(invalid_request_error.starts_with("microsoft_oauth_invalid_request:"));
+    }
+
+    #[test]
+    fn onedrive_cleanup_keeps_current_blob_and_legacy_latest_only() {
+        let keep = onedrive_keep_object_paths(&json!({
+            "blobPath": "objects/current.oxide"
+        }));
+
+        assert!(keep.contains("objects/current.oxide"));
+        assert!(keep.contains("objects/latest.oxide"));
+        assert!(!keep.contains("objects/old.oxide"));
+    }
+
+    #[test]
+    fn retry_after_parser_accepts_seconds_and_caps_delay() {
+        assert_eq!(parse_retry_after("2"), Some(Duration::from_secs(2)));
+        assert_eq!(
+            parse_retry_after("120")
+                .unwrap()
+                .min(CLOUD_REQUEST_MAX_RETRY_AFTER),
+            CLOUD_REQUEST_MAX_RETRY_AFTER
+        );
+        assert!(parse_retry_after("not a retry-after").is_none());
     }
 
     #[test]

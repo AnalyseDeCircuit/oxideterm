@@ -175,7 +175,8 @@
         "dropbox": "Dropbox",
         "git": "Kho Git",
         "s3": "Tương thích S3",
-        "github_gist": "GitHub Gist"
+        "github_gist": "GitHub Gist",
+        "onedrive": "OneDrive"
       },
       "status": {
         "ready": "Sẵn sàng đồng bộ",
@@ -201,7 +202,8 @@
         "save_settings": "Lưu cài đặt",
         "saving": "Đang lưu...",
         "enable_sensitive_sync": "Bật đồng bộ nhạy cảm",
-        "github_oauth_login": "Đăng nhập GitHub"
+        "github_oauth_login": "Đăng nhập GitHub",
+        "microsoft_oauth_login": "Đăng nhập Microsoft"
       },
       "fields": {
         "backend": "Backend",
@@ -262,7 +264,19 @@
         "http_json_example_endpoint": "https://example.com/oxideterm-sync",
         "http_json_example_namespace": "personal",
         "webdav_duplicate_warning": "Không đặt cùng đường dẫn thư mục trong cả Endpoint và Namespace. Nếu Endpoint đã kết thúc bằng thư mục đồng bộ, hãy sử dụng Namespace khác thay vì lặp lại cùng đường dẫn.",
-        "backend_github_gist": "GitHub Gist lưu các đối tượng đồng bộ OxideTerm dưới dạng tệp đã mã hóa trong một Gist riêng tư có sẵn hoặc được tạo tự động. Nhập ID Gist hoặc để trống để tạo khi tải lên lần đầu; dùng GitHub token có quyền gist, hoặc đăng nhập bằng OAuth Client ID đã cấu hình."
+        "backend_github_gist": "GitHub Gist lưu các đối tượng đồng bộ OxideTerm dưới dạng tệp đã mã hóa trong một Gist riêng tư có sẵn hoặc được tạo tự động. Nhập ID Gist hoặc để trống để tạo khi tải lên lần đầu; dùng GitHub token có quyền gist, hoặc đăng nhập bằng OAuth Client ID đã cấu hình.",
+        "backend_onedrive": "OneDrive dùng thư mục ứng dụng của Microsoft Graph. Đăng nhập bằng ID khách OAuth Microsoft có Files.ReadWrite.AppFolder; OxideTerm sẽ ghi metadata.json và objects/*.oxide trong thư mục ứng dụng.",
+        "onedrive_title": "Thiết lập thư mục ứng dụng OneDrive",
+        "onedrive_description": "Đăng ký ứng dụng Microsoft Entra cho đăng nhập desktop/thiết bị, cấp scope thư mục ứng dụng, rồi dán ID khách vào đây. OxideTerm chỉ lưu các đối tượng đồng bộ đã mã hóa trong thư mục ứng dụng.",
+        "onedrive_example_account_type_label": "Tài khoản hỗ trợ",
+        "onedrive_example_account_type": "Chọn loại tài khoản muốn hỗ trợ; dùng tài khoản Microsoft cá nhân nếu tenant chặn delegated access tới thư mục ứng dụng.",
+        "onedrive_example_permission_label": "Quyền Graph",
+        "onedrive_example_permission": "Quyền delegated của Microsoft Graph: Files.ReadWrite.AppFolder. Tránh dùng Files.ReadWrite.All.",
+        "onedrive_example_public_client_label": "Đăng nhập thiết bị",
+        "onedrive_example_public_client": "Authentication > Advanced settings > Allow public client flows: Yes.",
+        "onedrive_example_storage_label": "Đường dẫn lưu trữ",
+        "onedrive_example_storage": "/me/drive/special/approot/metadata.json và /objects/*.oxide",
+        "onedrive_permission_warning": "Nếu Microsoft trả về invalid_scope, consent_required hoặc insufficient privileges, hãy kiểm tra quyền API, consent, loại tài khoản hỗ trợ và thiết lập public client flow."
       },
       "settings": {
         "backend_type": "Loại backend",
@@ -297,7 +311,9 @@
         "sync_sensitive_credentials": "Đồng bộ thông tin xác thực nhạy cảm",
         "gist_id": "ID Gist",
         "github_access_token": "Token truy cập GitHub",
-        "github_oauth_client_id": "GitHub OAuth Client ID"
+        "github_oauth_client_id": "GitHub OAuth Client ID",
+        "microsoft_oauth_client_id": "ID khách OAuth Microsoft",
+        "microsoft_access_token": "Token truy cập Microsoft"
       },
       "auth": {
         "bearer": "Bearer",
@@ -344,7 +360,8 @@
         "backend_dropbox": "Dropbox sử dụng trường namespace làm đường dẫn thư mục và yêu cầu token truy cập ứng dụng.",
         "backend_git": "Git sử dụng endpoint tương thích với GitHub Contents API. Đặt Endpoint là gốc API, Repository là owner/repo, Branch là nhánh đích và Namespace là đường dẫn thư mục tùy chọn bên trong kho lưu trữ.",
         "backend_s3": "S3 Compatible sử dụng endpoint làm gốc dịch vụ, bucket làm bộ chứa và namespace làm tiền tố đối tượng tùy chọn.",
-        "backend_github_gist": "GitHub Gist lưu các đối tượng đồng bộ OxideTerm dưới dạng tệp đã mã hóa trong một Gist hiện có. Nhập ID Gist và GitHub token có quyền gist; Namespace được dùng làm tiền tố tên tệp."
+        "backend_github_gist": "GitHub Gist lưu các đối tượng đồng bộ OxideTerm dưới dạng tệp đã mã hóa trong một Gist hiện có. Nhập ID Gist và GitHub token có quyền gist; Namespace được dùng làm tiền tố tên tệp.",
+        "backend_onedrive": "OneDrive dùng thư mục ứng dụng Microsoft Graph và cần đăng nhập thiết bị Microsoft. Tệp được tách riêng dưới dạng metadata.json và objects/*.oxide."
       },
       "backup": {
         "description": "Bản sao lưu khôi phục Oxide Cloud Sync",
@@ -390,7 +407,28 @@
         "github_oauth_bad_client": "GitHub OAuth Client ID không hợp lệ hoặc ứng dụng chưa bật device flow.",
         "github_oauth_start_failed": "GitHub đã từ chối yêu cầu đăng nhập thiết bị.",
         "github_oauth_poll_failed": "GitHub đã từ chối yêu cầu thăm dò đăng nhập thiết bị.",
-        "github_oauth_empty_response": "GitHub không trả về access token."
+        "github_oauth_empty_response": "GitHub không trả về access token.",
+        "missing_microsoft_oauth_client_id": "Hãy cấu hình ID khách OAuth Microsoft trước khi bắt đầu đăng nhập thiết bị.",
+        "missing_microsoft_refresh_token": "Thiếu refresh token Microsoft. Hãy đăng nhập lại OneDrive.",
+        "onedrive_bad_credentials": "Microsoft Graph đã từ chối token OneDrive. Hãy đăng nhập lại.",
+        "onedrive_missing_scope": "Token Microsoft thiếu quyền Files.ReadWrite.AppFolder, hoặc ứng dụng không thể truy cập thư mục ứng dụng của nó.",
+        "onedrive_rate_limited": "Đã chạm giới hạn tốc độ Microsoft Graph. Hãy chờ một chút rồi thử lại.",
+        "onedrive_quota_exceeded": "OneDrive không đủ dung lượng cho đối tượng đồng bộ.",
+        "microsoft_oauth_expired": "Đăng nhập thiết bị Microsoft đã hết hạn. Hãy bắt đầu lại.",
+        "microsoft_oauth_denied": "Đăng nhập thiết bị Microsoft đã bị từ chối.",
+        "microsoft_oauth_bad_code": "Microsoft đã từ chối mã xác minh thiết bị. Hãy bắt đầu lại.",
+        "microsoft_oauth_bad_client": "ID khách OAuth Microsoft không hợp lệ hoặc ứng dụng này chưa bật luồng thiết bị.",
+        "microsoft_oauth_start_failed": "Microsoft đã từ chối yêu cầu đăng nhập thiết bị.",
+        "microsoft_oauth_poll_failed": "Microsoft đã từ chối yêu cầu thăm dò đăng nhập thiết bị.",
+        "microsoft_oauth_refresh_failed": "Không thể gia hạn refresh token Microsoft. Hãy đăng nhập lại.",
+        "microsoft_oauth_empty_response": "Microsoft không trả về token OAuth bắt buộc.",
+        "onedrive_access_denied": "Microsoft Graph đã từ chối truy cập thư mục ứng dụng. Hãy kiểm tra loại tài khoản, chính sách tenant và consent của ứng dụng.",
+        "onedrive_bad_request": "Microsoft Graph đã từ chối yêu cầu OneDrive. Hãy kiểm tra thư mục ứng dụng và loại tài khoản đã cấu hình có được hỗ trợ không.",
+        "onedrive_locked": "OneDrive báo tệp hoặc thư mục đồng bộ đang bị khóa. Hãy đợi mở khóa rồi thử lại.",
+        "onedrive_service_unavailable": "Microsoft Graph hoặc OneDrive tạm thời không khả dụng. Hãy thử lại sau.",
+        "microsoft_oauth_missing_scope": "Microsoft đã từ chối scope được yêu cầu. Hãy thêm Files.ReadWrite.AppFolder vào đăng ký ứng dụng và consent lại.",
+        "microsoft_oauth_consent_required": "Microsoft yêu cầu người dùng hoặc quản trị viên consent cho ứng dụng này. Hãy cấp consent rồi đăng nhập lại.",
+        "microsoft_oauth_invalid_request": "Microsoft đã từ chối yêu cầu OAuth. Hãy kiểm tra ID khách và cấu hình luồng thiết bị."
       },
       "toast": {
         "check_failed_title": "Kiểm tra từ xa thất bại",
@@ -412,7 +450,11 @@
         "github_oauth_code_title": "Đã bắt đầu đăng nhập GitHub",
         "github_oauth_code_description": "Nhập mã {{code}} tại {{url}} trong vòng {{seconds}} giây. Trang xác minh đã được mở.",
         "github_oauth_success_title": "Đã lưu GitHub token",
-        "github_oauth_failed_title": "Đăng nhập GitHub thất bại"
+        "github_oauth_failed_title": "Đăng nhập GitHub thất bại",
+        "microsoft_oauth_code_title": "Đã bắt đầu đăng nhập Microsoft",
+        "microsoft_oauth_code_description": "Nhập mã {{code}} tại {{url}} trong vòng {{seconds}} giây. Trang xác minh đã được mở.",
+        "microsoft_oauth_success_title": "Đã lưu token Microsoft",
+        "microsoft_oauth_failed_title": "Đăng nhập Microsoft thất bại"
       },
       "progress": {
         "checking": "Đang kiểm tra ảnh chụp từ xa",
@@ -514,7 +556,8 @@
         "session_token": "Token phiên tùy chọn",
         "gist_id": "ID Gist hoặc https://gist.github.com/...",
         "github_access_token": "GitHub token có quyền gist",
-        "github_oauth_client_id": "OAuth App client ID cho đăng nhập thiết bị"
+        "github_oauth_client_id": "OAuth App client ID cho đăng nhập thiết bị",
+        "microsoft_oauth_client_id": "ID khách ứng dụng Microsoft Entra"
       },
       "history_empty": "Chưa có lịch sử đồng bộ.",
       "native_description": "Đồng bộ tự lưu trữ được mã hóa cho OxideTerm.",

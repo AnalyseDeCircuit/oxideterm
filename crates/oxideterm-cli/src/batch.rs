@@ -57,6 +57,7 @@ struct BatchCloudSyncConfigure {
     git_repository: Option<String>,
     git_branch: Option<String>,
     github_oauth_client_id: Option<String>,
+    microsoft_oauth_client_id: Option<String>,
     auto_upload_enabled: Option<bool>,
     auto_upload_interval_mins: Option<f64>,
     default_conflict_strategy: Option<String>,
@@ -182,6 +183,7 @@ fn cloud_sync_configure_args(
         git_repository: configure.git_repository,
         git_branch: configure.git_branch,
         github_oauth_client_id: configure.github_oauth_client_id,
+        microsoft_oauth_client_id: configure.microsoft_oauth_client_id,
         auto_upload_enabled: configure.auto_upload_enabled,
         auto_upload_interval_mins: configure.auto_upload_interval_mins,
         default_conflict_strategy: configure
@@ -198,6 +200,7 @@ fn parse_cloud_sync_backend(value: &str, json: bool) -> CliResult<CloudSyncBacke
         "webdav" => Ok(CloudSyncBackendArg::Webdav),
         "http-json" => Ok(CloudSyncBackendArg::HttpJson),
         "dropbox" => Ok(CloudSyncBackendArg::Dropbox),
+        "onedrive" => Ok(CloudSyncBackendArg::OneDrive),
         "github-gist" => Ok(CloudSyncBackendArg::GithubGist),
         "s3" => Ok(CloudSyncBackendArg::S3),
         "git" => Ok(CloudSyncBackendArg::Git),
