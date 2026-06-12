@@ -369,6 +369,87 @@ pub fn cloud_sync_toggle_grid(
         .into_any_element()
 }
 
+pub fn cloud_sync_status_list(
+    tokens: &ThemeTokens,
+    title: AnyElement,
+    rows: impl IntoIterator<Item = AnyElement>,
+) -> AnyElement {
+    rows.into_iter()
+        .fold(cloud_sync_preview_block(tokens, title), |list, row| {
+            list.child(row)
+        })
+        .into_any_element()
+}
+
+pub fn cloud_sync_status_row(
+    tokens: &ThemeTokens,
+    label: AnyElement,
+    detail: Option<AnyElement>,
+    status: AnyElement,
+    accent: bool,
+) -> AnyElement {
+    let theme = tokens.ui;
+    div()
+        .w_full()
+        .min_w(px(0.0))
+        .py(px(4.0))
+        .flex()
+        .items_start()
+        .justify_between()
+        .gap(px(12.0))
+        .child(
+            div()
+                .min_w(px(0.0))
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(px(tokens.metrics.ui_text_sm))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(theme.text))
+                        .child(label),
+                )
+                .when_some(detail, |content, detail| {
+                    content.child(
+                        div()
+                            .text_size(px(tokens.metrics.ui_text_xs))
+                            .line_height(px(18.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(detail),
+                    )
+                }),
+        )
+        .child(
+            div()
+                .flex_shrink_0()
+                .rounded(px(999.0))
+                .border_1()
+                .border_color(if accent {
+                    rgba((theme.accent << 8) | CLOUD_SYNC_ACCENT_BORDER_ALPHA)
+                } else {
+                    rgba((theme.border << 8) | CLOUD_SYNC_LIST_BORDER_ALPHA)
+                })
+                .bg(if accent {
+                    rgba((theme.accent << 8) | CLOUD_SYNC_ACCENT_TINT_ALPHA)
+                } else {
+                    rgba((theme.bg_panel << 8) | CLOUD_SYNC_SOFT_SURFACE_ALPHA)
+                })
+                .px(px(8.0))
+                .py(px(2.0))
+                .text_size(px(tokens.metrics.ui_text_xs))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(if accent {
+                    rgb(theme.accent)
+                } else {
+                    rgb(theme.text_muted)
+                })
+                .child(status),
+        )
+        .into_any_element()
+}
+
 pub fn cloud_sync_button_options(variant: ButtonVariant, disabled: bool) -> ToolbarButtonOptions {
     ToolbarButtonOptions {
         button: ButtonOptions {

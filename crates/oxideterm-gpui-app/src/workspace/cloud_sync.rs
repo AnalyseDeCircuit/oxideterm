@@ -20,27 +20,31 @@ use oxideterm_cloud_sync::{
 };
 use oxideterm_gpui_cloud_sync::{
     CLOUD_SYNC_GUIDE_STEP_KEYS, CloudSyncApplyOutcome, CloudSyncApplyUiOutcome, CloudSyncConfigRow,
-    CloudSyncConfirmDescription, CloudSyncErrorMessageSpec, CloudSyncForwardDetail,
-    CloudSyncGuideExampleElements, CloudSyncPreviewBodySection, CloudSyncPreviewFactValue,
+    CloudSyncConfirmDescription, CloudSyncCoverageDetail, CloudSyncCoverageStatus,
+    CloudSyncDiffLabel, CloudSyncErrorMessageSpec, CloudSyncForwardDetail,
+    CloudSyncGuideExampleElements, CloudSyncHealthStatus, CloudSyncLocalDiffStatus,
+    CloudSyncPreviewBodySection, CloudSyncPreviewFactValue, CloudSyncPreviewImpactItem,
     CloudSyncPreviewRecord, CloudSyncPreviewRecordRow, CloudSyncPreviewSelectionAction,
     CloudSyncPreviewSelectionLabel, CloudSyncPreviewSource, CloudSyncPreviewSummary,
-    CloudSyncRollbackBackupSummarySpec, CloudSyncSection, CloudSyncSelectAction,
-    CloudSyncSelectKeyEffect, CloudSyncSelectKeyState, CloudSyncSelectOption,
-    close_cloud_sync_select_on_container_scroll, cloud_sync_action_grid, cloud_sync_action_panel,
-    cloud_sync_app_settings_section_label_key, cloud_sync_backend_label_key, cloud_sync_card,
+    CloudSyncRemoteDiffStatus, CloudSyncRollbackBackupSummarySpec, CloudSyncSection,
+    CloudSyncSectionDiffItem, CloudSyncSelectAction, CloudSyncSelectKeyEffect,
+    CloudSyncSelectKeyState, CloudSyncSelectOption, close_cloud_sync_select_on_container_scroll,
+    cloud_sync_action_grid, cloud_sync_action_panel, cloud_sync_app_settings_section_label_key,
+    cloud_sync_apply_diff_items, cloud_sync_backend_label_key, cloud_sync_card,
     cloud_sync_check_row, cloud_sync_config_rows, cloud_sync_confirm_copy_spec,
-    cloud_sync_error_message_spec, cloud_sync_error_view, cloud_sync_fact_card,
-    cloud_sync_fact_grid, cloud_sync_field_row, cloud_sync_focusable_selects, cloud_sync_form_grid,
-    cloud_sync_format_timestamp, cloud_sync_forward_detail_rows, cloud_sync_guide_card,
-    cloud_sync_guide_spec, cloud_sync_header, cloud_sync_history_action_label_key,
+    cloud_sync_conflict_info, cloud_sync_coverage_model, cloud_sync_error_message_spec,
+    cloud_sync_error_view, cloud_sync_fact_card, cloud_sync_fact_grid, cloud_sync_field_row,
+    cloud_sync_focusable_selects, cloud_sync_form_grid, cloud_sync_format_timestamp,
+    cloud_sync_forward_detail_rows, cloud_sync_guide_card, cloud_sync_guide_spec,
+    cloud_sync_header, cloud_sync_health_items, cloud_sync_history_action_label_key,
     cloud_sync_history_card, cloud_sync_history_empty, cloud_sync_history_entry,
     cloud_sync_history_signature, cloud_sync_inline_button_options, cloud_sync_legacy_apply_plan,
-    cloud_sync_list_item, cloud_sync_list_more, cloud_sync_main_action_grid, cloud_sync_meta_block,
-    cloud_sync_meta_line, cloud_sync_notes_card, cloud_sync_platform_label,
-    cloud_sync_preview_block, cloud_sync_preview_card, cloud_sync_preview_card_model,
-    cloud_sync_preview_record_group_model, cloud_sync_preview_record_label_key,
-    cloud_sync_preview_summary, cloud_sync_progress_stage_label_key, cloud_sync_progress_unit,
-    cloud_sync_progress_view, cloud_sync_rollback_backup_row, cloud_sync_rollback_backup_signature,
+    cloud_sync_list_item, cloud_sync_list_more, cloud_sync_main_action_grid, cloud_sync_meta_line,
+    cloud_sync_notes_card, cloud_sync_platform_label, cloud_sync_preview_block,
+    cloud_sync_preview_card, cloud_sync_preview_card_model, cloud_sync_preview_record_group_model,
+    cloud_sync_preview_record_label_key, cloud_sync_preview_summary,
+    cloud_sync_progress_stage_label_key, cloud_sync_progress_unit, cloud_sync_progress_view,
+    cloud_sync_rollback_backup_row, cloud_sync_rollback_backup_signature,
     cloud_sync_rollback_backup_summary_spec, cloud_sync_secret_row, cloud_sync_section_item,
     cloud_sync_section_signature, cloud_sync_section_title, cloud_sync_sections,
     cloud_sync_select_field, cloud_sync_select_label_key, cloud_sync_select_menu,
@@ -49,7 +53,8 @@ use oxideterm_gpui_cloud_sync::{
     cloud_sync_selected_option_index as cloud_sync_selected_option_spec_index,
     cloud_sync_settings_from_form, cloud_sync_should_create_rollback_backup,
     cloud_sync_sidebar_empty, cloud_sync_status_card, cloud_sync_status_label_key,
-    cloud_sync_toggle, cloud_sync_toggle_grid, cloud_sync_value_prefers_mono,
+    cloud_sync_status_list, cloud_sync_status_row, cloud_sync_toggle, cloud_sync_toggle_grid,
+    cloud_sync_upload_diff_items, cloud_sync_value_prefers_mono, cloud_sync_version_info_rows,
     deliver_cloud_sync_apply_preview, deliver_cloud_sync_check, deliver_cloud_sync_pull_preview,
     deliver_cloud_sync_restore_backup_preview, deliver_cloud_sync_upload,
     finish_cloud_sync_automatic_upload_error_state, finish_cloud_sync_check_state,
@@ -643,49 +648,51 @@ impl WorkspaceApp {
         local_snapshot: Option<&CloudSyncLocalSnapshot>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let counts = local_snapshot
-            .map(|snapshot| {
-                format!(
-                    "{} / {}",
-                    snapshot.connections_record_count, snapshot.forwards_record_count
-                )
-            })
-            .unwrap_or_else(|| "—".to_string());
-        cloud_sync_meta_block(
+        let counts = local_snapshot.map(|snapshot| {
+            format!(
+                "{} / {}",
+                snapshot.connections_record_count, snapshot.forwards_record_count
+            )
+        });
+        let version_rows = cloud_sync_version_info_rows(state, counts);
+        let version_title = self.render_selectable_text_scoped(
+            "cloud-sync-version-info",
+            "title",
+            self.i18n.t("plugin.cloud_sync.sections.version_info"),
+            self.tokens.ui.text_heading,
+            cx,
+        );
+        let version_block = cloud_sync_status_list(
             &self.tokens,
-            [
-                self.render_cloud_sync_meta_line(
-                    "plugin.cloud_sync.fields.remote_revision",
-                    state
-                        .last_known_remote_revision
-                        .clone()
-                        .unwrap_or_else(|| "—".to_string()),
-                    cx,
-                ),
-                self.render_cloud_sync_meta_line(
-                    "plugin.cloud_sync.fields.remote_device",
-                    state
-                        .remote_device_id
-                        .clone()
-                        .unwrap_or_else(|| "—".to_string()),
-                    cx,
-                ),
-                self.render_cloud_sync_meta_line(
-                    "plugin.cloud_sync.fields.remote_updated_at",
-                    state
-                        .remote_updated_at
-                        .as_deref()
-                        .map(cloud_sync_format_timestamp)
-                        .unwrap_or_else(|| "—".to_string()),
-                    cx,
-                ),
-                self.render_cloud_sync_meta_line(
-                    "plugin.cloud_sync.fields.local_counts",
-                    counts,
-                    cx,
-                ),
-            ],
-        )
+            version_title,
+            version_rows
+                .into_iter()
+                .map(|row| self.render_cloud_sync_meta_line(row.label_key, row.value, cx)),
+        );
+        let mut block = div().flex().flex_col().gap(px(8.0)).child(version_block);
+        if let Some(conflict) = cloud_sync_conflict_info(state) {
+            let conflict_title = self.render_selectable_text_scoped(
+                "cloud-sync-conflict-info",
+                "title",
+                self.i18n.t("plugin.cloud_sync.conflict.details_title"),
+                self.tokens.ui.text_heading,
+                cx,
+            );
+            let mut rows = conflict
+                .rows
+                .into_iter()
+                .map(|row| self.render_cloud_sync_meta_line(row.label_key, row.value, cx))
+                .collect::<Vec<_>>();
+            rows.push(cloud_sync_meta_line(self.render_selectable_text_scoped(
+                "cloud-sync-conflict-info",
+                "recommendation",
+                self.i18n.t(conflict.recommendation_key),
+                self.tokens.ui.accent,
+                cx,
+            )));
+            block = block.child(cloud_sync_status_list(&self.tokens, conflict_title, rows));
+        }
+        block.into_any_element()
     }
 
     fn render_cloud_sync_meta_line(
@@ -743,7 +750,21 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         let warning = model.copy.warning_key.map(|key| self.i18n.t(key));
         let mut body = Vec::new();
-        for section in model.body_sections {
+        let local_snapshot = self.cloud_sync_local_snapshot(state).ok();
+        let apply_diff_items =
+            cloud_sync_apply_diff_items(preview, &model.selection, local_snapshot.as_ref());
+        if !apply_diff_items.is_empty() {
+            body.push(self.render_cloud_sync_section_diff_card(
+                "cloud-sync-apply-diff",
+                "plugin.cloud_sync.preflight.apply_diff_title",
+                &apply_diff_items,
+                cx,
+            ));
+        }
+        if !model.impact_items.is_empty() {
+            body.push(self.render_cloud_sync_preview_impact(&model.impact_items, cx));
+        }
+        for section in &model.body_sections {
             body.push(match section {
                 CloudSyncPreviewBodySection::Selection => {
                     self.render_cloud_sync_preview_selection(&model.summary, &model.selection, cx)
@@ -798,6 +819,165 @@ impl WorkspaceApp {
                 ),
             ]),
         )
+    }
+
+    fn render_cloud_sync_preview_impact(
+        &self,
+        items: &[CloudSyncPreviewImpactItem],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title = self.render_selectable_text_scoped(
+            "cloud-sync-preview-impact-title",
+            "title",
+            self.i18n.t("plugin.cloud_sync.preview.apply_plan_title"),
+            self.tokens.ui.text_heading,
+            cx,
+        );
+        let rows = items.iter().map(|item| {
+            self.render_cloud_sync_status_row(
+                item.label_key,
+                Some(self.i18n_replace(
+                    "plugin.cloud_sync.preview.item_count",
+                    &[("count", item.count.to_string())],
+                )),
+                item.status,
+                cx,
+            )
+        });
+        cloud_sync_status_list(&self.tokens, title, rows)
+    }
+
+    fn render_cloud_sync_section_diff_card(
+        &self,
+        identity: &'static str,
+        title_key: &'static str,
+        items: &[CloudSyncSectionDiffItem],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title = self.render_selectable_text_scoped(
+            identity,
+            "title",
+            self.i18n.t(title_key),
+            self.tokens.ui.text_heading,
+            cx,
+        );
+        let rows = items
+            .iter()
+            .map(|item| self.render_cloud_sync_section_diff_row(item, cx));
+        cloud_sync_status_list(&self.tokens, title, rows)
+    }
+
+    fn render_cloud_sync_section_diff_row(
+        &self,
+        item: &CloudSyncSectionDiffItem,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = self.cloud_sync_diff_label(&item.label);
+        let local_status = self
+            .i18n
+            .t(self.cloud_sync_local_diff_status_key(item.local_status));
+        let remote_status = self
+            .i18n
+            .t(self.cloud_sync_remote_diff_status_key(item.remote_status));
+        let detail = item.count.map_or_else(
+            || {
+                self.i18n_replace(
+                    "plugin.cloud_sync.preflight.diff_detail",
+                    &[
+                        ("local", local_status.clone()),
+                        ("remote", remote_status.clone()),
+                    ],
+                )
+            },
+            |count| {
+                self.i18n_replace(
+                    "plugin.cloud_sync.preflight.diff_detail_with_count",
+                    &[
+                        ("local", local_status.clone()),
+                        ("remote", remote_status.clone()),
+                        ("count", count.to_string()),
+                    ],
+                )
+            },
+        );
+        let accent = !matches!(
+            item.local_status,
+            CloudSyncLocalDiffStatus::Unchanged | CloudSyncLocalDiffStatus::Excluded
+        );
+        cloud_sync_status_row(
+            &self.tokens,
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-section-diff-row",
+                (label.clone(), "label"),
+                label,
+                self.tokens.ui.text,
+                cx,
+            ),
+            Some(self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-section-diff-row",
+                (
+                    self.cloud_sync_local_diff_status_key(item.local_status),
+                    "detail",
+                ),
+                detail,
+                self.tokens.ui.text_muted,
+                cx,
+            )),
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-section-diff-row",
+                (
+                    self.cloud_sync_local_diff_status_key(item.local_status),
+                    "status",
+                ),
+                local_status,
+                self.tokens.ui.accent,
+                cx,
+            ),
+            accent,
+        )
+    }
+
+    fn cloud_sync_diff_label(&self, label: &CloudSyncDiffLabel) -> String {
+        match label {
+            CloudSyncDiffLabel::Key(key) => self.i18n.t(key),
+            CloudSyncDiffLabel::AppSettingsSection(section_id) => {
+                cloud_sync_app_settings_section_label_key(section_id)
+                    .map(|key| self.i18n.t(key))
+                    .unwrap_or_else(|| section_id.clone())
+            }
+            CloudSyncDiffLabel::PluginSettings(plugin_id) => self.i18n_replace(
+                "plugin.cloud_sync.preflight.plugin_settings_item",
+                &[("plugin", plugin_id.clone())],
+            ),
+        }
+    }
+
+    fn cloud_sync_local_diff_status_key(&self, status: CloudSyncLocalDiffStatus) -> &'static str {
+        match status {
+            CloudSyncLocalDiffStatus::Added => "plugin.cloud_sync.preflight.local_added",
+            CloudSyncLocalDiffStatus::Modified => "plugin.cloud_sync.preflight.local_modified",
+            CloudSyncLocalDiffStatus::Deleted => "plugin.cloud_sync.preflight.local_deleted",
+            CloudSyncLocalDiffStatus::Unchanged => "plugin.cloud_sync.preflight.local_unchanged",
+            CloudSyncLocalDiffStatus::Excluded => "plugin.cloud_sync.preflight.local_excluded",
+        }
+    }
+
+    fn cloud_sync_remote_diff_status_key(&self, status: CloudSyncRemoteDiffStatus) -> &'static str {
+        match status {
+            CloudSyncRemoteDiffStatus::Creates => "plugin.cloud_sync.preflight.remote_creates",
+            CloudSyncRemoteDiffStatus::Overwrites => {
+                "plugin.cloud_sync.preflight.remote_overwrites"
+            }
+            CloudSyncRemoteDiffStatus::Unchanged => "plugin.cloud_sync.preflight.remote_unchanged",
+            CloudSyncRemoteDiffStatus::RemovedByScope => {
+                "plugin.cloud_sync.preflight.remote_removed_by_scope"
+            }
+            CloudSyncRemoteDiffStatus::Excluded => "plugin.cloud_sync.preflight.remote_excluded",
+            CloudSyncRemoteDiffStatus::Unknown => "plugin.cloud_sync.preflight.remote_unknown",
+        }
     }
 
     fn render_cloud_sync_preview_selection(
@@ -1416,14 +1596,231 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(cloud_sync_form_grid(connection_rows));
+        let state = self.cloud_sync_store.state();
+        let upload_diff = self
+            .cloud_sync_local_snapshot(state)
+            .ok()
+            .map(|snapshot| cloud_sync_upload_diff_items(&snapshot, state));
 
-        div()
+        let mut content = div()
             .flex()
             .flex_col()
             .gap(px(12.0))
             .child(connection_card)
             .child(self.render_cloud_sync_scope_card(cx))
+            .child(self.render_cloud_sync_coverage_card(cx));
+        if let Some(upload_diff) = upload_diff.as_ref().filter(|items| !items.is_empty()) {
+            content = content.child(
+                cloud_sync_card(&self.tokens)
+                    .child(self.render_cloud_sync_section_title(
+                        "plugin.cloud_sync.sections.sync_preflight",
+                        cx,
+                    ))
+                    .child(self.render_cloud_sync_section_diff_card(
+                        "cloud-sync-upload-diff",
+                        "plugin.cloud_sync.preflight.upload_diff_title",
+                        upload_diff,
+                        cx,
+                    )),
+            );
+        }
+        content
+            .child(self.render_cloud_sync_health_card(cx))
             .into_any_element()
+    }
+
+    fn render_cloud_sync_health_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let state = self.cloud_sync_store.state();
+        let rows = cloud_sync_health_items(&self.cloud_sync_form, state)
+            .into_iter()
+            .map(|item| {
+                self.render_cloud_sync_health_row(item.label_key, item.detail_key, item.status, cx)
+            })
+            .collect::<Vec<_>>();
+
+        cloud_sync_card(&self.tokens)
+            .child(
+                self.render_cloud_sync_section_title("plugin.cloud_sync.sections.sync_health", cx),
+            )
+            .child(cloud_sync_status_list(
+                &self.tokens,
+                self.render_selectable_text_scoped(
+                    "cloud-sync-health-title",
+                    "title",
+                    self.i18n.t("plugin.cloud_sync.health.title"),
+                    self.tokens.ui.text_heading,
+                    cx,
+                ),
+                rows,
+            ))
+            .into_any_element()
+    }
+
+    fn render_cloud_sync_health_row(
+        &self,
+        label_key: &'static str,
+        detail_key: &'static str,
+        status: CloudSyncHealthStatus,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let status_key = self.cloud_sync_health_status_key(status);
+        cloud_sync_status_row(
+            &self.tokens,
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-health-row",
+                (label_key, "label"),
+                self.i18n.t(label_key),
+                self.tokens.ui.text,
+                cx,
+            ),
+            Some(self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-health-row",
+                (label_key, "detail"),
+                self.i18n.t(detail_key),
+                self.tokens.ui.text_muted,
+                cx,
+            )),
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-health-row",
+                (label_key, "status"),
+                self.i18n.t(status_key),
+                self.tokens.ui.accent,
+                cx,
+            ),
+            status != CloudSyncHealthStatus::Fail,
+        )
+    }
+
+    fn cloud_sync_health_status_key(&self, status: CloudSyncHealthStatus) -> &'static str {
+        match status {
+            CloudSyncHealthStatus::Pass => "plugin.cloud_sync.health.status_pass",
+            CloudSyncHealthStatus::Warning => "plugin.cloud_sync.health.status_warning",
+            CloudSyncHealthStatus::Fail => "plugin.cloud_sync.health.status_fail",
+        }
+    }
+
+    fn render_cloud_sync_coverage_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let state = self.cloud_sync_store.state();
+        let rows = cloud_sync_coverage_model(&state.sync_scope)
+            .into_iter()
+            .map(|item| {
+                self.render_cloud_sync_status_row(
+                    item.label_key,
+                    Some(self.cloud_sync_coverage_detail(item.detail)),
+                    item.status,
+                    cx,
+                )
+            })
+            .collect::<Vec<_>>();
+        cloud_sync_card(&self.tokens)
+            .child(
+                self.render_cloud_sync_section_title(
+                    "plugin.cloud_sync.sections.sync_coverage",
+                    cx,
+                ),
+            )
+            .child(cloud_sync_status_list(
+                &self.tokens,
+                self.render_selectable_text_scoped(
+                    "cloud-sync-coverage-title",
+                    "title",
+                    self.i18n.t("plugin.cloud_sync.coverage.title"),
+                    self.tokens.ui.text_heading,
+                    cx,
+                ),
+                rows,
+            ))
+            .into_any_element()
+    }
+
+    fn render_cloud_sync_status_row(
+        &self,
+        label_key: &'static str,
+        detail: Option<String>,
+        status: CloudSyncCoverageStatus,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = self.i18n.t(label_key);
+        let status_key = self.cloud_sync_coverage_status_key(status);
+        cloud_sync_status_row(
+            &self.tokens,
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-status-row",
+                (label_key, "label"),
+                label,
+                self.tokens.ui.text,
+                cx,
+            ),
+            detail.map(|detail| {
+                self.render_display_text_with_role(
+                    SelectableTextRole::PlainDocument,
+                    "cloud-sync-status-row",
+                    (label_key, "detail"),
+                    detail,
+                    self.tokens.ui.text_muted,
+                    cx,
+                )
+            }),
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-status-row",
+                (label_key, "status"),
+                self.i18n.t(status_key),
+                self.tokens.ui.accent,
+                cx,
+            ),
+            status != CloudSyncCoverageStatus::Excluded,
+        )
+    }
+
+    fn cloud_sync_coverage_status_key(&self, status: CloudSyncCoverageStatus) -> &'static str {
+        match status {
+            CloudSyncCoverageStatus::Included => "plugin.cloud_sync.coverage.status_included",
+            CloudSyncCoverageStatus::Excluded => "plugin.cloud_sync.coverage.status_excluded",
+            CloudSyncCoverageStatus::Partial => "plugin.cloud_sync.coverage.status_partial",
+        }
+    }
+
+    fn cloud_sync_coverage_detail(&self, detail: CloudSyncCoverageDetail) -> String {
+        match detail {
+            CloudSyncCoverageDetail::Static(key) => self.i18n.t(key),
+            CloudSyncCoverageDetail::AppSettingsSections(section_ids) => {
+                if section_ids.is_empty() {
+                    return self
+                        .i18n
+                        .t("plugin.cloud_sync.coverage.app_settings_disabled_detail");
+                }
+                let sections = section_ids
+                    .into_iter()
+                    .map(|section_id| {
+                        cloud_sync_app_settings_section_label_key(&section_id)
+                            .map(|key| self.i18n.t(key))
+                            .unwrap_or(section_id)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.i18n_replace(
+                    "plugin.cloud_sync.coverage.app_settings_sections_detail",
+                    &[("sections", sections)],
+                )
+            }
+            CloudSyncCoverageDetail::PluginSettings(plugin_ids) => match plugin_ids {
+                None => self
+                    .i18n
+                    .t("plugin.cloud_sync.coverage.plugin_settings_all_detail"),
+                Some(ids) if ids.is_empty() => self
+                    .i18n
+                    .t("plugin.cloud_sync.coverage.plugin_settings_disabled_detail"),
+                Some(ids) => self.i18n_replace(
+                    "plugin.cloud_sync.coverage.plugin_settings_selected_detail",
+                    &[("plugins", ids.join(", "))],
+                ),
+            },
+        }
     }
 
     fn render_cloud_sync_scope_card(&self, cx: &mut Context<Self>) -> AnyElement {

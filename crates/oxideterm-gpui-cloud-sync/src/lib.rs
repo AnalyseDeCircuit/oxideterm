@@ -17,6 +17,7 @@ pub mod preview;
 pub mod selection;
 pub mod signatures;
 pub mod state_finish;
+pub mod status;
 pub mod view;
 pub mod view_state;
 
@@ -30,5 +31,6 @@ pub use preview::*;
 pub use selection::*;
 pub use signatures::*;
 pub use state_finish::*;
+pub use status::*;
 pub use view::*;
 pub use view_state::*;

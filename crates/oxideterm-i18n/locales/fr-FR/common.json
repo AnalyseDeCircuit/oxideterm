@@ -216,7 +216,14 @@
         "forwards": "Forwards Snapshot",
         "upload_units": "Upload Units",
         "last_upload": "Last Upload",
-        "last_check": "Last Check"
+        "last_check": "Last Check",
+        "remote_format": "Format distant",
+        "remote_etag": "ETag distant",
+        "local_device": "Appareil local",
+        "local_revision_sequence": "Séquence de révision locale",
+        "conflict_remote_revision": "Révision distante en conflit",
+        "conflict_remote_device": "Appareil distant en conflit",
+        "conflict_remote_updated_at": "Mise à jour distante en conflit"
       },
       "sections": {
         "quick_start": "Démarrage rapide",
@@ -227,7 +234,11 @@
         "rollback_preview": "Aperçu de la restauration",
         "rollback_backups": "Sauvegardes de restauration",
         "sync_history": "Historique de synchronisation",
-        "notes": "Remarques"
+        "sync_coverage": "Couverture de synchronisation",
+        "sync_preflight": "Préparation de synchronisation",
+        "sync_health": "État de synchronisation",
+        "notes": "Remarques",
+        "version_info": "Informations de version"
       },
       "guide": {
         "webdav_title": "Configuration WebDAV recommandée",
@@ -291,12 +302,31 @@
         "replace": "Remplacer",
         "skip": "Ignorer",
         "rename": "Renommer",
-        "blocked_description": "Les modifications distantes sont plus récentes que votre dernière révision synchronisée alors que des modifications locales sont encore en attente. Revérifiez le distant, récupérez d'abord, ou forcez l'écrasement."
+        "blocked_description": "Les modifications distantes sont plus récentes que votre dernière révision synchronisée alors que des modifications locales sont encore en attente. Revérifiez le distant, récupérez d'abord, ou forcez l'écrasement.",
+        "details_title": "Détails du conflit",
+        "detail_recommendation": "Récupérez et prévisualisez le snapshot distant avant de renvoyer. Ne forcez l’écrasement qu’après avoir vérifié les modifications locales."
       },
       "common": {
         "yes": "Oui",
         "no": "Non",
         "error": "Error"
+      },
+      "coverage": {
+        "title": "Couverture de synchronisation actuelle",
+        "status_included": "Inclus",
+        "status_excluded": "Exclu",
+        "status_partial": "Partiel",
+        "connections_detail": "Les profils de connexion enregistrés et leurs métadonnées sont inclus dans les snapshots structurés.",
+        "forwards_detail": "Les règles de redirection enregistrées sont incluses avec les métadonnées de leur connexion propriétaire.",
+        "quick_commands_detail": "Les définitions de commandes rapides sont incluses.",
+        "serial_profiles_detail": "Les profils de connexion série sont inclus.",
+        "app_settings_sections_detail": "Sections sélectionnées : {{sections}}",
+        "app_settings_disabled_detail": "Les paramètres de l'application sont exclus du périmètre de synchronisation actuel.",
+        "plugin_settings_all_detail": "Tous les paramètres de plugins synchronisables sont inclus.",
+        "plugin_settings_selected_detail": "Plugins sélectionnés : {{plugins}}",
+        "plugin_settings_disabled_detail": "Les paramètres de plugins sont exclus du périmètre de synchronisation actuel.",
+        "sensitive_credentials_enabled_detail": "Les objets chiffrés contenant des identifiants sensibles sont inclus.",
+        "sensitive_credentials_disabled_detail": "Les mots de passe de connexion, phrases secrètes de clés, clés privées gérées, clés IA et identifiants d'élévation sont exclus tant que la synchronisation des identifiants sensibles n'est pas activée."
       },
       "notes": {
         "upload_only": "La synchronisation automatique ne fait qu'envoyer. Les mises à jour distantes nécessitent toujours une confirmation de l'utilisateur.",
@@ -378,6 +408,8 @@
       },
       "preview": {
         "summary_header": "Résumé de l'aperçu distant",
+        "apply_plan_title": "Plan d'application",
+        "item_count": "{{count}} élément(s)",
         "connection_count": "Connexions",
         "total_forwards": "Redirections",
         "quick_commands_label": "Commandes rapides",
@@ -456,7 +488,51 @@
       "native_description": "Synchronisation chiffrée auto-hébergée pour OxideTerm.",
       "native_scope_summary": "Sections de l'application synchronisées par défaut : {{sections}}.",
       "native_service_pending": "Le service de synchronisation intégré est en cours de connexion à la couche de compatibilité.",
-      "native_service_ready": "Le service de synchronisation intégré est connecté à la couche de compatibilité."
+      "native_service_ready": "Le service de synchronisation intégré est connecté à la couche de compatibilité.",
+      "health": {
+        "title": "Vérifications préalables",
+        "status_pass": "Prêt",
+        "status_warning": "À vérifier",
+        "status_fail": "Bloqué",
+        "backend_config": "Configuration du backend",
+        "backend_config_ok": "Les champs backend requis et les références d’authentification sont présents.",
+        "backend_config_missing": "Des champs backend requis ou des secrets d’authentification manquent.",
+        "sync_password": "Mot de passe de synchronisation",
+        "sync_password_ok": "Un mot de passe de synchronisation est disponible pour les objets chiffrés.",
+        "sync_password_missing": "Définissez un mot de passe avant d’envoyer ou d’appliquer des données synchronisées chiffrées.",
+        "remote_check": "État distant",
+        "remote_check_ok": "L’état distant a été vérifié ou envoyé depuis cet appareil.",
+        "remote_check_not_run": "Lancez une vérification distante avant de vous appuyer sur cette configuration.",
+        "remote_check_failed": "La dernière opération distante a échoué. Vérifiez l’erreur actuelle avant de synchroniser.",
+        "conflict_state": "État des conflits",
+        "conflict_state_ok": "Aucun conflit bloquant n’est enregistré.",
+        "conflict_state_blocked": "Un conflit distant bloque l’envoi automatique.",
+        "local_changes": "Modifications locales",
+        "local_changes_clean": "Aucune modification locale non synchronisée n’est actuellement marquée.",
+        "local_changes_dirty": "Des modifications locales attendent l’envoi.",
+        "sync_scope": "Portée de synchronisation",
+        "sync_scope_ok": "Les groupes de données sélectionnés incluent les identifiants sensibles.",
+        "sync_scope_warning": "Les identifiants sensibles sont exclus de cette portée de synchronisation.",
+        "sync_scope_empty": "Aucun groupe de données n’est sélectionné pour la synchronisation."
+      },
+      "preflight": {
+        "upload_diff_title": "Impact de l’envoi",
+        "apply_diff_title": "Impact de l’application",
+        "plugin_settings_item": "Réglages du plugin : {{plugin}}",
+        "diff_detail": "Local : {{local}} · Distant : {{remote}}",
+        "diff_detail_with_count": "Local : {{local}} · Distant : {{remote}} · Éléments : {{count}}",
+        "local_added": "Ajouté",
+        "local_modified": "Modifié",
+        "local_deleted": "Supprimé",
+        "local_unchanged": "Inchangé",
+        "local_excluded": "Exclu",
+        "remote_creates": "sera créé",
+        "remote_overwrites": "sera écrasé",
+        "remote_unchanged": "inchangé",
+        "remote_removed_by_scope": "retiré par la portée",
+        "remote_excluded": "exclu",
+        "remote_unknown": "inconnu"
+      }
     },
     "refresh": "Actualiser",
     "open_plugins_dir": "Ouvrir le dossier",
