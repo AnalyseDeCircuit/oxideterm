@@ -656,6 +656,15 @@
         "flow_control": "흐름 제어",
         "connect_on_open": "열 때 연결",
         "setting_field": "설정 필드"
+      },
+      "tabs": {
+        "overview": "개요",
+        "configure": "구성",
+        "history": "기록"
+      },
+      "overview": {
+        "recent_history": "최근 활동",
+        "view_all_history": "모든 기록 보기"
       }
     },
     "refresh": "새로고침",

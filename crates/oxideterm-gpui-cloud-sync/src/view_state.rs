@@ -8,16 +8,29 @@ use oxideterm_cloud_sync::{
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum CloudSyncTab {
+    Overview,
+    Configure,
+    History,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CloudSyncSection {
     Header,
+    TabBar,
     Guide,
     Status,
     Actions,
     Preview,
     Rollback,
     History,
-    Config,
-    Notes,
+    RecentHistory,
+    ConfigConnection,
+    ConfigScope,
+    ConfigCoverage,
+    ConfigPreflight,
+    ConfigHealth,
+    ConfigNotes,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

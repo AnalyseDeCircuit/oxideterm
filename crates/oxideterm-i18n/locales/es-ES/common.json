@@ -656,6 +656,15 @@
         "flow_control": "Control de flujo",
         "connect_on_open": "Conectar al abrir",
         "setting_field": "Campo de ajuste"
+      },
+      "tabs": {
+        "overview": "Resumen",
+        "configure": "Configurar",
+        "history": "Historial"
+      },
+      "overview": {
+        "recent_history": "Actividad reciente",
+        "view_all_history": "Ver todo el historial"
       }
     },
     "refresh": "Actualizar",

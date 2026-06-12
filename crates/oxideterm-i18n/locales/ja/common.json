@@ -656,6 +656,15 @@
         "flow_control": "フロー制御",
         "connect_on_open": "開いたら接続",
         "setting_field": "設定フィールド"
+      },
+      "tabs": {
+        "overview": "概要",
+        "configure": "設定",
+        "history": "履歴"
+      },
+      "overview": {
+        "recent_history": "最近のアクティビティ",
+        "view_all_history": "すべての履歴を表示"
       }
     },
     "refresh": "更新",

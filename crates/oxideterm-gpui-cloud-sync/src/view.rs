@@ -325,6 +325,53 @@ pub fn cloud_sync_action_panel(tokens: &ThemeTokens, actions: AnyElement) -> Any
         .into_any_element()
 }
 
+/// Centered pill-style tab bar used to switch Cloud Sync page views.
+pub fn cloud_sync_tab_bar(children: impl IntoIterator<Item = AnyElement>) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(8.0))
+        .children(children)
+}
+
+/// Single tab button for the Cloud Sync tab bar. The caller supplies the
+/// label/icon child and attaches the mouse handler so the builder stays free
+/// of `WorkspaceApp` dependencies.
+pub fn cloud_sync_tab_button(tokens: &ThemeTokens, active: bool, child: AnyElement) -> Div {
+    let theme = tokens.ui;
+    div()
+        .rounded(px(tokens.radii.md))
+        .border_1()
+        .border_color(if active {
+            rgba((theme.accent << 8) | CLOUD_SYNC_ACCENT_BORDER_ALPHA)
+        } else {
+            rgba((theme.border << 8) | 0x00)
+        })
+        .bg(if active {
+            rgba((theme.accent << 8) | CLOUD_SYNC_ACCENT_TINT_ALPHA)
+        } else {
+            rgba((theme.bg_panel << 8) | 0x00)
+        })
+        .px(px(12.0))
+        .py(px(8.0))
+        .flex()
+        .items_center()
+        .gap(px(7.0))
+        .text_size(px(tokens.metrics.ui_text_sm))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(rgb(if active {
+            theme.accent
+        } else {
+            theme.text_muted
+        }))
+        .when(!active, |button| {
+            button.hover(|style| style.bg(rgb(theme.bg_hover)))
+        })
+        .child(child)
+}
+
 pub fn cloud_sync_form_grid(children: impl IntoIterator<Item = AnyElement>) -> AnyElement {
     children
         .into_iter()

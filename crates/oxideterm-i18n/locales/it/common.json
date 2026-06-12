@@ -656,6 +656,15 @@
         "flow_control": "Controllo di flusso",
         "connect_on_open": "Connetti all’apertura",
         "setting_field": "Campo impostazione"
+      },
+      "tabs": {
+        "overview": "Panoramica",
+        "configure": "Configura",
+        "history": "Cronologia"
+      },
+      "overview": {
+        "recent_history": "Attività recente",
+        "view_all_history": "Vedi tutta la cronologia"
       }
     },
     "refresh": "Aggiorna",

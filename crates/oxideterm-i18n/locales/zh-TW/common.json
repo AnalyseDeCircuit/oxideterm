@@ -656,6 +656,15 @@
         "flow_control": "流量控制",
         "connect_on_open": "開啟後連線",
         "setting_field": "設定欄位"
+      },
+      "tabs": {
+        "overview": "概覽",
+        "configure": "設定",
+        "history": "歷史"
+      },
+      "overview": {
+        "recent_history": "近期活動",
+        "view_all_history": "查看所有歷史"
       }
     },
     "refresh": "重新整理",
