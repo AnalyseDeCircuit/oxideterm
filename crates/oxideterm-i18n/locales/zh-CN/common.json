@@ -648,6 +648,15 @@
         "flow_control": "流控",
         "connect_on_open": "打开后连接",
         "setting_field": "设置字段"
+      },
+      "tabs": {
+        "overview": "概览",
+        "configure": "配置",
+        "history": "历史"
+      },
+      "overview": {
+        "recent_history": "近期活动",
+        "view_all_history": "查看全部历史"
       }
     },
     "native_description": "native 插件宿主尚未启用。",

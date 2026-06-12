@@ -693,6 +693,7 @@ impl WorkspaceApp {
             cloud_sync_dirty_refresh_generation: 0,
             cloud_sync_upload_after_current: None,
             cloud_sync_pull_preview_after_current: false,
+            cloud_sync_active_tab: oxideterm_gpui_cloud_sync::CloudSyncTab::Overview,
             sftp_worker_tx,
             sftp_worker_rx,
             forwarding_worker_tx,

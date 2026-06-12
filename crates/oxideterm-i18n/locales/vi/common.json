@@ -656,6 +656,15 @@
         "flow_control": "Điều khiển luồng",
         "connect_on_open": "Kết nối khi mở",
         "setting_field": "Trường cài đặt"
+      },
+      "tabs": {
+        "overview": "Tổng quan",
+        "configure": "Cấu hình",
+        "history": "Lịch sử"
+      },
+      "overview": {
+        "recent_history": "Hoạt động gần đây",
+        "view_all_history": "Xem tất cả lịch sử"
       }
     },
     "refresh": "Làm mới",

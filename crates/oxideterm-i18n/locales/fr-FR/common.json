@@ -656,6 +656,15 @@
         "flow_control": "Contrôle de flux",
         "connect_on_open": "Connecter à l’ouverture",
         "setting_field": "Champ de réglage"
+      },
+      "tabs": {
+        "overview": "Aperçu",
+        "configure": "Configurer",
+        "history": "Historique"
+      },
+      "overview": {
+        "recent_history": "Activité récente",
+        "view_all_history": "Voir tout l'historique"
       }
     },
     "refresh": "Actualiser",

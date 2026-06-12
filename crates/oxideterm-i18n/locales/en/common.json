@@ -648,6 +648,15 @@
         "flow_control": "Flow control",
         "connect_on_open": "Connect on open",
         "setting_field": "Setting field"
+      },
+      "tabs": {
+        "overview": "Overview",
+        "configure": "Configure",
+        "history": "History"
+      },
+      "overview": {
+        "recent_history": "Recent Activity",
+        "view_all_history": "View all history"
       }
     },
     "native_description": "Native plugin hosting is not enabled yet.",

@@ -13,23 +13,43 @@ use oxideterm_cloud_sync::{
     state::{CloudSyncHistoryEntry, CloudSyncPersistedState, CloudSyncRollbackBackup},
 };
 
-use crate::CloudSyncSection;
+use crate::{CloudSyncSection, CloudSyncTab};
 
 pub fn cloud_sync_sections(
     state: &CloudSyncPersistedState,
     has_pending_preview: bool,
+    active_tab: CloudSyncTab,
 ) -> Vec<CloudSyncSection> {
-    let mut sections = vec![CloudSyncSection::Header, CloudSyncSection::Status];
+    let mut sections = vec![CloudSyncSection::Header, CloudSyncSection::TabBar];
     if has_pending_preview {
         sections.push(CloudSyncSection::Preview);
     }
-    sections.push(CloudSyncSection::Config);
-    if !state.rollback_backups.is_empty() {
-        sections.push(CloudSyncSection::Rollback);
+    match active_tab {
+        CloudSyncTab::Overview => {
+            sections.push(CloudSyncSection::Status);
+            sections.push(CloudSyncSection::RecentHistory);
+            if !state.rollback_backups.is_empty() {
+                sections.push(CloudSyncSection::Rollback);
+            }
+        }
+        CloudSyncTab::Configure => {
+            sections.push(CloudSyncSection::ConfigConnection);
+            sections.push(CloudSyncSection::ConfigScope);
+            sections.push(CloudSyncSection::ConfigCoverage);
+            if state.local_dirty {
+                sections.push(CloudSyncSection::ConfigPreflight);
+            }
+            sections.push(CloudSyncSection::ConfigHealth);
+            sections.push(CloudSyncSection::ConfigNotes);
+            sections.push(CloudSyncSection::Guide);
+        }
+        CloudSyncTab::History => {
+            sections.push(CloudSyncSection::History);
+            if !state.rollback_backups.is_empty() {
+                sections.push(CloudSyncSection::Rollback);
+            }
+        }
     }
-    // History is retrospective information, so keep it after all active
-    // configuration, scope, preview, and recovery sections.
-    sections.push(CloudSyncSection::History);
     sections
 }
 
@@ -44,13 +64,18 @@ pub fn cloud_sync_section_signature(
     has_pending_preview: bool,
     has_preview_selection: bool,
     has_progress: bool,
+    active_tab: CloudSyncTab,
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     section.hash(&mut hasher);
+    // Tab switches can change which sections exist and how large they are, so
+    // the active tab is part of every section signature.
+    active_tab.hash(&mut hasher);
     match section {
         CloudSyncSection::Header => {
             format!("{:?}", state.status).hash(&mut hasher);
         }
+        CloudSyncSection::TabBar => {}
         CloudSyncSection::Guide => {
             format!("{backend_type:?}").hash(&mut hasher);
         }
@@ -72,13 +97,15 @@ pub fn cloud_sync_section_signature(
             state.rollback_backups.len().hash(&mut hasher);
             busy.hash(&mut hasher);
         }
-        CloudSyncSection::History => {
+        CloudSyncSection::History | CloudSyncSection::RecentHistory => {
             state.sync_history.len().hash(&mut hasher);
         }
-        CloudSyncSection::Config => {
+        CloudSyncSection::ConfigConnection => {
             format!("{backend_type:?}").hash(&mut hasher);
             format!("{auth_mode:?}").hash(&mut hasher);
             format!("{conflict_strategy:?}").hash(&mut hasher);
+        }
+        CloudSyncSection::ConfigScope => {
             state.sync_scope.sync_connections.hash(&mut hasher);
             state.sync_scope.sync_forwards.hash(&mut hasher);
             state.sync_scope.sync_quick_commands.hash(&mut hasher);
@@ -96,11 +123,28 @@ pub fn cloud_sync_section_signature(
             state.sync_scope.sync_plugin_settings.hash(&mut hasher);
             state.sync_scope.plugin_ids.hash(&mut hasher);
         }
-        CloudSyncSection::Notes => {
+        CloudSyncSection::ConfigCoverage | CloudSyncSection::ConfigNotes => {
             state.sync_scope.sync_connections.hash(&mut hasher);
             state.sync_scope.sync_forwards.hash(&mut hasher);
             state.sync_scope.sync_app_settings.hash(&mut hasher);
             state.sync_scope.sync_plugin_settings.hash(&mut hasher);
+            state.sync_scope.app_settings_sections.hash(&mut hasher);
+        }
+        CloudSyncSection::ConfigPreflight => {
+            state.local_dirty.hash(&mut hasher);
+            state.revision_seq.hash(&mut hasher);
+        }
+        CloudSyncSection::ConfigHealth => {
+            format!("{backend_type:?}").hash(&mut hasher);
+            format!("{auth_mode:?}").hash(&mut hasher);
+            state.sync_scope.sync_connections.hash(&mut hasher);
+            state.sync_scope.sync_forwards.hash(&mut hasher);
+            state.sync_scope.sync_app_settings.hash(&mut hasher);
+            state.sync_scope.sync_plugin_settings.hash(&mut hasher);
+            state.local_dirty.hash(&mut hasher);
+            format!("{:?}", state.status).hash(&mut hasher);
+            state.conflict_details.is_some().hash(&mut hasher);
+            state.auto_upload_blocked_by_conflict.hash(&mut hasher);
         }
     }
     hasher.finish()
@@ -161,37 +205,55 @@ mod tests {
     }
 
     #[test]
-    fn cloud_sync_sections_put_history_after_active_configuration() {
+    fn cloud_sync_sections_overview_shows_status_and_recent_history() {
         let state = CloudSyncPersistedState::default();
 
         assert_eq!(
-            cloud_sync_sections(&state, false),
+            cloud_sync_sections(&state, false, CloudSyncTab::Overview),
             vec![
                 CloudSyncSection::Header,
+                CloudSyncSection::TabBar,
                 CloudSyncSection::Status,
-                CloudSyncSection::Config,
-                CloudSyncSection::History,
+                CloudSyncSection::RecentHistory,
             ]
         );
     }
 
     #[test]
-    fn cloud_sync_sections_keep_history_last_with_preview_and_backups() {
+    fn cloud_sync_sections_configure_shows_config_and_guide() {
+        let state = CloudSyncPersistedState::default();
+
+        assert_eq!(
+            cloud_sync_sections(&state, false, CloudSyncTab::Configure),
+            vec![
+                CloudSyncSection::Header,
+                CloudSyncSection::TabBar,
+                CloudSyncSection::ConfigConnection,
+                CloudSyncSection::ConfigScope,
+                CloudSyncSection::ConfigCoverage,
+                CloudSyncSection::ConfigHealth,
+                CloudSyncSection::ConfigNotes,
+                CloudSyncSection::Guide,
+            ]
+        );
+    }
+
+    #[test]
+    fn cloud_sync_sections_history_keeps_history_and_backups() {
         let mut state = CloudSyncPersistedState::default();
         state.rollback_backups.push(rollback_backup());
 
-        let sections = cloud_sync_sections(&state, true);
+        let sections = cloud_sync_sections(&state, true, CloudSyncTab::History);
 
-        assert_eq!(sections.last(), Some(&CloudSyncSection::History));
+        assert_eq!(sections.last(), Some(&CloudSyncSection::Rollback));
         assert_eq!(
             sections,
             vec![
                 CloudSyncSection::Header,
-                CloudSyncSection::Status,
+                CloudSyncSection::TabBar,
                 CloudSyncSection::Preview,
-                CloudSyncSection::Config,
-                CloudSyncSection::Rollback,
                 CloudSyncSection::History,
+                CloudSyncSection::Rollback,
             ]
         );
     }
