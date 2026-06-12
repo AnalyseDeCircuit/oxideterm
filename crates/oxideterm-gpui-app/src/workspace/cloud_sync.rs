@@ -2,6 +2,7 @@ use std::sync::mpsc::{self, TryRecvError};
 
 use crate::workspace::ime::WorkspaceImeTarget;
 use chrono::Utc;
+use gpui::FontWeight;
 use gpui::prelude::*;
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,
@@ -1302,17 +1303,41 @@ impl WorkspaceApp {
         items: &[CloudSyncSectionDiffItem],
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = self.tokens.ui;
         let title = self.render_selectable_text_scoped(
             identity,
             "title",
             self.i18n.t(title_key),
-            self.tokens.ui.text_heading,
+            theme.text_muted,
             cx,
         );
         let rows = items
             .iter()
-            .map(|item| self.render_cloud_sync_section_diff_row(item, cx));
-        cloud_sync_status_list(&self.tokens, title, rows)
+            .map(|item| self.render_cloud_sync_section_diff_row(item, cx))
+            .collect::<Vec<_>>();
+        rows.into_iter()
+            .fold(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | 0x55))
+                    .bg(rgba((theme.bg_panel << 8) | 0x5F))
+                    .p(px(12.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text_muted))
+                            .child(title),
+                    ),
+                |panel, row| panel.child(row),
+            )
+            .into_any_element()
     }
 
     fn render_cloud_sync_section_diff_row(
@@ -1327,65 +1352,78 @@ impl WorkspaceApp {
         let remote_status = self
             .i18n
             .t(self.cloud_sync_remote_diff_status_key(item.remote_status));
-        let detail = item.count.map_or_else(
-            || {
-                self.i18n_replace(
-                    "plugin.cloud_sync.preflight.diff_detail",
-                    &[
-                        ("local", local_status.clone()),
-                        ("remote", remote_status.clone()),
-                    ],
-                )
-            },
-            |count| {
-                self.i18n_replace(
-                    "plugin.cloud_sync.preflight.diff_detail_with_count",
-                    &[
-                        ("local", local_status.clone()),
-                        ("remote", remote_status.clone()),
-                        ("count", count.to_string()),
-                    ],
-                )
-            },
-        );
-        let accent = !matches!(
-            item.local_status,
-            CloudSyncLocalDiffStatus::Unchanged | CloudSyncLocalDiffStatus::Excluded
-        );
-        cloud_sync_status_row(
-            &self.tokens,
+        let theme = self.tokens.ui;
+        let count = item.count.map(|count| {
             self.render_display_text_with_role(
                 SelectableTextRole::PlainDocument,
                 "cloud-sync-section-diff-row",
-                (label.clone(), "label"),
-                label,
-                self.tokens.ui.text,
-                cx,
-            ),
-            Some(self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "cloud-sync-section-diff-row",
-                (
-                    self.cloud_sync_local_diff_status_key(item.local_status),
-                    "detail",
+                (label.clone(), "count"),
+                self.i18n_replace(
+                    "plugin.cloud_sync.preview.item_count",
+                    &[("count", count.to_string())],
                 ),
-                detail,
-                self.tokens.ui.text_muted,
+                theme.text_muted,
                 cx,
-            )),
-            self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "cloud-sync-section-diff-row",
-                (
-                    self.cloud_sync_local_diff_status_key(item.local_status),
-                    "status",
-                ),
-                local_status,
-                self.tokens.ui.accent,
-                cx,
-            ),
-            accent,
-        )
+            )
+        });
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.sm))
+            .bg(rgba((theme.bg_card << 8) | 0x66))
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "cloud-sync-section-diff-row",
+                                (label.clone(), "label"),
+                                label,
+                                theme.text,
+                                cx,
+                            )),
+                    )
+                    .when_some(count, |content, count| {
+                        content.child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(theme.text_muted))
+                                .child(count),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .justify_end()
+                    .gap(px(6.0))
+                    .child(self.render_cloud_sync_local_diff_chip(
+                        item.local_status,
+                        local_status,
+                        cx,
+                    ))
+                    .child(self.render_cloud_sync_remote_diff_chip(
+                        item.remote_status,
+                        remote_status,
+                        cx,
+                    )),
+            )
+            .into_any_element()
     }
 
     fn cloud_sync_diff_label(&self, label: &CloudSyncDiffLabel) -> String {
@@ -1426,6 +1464,79 @@ impl WorkspaceApp {
             CloudSyncRemoteDiffStatus::Excluded => "plugin.cloud_sync.preflight.remote_excluded",
             CloudSyncRemoteDiffStatus::Unknown => "plugin.cloud_sync.preflight.remote_unknown",
         }
+    }
+
+    fn render_cloud_sync_local_diff_chip(
+        &self,
+        status: CloudSyncLocalDiffStatus,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_cloud_sync_tone_chip(
+            local_diff_tone(status),
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-section-diff-chip",
+                (self.cloud_sync_local_diff_status_key(status), "local"),
+                label,
+                local_diff_tone(status).color(&self.tokens),
+                cx,
+            ),
+        )
+    }
+
+    fn render_cloud_sync_remote_diff_chip(
+        &self,
+        status: CloudSyncRemoteDiffStatus,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_cloud_sync_tone_chip(
+            remote_diff_tone(status),
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-section-diff-chip",
+                (self.cloud_sync_remote_diff_status_key(status), "remote"),
+                label,
+                remote_diff_tone(status).color(&self.tokens),
+                cx,
+            ),
+        )
+    }
+
+    fn render_cloud_sync_health_chip(
+        &self,
+        status: CloudSyncHealthStatus,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_cloud_sync_tone_chip(
+            health_tone(status),
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-health-chip",
+                (self.cloud_sync_health_status_key(status), "status"),
+                label,
+                health_tone(status).color(&self.tokens),
+                cx,
+            ),
+        )
+    }
+
+    fn render_cloud_sync_tone_chip(&self, tone: CloudSyncTone, label: AnyElement) -> AnyElement {
+        div()
+            .flex_shrink_0()
+            .rounded(px(999.0))
+            .border_1()
+            .border_color(rgba((tone.color(&self.tokens) << 8) | 0x73))
+            .bg(rgba((tone.color(&self.tokens) << 8) | 0x1A))
+            .px(px(8.0))
+            .py(px(2.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(rgb(tone.color(&self.tokens)))
+            .child(label)
+            .into_any_element()
     }
 
     fn render_cloud_sync_apply_field_diff_card(
@@ -2292,6 +2403,22 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let sections = local_snapshot
+            .map(|snapshot| {
+                snapshot
+                    .scope
+                    .app_settings_sections
+                    .iter()
+                    .map(|section| {
+                        cloud_sync_app_settings_section_label_key(section)
+                            .map(|key| self.i18n.t(key))
+                            .unwrap_or_else(|| section.clone())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            })
+            .filter(|sections| !sections.trim().is_empty())
+            .unwrap_or_else(|| "—".to_string());
         cloud_sync_notes_card(
             &self.tokens,
             self.render_display_text_with_role(
@@ -2304,12 +2431,7 @@ impl WorkspaceApp {
             ),
             self.i18n_replace(
                 "plugin.cloud_sync.native_scope_summary",
-                &[(
-                    "sections",
-                    local_snapshot
-                        .map(|snapshot| snapshot.scope.app_settings_sections.join(", "))
-                        .unwrap_or_default(),
-                )],
+                &[("sections", sections)],
             ),
         )
     }
@@ -2403,21 +2525,33 @@ impl WorkspaceApp {
             })
             .collect::<Vec<_>>();
 
+        let theme = self.tokens.ui;
         cloud_sync_card(&self.tokens)
             .child(
                 self.render_cloud_sync_section_title("plugin.cloud_sync.sections.sync_health", cx),
             )
-            .child(cloud_sync_status_list(
-                &self.tokens,
-                self.render_selectable_text_scoped(
-                    "cloud-sync-health-title",
-                    "title",
-                    self.i18n.t("plugin.cloud_sync.health.title"),
-                    self.tokens.ui.text_heading,
-                    cx,
-                ),
-                rows,
-            ))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(theme.text_muted))
+                    .line_height(px(18.0))
+                    .child(self.render_selectable_text_scoped(
+                        "cloud-sync-health-title",
+                        "title",
+                        self.i18n.t("plugin.cloud_sync.health.title"),
+                        theme.text_muted,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(10.0))
+                    .children(rows),
+            )
             .into_any_element()
     }
 
@@ -2429,34 +2563,56 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let status_key = self.cloud_sync_health_status_key(status);
-        cloud_sync_status_row(
-            &self.tokens,
-            self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "cloud-sync-health-row",
-                (label_key, "label"),
-                self.i18n.t(label_key),
-                self.tokens.ui.text,
-                cx,
-            ),
-            Some(self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "cloud-sync-health-row",
-                (label_key, "detail"),
-                self.i18n.t(detail_key),
-                self.tokens.ui.text_muted,
-                cx,
-            )),
-            self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "cloud-sync-health-row",
-                (label_key, "status"),
-                self.i18n.t(status_key),
-                self.tokens.ui.accent,
-                cx,
-            ),
-            status != CloudSyncHealthStatus::Fail,
-        )
+        let theme = self.tokens.ui;
+        div()
+            .min_w(px(260.0))
+            .flex_1()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x55))
+            .bg(rgba((theme.bg_panel << 8) | 0x66))
+            .p(px(12.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "cloud-sync-health-row",
+                                (label_key, "label"),
+                                self.i18n.t(label_key),
+                                theme.text,
+                                cx,
+                            )),
+                    )
+                    .child(self.render_cloud_sync_health_chip(status, self.i18n.t(status_key), cx)),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .line_height(px(18.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "cloud-sync-health-row",
+                        (label_key, "detail"),
+                        self.i18n.t(detail_key),
+                        theme.text_muted,
+                        cx,
+                    )),
+            )
+            .into_any_element()
     }
 
     fn cloud_sync_health_status_key(&self, status: CloudSyncHealthStatus) -> &'static str {
@@ -4359,4 +4515,56 @@ fn is_cloud_sync_remote_changed_before_upload(error: &str) -> bool {
     error
         .trim_start()
         .starts_with("remote_changed_before_upload")
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CloudSyncTone {
+    Accent,
+    Success,
+    Warning,
+    Error,
+    Muted,
+}
+
+impl CloudSyncTone {
+    fn color(self, tokens: &oxideterm_theme::ThemeTokens) -> u32 {
+        match self {
+            Self::Accent => tokens.ui.accent,
+            Self::Success => tokens.ui.success,
+            Self::Warning => tokens.ui.warning,
+            Self::Error => tokens.ui.error,
+            Self::Muted => tokens.ui.text_muted,
+        }
+    }
+}
+
+fn health_tone(status: CloudSyncHealthStatus) -> CloudSyncTone {
+    match status {
+        CloudSyncHealthStatus::Pass => CloudSyncTone::Success,
+        CloudSyncHealthStatus::Warning => CloudSyncTone::Warning,
+        CloudSyncHealthStatus::Fail => CloudSyncTone::Error,
+    }
+}
+
+fn local_diff_tone(status: CloudSyncLocalDiffStatus) -> CloudSyncTone {
+    match status {
+        CloudSyncLocalDiffStatus::Added => CloudSyncTone::Success,
+        CloudSyncLocalDiffStatus::Modified => CloudSyncTone::Accent,
+        CloudSyncLocalDiffStatus::Deleted => CloudSyncTone::Error,
+        CloudSyncLocalDiffStatus::Unchanged | CloudSyncLocalDiffStatus::Excluded => {
+            CloudSyncTone::Muted
+        }
+    }
+}
+
+fn remote_diff_tone(status: CloudSyncRemoteDiffStatus) -> CloudSyncTone {
+    match status {
+        CloudSyncRemoteDiffStatus::Creates => CloudSyncTone::Success,
+        CloudSyncRemoteDiffStatus::Overwrites => CloudSyncTone::Warning,
+        CloudSyncRemoteDiffStatus::RemovedByScope => CloudSyncTone::Error,
+        CloudSyncRemoteDiffStatus::Unchanged | CloudSyncRemoteDiffStatus::Excluded => {
+            CloudSyncTone::Muted
+        }
+        CloudSyncRemoteDiffStatus::Unknown => CloudSyncTone::Warning,
+    }
 }
