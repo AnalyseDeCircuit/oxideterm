@@ -857,6 +857,7 @@ pub(crate) struct WorkspaceApp {
     cloud_sync_dirty_refresh_scheduled: bool,
     cloud_sync_dirty_refresh_generation: u64,
     cloud_sync_upload_after_current: Option<bool>,
+    cloud_sync_pull_preview_after_current: bool,
     sftp_worker_tx: std::sync::mpsc::Sender<sftp::SftpWorkerResult>,
     sftp_worker_rx: std::sync::mpsc::Receiver<sftp::SftpWorkerResult>,
     forwarding_worker_tx: std::sync::mpsc::Sender<forwards::ForwardingWorkerResult>,

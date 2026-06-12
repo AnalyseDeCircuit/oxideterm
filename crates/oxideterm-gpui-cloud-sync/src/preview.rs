@@ -235,6 +235,16 @@ pub struct CloudSyncFieldDiffField {
     pub label_key: &'static str,
     pub before: Option<String>,
     pub after: Option<String>,
+    pub merge_outcome: Option<CloudSyncFieldMergeOutcome>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CloudSyncFieldMergeOutcome {
+    Remote,
+    Local,
+    Merged,
+    ConflictLocal,
+    ConflictRemote,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -957,26 +967,34 @@ fn push_connection_field_diffs(
             continue;
         };
         let local_payload = local_record.and_then(|record| record.payload.as_ref());
+        let base_payload = base_records
+            .get(record.id.as_str())
+            .and_then(|record| record.payload.as_ref());
         let effective_remote = local_payload
             .and_then(|local_payload| {
-                base_records
-                    .get(record.id.as_str())
-                    .and_then(|record| record.payload.as_ref())
-                    .and_then(|base_payload| {
-                        merge_structured_model_fields(
-                            base_payload,
-                            local_payload,
-                            remote_payload,
-                            conflict_strategy,
-                        )
-                        .ok()
-                        .flatten()
-                    })
+                base_payload.and_then(|base_payload| {
+                    merge_structured_model_fields(
+                        base_payload,
+                        local_payload,
+                        remote_payload,
+                        conflict_strategy,
+                    )
+                    .ok()
+                    .flatten()
+                })
             })
             .unwrap_or_else(|| remote_payload.clone());
-        let fields = local_payload
-            .map(|local_payload| connection_changed_fields(local_payload, &effective_remote))
-            .unwrap_or_else(|| connection_summary_fields(remote_payload));
+        let fields = match (base_payload, local_payload) {
+            (Some(base_payload), Some(local_payload)) => connection_merge_fields(
+                base_payload,
+                local_payload,
+                remote_payload,
+                &effective_remote,
+                conflict_strategy,
+            ),
+            (_, Some(local_payload)) => connection_changed_fields(local_payload, &effective_remote),
+            _ => connection_summary_fields(remote_payload),
+        };
         let status = if local_payload.is_some() {
             CloudSyncFieldDiffStatus::Modified
         } else {
@@ -1093,26 +1111,34 @@ fn push_forward_field_diffs(
             continue;
         };
         let local_payload = local_record.and_then(|record| record.payload.as_ref());
+        let base_payload = base_records
+            .get(record.id.as_str())
+            .and_then(|record| record.payload.as_ref());
         let effective_remote = local_payload
             .and_then(|local_payload| {
-                base_records
-                    .get(record.id.as_str())
-                    .and_then(|record| record.payload.as_ref())
-                    .and_then(|base_payload| {
-                        merge_structured_model_fields(
-                            base_payload,
-                            local_payload,
-                            remote_payload,
-                            conflict_strategy,
-                        )
-                        .ok()
-                        .flatten()
-                    })
+                base_payload.and_then(|base_payload| {
+                    merge_structured_model_fields(
+                        base_payload,
+                        local_payload,
+                        remote_payload,
+                        conflict_strategy,
+                    )
+                    .ok()
+                    .flatten()
+                })
             })
             .unwrap_or_else(|| remote_payload.clone());
-        let fields = local_payload
-            .map(|local_payload| forward_changed_fields(local_payload, &effective_remote))
-            .unwrap_or_else(|| forward_summary_fields(remote_payload));
+        let fields = match (base_payload, local_payload) {
+            (Some(base_payload), Some(local_payload)) => forward_merge_fields(
+                base_payload,
+                local_payload,
+                remote_payload,
+                &effective_remote,
+                conflict_strategy,
+            ),
+            (_, Some(local_payload)) => forward_changed_fields(local_payload, &effective_remote),
+            _ => forward_summary_fields(remote_payload),
+        };
         let status = if local_payload.is_some() {
             CloudSyncFieldDiffStatus::Modified
         } else {
@@ -1193,25 +1219,34 @@ fn push_quick_command_field_diffs(
         .collect::<BTreeMap<_, _>>();
     for remote_command in &remote.commands {
         let local_command = local_commands.get(remote_command.id.as_str()).copied();
+        let base_command = base_commands.get(remote_command.id.as_str()).copied();
         let effective_remote = local_command
             .and_then(|local_command| {
-                base_commands
-                    .get(remote_command.id.as_str())
-                    .and_then(|base_command| {
-                        merge_structured_model_fields(
-                            *base_command,
-                            local_command,
-                            remote_command,
-                            conflict_strategy,
-                        )
-                        .ok()
-                        .flatten()
-                    })
+                base_command.and_then(|base_command| {
+                    merge_structured_model_fields(
+                        base_command,
+                        local_command,
+                        remote_command,
+                        conflict_strategy,
+                    )
+                    .ok()
+                    .flatten()
+                })
             })
             .unwrap_or_else(|| remote_command.clone());
-        let fields = local_command
-            .map(|local_command| quick_command_changed_fields(local_command, &effective_remote))
-            .unwrap_or_else(|| quick_command_summary_fields(remote_command));
+        let fields = match (base_command, local_command) {
+            (Some(base_command), Some(local_command)) => quick_command_merge_fields(
+                base_command,
+                local_command,
+                remote_command,
+                &effective_remote,
+                conflict_strategy,
+            ),
+            (_, Some(local_command)) => {
+                quick_command_changed_fields(local_command, &effective_remote)
+            }
+            _ => quick_command_summary_fields(remote_command),
+        };
         let status = if local_command.is_some() {
             CloudSyncFieldDiffStatus::Modified
         } else {
@@ -1292,25 +1327,34 @@ fn push_serial_profile_field_diffs(
         .collect::<BTreeMap<_, _>>();
     for remote_profile in &remote.records {
         let local_profile = local_profiles.get(remote_profile.id.as_str()).copied();
+        let base_profile = base_profiles.get(remote_profile.id.as_str()).copied();
         let effective_remote = local_profile
             .and_then(|local_profile| {
-                base_profiles
-                    .get(remote_profile.id.as_str())
-                    .and_then(|base_profile| {
-                        merge_structured_model_fields(
-                            *base_profile,
-                            local_profile,
-                            remote_profile,
-                            conflict_strategy,
-                        )
-                        .ok()
-                        .flatten()
-                    })
+                base_profile.and_then(|base_profile| {
+                    merge_structured_model_fields(
+                        base_profile,
+                        local_profile,
+                        remote_profile,
+                        conflict_strategy,
+                    )
+                    .ok()
+                    .flatten()
+                })
             })
             .unwrap_or_else(|| remote_profile.clone());
-        let fields = local_profile
-            .map(|local_profile| serial_profile_changed_fields(local_profile, &effective_remote))
-            .unwrap_or_else(|| serial_profile_summary_fields(remote_profile));
+        let fields = match (base_profile, local_profile) {
+            (Some(base_profile), Some(local_profile)) => serial_profile_merge_fields(
+                base_profile,
+                local_profile,
+                remote_profile,
+                &effective_remote,
+                conflict_strategy,
+            ),
+            (_, Some(local_profile)) => {
+                serial_profile_changed_fields(local_profile, &effective_remote)
+            }
+            _ => serial_profile_summary_fields(remote_profile),
+        };
         let status = if local_profile.is_some() {
             CloudSyncFieldDiffStatus::Modified
         } else {
@@ -1563,6 +1607,143 @@ fn connection_changed_fields(
     fields
 }
 
+fn connection_merge_fields(
+    base: &ConnectionInfo,
+    local: &ConnectionInfo,
+    remote: &ConnectionInfo,
+    effective: &ConnectionInfo,
+    conflict_strategy: &ConflictStrategy,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(base.name.clone()),
+        Some(local.name.clone()),
+        Some(remote.name.clone()),
+        Some(effective.name.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        base.group.clone(),
+        local.group.clone(),
+        remote.group.clone(),
+        effective.group.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.host",
+        Some(base.host.clone()),
+        Some(local.host.clone()),
+        Some(remote.host.clone()),
+        Some(effective.host.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.port",
+        Some(base.port.to_string()),
+        Some(local.port.to_string()),
+        Some(remote.port.to_string()),
+        Some(effective.port.to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.username",
+        Some(base.username.clone()),
+        Some(local.username.clone()),
+        Some(remote.username.clone()),
+        Some(effective.username.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.auth_type",
+        Some(format!("{:?}", base.auth_type)),
+        Some(format!("{:?}", local.auth_type)),
+        Some(format!("{:?}", remote.auth_type)),
+        Some(format!("{:?}", effective.auth_type)),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.key_path",
+        base.key_path.clone(),
+        local.key_path.clone(),
+        remote.key_path.clone(),
+        effective.key_path.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.cert_path",
+        base.cert_path.clone(),
+        local.cert_path.clone(),
+        remote.cert_path.clone(),
+        effective.cert_path.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.managed_key",
+        base.managed_key_id.clone(),
+        local.managed_key_id.clone(),
+        remote.managed_key_id.clone(),
+        effective.managed_key_id.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.proxy_chain",
+        Some(base.proxy_chain.len().to_string()),
+        Some(local.proxy_chain.len().to_string()),
+        Some(remote.proxy_chain.len().to_string()),
+        Some(effective.proxy_chain.len().to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.agent_forwarding",
+        Some(base.agent_forwarding.to_string()),
+        Some(local.agent_forwarding.to_string()),
+        Some(remote.agent_forwarding.to_string()),
+        Some(effective.agent_forwarding.to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.post_connect_command",
+        redacted_presence(base.post_connect_command.as_ref()),
+        redacted_presence(local.post_connect_command.as_ref()),
+        redacted_presence(remote.post_connect_command.as_ref()),
+        redacted_presence(effective.post_connect_command.as_ref()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.color",
+        base.color.clone(),
+        local.color.clone(),
+        remote.color.clone(),
+        effective.color.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.tags",
+        Some(base.tags.join(", ")),
+        Some(local.tags.join(", ")),
+        Some(remote.tags.join(", ")),
+        Some(effective.tags.join(", ")),
+        conflict_strategy,
+    );
+    fields
+}
+
 fn connection_summary_fields(value: &ConnectionInfo) -> Vec<CloudSyncFieldDiffField> {
     vec![
         field(
@@ -1638,6 +1819,80 @@ fn forward_changed_fields(
     fields
 }
 
+fn forward_merge_fields(
+    base: &PersistedForwardDto,
+    local: &PersistedForwardDto,
+    remote: &PersistedForwardDto,
+    effective: &PersistedForwardDto,
+    conflict_strategy: &ConflictStrategy,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.forward_type",
+        Some(base.forward_type.clone()),
+        Some(local.forward_type.clone()),
+        Some(remote.forward_type.clone()),
+        Some(effective.forward_type.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.bind_address",
+        Some(base.bind_address.clone()),
+        Some(local.bind_address.clone()),
+        Some(remote.bind_address.clone()),
+        Some(effective.bind_address.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.bind_port",
+        Some(base.bind_port.to_string()),
+        Some(local.bind_port.to_string()),
+        Some(remote.bind_port.to_string()),
+        Some(effective.bind_port.to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.target_host",
+        Some(base.target_host.clone()),
+        Some(local.target_host.clone()),
+        Some(remote.target_host.clone()),
+        Some(effective.target_host.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.target_port",
+        Some(base.target_port.to_string()),
+        Some(local.target_port.to_string()),
+        Some(remote.target_port.to_string()),
+        Some(effective.target_port.to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.description",
+        base.description.clone(),
+        local.description.clone(),
+        remote.description.clone(),
+        effective.description.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.auto_start",
+        Some(base.auto_start.to_string()),
+        Some(local.auto_start.to_string()),
+        Some(remote.auto_start.to_string()),
+        Some(effective.auto_start.to_string()),
+        conflict_strategy,
+    );
+    fields
+}
+
 fn forward_summary_fields(value: &PersistedForwardDto) -> Vec<CloudSyncFieldDiffField> {
     vec![
         field(
@@ -1702,6 +1957,62 @@ fn quick_command_changed_fields(
         "plugin.cloud_sync.diff_fields.host_pattern",
         before.host_pattern.clone(),
         after.host_pattern.clone(),
+    );
+    fields
+}
+
+fn quick_command_merge_fields(
+    base: &QuickCommand,
+    local: &QuickCommand,
+    remote: &QuickCommand,
+    effective: &QuickCommand,
+    conflict_strategy: &ConflictStrategy,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(base.name.clone()),
+        Some(local.name.clone()),
+        Some(remote.name.clone()),
+        Some(effective.name.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.command",
+        Some(base.command.clone()),
+        Some(local.command.clone()),
+        Some(remote.command.clone()),
+        Some(effective.command.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.category",
+        Some(base.category.clone()),
+        Some(local.category.clone()),
+        Some(remote.category.clone()),
+        Some(effective.category.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.description",
+        base.description.clone(),
+        local.description.clone(),
+        remote.description.clone(),
+        effective.description.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.host_pattern",
+        base.host_pattern.clone(),
+        local.host_pattern.clone(),
+        remote.host_pattern.clone(),
+        effective.host_pattern.clone(),
+        conflict_strategy,
     );
     fields
 }
@@ -1783,6 +2094,98 @@ fn serial_profile_changed_fields(
     fields
 }
 
+fn serial_profile_merge_fields(
+    base: &SerialProfile,
+    local: &SerialProfile,
+    remote: &SerialProfile,
+    effective: &SerialProfile,
+    conflict_strategy: &ConflictStrategy,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(base.name.clone()),
+        Some(local.name.clone()),
+        Some(remote.name.clone()),
+        Some(effective.name.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        base.group.clone(),
+        local.group.clone(),
+        remote.group.clone(),
+        effective.group.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.port_path",
+        Some(base.port_path.clone()),
+        Some(local.port_path.clone()),
+        Some(remote.port_path.clone()),
+        Some(effective.port_path.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.baud_rate",
+        Some(base.baud_rate.to_string()),
+        Some(local.baud_rate.to_string()),
+        Some(remote.baud_rate.to_string()),
+        Some(effective.baud_rate.to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.data_bits",
+        Some(base.data_bits.to_string()),
+        Some(local.data_bits.to_string()),
+        Some(remote.data_bits.to_string()),
+        Some(effective.data_bits.to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.stop_bits",
+        Some(base.stop_bits.to_string()),
+        Some(local.stop_bits.to_string()),
+        Some(remote.stop_bits.to_string()),
+        Some(effective.stop_bits.to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.parity",
+        Some(format!("{:?}", base.parity)),
+        Some(format!("{:?}", local.parity)),
+        Some(format!("{:?}", remote.parity)),
+        Some(format!("{:?}", effective.parity)),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.flow_control",
+        Some(format!("{:?}", base.flow_control)),
+        Some(format!("{:?}", local.flow_control)),
+        Some(format!("{:?}", remote.flow_control)),
+        Some(format!("{:?}", effective.flow_control)),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.connect_on_open",
+        Some(base.connect_on_open.to_string()),
+        Some(local.connect_on_open.to_string()),
+        Some(remote.connect_on_open.to_string()),
+        Some(effective.connect_on_open.to_string()),
+        conflict_strategy,
+    );
+    fields
+}
+
 fn serial_profile_summary_fields(value: &SerialProfile) -> Vec<CloudSyncFieldDiffField> {
     vec![
         field(
@@ -1856,20 +2259,95 @@ fn push_changed(
     }
 }
 
+fn push_merge_changed(
+    fields: &mut Vec<CloudSyncFieldDiffField>,
+    label_key: &'static str,
+    base: Option<String>,
+    local: Option<String>,
+    remote: Option<String>,
+    effective: Option<String>,
+    conflict_strategy: &ConflictStrategy,
+) {
+    let merge_outcome = merge_outcome_for_values(
+        base.as_deref(),
+        local.as_deref(),
+        remote.as_deref(),
+        effective.as_deref(),
+        conflict_strategy,
+    );
+    if local != effective || merge_outcome.is_some() {
+        fields.push(field_with_merge_outcome(
+            label_key,
+            local,
+            effective,
+            merge_outcome,
+        ));
+    }
+}
+
+fn merge_outcome_for_values(
+    base: Option<&str>,
+    local: Option<&str>,
+    remote: Option<&str>,
+    effective: Option<&str>,
+    conflict_strategy: &ConflictStrategy,
+) -> Option<CloudSyncFieldMergeOutcome> {
+    if local == remote {
+        return None;
+    }
+    if base == local && remote != base && effective == remote {
+        return Some(CloudSyncFieldMergeOutcome::Remote);
+    }
+    if base == remote && local != base && effective == local {
+        return Some(CloudSyncFieldMergeOutcome::Local);
+    }
+    if base != local && base != remote && local != remote {
+        return match conflict_strategy {
+            ConflictStrategy::Replace if effective == remote => {
+                Some(CloudSyncFieldMergeOutcome::ConflictRemote)
+            }
+            _ if effective == local => Some(CloudSyncFieldMergeOutcome::ConflictLocal),
+            _ if effective == remote => Some(CloudSyncFieldMergeOutcome::ConflictRemote),
+            _ => Some(CloudSyncFieldMergeOutcome::Merged),
+        };
+    }
+    if effective == local {
+        Some(CloudSyncFieldMergeOutcome::Local)
+    } else if effective == remote {
+        Some(CloudSyncFieldMergeOutcome::Remote)
+    } else {
+        Some(CloudSyncFieldMergeOutcome::Merged)
+    }
+}
+
 fn field(
     label_key: &'static str,
     before: Option<String>,
     after: Option<String>,
 ) -> CloudSyncFieldDiffField {
+    field_with_merge_outcome(label_key, before, after, None)
+}
+
+fn field_with_merge_outcome(
+    label_key: &'static str,
+    before: Option<String>,
+    after: Option<String>,
+    merge_outcome: Option<CloudSyncFieldMergeOutcome>,
+) -> CloudSyncFieldDiffField {
     CloudSyncFieldDiffField {
         label_key,
         before,
         after,
+        merge_outcome,
     }
 }
 
 fn redacted_changed_value() -> String {
     CLOUD_SYNC_FIELD_REDACTED_VALUE.to_string()
+}
+
+fn redacted_presence<T>(value: Option<T>) -> Option<String> {
+    value.map(|_| redacted_changed_value())
 }
 
 fn push_app_settings_diff_items(
@@ -2692,13 +3170,14 @@ mod tests {
             field.label_key == "plugin.cloud_sync.diff_fields.command"
                 && field.before.as_deref() == Some("deploy --old")
                 && field.after.as_deref() == Some("deploy --prod")
+                && field.merge_outcome == Some(CloudSyncFieldMergeOutcome::Remote)
         }));
-        assert!(
-            !items[0]
-                .fields
-                .iter()
-                .any(|field| field.label_key == "plugin.cloud_sync.diff_fields.description")
-        );
+        assert!(items[0].fields.iter().any(|field| {
+            field.label_key == "plugin.cloud_sync.diff_fields.description"
+                && field.before.as_deref() == Some("local note")
+                && field.after.as_deref() == Some("local note")
+                && field.merge_outcome == Some(CloudSyncFieldMergeOutcome::Local)
+        }));
     }
 
     #[test]

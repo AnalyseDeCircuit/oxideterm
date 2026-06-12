@@ -148,7 +148,8 @@ pub fn finish_structured_apply_state(
     let previous_remote_baseline = state.last_synced_remote_sections.clone();
     let was_conflict_blocked = state.auto_upload_blocked_by_conflict;
     let applied_full_remote =
-        structured_apply_covers_full_remote(&outcome.manifest, &outcome.selection);
+        structured_apply_covers_full_remote(&outcome.manifest, &outcome.selection)
+            && !outcome.requires_upload_after_merge;
     let next_local_baseline = merge_structured_baseline(
         previous_local_baseline.as_ref(),
         &local_snapshot.dirty.current_state,
@@ -189,7 +190,8 @@ pub fn finish_structured_apply_state(
     state.local_dirty = dirty_after.has_dirty;
     state.local_dirty_sections = Some(dirty_after.dirty_sections.clone());
     state.auto_upload_blocked_by_conflict =
-        dirty_after.has_dirty && !applied_full_remote && was_conflict_blocked;
+        (dirty_after.has_dirty && !applied_full_remote && was_conflict_blocked)
+            || outcome.requires_upload_after_merge;
     if !state.auto_upload_blocked_by_conflict {
         state.conflict_details = None;
     }
@@ -201,7 +203,7 @@ pub fn finish_structured_apply_state(
         Some(outcome.manifest.revision.clone()),
     ));
 
-    was_conflict_blocked && !applied_full_remote
+    (was_conflict_blocked && !applied_full_remote) || outcome.requires_upload_after_merge
 }
 
 pub struct LegacyApplyStateInput<'a> {
@@ -451,6 +453,7 @@ mod tests {
                 app_settings_sections: Vec::new(),
                 plugin_ids: Vec::new(),
             },
+            requires_upload_after_merge: false,
         };
         let mut state = CloudSyncPersistedState::default();
 

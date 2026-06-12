@@ -100,6 +100,15 @@ fn apply_oxide_import_with_options_inner(
             .into_iter()
             .map(|id| format!("Forward id not found in .oxide payload: {id}")),
     );
+    let credential_counts =
+        count_sensitive_credentials_for_import(&selected_connections, &plans, &options);
+    result.restored_connection_passwords = credential_counts.restored_connection_passwords;
+    result.restored_key_passphrases = credential_counts.restored_key_passphrases;
+    result.restored_managed_keys = credential_counts.restored_managed_keys;
+    result.restored_managed_key_passphrases =
+        credential_counts.restored_managed_key_passphrases;
+    result.restored_privilege_credentials = credential_counts.restored_privilege_credentials;
+    result.skipped_sensitive_credentials = credential_counts.skipped_sensitive_credentials;
     let mut connections_to_save = Vec::new();
     let mut restored_managed_keys = HashMap::new();
     let mut imported_managed_keys = Vec::new();
@@ -224,6 +233,104 @@ fn apply_oxide_import_with_options_inner(
     }
 
     Ok(result)
+}
+
+#[derive(Debug, Default)]
+struct SensitiveCredentialImportCounts {
+    restored_connection_passwords: usize,
+    restored_key_passphrases: usize,
+    restored_managed_keys: usize,
+    restored_managed_key_passphrases: usize,
+    restored_privilege_credentials: usize,
+    skipped_sensitive_credentials: usize,
+}
+
+impl SensitiveCredentialImportCounts {
+    fn add_restored(&mut self, other: Self) {
+        self.restored_connection_passwords += other.restored_connection_passwords;
+        self.restored_key_passphrases += other.restored_key_passphrases;
+        self.restored_managed_keys += other.restored_managed_keys;
+        self.restored_managed_key_passphrases += other.restored_managed_key_passphrases;
+        self.restored_privilege_credentials += other.restored_privilege_credentials;
+    }
+
+    fn restored_total(&self) -> usize {
+        self.restored_connection_passwords
+            + self.restored_key_passphrases
+            + self.restored_managed_keys
+            + self.restored_managed_key_passphrases
+            + self.restored_privilege_credentials
+    }
+}
+
+fn count_sensitive_credentials_for_import(
+    connections: &[EncryptedConnection],
+    plans: &[PlannedImportAction],
+    options: &OxideImportOptions,
+) -> SensitiveCredentialImportCounts {
+    let mut counts = SensitiveCredentialImportCounts::default();
+    for (connection, plan) in connections.iter().zip(plans.iter()) {
+        let connection_counts = count_sensitive_credentials_for_connection(connection, options);
+        if matches!(plan, PlannedImportAction::Skip) {
+            counts.skipped_sensitive_credentials += connection_counts.restored_total();
+        } else {
+            counts.add_restored(connection_counts);
+        }
+    }
+    counts
+}
+
+fn count_sensitive_credentials_for_connection(
+    connection: &EncryptedConnection,
+    options: &OxideImportOptions,
+) -> SensitiveCredentialImportCounts {
+    let mut counts = SensitiveCredentialImportCounts::default();
+    count_sensitive_credentials_for_auth(&connection.auth, options, &mut counts);
+    for hop in &connection.proxy_chain {
+        count_sensitive_credentials_for_auth(&hop.auth, options, &mut counts);
+    }
+    counts.restored_privilege_credentials += connection
+        .privilege_credentials
+        .iter()
+        .filter(|credential| credential.secret.is_some())
+        .count();
+    counts
+}
+
+fn count_sensitive_credentials_for_auth(
+    auth: &EncryptedAuth,
+    options: &OxideImportOptions,
+    counts: &mut SensitiveCredentialImportCounts,
+) {
+    // This reports only presence/count metadata; secret values stay in their
+    // zeroizing archive owners and are never cloned into UI-facing summaries.
+    match auth {
+        EncryptedAuth::Password { password } => {
+            if !password.is_empty() {
+                counts.restored_connection_passwords += 1;
+            }
+        }
+        EncryptedAuth::Key {
+            passphrase,
+            managed_key,
+            ..
+        } => {
+            if managed_key.is_some() && options.restore_managed_keys {
+                counts.restored_managed_keys += 1;
+                if passphrase.is_some() && options.restore_managed_key_passphrases {
+                    counts.restored_managed_key_passphrases += 1;
+                }
+            } else if passphrase.is_some() {
+                counts.restored_key_passphrases += 1;
+            }
+        }
+        EncryptedAuth::Certificate { passphrase, .. } => {
+            if passphrase.is_some() {
+                counts.restored_key_passphrases += 1;
+            }
+        }
+        EncryptedAuth::Agent => {}
+    }
 }
 
 #[derive(Debug, Default)]

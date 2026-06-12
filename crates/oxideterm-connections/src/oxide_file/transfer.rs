@@ -228,6 +228,12 @@ pub struct ImportResultEnvelope {
     pub skipped_forwards: usize,
     pub imported_portable_secrets: usize,
     pub skipped_portable_secrets: usize,
+    pub restored_connection_passwords: usize,
+    pub restored_key_passphrases: usize,
+    pub restored_managed_keys: usize,
+    pub restored_managed_key_passphrases: usize,
+    pub restored_privilege_credentials: usize,
+    pub skipped_sensitive_credentials: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_settings_json: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

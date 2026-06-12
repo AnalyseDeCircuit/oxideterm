@@ -23,14 +23,14 @@ use oxideterm_gpui_cloud_sync::{
     CloudSyncApplyUiOutcome, CloudSyncConfigRow, CloudSyncConfirmDescription,
     CloudSyncCoverageDetail, CloudSyncCoverageStatus, CloudSyncDiffLabel,
     CloudSyncErrorMessageSpec, CloudSyncFieldDiffItem, CloudSyncFieldDiffStatus,
-    CloudSyncForwardDetail, CloudSyncGuideExampleElements, CloudSyncHealthStatus,
-    CloudSyncLocalDiffStatus, CloudSyncLocalFieldDiffSnapshot, CloudSyncPreviewBodySection,
-    CloudSyncPreviewFactValue, CloudSyncPreviewImpactItem, CloudSyncPreviewRecord,
-    CloudSyncPreviewRecordRow, CloudSyncPreviewSelectionAction, CloudSyncPreviewSelectionLabel,
-    CloudSyncPreviewSource, CloudSyncPreviewSummary, CloudSyncRemoteDiffStatus,
-    CloudSyncRollbackBackupSummarySpec, CloudSyncSection, CloudSyncSectionDiffItem,
-    CloudSyncSelectAction, CloudSyncSelectKeyEffect, CloudSyncSelectKeyState,
-    CloudSyncSelectOption, CloudSyncUploadSelectionAction,
+    CloudSyncFieldMergeOutcome, CloudSyncForwardDetail, CloudSyncGuideExampleElements,
+    CloudSyncHealthStatus, CloudSyncLocalDiffStatus, CloudSyncLocalFieldDiffSnapshot,
+    CloudSyncPreviewBodySection, CloudSyncPreviewFactValue, CloudSyncPreviewImpactItem,
+    CloudSyncPreviewRecord, CloudSyncPreviewRecordRow, CloudSyncPreviewSelectionAction,
+    CloudSyncPreviewSelectionLabel, CloudSyncPreviewSource, CloudSyncPreviewSummary,
+    CloudSyncRemoteDiffStatus, CloudSyncRollbackBackupSummarySpec, CloudSyncSection,
+    CloudSyncSectionDiffItem, CloudSyncSelectAction, CloudSyncSelectKeyEffect,
+    CloudSyncSelectKeyState, CloudSyncSelectOption, CloudSyncUploadSelectionAction,
     close_cloud_sync_select_on_container_scroll, cloud_sync_action_grid, cloud_sync_action_panel,
     cloud_sync_app_settings_section_label_key, cloud_sync_apply_diff_items,
     cloud_sync_apply_field_diff_items, cloud_sync_backend_label_key, cloud_sync_card,
@@ -1629,25 +1629,34 @@ impl WorkspaceApp {
             item.fields
                 .iter()
                 .fold(div().flex().flex_col().gap(px(2.0)), |fields, field| {
+                    let mut field_text = self.i18n_replace(
+                        "plugin.cloud_sync.field_diff.field_change",
+                        &[
+                            ("field", self.i18n.t(field.label_key)),
+                            (
+                                "before",
+                                self.cloud_sync_field_diff_value(field.before.as_deref()),
+                            ),
+                            (
+                                "after",
+                                self.cloud_sync_field_diff_value(field.after.as_deref()),
+                            ),
+                        ],
+                    );
+                    if let Some(outcome) = field.merge_outcome {
+                        field_text.push_str(" · ");
+                        field_text.push_str(
+                            &self
+                                .i18n
+                                .t(self.cloud_sync_field_merge_outcome_key(outcome)),
+                        );
+                    }
                     fields.child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .line_height(px(18.0))
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n_replace(
-                                "plugin.cloud_sync.field_diff.field_change",
-                                &[
-                                    ("field", self.i18n.t(field.label_key)),
-                                    (
-                                        "before",
-                                        self.cloud_sync_field_diff_value(field.before.as_deref()),
-                                    ),
-                                    (
-                                        "after",
-                                        self.cloud_sync_field_diff_value(field.after.as_deref()),
-                                    ),
-                                ],
-                            )),
+                            .child(field_text),
                     )
                 });
         let detail = div()
@@ -1700,6 +1709,23 @@ impl WorkspaceApp {
             CloudSyncFieldDiffStatus::Added => "plugin.cloud_sync.field_diff.status_added",
             CloudSyncFieldDiffStatus::Modified => "plugin.cloud_sync.field_diff.status_modified",
             CloudSyncFieldDiffStatus::Deleted => "plugin.cloud_sync.field_diff.status_deleted",
+        }
+    }
+
+    fn cloud_sync_field_merge_outcome_key(
+        &self,
+        outcome: CloudSyncFieldMergeOutcome,
+    ) -> &'static str {
+        match outcome {
+            CloudSyncFieldMergeOutcome::Remote => "plugin.cloud_sync.field_diff.outcome_remote",
+            CloudSyncFieldMergeOutcome::Local => "plugin.cloud_sync.field_diff.outcome_local",
+            CloudSyncFieldMergeOutcome::Merged => "plugin.cloud_sync.field_diff.outcome_merged",
+            CloudSyncFieldMergeOutcome::ConflictLocal => {
+                "plugin.cloud_sync.field_diff.outcome_conflict_local"
+            }
+            CloudSyncFieldMergeOutcome::ConflictRemote => {
+                "plugin.cloud_sync.field_diff.outcome_conflict_remote"
+            }
         }
     }
 
@@ -3842,7 +3868,10 @@ impl WorkspaceApp {
                 self.cloud_sync_store.state_mut().status = CloudSyncStatus::Idle;
                 self.save_cloud_sync_state();
             }
-            if let Some(automatic) = self.cloud_sync_upload_after_current.take() {
+            if self.cloud_sync_pull_preview_after_current {
+                self.cloud_sync_pull_preview_after_current = false;
+                self.start_cloud_sync_pull_preview(cx);
+            } else if let Some(automatic) = self.cloud_sync_upload_after_current.take() {
                 self.start_cloud_sync_upload_with_options(false, automatic, true, cx);
             }
         }
@@ -3894,6 +3923,8 @@ impl WorkspaceApp {
                     Err(error) => {
                         if automatic {
                             self.finish_cloud_sync_automatic_upload_error(error);
+                        } else if is_cloud_sync_remote_changed_before_upload(&error) {
+                            self.finish_cloud_sync_upload_conflict_for_preview(error);
                         } else {
                             self.finish_cloud_sync_error("upload", error);
                         }
@@ -4005,6 +4036,22 @@ impl WorkspaceApp {
         self.save_cloud_sync_state();
     }
 
+    fn finish_cloud_sync_upload_conflict_for_preview(&mut self, error: String) {
+        let display_error = self.format_cloud_sync_error(&error);
+        let history_summary = self.cloud_sync_upload_failure_summary();
+        finish_cloud_sync_error_state(
+            self.cloud_sync_store.state_mut(),
+            "upload",
+            &error,
+            display_error,
+            Some(history_summary),
+        );
+        self.cloud_sync_progress = None;
+        self.cloud_sync_upload_after_current = None;
+        self.cloud_sync_pull_preview_after_current = true;
+        self.save_cloud_sync_state();
+    }
+
     fn finish_cloud_sync_pull_preview(&mut self, preview: CloudSyncPendingPreview) {
         finish_cloud_sync_pull_preview_state(self.cloud_sync_store.state_mut(), &preview);
         self.cloud_sync_preview_selection = Some(CloudSyncPreviewSelection::from_preview(
@@ -4061,6 +4108,10 @@ impl WorkspaceApp {
         if let Some(envelope) = outcome.sensitive_credentials_envelope.as_mut() {
             self.apply_oxide_import_portable_secrets(envelope);
         }
+        let sensitive_restore_description = outcome
+            .sensitive_credentials_envelope
+            .as_ref()
+            .and_then(|envelope| self.cloud_sync_sensitive_restore_description(envelope));
         let previous_local_baseline = self
             .cloud_sync_store
             .state()
@@ -4089,15 +4140,20 @@ impl WorkspaceApp {
             self.cloud_sync_upload_after_current = Some(true);
         }
         self.save_cloud_sync_state();
+        let mut description = self.i18n_replace(
+            "plugin.cloud_sync.toast.pull_success_description",
+            &[
+                ("imported", outcome.content_summary.connections.to_string()),
+                ("merged", "0".to_string()),
+            ],
+        );
+        if let Some(sensitive_restore_description) = sensitive_restore_description {
+            description.push('\n');
+            description.push_str(&sensitive_restore_description);
+        }
         self.push_cloud_sync_toast(
             self.i18n.t("plugin.cloud_sync.toast.pull_success_title"),
-            Some(self.i18n_replace(
-                "plugin.cloud_sync.toast.pull_success_description",
-                &[
-                    ("imported", outcome.content_summary.connections.to_string()),
-                    ("merged", "0".to_string()),
-                ],
-            )),
+            Some(description),
             TerminalNoticeVariant::Success,
         );
     }
@@ -4138,6 +4194,8 @@ impl WorkspaceApp {
         if cloud_options.oxide_options.import_portable_secrets {
             self.apply_oxide_import_portable_secrets(&mut outcome.envelope);
         }
+        let sensitive_restore_description =
+            self.cloud_sync_sensitive_restore_description(&outcome.envelope);
 
         let local_snapshot = build_local_snapshot(
             &self.connection_store,
@@ -4164,17 +4222,69 @@ impl WorkspaceApp {
         }
         self.save_cloud_sync_state();
         let copy = plan.success_copy;
+        let mut description = self.i18n_replace(
+            copy.description_key,
+            &[
+                ("imported", outcome.envelope.imported.to_string()),
+                ("merged", outcome.envelope.merged.to_string()),
+            ],
+        );
+        if let Some(sensitive_restore_description) = sensitive_restore_description {
+            description.push('\n');
+            description.push_str(&sensitive_restore_description);
+        }
         self.push_cloud_sync_toast(
             self.i18n.t(copy.title_key),
-            Some(self.i18n_replace(
-                copy.description_key,
-                &[
-                    ("imported", outcome.envelope.imported.to_string()),
-                    ("merged", outcome.envelope.merged.to_string()),
-                ],
-            )),
+            Some(description),
             TerminalNoticeVariant::Success,
         );
+    }
+
+    fn cloud_sync_sensitive_restore_description(
+        &self,
+        envelope: &oxideterm_connections::oxide_file::ImportResultEnvelope,
+    ) -> Option<String> {
+        let total = envelope.restored_connection_passwords
+            + envelope.restored_key_passphrases
+            + envelope.restored_managed_keys
+            + envelope.restored_managed_key_passphrases
+            + envelope.restored_privilege_credentials
+            + envelope.imported_portable_secrets
+            + envelope.skipped_sensitive_credentials
+            + envelope.skipped_portable_secrets;
+        (total > 0).then(|| {
+            self.i18n_replace(
+                "plugin.cloud_sync.toast.sensitive_restore_description",
+                &[
+                    (
+                        "passwords",
+                        envelope.restored_connection_passwords.to_string(),
+                    ),
+                    (
+                        "keyPassphrases",
+                        envelope.restored_key_passphrases.to_string(),
+                    ),
+                    ("managedKeys", envelope.restored_managed_keys.to_string()),
+                    (
+                        "managedKeyPassphrases",
+                        envelope.restored_managed_key_passphrases.to_string(),
+                    ),
+                    (
+                        "privilegeCredentials",
+                        envelope.restored_privilege_credentials.to_string(),
+                    ),
+                    ("aiKeys", envelope.imported_portable_secrets.to_string()),
+                    (
+                        "skippedCredentials",
+                        envelope.skipped_sensitive_credentials.to_string(),
+                    ),
+                    (
+                        "skippedAiKeys",
+                        envelope.skipped_portable_secrets.to_string(),
+                    ),
+                ],
+            )
+        })
     }
 
     fn finish_cloud_sync_error(&mut self, action: &str, error: String) {
@@ -4243,4 +4353,10 @@ impl WorkspaceApp {
             self.cloud_sync_store.state_mut().last_error = Some(error.to_string());
         }
     }
+}
+
+fn is_cloud_sync_remote_changed_before_upload(error: &str) -> bool {
+    error
+        .trim_start()
+        .starts_with("remote_changed_before_upload")
 }

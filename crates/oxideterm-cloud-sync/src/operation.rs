@@ -917,7 +917,7 @@ impl CloudSyncOperationService {
             }
         }
 
-        merge_structured_preview_fields(
+        let requires_upload_after_merge = merge_structured_preview_fields(
             connection_store,
             forwarding_registry,
             settings_store,
@@ -1008,6 +1008,7 @@ impl CloudSyncOperationService {
             manifest: preview.manifest,
             remote_metadata: preview.remote_metadata,
             selection: applied_selection,
+            requires_upload_after_merge,
         }))
     }
 
@@ -1551,8 +1552,9 @@ fn merge_structured_preview_fields(
     preview: &mut StructuredPreview,
     selection: &StructuredApplySelection,
     conflict_strategy: &ConflictStrategy,
-) -> Result<()> {
+) -> Result<bool> {
     let now_rfc3339 = Utc::now().to_rfc3339();
+    let mut changed = false;
     if selection.connections
         && let (Some(remote), Some(base)) = (
             preview.connections_snapshot.as_mut(),
@@ -1560,7 +1562,7 @@ fn merge_structured_preview_fields(
         )
     {
         let local = connection_store.export_saved_connections_snapshot()?;
-        merge_connection_records(remote, base, &local, conflict_strategy, &now_rfc3339)?;
+        changed |= merge_connection_records(remote, base, &local, conflict_strategy, &now_rfc3339)?;
     }
     if selection.forwards
         && let (Some(remote), Some(base)) = (
@@ -1569,7 +1571,7 @@ fn merge_structured_preview_fields(
         )
     {
         let local = forwarding_registry.export_saved_forwards_snapshot()?;
-        merge_forward_records(remote, base, &local, conflict_strategy, &now_rfc3339)?;
+        changed |= merge_forward_records(remote, base, &local, conflict_strategy, &now_rfc3339)?;
     }
     if selection.quick_commands
         && let (Some(remote_json), Some(base_json)) = (
@@ -1579,7 +1581,7 @@ fn merge_structured_preview_fields(
     {
         let local_json = oxideterm_quick_commands::export_snapshot_json(settings_store.path())
             .map_err(anyhow::Error::msg)?;
-        merge_quick_command_records(
+        changed |= merge_quick_command_records(
             remote_json,
             base_json,
             &local_json,
@@ -1594,9 +1596,10 @@ fn merge_structured_preview_fields(
         )
     {
         let local = connection_store.export_serial_profiles_snapshot()?;
-        merge_serial_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
+        changed |=
+            merge_serial_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
     }
-    Ok(())
+    Ok(changed)
 }
 
 fn merge_connection_records(
@@ -1605,9 +1608,10 @@ fn merge_connection_records(
     local: &SavedConnectionsSyncSnapshot,
     conflict_strategy: &ConflictStrategy,
     merged_at: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let base_records = sync_records_by_id(&base.records);
     let local_records = sync_records_by_id(&local.records);
+    let mut changed = false;
     for remote_record in &mut remote.records {
         if remote_record.deleted {
             continue;
@@ -1637,9 +1641,10 @@ fn merge_connection_records(
         )? {
             remote_record.payload = Some(merged_payload);
             remote_record.updated_at = merged_at.to_string();
+            changed = true;
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 fn merge_forward_records(
@@ -1648,9 +1653,10 @@ fn merge_forward_records(
     local: &SavedForwardsSyncSnapshot,
     conflict_strategy: &ConflictStrategy,
     merged_at: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let base_records = forward_records_by_id(&base.records);
     let local_records = forward_records_by_id(&local.records);
+    let mut changed = false;
     for remote_record in &mut remote.records {
         if remote_record.deleted {
             continue;
@@ -1680,9 +1686,10 @@ fn merge_forward_records(
         )? {
             remote_record.payload = Some(merged_payload);
             remote_record.updated_at = merged_at.to_string();
+            changed = true;
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 fn merge_serial_profile_records(
@@ -1691,7 +1698,7 @@ fn merge_serial_profile_records(
     local: &SerialProfilesSyncSnapshot,
     conflict_strategy: &ConflictStrategy,
     merged_at: chrono::DateTime<Utc>,
-) -> Result<()> {
+) -> Result<bool> {
     let base_records = base
         .records
         .iter()
@@ -1702,6 +1709,7 @@ fn merge_serial_profile_records(
         .iter()
         .map(|profile| (profile.id.as_str(), profile))
         .collect::<BTreeMap<_, _>>();
+    let mut changed = false;
     for remote_profile in &mut remote.records {
         let Some(base_profile) = base_records.get(remote_profile.id.as_str()).copied() else {
             continue;
@@ -1717,9 +1725,10 @@ fn merge_serial_profile_records(
         )? {
             merged_profile.updated_at = merged_at;
             *remote_profile = merged_profile;
+            changed = true;
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 fn merge_quick_command_records(
@@ -1728,7 +1737,7 @@ fn merge_quick_command_records(
     local_json: &str,
     conflict_strategy: &ConflictStrategy,
     merged_at: u64,
-) -> Result<()> {
+) -> Result<bool> {
     let base = serde_json::from_str::<QuickCommandsSnapshot>(base_json)?;
     let local = serde_json::from_str::<QuickCommandsSnapshot>(local_json)?;
     let mut remote = serde_json::from_str::<QuickCommandsSnapshot>(remote_json)?;
@@ -1750,7 +1759,7 @@ fn merge_quick_command_records(
         remote.updated_at = merged_at;
         *remote_json = serde_json::to_string(&remote)?;
     }
-    Ok(())
+    Ok(changed)
 }
 
 fn merge_quick_command_categories(
@@ -2025,6 +2034,7 @@ pub struct ApplyStructuredPreviewOutcome {
     pub manifest: StructuredManifest,
     pub remote_metadata: RemoteMetadata,
     pub selection: StructuredApplySelection,
+    pub requires_upload_after_merge: bool,
 }
 
 #[derive(Clone, Debug)]
