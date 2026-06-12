@@ -216,7 +216,14 @@
         "forwards": "連接埠轉發快照",
         "upload_units": "上傳單元",
         "last_upload": "上次上傳",
-        "last_check": "上次檢查"
+        "last_check": "上次檢查",
+        "remote_format": "遠端格式",
+        "remote_etag": "遠端 ETag",
+        "local_device": "本機裝置",
+        "local_revision_sequence": "本機版本序號",
+        "conflict_remote_revision": "衝突遠端版本",
+        "conflict_remote_device": "衝突遠端裝置",
+        "conflict_remote_updated_at": "衝突遠端更新時間"
       },
       "sections": {
         "quick_start": "使用方法",
@@ -227,7 +234,11 @@
         "rollback_preview": "回滾預覽",
         "rollback_backups": "回滾備份",
         "sync_history": "同步歷程",
-        "notes": "注意事項"
+        "sync_coverage": "同步覆蓋範圍",
+        "sync_preflight": "同步前檢查",
+        "sync_health": "同步健康狀態",
+        "notes": "注意事項",
+        "version_info": "版本資訊"
       },
       "guide": {
         "webdav_title": "建議的 WebDAV 設定",
@@ -291,12 +302,31 @@
         "replace": "取代",
         "skip": "略過",
         "rename": "重新命名",
-        "blocked_description": "遠端變更比你上次同步的版本更新，而本機仍有待同步的變更。請重新檢查遠端、先拉取，或強制覆寫遠端。"
+        "blocked_description": "遠端變更比你上次同步的版本更新，而本機仍有待同步的變更。請重新檢查遠端、先拉取，或強制覆寫遠端。",
+        "details_title": "衝突詳情",
+        "detail_recommendation": "再次上傳前請先拉取並預覽遠端快照；如果確認要覆寫，請在檢查本機變更後再主動強制覆寫。"
       },
       "common": {
         "yes": "是",
         "no": "否",
         "error": "錯誤"
+      },
+      "coverage": {
+        "title": "目前同步覆蓋範圍",
+        "status_included": "已包含",
+        "status_excluded": "已排除",
+        "status_partial": "部分包含",
+        "connections_detail": "已儲存的連線設定與連線中繼資料會進入結構化快照。",
+        "forwards_detail": "已儲存的連接埠轉送規則會連同所屬連線中繼資料一起同步。",
+        "quick_commands_detail": "快捷命令定義會參與同步。",
+        "serial_profiles_detail": "序列埠連線設定會參與同步。",
+        "app_settings_sections_detail": "已選取分組：{{sections}}",
+        "app_settings_disabled_detail": "目前同步範圍已排除應用程式設定。",
+        "plugin_settings_all_detail": "所有可同步外掛設定都會參與同步。",
+        "plugin_settings_selected_detail": "已選取外掛：{{plugins}}",
+        "plugin_settings_disabled_detail": "目前同步範圍已排除外掛設定。",
+        "sensitive_credentials_enabled_detail": "加密後的敏感憑據物件會參與同步。",
+        "sensitive_credentials_disabled_detail": "連線密碼、金鑰密碼、託管私鑰、AI 金鑰和提權憑據會被排除，直到啟用敏感憑據同步。"
       },
       "notes": {
         "upload_only": "自動同步只會自動上傳。發現遠端更新後，仍然需要使用者明確確認。",
@@ -378,6 +408,8 @@
       },
       "preview": {
         "summary_header": "遠端預覽摘要",
+        "apply_plan_title": "本次套用計畫",
+        "item_count": "{{count}} 項",
         "connection_count": "連線數",
         "total_forwards": "轉送數",
         "quick_commands_label": "快捷命令",
@@ -456,7 +488,51 @@
       "native_description": "用於 OxideTerm 的加密自託管同步。",
       "native_scope_summary": "預設同步的應用程式區段：{{sections}}。",
       "native_service_pending": "正在將內建同步服務連接到相容層。",
-      "native_service_ready": "內建同步服務已連接到相容層。"
+      "native_service_ready": "內建同步服務已連接到相容層。",
+      "health": {
+        "title": "同步前檢查",
+        "status_pass": "可用",
+        "status_warning": "需注意",
+        "status_fail": "已阻擋",
+        "backend_config": "後端設定",
+        "backend_config_ok": "必要的後端欄位與鑑權參照已就緒。",
+        "backend_config_missing": "缺少必要的後端欄位或鑑權密鑰。",
+        "sync_password": "同步密碼",
+        "sync_password_ok": "已有可用於加密同步物件的同步密碼。",
+        "sync_password_missing": "上傳或套用加密同步資料前，請先設定同步密碼。",
+        "remote_check": "遠端狀態",
+        "remote_check_ok": "已從本機檢查或上傳過遠端狀態。",
+        "remote_check_not_run": "依賴此設定前，建議先執行一次遠端檢查。",
+        "remote_check_failed": "最近一次遠端操作失敗，請先查看目前錯誤再同步。",
+        "conflict_state": "衝突狀態",
+        "conflict_state_ok": "目前沒有記錄阻擋性衝突。",
+        "conflict_state_blocked": "遠端衝突正在阻止自動上傳。",
+        "local_changes": "本機變更",
+        "local_changes_clean": "目前沒有標記為未同步的本機變更。",
+        "local_changes_dirty": "有等待上傳的本機變更。",
+        "sync_scope": "同步範圍",
+        "sync_scope_ok": "所選資料分組包含敏感憑據。",
+        "sync_scope_warning": "敏感憑據已從目前同步範圍排除。",
+        "sync_scope_empty": "目前沒有選擇任何要同步的資料分組。"
+      },
+      "preflight": {
+        "upload_diff_title": "上傳影響",
+        "apply_diff_title": "套用影響",
+        "plugin_settings_item": "外掛設定：{{plugin}}",
+        "diff_detail": "本機：{{local}} · 遠端：{{remote}}",
+        "diff_detail_with_count": "本機：{{local}} · 遠端：{{remote}} · 項目：{{count}}",
+        "local_added": "新增",
+        "local_modified": "修改",
+        "local_deleted": "刪除",
+        "local_unchanged": "未變",
+        "local_excluded": "已排除",
+        "remote_creates": "將新增",
+        "remote_overwrites": "將覆蓋",
+        "remote_unchanged": "未變",
+        "remote_removed_by_scope": "被範圍排除",
+        "remote_excluded": "已排除",
+        "remote_unknown": "未知"
+      }
     },
     "refresh": "重新整理",
     "open_plugins_dir": "開啟目錄",

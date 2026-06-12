@@ -216,7 +216,14 @@
         "forwards": "Forwards Snapshot",
         "upload_units": "Upload Units",
         "last_upload": "Last Upload",
-        "last_check": "Last Check"
+        "last_check": "Last Check",
+        "remote_format": "원격 형식",
+        "remote_etag": "원격 ETag",
+        "local_device": "로컬 장치",
+        "local_revision_sequence": "로컬 리비전 순번",
+        "conflict_remote_revision": "충돌 원격 리비전",
+        "conflict_remote_device": "충돌 원격 장치",
+        "conflict_remote_updated_at": "충돌 원격 업데이트 시간"
       },
       "sections": {
         "quick_start": "사용 방법",
@@ -227,7 +234,11 @@
         "rollback_preview": "롤백 미리보기",
         "rollback_backups": "롤백 백업",
         "sync_history": "동기화 기록",
-        "notes": "참고 사항"
+        "sync_coverage": "동기화 범위 상세",
+        "sync_preflight": "동기화 전 점검",
+        "sync_health": "동기화 상태 점검",
+        "notes": "참고 사항",
+        "version_info": "버전 정보"
       },
       "guide": {
         "webdav_title": "권장 WebDAV 설정",
@@ -291,12 +302,31 @@
         "replace": "대체",
         "skip": "건너뛰기",
         "rename": "이름 변경",
-        "blocked_description": "로컬에 아직 동기화되지 않은 변경 사항이 남아 있는 동안, 원격 변경 내용은 마지막으로 동기화한 리비전보다 더 최신입니다. 원격을 다시 확인하거나, 먼저 가져오거나, 강제로 덮어쓰세요."
+        "blocked_description": "로컬에 아직 동기화되지 않은 변경 사항이 남아 있는 동안, 원격 변경 내용은 마지막으로 동기화한 리비전보다 더 최신입니다. 원격을 다시 확인하거나, 먼저 가져오거나, 강제로 덮어쓰세요.",
+        "details_title": "충돌 상세",
+        "detail_recommendation": "다시 업로드하기 전에 원격 스냅샷을 가져와 미리 보세요. 덮어쓰려면 로컬 변경 사항을 검토한 뒤 명시적으로 강제 덮어쓰기를 실행하세요."
       },
       "common": {
         "yes": "예",
         "no": "아니요",
         "error": "Error"
+      },
+      "coverage": {
+        "title": "현재 동기화 포함 범위",
+        "status_included": "포함",
+        "status_excluded": "제외",
+        "status_partial": "일부",
+        "connections_detail": "저장된 연결 프로필과 연결 메타데이터가 구조화 스냅샷에 포함됩니다.",
+        "forwards_detail": "저장된 포트 포워딩 규칙이 소유 연결 메타데이터와 함께 포함됩니다.",
+        "quick_commands_detail": "빠른 명령 정의가 포함됩니다.",
+        "serial_profiles_detail": "시리얼 연결 프로필이 포함됩니다.",
+        "app_settings_sections_detail": "선택한 섹션: {{sections}}",
+        "app_settings_disabled_detail": "현재 동기화 범위에서 애플리케이션 설정이 제외됩니다.",
+        "plugin_settings_all_detail": "동기화 가능한 모든 플러그인 설정이 포함됩니다.",
+        "plugin_settings_selected_detail": "선택한 플러그인: {{plugins}}",
+        "plugin_settings_disabled_detail": "현재 동기화 범위에서 플러그인 설정이 제외됩니다.",
+        "sensitive_credentials_enabled_detail": "암호화된 민감한 자격 증명 객체가 포함됩니다.",
+        "sensitive_credentials_disabled_detail": "연결 비밀번호, 키 암호, 관리형 개인 키, AI 키, 권한 상승 자격 증명은 민감한 자격 증명 동기화를 켤 때까지 제외됩니다."
       },
       "notes": {
         "upload_only": "자동 동기화는 업로드만 수행합니다. 원격 업데이트는 항상 사용자 확인이 필요합니다.",
@@ -378,6 +408,8 @@
       },
       "preview": {
         "summary_header": "원격 미리보기 요약",
+        "apply_plan_title": "적용 계획",
+        "item_count": "{{count}}개 항목",
         "connection_count": "연결 수",
         "total_forwards": "포워딩 수",
         "quick_commands_label": "빠른 명령",
@@ -456,7 +488,51 @@
       "native_description": "OxideTerm용 암호화된 자체 호스팅 동기화입니다.",
       "native_scope_summary": "기본으로 동기화되는 앱 섹션: {{sections}}.",
       "native_service_pending": "내장 동기화 서비스를 호환성 계층에 연결하는 중입니다.",
-      "native_service_ready": "내장 동기화 서비스가 호환성 계층에 연결되었습니다."
+      "native_service_ready": "내장 동기화 서비스가 호환성 계층에 연결되었습니다.",
+      "health": {
+        "title": "사전 점검",
+        "status_pass": "준비됨",
+        "status_warning": "확인 필요",
+        "status_fail": "차단됨",
+        "backend_config": "백엔드 구성",
+        "backend_config_ok": "필수 백엔드 필드와 인증 참조가 준비되어 있습니다.",
+        "backend_config_missing": "필수 백엔드 필드 또는 인증 비밀값이 없습니다.",
+        "sync_password": "동기화 암호",
+        "sync_password_ok": "암호화된 동기화 객체에 사용할 동기화 암호가 있습니다.",
+        "sync_password_missing": "암호화된 동기화 데이터를 업로드하거나 적용하기 전에 동기화 암호를 설정하세요.",
+        "remote_check": "원격 상태",
+        "remote_check_ok": "이 장치에서 원격 상태를 확인했거나 업로드했습니다.",
+        "remote_check_not_run": "이 구성을 신뢰하기 전에 원격 확인을 실행하세요.",
+        "remote_check_failed": "최근 원격 작업이 실패했습니다. 동기화 전에 현재 오류를 확인하세요.",
+        "conflict_state": "충돌 상태",
+        "conflict_state_ok": "차단 중인 충돌 기록이 없습니다.",
+        "conflict_state_blocked": "원격 충돌로 인해 자동 업로드가 차단되었습니다.",
+        "local_changes": "로컬 변경",
+        "local_changes_clean": "현재 동기화되지 않은 로컬 변경으로 표시된 항목이 없습니다.",
+        "local_changes_dirty": "업로드 대기 중인 로컬 변경이 있습니다.",
+        "sync_scope": "동기화 범위",
+        "sync_scope_ok": "선택한 데이터 그룹에 민감한 자격 증명이 포함됩니다.",
+        "sync_scope_warning": "민감한 자격 증명이 이 동기화 범위에서 제외되었습니다.",
+        "sync_scope_empty": "동기화할 데이터 그룹이 선택되지 않았습니다."
+      },
+      "preflight": {
+        "upload_diff_title": "업로드 영향",
+        "apply_diff_title": "적용 영향",
+        "plugin_settings_item": "플러그인 설정: {{plugin}}",
+        "diff_detail": "로컬: {{local}} · 원격: {{remote}}",
+        "diff_detail_with_count": "로컬: {{local}} · 원격: {{remote}} · 항목: {{count}}",
+        "local_added": "추가",
+        "local_modified": "수정",
+        "local_deleted": "삭제",
+        "local_unchanged": "변경 없음",
+        "local_excluded": "제외됨",
+        "remote_creates": "생성 예정",
+        "remote_overwrites": "덮어씀",
+        "remote_unchanged": "변경 없음",
+        "remote_removed_by_scope": "범위에서 제외됨",
+        "remote_excluded": "제외됨",
+        "remote_unknown": "알 수 없음"
+      }
     },
     "refresh": "새로고침",
     "open_plugins_dir": "디렉토리 열기",

@@ -216,7 +216,14 @@
         "forwards": "Forwards Snapshot",
         "upload_units": "Upload Units",
         "last_upload": "Last Upload",
-        "last_check": "Last Check"
+        "last_check": "Last Check",
+        "remote_format": "Định dạng từ xa",
+        "remote_etag": "ETag từ xa",
+        "local_device": "Thiết bị cục bộ",
+        "local_revision_sequence": "Số thứ tự phiên bản cục bộ",
+        "conflict_remote_revision": "Phiên bản từ xa xung đột",
+        "conflict_remote_device": "Thiết bị từ xa xung đột",
+        "conflict_remote_updated_at": "Thời điểm cập nhật từ xa xung đột"
       },
       "sections": {
         "quick_start": "Bắt đầu nhanh",
@@ -227,7 +234,11 @@
         "rollback_preview": "Xem trước hoàn tác",
         "rollback_backups": "Bản sao lưu hoàn tác",
         "sync_history": "Lịch sử đồng bộ",
-        "notes": "Ghi chú"
+        "sync_coverage": "Phạm vi được đồng bộ",
+        "sync_preflight": "Kiểm tra trước đồng bộ",
+        "sync_health": "Tình trạng đồng bộ",
+        "notes": "Ghi chú",
+        "version_info": "Thông tin phiên bản"
       },
       "guide": {
         "webdav_title": "Cấu hình WebDAV khuyến nghị",
@@ -291,12 +302,31 @@
         "replace": "Thay thế",
         "skip": "Bỏ qua",
         "rename": "Đổi tên",
-        "blocked_description": "Các thay đổi từ xa mới hơn lần đồng bộ gần nhất của bạn trong khi các thay đổi cục bộ vẫn đang chờ xử lý. Hãy kiểm tra lại từ xa, tải xuống trước hoặc buộc ghi đè."
+        "blocked_description": "Các thay đổi từ xa mới hơn lần đồng bộ gần nhất của bạn trong khi các thay đổi cục bộ vẫn đang chờ xử lý. Hãy kiểm tra lại từ xa, tải xuống trước hoặc buộc ghi đè.",
+        "details_title": "Chi tiết xung đột",
+        "detail_recommendation": "Hãy tải xuống và xem trước snapshot từ xa trước khi tải lên lại. Chỉ buộc ghi đè sau khi đã kiểm tra các thay đổi cục bộ."
       },
       "common": {
         "yes": "Có",
         "no": "Không",
         "error": "Error"
+      },
+      "coverage": {
+        "title": "Phạm vi đồng bộ hiện tại",
+        "status_included": "Bao gồm",
+        "status_excluded": "Loại trừ",
+        "status_partial": "Một phần",
+        "connections_detail": "Hồ sơ kết nối đã lưu và siêu dữ liệu kết nối được đưa vào ảnh chụp có cấu trúc.",
+        "forwards_detail": "Quy tắc chuyển tiếp cổng đã lưu được đưa vào cùng siêu dữ liệu kết nối sở hữu.",
+        "quick_commands_detail": "Định nghĩa lệnh nhanh được đưa vào.",
+        "serial_profiles_detail": "Hồ sơ kết nối serial được đưa vào.",
+        "app_settings_sections_detail": "Phần đã chọn: {{sections}}",
+        "app_settings_disabled_detail": "Cài đặt ứng dụng bị loại trừ khỏi phạm vi đồng bộ hiện tại.",
+        "plugin_settings_all_detail": "Tất cả cài đặt plugin có thể đồng bộ đều được đưa vào.",
+        "plugin_settings_selected_detail": "Plugin đã chọn: {{plugins}}",
+        "plugin_settings_disabled_detail": "Cài đặt plugin bị loại trừ khỏi phạm vi đồng bộ hiện tại.",
+        "sensitive_credentials_enabled_detail": "Các đối tượng thông tin xác thực nhạy cảm đã mã hóa được đưa vào.",
+        "sensitive_credentials_disabled_detail": "Mật khẩu kết nối, cụm mật khẩu khóa, khóa riêng được quản lý, khóa AI và thông tin xác thực nâng quyền bị loại trừ cho đến khi bật đồng bộ thông tin xác thực nhạy cảm."
       },
       "notes": {
         "upload_only": "Đồng bộ tự động chỉ tải lên. Các bản cập nhật từ xa luôn yêu cầu xác nhận của người dùng.",
@@ -378,6 +408,8 @@
       },
       "preview": {
         "summary_header": "Tóm tắt xem trước từ xa",
+        "apply_plan_title": "Kế hoạch áp dụng",
+        "item_count": "{{count}} mục",
         "connection_count": "Kết nối",
         "total_forwards": "Chuyển tiếp",
         "quick_commands_label": "Lệnh nhanh",
@@ -456,7 +488,51 @@
       "native_description": "Đồng bộ tự lưu trữ được mã hóa cho OxideTerm.",
       "native_scope_summary": "Các phần ứng dụng được đồng bộ mặc định: {{sections}}.",
       "native_service_pending": "Dịch vụ đồng bộ tích hợp đang được kết nối với lớp tương thích.",
-      "native_service_ready": "Dịch vụ đồng bộ tích hợp đã kết nối với lớp tương thích."
+      "native_service_ready": "Dịch vụ đồng bộ tích hợp đã kết nối với lớp tương thích.",
+      "health": {
+        "title": "Kiểm tra trước",
+        "status_pass": "Sẵn sàng",
+        "status_warning": "Cần chú ý",
+        "status_fail": "Bị chặn",
+        "backend_config": "Cấu hình backend",
+        "backend_config_ok": "Các trường backend bắt buộc và tham chiếu xác thực đã sẵn sàng.",
+        "backend_config_missing": "Thiếu trường backend bắt buộc hoặc bí mật xác thực.",
+        "sync_password": "Mật khẩu đồng bộ",
+        "sync_password_ok": "Đã có mật khẩu cho các đối tượng đồng bộ được mã hóa.",
+        "sync_password_missing": "Hãy đặt mật khẩu trước khi tải lên hoặc áp dụng dữ liệu đồng bộ được mã hóa.",
+        "remote_check": "Trạng thái từ xa",
+        "remote_check_ok": "Trạng thái từ xa đã được kiểm tra hoặc tải lên từ thiết bị này.",
+        "remote_check_not_run": "Hãy chạy kiểm tra từ xa trước khi tin dùng cấu hình này.",
+        "remote_check_failed": "Thao tác từ xa gần nhất đã thất bại. Hãy xem lỗi hiện tại trước khi đồng bộ.",
+        "conflict_state": "Trạng thái xung đột",
+        "conflict_state_ok": "Không có xung đột chặn nào được ghi nhận.",
+        "conflict_state_blocked": "Một xung đột từ xa đang chặn tải lên tự động.",
+        "local_changes": "Thay đổi cục bộ",
+        "local_changes_clean": "Hiện không có thay đổi cục bộ nào được đánh dấu là chưa đồng bộ.",
+        "local_changes_dirty": "Có thay đổi cục bộ đang chờ tải lên.",
+        "sync_scope": "Phạm vi đồng bộ",
+        "sync_scope_ok": "Các nhóm dữ liệu đã chọn bao gồm thông tin xác thực nhạy cảm.",
+        "sync_scope_warning": "Thông tin xác thực nhạy cảm bị loại khỏi phạm vi đồng bộ này.",
+        "sync_scope_empty": "Chưa chọn nhóm dữ liệu nào để đồng bộ."
+      },
+      "preflight": {
+        "upload_diff_title": "Tác động tải lên",
+        "apply_diff_title": "Tác động áp dụng",
+        "plugin_settings_item": "Cài đặt plugin: {{plugin}}",
+        "diff_detail": "Cục bộ: {{local}} · Từ xa: {{remote}}",
+        "diff_detail_with_count": "Cục bộ: {{local}} · Từ xa: {{remote}} · Mục: {{count}}",
+        "local_added": "Thêm mới",
+        "local_modified": "Đã sửa",
+        "local_deleted": "Đã xóa",
+        "local_unchanged": "Không đổi",
+        "local_excluded": "Bị loại trừ",
+        "remote_creates": "sẽ tạo",
+        "remote_overwrites": "sẽ ghi đè",
+        "remote_unchanged": "không đổi",
+        "remote_removed_by_scope": "bị loại bởi phạm vi",
+        "remote_excluded": "bị loại trừ",
+        "remote_unknown": "không rõ"
+      }
     },
     "refresh": "Làm mới",
     "open_plugins_dir": "Mở thư mục",

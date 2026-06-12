@@ -216,7 +216,14 @@
         "forwards": "Forwards Snapshot",
         "upload_units": "Upload Units",
         "last_upload": "Last Upload",
-        "last_check": "Last Check"
+        "last_check": "Last Check",
+        "remote_format": "リモート形式",
+        "remote_etag": "リモート ETag",
+        "local_device": "ローカルデバイス",
+        "local_revision_sequence": "ローカルリビジョン番号",
+        "conflict_remote_revision": "競合リモートリビジョン",
+        "conflict_remote_device": "競合リモートデバイス",
+        "conflict_remote_updated_at": "競合リモート更新日時"
       },
       "sections": {
         "quick_start": "使い方",
@@ -227,7 +234,11 @@
         "rollback_preview": "ロールバックプレビュー",
         "rollback_backups": "ロールバックバックアップ",
         "sync_history": "同期履歴",
-        "notes": "注意事項"
+        "sync_coverage": "同期対象範囲",
+        "sync_preflight": "同期前チェック",
+        "sync_health": "同期ヘルス",
+        "notes": "注意事項",
+        "version_info": "バージョン情報"
       },
       "guide": {
         "webdav_title": "推奨の WebDAV 設定",
@@ -291,12 +302,31 @@
         "replace": "置換",
         "skip": "スキップ",
         "rename": "リネーム",
-        "blocked_description": "ローカルに未同期の変更が残っている一方で、リモートの変更は前回同期したリビジョンより新しくなっています。リモートを再確認するか、先にプルするか、強制的に上書きしてください。"
+        "blocked_description": "ローカルに未同期の変更が残っている一方で、リモートの変更は前回同期したリビジョンより新しくなっています。リモートを再確認するか、先にプルするか、強制的に上書きしてください。",
+        "details_title": "競合の詳細",
+        "detail_recommendation": "再アップロードする前にリモートスナップショットをプルしてプレビューしてください。上書きする場合は、ローカル変更を確認してから明示的に実行してください。"
       },
       "common": {
         "yes": "はい",
         "no": "いいえ",
         "error": "Error"
+      },
+      "coverage": {
+        "title": "現在の同期対象範囲",
+        "status_included": "含まれる",
+        "status_excluded": "除外",
+        "status_partial": "一部",
+        "connections_detail": "保存済み接続プロファイルと接続メタデータが構造化スナップショットに含まれます。",
+        "forwards_detail": "保存済みポート転送ルールが所有元接続のメタデータと一緒に含まれます。",
+        "quick_commands_detail": "クイックコマンド定義が含まれます。",
+        "serial_profiles_detail": "シリアル接続プロファイルが含まれます。",
+        "app_settings_sections_detail": "選択済みセクション: {{sections}}",
+        "app_settings_disabled_detail": "現在の同期範囲ではアプリケーション設定は除外されています。",
+        "plugin_settings_all_detail": "同期可能なすべてのプラグイン設定が含まれます。",
+        "plugin_settings_selected_detail": "選択済みプラグイン: {{plugins}}",
+        "plugin_settings_disabled_detail": "現在の同期範囲ではプラグイン設定は除外されています。",
+        "sensitive_credentials_enabled_detail": "暗号化された機密資格情報オブジェクトが含まれます。",
+        "sensitive_credentials_disabled_detail": "接続パスワード、鍵パスフレーズ、管理対象秘密鍵、AI キー、権限昇格資格情報は、機密資格情報同期を有効にするまで除外されます。"
       },
       "notes": {
         "upload_only": "自動同期はアップロードのみ行います。リモートの更新は常にユーザーの確認が必要です。",
@@ -378,6 +408,8 @@
       },
       "preview": {
         "summary_header": "リモートプレビュー概要",
+        "apply_plan_title": "適用計画",
+        "item_count": "{{count}} 件",
         "connection_count": "接続数",
         "total_forwards": "フォワード数",
         "quick_commands_label": "クイックコマンド",
@@ -456,7 +488,51 @@
       "native_description": "OxideTerm 向けの暗号化されたセルフホスト同期。",
       "native_scope_summary": "既定で同期されるアプリ セクション: {{sections}}。",
       "native_service_pending": "組み込み同期サービスを互換レイヤーに接続しています。",
-      "native_service_ready": "組み込み同期サービスは互換レイヤーに接続されています。"
+      "native_service_ready": "組み込み同期サービスは互換レイヤーに接続されています。",
+      "health": {
+        "title": "事前チェック",
+        "status_pass": "準備完了",
+        "status_warning": "要確認",
+        "status_fail": "ブロック中",
+        "backend_config": "バックエンド設定",
+        "backend_config_ok": "必要なバックエンド項目と認証参照がそろっています。",
+        "backend_config_missing": "必要なバックエンド項目または認証シークレットが不足しています。",
+        "sync_password": "同期パスワード",
+        "sync_password_ok": "暗号化された同期オブジェクト用の同期パスワードがあります。",
+        "sync_password_missing": "暗号化された同期データをアップロードまたは適用する前に同期パスワードを設定してください。",
+        "remote_check": "リモート状態",
+        "remote_check_ok": "このデバイスからリモートの確認またはアップロードが行われています。",
+        "remote_check_not_run": "この設定を使う前にリモート確認を実行してください。",
+        "remote_check_failed": "直近のリモート操作に失敗しました。同期前に現在のエラーを確認してください。",
+        "conflict_state": "競合状態",
+        "conflict_state_ok": "ブロックする競合は記録されていません。",
+        "conflict_state_blocked": "リモート競合により自動アップロードがブロックされています。",
+        "local_changes": "ローカル変更",
+        "local_changes_clean": "未同期としてマークされたローカル変更はありません。",
+        "local_changes_dirty": "アップロード待ちのローカル変更があります。",
+        "sync_scope": "同期範囲",
+        "sync_scope_ok": "選択したデータグループに機密認証情報が含まれます。",
+        "sync_scope_warning": "機密認証情報はこの同期範囲から除外されています。",
+        "sync_scope_empty": "同期するデータグループが選択されていません。"
+      },
+      "preflight": {
+        "upload_diff_title": "アップロードの影響",
+        "apply_diff_title": "適用の影響",
+        "plugin_settings_item": "プラグイン設定: {{plugin}}",
+        "diff_detail": "ローカル: {{local}} · リモート: {{remote}}",
+        "diff_detail_with_count": "ローカル: {{local}} · リモート: {{remote}} · 項目: {{count}}",
+        "local_added": "追加",
+        "local_modified": "変更",
+        "local_deleted": "削除",
+        "local_unchanged": "変更なし",
+        "local_excluded": "除外",
+        "remote_creates": "作成予定",
+        "remote_overwrites": "上書き予定",
+        "remote_unchanged": "変更なし",
+        "remote_removed_by_scope": "範囲により除外",
+        "remote_excluded": "除外",
+        "remote_unknown": "不明"
+      }
     },
     "refresh": "更新",
     "open_plugins_dir": "ディレクトリを開く",
