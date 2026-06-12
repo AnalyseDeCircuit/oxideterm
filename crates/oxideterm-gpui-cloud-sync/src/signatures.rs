@@ -32,9 +32,11 @@ pub fn cloud_sync_sections(
         sections.push(CloudSyncSection::Rollback);
     }
     sections.extend([
-        CloudSyncSection::History,
         CloudSyncSection::Config,
         CloudSyncSection::Notes,
+        // History is retrospective information, so keep it after all active
+        // configuration, scope, preview, and safety notes sections.
+        CloudSyncSection::History,
     ]);
     sections
 }
@@ -149,4 +151,62 @@ pub fn cloud_sync_history_signature(entry: &CloudSyncHistoryEntry) -> u64 {
     entry.error.hash(&mut hasher);
     entry.remote_revision.hash(&mut hasher);
     hasher.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rollback_backup() -> CloudSyncRollbackBackup {
+        CloudSyncRollbackBackup {
+            id: "backup-1".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            source_revision: Some("rev-1".to_string()),
+            size_bytes: 1,
+            bytes_base64: "AA==".to_string(),
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn cloud_sync_sections_put_history_after_active_configuration() {
+        let state = CloudSyncPersistedState::default();
+
+        assert_eq!(
+            cloud_sync_sections(&state, false),
+            vec![
+                CloudSyncSection::Header,
+                CloudSyncSection::Guide,
+                CloudSyncSection::Status,
+                CloudSyncSection::Actions,
+                CloudSyncSection::Config,
+                CloudSyncSection::Notes,
+                CloudSyncSection::History,
+            ]
+        );
+    }
+
+    #[test]
+    fn cloud_sync_sections_keep_history_last_with_preview_and_backups() {
+        let mut state = CloudSyncPersistedState::default();
+        state.rollback_backups.push(rollback_backup());
+
+        let sections = cloud_sync_sections(&state, true);
+
+        assert_eq!(sections.last(), Some(&CloudSyncSection::History));
+        assert_eq!(
+            sections,
+            vec![
+                CloudSyncSection::Header,
+                CloudSyncSection::Guide,
+                CloudSyncSection::Status,
+                CloudSyncSection::Actions,
+                CloudSyncSection::Preview,
+                CloudSyncSection::Rollback,
+                CloudSyncSection::Config,
+                CloudSyncSection::Notes,
+                CloudSyncSection::History,
+            ]
+        );
+    }
 }
