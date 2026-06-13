@@ -353,6 +353,11 @@ impl WorkspaceApp {
                     .upstream_proxy_disclaimer_accepted
                     .hash(&mut hasher);
             }
+            SettingsTab::Help => {
+                settings.general.update_channel.hash(&mut hasher);
+                settings.general.update_proxy.mode.hash(&mut hasher);
+                settings.general.update_proxy.protocol.hash(&mut hasher);
+            }
             SettingsTab::Connections => {
                 self.connection_store.connections().len().hash(&mut hasher);
                 self.settings_connection_groups_signature().hash(&mut hasher);

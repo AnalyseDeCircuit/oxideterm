@@ -47,6 +47,8 @@ impl SettingsSelectAnchorExt for SettingsSelect {
         match self {
             Self::Language => SelectAnchorId::SettingsLanguage,
             Self::UpdateChannel => SelectAnchorId::SettingsUpdateChannel,
+            Self::UpdateProxyMode => SelectAnchorId::SettingsUpdateProxyMode,
+            Self::UpdateProxyProtocol => SelectAnchorId::SettingsUpdateProxyProtocol,
             Self::AppearanceTheme => SelectAnchorId::SettingsAppearanceTheme,
             Self::AppearanceDensity => SelectAnchorId::SettingsAppearanceDensity,
             Self::AppearanceAnimation => SelectAnchorId::SettingsAppearanceAnimation,

@@ -5,7 +5,7 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::{
     AiReasoningEffort, AiThinkingStyle, AnimationSpeed, BackgroundFit, ConflictAction,
     CursorStyle as SettingsCursorStyle, FontFamily, IdeAgentMode, Language, PersistedSettings,
-    TerminalEncoding, UiDensity, UpdateChannel,
+    TerminalEncoding, UiDensity, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
 };
 use oxideterm_theme::BUILT_IN_THEMES;
 
@@ -500,6 +500,22 @@ pub fn update_channel_label(channel: UpdateChannel, i18n: &I18n) -> String {
         UpdateChannel::Stable => i18n.t("settings_view.help.channel_stable"),
         UpdateChannel::Beta => i18n.t("settings_view.help.channel_beta"),
         UpdateChannel::GpuiPreview => i18n.t("settings_view.help.channel_gpui_preview"),
+    }
+}
+
+pub fn update_proxy_mode_label(mode: UpdateProxyMode, i18n: &I18n) -> String {
+    match mode {
+        UpdateProxyMode::Direct => i18n.t("settings_view.help.update_proxy_mode_direct"),
+        UpdateProxyMode::System => i18n.t("settings_view.help.update_proxy_mode_system"),
+        UpdateProxyMode::Custom => i18n.t("settings_view.help.update_proxy_mode_custom"),
+    }
+}
+
+pub fn update_proxy_protocol_label(protocol: UpdateProxyProtocol, i18n: &I18n) -> String {
+    match protocol {
+        UpdateProxyProtocol::Http => i18n.t("settings_view.help.update_proxy_protocol_http"),
+        UpdateProxyProtocol::Https => i18n.t("settings_view.help.update_proxy_protocol_https"),
+        UpdateProxyProtocol::Socks5 => i18n.t("settings_view.help.update_proxy_protocol_socks5"),
     }
 }
 

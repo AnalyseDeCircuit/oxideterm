@@ -6,8 +6,8 @@ use gpui::{
 use oxideterm_settings::{
     FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
     PersistedSettings, SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig,
-    SettingsUpstreamProxyProtocol, UpdateChannel, create_default_highlight_rule,
-    reindex_highlight_rules,
+    SettingsUpstreamProxyProtocol, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
+    create_default_highlight_rule, reindex_highlight_rules,
 };
 use oxideterm_settings_model::{
     AI_MODEL_REFRESH_MISSING_API_KEY, AcpAgentPreset, AiMcpServerDraft, AiModelRefreshDelivery,

@@ -2,6 +2,8 @@
 pub struct GeneralSettings {
     pub language: Language,
     pub update_channel: UpdateChannel,
+    #[serde(default)]
+    pub update_proxy: UpdateProxySettings,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -11,6 +13,7 @@ impl Default for GeneralSettings {
         Self {
             language: Language::ZhCn,
             update_channel: UpdateChannel::default(),
+            update_proxy: UpdateProxySettings::default(),
             extra: ExtraFields::new(),
         }
     }

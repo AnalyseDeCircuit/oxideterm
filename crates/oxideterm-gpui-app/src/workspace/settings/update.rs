@@ -33,13 +33,15 @@ impl WorkspaceApp {
 
         self.native_update_state = NativeUpdateUiState::Checking;
         let channel = self.settings_store.settings().general.update_channel;
+        let update_proxy = self.settings_store.settings().general.update_proxy.clone();
         let current_version = env!("CARGO_PKG_VERSION").to_string();
         let runtime = self.forwarding_runtime.clone();
 
         cx.spawn(async move |weak, cx| {
             let result = runtime
                 .spawn(async move {
-                    let client = oxideterm_update::NativeUpdateClient::new()?;
+                    let client =
+                        oxideterm_update::NativeUpdateClient::with_update_proxy(&update_proxy)?;
                     client
                         .check(oxideterm_update::NativeUpdateRequest::current(
                             channel,
@@ -83,11 +85,13 @@ impl WorkspaceApp {
 
         let directory = self.native_update_download_directory();
         let runtime = self.forwarding_runtime.clone();
+        let update_proxy = self.settings_store.settings().general.update_proxy.clone();
 
         cx.spawn(async move |_weak, _cx| {
             runtime.spawn(async move {
                 let result = async {
-                    let client = oxideterm_update::NativeUpdateClient::new()?;
+                    let client =
+                        oxideterm_update::NativeUpdateClient::with_update_proxy(&update_proxy)?;
                     // Match Tauri's resumable updater cache contract:
                     // package.part + state.json, Range resume, retry status,
                     // and minisign verification before the package is opened.

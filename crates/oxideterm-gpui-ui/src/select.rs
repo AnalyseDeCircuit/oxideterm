@@ -56,6 +56,8 @@ pub enum SelectAnchorId {
     SettingsAppearanceBackgroundBlurSlider,
     SettingsAppearanceBackgroundFit,
     SettingsCustomThemeDuplicate,
+    SettingsUpdateProxyMode,
+    SettingsUpdateProxyProtocol,
     SettingsTerminalFontFamily,
     SettingsTerminalFontSizeSlider,
     SettingsTerminalEncoding,
@@ -130,6 +132,8 @@ impl SelectAnchorId {
             self,
             Self::SettingsLanguage
                 | Self::SettingsUpdateChannel
+                | Self::SettingsUpdateProxyMode
+                | Self::SettingsUpdateProxyProtocol
                 | Self::SettingsAppearanceTheme
                 | Self::SettingsAppearanceDensity
                 | Self::SettingsAppearanceAnimation

@@ -55,6 +55,66 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Help, SettingsSelect::UpdateProxyMode) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let current = settings.general.update_proxy.mode;
+                for mode in [
+                    UpdateProxyMode::Direct,
+                    UpdateProxyMode::System,
+                    UpdateProxyMode::Custom,
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                update_proxy_mode_label(mode, &self.i18n),
+                                mode == current,
+                            ),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    |settings| settings.general.update_proxy.mode = mode,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Help, SettingsSelect::UpdateProxyProtocol) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let current = settings.general.update_proxy.protocol;
+                for protocol in [
+                    UpdateProxyProtocol::Http,
+                    UpdateProxyProtocol::Https,
+                    UpdateProxyProtocol::Socks5,
+                ] {
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(
+                                &self.tokens,
+                                update_proxy_protocol_label(protocol, &self.i18n),
+                                protocol == current,
+                            ),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    |settings| settings.general.update_proxy.protocol = protocol,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             (SettingsTab::Appearance, SettingsSelect::AppearanceTheme) => {
                 let mut popup = select_panel_overlay_popup_with_max_height(
                     &self.tokens,

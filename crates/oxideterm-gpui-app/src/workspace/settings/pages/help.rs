@@ -15,6 +15,10 @@ const HELP_TECH_BADGES: [(&str, u32); 6] = [
 ];
 
 const HELP_UPDATE_CHANNEL_SELECT_WIDTH: f32 = 140.0;
+const HELP_UPDATE_PROXY_MODE_SELECT_WIDTH: f32 = 148.0;
+const HELP_UPDATE_PROXY_PROTOCOL_SELECT_WIDTH: f32 = 120.0;
+const HELP_UPDATE_PROXY_PORT_INPUT_WIDTH: f32 = 104.0;
+const HELP_UPDATE_PROXY_TEXT_INPUT_WIDTH: f32 = 260.0;
 const HELP_PREVIEW_NOTICE_ALPHA: f32 = 0.10;
 const HELP_PREVIEW_NOTICE_BORDER_ALPHA: f32 = 0.30;
 const HELP_UPDATE_FOOTER_BORDER_ALPHA: f32 = 0.50;
@@ -57,6 +61,10 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.help_portable_or_channel_row(is_portable, channel_label, cx));
+
+        if !is_portable {
+            version_rows = version_rows.child(self.help_update_proxy_rows(cx));
+        }
 
         if !is_portable && update_channel == UpdateChannel::GpuiPreview {
             version_rows = version_rows.child(self.help_gpui_preview_notice());
@@ -226,6 +234,135 @@ impl WorkspaceApp {
             ),
             cx,
         )
+    }
+
+    fn help_update_proxy_rows(&self, cx: &mut Context<Self>) -> AnyElement {
+        let proxy = &self.settings_store.settings().general.update_proxy;
+        let mut rows = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(self.help_update_proxy_mode_row(cx));
+
+        if proxy.mode == UpdateProxyMode::Custom {
+            rows = rows
+                .child(self.setting_row(
+                    "settings_view.help.update_proxy_protocol",
+                    "settings_view.help.update_proxy_protocol_hint",
+                    self.settings_select_control(
+                        SettingsSelect::UpdateProxyProtocol,
+                        update_proxy_protocol_label(proxy.protocol, &self.i18n),
+                        false,
+                        Some(HELP_UPDATE_PROXY_PROTOCOL_SELECT_WIDTH),
+                        cx,
+                    ),
+                    cx,
+                ))
+                .child(self.setting_row(
+                    "settings_view.help.update_proxy_host",
+                    "settings_view.help.update_proxy_host_hint",
+                    self.settings_text_input_control(
+                        SettingsInput::UpdateProxyHost,
+                        self.current_settings_input_value(SettingsInput::UpdateProxyHost),
+                        "127.0.0.1".to_string(),
+                        HELP_UPDATE_PROXY_TEXT_INPUT_WIDTH,
+                        cx,
+                    ),
+                    cx,
+                ))
+                .child(self.setting_row(
+                    "settings_view.help.update_proxy_port",
+                    "settings_view.help.update_proxy_port_hint",
+                    self.settings_text_input_control(
+                        SettingsInput::UpdateProxyPort,
+                        self.current_settings_input_value(SettingsInput::UpdateProxyPort),
+                        "7890".to_string(),
+                        HELP_UPDATE_PROXY_PORT_INPUT_WIDTH,
+                        cx,
+                    ),
+                    cx,
+                ))
+                .child(self.setting_row(
+                    "settings_view.help.update_proxy_no_proxy",
+                    "settings_view.help.update_proxy_no_proxy_hint",
+                    self.settings_text_input_control(
+                        SettingsInput::UpdateProxyNoProxy,
+                        self.current_settings_input_value(SettingsInput::UpdateProxyNoProxy),
+                        "localhost,127.0.0.1".to_string(),
+                        HELP_UPDATE_PROXY_TEXT_INPUT_WIDTH,
+                        cx,
+                    ),
+                    cx,
+                ));
+        }
+
+        rows.into_any_element()
+    }
+
+    fn help_update_proxy_mode_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let proxy = &self.settings_store.settings().general.update_proxy;
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .justify_between()
+            .gap(px(self.tokens.metrics.settings_row_gap))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.render_selectable_text_scoped(
+                                "settings-row-label",
+                                "settings_view.help.update_proxy",
+                                self.i18n.t("settings_view.help.update_proxy"),
+                                self.tokens.ui.text,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.render_selectable_text_scoped(
+                                "settings-row-hint",
+                                "settings_view.help.update_proxy_hint",
+                                self.i18n.t("settings_view.help.update_proxy_hint"),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.render_selectable_text_scoped(
+                                "settings-row-hint",
+                                "settings_view.help.update_proxy_legal_hint",
+                                self.i18n.t("settings_view.help.update_proxy_legal_hint"),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
+                    ),
+            )
+            .child(self.settings_select_control(
+                SettingsSelect::UpdateProxyMode,
+                update_proxy_mode_label(proxy.mode, &self.i18n),
+                false,
+                Some(HELP_UPDATE_PROXY_MODE_SELECT_WIDTH),
+                cx,
+            ))
+            .into_any_element()
     }
 
     fn help_update_footer(&self, is_portable: bool, cx: &mut Context<Self>) -> AnyElement {

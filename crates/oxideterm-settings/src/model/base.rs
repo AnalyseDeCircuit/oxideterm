@@ -102,7 +102,7 @@ fn version_contains_prerelease_tag(version: &str, tags: &[&str]) -> bool {
     })
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UpdateChannel {
     Stable,
@@ -115,6 +115,49 @@ impl Default for UpdateChannel {
         // Match Tauri's settingsStore default channel selection so a stable
         // native build does not accidentally poll the GPUI preview endpoint.
         default_update_channel_for_version(env!("CARGO_PKG_VERSION"))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpdateProxyMode {
+    #[default]
+    Direct,
+    System,
+    Custom,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpdateProxyProtocol {
+    #[default]
+    Http,
+    Https,
+    Socks5,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProxySettings {
+    pub mode: UpdateProxyMode,
+    pub protocol: UpdateProxyProtocol,
+    pub host: String,
+    pub port: u16,
+    pub no_proxy: String,
+    #[serde(flatten)]
+    pub extra: ExtraFields,
+}
+
+impl Default for UpdateProxySettings {
+    fn default() -> Self {
+        Self {
+            mode: UpdateProxyMode::Direct,
+            protocol: UpdateProxyProtocol::Http,
+            host: "127.0.0.1".to_string(),
+            port: 7890,
+            no_proxy: String::new(),
+            extra: ExtraFields::new(),
+        }
     }
 }
 
