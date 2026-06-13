@@ -181,7 +181,13 @@
       "section_quick_commands": "Quick Commands ({{count}} commands)",
       "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
       "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
-      "skipped_quick_commands": "Quick Commands skipped"
+      "skipped_quick_commands": "Quick Commands skipped",
+      "contains_serial_profiles": "Serial profiles:",
+      "serial_profiles_count": "{{count}} profile(s)",
+      "section_serial_profiles": "Serial Profiles ({{count}})",
+      "toggle_serial_profiles": "Import serial connection profiles",
+      "imported_serial_profiles": "Imported {{count}} serial profile(s).",
+      "skipped_serial_profiles": "Serial profiles skipped"
     },
     "reconnect": {
       "title": "Reconnect Session",
@@ -684,6 +690,9 @@
     "summary_managed_keys": "{{count}} managed key(s)",
     "summary_managed_key_passphrases": "{{count}} managed-key passphrase(s)",
     "warning_passwords_included": "{{count}} saved server password(s) will be included in the encrypted file.",
-    "security_passwords_included": "Saved server passwords are included inside this encrypted .oxide file"
+    "security_passwords_included": "Saved server passwords are included inside this encrypted .oxide file",
+    "include_serial_profiles": "Include Serial Profiles",
+    "include_serial_profiles_description": "Export saved serial connection profiles ({{count}} profile(s)).",
+    "content_summary_serial_profiles": "Serial profiles: {{count}} profile(s)"
   }
 }

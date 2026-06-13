@@ -70,6 +70,7 @@ fn preview_oxide_import_inner(
         mut connections,
         app_settings_json,
         quick_commands_json,
+        serial_profiles_json,
         plugin_settings,
         portable_secrets,
         ..
@@ -91,6 +92,7 @@ fn preview_oxide_import_inner(
         total_connections: connections.len(),
         has_embedded_keys: connections.iter().any(connection_has_embedded_key),
         total_forwards: connections.iter().map(|conn| conn.forwards.len()).sum(),
+        serial_profiles_count: count_serial_profiles(serial_profiles_json.as_deref()),
         plugin_settings_count: plugin_settings.len(),
         portable_secret_count: portable_secrets.len(),
         plugin_settings_by_plugin: plugin_settings_by_plugin(&plugin_settings),

@@ -181,7 +181,13 @@
       "toggle_managed_keys_restore": "将托管密钥恢复到 OxideTerm，使使用托管密钥的连接继续走密钥库认证。",
       "toggle_managed_keys_extract": "托管密钥会按嵌入的备用密钥文件导入，而不是写入托管密钥库。",
       "restore_managed_key_passphrases": "恢复托管密钥口令",
-      "restore_managed_key_passphrases_description": "关闭后，OxideTerm 会在需要时再询问托管密钥口令。"
+      "restore_managed_key_passphrases_description": "关闭后，OxideTerm 会在需要时再询问托管密钥口令。",
+      "contains_serial_profiles": "串口配置：",
+      "serial_profiles_count": "{{count}} 个配置",
+      "section_serial_profiles": "串口配置（{{count}} 个）",
+      "toggle_serial_profiles": "导入串口连接配置",
+      "imported_serial_profiles": "已导入 {{count}} 个串口配置。",
+      "skipped_serial_profiles": "已跳过串口配置"
     },
     "reconnect": {
       "title": "重新连接会话",
@@ -684,6 +690,9 @@
     "summary_managed_keys": "{{count}} 个托管密钥",
     "summary_managed_key_passphrases": "{{count}} 个托管密钥口令",
     "warning_passwords_included": "将包含 {{count}} 个已保存的服务器密码到加密文件中。",
-    "security_passwords_included": "已保存的服务器密码会包含在这个加密的 .oxide 文件中"
+    "security_passwords_included": "已保存的服务器密码会包含在这个加密的 .oxide 文件中",
+    "include_serial_profiles": "包含串口配置",
+    "include_serial_profiles_description": "导出已保存的串口连接配置（{{count}} 个）。",
+    "content_summary_serial_profiles": "串口配置：{{count}} 个"
   }
 }

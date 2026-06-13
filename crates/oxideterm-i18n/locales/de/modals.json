@@ -181,7 +181,13 @@
       "toggle_managed_keys_restore": "Verwaltete Schlüssel in OxideTerm wiederherstellen, damit Verbindungen mit verwalteten Schlüsseln weiterhin Tresor-basierte Authentifizierung verwenden.",
       "toggle_managed_keys_extract": "Verwaltete Schlüssel werden über eingebettete Fallback-Schlüsseldateien importiert statt in den verwalteten Schlüsselspeicher.",
       "restore_managed_key_passphrases": "Passphrasen verwalteter Schlüssel wiederherstellen",
-      "restore_managed_key_passphrases_description": "Wenn deaktiviert, fragt OxideTerm bei Bedarf nach der Passphrase des verwalteten Schlüssels."
+      "restore_managed_key_passphrases_description": "Wenn deaktiviert, fragt OxideTerm bei Bedarf nach der Passphrase des verwalteten Schlüssels.",
+      "contains_serial_profiles": "Serielle Profile:",
+      "serial_profiles_count": "{{count}} Profil(e)",
+      "section_serial_profiles": "Serielle Profile ({{count}})",
+      "toggle_serial_profiles": "Serielle Verbindungsprofile importieren",
+      "imported_serial_profiles": "{{count}} serielle(s) Profil(e) importiert.",
+      "skipped_serial_profiles": "Serielle Profile übersprungen"
     },
     "reconnect": {
       "title": "Sitzung erneut verbinden",
@@ -697,6 +703,9 @@
     "summary_managed_keys": "{{count}} verwaltete(r) Schlüssel",
     "summary_managed_key_passphrases": "{{count}} Passphrase(n) verwalteter Schlüssel",
     "warning_passwords_included": "{{count}} gespeicherte Serverpasswörter werden in die verschlüsselte Datei aufgenommen.",
-    "security_passwords_included": "Gespeicherte Serverpasswörter sind in dieser verschlüsselten .oxide-Datei enthalten"
+    "security_passwords_included": "Gespeicherte Serverpasswörter sind in dieser verschlüsselten .oxide-Datei enthalten",
+    "include_serial_profiles": "Serielle Profile einschließen",
+    "include_serial_profiles_description": "Gespeicherte serielle Verbindungsprofile exportieren ({{count}} Profil(e)).",
+    "content_summary_serial_profiles": "Serielle Profile: {{count}} Profil(e)"
   }
 }

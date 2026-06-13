@@ -111,6 +111,9 @@ impl WorkspaceApp {
         if preview.has_quick_commands {
             children.push(self.render_oxide_import_quick_commands(&preview, cx));
         }
+        if preview.serial_profiles_count > 0 {
+            children.push(self.render_oxide_import_serial_profiles(&preview, cx));
+        }
         if preview.plugin_settings_count > 0 {
             children.push(self.render_oxide_import_plugins(&preview, cx));
         }
@@ -775,6 +778,33 @@ impl WorkspaceApp {
                     if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
                         dialog.import_quick_commands = !dialog.import_quick_commands;
                     }
+                cx.notify();
+                cx.stop_propagation();
+            }),
+            cx,
+        )])
+    }
+
+    fn render_oxide_import_serial_profiles(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_serial_profiles);
+        self.render_oxide_import_preview_subcard(vec![self.render_oxide_option_row(
+            self.i18n
+                .t("modals.import.section_serial_profiles")
+                .replace("{{count}}", &preview.serial_profiles_count.to_string()),
+            self.i18n.t("modals.import.toggle_serial_profiles"),
+            checked,
+            cx.listener(|this, _event, _window, cx| {
+                if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
+                    dialog.import_serial_profiles = !dialog.import_serial_profiles;
+                }
                 cx.notify();
                 cx.stop_propagation();
             }),

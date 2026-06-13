@@ -181,7 +181,13 @@
       "toggle_managed_keys_restore": "Restaurar chaves gerenciadas no OxideTerm para que conexões com chaves gerenciadas continuem usando autenticação baseada em cofre.",
       "toggle_managed_keys_extract": "Chaves gerenciadas serão importadas por arquivos de chave de fallback incorporados em vez de serem gravadas no armazenamento de chaves gerenciadas.",
       "restore_managed_key_passphrases": "Restaurar frases secretas de chaves gerenciadas",
-      "restore_managed_key_passphrases_description": "Se desativado, o OxideTerm pedirá a frase secreta da chave gerenciada quando necessário."
+      "restore_managed_key_passphrases_description": "Se desativado, o OxideTerm pedirá a frase secreta da chave gerenciada quando necessário.",
+      "contains_serial_profiles": "Perfis seriais:",
+      "serial_profiles_count": "{{count}} perfil(is)",
+      "section_serial_profiles": "Perfis seriais ({{count}})",
+      "toggle_serial_profiles": "Importar perfis de conexão serial",
+      "imported_serial_profiles": "{{count}} perfil(is) serial(is) importado(s).",
+      "skipped_serial_profiles": "Perfis seriais ignorados"
     },
     "reconnect": {
       "title": "Reconectar à sessão",
@@ -697,6 +703,9 @@
     "summary_managed_keys": "{{count}} chave(s) gerenciada(s)",
     "summary_managed_key_passphrases": "{{count}} frase(s) secreta(s) de chave gerenciada",
     "warning_passwords_included": "{{count}} senha(s) de servidor salvas serão incluídas no arquivo criptografado.",
-    "security_passwords_included": "Senhas de servidor salvas estão incluídas neste arquivo .oxide criptografado"
+    "security_passwords_included": "Senhas de servidor salvas estão incluídas neste arquivo .oxide criptografado",
+    "include_serial_profiles": "Incluir perfis seriais",
+    "include_serial_profiles_description": "Exporta perfis de conexão serial salvos ({{count}} perfil(is)).",
+    "content_summary_serial_profiles": "Perfis seriais: {{count}} perfil(is)"
   }
 }

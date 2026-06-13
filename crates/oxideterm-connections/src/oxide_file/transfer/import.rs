@@ -61,6 +61,7 @@ fn apply_oxide_import_with_options_inner(
         connections,
         app_settings_json,
         quick_commands_json,
+        serial_profiles_json,
         plugin_settings,
         portable_secrets,
         ..
@@ -85,6 +86,7 @@ fn apply_oxide_import_with_options_inner(
     let mut result = ImportResultEnvelope {
         app_settings_json,
         quick_commands_json,
+        serial_profiles_json: serial_profiles_json.clone(),
         plugin_settings,
         portable_secrets: if options.import_portable_secrets {
             portable_secrets.clone()
@@ -218,6 +220,28 @@ fn apply_oxide_import_with_options_inner(
         result.skipped_forwards = total_selected_forwards;
     } else if forward_filter.is_some() {
         result.skipped_forwards = total_available_forwards.saturating_sub(total_selected_forwards);
+    }
+
+    if let Some(snapshot_json) = serial_profiles_json {
+        let serial_profiles_snapshot: SerialProfilesSyncSnapshot =
+            serde_json::from_str(&snapshot_json).map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Invalid serial profiles snapshot in .oxide payload: {error}"
+                ))
+            })?;
+        let serial_profiles_count = serial_profiles_snapshot.records.len();
+        if options.import_serial_profiles {
+            result.imported_serial_profiles =
+                store.apply_serial_profiles_snapshot(serial_profiles_snapshot).map_err(|error| {
+                    OxideFileError::InvalidFormat(format!(
+                        "Failed to import serial profiles from .oxide payload: {error}"
+                    ))
+                })?;
+            result.skipped_serial_profiles =
+                serial_profiles_count.saturating_sub(result.imported_serial_profiles);
+        } else {
+            result.skipped_serial_profiles = serial_profiles_count;
+        }
     }
 
     if options.import_portable_secrets {

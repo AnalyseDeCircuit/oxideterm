@@ -112,6 +112,8 @@ pub struct OxideMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quick_command_categories_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial_profiles_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_settings_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub portable_secret_count: Option<usize>,
@@ -127,6 +129,8 @@ pub struct EncryptedPayload {
     pub app_settings_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quick_commands_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -145,6 +149,10 @@ impl fmt::Debug for EncryptedPayload {
             .field(
                 "has_quick_commands_json",
                 &self.quick_commands_json.is_some(),
+            )
+            .field(
+                "has_serial_profiles_json",
+                &self.serial_profiles_json.is_some(),
             )
             .field("plugin_settings_len", &self.plugin_settings.len())
             .field("portable_secrets_len", &self.portable_secrets.len())

@@ -206,6 +206,14 @@ impl WorkspaceApp {
                 format!("{} 条命令", metadata.quick_commands_count.unwrap_or(0)),
             ));
         }
+        if let Some(count) = metadata.serial_profiles_count.filter(|count| *count > 0) {
+            rows.push((
+                self.i18n.t("modals.import.contains_serial_profiles"),
+                self.i18n
+                    .t("modals.import.serial_profiles_count")
+                    .replace("{{count}}", &count.to_string()),
+            ));
+        }
         if let Some(count) = metadata.plugin_settings_count.filter(|count| *count > 0) {
             rows.push(("插件偏好设置:".to_string(), format!("{count} 项")));
         }
