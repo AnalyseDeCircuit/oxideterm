@@ -109,6 +109,9 @@
   "common": {
     "enabled": "Đã bật",
     "disabled": "Đã tắt",
+    "confirm": {
+      "disconnect_node": "Bạn có chắc chắn muốn ngắt kết nối \"{{name}}\" và tất cả các nút con không?"
+    },
     "actions": {
       "cancel": "Hủy",
       "confirm": "Xác nhận",

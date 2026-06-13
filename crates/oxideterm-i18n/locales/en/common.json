@@ -116,6 +116,9 @@
   "common": {
     "enabled": "Enabled",
     "disabled": "Disabled",
+    "confirm": {
+      "disconnect_node": "Are you sure you want to disconnect \"{{name}}\" and all of its child nodes?"
+    },
     "actions": {
       "cancel": "Cancel",
       "confirm": "Confirm",

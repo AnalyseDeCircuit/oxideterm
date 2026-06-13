@@ -109,6 +109,9 @@
   "common": {
     "enabled": "Attivato",
     "disabled": "Disattivato",
+    "confirm": {
+      "disconnect_node": "Sei sicuro di voler disconnettere \"{{name}}\" e tutti i suoi nodi figlio?"
+    },
     "actions": {
       "cancel": "Annulla",
       "confirm": "Conferma",

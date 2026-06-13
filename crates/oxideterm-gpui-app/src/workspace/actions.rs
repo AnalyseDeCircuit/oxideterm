@@ -739,6 +739,29 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn handle_node_disconnect_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.node_disconnect_confirm.is_none() {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.cancel_node_disconnect_confirm(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                self.confirm_node_disconnect_confirm(window, cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
     pub(super) fn handle_ai_sidebar_confirm_key(
         &mut self,
         event: &KeyDownEvent,

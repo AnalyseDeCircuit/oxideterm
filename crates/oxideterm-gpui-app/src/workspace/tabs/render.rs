@@ -204,6 +204,39 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(super) fn render_node_disconnect_confirm_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(confirm) = self.node_disconnect_confirm.as_ref() else {
+            return div().into_any_element();
+        };
+        let title = self
+            .i18n
+            .t("common.confirm.disconnect_node")
+            .replace("{{name}}", &confirm.display_name);
+        confirm_dialog_with_focus(
+            &self.tokens,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Danger,
+                title: div().child(title).into_any_element(),
+                description: None,
+                cancel_label: div()
+                    .child(self.i18n.t("common.actions.cancel"))
+                    .into_any_element(),
+                confirm_label: div()
+                    .child(self.i18n.t("common.actions.confirm"))
+                    .into_any_element(),
+            },
+            self.standard_confirm_focus(),
+            cx.listener(|this, _event, _window, cx| {
+                this.cancel_node_disconnect_confirm(cx);
+                cx.stop_propagation();
+            }),
+            cx.listener(|this, _event, window, cx| {
+                this.confirm_node_disconnect_confirm(window, cx);
+                cx.stop_propagation();
+            }),
+        )
+    }
+
     pub(super) fn render_tab_close_confirm_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(confirm) = self.tab_close_confirm.as_ref() else {
             return div().into_any_element();

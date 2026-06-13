@@ -109,6 +109,9 @@
   "common": {
     "enabled": "Ativado",
     "disabled": "Desativado",
+    "confirm": {
+      "disconnect_node": "Tem certeza de que deseja desconectar \"{{name}}\" e todos os seus nós filhos?"
+    },
     "actions": {
       "cancel": "Cancelar",
       "confirm": "Confirmar",

@@ -112,6 +112,7 @@ impl WorkspaceApp {
             tab_navigation_observed_tab: None,
             tab_drag: None,
             tab_close_confirm: None,
+            node_disconnect_confirm: None,
             panes: HashMap::new(),
             tab_scroll_handle: ScrollHandle::new(),
             next_tab_id: 1,

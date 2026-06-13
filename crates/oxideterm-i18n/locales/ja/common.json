@@ -109,6 +109,9 @@
   "common": {
     "enabled": "有効",
     "disabled": "無効",
+    "confirm": {
+      "disconnect_node": "\"{{name}}\" とそのすべての子ノードを切断してもよろしいですか？"
+    },
     "actions": {
       "cancel": "キャンセル",
       "confirm": "確認",

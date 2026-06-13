@@ -625,6 +625,7 @@ mod tests {
             "sessions.actions.disconnect",
             "sessions.actions.reconnect",
             "sessions.actions.drill_in",
+            "common.confirm.disconnect_node",
             "sessions.breadcrumb.back_to_root",
             "sessions.breadcrumb.all_servers",
             "sessions.focused_list.all_servers",

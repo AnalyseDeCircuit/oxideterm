@@ -109,6 +109,9 @@
   "common": {
     "enabled": "Aktiviert",
     "disabled": "Deaktiviert",
+    "confirm": {
+      "disconnect_node": "Möchten Sie wirklich \"{{name}}\" und alle untergeordneten Knoten trennen?"
+    },
     "actions": {
       "cancel": "Abbrechen",
       "confirm": "Bestätigen",

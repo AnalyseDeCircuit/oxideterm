@@ -109,6 +109,9 @@
   "common": {
     "enabled": "활성화됨",
     "disabled": "비활성화됨",
+    "confirm": {
+      "disconnect_node": "\"{{name}}\" 및 모든 하위 노드의 연결을 해제하시겠습니까?"
+    },
     "actions": {
       "cancel": "취소",
       "confirm": "확인",

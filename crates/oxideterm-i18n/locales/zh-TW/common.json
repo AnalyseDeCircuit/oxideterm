@@ -109,6 +109,9 @@
   "common": {
     "enabled": "已啟用",
     "disabled": "已停用",
+    "confirm": {
+      "disconnect_node": "確定要中斷連線「{{name}}」及其所有子節點嗎？"
+    },
     "actions": {
       "cancel": "取消",
       "confirm": "確認",

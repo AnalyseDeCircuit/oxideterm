@@ -109,6 +109,9 @@
   "common": {
     "enabled": "Activado",
     "disabled": "Desactivado",
+    "confirm": {
+      "disconnect_node": "¿Estás seguro de que deseas desconectar \"{{name}}\" y todos sus nodos secundarios?"
+    },
     "actions": {
       "cancel": "Cancelar",
       "confirm": "Confirmar",

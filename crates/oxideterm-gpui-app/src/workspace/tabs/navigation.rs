@@ -353,6 +353,48 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn request_disconnect_ssh_node(
+        &mut self,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(node) = self.ssh_nodes.get(node_id) else {
+            return;
+        };
+        let title = node.title.trim();
+        let display_name = if title.is_empty() {
+            format!("{}@{}", node.config.username, node.config.host)
+        } else {
+            title.to_string()
+        };
+        // Tauri opens the confirmation from the tree action entrypoint, while
+        // disconnectNode itself remains the backend cleanup path.
+        self.node_disconnect_confirm = Some(NodeDisconnectConfirm {
+            node_id: node_id.clone(),
+            display_name,
+        });
+        self.reset_standard_confirm_focus();
+        cx.notify();
+    }
+
+    pub(super) fn cancel_node_disconnect_confirm(&mut self, cx: &mut Context<Self>) {
+        self.node_disconnect_confirm = None;
+        self.clear_standard_confirm_focus();
+        cx.notify();
+    }
+
+    pub(super) fn confirm_node_disconnect_confirm(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(confirm) = self.node_disconnect_confirm.take() else {
+            return;
+        };
+        self.clear_standard_confirm_focus();
+        self.disconnect_ssh_node(&confirm.node_id, window, cx);
+    }
+
     pub(super) fn disconnect_ssh_node(
         &mut self,
         node_id: &NodeId,

@@ -1068,8 +1068,8 @@ impl WorkspaceApp {
                 }
                 let listener = cx.listener({
                     let node_id = node_id.clone();
-                    move |this, _event, window, cx| {
-                        this.disconnect_ssh_node(&node_id, window, cx);
+                    move |this, _event, _window, cx| {
+                        this.request_disconnect_ssh_node(&node_id, cx);
                         cx.stop_propagation();
                     }
                 });

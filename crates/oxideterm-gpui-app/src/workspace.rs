@@ -488,6 +488,12 @@ enum TabCloseConfirm {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct NodeDisconnectConfirm {
+    node_id: NodeId,
+    display_name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum DataDirectoryConfirm {
     Conflict {
         path: PathBuf,
@@ -516,6 +522,7 @@ pub(crate) struct WorkspaceApp {
     tab_navigation_observed_tab: Option<TabId>,
     tab_drag: Option<TabDragState>,
     tab_close_confirm: Option<TabCloseConfirm>,
+    node_disconnect_confirm: Option<NodeDisconnectConfirm>,
     panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
     tab_scroll_handle: ScrollHandle,
     next_tab_id: u64,

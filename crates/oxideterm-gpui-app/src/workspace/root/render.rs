@@ -150,6 +150,9 @@ impl Render for WorkspaceApp {
                     }
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_node_disconnect_confirm_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_tab_close_confirm_key(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -668,6 +671,9 @@ impl Render for WorkspaceApp {
             )
             .when(self.cloud_sync_confirm.is_some(), |root| {
                 root.child(self.render_cloud_sync_confirm_dialog(cx))
+            })
+            .when(self.node_disconnect_confirm.is_some(), |root| {
+                root.child(self.render_node_disconnect_confirm_dialog(cx))
             })
             .when(self.tab_close_confirm.is_some(), |root| {
                 root.child(self.render_tab_close_confirm_dialog(cx))
