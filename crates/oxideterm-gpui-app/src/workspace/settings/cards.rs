@@ -557,6 +557,19 @@ impl WorkspaceApp {
                         SelectAnchorId::NewConnectionSerialFlowControl
                     )
             )
+            || matches!(
+                (self.cloud_sync_open_select, anchor.id),
+                (
+                    Some(crate::workspace::cloud_sync::CloudSyncSelect::Backend),
+                    SelectAnchorId::CloudSyncBackend
+                ) | (
+                    Some(crate::workspace::cloud_sync::CloudSyncSelect::AuthMode),
+                    SelectAnchorId::CloudSyncAuthMode
+                ) | (
+                    Some(crate::workspace::cloud_sync::CloudSyncSelect::ConflictStrategy),
+                    SelectAnchorId::CloudSyncConflictStrategy
+                )
+            )
             || (matches!(
                 anchor.id,
                 SelectAnchorId::AiPanelRoot
@@ -1301,7 +1314,10 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
     // opening click. GPUI portals cannot, so modal select triggers keep a
     // closed-state anchor cache without notifying; that makes first-click open
     // immediate while scroll handlers still clear stale coordinates.
-    if anchor_id.is_settings_select_trigger() || anchor_id.is_new_connection_select_trigger() {
+    if anchor_id.is_settings_select_trigger()
+        || anchor_id.is_new_connection_select_trigger()
+        || anchor_id.is_cloud_sync_select_trigger()
+    {
         return true;
     }
 

@@ -455,6 +455,7 @@ pub struct CloudSyncSecrets {
     pub token: Option<CloudSyncSecretValue>,
     pub git_token: Option<CloudSyncSecretValue>,
     pub microsoft_refresh_token: Option<CloudSyncSecretValue>,
+    pub google_refresh_token: Option<CloudSyncSecretValue>,
     pub basic_username: Option<CloudSyncSecretValue>,
     pub basic_password: Option<CloudSyncSecretValue>,
     pub access_key_id: Option<CloudSyncSecretValue>,
@@ -479,6 +480,13 @@ impl std::fmt::Debug for CloudSyncSecrets {
                 "microsoft_refresh_token",
                 &self
                     .microsoft_refresh_token
+                    .as_ref()
+                    .map(|_| "[redacted secret]"),
+            )
+            .field(
+                "google_refresh_token",
+                &self
+                    .google_refresh_token
                     .as_ref()
                     .map(|_| "[redacted secret]"),
             )
@@ -531,6 +539,10 @@ pub fn backend_uses_microsoft_refresh_token(backend_type: &BackendType) -> bool 
     matches!(backend_type, BackendType::OneDrive)
 }
 
+pub fn backend_uses_google_refresh_token(backend_type: &BackendType) -> bool {
+    matches!(backend_type, BackendType::GoogleDrive)
+}
+
 pub fn get_action_secrets(
     settings: &crate::CloudSyncSettings,
     provider: &mut impl CloudSyncSecretProvider,
@@ -559,6 +571,11 @@ pub fn get_action_secrets(
     if backend_uses_microsoft_refresh_token(&settings.backend_type) {
         reads.push((secret_keys::MICROSOFT_REFRESH_TOKEN, |secrets, value| {
             secrets.microsoft_refresh_token = value
+        }));
+    }
+    if backend_uses_google_refresh_token(&settings.backend_type) {
+        reads.push((secret_keys::GOOGLE_REFRESH_TOKEN, |secrets, value| {
+            secrets.google_refresh_token = value
         }));
     }
     if backend_uses_basic(&settings.backend_type, &settings.auth_mode) {
@@ -610,6 +627,7 @@ fn secret_missing(key: &str, secrets: &CloudSyncSecrets) -> bool {
         secret_keys::TOKEN => secrets.token.is_none(),
         secret_keys::GIT_TOKEN => secrets.git_token.is_none(),
         secret_keys::MICROSOFT_REFRESH_TOKEN => secrets.microsoft_refresh_token.is_none(),
+        secret_keys::GOOGLE_REFRESH_TOKEN => secrets.google_refresh_token.is_none(),
         secret_keys::BASIC_USERNAME => secrets.basic_username.is_none(),
         secret_keys::BASIC_PASSWORD => secrets.basic_password.is_none(),
         secret_keys::ACCESS_KEY_ID => secrets.access_key_id.is_none(),
@@ -731,6 +749,44 @@ mod tests {
             provider.batch_reads,
             vec![(
                 vec![secret_keys::MICROSOFT_REFRESH_TOKEN.to_string()],
+                SecretReadMode::Prompt,
+            )]
+        );
+    }
+
+    #[test]
+    fn google_drive_actions_read_refresh_token_instead_of_short_lived_access_token() {
+        let mut provider = TestSecrets {
+            hints: HashSet::from([
+                secret_keys::TOKEN.to_string(),
+                secret_keys::GOOGLE_REFRESH_TOKEN.to_string(),
+            ]),
+            values: HashMap::from([(
+                secret_keys::GOOGLE_REFRESH_TOKEN.to_string(),
+                "google-refresh".to_string(),
+            )]),
+            ..TestSecrets::default()
+        };
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::GoogleDrive,
+            ..CloudSyncSettings::default()
+        };
+
+        let secrets =
+            get_action_secrets(&settings, &mut provider, false, SecretReadMode::Prompt).unwrap();
+
+        assert!(secrets.token.is_none());
+        assert_eq!(
+            secrets
+                .google_refresh_token
+                .as_ref()
+                .map(|secret| secret.as_str()),
+            Some("google-refresh")
+        );
+        assert_eq!(
+            provider.batch_reads,
+            vec![(
+                vec![secret_keys::GOOGLE_REFRESH_TOKEN.to_string()],
                 SecretReadMode::Prompt,
             )]
         );

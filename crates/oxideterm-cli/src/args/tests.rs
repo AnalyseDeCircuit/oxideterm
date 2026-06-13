@@ -732,6 +732,36 @@ fn parses_cloud_sync_configure_multi_backend_settings() {
 }
 
 #[test]
+fn parses_cloud_sync_configure_google_drive_settings() {
+    let cli = Cli::parse_from([
+        "oxideterm",
+        "cloud-sync",
+        "configure",
+        "--backend",
+        "google-drive",
+        "--google-oauth-client-id",
+        "google-client-id",
+        "--dry-run",
+        "--json",
+    ]);
+    match cli.command {
+        Command::CloudSync(command) => match command.action {
+            CloudSyncAction::Configure(args) => {
+                assert_eq!(args.backend, Some(CloudSyncBackendArg::GoogleDrive));
+                assert_eq!(
+                    args.google_oauth_client_id.as_deref(),
+                    Some("google-client-id")
+                );
+                assert!(args.write.dry_run);
+                assert!(args.write.json);
+            }
+            _ => panic!("expected cloud-sync configure command"),
+        },
+        _ => panic!("expected cloud-sync command"),
+    }
+}
+
+#[test]
 fn parses_cloud_sync_apply_remote() {
     let cli = Cli::parse_from([
         "oxideterm",
@@ -1047,6 +1077,38 @@ fn parses_cloud_sync_onedrive_backend_configure() {
                     }
                 },
                 _ => panic!("expected onedrive backend"),
+            },
+            _ => panic!("expected cloud-sync backend"),
+        },
+        _ => panic!("expected cloud-sync command"),
+    }
+}
+
+#[test]
+fn parses_cloud_sync_google_drive_backend_configure() {
+    let cli = Cli::parse_from([
+        "oxideterm",
+        "cloud-sync",
+        "backend",
+        "google-drive",
+        "configure",
+        "--google-oauth-client-id",
+        "google-client-id",
+        "--dry-run",
+    ]);
+    match cli.command {
+        Command::CloudSync(command) => match command.action {
+            CloudSyncAction::Backend(command) => match command.action {
+                CloudSyncBackendAction::GoogleDrive(command) => match command.action {
+                    CloudSyncBackendConfigureAction::Configure(args) => {
+                        assert_eq!(
+                            args.google_oauth_client_id.as_deref(),
+                            Some("google-client-id")
+                        );
+                        assert!(args.write.dry_run);
+                    }
+                },
+                _ => panic!("expected google-drive backend"),
             },
             _ => panic!("expected cloud-sync backend"),
         },

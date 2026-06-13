@@ -176,7 +176,8 @@
         "git": "Kho Git",
         "s3": "Tương thích S3",
         "github_gist": "GitHub Gist",
-        "onedrive": "OneDrive"
+        "onedrive": "OneDrive",
+        "google_drive": "Google Drive"
       },
       "status": {
         "ready": "Sẵn sàng đồng bộ",
@@ -203,7 +204,8 @@
         "saving": "Đang lưu...",
         "enable_sensitive_sync": "Bật đồng bộ nhạy cảm",
         "github_oauth_login": "Đăng nhập GitHub",
-        "microsoft_oauth_login": "Đăng nhập Microsoft"
+        "microsoft_oauth_login": "Đăng nhập Microsoft",
+        "google_oauth_login": "Đăng nhập Google"
       },
       "fields": {
         "backend": "Backend",
@@ -276,7 +278,19 @@
         "onedrive_example_public_client": "Authentication > Advanced settings > Allow public client flows: Yes.",
         "onedrive_example_storage_label": "Đường dẫn lưu trữ",
         "onedrive_example_storage": "/me/drive/special/approot/metadata.json và /objects/*.oxide",
-        "onedrive_permission_warning": "Nếu Microsoft trả về invalid_scope, consent_required hoặc insufficient privileges, hãy kiểm tra quyền API, consent, loại tài khoản hỗ trợ và thiết lập public client flow."
+        "onedrive_permission_warning": "Nếu Microsoft trả về invalid_scope, consent_required hoặc insufficient privileges, hãy kiểm tra quyền API, consent, loại tài khoản hỗ trợ và thiết lập public client flow.",
+        "backend_google_drive": "Google Drive dùng thư mục Drive appDataFolder ẩn với phạm vi drive.appdata. Đăng nhập bằng ID khách OAuth cho ứng dụng máy tính; OxideTerm ghi metadata.json và các tệp phẳng objects__*.oxide.",
+        "google_drive_title": "Thiết lập dữ liệu ứng dụng Google Drive",
+        "google_drive_description": "Tạo khách OAuth Google kiểu ứng dụng máy tính, bật Drive API, cấu hình màn hình đồng ý rồi dán ID khách vào đây. OxideTerm chỉ yêu cầu drive.appdata và lưu các đối tượng đồng bộ đã mã hóa trong thư mục dữ liệu ứng dụng ẩn.",
+        "google_drive_example_client_type_label": "Loại khách OAuth",
+        "google_drive_example_client_type": "Google Cloud Console > Thông tin xác thực > ID khách OAuth > Ứng dụng máy tính. Khách Web sẽ lỗi ở bước chuyển hướng localhost.",
+        "google_drive_example_scope_label": "Phạm vi Drive",
+        "google_drive_example_scope": "Chỉ dùng https://www.googleapis.com/auth/drive.appdata. Tránh các phạm vi Drive đầy đủ.",
+        "google_drive_example_api_label": "Thiết lập API",
+        "google_drive_example_api": "Bật Google Drive API và xuất bản hoặc thử nghiệm màn hình đồng ý OAuth cho tài khoản bạn dùng.",
+        "google_drive_example_storage_label": "Tên lưu trữ",
+        "google_drive_example_storage": "appDataFolder: metadata.json và objects__<hash>.oxide",
+        "google_drive_permission_warning": "Nếu Google báo access_denied, admin_policy_enforced, invalid_client hoặc Drive API chưa bật, hãy kiểm tra màn hình đồng ý, loại khách desktop, trạng thái API, chính sách quản trị và người dùng thử nghiệm."
       },
       "settings": {
         "backend_type": "Loại backend",
@@ -313,7 +327,8 @@
         "github_access_token": "Token truy cập GitHub",
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "ID khách OAuth Microsoft",
-        "microsoft_access_token": "Token truy cập Microsoft"
+        "microsoft_access_token": "Token truy cập Microsoft",
+        "google_oauth_client_id": "ID khách OAuth Google"
       },
       "auth": {
         "bearer": "Bearer",
@@ -361,7 +376,8 @@
         "backend_git": "Git sử dụng endpoint tương thích với GitHub Contents API. Đặt Endpoint là gốc API, Repository là owner/repo, Branch là nhánh đích và Namespace là đường dẫn thư mục tùy chọn bên trong kho lưu trữ.",
         "backend_s3": "S3 Compatible sử dụng endpoint làm gốc dịch vụ, bucket làm bộ chứa và namespace làm tiền tố đối tượng tùy chọn.",
         "backend_github_gist": "GitHub Gist lưu các đối tượng đồng bộ OxideTerm dưới dạng tệp đã mã hóa trong một Gist hiện có. Nhập ID Gist và GitHub token có quyền gist; Namespace được dùng làm tiền tố tên tệp.",
-        "backend_onedrive": "OneDrive dùng thư mục ứng dụng Microsoft Graph và cần đăng nhập thiết bị Microsoft. Tệp được tách riêng dưới dạng metadata.json và objects/*.oxide."
+        "backend_onedrive": "OneDrive dùng thư mục ứng dụng Microsoft Graph và cần đăng nhập thiết bị Microsoft. Tệp được tách riêng dưới dạng metadata.json và objects/*.oxide.",
+        "backend_google_drive": "Google Drive dùng appDataFolder ẩn và OAuth desktop với PKCE. Tệp được tách biệt dưới dạng metadata.json và objects__*.oxide; không yêu cầu quyền truy cập Drive đầy đủ."
       },
       "backup": {
         "description": "Bản sao lưu khôi phục Oxide Cloud Sync",
@@ -428,7 +444,30 @@
         "onedrive_service_unavailable": "Microsoft Graph hoặc OneDrive tạm thời không khả dụng. Hãy thử lại sau.",
         "microsoft_oauth_missing_scope": "Microsoft đã từ chối scope được yêu cầu. Hãy thêm Files.ReadWrite.AppFolder vào đăng ký ứng dụng và consent lại.",
         "microsoft_oauth_consent_required": "Microsoft yêu cầu người dùng hoặc quản trị viên consent cho ứng dụng này. Hãy cấp consent rồi đăng nhập lại.",
-        "microsoft_oauth_invalid_request": "Microsoft đã từ chối yêu cầu OAuth. Hãy kiểm tra ID khách và cấu hình luồng thiết bị."
+        "microsoft_oauth_invalid_request": "Microsoft đã từ chối yêu cầu OAuth. Hãy kiểm tra ID khách và cấu hình luồng thiết bị.",
+        "missing_google_oauth_client_id": "Hãy cấu hình ID khách OAuth Google trước khi bắt đầu đăng nhập bằng trình duyệt.",
+        "missing_google_refresh_token": "Thiếu refresh token Google. Hãy đăng nhập lại Google Drive.",
+        "google_drive_bad_credentials": "Google Drive đã từ chối token truy cập. Hãy đăng nhập lại.",
+        "google_drive_missing_scope": "Token Google thiếu phạm vi drive.appdata, hoặc ứng dụng không thể truy cập thư mục dữ liệu ứng dụng của chính nó.",
+        "google_drive_access_denied": "Google Drive đã từ chối quyền truy cập thư mục dữ liệu ứng dụng. Hãy kiểm tra chính sách tài khoản và đồng ý OAuth.",
+        "google_drive_bad_request": "Google Drive đã từ chối yêu cầu. Hãy kiểm tra cấu hình lưu trữ appDataFolder.",
+        "google_drive_api_not_enabled": "Google Drive API chưa được bật cho dự án OAuth này. Hãy bật trong Google Cloud Console rồi thử lại.",
+        "google_drive_rate_limited": "Đã chạm giới hạn tần suất của Google Drive. Hãy chờ một lát rồi thử lại.",
+        "google_drive_quota_exceeded": "Đã chạm hạn mức hoặc giới hạn lưu trữ Google Drive cho đối tượng đồng bộ.",
+        "google_drive_service_unavailable": "Google Drive tạm thời không khả dụng. Hãy thử lại sau.",
+        "google_oauth_denied": "Đăng nhập Google đã bị từ chối.",
+        "google_oauth_admin_policy": "Chính sách quản trị Google Workspace đã chặn ứng dụng này. Hãy nhờ quản trị viên cho phép hoặc dùng tài khoản khác.",
+        "google_oauth_bad_client": "ID khách OAuth Google không hợp lệ hoặc không phải khách ứng dụng máy tính.",
+        "google_oauth_missing_scope": "Google đã từ chối phạm vi được yêu cầu. Hãy cấu hình đồng ý cho drive.appdata rồi đăng nhập lại.",
+        "google_oauth_consent_required": "Google yêu cầu người dùng đồng ý cho ứng dụng này. Hãy cấu hình màn hình đồng ý rồi đăng nhập lại.",
+        "google_oauth_invalid_request": "Google đã từ chối yêu cầu OAuth. Hãy kiểm tra ID khách, redirect URI và cấu hình ứng dụng máy tính.",
+        "google_oauth_start_failed": "Không thể bắt đầu đăng nhập Google trong trình duyệt.",
+        "google_oauth_redirect_failed": "Không thể nhận chuyển hướng localhost của Google OAuth. Hãy kiểm tra tường lửa cục bộ hoặc giới hạn trình duyệt.",
+        "google_oauth_exchange_failed": "Google đã từ chối trao đổi mã ủy quyền. Hãy đăng nhập lại.",
+        "google_oauth_refresh_failed": "Không thể gia hạn refresh token Google. Hãy đăng nhập lại.",
+        "google_oauth_empty_response": "Google không trả về token OAuth cần thiết.",
+        "google_oauth_invalid_state": "State OAuth Google không khớp. Hãy đăng nhập lại.",
+        "google_oauth_timeout": "Đăng nhập Google đã hết thời gian. Hãy đăng nhập lại."
       },
       "toast": {
         "check_failed_title": "Kiểm tra từ xa thất bại",
@@ -454,7 +493,11 @@
         "microsoft_oauth_code_title": "Đã bắt đầu đăng nhập Microsoft",
         "microsoft_oauth_code_description": "Nhập mã {{code}} tại {{url}} trong vòng {{seconds}} giây. Trang xác minh đã được mở.",
         "microsoft_oauth_success_title": "Đã lưu token Microsoft",
-        "microsoft_oauth_failed_title": "Đăng nhập Microsoft thất bại"
+        "microsoft_oauth_failed_title": "Đăng nhập Microsoft thất bại",
+        "google_oauth_url_title": "Đã mở đăng nhập Google",
+        "google_oauth_url_description": "Hoàn tất đăng nhập trong trình duyệt trong vòng {{seconds}} giây. OxideTerm đang chờ chuyển hướng localhost.",
+        "google_oauth_success_title": "Đã lưu token Google",
+        "google_oauth_failed_title": "Đăng nhập Google thất bại"
       },
       "progress": {
         "checking": "Đang kiểm tra ảnh chụp từ xa",
@@ -557,7 +600,8 @@
         "gist_id": "ID Gist hoặc https://gist.github.com/...",
         "github_access_token": "GitHub token có quyền gist",
         "github_oauth_client_id": "OAuth App client ID cho đăng nhập thiết bị",
-        "microsoft_oauth_client_id": "ID khách ứng dụng Microsoft Entra"
+        "microsoft_oauth_client_id": "ID khách ứng dụng Microsoft Entra",
+        "google_oauth_client_id": "ID khách OAuth Google cho ứng dụng máy tính"
       },
       "history_empty": "Chưa có lịch sử đồng bộ.",
       "native_description": "Đồng bộ tự lưu trữ được mã hóa cho OxideTerm.",

@@ -9,6 +9,7 @@
 
 use std::{
     collections::BTreeMap,
+    fmt,
     sync::mpsc::Sender,
     time::{Duration, Instant},
 };
@@ -38,6 +39,11 @@ use oxideterm_connections::{
 };
 use oxideterm_forwarding::{ForwardType, ForwardingRegistry};
 use oxideterm_settings::SettingsStore;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+};
+use zeroize::Zeroizing;
 
 use crate::{
     CloudSyncPendingPreview, CloudSyncPreviewSelection, CloudSyncPreviewSource,
@@ -61,6 +67,8 @@ pub enum CloudSyncDelivery {
     GithubOauthFinished(CloudSyncActionResult<()>),
     MicrosoftOauthCode(CloudSyncOauthDevicePrompt),
     MicrosoftOauthFinished(CloudSyncActionResult<()>),
+    GoogleOauthUrl(CloudSyncOauthBrowserPrompt),
+    GoogleOauthFinished(CloudSyncActionResult<()>),
 }
 
 #[derive(Debug)]
@@ -73,6 +81,12 @@ pub struct CloudSyncActionResult<T> {
 pub struct CloudSyncOauthDevicePrompt {
     pub user_code: String,
     pub verification_uri: String,
+    pub expires_in: u64,
+}
+
+#[derive(Debug)]
+pub struct CloudSyncOauthBrowserPrompt {
+    pub authorization_url: String,
     pub expires_in: u64,
 }
 
@@ -233,6 +247,107 @@ pub async fn deliver_cloud_sync_microsoft_oauth(
     send_action_result(
         tx,
         CloudSyncDelivery::MicrosoftOauthFinished,
+        result,
+        &provider,
+    );
+}
+
+pub async fn deliver_cloud_sync_google_oauth(
+    tx: Sender<CloudSyncDelivery>,
+    client_id: String,
+    hints: BTreeMap<String, bool>,
+) {
+    let mut provider = CloudSyncKeychainSecretProvider::new(hints);
+    let backend = CloudSyncBackend::new();
+    let result = async {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|error| {
+            anyhow::anyhow!(
+                "google_oauth_redirect_failed: failed to start local OAuth listener: {error}"
+            )
+        })?;
+        let local_addr = listener.local_addr().map_err(|error| {
+            anyhow::anyhow!(
+                "google_oauth_redirect_failed: failed to read local OAuth listener address: {error}"
+            )
+        })?;
+        let redirect_uri = format!(
+            "http://127.0.0.1:{}/oauth/google/callback",
+            local_addr.port()
+        );
+        let flow = backend.start_google_oauth_flow(&client_id, &redirect_uri)?;
+        let _ = tx.send(CloudSyncDelivery::GoogleOauthUrl(
+            CloudSyncOauthBrowserPrompt {
+                authorization_url: flow.authorization_url.clone(),
+                expires_in: 300,
+            },
+        ));
+        let callback = tokio::time::timeout(Duration::from_secs(300), async {
+            let (mut stream, _) = listener.accept().await.map_err(|error| {
+                anyhow::anyhow!(
+                    "google_oauth_redirect_failed: failed to accept OAuth redirect: {error}"
+                )
+            })?;
+            // The localhost redirect contains a short-lived OAuth code. Keep
+            // the raw request buffer zeroized after parsing so the browser
+            // handoff has the same transient secret boundary as keychain reads.
+            let mut buffer = Zeroizing::new(vec![0u8; 8192]);
+            let bytes_read = stream.read(&mut buffer[..]).await.map_err(|error| {
+                anyhow::anyhow!(
+                    "google_oauth_redirect_failed: failed to read OAuth redirect: {error}"
+                )
+            })?;
+            let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+            let callback = parse_google_oauth_callback(&request)?;
+            let callback_success = callback.error.is_none()
+                && callback.state.as_deref() == Some(flow.state.as_str())
+                && callback
+                    .code
+                    .as_ref()
+                    .is_some_and(|code| !code.trim().is_empty());
+            // The browser only needs an acknowledgement; the authorization
+            // code itself stays inside this background task until exchange.
+            write_google_oauth_callback_response(&mut stream, callback_success).await?;
+            Ok::<_, anyhow::Error>(callback)
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("google_oauth_timeout: Google OAuth login timed out"))??;
+
+        if callback.state.as_deref() != Some(flow.state.as_str()) {
+            anyhow::bail!("google_oauth_invalid_state: Google OAuth state did not match");
+        }
+        if let Some(error) = callback.error.as_deref() {
+            return Err(google_oauth_callback_error(
+                error,
+                callback.error_description.as_deref(),
+            ));
+        }
+        let code = callback.code.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "google_oauth_empty_response: Google did not return an authorization code"
+            )
+        })?;
+        let tokens = backend
+            .exchange_google_authorization_code(
+                &client_id,
+                code.as_str(),
+                flow.code_verifier.as_str(),
+                &redirect_uri,
+            )
+            .await?;
+        provider.store_secret(secret_keys::TOKEN, Some(tokens.access_token.as_str()))?;
+        if let Some(refresh_token) = tokens.refresh_token.as_ref() {
+            provider.store_secret(
+                secret_keys::GOOGLE_REFRESH_TOKEN,
+                Some(refresh_token.as_str()),
+            )?;
+        }
+        Ok(())
+    }
+    .await
+    .map_err(|error: anyhow::Error| error.to_string());
+    send_action_result(
+        tx,
+        CloudSyncDelivery::GoogleOauthFinished,
         result,
         &provider,
     );
@@ -652,6 +767,140 @@ fn read_apply_sync_password(
             ));
             None
         }
+    }
+}
+
+#[derive(Default)]
+struct GoogleOauthCallback {
+    code: Option<Zeroizing<String>>,
+    state: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+impl fmt::Debug for GoogleOauthCallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The callback can hold an OAuth authorization code. Redact it from
+        // Debug so diagnostics and test failures cannot expose bearer material.
+        f.debug_struct("GoogleOauthCallback")
+            .field("code", &self.code.as_ref().map(|_| "<redacted>"))
+            .field("state", &self.state)
+            .field("error", &self.error)
+            .field("error_description", &self.error_description)
+            .finish()
+    }
+}
+
+fn parse_google_oauth_callback(request: &str) -> anyhow::Result<GoogleOauthCallback> {
+    let request_line = request
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("google_oauth_redirect_failed: empty OAuth redirect"))?;
+    let path = request_line
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| anyhow::anyhow!("google_oauth_redirect_failed: malformed OAuth redirect"))?;
+    let query = path.split_once('?').map(|(_, query)| query).unwrap_or("");
+    let mut callback = GoogleOauthCallback::default();
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let key = percent_decode_component(key);
+        let value = percent_decode_component(value);
+        match key.as_str() {
+            "code" => callback.code = Some(Zeroizing::new(value)),
+            "state" => callback.state = Some(value),
+            "error" => callback.error = Some(value),
+            "error_description" => callback.error_description = Some(value),
+            _ => {}
+        }
+    }
+    Ok(callback)
+}
+
+fn google_oauth_callback_error(error: &str, description: Option<&str>) -> anyhow::Error {
+    let code = match error {
+        "access_denied" => "google_oauth_denied",
+        "admin_policy_enforced" => "google_oauth_admin_policy",
+        "invalid_client" | "unauthorized_client" => "google_oauth_bad_client",
+        "invalid_scope" => "google_oauth_missing_scope",
+        "consent_required" | "interaction_required" => "google_oauth_consent_required",
+        "invalid_request" => "google_oauth_invalid_request",
+        _ => "google_oauth_exchange_failed",
+    };
+    let message = description.unwrap_or("Google OAuth browser authorization failed");
+    anyhow::anyhow!("{code}: {message}")
+}
+
+async fn write_google_oauth_callback_response(
+    stream: &mut tokio::net::TcpStream,
+    success: bool,
+) -> anyhow::Result<()> {
+    let title = if success {
+        "OxideTerm Google Drive login finished"
+    } else {
+        "OxideTerm Google Drive login failed"
+    };
+    let body = format!(
+        "<!doctype html><meta charset=\"utf-8\"><title>{title}</title><body><h1>{title}</h1><p>You can return to OxideTerm now.</p></body>"
+    );
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes()).await?;
+    let _ = stream.shutdown().await;
+    Ok(())
+}
+
+fn percent_decode_component(value: &str) -> String {
+    let normalized = value.replace('+', " ");
+    let bytes = normalized.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+        {
+            output.push((high << 4) | low);
+            index += 3;
+        } else {
+            output.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8_lossy(&output).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn google_oauth_callback_code_debug_is_redacted() {
+        let callback = parse_google_oauth_callback(
+            "GET /oauth/google/callback?code=secret-code&state=state-1 HTTP/1.1\r\n\r\n",
+        )
+        .expect("callback");
+        let debug = format!("{callback:?}");
+
+        assert_eq!(
+            callback.code.as_ref().map(|code| code.as_str()),
+            Some("secret-code")
+        );
+        assert!(debug.contains("redacted"));
+        assert!(!debug.contains("secret-code"));
+    }
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 

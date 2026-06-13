@@ -92,6 +92,7 @@ pub mod secret_keys {
     pub const TOKEN: &str = "backend-token";
     pub const GIT_TOKEN: &str = "git-backend-token";
     pub const MICROSOFT_REFRESH_TOKEN: &str = "microsoft-refresh-token";
+    pub const GOOGLE_REFRESH_TOKEN: &str = "google-refresh-token";
     pub const BASIC_USERNAME: &str = "basic-username";
     pub const BASIC_PASSWORD: &str = "basic-password";
     pub const ACCESS_KEY_ID: &str = "s3-access-key-id";
@@ -123,6 +124,7 @@ pub enum BackendType {
     HttpJson,
     Dropbox,
     OneDrive,
+    GoogleDrive,
     GithubGist,
     S3,
     Git,
@@ -172,6 +174,8 @@ pub struct CloudSyncSettings {
     #[serde(default)]
     pub microsoft_oauth_client_id: String,
     #[serde(default)]
+    pub google_oauth_client_id: String,
+    #[serde(default)]
     pub auto_upload_enabled: bool,
     #[serde(default = "default_auto_upload_interval_mins")]
     pub auto_upload_interval_mins: f64,
@@ -192,6 +196,7 @@ impl Default for CloudSyncSettings {
             git_branch: default_git_branch(),
             github_oauth_client_id: String::new(),
             microsoft_oauth_client_id: String::new(),
+            google_oauth_client_id: String::new(),
             auto_upload_enabled: false,
             auto_upload_interval_mins: default_auto_upload_interval_mins(),
             default_conflict_strategy: ConflictStrategy::default(),

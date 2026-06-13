@@ -6,8 +6,8 @@
 use oxideterm_cloud_sync::{
     BackendType, CloudSyncStatus, RawSyncScope, normalize_sync_scope, secret_keys,
     secrets::{
-        backend_uses_basic, backend_uses_git_token, backend_uses_microsoft_refresh_token,
-        backend_uses_s3_credentials, backend_uses_token,
+        backend_uses_basic, backend_uses_git_token, backend_uses_google_refresh_token,
+        backend_uses_microsoft_refresh_token, backend_uses_s3_credentials, backend_uses_token,
     },
     state::CloudSyncPersistedState,
 };
@@ -269,6 +269,7 @@ fn required_backend_text_fields_present(form: &CloudSyncFormDraft) -> bool {
     match form.backend_type {
         BackendType::Dropbox => true,
         BackendType::OneDrive => has_text(&form.microsoft_oauth_client_id),
+        BackendType::GoogleDrive => has_text(&form.google_oauth_client_id),
         BackendType::GithubGist => true,
         BackendType::Git => has_text(&form.git_repository),
         BackendType::S3 => {
@@ -286,6 +287,13 @@ fn required_backend_secrets_present(
         return state
             .secret_hints
             .get(secret_keys::MICROSOFT_REFRESH_TOKEN)
+            .copied()
+            .unwrap_or(false);
+    }
+    if backend_uses_google_refresh_token(&form.backend_type) {
+        return state
+            .secret_hints
+            .get(secret_keys::GOOGLE_REFRESH_TOKEN)
             .copied()
             .unwrap_or(false);
     }
@@ -470,6 +478,34 @@ mod tests {
         }));
         assert!(items.iter().any(|item| {
             item.label_key == "plugin.cloud_sync.health.remote_check"
+                && item.status == CloudSyncHealthStatus::Pass
+        }));
+    }
+
+    #[test]
+    fn health_items_require_google_drive_client_id_and_refresh_token_hint() {
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::GoogleDrive,
+            google_oauth_client_id: "google-client-id".to_string(),
+            ..CloudSyncSettings::default()
+        };
+        let form = CloudSyncFormDraft::from_settings(&settings);
+        let mut state = CloudSyncPersistedState::default();
+        state
+            .secret_hints
+            .insert(secret_keys::GOOGLE_REFRESH_TOKEN.to_string(), true);
+        state
+            .secret_hints
+            .insert(secret_keys::SYNC_PASSWORD.to_string(), true);
+
+        let items = cloud_sync_health_items(&form, &state);
+
+        assert!(items.iter().any(|item| {
+            item.label_key == "plugin.cloud_sync.health.backend_config"
+                && item.status == CloudSyncHealthStatus::Pass
+        }));
+        assert!(items.iter().any(|item| {
+            item.label_key == "plugin.cloud_sync.health.sync_password"
                 && item.status == CloudSyncHealthStatus::Pass
         }));
     }

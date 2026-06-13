@@ -1,11 +1,15 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::BTreeSet, time::Duration};
+use std::{collections::BTreeSet, fmt, time::Duration};
 
 use anyhow::{Context, Result, bail};
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use base64::{
+    Engine,
+    engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD},
+};
 use chrono::{DateTime, Utc};
+use rand::RngCore;
 use reqwest::{
     Client, Method, RequestBuilder, Response, StatusCode, Url,
     header::{
@@ -28,6 +32,11 @@ const DROPBOX_CONTENT_BASE: &str = "https://content.dropboxapi.com/2";
 const MICROSOFT_GRAPH_BASE: &str = "https://graph.microsoft.com/v1.0";
 const MICROSOFT_AUTH_TENANT: &str = "common";
 const MICROSOFT_ONEDRIVE_SCOPE: &str = "offline_access Files.ReadWrite.AppFolder";
+const GOOGLE_DRIVE_API_BASE: &str = "https://www.googleapis.com/drive/v3";
+const GOOGLE_DRIVE_UPLOAD_BASE: &str = "https://www.googleapis.com/upload/drive/v3";
+const GOOGLE_OAUTH_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_OAUTH_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const GOOGLE_DRIVE_APPDATA_SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
 const CLOUD_REQUEST_MAX_RETRY_ATTEMPTS: usize = 3;
 const CLOUD_REQUEST_MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 const DEFAULT_GIT_API_ENDPOINT: &str = "https://api.github.com";
@@ -328,6 +337,128 @@ impl CloudSyncBackend {
         })
     }
 
+    pub fn start_google_oauth_flow(
+        &self,
+        client_id: &str,
+        redirect_uri: &str,
+    ) -> Result<GoogleOauthStart> {
+        let client_id = client_id.trim();
+        if client_id.is_empty() {
+            bail!("missing_google_oauth_client_id: Google OAuth client ID is not configured");
+        }
+        let redirect_uri = redirect_uri.trim();
+        if redirect_uri.is_empty() {
+            bail!("google_oauth_redirect_failed: Google OAuth redirect URI is not configured");
+        }
+        let code_verifier = generate_google_pkce_verifier();
+        let code_challenge = google_pkce_challenge(code_verifier.as_str());
+        let state = generate_google_oauth_state();
+        let mut url = Url::parse(GOOGLE_OAUTH_AUTH_URL)
+            .context("google_oauth_start_failed: invalid Google OAuth authorization URL")?;
+        url.query_pairs_mut()
+            .append_pair("client_id", client_id)
+            .append_pair("redirect_uri", redirect_uri)
+            .append_pair("response_type", "code")
+            .append_pair("scope", GOOGLE_DRIVE_APPDATA_SCOPE)
+            .append_pair("access_type", "offline")
+            .append_pair("prompt", "consent")
+            .append_pair("code_challenge", &code_challenge)
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("state", &state);
+        Ok(GoogleOauthStart {
+            authorization_url: url.to_string(),
+            state,
+            code_verifier: Zeroizing::new(code_verifier),
+        })
+    }
+
+    pub async fn exchange_google_authorization_code(
+        &self,
+        client_id: &str,
+        code: &str,
+        code_verifier: &str,
+        redirect_uri: &str,
+    ) -> Result<GoogleTokenRefresh> {
+        let client_id = client_id.trim();
+        if client_id.is_empty() {
+            bail!("missing_google_oauth_client_id: Google OAuth client ID is not configured");
+        }
+        if code.trim().is_empty() {
+            bail!("google_oauth_empty_response: Google did not return an authorization code");
+        }
+        let response = execute_cloud_request(
+            self.client
+                .post(GOOGLE_OAUTH_TOKEN_URL)
+                .header(ACCEPT, "application/json")
+                .form(&[
+                    ("client_id", client_id),
+                    ("code", code),
+                    ("code_verifier", code_verifier),
+                    ("redirect_uri", redirect_uri),
+                    ("grant_type", "authorization_code"),
+                ]),
+        )
+        .await?;
+        let status = response.status();
+        let value = response
+            .json::<GoogleTokenResponse>()
+            .await
+            .map_err(anyhow::Error::new)?;
+        if !status.is_success() {
+            return Err(google_oauth_error(&value, "google_oauth_exchange_failed"));
+        }
+        let access_token = value
+            .access_token
+            .context("google_oauth_empty_response: Google did not return an access token")?;
+        let refresh_token = value
+            .refresh_token
+            .context("google_oauth_empty_response: Google did not return a refresh token")?;
+        Ok(GoogleTokenRefresh {
+            access_token: Zeroizing::new(access_token),
+            refresh_token: Some(Zeroizing::new(refresh_token)),
+        })
+    }
+
+    pub async fn refresh_google_access_token(
+        &self,
+        client_id: &str,
+        refresh_token: &str,
+    ) -> Result<GoogleTokenRefresh> {
+        let client_id = client_id.trim();
+        if client_id.is_empty() {
+            bail!("missing_google_oauth_client_id: Google OAuth client ID is not configured");
+        }
+        if refresh_token.trim().is_empty() {
+            bail!("missing_google_refresh_token: Google refresh token is not configured");
+        }
+        let response = execute_cloud_request(
+            self.client
+                .post(GOOGLE_OAUTH_TOKEN_URL)
+                .header(ACCEPT, "application/json")
+                .form(&[
+                    ("client_id", client_id),
+                    ("refresh_token", refresh_token),
+                    ("grant_type", "refresh_token"),
+                ]),
+        )
+        .await?;
+        let status = response.status();
+        let value = response
+            .json::<GoogleTokenResponse>()
+            .await
+            .map_err(anyhow::Error::new)?;
+        if !status.is_success() {
+            return Err(google_oauth_error(&value, "google_oauth_refresh_failed"));
+        }
+        let access_token = value
+            .access_token
+            .context("google_oauth_empty_response: Google did not return an access token")?;
+        Ok(GoogleTokenRefresh {
+            access_token: Zeroizing::new(access_token),
+            refresh_token: value.refresh_token.map(Zeroizing::new),
+        })
+    }
+
     pub async fn fetch_remote_metadata(
         &self,
         config: &CloudSyncSettings,
@@ -338,6 +469,7 @@ impl CloudSyncBackend {
             BackendType::HttpJson => self.fetch_http_json_metadata(config, secrets).await,
             BackendType::Dropbox => self.fetch_dropbox_metadata(config, secrets).await,
             BackendType::OneDrive => self.fetch_onedrive_metadata(config, secrets).await,
+            BackendType::GoogleDrive => self.fetch_google_drive_metadata(config, secrets).await,
             BackendType::GithubGist => self.fetch_gist_metadata(config, secrets).await,
             BackendType::Git => self.fetch_git_metadata(config, secrets).await,
             BackendType::S3 => self.fetch_s3_metadata(config, secrets).await,
@@ -359,6 +491,10 @@ impl CloudSyncBackend {
             BackendType::Dropbox => self.upload_dropbox_snapshot(config, secrets, payload).await,
             BackendType::OneDrive => {
                 self.upload_onedrive_snapshot(config, secrets, payload)
+                    .await
+            }
+            BackendType::GoogleDrive => {
+                self.upload_google_drive_snapshot(config, secrets, payload)
                     .await
             }
             BackendType::GithubGist => self.upload_gist_snapshot(config, secrets, payload).await,
@@ -387,6 +523,17 @@ impl CloudSyncBackend {
             }
             BackendType::OneDrive => {
                 self.write_onedrive_object(
+                    config,
+                    secrets,
+                    relative_path,
+                    bytes,
+                    content_type,
+                    None,
+                )
+                .await
+            }
+            BackendType::GoogleDrive => {
+                self.write_google_drive_object(
                     config,
                     secrets,
                     relative_path,
@@ -434,6 +581,10 @@ impl CloudSyncBackend {
                 self.read_onedrive_object(config, secrets, relative_path)
                     .await
             }
+            BackendType::GoogleDrive => {
+                self.read_google_drive_object(config, secrets, relative_path)
+                    .await
+            }
             BackendType::GithubGist => self.read_gist_object(config, secrets, relative_path).await,
             BackendType::Git => self.read_git_object(config, secrets, relative_path).await,
             BackendType::S3 => self.read_s3_object(config, secrets, relative_path).await,
@@ -473,6 +624,22 @@ impl CloudSyncBackend {
                     expected_etag,
                 )
                 .await;
+        }
+        if matches!(config.backend_type, BackendType::GoogleDrive) {
+            let paths = google_drive_paths();
+            let result = self
+                .write_google_drive_object(
+                    config,
+                    secrets,
+                    &paths.metadata_path,
+                    serde_json::to_vec(metadata)?,
+                    Some("application/json"),
+                    expected_etag,
+                )
+                .await?;
+            self.cleanup_google_drive_objects(config, secrets, metadata)
+                .await?;
+            return Ok(result);
         }
         self.write_remote_object(
             config,
@@ -565,6 +732,7 @@ impl CloudSyncBackend {
             BackendType::HttpJson => "HTTP JSON metadata",
             BackendType::Dropbox => "Dropbox metadata",
             BackendType::OneDrive => "OneDrive metadata",
+            BackendType::GoogleDrive => "Google Drive metadata",
             BackendType::GithubGist => "GitHub Gist metadata",
             BackendType::Git => "Git metadata",
             BackendType::S3 => "S3 metadata",
@@ -628,6 +796,18 @@ impl CloudSyncBackend {
                     .await?
                     .ok_or_else(|| {
                         anyhow::anyhow!("remote_not_found: no remote OneDrive snapshot found")
+                    })?
+            }
+            BackendType::GoogleDrive => {
+                let path = metadata
+                    .blob_path
+                    .as_deref()
+                    .unwrap_or(&google_drive_paths().blob_path)
+                    .to_string();
+                self.read_google_drive_object(config, secrets, &path)
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("remote_not_found: no remote Google Drive snapshot found")
                     })?
             }
             BackendType::GithubGist => {
@@ -778,6 +958,24 @@ impl CloudSyncBackend {
         let paths = onedrive_paths(config);
         let Some(object) = self
             .read_onedrive_object(config, secrets, &paths.metadata_path)
+            .await?
+        else {
+            return Ok(RemoteMetadata::missing());
+        };
+        let value = serde_json::from_slice::<Value>(&object.bytes)?;
+        let mut metadata = normalize_remote_metadata(value, object.etag)?;
+        metadata.blob_path.get_or_insert(paths.blob_path);
+        Ok(metadata)
+    }
+
+    async fn fetch_google_drive_metadata(
+        &self,
+        config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+    ) -> Result<RemoteMetadata> {
+        let paths = google_drive_paths();
+        let Some(object) = self
+            .read_google_drive_object(config, secrets, &paths.metadata_path)
             .await?
         else {
             return Ok(RemoteMetadata::missing());
@@ -993,6 +1191,43 @@ impl CloudSyncBackend {
             )
             .await?;
         self.cleanup_onedrive_objects(config, secrets, &metadata)
+            .await?;
+        Ok(RemoteWriteResult {
+            revision: payload.revision,
+            etag: result.etag.or(payload.etag),
+        })
+    }
+
+    async fn upload_google_drive_snapshot(
+        &self,
+        config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        payload: RemoteSnapshotUpload,
+    ) -> Result<RemoteWriteResult> {
+        let metadata_path = google_drive_paths().metadata_path;
+        let blob_path = google_drive_blob_path(&payload);
+        let mut metadata = payload.metadata_json_with_blob_path(&blob_path);
+        metadata["namespace"] = Value::String(config.namespace.clone());
+        self.write_google_drive_object(
+            config,
+            secrets,
+            &blob_path,
+            payload.bytes,
+            Some(OXIDE_CONTENT_TYPE),
+            None,
+        )
+        .await?;
+        let result = self
+            .write_google_drive_object(
+                config,
+                secrets,
+                &metadata_path,
+                serde_json::to_vec(&metadata)?,
+                Some("application/json"),
+                payload.previous_etag.as_deref(),
+            )
+            .await?;
+        self.cleanup_google_drive_objects(config, secrets, &metadata)
             .await?;
         Ok(RemoteWriteResult {
             revision: payload.revision,
@@ -1338,6 +1573,136 @@ impl CloudSyncBackend {
                 .and_then(Value::as_str)
                 .map(str::to_string),
         })
+    }
+
+    async fn read_google_drive_object(
+        &self,
+        _config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        relative_path: &str,
+    ) -> Result<Option<RemoteObject>> {
+        let Some(file) = self
+            .find_google_drive_file(secrets, &google_drive_object_name(relative_path))
+            .await?
+        else {
+            return Ok(None);
+        };
+        let response = execute_cloud_request(
+            self.client
+                .get(google_drive_media_url(&file.id))
+                .headers(google_drive_headers(secrets)?),
+        )
+        .await?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !response.status().is_success() {
+            let status = response.status();
+            let value = response.json::<Value>().await.unwrap_or(Value::Null);
+            return Err(google_drive_value_error(
+                status,
+                &value,
+                "google_drive_download",
+                "Failed to download Google Drive content",
+            ));
+        }
+        let mut object =
+            response_to_object(response, &format!("Google Drive object {relative_path}")).await?;
+        object.etag = file.head_revision_id.or(object.etag);
+        object.last_modified = file.modified_time.or(object.last_modified);
+        object.content_type = file.mime_type.or(object.content_type);
+        Ok(Some(object))
+    }
+
+    async fn write_google_drive_object(
+        &self,
+        _config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        relative_path: &str,
+        bytes: Vec<u8>,
+        content_type: Option<&str>,
+        expected_etag: Option<&str>,
+    ) -> Result<RemoteWriteResult> {
+        let name = google_drive_object_name(relative_path);
+        let current = self.find_google_drive_file(secrets, &name).await?;
+        if let Some(expected_etag) = expected_etag {
+            let current_etag = current
+                .as_ref()
+                .and_then(|file| file.head_revision_id.as_deref());
+            if current_etag != Some(expected_etag) {
+                bail!(
+                    "etag_conflict_detected: Google Drive metadata changed before upload completed"
+                );
+            }
+        } else if relative_path == google_drive_paths().metadata_path && current.is_some() {
+            bail!("etag_conflict_detected: Google Drive metadata already exists");
+        }
+
+        let file = if let Some(file) = current {
+            self.update_google_drive_file(
+                secrets,
+                &file.id,
+                bytes,
+                content_type.unwrap_or("application/octet-stream"),
+            )
+            .await?
+        } else {
+            self.create_google_drive_file(
+                secrets,
+                &name,
+                bytes,
+                content_type.unwrap_or("application/octet-stream"),
+            )
+            .await?
+        };
+
+        Ok(RemoteWriteResult {
+            revision: file.head_revision_id.clone().unwrap_or_default(),
+            etag: file.head_revision_id,
+        })
+    }
+
+    async fn cleanup_google_drive_objects(
+        &self,
+        _config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        metadata: &Value,
+    ) -> Result<()> {
+        let files = self
+            .list_google_drive_files(secrets, "name contains 'objects__'")
+            .await?;
+        let keep = google_drive_keep_object_names(metadata);
+        for file in files {
+            let Some(name) = file.name.as_deref() else {
+                continue;
+            };
+            if !name.ends_with(".oxide") || keep.contains(name) {
+                continue;
+            }
+            let response = execute_cloud_request(
+                self.client
+                    .delete(format!(
+                        "{GOOGLE_DRIVE_API_BASE}/files/{}",
+                        encode_component(&file.id)
+                    ))
+                    .headers(google_drive_headers(secrets)?),
+            )
+            .await?;
+            let status = response.status();
+            if status == StatusCode::NOT_FOUND {
+                continue;
+            }
+            if !status.is_success() {
+                let value = response.json::<Value>().await.unwrap_or(Value::Null);
+                return Err(google_drive_value_error(
+                    status,
+                    &value,
+                    "google_drive_cleanup",
+                    "Failed to remove old Google Drive object",
+                ));
+            }
+        }
+        Ok(())
     }
 
     async fn cleanup_onedrive_objects(
@@ -2057,6 +2422,125 @@ impl CloudSyncBackend {
         Ok(response.text().await?)
     }
 
+    async fn find_google_drive_file(
+        &self,
+        secrets: &CloudSyncSecrets,
+        name: &str,
+    ) -> Result<Option<GoogleDriveFile>> {
+        let query = format!(
+            "name = {} and 'appDataFolder' in parents and trashed = false",
+            google_drive_query_literal(name)
+        );
+        let files = self.list_google_drive_files(secrets, &query).await?;
+        Ok(files.into_iter().next())
+    }
+
+    async fn list_google_drive_files(
+        &self,
+        secrets: &CloudSyncSecrets,
+        query: &str,
+    ) -> Result<Vec<GoogleDriveFile>> {
+        let response = execute_cloud_request(
+            self.client
+                .get(format!("{GOOGLE_DRIVE_API_BASE}/files"))
+                .headers(google_drive_headers(secrets)?)
+                .query(&[
+                    ("spaces", "appDataFolder"),
+                    (
+                        "fields",
+                        "files(id,name,headRevisionId,modifiedTime,mimeType)",
+                    ),
+                    ("pageSize", "1000"),
+                    ("q", query),
+                ]),
+        )
+        .await?;
+        let status = response.status();
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(google_drive_value_error(
+                status,
+                &value,
+                "google_drive_list",
+                "Failed to list Google Drive app data files",
+            ));
+        }
+        let list = serde_json::from_value::<GoogleDriveFileList>(value)?;
+        Ok(list.files)
+    }
+
+    async fn create_google_drive_file(
+        &self,
+        secrets: &CloudSyncSecrets,
+        name: &str,
+        bytes: Vec<u8>,
+        content_type: &str,
+    ) -> Result<GoogleDriveFile> {
+        let boundary = format!("oxideterm-{}", digest_hex(name.as_bytes()));
+        let body = google_drive_multipart_body(name, content_type, &boundary, &bytes)?;
+        let response = execute_cloud_request(
+            self.client
+                .post(format!("{GOOGLE_DRIVE_UPLOAD_BASE}/files"))
+                .headers(google_drive_headers(secrets)?)
+                .header(
+                    CONTENT_TYPE,
+                    format!("multipart/related; boundary={boundary}"),
+                )
+                .query(&[
+                    ("uploadType", "multipart"),
+                    ("fields", "id,name,headRevisionId,modifiedTime,mimeType"),
+                ])
+                .body(body),
+        )
+        .await?;
+        let status = response.status();
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(google_drive_value_error(
+                status,
+                &value,
+                "google_drive_write",
+                "Failed to create Google Drive app data file",
+            ));
+        }
+        Ok(serde_json::from_value(value)?)
+    }
+
+    async fn update_google_drive_file(
+        &self,
+        secrets: &CloudSyncSecrets,
+        file_id: &str,
+        bytes: Vec<u8>,
+        content_type: &str,
+    ) -> Result<GoogleDriveFile> {
+        let response = execute_cloud_request(
+            self.client
+                .patch(format!(
+                    "{GOOGLE_DRIVE_UPLOAD_BASE}/files/{}",
+                    encode_component(file_id)
+                ))
+                .headers(google_drive_headers(secrets)?)
+                .header(CONTENT_TYPE, content_type)
+                .query(&[
+                    ("uploadType", "media"),
+                    ("fields", "id,name,headRevisionId,modifiedTime,mimeType"),
+                ])
+                .body(bytes),
+        )
+        .await?;
+        let status = response.status();
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(google_drive_value_error(
+                status,
+                &value,
+                "google_drive_write",
+                "Failed to update Google Drive app data file",
+            ));
+        }
+        Ok(serde_json::from_value(value)?)
+    }
+
     async fn ensure_onedrive_parent(
         &self,
         _config: &CloudSyncSettings,
@@ -2328,6 +2812,47 @@ impl std::fmt::Debug for MicrosoftTokenRefresh {
     }
 }
 
+#[derive(Eq, PartialEq)]
+pub struct GoogleOauthStart {
+    pub authorization_url: String,
+    pub state: String,
+    pub code_verifier: Zeroizing<String>,
+}
+
+impl std::fmt::Debug for GoogleOauthStart {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GoogleOauthStart")
+            .field("authorization_url", &self.authorization_url)
+            .field("state", &"[redacted state]")
+            .field("code_verifier", &"[redacted verifier]")
+            .finish()
+    }
+}
+
+#[derive(Eq, PartialEq)]
+pub struct GoogleTokenRefresh {
+    pub access_token: Zeroizing<String>,
+    pub refresh_token: Option<Zeroizing<String>>,
+}
+
+impl std::fmt::Debug for GoogleTokenRefresh {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GoogleTokenRefresh")
+            .field("access_token", &"[redacted token]")
+            .field(
+                "refresh_token",
+                &self
+                    .refresh_token
+                    .as_ref()
+                    .map(|_| "[redacted token]")
+                    .unwrap_or("None"),
+            )
+            .finish()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct GithubDeviceCodeResponse {
     device_code: String,
@@ -2365,6 +2890,53 @@ struct MicrosoftTokenResponse {
     interval: Option<u64>,
 }
 
+#[derive(Deserialize)]
+struct GoogleTokenResponse {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+    error_uri: Option<String>,
+}
+
+impl fmt::Debug for GoogleTokenResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // OAuth token responses can contain bearer and refresh tokens. Keep
+        // diagnostics useful while guaranteeing token material never enters
+        // logs, test failures, or UI-facing error formatting.
+        f.debug_struct("GoogleTokenResponse")
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("error", &self.error)
+            .field("error_description", &self.error_description)
+            .field("error_uri", &self.error_uri)
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GoogleDriveFileList {
+    #[serde(default)]
+    files: Vec<GoogleDriveFile>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GoogleDriveFile {
+    id: String,
+    name: Option<String>,
+    head_revision_id: Option<String>,
+    modified_time: Option<String>,
+    mime_type: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GitContentFile {
@@ -2378,7 +2950,7 @@ fn validate_namespace(config: &CloudSyncSettings) -> Result<()> {
     if config.namespace.trim().is_empty()
         && !matches!(
             config.backend_type,
-            BackendType::S3 | BackendType::Git | BackendType::GithubGist
+            BackendType::S3 | BackendType::Git | BackendType::GithubGist | BackendType::GoogleDrive
         )
     {
         bail!("missing_namespace: cloud sync namespace is not configured");
@@ -2701,6 +3273,33 @@ fn encode_path_segments(path: &str) -> String {
         .join("/")
 }
 
+fn google_drive_query_literal(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('\'', "\\'");
+    format!("'{escaped}'")
+}
+
+fn google_drive_multipart_body(
+    name: &str,
+    content_type: &str,
+    boundary: &str,
+    bytes: &[u8],
+) -> Result<Vec<u8>> {
+    let metadata = serde_json::to_vec(&json!({
+        "name": name,
+        "parents": ["appDataFolder"],
+        "mimeType": content_type,
+    }))?;
+    let mut body = Vec::with_capacity(metadata.len() + bytes.len() + boundary.len() * 4 + 256);
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Type: application/json; charset=UTF-8\r\n\r\n");
+    body.extend_from_slice(&metadata);
+    body.extend_from_slice(format!("\r\n--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(format!("Content-Type: {content_type}\r\n\r\n").as_bytes());
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    Ok(body)
+}
+
 fn webdav_namespace_url(config: &CloudSyncSettings) -> String {
     let endpoint = trim_trailing_slash(&config.endpoint);
     let namespace = encode_path_segments(&config.namespace);
@@ -2916,6 +3515,57 @@ fn onedrive_keep_object_paths(metadata: &Value) -> BTreeSet<String> {
     keep
 }
 
+struct GoogleDrivePaths {
+    metadata_path: String,
+    blob_path: String,
+}
+
+fn google_drive_paths() -> GoogleDrivePaths {
+    GoogleDrivePaths {
+        metadata_path: "metadata.json".to_string(),
+        blob_path: "objects__latest.oxide".to_string(),
+    }
+}
+
+fn google_drive_blob_path(payload: &RemoteSnapshotUpload) -> String {
+    let stable_name = payload
+        .etag
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(&payload.revision);
+    format!(
+        "objects__{}.oxide",
+        sanitize_remote_object_name(stable_name)
+    )
+}
+
+fn google_drive_object_name(relative_path: &str) -> String {
+    let path = trim_slashes(relative_path);
+    if path.is_empty() {
+        return google_drive_paths().metadata_path;
+    }
+    if path == google_drive_paths().metadata_path {
+        return path;
+    }
+    sanitize_remote_object_name(&path.replace('/', "__"))
+}
+
+fn google_drive_media_url(file_id: &str) -> String {
+    format!(
+        "{GOOGLE_DRIVE_API_BASE}/files/{}?alt=media",
+        encode_component(file_id)
+    )
+}
+
+fn google_drive_keep_object_names(metadata: &Value) -> BTreeSet<String> {
+    let mut keep = BTreeSet::new();
+    if let Some(blob_path) = metadata.get("blobPath").and_then(Value::as_str) {
+        keep.insert(google_drive_object_name(blob_path));
+    }
+    keep.insert(google_drive_paths().blob_path);
+    keep
+}
+
 struct GistPaths {
     metadata_path: String,
     blob_path: String,
@@ -3064,12 +3714,44 @@ fn onedrive_headers(secrets: &CloudSyncSecrets) -> Result<HeaderMap> {
     Ok(headers)
 }
 
+fn google_drive_headers(secrets: &CloudSyncSecrets) -> Result<HeaderMap> {
+    let token = secrets
+        .token
+        .as_ref()
+        .map(|token| token.as_str())
+        .filter(|token| !token.is_empty())
+        .context("missing_backend_token: Google Drive access token is not configured")?;
+    let mut headers = HeaderMap::new();
+    insert_header(&mut headers, ACCEPT.as_str(), "application/json")?;
+    headers.insert(USER_AGENT, HeaderValue::from_static("OxideTerm"));
+    insert_bearer_auth_header(&mut headers, token)?;
+    Ok(headers)
+}
+
 fn microsoft_device_code_url() -> String {
     format!("https://login.microsoftonline.com/{MICROSOFT_AUTH_TENANT}/oauth2/v2.0/devicecode")
 }
 
 fn microsoft_token_url() -> String {
     format!("https://login.microsoftonline.com/{MICROSOFT_AUTH_TENANT}/oauth2/v2.0/token")
+}
+
+fn generate_google_pkce_verifier() -> String {
+    random_urlsafe_string(32)
+}
+
+fn generate_google_oauth_state() -> String {
+    random_urlsafe_string(24)
+}
+
+fn random_urlsafe_string(byte_len: usize) -> String {
+    let mut bytes = vec![0u8; byte_len];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn google_pkce_challenge(code_verifier: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()))
 }
 
 fn gist_revision_from_response(value: &Value) -> Option<String> {
@@ -3205,6 +3887,130 @@ fn onedrive_scope_or_permission_error(graph_code: &str, message: &str) -> bool {
         || message.contains("insufficient privileges")
         || message.contains("permission")
         || message.contains("scope")
+}
+
+fn google_drive_value_error(
+    status: StatusCode,
+    value: &Value,
+    code_prefix: &str,
+    fallback: &str,
+) -> anyhow::Error {
+    let status_code = status.as_u16();
+    let message = google_error_message(value).unwrap_or(fallback);
+    let reason = google_error_reason(value).unwrap_or_default();
+    let code = match status {
+        StatusCode::BAD_REQUEST => {
+            if google_drive_api_disabled(&reason, message) {
+                "google_drive_api_not_enabled".to_string()
+            } else {
+                "google_drive_bad_request".to_string()
+            }
+        }
+        StatusCode::UNAUTHORIZED => "google_drive_bad_credentials".to_string(),
+        StatusCode::FORBIDDEN => {
+            if google_drive_api_disabled(&reason, message) {
+                "google_drive_api_not_enabled".to_string()
+            } else if google_drive_quota_error(&reason, message) {
+                "google_drive_quota_exceeded".to_string()
+            } else if google_drive_rate_limit_error(&reason, message) {
+                "google_drive_rate_limited".to_string()
+            } else if google_drive_scope_error(&reason, message) {
+                "google_drive_missing_scope".to_string()
+            } else {
+                "google_drive_access_denied".to_string()
+            }
+        }
+        StatusCode::TOO_MANY_REQUESTS => "google_drive_rate_limited".to_string(),
+        StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT => {
+            "google_drive_service_unavailable".to_string()
+        }
+        status if status.as_u16() == 507 => "google_drive_quota_exceeded".to_string(),
+        _ => format!("{code_prefix}_{status_code}"),
+    };
+    anyhow::anyhow!("{code}: {message}")
+}
+
+fn google_error_message(value: &Value) -> Option<&str> {
+    value
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get("error_description").and_then(Value::as_str))
+        .or_else(|| value.get("message").and_then(Value::as_str))
+}
+
+fn google_error_reason(value: &Value) -> Option<String> {
+    value
+        .get("error")
+        .and_then(|error| error.get("errors"))
+        .and_then(Value::as_array)
+        .and_then(|errors| errors.first())
+        .and_then(|error| error.get("reason"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            value
+                .get("error")
+                .and_then(|error| error.get("status"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| value.get("error").and_then(Value::as_str))
+        .map(str::to_string)
+}
+
+fn google_drive_api_disabled(reason: &str, message: &str) -> bool {
+    let reason = reason.to_ascii_lowercase();
+    let message = message.to_ascii_lowercase();
+    reason.contains("accessnotconfigured")
+        || reason.contains("servicedisabled")
+        || message.contains("drive api has not been used")
+        || message.contains("drive.googleapis.com")
+        || message.contains("api has not been enabled")
+}
+
+fn google_drive_quota_error(reason: &str, message: &str) -> bool {
+    let reason = reason.to_ascii_lowercase();
+    let message = message.to_ascii_lowercase();
+    reason.contains("quota")
+        || reason.contains("dailylimitexceeded")
+        || reason.contains("storagelimitexceeded")
+        || message.contains("quota")
+}
+
+fn google_drive_rate_limit_error(reason: &str, message: &str) -> bool {
+    let reason = reason.to_ascii_lowercase();
+    let message = message.to_ascii_lowercase();
+    reason.contains("ratelimit")
+        || reason.contains("userratelimit")
+        || message.contains("rate limit")
+        || message.contains("too many requests")
+}
+
+fn google_drive_scope_error(reason: &str, message: &str) -> bool {
+    let reason = reason.to_ascii_lowercase();
+    let message = message.to_ascii_lowercase();
+    reason.contains("insufficientpermissions")
+        || message.contains("insufficient permission")
+        || message.contains(GOOGLE_DRIVE_APPDATA_SCOPE)
+        || message.contains("scope")
+}
+
+fn google_oauth_error(value: &GoogleTokenResponse, fallback_code: &str) -> anyhow::Error {
+    let code = match value.error.as_deref() {
+        Some("access_denied") => "google_oauth_denied",
+        Some("admin_policy_enforced") => "google_oauth_admin_policy",
+        Some("invalid_client") | Some("unauthorized_client") => "google_oauth_bad_client",
+        Some("invalid_scope") => "google_oauth_missing_scope",
+        Some("invalid_grant") => "google_oauth_refresh_failed",
+        Some("consent_required") | Some("interaction_required") => "google_oauth_consent_required",
+        Some("invalid_request") => "google_oauth_invalid_request",
+        _ => fallback_code,
+    };
+    let message = value
+        .error_description
+        .as_deref()
+        .or(value.error_uri.as_deref())
+        .unwrap_or("Google OAuth failed");
+    anyhow::anyhow!("{code}: {message}")
 }
 
 fn microsoft_oauth_value_error(value: &Value, fallback_code: &str) -> anyhow::Error {
@@ -3619,6 +4425,146 @@ mod tests {
             onedrive_content_url(&settings, "objects/hash-abc.oxide"),
             "https://graph.microsoft.com/v1.0/me/drive/special/approot:/objects/hash-abc.oxide:/content"
         );
+    }
+
+    #[test]
+    fn google_drive_paths_use_flat_appdata_names() {
+        let upload = RemoteSnapshotUpload {
+            revision: "rev/one".to_string(),
+            device_id: "device".to_string(),
+            uploaded_at: "2026-06-13T00:00:00Z".to_string(),
+            bytes: Vec::new(),
+            etag: Some("hash:abc/def".to_string()),
+            previous_etag: None,
+            section_revisions: None,
+        };
+
+        assert_eq!(google_drive_paths().metadata_path, "metadata.json");
+        assert_eq!(google_drive_paths().blob_path, "objects__latest.oxide");
+        assert_eq!(
+            google_drive_blob_path(&upload),
+            "objects__hash-abc-def.oxide"
+        );
+        assert_eq!(
+            google_drive_object_name("objects/hash:abc.oxide"),
+            "objects__hash-abc.oxide"
+        );
+        assert_eq!(google_drive_object_name("metadata.json"), "metadata.json");
+    }
+
+    #[test]
+    fn google_oauth_token_debug_redacts_token_values() {
+        let token_response = GoogleTokenResponse {
+            access_token: Some("google-access-token".to_string()),
+            refresh_token: Some("google-refresh-token".to_string()),
+            error: None,
+            error_description: None,
+            error_uri: None,
+        };
+        let refreshed = GoogleTokenRefresh {
+            access_token: Zeroizing::new("refreshed-google-access".to_string()),
+            refresh_token: Some(Zeroizing::new("refreshed-google-refresh".to_string())),
+        };
+        let debug = format!("{token_response:?} {refreshed:?}");
+
+        assert!(debug.contains("redacted"));
+        assert!(!debug.contains("google-access-token"));
+        assert!(!debug.contains("google-refresh-token"));
+        assert!(!debug.contains("refreshed-google-access"));
+        assert!(!debug.contains("refreshed-google-refresh"));
+    }
+
+    #[test]
+    fn google_drive_error_mapping_distinguishes_setup_scope_and_quota_failures() {
+        let api_disabled = google_drive_value_error(
+            StatusCode::FORBIDDEN,
+            &json!({
+                "error": {
+                    "errors": [{ "reason": "accessNotConfigured" }],
+                    "message": "Google Drive API has not been used in project"
+                }
+            }),
+            "google_drive",
+            "fallback",
+        )
+        .to_string();
+        let missing_scope = google_drive_value_error(
+            StatusCode::FORBIDDEN,
+            &json!({
+                "error": {
+                    "errors": [{ "reason": "insufficientPermissions" }],
+                    "message": "Request is missing https://www.googleapis.com/auth/drive.appdata"
+                }
+            }),
+            "google_drive",
+            "fallback",
+        )
+        .to_string();
+        let quota = google_drive_value_error(
+            StatusCode::FORBIDDEN,
+            &json!({
+                "error": {
+                    "errors": [{ "reason": "storageQuotaExceeded" }],
+                    "message": "Quota exceeded"
+                }
+            }),
+            "google_drive",
+            "fallback",
+        )
+        .to_string();
+        let rate = google_drive_value_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            &json!({ "error": { "message": "Rate Limit Exceeded" } }),
+            "google_drive",
+            "fallback",
+        )
+        .to_string();
+
+        assert!(api_disabled.starts_with("google_drive_api_not_enabled:"));
+        assert!(missing_scope.starts_with("google_drive_missing_scope:"));
+        assert!(quota.starts_with("google_drive_quota_exceeded:"));
+        assert!(rate.starts_with("google_drive_rate_limited:"));
+    }
+
+    #[test]
+    fn google_oauth_error_mapping_distinguishes_consent_admin_and_client_failures() {
+        let admin = google_oauth_error(
+            &GoogleTokenResponse {
+                access_token: None,
+                refresh_token: None,
+                error: Some("admin_policy_enforced".to_string()),
+                error_description: Some("Blocked by admin policy".to_string()),
+                error_uri: None,
+            },
+            "google_oauth_exchange_failed",
+        )
+        .to_string();
+        let bad_client = google_oauth_error(
+            &GoogleTokenResponse {
+                access_token: None,
+                refresh_token: None,
+                error: Some("unauthorized_client".to_string()),
+                error_description: Some("Wrong OAuth client type".to_string()),
+                error_uri: None,
+            },
+            "google_oauth_exchange_failed",
+        )
+        .to_string();
+        let refresh_failed = google_oauth_error(
+            &GoogleTokenResponse {
+                access_token: None,
+                refresh_token: None,
+                error: Some("invalid_grant".to_string()),
+                error_description: Some("Refresh token expired or revoked".to_string()),
+                error_uri: None,
+            },
+            "google_oauth_exchange_failed",
+        )
+        .to_string();
+
+        assert!(admin.starts_with("google_oauth_admin_policy:"));
+        assert!(bad_client.starts_with("google_oauth_bad_client:"));
+        assert!(refresh_failed.starts_with("google_oauth_refresh_failed:"));
     }
 
     #[test]

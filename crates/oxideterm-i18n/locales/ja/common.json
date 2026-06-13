@@ -176,7 +176,8 @@
         "git": "Git リポジトリ",
         "s3": "S3 互換ストレージ",
         "github_gist": "GitHub Gist",
-        "onedrive": "OneDrive"
+        "onedrive": "OneDrive",
+        "google_drive": "Google Drive"
       },
       "status": {
         "ready": "同期準備完了",
@@ -203,7 +204,8 @@
         "saving": "保存中...",
         "enable_sensitive_sync": "機密同期を有効化",
         "github_oauth_login": "GitHub ログイン",
-        "microsoft_oauth_login": "Microsoft ログイン"
+        "microsoft_oauth_login": "Microsoft ログイン",
+        "google_oauth_login": "Google ログイン"
       },
       "fields": {
         "backend": "バックエンド",
@@ -276,7 +278,19 @@
         "onedrive_example_public_client": "Authentication > Advanced settings > Allow public client flows: Yes。",
         "onedrive_example_storage_label": "保存パス",
         "onedrive_example_storage": "/me/drive/special/approot/metadata.json と /objects/*.oxide",
-        "onedrive_permission_warning": "Microsoft が invalid_scope、consent_required、または insufficient privileges を返す場合は、API 権限、同意、対応アカウント種別、public client flow 設定を確認してください。"
+        "onedrive_permission_warning": "Microsoft が invalid_scope、consent_required、または insufficient privileges を返す場合は、API 権限、同意、対応アカウント種別、public client flow 設定を確認してください。",
+        "backend_google_drive": "Google Drive は非表示の Drive appDataFolder と drive.appdata スコープを使用します。デスクトップ OAuth クライアント ID でログインし、OxideTerm は metadata.json とフラットな objects__*.oxide ファイルを書き込みます。",
+        "google_drive_title": "Google Drive アプリデータ設定",
+        "google_drive_description": "Google OAuth デスクトップ クライアントを作成し、Drive API を有効化し、同意画面を設定してから、このクライアント ID を貼り付けてください。OxideTerm は drive.appdata のみを要求し、暗号化された同期オブジェクトを非表示のアプリデータ フォルダに保存します。",
+        "google_drive_example_client_type_label": "OAuth クライアント種別",
+        "google_drive_example_client_type": "Google Cloud Console > 認証情報 > OAuth クライアント ID > デスクトップ アプリ。Web クライアントでは localhost リダイレクトが失敗します。",
+        "google_drive_example_scope_label": "Drive スコープ",
+        "google_drive_example_scope": "https://www.googleapis.com/auth/drive.appdata のみ。完全な Drive スコープは避けてください。",
+        "google_drive_example_api_label": "API 設定",
+        "google_drive_example_api": "Google Drive API を有効化し、使用するアカウント向けに OAuth 同意画面を公開またはテストユーザーに追加してください。",
+        "google_drive_example_storage_label": "保存名",
+        "google_drive_example_storage": "appDataFolder: metadata.json と objects__<hash>.oxide",
+        "google_drive_permission_warning": "Google が access_denied、admin_policy_enforced、invalid_client、または Drive API 未有効を返す場合は、同意画面、デスクトップ クライアント種別、API 状態、管理者ポリシー、テストユーザーを確認してください。"
       },
       "settings": {
         "backend_type": "バックエンドタイプ",
@@ -313,7 +327,8 @@
         "github_access_token": "GitHub アクセストークン",
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth クライアント ID",
-        "microsoft_access_token": "Microsoft アクセストークン"
+        "microsoft_access_token": "Microsoft アクセストークン",
+        "google_oauth_client_id": "Google OAuth クライアント ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -361,7 +376,8 @@
         "backend_git": "Git バックエンドは GitHub Contents API 互換のインターフェースを使用します。Endpoint に API ルートを、リポジトリに owner/repo を、ブランチにターゲットブランチを、Namespace にリポジトリ内の任意のフォルダパスを指定します。",
         "backend_s3": "S3 互換バックエンドは、Endpoint をサービスルート、Bucket をコンテナ、Namespace をオプションのオブジェクトプレフィックスとして使用します。",
         "backend_github_gist": "GitHub Gist は、既存の Gist 内に OxideTerm の同期オブジェクトをエンコード済みファイルとして保存します。Gist ID と gist 権限を持つ GitHub token を入力してください。Namespace はファイル名の接頭辞として使われます。",
-        "backend_onedrive": "OneDrive は Microsoft Graph のアプリ フォルダーを使用し、Microsoft デバイス ログインが必要です。ファイルはアプリ フォルダー内の metadata.json と objects/*.oxide に分離して保存されます。"
+        "backend_onedrive": "OneDrive は Microsoft Graph のアプリ フォルダーを使用し、Microsoft デバイス ログインが必要です。ファイルはアプリ フォルダー内の metadata.json と objects/*.oxide に分離して保存されます。",
+        "backend_google_drive": "Google Drive は非表示の appDataFolder と PKCE 付きデスクトップ OAuth を使用します。ファイルは metadata.json と objects__*.oxide として分離され、完全な Drive アクセスは要求しません。"
       },
       "backup": {
         "description": "Oxide クラウド同期ロールバックバックアップ",
@@ -428,7 +444,30 @@
         "onedrive_service_unavailable": "Microsoft Graph または OneDrive は一時的に利用できません。後でもう一度試してください。",
         "microsoft_oauth_missing_scope": "Microsoft が要求された scope を拒否しました。アプリ登録に Files.ReadWrite.AppFolder を追加し、再度同意してください。",
         "microsoft_oauth_consent_required": "Microsoft はこのアプリにユーザーまたは管理者の同意を要求しています。同意してからログインをやり直してください。",
-        "microsoft_oauth_invalid_request": "Microsoft が OAuth 要求を拒否しました。クライアント ID とデバイス フローのアプリ設定を確認してください。"
+        "microsoft_oauth_invalid_request": "Microsoft が OAuth 要求を拒否しました。クライアント ID とデバイス フローのアプリ設定を確認してください。",
+        "missing_google_oauth_client_id": "ブラウザログインを開始する前に Google OAuth クライアント ID を設定してください。",
+        "missing_google_refresh_token": "Google refresh token がありません。Google Drive に再ログインしてください。",
+        "google_drive_bad_credentials": "Google Drive がアクセストークンを拒否しました。再ログインしてください。",
+        "google_drive_missing_scope": "Google トークンに drive.appdata スコープがないか、アプリが自身のアプリデータ フォルダにアクセスできません。",
+        "google_drive_access_denied": "Google Drive がアプリデータ フォルダへのアクセスを拒否しました。アカウント ポリシーと OAuth 同意を確認してください。",
+        "google_drive_bad_request": "Google Drive がリクエストを拒否しました。appDataFolder の保存設定を確認してください。",
+        "google_drive_api_not_enabled": "この OAuth プロジェクトで Google Drive API が有効化されていません。Google Cloud Console で有効化して再試行してください。",
+        "google_drive_rate_limited": "Google Drive のレート制限に達しました。しばらく待って再試行してください。",
+        "google_drive_quota_exceeded": "同期オブジェクト用の Google Drive クォータまたはストレージ制限に達しました。",
+        "google_drive_service_unavailable": "Google Drive は一時的に利用できません。後で再試行してください。",
+        "google_oauth_denied": "Google ログインが拒否されました。",
+        "google_oauth_admin_policy": "Google Workspace 管理者ポリシーがこのアプリをブロックしました。管理者に許可を依頼するか別のアカウントを使用してください。",
+        "google_oauth_bad_client": "Google OAuth クライアント ID が無効、またはデスクトップ アプリ クライアントではありません。",
+        "google_oauth_missing_scope": "Google が要求スコープを拒否しました。drive.appdata の同意を設定して再ログインしてください。",
+        "google_oauth_consent_required": "Google はこのアプリへのユーザー同意を要求しています。同意画面を設定して再ログインしてください。",
+        "google_oauth_invalid_request": "Google が OAuth リクエストを拒否しました。クライアント ID、redirect URI、デスクトップ アプリ設定を確認してください。",
+        "google_oauth_start_failed": "Google ブラウザログインを開始できませんでした。",
+        "google_oauth_redirect_failed": "Google OAuth の localhost リダイレクトを受信できませんでした。ローカル ファイアウォールまたはブラウザ制限を確認してください。",
+        "google_oauth_exchange_failed": "Google が認可コード交換を拒否しました。再ログインしてください。",
+        "google_oauth_refresh_failed": "Google refresh token を更新できませんでした。再ログインしてください。",
+        "google_oauth_empty_response": "Google が必要な OAuth トークンを返しませんでした。",
+        "google_oauth_invalid_state": "Google OAuth state が一致しません。再ログインしてください。",
+        "google_oauth_timeout": "Google ログインがタイムアウトしました。再ログインしてください。"
       },
       "toast": {
         "check_failed_title": "リモート確認失敗",
@@ -454,7 +493,11 @@
         "microsoft_oauth_code_title": "Microsoft ログインを開始しました",
         "microsoft_oauth_code_description": "{{seconds}} 秒以内に {{url}} でコード {{code}} を入力してください。確認ページを開きました。",
         "microsoft_oauth_success_title": "Microsoft token を保存しました",
-        "microsoft_oauth_failed_title": "Microsoft ログインに失敗しました"
+        "microsoft_oauth_failed_title": "Microsoft ログインに失敗しました",
+        "google_oauth_url_title": "Google ログインを開きました",
+        "google_oauth_url_description": "{{seconds}} 秒以内にブラウザログインを完了してください。OxideTerm は localhost リダイレクトを待っています。",
+        "google_oauth_success_title": "Google トークンを保存しました",
+        "google_oauth_failed_title": "Google ログインに失敗しました"
       },
       "progress": {
         "checking": "リモートスナップショットを確認中",
@@ -557,7 +600,8 @@
         "gist_id": "Gist ID または https://gist.github.com/...",
         "github_access_token": "gist 権限を持つ GitHub token",
         "github_oauth_client_id": "デバイスログイン用 OAuth App client ID",
-        "microsoft_oauth_client_id": "Microsoft Entra アプリのクライアント ID"
+        "microsoft_oauth_client_id": "Microsoft Entra アプリのクライアント ID",
+        "google_oauth_client_id": "Google デスクトップ OAuth クライアント ID"
       },
       "history_empty": "同期履歴はまだありません。",
       "native_description": "OxideTerm 向けの暗号化されたセルフホスト同期。",

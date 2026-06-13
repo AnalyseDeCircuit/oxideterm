@@ -51,7 +51,10 @@ pub fn cloud_sync_config_rows(
     }
     if !matches!(
         backend,
-        BackendType::Dropbox | BackendType::GithubGist | BackendType::OneDrive
+        BackendType::Dropbox
+            | BackendType::GithubGist
+            | BackendType::OneDrive
+            | BackendType::GoogleDrive
     ) {
         rows.push(CloudSyncConfigRow::Text(CloudSyncTextFieldSpec {
             label_key: "plugin.cloud_sync.settings.endpoint",
@@ -59,7 +62,7 @@ pub fn cloud_sync_config_rows(
             placeholder_key: cloud_sync_endpoint_placeholder_key(backend),
         }));
     }
-    if !matches!(backend, BackendType::OneDrive) {
+    if !matches!(backend, BackendType::OneDrive | BackendType::GoogleDrive) {
         rows.push(CloudSyncConfigRow::Text(CloudSyncTextFieldSpec {
             label_key: cloud_sync_namespace_label_key(backend),
             input: SettingsInput::CloudSyncNamespace,
@@ -99,6 +102,13 @@ pub fn cloud_sync_config_rows(
             label_key: "plugin.cloud_sync.settings.microsoft_oauth_client_id",
             input: SettingsInput::CloudSyncMicrosoftOauthClientId,
             placeholder_key: "plugin.cloud_sync.placeholders.microsoft_oauth_client_id",
+        }));
+    }
+    if matches!(backend, BackendType::GoogleDrive) {
+        rows.push(CloudSyncConfigRow::Text(CloudSyncTextFieldSpec {
+            label_key: "plugin.cloud_sync.settings.google_oauth_client_id",
+            input: SettingsInput::CloudSyncGoogleOauthClientId,
+            placeholder_key: "plugin.cloud_sync.placeholders.google_oauth_client_id",
         }));
     }
     if backend_uses_s3_credentials(backend) {
@@ -193,7 +203,7 @@ pub fn cloud_sync_endpoint_placeholder_key(backend: &BackendType) -> &'static st
         BackendType::Git => "plugin.cloud_sync.placeholders.endpoint_git",
         BackendType::GithubGist => "plugin.cloud_sync.placeholders.endpoint_git",
         BackendType::HttpJson => "plugin.cloud_sync.placeholders.endpoint_http_json",
-        BackendType::Dropbox | BackendType::OneDrive => {
+        BackendType::Dropbox | BackendType::OneDrive | BackendType::GoogleDrive => {
             "plugin.cloud_sync.placeholders.endpoint_http_json"
         }
         BackendType::Webdav => "plugin.cloud_sync.placeholders.endpoint_webdav",
@@ -203,7 +213,11 @@ pub fn cloud_sync_endpoint_placeholder_key(backend: &BackendType) -> &'static st
 pub fn cloud_sync_namespace_label_key(backend: &BackendType) -> &'static str {
     if matches!(
         backend,
-        BackendType::Dropbox | BackendType::Git | BackendType::GithubGist | BackendType::OneDrive
+        BackendType::Dropbox
+            | BackendType::Git
+            | BackendType::GithubGist
+            | BackendType::OneDrive
+            | BackendType::GoogleDrive
     ) {
         "plugin.cloud_sync.settings.path_prefix"
     } else if matches!(backend, BackendType::S3) {

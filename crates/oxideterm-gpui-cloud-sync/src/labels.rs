@@ -27,6 +27,7 @@ pub fn cloud_sync_backend_label_key(backend: &BackendType) -> &'static str {
         BackendType::HttpJson => "plugin.cloud_sync.backend.http_json",
         BackendType::Dropbox => "plugin.cloud_sync.backend.dropbox",
         BackendType::OneDrive => "plugin.cloud_sync.backend.onedrive",
+        BackendType::GoogleDrive => "plugin.cloud_sync.backend.google_drive",
         BackendType::GithubGist => "plugin.cloud_sync.backend.github_gist",
         BackendType::S3 => "plugin.cloud_sync.backend.s3",
         BackendType::Git => "plugin.cloud_sync.backend.git",
@@ -114,6 +115,12 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         "missing_microsoft_refresh_token" => CloudSyncErrorMessageSpec::Key(
             "plugin.cloud_sync.errors.missing_microsoft_refresh_token",
         ),
+        "missing_google_oauth_client_id" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.missing_google_oauth_client_id",
+        ),
+        "missing_google_refresh_token" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_google_refresh_token")
+        }
         "http_unauthorized" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.http_unauthorized")
         }
@@ -177,6 +184,30 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         "onedrive_service_unavailable" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.onedrive_service_unavailable")
         }
+        "google_drive_bad_credentials" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_drive_bad_credentials")
+        }
+        "google_drive_missing_scope" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_drive_missing_scope")
+        }
+        "google_drive_access_denied" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_drive_access_denied")
+        }
+        "google_drive_bad_request" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_drive_bad_request")
+        }
+        "google_drive_api_not_enabled" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_drive_api_not_enabled")
+        }
+        "google_drive_rate_limited" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_drive_rate_limited")
+        }
+        "google_drive_quota_exceeded" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_drive_quota_exceeded")
+        }
+        "google_drive_service_unavailable" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.google_drive_service_unavailable",
+        ),
         "microsoft_oauth_expired" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.microsoft_oauth_expired")
         }
@@ -210,6 +241,45 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         "microsoft_oauth_empty_response" => CloudSyncErrorMessageSpec::Key(
             "plugin.cloud_sync.errors.microsoft_oauth_empty_response",
         ),
+        "google_oauth_denied" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_denied")
+        }
+        "google_oauth_admin_policy" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_admin_policy")
+        }
+        "google_oauth_bad_client" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_bad_client")
+        }
+        "google_oauth_missing_scope" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_missing_scope")
+        }
+        "google_oauth_consent_required" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_consent_required")
+        }
+        "google_oauth_invalid_request" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_invalid_request")
+        }
+        "google_oauth_start_failed" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_start_failed")
+        }
+        "google_oauth_redirect_failed" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_redirect_failed")
+        }
+        "google_oauth_exchange_failed" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_exchange_failed")
+        }
+        "google_oauth_refresh_failed" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_refresh_failed")
+        }
+        "google_oauth_empty_response" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_empty_response")
+        }
+        "google_oauth_invalid_state" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_invalid_state")
+        }
+        "google_oauth_timeout" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_timeout")
+        }
         "missing_s3_bucket" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_s3_bucket")
         }
@@ -297,6 +367,7 @@ pub fn cloud_sync_select_label_key(label: CloudSyncSelectLabelKey) -> &'static s
         CloudSyncSelectLabelKey::BackendHttpJson => "plugin.cloud_sync.backend.http_json",
         CloudSyncSelectLabelKey::BackendDropbox => "plugin.cloud_sync.backend.dropbox",
         CloudSyncSelectLabelKey::BackendOneDrive => "plugin.cloud_sync.backend.onedrive",
+        CloudSyncSelectLabelKey::BackendGoogleDrive => "plugin.cloud_sync.backend.google_drive",
         CloudSyncSelectLabelKey::BackendGithubGist => "plugin.cloud_sync.backend.github_gist",
         CloudSyncSelectLabelKey::BackendGit => "plugin.cloud_sync.backend.git",
         CloudSyncSelectLabelKey::BackendS3 => "plugin.cloud_sync.backend.s3",
@@ -411,6 +482,22 @@ mod tests {
             CloudSyncErrorMessageSpec::Key(
                 "plugin.cloud_sync.errors.microsoft_oauth_consent_required"
             )
+        );
+    }
+
+    #[test]
+    fn maps_google_drive_and_oauth_errors_to_copy_specs() {
+        assert_eq!(
+            cloud_sync_error_message_spec("google_drive_api_not_enabled: Drive API disabled"),
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_drive_api_not_enabled")
+        );
+        assert_eq!(
+            cloud_sync_error_message_spec("google_oauth_admin_policy: blocked by admin"),
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_admin_policy")
+        );
+        assert_eq!(
+            cloud_sync_error_message_spec("google_oauth_bad_client: wrong client type"),
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_bad_client")
         );
     }
 

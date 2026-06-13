@@ -63,13 +63,13 @@ use oxideterm_gpui_cloud_sync::{
     cloud_sync_status_row, cloud_sync_tab_bar, cloud_sync_tab_button, cloud_sync_toggle,
     cloud_sync_toggle_grid, cloud_sync_upload_diff_items, cloud_sync_upload_field_diff_items,
     cloud_sync_value_prefers_mono, cloud_sync_version_info_rows, deliver_cloud_sync_apply_preview,
-    deliver_cloud_sync_check, deliver_cloud_sync_github_oauth, deliver_cloud_sync_microsoft_oauth,
-    deliver_cloud_sync_pull_preview, deliver_cloud_sync_restore_backup_preview,
-    deliver_cloud_sync_upload, deliver_cloud_sync_upload_preview,
-    finish_cloud_sync_automatic_upload_error_state, finish_cloud_sync_check_state,
-    finish_cloud_sync_error_state, finish_cloud_sync_pull_preview_state,
-    finish_cloud_sync_upload_state, finish_legacy_cloud_sync_apply_state,
-    finish_structured_cloud_sync_apply_state,
+    deliver_cloud_sync_check, deliver_cloud_sync_github_oauth, deliver_cloud_sync_google_oauth,
+    deliver_cloud_sync_microsoft_oauth, deliver_cloud_sync_pull_preview,
+    deliver_cloud_sync_restore_backup_preview, deliver_cloud_sync_upload,
+    deliver_cloud_sync_upload_preview, finish_cloud_sync_automatic_upload_error_state,
+    finish_cloud_sync_check_state, finish_cloud_sync_error_state,
+    finish_cloud_sync_pull_preview_state, finish_cloud_sync_upload_state,
+    finish_legacy_cloud_sync_apply_state, finish_structured_cloud_sync_apply_state,
     handle_cloud_sync_select_key as reduce_cloud_sync_select_key,
     normalize_cloud_sync_interval_draft, persist_remote_metadata, reset_cloud_sync_secret_drafts,
     store_cloud_sync_touched_secrets,
@@ -712,6 +712,8 @@ impl WorkspaceApp {
         let github_oauth_disabled = busy || settings.github_oauth_client_id.trim().is_empty();
         let show_microsoft_oauth = matches!(settings.backend_type, BackendType::OneDrive);
         let microsoft_oauth_disabled = busy || settings.microsoft_oauth_client_id.trim().is_empty();
+        let show_google_oauth = matches!(settings.backend_type, BackendType::GoogleDrive);
+        let google_oauth_disabled = busy || settings.google_oauth_client_id.trim().is_empty();
 
         let mut card = self
             .cloud_sync_plugin_card(has_background)
@@ -799,6 +801,24 @@ impl WorkspaceApp {
                                          _window,
                                          cx: &mut Context<WorkspaceApp>| {
                                             this.start_cloud_sync_microsoft_oauth(cx);
+                                            this.clear_cloud_sync_select_focus();
+                                            cx.stop_propagation();
+                                        },
+                                    ),
+                                ))
+                            })
+                            .when(show_google_oauth, |toolbar| {
+                                toolbar.child(self.render_cloud_sync_toolbar_button(
+                                    LucideIcon::KeyRound,
+                                    "plugin.cloud_sync.actions.google_oauth_login",
+                                    CloudSyncActionTone::Muted,
+                                    google_oauth_disabled,
+                                    cx.listener(
+                                        |this: &mut WorkspaceApp,
+                                         _event,
+                                         _window,
+                                         cx: &mut Context<WorkspaceApp>| {
+                                            this.start_cloud_sync_google_oauth(cx);
                                             this.clear_cloud_sync_select_focus();
                                             cx.stop_propagation();
                                         },
@@ -3896,17 +3916,7 @@ impl WorkspaceApp {
                     trigger,
                     move |anchor, _window, cx| {
                         let _ = workspace.update(cx, |this, cx| {
-                            if this.cloud_sync_open_select != Some(select) {
-                                return;
-                            }
-                            let changed = this
-                                .select_anchors
-                                .get(&anchor_id)
-                                .map_or(true, |previous| previous.bounds != anchor.bounds);
-                            if changed {
-                                this.select_anchors.insert(anchor_id, anchor);
-                                cx.notify();
-                            }
+                            this.update_select_anchor(anchor, cx);
                         });
                     },
                 ))
@@ -4404,6 +4414,39 @@ impl WorkspaceApp {
         self.schedule_cloud_sync_poll(cx);
         self.forwarding_runtime
             .spawn(deliver_cloud_sync_microsoft_oauth(tx, client_id, hints));
+    }
+
+    fn start_cloud_sync_google_oauth(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_sync_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress();
+            return;
+        }
+        self.save_cloud_sync_configuration(cx);
+        let client_id = self
+            .cloud_sync_store
+            .state()
+            .settings
+            .google_oauth_client_id
+            .trim()
+            .to_string();
+        if client_id.is_empty() {
+            self.finish_cloud_sync_error(
+                "google_oauth",
+                "missing_google_oauth_client_id: Google OAuth client ID is not configured"
+                    .to_string(),
+            );
+            return;
+        }
+        self.cloud_sync_store.state_mut().status = CloudSyncStatus::Checking;
+        self.cloud_sync_store.state_mut().last_error = None;
+        self.save_cloud_sync_state();
+        let hints = self.cloud_sync_store.state().secret_hints.clone();
+        let (tx, rx) = mpsc::channel();
+        self.cloud_sync_rx = Some(rx);
+        self.cloud_sync_active_action = Some("google_oauth");
+        self.schedule_cloud_sync_poll(cx);
+        self.forwarding_runtime
+            .spawn(deliver_cloud_sync_google_oauth(tx, client_id, hints));
     }
 
     fn start_cloud_sync_check_with_options(&mut self, skip_if_busy: bool, cx: &mut Context<Self>) {
@@ -4936,6 +4979,25 @@ impl WorkspaceApp {
                     Err(error) => self.finish_cloud_sync_error("microsoft_oauth", error),
                 }
             }
+            CloudSyncDelivery::GoogleOauthUrl(prompt) => {
+                cx.open_url(&prompt.authorization_url);
+                self.push_cloud_sync_toast(
+                    self.i18n
+                        .t("plugin.cloud_sync.toast.google_oauth_url_title"),
+                    Some(self.i18n_replace(
+                        "plugin.cloud_sync.toast.google_oauth_url_description",
+                        &[("seconds", prompt.expires_in.to_string())],
+                    )),
+                    TerminalNoticeVariant::Default,
+                );
+            }
+            CloudSyncDelivery::GoogleOauthFinished(action) => {
+                self.cloud_sync_store.state_mut().secret_hints = action.secret_hints;
+                match action.result {
+                    Ok(()) => self.finish_cloud_sync_google_oauth(),
+                    Err(error) => self.finish_cloud_sync_error("google_oauth", error),
+                }
+            }
         }
     }
 
@@ -5028,6 +5090,23 @@ impl WorkspaceApp {
         self.push_cloud_sync_toast(
             self.i18n
                 .t("plugin.cloud_sync.toast.microsoft_oauth_success_title"),
+            None,
+            TerminalNoticeVariant::Success,
+        );
+    }
+
+    fn finish_cloud_sync_google_oauth(&mut self) {
+        self.cloud_sync_progress = None;
+        // Google OAuth tokens are persisted by the delivery task into the
+        // keychain; clear the generic token draft so UI memory does not retain it.
+        self.cloud_sync_form.token.clear();
+        self.cloud_sync_form.token_touched = false;
+        self.cloud_sync_store.state_mut().last_error = None;
+        self.cloud_sync_store.state_mut().status = CloudSyncStatus::Idle;
+        self.save_cloud_sync_state();
+        self.push_cloud_sync_toast(
+            self.i18n
+                .t("plugin.cloud_sync.toast.google_oauth_success_title"),
             None,
             TerminalNoticeVariant::Success,
         );
@@ -5329,6 +5408,7 @@ impl WorkspaceApp {
             ),
             "github_oauth" => Some("plugin.cloud_sync.toast.github_oauth_failed_title"),
             "microsoft_oauth" => Some("plugin.cloud_sync.toast.microsoft_oauth_failed_title"),
+            "google_oauth" => Some("plugin.cloud_sync.toast.google_oauth_failed_title"),
             _ => None,
         };
         if let Some(title_key) = title_key {

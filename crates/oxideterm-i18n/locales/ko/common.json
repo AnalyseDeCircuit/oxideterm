@@ -176,7 +176,8 @@
         "git": "Git 저장소",
         "s3": "S3 호환 스토리지",
         "github_gist": "GitHub Gist",
-        "onedrive": "OneDrive"
+        "onedrive": "OneDrive",
+        "google_drive": "Google Drive"
       },
       "status": {
         "ready": "동기화 준비 완료",
@@ -203,7 +204,8 @@
         "saving": "저장 중...",
         "enable_sensitive_sync": "민감 동기화 켜기",
         "github_oauth_login": "GitHub 로그인",
-        "microsoft_oauth_login": "Microsoft 로그인"
+        "microsoft_oauth_login": "Microsoft 로그인",
+        "google_oauth_login": "Google 로그인"
       },
       "fields": {
         "backend": "백엔드",
@@ -276,7 +278,19 @@
         "onedrive_example_public_client": "Authentication > Advanced settings > Allow public client flows: Yes.",
         "onedrive_example_storage_label": "저장 경로",
         "onedrive_example_storage": "/me/drive/special/approot/metadata.json 및 /objects/*.oxide",
-        "onedrive_permission_warning": "Microsoft가 invalid_scope, consent_required 또는 insufficient privileges를 반환하면 API 권한, 동의, 지원 계정 유형, public client flow 설정을 다시 확인하세요."
+        "onedrive_permission_warning": "Microsoft가 invalid_scope, consent_required 또는 insufficient privileges를 반환하면 API 권한, 동의, 지원 계정 유형, public client flow 설정을 다시 확인하세요.",
+        "backend_google_drive": "Google Drive는 숨겨진 Drive appDataFolder와 drive.appdata 범위를 사용합니다. 데스크톱 OAuth 클라이언트 ID로 로그인하면 OxideTerm이 metadata.json과 평면 objects__*.oxide 파일을 씁니다.",
+        "google_drive_title": "Google Drive 앱 데이터 설정",
+        "google_drive_description": "Google OAuth 데스크톱 클라이언트를 만들고 Drive API를 활성화한 뒤 동의 화면을 구성하고 클라이언트 ID를 여기에 붙여 넣으세요. OxideTerm은 drive.appdata만 요청하며 암호화된 동기화 객체를 숨겨진 앱 데이터 폴더에 저장합니다.",
+        "google_drive_example_client_type_label": "OAuth 클라이언트 유형",
+        "google_drive_example_client_type": "Google Cloud Console > 사용자 인증 정보 > OAuth 클라이언트 ID > 데스크톱 앱. 웹 클라이언트는 localhost 리디렉션에서 실패합니다.",
+        "google_drive_example_scope_label": "Drive 범위",
+        "google_drive_example_scope": "https://www.googleapis.com/auth/drive.appdata만 사용하세요. 전체 Drive 범위는 피하세요.",
+        "google_drive_example_api_label": "API 설정",
+        "google_drive_example_api": "Google Drive API를 활성화하고 사용할 계정에 대해 OAuth 동의 화면을 게시하거나 테스트 사용자에 추가하세요.",
+        "google_drive_example_storage_label": "저장 이름",
+        "google_drive_example_storage": "appDataFolder: metadata.json 및 objects__<hash>.oxide",
+        "google_drive_permission_warning": "Google이 access_denied, admin_policy_enforced, invalid_client 또는 Drive API 미활성화를 보고하면 동의 화면, 데스크톱 클라이언트 유형, API 상태, 관리자 정책, 테스트 사용자를 확인하세요."
       },
       "settings": {
         "backend_type": "백엔드 유형",
@@ -313,7 +327,8 @@
         "github_access_token": "GitHub 액세스 토큰",
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth 클라이언트 ID",
-        "microsoft_access_token": "Microsoft 액세스 토큰"
+        "microsoft_access_token": "Microsoft 액세스 토큰",
+        "google_oauth_client_id": "Google OAuth 클라이언트 ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -361,7 +376,8 @@
         "backend_git": "Git 백엔드는 GitHub Contents API 호환 인터페이스를 사용합니다. Endpoint에 API 루트를, 저장소에 owner/repo를, 브랜치에 대상 브랜치를, Namespace에 저장소 내 선택적 폴더 경로를 지정합니다.",
         "backend_s3": "S3 호환 백엔드는 Endpoint를 서비스 루트로, Bucket을 컨테이너로, Namespace를 선택적 오브젝트 접두사로 사용합니다.",
         "backend_github_gist": "GitHub Gist는 기존 Gist 안에 OxideTerm 동기화 객체를 인코딩된 파일로 저장합니다. Gist ID와 gist 권한이 있는 GitHub token을 입력하세요. Namespace는 파일 이름 접두사로 사용됩니다.",
-        "backend_onedrive": "OneDrive는 Microsoft Graph 앱 폴더를 사용하며 Microsoft 디바이스 로그인이 필요합니다. 파일은 앱 폴더의 metadata.json 및 objects/*.oxide에 격리되어 저장됩니다."
+        "backend_onedrive": "OneDrive는 Microsoft Graph 앱 폴더를 사용하며 Microsoft 디바이스 로그인이 필요합니다. 파일은 앱 폴더의 metadata.json 및 objects/*.oxide에 격리되어 저장됩니다.",
+        "backend_google_drive": "Google Drive는 숨겨진 appDataFolder와 PKCE 기반 데스크톱 OAuth를 사용합니다. 파일은 metadata.json 및 objects__*.oxide로 격리되며 전체 Drive 접근은 요청하지 않습니다."
       },
       "backup": {
         "description": "Oxide 클라우드 동기화 롤백 백업",
@@ -428,7 +444,30 @@
         "onedrive_service_unavailable": "Microsoft Graph 또는 OneDrive를 일시적으로 사용할 수 없습니다. 나중에 다시 시도하세요.",
         "microsoft_oauth_missing_scope": "Microsoft가 요청한 scope를 거부했습니다. 앱 등록에 Files.ReadWrite.AppFolder를 추가하고 다시 동의하세요.",
         "microsoft_oauth_consent_required": "Microsoft가 이 앱에 대한 사용자 또는 관리자 동의를 요구합니다. 동의한 뒤 로그인을 다시 시작하세요.",
-        "microsoft_oauth_invalid_request": "Microsoft가 OAuth 요청을 거부했습니다. 클라이언트 ID와 디바이스 흐름 앱 설정을 확인하세요."
+        "microsoft_oauth_invalid_request": "Microsoft가 OAuth 요청을 거부했습니다. 클라이언트 ID와 디바이스 흐름 앱 설정을 확인하세요.",
+        "missing_google_oauth_client_id": "브라우저 로그인을 시작하기 전에 Google OAuth 클라이언트 ID를 설정하세요.",
+        "missing_google_refresh_token": "Google refresh token이 없습니다. Google Drive에 다시 로그인하세요.",
+        "google_drive_bad_credentials": "Google Drive가 액세스 토큰을 거부했습니다. 다시 로그인하세요.",
+        "google_drive_missing_scope": "Google 토큰에 drive.appdata 범위가 없거나 앱이 자신의 앱 데이터 폴더에 접근할 수 없습니다.",
+        "google_drive_access_denied": "Google Drive가 앱 데이터 폴더 접근을 거부했습니다. 계정 정책과 OAuth 동의를 확인하세요.",
+        "google_drive_bad_request": "Google Drive가 요청을 거부했습니다. appDataFolder 저장 설정을 확인하세요.",
+        "google_drive_api_not_enabled": "이 OAuth 프로젝트에서 Google Drive API가 활성화되어 있지 않습니다. Google Cloud Console에서 활성화한 뒤 다시 시도하세요.",
+        "google_drive_rate_limited": "Google Drive 속도 제한에 도달했습니다. 잠시 후 다시 시도하세요.",
+        "google_drive_quota_exceeded": "동기화 객체에 대한 Google Drive 할당량 또는 저장소 제한에 도달했습니다.",
+        "google_drive_service_unavailable": "Google Drive를 일시적으로 사용할 수 없습니다. 나중에 다시 시도하세요.",
+        "google_oauth_denied": "Google 로그인이 거부되었습니다.",
+        "google_oauth_admin_policy": "Google Workspace 관리자 정책이 이 앱을 차단했습니다. 관리자에게 허용을 요청하거나 다른 계정을 사용하세요.",
+        "google_oauth_bad_client": "Google OAuth 클라이언트 ID가 잘못되었거나 데스크톱 앱 클라이언트가 아닙니다.",
+        "google_oauth_missing_scope": "Google이 요청한 범위를 거부했습니다. drive.appdata 동의를 구성하고 다시 로그인하세요.",
+        "google_oauth_consent_required": "Google이 이 앱에 대한 사용자 동의를 요구합니다. 동의 화면을 구성하고 다시 로그인하세요.",
+        "google_oauth_invalid_request": "Google이 OAuth 요청을 거부했습니다. 클라이언트 ID, redirect URI, 데스크톱 앱 설정을 확인하세요.",
+        "google_oauth_start_failed": "Google 브라우저 로그인을 시작하지 못했습니다.",
+        "google_oauth_redirect_failed": "Google OAuth localhost 리디렉션을 받지 못했습니다. 로컬 방화벽이나 브라우저 제한을 확인하세요.",
+        "google_oauth_exchange_failed": "Google이 인증 코드 교환을 거부했습니다. 다시 로그인하세요.",
+        "google_oauth_refresh_failed": "Google refresh token을 갱신할 수 없습니다. 다시 로그인하세요.",
+        "google_oauth_empty_response": "Google이 필요한 OAuth 토큰을 반환하지 않았습니다.",
+        "google_oauth_invalid_state": "Google OAuth state가 일치하지 않습니다. 다시 로그인하세요.",
+        "google_oauth_timeout": "Google 로그인이 시간 초과되었습니다. 다시 로그인하세요."
       },
       "toast": {
         "check_failed_title": "원격 확인 실패",
@@ -454,7 +493,11 @@
         "microsoft_oauth_code_title": "Microsoft 로그인을 시작했습니다",
         "microsoft_oauth_code_description": "{{seconds}}초 안에 {{url}}에서 코드 {{code}}를 입력하세요. 확인 페이지를 열었습니다.",
         "microsoft_oauth_success_title": "Microsoft token이 저장되었습니다",
-        "microsoft_oauth_failed_title": "Microsoft 로그인 실패"
+        "microsoft_oauth_failed_title": "Microsoft 로그인 실패",
+        "google_oauth_url_title": "Google 로그인이 열렸습니다",
+        "google_oauth_url_description": "{{seconds}}초 안에 브라우저 로그인을 완료하세요. OxideTerm이 localhost 리디렉션을 기다립니다.",
+        "google_oauth_success_title": "Google 토큰 저장됨",
+        "google_oauth_failed_title": "Google 로그인 실패"
       },
       "progress": {
         "checking": "원격 스냅샷 확인 중",
@@ -557,7 +600,8 @@
         "gist_id": "Gist ID 또는 https://gist.github.com/...",
         "github_access_token": "gist 권한이 있는 GitHub token",
         "github_oauth_client_id": "기기 로그인을 위한 OAuth App client ID",
-        "microsoft_oauth_client_id": "Microsoft Entra 앱 클라이언트 ID"
+        "microsoft_oauth_client_id": "Microsoft Entra 앱 클라이언트 ID",
+        "google_oauth_client_id": "Google 데스크톱 OAuth 클라이언트 ID"
       },
       "history_empty": "아직 동기화 기록이 없습니다.",
       "native_description": "OxideTerm용 암호화된 자체 호스팅 동기화입니다.",

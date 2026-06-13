@@ -104,6 +104,11 @@ pub fn run(command: CloudSyncCommand) -> CliResult<()> {
                     configure_backend(CloudSyncBackendArg::OneDrive, args)
                 }
             },
+            CloudSyncBackendAction::GoogleDrive(command) => match command.action {
+                CloudSyncBackendConfigureAction::Configure(args) => {
+                    configure_backend(CloudSyncBackendArg::GoogleDrive, args)
+                }
+            },
             CloudSyncBackendAction::GithubGist(command) => match command.action {
                 CloudSyncBackendConfigureAction::Configure(args) => {
                     configure_backend(CloudSyncBackendArg::GithubGist, args)
@@ -197,6 +202,7 @@ fn validate_backend_configure_args(
         CloudSyncBackendArg::HttpJson
         | CloudSyncBackendArg::Dropbox
         | CloudSyncBackendArg::OneDrive
+        | CloudSyncBackendArg::GoogleDrive
         | CloudSyncBackendArg::GithubGist => Ok(()),
     }
 }
@@ -252,6 +258,7 @@ fn apply_configure_args(settings: &mut CloudSyncSettings, args: &CloudSyncConfig
             CloudSyncBackendArg::HttpJson => BackendType::HttpJson,
             CloudSyncBackendArg::Dropbox => BackendType::Dropbox,
             CloudSyncBackendArg::OneDrive => BackendType::OneDrive,
+            CloudSyncBackendArg::GoogleDrive => BackendType::GoogleDrive,
             CloudSyncBackendArg::GithubGist => BackendType::GithubGist,
             CloudSyncBackendArg::S3 => BackendType::S3,
             CloudSyncBackendArg::Git => BackendType::Git,
@@ -277,6 +284,10 @@ fn apply_configure_args(settings: &mut CloudSyncSettings, args: &CloudSyncConfig
     assign_optional_string(
         &mut settings.microsoft_oauth_client_id,
         &args.microsoft_oauth_client_id,
+    );
+    assign_optional_string(
+        &mut settings.google_oauth_client_id,
+        &args.google_oauth_client_id,
     );
     if let Some(enabled) = args.auto_upload_enabled {
         settings.auto_upload_enabled = enabled;
@@ -385,6 +396,12 @@ fn cloud_sync_configure_changes(
         "microsoftOauthClientId",
         before.microsoft_oauth_client_id.clone(),
         after.microsoft_oauth_client_id.clone(),
+    );
+    push_configure_change(
+        &mut changes,
+        "googleOauthClientId",
+        before.google_oauth_client_id.clone(),
+        after.google_oauth_client_id.clone(),
     );
     push_configure_change(
         &mut changes,

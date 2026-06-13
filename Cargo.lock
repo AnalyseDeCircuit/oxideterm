@@ -7401,6 +7401,7 @@ dependencies = [
  "oxideterm-portable-runtime",
  "oxideterm-quick-commands",
  "oxideterm-settings",
+ "rand 0.8.6",
  "reqwest",
  "serde",
  "serde_json",
@@ -7628,6 +7629,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

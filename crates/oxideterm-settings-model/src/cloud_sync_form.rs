@@ -24,6 +24,7 @@ pub struct CloudSyncFormDraft {
     pub git_branch: String,
     pub github_oauth_client_id: String,
     pub microsoft_oauth_client_id: String,
+    pub google_oauth_client_id: String,
     pub auto_upload_enabled: bool,
     pub auto_upload_interval_mins: String,
     pub default_conflict_strategy: ConflictStrategy,
@@ -61,6 +62,7 @@ impl fmt::Debug for CloudSyncFormDraft {
             .field("git_branch", &self.git_branch)
             .field("github_oauth_client_id", &self.github_oauth_client_id)
             .field("microsoft_oauth_client_id", &self.microsoft_oauth_client_id)
+            .field("google_oauth_client_id", &self.google_oauth_client_id)
             .field("auto_upload_enabled", &self.auto_upload_enabled)
             .field("auto_upload_interval_mins", &self.auto_upload_interval_mins)
             .field("default_conflict_strategy", &self.default_conflict_strategy)
@@ -104,6 +106,7 @@ impl CloudSyncFormDraft {
             git_branch: settings.git_branch.clone(),
             github_oauth_client_id: settings.github_oauth_client_id.clone(),
             microsoft_oauth_client_id: settings.microsoft_oauth_client_id.clone(),
+            google_oauth_client_id: settings.google_oauth_client_id.clone(),
             auto_upload_enabled: settings.auto_upload_enabled,
             auto_upload_interval_mins: settings.auto_upload_interval_mins.to_string(),
             default_conflict_strategy: settings.default_conflict_strategy.clone(),
@@ -142,6 +145,7 @@ pub fn cloud_sync_form_input_value(
         SettingsInput::CloudSyncMicrosoftOauthClientId => {
             Some(form.microsoft_oauth_client_id.clone())
         }
+        SettingsInput::CloudSyncGoogleOauthClientId => Some(form.google_oauth_client_id.clone()),
         SettingsInput::CloudSyncToken => Some(form.token.clone()),
         SettingsInput::CloudSyncGitToken => Some(form.git_token.clone()),
         SettingsInput::CloudSyncBasicUsername => Some(form.basic_username.clone()),
@@ -172,6 +176,9 @@ pub fn apply_cloud_sync_form_input_draft(
         }
         SettingsInput::CloudSyncMicrosoftOauthClientId => {
             form.microsoft_oauth_client_id = draft.to_string();
+        }
+        SettingsInput::CloudSyncGoogleOauthClientId => {
+            form.google_oauth_client_id = draft.to_string();
         }
         SettingsInput::CloudSyncAutoUploadInterval => {
             form.auto_upload_interval_mins = draft.to_string();

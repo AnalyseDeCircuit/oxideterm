@@ -168,7 +168,8 @@
         "git": "Git 仓库",
         "s3": "S3 兼容对象存储",
         "github_gist": "GitHub Gist",
-        "onedrive": "OneDrive"
+        "onedrive": "OneDrive",
+        "google_drive": "Google Drive"
       },
       "status": {
         "ready": "同步就绪",
@@ -195,7 +196,8 @@
         "saving": "保存中...",
         "enable_sensitive_sync": "启用敏感同步",
         "github_oauth_login": "GitHub 登录",
-        "microsoft_oauth_login": "Microsoft 登录"
+        "microsoft_oauth_login": "Microsoft 登录",
+        "google_oauth_login": "Google 登录"
       },
       "fields": {
         "backend": "后端类型",
@@ -268,7 +270,19 @@
         "onedrive_example_public_client": "Authentication > Advanced settings > Allow public client flows：Yes。",
         "onedrive_example_storage_label": "存储路径",
         "onedrive_example_storage": "/me/drive/special/approot/metadata.json 和 /objects/*.oxide",
-        "onedrive_permission_warning": "如果 Microsoft 返回 invalid_scope、consent_required 或 insufficient privileges，请检查 API 权限、授权同意、支持的账号类型和 public client flow 设置。"
+        "onedrive_permission_warning": "如果 Microsoft 返回 invalid_scope、consent_required 或 insufficient privileges，请检查 API 权限、授权同意、支持的账号类型和 public client flow 设置。",
+        "backend_google_drive": "Google Drive 使用隐藏的 Drive appDataFolder 和 drive.appdata scope。使用桌面 OAuth Client ID 登录；OxideTerm 写入 metadata.json 和扁平的 objects__*.oxide 文件。",
+        "google_drive_title": "Google Drive 应用数据设置",
+        "google_drive_description": "创建 Google OAuth 桌面客户端，启用 Drive API，配置同意屏幕，然后在这里填入 Client ID。OxideTerm 只请求 drive.appdata，并把加密同步对象存到隐藏的应用数据文件夹。",
+        "google_drive_example_client_type_label": "OAuth 客户端类型",
+        "google_drive_example_client_type": "Google Cloud Console > 凭据 > OAuth 客户端 ID > 桌面应用。Web 客户端无法完成 localhost 回调。",
+        "google_drive_example_scope_label": "Drive scope",
+        "google_drive_example_scope": "仅使用 https://www.googleapis.com/auth/drive.appdata。不要使用完整 Drive scope。",
+        "google_drive_example_api_label": "API 设置",
+        "google_drive_example_api": "启用 Google Drive API，并为当前账号发布或加入 OAuth 同意屏幕测试用户。",
+        "google_drive_example_storage_label": "存储文件名",
+        "google_drive_example_storage": "appDataFolder: metadata.json 和 objects__<hash>.oxide",
+        "google_drive_permission_warning": "如果 Google 报 access_denied、admin_policy_enforced、invalid_client 或 Drive API 未启用，请检查同意屏幕、桌面客户端类型、API 状态、管理员策略和测试用户。"
       },
       "settings": {
         "backend_type": "后端类型",
@@ -305,7 +319,8 @@
         "github_access_token": "GitHub 访问令牌",
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth Client ID",
-        "microsoft_access_token": "Microsoft 访问令牌"
+        "microsoft_access_token": "Microsoft 访问令牌",
+        "google_oauth_client_id": "Google OAuth Client ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -353,7 +368,8 @@
         "backend_git": "Git 后端使用兼容 GitHub Contents API 的接口。Endpoint 填 API 根地址，仓库填 owner/repo，分支填目标分支，命名空间则作为仓库内的可选文件夹前缀。",
         "backend_s3": "S3 兼容后端会把 endpoint 当作服务根地址，bucket 当作容器，命名空间则作为可选对象前缀。",
         "backend_github_gist": "GitHub Gist 会把 OxideTerm 同步对象作为编码后的文件存放在已有 Gist 中。填写 Gist ID，并提供带 gist 权限的 GitHub token；命名空间会作为文件名前缀使用。",
-        "backend_onedrive": "OneDrive 使用 Microsoft Graph 应用文件夹并需要 Microsoft 设备登录。文件会隔离存放在应用文件夹下的 metadata.json 和 objects/*.oxide。"
+        "backend_onedrive": "OneDrive 使用 Microsoft Graph 应用文件夹并需要 Microsoft 设备登录。文件会隔离存放在应用文件夹下的 metadata.json 和 objects/*.oxide。",
+        "backend_google_drive": "Google Drive 使用隐藏 appDataFolder 和带 PKCE 的桌面 OAuth。文件隔离为 metadata.json 与 objects__*.oxide；不会请求完整 Drive 访问权限。"
       },
       "backup": {
         "description": "Oxide 云同步回滚备份",
@@ -420,7 +436,30 @@
         "onedrive_service_unavailable": "Microsoft Graph 或 OneDrive 暂时不可用。请稍后重试。",
         "microsoft_oauth_missing_scope": "Microsoft 拒绝了请求的 scope。请在应用注册中加入 Files.ReadWrite.AppFolder 并重新授权。",
         "microsoft_oauth_consent_required": "Microsoft 要求用户或管理员同意此应用。请完成授权同意后重新登录。",
-        "microsoft_oauth_invalid_request": "Microsoft 拒绝了 OAuth 请求。请检查 Client ID 和设备流程应用配置。"
+        "microsoft_oauth_invalid_request": "Microsoft 拒绝了 OAuth 请求。请检查 Client ID 和设备流程应用配置。",
+        "missing_google_oauth_client_id": "请先配置 Google OAuth Client ID，再启动浏览器登录。",
+        "missing_google_refresh_token": "缺少 Google refresh token。请重新登录 Google Drive。",
+        "google_drive_bad_credentials": "Google Drive 拒绝了访问令牌。请重新登录。",
+        "google_drive_missing_scope": "Google token 缺少 drive.appdata scope，或应用无法访问自己的应用数据文件夹。",
+        "google_drive_access_denied": "Google Drive 拒绝访问应用数据文件夹。请检查账号策略和 OAuth 同意。",
+        "google_drive_bad_request": "Google Drive 拒绝了请求。请检查 appDataFolder 存储配置。",
+        "google_drive_api_not_enabled": "此 OAuth 项目尚未启用 Google Drive API。请在 Google Cloud Console 中启用后重试。",
+        "google_drive_rate_limited": "已触发 Google Drive 速率限制。请稍后重试。",
+        "google_drive_quota_exceeded": "Google Drive 配额或存储限制不足，无法保存同步对象。",
+        "google_drive_service_unavailable": "Google Drive 暂时不可用。请稍后重试。",
+        "google_oauth_denied": "Google 登录已被拒绝。",
+        "google_oauth_admin_policy": "Google Workspace 管理员策略阻止了此应用。请联系管理员放行，或使用其他账号。",
+        "google_oauth_bad_client": "Google OAuth Client ID 无效，或不是桌面应用客户端。",
+        "google_oauth_missing_scope": "Google 拒绝了请求的 scope。请为 drive.appdata 配置同意屏幕后重新登录。",
+        "google_oauth_consent_required": "Google 需要用户同意此应用。请配置同意屏幕后重新登录。",
+        "google_oauth_invalid_request": "Google 拒绝了 OAuth 请求。请检查 Client ID、redirect URI 和桌面应用配置。",
+        "google_oauth_start_failed": "启动 Google 浏览器登录失败。",
+        "google_oauth_redirect_failed": "未能收到 Google OAuth localhost 回调。请检查本机防火墙或浏览器限制。",
+        "google_oauth_exchange_failed": "Google 拒绝了授权码交换。请重新登录。",
+        "google_oauth_refresh_failed": "Google refresh token 无法续期。请重新登录。",
+        "google_oauth_empty_response": "Google 未返回所需的 OAuth token。",
+        "google_oauth_invalid_state": "Google OAuth state 不匹配。请重新登录。",
+        "google_oauth_timeout": "Google 登录超时。请重新登录。"
       },
       "toast": {
         "check_failed_title": "检查远端失败",
@@ -446,7 +485,11 @@
         "microsoft_oauth_code_title": "Microsoft 登录已开始",
         "microsoft_oauth_code_description": "请在 {{seconds}} 秒内到 {{url}} 输入代码 {{code}}。验证页面已打开。",
         "microsoft_oauth_success_title": "Microsoft token 已保存",
-        "microsoft_oauth_failed_title": "Microsoft 登录失败"
+        "microsoft_oauth_failed_title": "Microsoft 登录失败",
+        "google_oauth_url_title": "已打开 Google 登录",
+        "google_oauth_url_description": "请在 {{seconds}} 秒内完成浏览器登录。OxideTerm 正在等待 localhost 回调。",
+        "google_oauth_success_title": "Google token 已保存",
+        "google_oauth_failed_title": "Google 登录失败"
       },
       "progress": {
         "checking": "正在检查远端快照",
@@ -549,7 +592,8 @@
         "gist_id": "Gist ID 或 https://gist.github.com/...",
         "github_access_token": "带 gist 权限的 GitHub token",
         "github_oauth_client_id": "用于设备登录的 OAuth App client ID",
-        "microsoft_oauth_client_id": "Microsoft Entra 应用 Client ID"
+        "microsoft_oauth_client_id": "Microsoft Entra 应用 Client ID",
+        "google_oauth_client_id": "Google 桌面 OAuth Client ID"
       },
       "native_description": "用于 OxideTerm 的加密自托管同步。",
       "native_service_pending": "正在将内置同步服务连接到兼容层。",

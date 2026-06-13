@@ -176,7 +176,8 @@
         "git": "Repository Git",
         "s3": "Compatibile S3",
         "github_gist": "GitHub Gist",
-        "onedrive": "OneDrive"
+        "onedrive": "OneDrive",
+        "google_drive": "Google Drive"
       },
       "status": {
         "ready": "Sincronizzazione pronta",
@@ -203,7 +204,8 @@
         "saving": "Salvataggio...",
         "enable_sensitive_sync": "Attiva sincronizzazione sensibile",
         "github_oauth_login": "Accesso GitHub",
-        "microsoft_oauth_login": "Accesso Microsoft"
+        "microsoft_oauth_login": "Accesso Microsoft",
+        "google_oauth_login": "Accesso Google"
       },
       "fields": {
         "backend": "Backend",
@@ -276,7 +278,19 @@
         "onedrive_example_public_client": "Authentication > Advanced settings > Allow public client flows: Yes.",
         "onedrive_example_storage_label": "Percorsi di archiviazione",
         "onedrive_example_storage": "/me/drive/special/approot/metadata.json e /objects/*.oxide",
-        "onedrive_permission_warning": "Se Microsoft segnala invalid_scope, consent_required o insufficient privileges, ricontrolla permessi API, consenso, tipi di account supportati e impostazioni del public client flow."
+        "onedrive_permission_warning": "Se Microsoft segnala invalid_scope, consent_required o insufficient privileges, ricontrolla permessi API, consenso, tipi di account supportati e impostazioni del public client flow.",
+        "backend_google_drive": "Google Drive usa la cartella nascosta appDataFolder di Drive con lo scope drive.appdata. Accedi con un ID client OAuth desktop; OxideTerm scrive metadata.json e file piatti objects__*.oxide.",
+        "google_drive_title": "Configurazione dati app Google Drive",
+        "google_drive_description": "Crea un client OAuth Google per applicazione desktop, abilita Drive API, configura la schermata di consenso e incolla qui l’ID client. OxideTerm richiede solo drive.appdata e conserva gli oggetti di sincronizzazione cifrati nella cartella dati app nascosta.",
+        "google_drive_example_client_type_label": "Tipo client OAuth",
+        "google_drive_example_client_type": "Google Cloud Console > Credenziali > ID client OAuth > App desktop. I client Web non completano il reindirizzamento localhost.",
+        "google_drive_example_scope_label": "Scope Drive",
+        "google_drive_example_scope": "Solo https://www.googleapis.com/auth/drive.appdata. Evita gli scope Drive completi.",
+        "google_drive_example_api_label": "Configurazione API",
+        "google_drive_example_api": "Abilita Google Drive API e pubblica o testa la schermata di consenso OAuth per l’account usato.",
+        "google_drive_example_storage_label": "Nomi di archiviazione",
+        "google_drive_example_storage": "appDataFolder: metadata.json e objects__<hash>.oxide",
+        "google_drive_permission_warning": "Se Google segnala access_denied, admin_policy_enforced, invalid_client o Drive API non abilitata, controlla schermata di consenso, tipo client desktop, stato API, criteri amministratore e utenti di test."
       },
       "settings": {
         "backend_type": "Tipo di backend",
@@ -313,7 +327,8 @@
         "github_access_token": "Token di accesso GitHub",
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "ID client OAuth Microsoft",
-        "microsoft_access_token": "Token di accesso Microsoft"
+        "microsoft_access_token": "Token di accesso Microsoft",
+        "google_oauth_client_id": "ID client OAuth Google"
       },
       "auth": {
         "bearer": "Bearer",
@@ -361,7 +376,8 @@
         "backend_git": "Git utilizza un endpoint compatibile con GitHub Contents API. Imposta l'Endpoint alla radice dell'API, il Repository su owner/repo, il Branch sul ramo di destinazione e il Namespace come percorso cartella opzionale all'interno del repository.",
         "backend_s3": "S3 Compatible utilizza l'endpoint come radice del servizio, il bucket come contenitore e il namespace come prefisso oggetto opzionale.",
         "backend_github_gist": "GitHub Gist archivia gli oggetti di sincronizzazione OxideTerm come file codificati dentro un Gist esistente. Inserisci l’ID Gist e un token GitHub con accesso gist; il Namespace viene usato come prefisso del nome file.",
-        "backend_onedrive": "OneDrive usa la cartella applicazione di Microsoft Graph e richiede l’accesso dispositivo Microsoft. I file restano isolati come metadata.json e objects/*.oxide."
+        "backend_onedrive": "OneDrive usa la cartella applicazione di Microsoft Graph e richiede l’accesso dispositivo Microsoft. I file restano isolati come metadata.json e objects/*.oxide.",
+        "backend_google_drive": "Google Drive usa appDataFolder nascosta e OAuth desktop con PKCE. I file sono isolati come metadata.json e objects__*.oxide; non viene richiesto l’accesso completo a Drive."
       },
       "backup": {
         "description": "Backup di ripristino Oxide Cloud Sync",
@@ -428,7 +444,30 @@
         "onedrive_service_unavailable": "Microsoft Graph o OneDrive non è temporaneamente disponibile. Riprova più tardi.",
         "microsoft_oauth_missing_scope": "Microsoft ha rifiutato lo scope richiesto. Aggiungi Files.ReadWrite.AppFolder alla registrazione app e concedi di nuovo il consenso.",
         "microsoft_oauth_consent_required": "Microsoft richiede il consenso dell’utente o dell’amministratore per questa app. Concedilo e avvia di nuovo l’accesso.",
-        "microsoft_oauth_invalid_request": "Microsoft ha rifiutato la richiesta OAuth. Ricontrolla ID client e configurazione del flusso dispositivo."
+        "microsoft_oauth_invalid_request": "Microsoft ha rifiutato la richiesta OAuth. Ricontrolla ID client e configurazione del flusso dispositivo.",
+        "missing_google_oauth_client_id": "Configura un ID client OAuth Google prima di avviare l’accesso nel browser.",
+        "missing_google_refresh_token": "Manca il refresh token Google. Accedi di nuovo a Google Drive.",
+        "google_drive_bad_credentials": "Google Drive ha rifiutato il token di accesso. Accedi di nuovo.",
+        "google_drive_missing_scope": "Al token Google manca lo scope drive.appdata, oppure l’app non può accedere alla propria cartella dati app.",
+        "google_drive_access_denied": "Google Drive ha negato l’accesso alla cartella dati app. Controlla criteri dell’account e consenso OAuth.",
+        "google_drive_bad_request": "Google Drive ha rifiutato la richiesta. Controlla la configurazione di archiviazione appDataFolder.",
+        "google_drive_api_not_enabled": "Google Drive API non è abilitata per questo progetto OAuth. Abilitala in Google Cloud Console e riprova.",
+        "google_drive_rate_limited": "È stato raggiunto il limite di frequenza di Google Drive. Attendi un momento e riprova.",
+        "google_drive_quota_exceeded": "Quota o limite di archiviazione Google Drive raggiunti per l’oggetto di sincronizzazione.",
+        "google_drive_service_unavailable": "Google Drive è temporaneamente non disponibile. Riprova più tardi.",
+        "google_oauth_denied": "L’accesso Google è stato negato.",
+        "google_oauth_admin_policy": "Un criterio amministratore di Google Workspace ha bloccato questa app. Chiedi l’autorizzazione all’amministratore o usa un altro account.",
+        "google_oauth_bad_client": "L’ID client OAuth Google non è valido o non è un client per app desktop.",
+        "google_oauth_missing_scope": "Google ha rifiutato lo scope richiesto. Configura il consenso per drive.appdata e accedi di nuovo.",
+        "google_oauth_consent_required": "Google richiede il consenso utente per questa app. Configura la schermata di consenso e accedi di nuovo.",
+        "google_oauth_invalid_request": "Google ha rifiutato la richiesta OAuth. Controlla ID client, redirect URI e configurazione app desktop.",
+        "google_oauth_start_failed": "Impossibile avviare l’accesso Google nel browser.",
+        "google_oauth_redirect_failed": "Impossibile ricevere il redirect localhost di Google OAuth. Controlla firewall locale o restrizioni del browser.",
+        "google_oauth_exchange_failed": "Google ha rifiutato lo scambio del codice di autorizzazione. Accedi di nuovo.",
+        "google_oauth_refresh_failed": "Impossibile rinnovare il refresh token Google. Accedi di nuovo.",
+        "google_oauth_empty_response": "Google non ha restituito il token OAuth richiesto.",
+        "google_oauth_invalid_state": "Lo state OAuth Google non corrisponde. Accedi di nuovo.",
+        "google_oauth_timeout": "Accesso Google scaduto. Accedi di nuovo."
       },
       "toast": {
         "check_failed_title": "Controllo remoto fallito",
@@ -454,7 +493,11 @@
         "microsoft_oauth_code_title": "Accesso Microsoft avviato",
         "microsoft_oauth_code_description": "Inserisci il codice {{code}} su {{url}} entro {{seconds}} secondi. La pagina di verifica è stata aperta.",
         "microsoft_oauth_success_title": "Token Microsoft salvato",
-        "microsoft_oauth_failed_title": "Accesso Microsoft non riuscito"
+        "microsoft_oauth_failed_title": "Accesso Microsoft non riuscito",
+        "google_oauth_url_title": "Accesso Google aperto",
+        "google_oauth_url_description": "Completa l’accesso nel browser entro {{seconds}} secondi. OxideTerm attende il redirect localhost.",
+        "google_oauth_success_title": "Token Google salvato",
+        "google_oauth_failed_title": "Accesso Google non riuscito"
       },
       "progress": {
         "checking": "Controllo dello snapshot remoto",
@@ -557,7 +600,8 @@
         "gist_id": "ID Gist o https://gist.github.com/...",
         "github_access_token": "Token GitHub con accesso gist",
         "github_oauth_client_id": "OAuth App client ID per accesso dispositivo",
-        "microsoft_oauth_client_id": "ID client dell’app Microsoft Entra"
+        "microsoft_oauth_client_id": "ID client dell’app Microsoft Entra",
+        "google_oauth_client_id": "ID client OAuth desktop Google"
       },
       "history_empty": "Nessuna cronologia di sincronizzazione.",
       "native_description": "Sincronizzazione cifrata self-hosted per OxideTerm.",

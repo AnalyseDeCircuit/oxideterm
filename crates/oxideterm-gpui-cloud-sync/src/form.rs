@@ -30,9 +30,11 @@ pub fn cloud_sync_settings_from_form(form: &CloudSyncFormDraft) -> (CloudSyncSet
         .unwrap_or(60.0);
     let auth_mode = match form.backend_type {
         BackendType::Dropbox => AuthMode::Bearer,
-        BackendType::GithubGist | BackendType::Git | BackendType::OneDrive | BackendType::S3 => {
-            AuthMode::None
-        }
+        BackendType::GithubGist
+        | BackendType::Git
+        | BackendType::OneDrive
+        | BackendType::GoogleDrive
+        | BackendType::S3 => AuthMode::None,
         BackendType::Webdav | BackendType::HttpJson => form.auth_mode.clone(),
     };
     let settings = CloudSyncSettings {
@@ -40,7 +42,10 @@ pub fn cloud_sync_settings_from_form(form: &CloudSyncFormDraft) -> (CloudSyncSet
         auth_mode,
         endpoint: if matches!(
             form.backend_type,
-            BackendType::Dropbox | BackendType::GithubGist | BackendType::OneDrive
+            BackendType::Dropbox
+                | BackendType::GithubGist
+                | BackendType::OneDrive
+                | BackendType::GoogleDrive
         ) {
             String::new()
         } else {
@@ -48,7 +53,11 @@ pub fn cloud_sync_settings_from_form(form: &CloudSyncFormDraft) -> (CloudSyncSet
         },
         namespace: if matches!(
             form.backend_type,
-            BackendType::GithubGist | BackendType::Git | BackendType::OneDrive | BackendType::S3
+            BackendType::GithubGist
+                | BackendType::Git
+                | BackendType::OneDrive
+                | BackendType::GoogleDrive
+                | BackendType::S3
         ) {
             form.namespace.trim().to_string()
         } else {
@@ -79,6 +88,7 @@ pub fn cloud_sync_settings_from_form(form: &CloudSyncFormDraft) -> (CloudSyncSet
         },
         github_oauth_client_id: form.github_oauth_client_id.trim().to_string(),
         microsoft_oauth_client_id: form.microsoft_oauth_client_id.trim().to_string(),
+        google_oauth_client_id: form.google_oauth_client_id.trim().to_string(),
         auto_upload_enabled: form.auto_upload_enabled,
         auto_upload_interval_mins: interval,
         default_conflict_strategy: form.default_conflict_strategy.clone(),
@@ -189,6 +199,22 @@ mod tests {
         assert_eq!(settings.auth_mode, AuthMode::None);
         assert!(settings.endpoint.is_empty());
         assert_eq!(settings.git_repository, "abcdef123456");
+    }
+
+    #[test]
+    fn settings_from_form_clears_hidden_google_drive_endpoint() {
+        let mut form = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
+        form.backend_type = BackendType::GoogleDrive;
+        form.auth_mode = AuthMode::Bearer;
+        form.endpoint = "https://dav.example.test".to_string();
+        form.google_oauth_client_id = "google-client-id".to_string();
+
+        let (settings, _) = cloud_sync_settings_from_form(&form);
+
+        assert_eq!(settings.backend_type, BackendType::GoogleDrive);
+        assert_eq!(settings.auth_mode, AuthMode::None);
+        assert!(settings.endpoint.is_empty());
+        assert_eq!(settings.google_oauth_client_id, "google-client-id");
     }
 
     #[test]

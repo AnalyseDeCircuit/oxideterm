@@ -193,6 +193,16 @@ impl SelectAnchorId {
                 | Self::NewConnectionSerialFlowControl
         )
     }
+
+    pub fn is_cloud_sync_select_trigger(self) -> bool {
+        // Cloud Sync select popups are root-mounted like settings popups. Keep
+        // their closed trigger rect warm so the first pointer click can open
+        // immediately instead of waiting for a second prepaint cycle.
+        matches!(
+            self,
+            Self::CloudSyncBackend | Self::CloudSyncAuthMode | Self::CloudSyncConflictStrategy
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -718,5 +728,15 @@ mod tests {
 
         assert!(!SelectAnchorId::SettingsLanguage.is_new_connection_select_trigger());
         assert!(!SelectAnchorId::AiModelSelector.is_new_connection_select_trigger());
+    }
+
+    #[test]
+    fn cloud_sync_select_anchor_ids_are_tracked_as_trigger_anchors() {
+        assert!(SelectAnchorId::CloudSyncBackend.is_cloud_sync_select_trigger());
+        assert!(SelectAnchorId::CloudSyncAuthMode.is_cloud_sync_select_trigger());
+        assert!(SelectAnchorId::CloudSyncConflictStrategy.is_cloud_sync_select_trigger());
+
+        assert!(!SelectAnchorId::SettingsLanguage.is_cloud_sync_select_trigger());
+        assert!(!SelectAnchorId::AiModelSelector.is_cloud_sync_select_trigger());
     }
 }
