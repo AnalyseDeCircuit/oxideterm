@@ -269,6 +269,16 @@ impl WorkspaceApp {
                     .replace("{{count}}", &dialog.selected_forward_ids.len().to_string()),
             );
         }
+        if dialog.include_serial_profiles {
+            items.push(
+                self.i18n
+                    .t("export.content_summary_serial_profiles")
+                    .replace(
+                        "{{count}}",
+                        &self.connection_store.serial_profiles().len().to_string(),
+                    ),
+            );
+        }
         if dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty() {
             let labels = OXIDE_APP_SETTINGS_SECTIONS
                 .iter()

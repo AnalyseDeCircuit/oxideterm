@@ -181,7 +181,13 @@
       "toggle_managed_keys_restore": "Khôi phục khóa được quản lý vào OxideTerm để kết nối dùng khóa được quản lý tiếp tục xác thực qua kho khóa.",
       "toggle_managed_keys_extract": "Khóa được quản lý sẽ được nhập qua tệp khóa dự phòng nhúng thay vì ghi vào kho khóa được quản lý.",
       "restore_managed_key_passphrases": "Khôi phục passphrase khóa được quản lý",
-      "restore_managed_key_passphrases_description": "Nếu tắt, OxideTerm sẽ hỏi passphrase khóa được quản lý khi cần."
+      "restore_managed_key_passphrases_description": "Nếu tắt, OxideTerm sẽ hỏi passphrase khóa được quản lý khi cần.",
+      "contains_serial_profiles": "Hồ sơ serial:",
+      "serial_profiles_count": "{{count}} hồ sơ",
+      "section_serial_profiles": "Hồ sơ serial ({{count}})",
+      "toggle_serial_profiles": "Nhập hồ sơ kết nối serial",
+      "imported_serial_profiles": "Đã nhập {{count}} hồ sơ serial.",
+      "skipped_serial_profiles": "Đã bỏ qua hồ sơ serial"
     },
     "reconnect": {
       "title": "Kết nối lại phiên",
@@ -697,6 +703,9 @@
     "summary_managed_keys": "{{count}} khóa được quản lý",
     "summary_managed_key_passphrases": "{{count}} passphrase khóa được quản lý",
     "warning_passwords_included": "{{count}} mật khẩu máy chủ đã lưu sẽ được bao gồm trong tệp mã hóa.",
-    "security_passwords_included": "Mật khẩu máy chủ đã lưu được bao gồm trong tệp .oxide đã mã hóa này"
+    "security_passwords_included": "Mật khẩu máy chủ đã lưu được bao gồm trong tệp .oxide đã mã hóa này",
+    "include_serial_profiles": "Bao gồm hồ sơ serial",
+    "include_serial_profiles_description": "Xuất các hồ sơ kết nối serial đã lưu ({{count}} hồ sơ).",
+    "content_summary_serial_profiles": "Hồ sơ serial: {{count}} hồ sơ"
   }
 }

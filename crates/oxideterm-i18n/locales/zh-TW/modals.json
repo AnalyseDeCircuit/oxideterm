@@ -181,7 +181,13 @@
       "toggle_managed_keys_restore": "將託管金鑰恢復到 OxideTerm，使使用託管金鑰的連線繼續走密鑰庫認證。",
       "toggle_managed_keys_extract": "託管金鑰會按嵌入的備用金鑰檔案匯入，而不是寫入託管金鑰庫。",
       "restore_managed_key_passphrases": "恢復託管金鑰密語",
-      "restore_managed_key_passphrases_description": "關閉後，OxideTerm 會在需要時再詢問託管金鑰密語。"
+      "restore_managed_key_passphrases_description": "關閉後，OxideTerm 會在需要時再詢問託管金鑰密語。",
+      "contains_serial_profiles": "序列埠設定：",
+      "serial_profiles_count": "{{count}} 個設定",
+      "section_serial_profiles": "序列埠設定（{{count}} 個）",
+      "toggle_serial_profiles": "匯入序列埠連線設定",
+      "imported_serial_profiles": "已匯入 {{count}} 個序列埠設定。",
+      "skipped_serial_profiles": "已略過序列埠設定"
     },
     "reconnect": {
       "title": "重新連線工作階段",
@@ -697,6 +703,9 @@
     "summary_managed_keys": "{{count}} 個託管金鑰",
     "summary_managed_key_passphrases": "{{count}} 個託管金鑰密語",
     "warning_passwords_included": "將包含 {{count}} 個已儲存的伺服器密碼到加密檔案中。",
-    "security_passwords_included": "已儲存的伺服器密碼會包含在這個加密的 .oxide 檔案中"
+    "security_passwords_included": "已儲存的伺服器密碼會包含在這個加密的 .oxide 檔案中",
+    "include_serial_profiles": "包含序列埠設定",
+    "include_serial_profiles_description": "匯出已儲存的序列埠連線設定（{{count}} 個）。",
+    "content_summary_serial_profiles": "序列埠設定：{{count}} 個"
   }
 }

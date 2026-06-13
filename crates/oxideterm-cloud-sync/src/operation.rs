@@ -950,6 +950,7 @@ impl CloudSyncOperationService {
                             selected_forward_ids: None,
                             conflict_strategy: ImportConflictStrategy::Merge,
                             import_forwards: false,
+                            import_serial_profiles: false,
                             import_portable_secrets: true,
                             restore_managed_keys: true,
                             restore_managed_key_passphrases: true,

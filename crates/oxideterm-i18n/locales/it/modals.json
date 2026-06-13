@@ -181,7 +181,13 @@
       "toggle_managed_keys_restore": "Ripristina le chiavi gestite in OxideTerm affinché le connessioni con chiavi gestite continuino a usare l’autenticazione basata su vault.",
       "toggle_managed_keys_extract": "Le chiavi gestite saranno importate tramite file chiave di fallback incorporati invece che nel keystore gestito.",
       "restore_managed_key_passphrases": "Ripristina passphrase delle chiavi gestite",
-      "restore_managed_key_passphrases_description": "Se disattivato, OxideTerm chiederà la passphrase della chiave gestita quando necessario."
+      "restore_managed_key_passphrases_description": "Se disattivato, OxideTerm chiederà la passphrase della chiave gestita quando necessario.",
+      "contains_serial_profiles": "Profili seriali:",
+      "serial_profiles_count": "{{count}} profilo/i",
+      "section_serial_profiles": "Profili seriali ({{count}})",
+      "toggle_serial_profiles": "Importa profili di connessione seriale",
+      "imported_serial_profiles": "Importati {{count}} profilo/i seriale/i.",
+      "skipped_serial_profiles": "Profili seriali saltati"
     },
     "reconnect": {
       "title": "Riconnetti Sessione",
@@ -697,6 +703,9 @@
     "summary_managed_keys": "{{count}} chiave/i gestita/e",
     "summary_managed_key_passphrases": "{{count}} passphrase di chiave gestita",
     "warning_passwords_included": "{{count}} password server salvate saranno incluse nel file cifrato.",
-    "security_passwords_included": "Le password server salvate sono incluse in questo file .oxide cifrato"
+    "security_passwords_included": "Le password server salvate sono incluse in questo file .oxide cifrato",
+    "include_serial_profiles": "Includi profili seriali",
+    "include_serial_profiles_description": "Esporta i profili di connessione seriale salvati ({{count}} profilo/i).",
+    "content_summary_serial_profiles": "Profili seriali: {{count}} profilo/i"
   }
 }

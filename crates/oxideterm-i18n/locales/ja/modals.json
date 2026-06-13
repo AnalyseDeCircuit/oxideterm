@@ -181,7 +181,13 @@
       "toggle_managed_keys_restore": "管理キーを OxideTerm に復元し、管理キー接続が引き続きボールトベース認証を使えるようにします。",
       "toggle_managed_keys_extract": "管理キーは管理キーストアではなく、埋め込みフォールバックキーファイルとしてインポートされます。",
       "restore_managed_key_passphrases": "管理キーのパスフレーズを復元",
-      "restore_managed_key_passphrases_description": "無効にすると、OxideTerm は必要時に管理キーのパスフレーズを要求します。"
+      "restore_managed_key_passphrases_description": "無効にすると、OxideTerm は必要時に管理キーのパスフレーズを要求します。",
+      "contains_serial_profiles": "シリアルプロファイル:",
+      "serial_profiles_count": "{{count}} 件のプロファイル",
+      "section_serial_profiles": "シリアルプロファイル（{{count}} 件）",
+      "toggle_serial_profiles": "シリアル接続プロファイルをインポート",
+      "imported_serial_profiles": "{{count}} 件のシリアルプロファイルをインポートしました。",
+      "skipped_serial_profiles": "シリアルプロファイルをスキップ"
     },
     "reconnect": {
       "title": "セッションに再接続",
@@ -697,6 +703,9 @@
     "summary_managed_keys": "{{count}} 個の管理キー",
     "summary_managed_key_passphrases": "{{count}} 個の管理キーパスフレーズ",
     "warning_passwords_included": "{{count}} 個の保存済みサーバーパスワードが暗号化ファイルに含まれます。",
-    "security_passwords_included": "保存済みサーバーパスワードはこの暗号化された .oxide ファイル内に含まれます"
+    "security_passwords_included": "保存済みサーバーパスワードはこの暗号化された .oxide ファイル内に含まれます",
+    "include_serial_profiles": "シリアルプロファイルを含める",
+    "include_serial_profiles_description": "保存済みのシリアル接続プロファイルをエクスポートします（{{count}} 件）。",
+    "content_summary_serial_profiles": "シリアルプロファイル: {{count}} 件"
   }
 }

@@ -181,7 +181,13 @@
       "toggle_managed_keys_restore": "Restaurer les clés gérées dans OxideTerm afin que les connexions concernées continuent d’utiliser l’authentification adossée au coffre.",
       "toggle_managed_keys_extract": "Les clés gérées seront importées via les fichiers de clés intégrés de secours au lieu d’être écrites dans le magasin de clés gérées.",
       "restore_managed_key_passphrases": "Restaurer les phrases secrètes des clés gérées",
-      "restore_managed_key_passphrases_description": "Si désactivé, OxideTerm demandera la phrase secrète de la clé gérée lorsque nécessaire."
+      "restore_managed_key_passphrases_description": "Si désactivé, OxideTerm demandera la phrase secrète de la clé gérée lorsque nécessaire.",
+      "contains_serial_profiles": "Profils série :",
+      "serial_profiles_count": "{{count}} profil(s)",
+      "section_serial_profiles": "Profils série ({{count}})",
+      "toggle_serial_profiles": "Importer les profils de connexion série",
+      "imported_serial_profiles": "{{count}} profil(s) série importé(s).",
+      "skipped_serial_profiles": "Profils série ignorés"
     },
     "reconnect": {
       "title": "Reconnecter la session",
@@ -697,6 +703,9 @@
     "summary_managed_keys": "{{count}} clé(s) gérée(s)",
     "summary_managed_key_passphrases": "{{count}} phrase(s) secrète(s) de clé gérée",
     "warning_passwords_included": "{{count}} mot(s) de passe serveur enregistrés seront inclus dans le fichier chiffré.",
-    "security_passwords_included": "Les mots de passe serveur enregistrés sont inclus dans ce fichier .oxide chiffré"
+    "security_passwords_included": "Les mots de passe serveur enregistrés sont inclus dans ce fichier .oxide chiffré",
+    "include_serial_profiles": "Inclure les profils série",
+    "include_serial_profiles_description": "Exporte les profils de connexion série enregistrés ({{count}} profil(s)).",
+    "content_summary_serial_profiles": "Profils série : {{count}} profil(s)"
   }
 }

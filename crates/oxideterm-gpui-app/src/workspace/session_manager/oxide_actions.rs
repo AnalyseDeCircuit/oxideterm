@@ -486,6 +486,7 @@ impl WorkspaceApp {
                 selected_forward_ids: None,
                 conflict_strategy: dialog.conflict_strategy,
                 import_forwards: dialog.import_forwards,
+                import_serial_profiles: dialog.import_serial_profiles,
                 import_portable_secrets: dialog.import_portable_secrets,
                 restore_managed_keys: dialog.restore_managed_keys,
                 restore_managed_key_passphrases: dialog.restore_managed_key_passphrases,
@@ -580,6 +581,8 @@ impl WorkspaceApp {
                                     }
                                     dialog.import_app_settings = preview.has_app_settings;
                                     dialog.import_quick_commands = preview.has_quick_commands;
+                                    dialog.import_serial_profiles =
+                                        preview.serial_profiles_count > 0;
                                     dialog.import_plugin_settings =
                                         preview.plugin_settings_count > 0;
                                     dialog.import_forwards = preview.total_forwards > 0;
@@ -768,6 +771,8 @@ impl WorkspaceApp {
             skipped_app_settings: result.skipped_app_settings,
             imported_quick_commands: result.imported_quick_commands,
             skipped_quick_commands: result.skipped_quick_commands,
+            imported_serial_profiles: result.envelope.imported_serial_profiles,
+            skipped_serial_profiles: result.envelope.skipped_serial_profiles,
             quick_commands_errors: result.quick_commands_errors.clone(),
             imported_plugin_settings: result.imported_plugin_settings,
             skipped_plugin_settings: result.skipped_plugin_settings,
@@ -784,6 +789,16 @@ impl WorkspaceApp {
         }
         if result_view.imported_quick_commands > 0 {
             parts.push(format!("{} 条快捷命令", result_view.imported_quick_commands));
+        }
+        if result_view.imported_serial_profiles > 0 {
+            parts.push(
+                self.i18n
+                    .t("modals.import.imported_serial_profiles")
+                    .replace(
+                        "{{count}}",
+                        &result_view.imported_serial_profiles.to_string(),
+                    ),
+            );
         }
         if result_view.imported_plugin_settings > 0 {
             parts.push(format!(
@@ -841,6 +856,7 @@ impl WorkspaceApp {
         !self.oxide_export_connection_ids(dialog).is_empty()
             || (dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty())
             || dialog.include_quick_commands
+            || dialog.include_serial_profiles
             || (dialog.include_plugin_settings && !dialog.selected_plugin_ids.is_empty())
             || dialog.include_portable_secrets
     }
@@ -1146,6 +1162,19 @@ impl WorkspaceApp {
         } else {
             None
         };
+        let serial_profiles_json = if dialog.include_serial_profiles {
+            Some(
+                serde_json::to_string_pretty(
+                    &self
+                        .connection_store
+                        .export_serial_profiles_snapshot()
+                        .map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?,
+            )
+        } else {
+            None
+        };
         let plugin_settings = if dialog.include_plugin_settings {
             crate::workspace::plugin_settings_store::load_plugin_settings(self.settings_store.path())?
                 .into_iter()
@@ -1217,6 +1246,7 @@ impl WorkspaceApp {
             include_managed_key_passphrases: dialog.include_managed_key_passphrases,
             app_settings_json,
             quick_commands_json,
+            serial_profiles_json,
             plugin_settings,
             portable_secrets,
             forwards,

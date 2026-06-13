@@ -214,6 +214,8 @@ pub(super) struct OxideImportResultView {
     pub(super) skipped_app_settings: bool,
     pub(super) imported_quick_commands: usize,
     pub(super) skipped_quick_commands: bool,
+    pub(super) imported_serial_profiles: usize,
+    pub(super) skipped_serial_profiles: usize,
     pub(super) quick_commands_errors: Vec<String>,
     pub(super) imported_plugin_settings: usize,
     pub(super) skipped_plugin_settings: bool,
@@ -340,6 +342,7 @@ pub(super) struct OxideImportDialogState {
     pub(super) selected_app_settings_sections: HashSet<String>,
     pub(super) expanded_app_settings_sections: HashSet<String>,
     pub(super) import_quick_commands: bool,
+    pub(super) import_serial_profiles: bool,
     pub(super) import_plugin_settings: bool,
     pub(super) selected_plugin_ids: HashSet<String>,
     pub(super) import_forwards: bool,
@@ -380,6 +383,7 @@ impl Default for OxideImportDialogState {
                 .collect(),
             expanded_app_settings_sections: HashSet::new(),
             import_quick_commands: true,
+            import_serial_profiles: true,
             import_plugin_settings: true,
             selected_plugin_ids: HashSet::new(),
             import_forwards: true,
@@ -448,6 +452,7 @@ pub(super) struct OxideExportDialogState {
     pub(super) selected_app_settings_sections: HashSet<String>,
     pub(super) include_local_terminal_env_vars: bool,
     pub(super) include_quick_commands: bool,
+    pub(super) include_serial_profiles: bool,
     pub(super) include_plugin_settings: bool,
     pub(super) plugin_groups: HashMap<String, usize>,
     pub(super) selected_plugin_ids: HashSet<String>,
@@ -484,6 +489,7 @@ impl Default for OxideExportDialogState {
                 .collect(),
             include_local_terminal_env_vars: false,
             include_quick_commands: true,
+            include_serial_profiles: true,
             include_plugin_settings: true,
             plugin_groups: HashMap::new(),
             selected_plugin_ids: HashSet::new(),
@@ -526,6 +532,7 @@ impl std::fmt::Debug for OxideExportDialogState {
                 &self.include_local_terminal_env_vars,
             )
             .field("include_quick_commands", &self.include_quick_commands)
+            .field("include_serial_profiles", &self.include_serial_profiles)
             .field("include_plugin_settings", &self.include_plugin_settings)
             .field("plugin_groups", &self.plugin_groups)
             .field("selected_plugin_ids", &self.selected_plugin_ids)

@@ -181,7 +181,13 @@
       "toggle_managed_keys_restore": "Restaurar claves gestionadas en OxideTerm para que las conexiones con claves gestionadas sigan usando autenticación respaldada por bóveda.",
       "toggle_managed_keys_extract": "Las claves gestionadas se importarán como archivos de clave incrustados de respaldo en lugar de escribirse en el almacén de claves gestionadas.",
       "restore_managed_key_passphrases": "Restaurar frases de contraseña de claves gestionadas",
-      "restore_managed_key_passphrases_description": "Si se desactiva, OxideTerm pedirá la frase de contraseña de la clave gestionada cuando sea necesario."
+      "restore_managed_key_passphrases_description": "Si se desactiva, OxideTerm pedirá la frase de contraseña de la clave gestionada cuando sea necesario.",
+      "contains_serial_profiles": "Perfiles serie:",
+      "serial_profiles_count": "{{count}} perfil(es)",
+      "section_serial_profiles": "Perfiles serie ({{count}})",
+      "toggle_serial_profiles": "Importar perfiles de conexión serie",
+      "imported_serial_profiles": "Se importaron {{count}} perfil(es) serie.",
+      "skipped_serial_profiles": "Perfiles serie omitidos"
     },
     "reconnect": {
       "title": "Reconectar a sesión",
@@ -697,6 +703,9 @@
     "summary_managed_keys": "{{count}} clave(s) gestionadas",
     "summary_managed_key_passphrases": "{{count}} frase(s) de contraseña de claves gestionadas",
     "warning_passwords_included": "Se incluirán {{count}} contraseña(s) de servidor guardadas en el archivo cifrado.",
-    "security_passwords_included": "Las contraseñas de servidor guardadas se incluyen dentro de este archivo .oxide cifrado"
+    "security_passwords_included": "Las contraseñas de servidor guardadas se incluyen dentro de este archivo .oxide cifrado",
+    "include_serial_profiles": "Incluir perfiles serie",
+    "include_serial_profiles_description": "Exporta perfiles de conexión serie guardados ({{count}} perfil(es)).",
+    "content_summary_serial_profiles": "Perfiles serie: {{count}} perfil(es)"
   }
 }

@@ -4,7 +4,8 @@ mod tests {
     use std::fs;
 
     use crate::{
-        PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SavedUpstreamProxyProtocol,
+        PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SaveSerialProfileRequest,
+        SavedUpstreamProxyProtocol, SerialFlowControl,
     };
     use russh::keys::ssh_key::LineEnding;
     use rand10::{rand_core::UnwrapErr, rngs::SysRng};
@@ -163,6 +164,75 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn export_import_roundtrip_preserves_serial_profiles() {
+        let mut source = temp_store("serial-profile-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+        let profile = source
+            .upsert_serial_profile(SaveSerialProfileRequest {
+                id: Some("serial-1".to_string()),
+                name: "Lab console".to_string(),
+                port_path: "/dev/cu.usbserial-1".to_string(),
+                flow_control: Some(SerialFlowControl::Hardware),
+                ..SaveSerialProfileRequest::default()
+            })
+            .unwrap();
+        let serial_profiles_json = serde_json::to_string_pretty(
+            &source.export_serial_profiles_snapshot().unwrap(),
+        )
+        .unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions {
+                serial_profiles_json: Some(serial_profiles_json),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        assert_eq!(file.metadata.serial_profiles_count, Some(1));
+
+        let preview = preview_oxide_import(
+            &temp_store("serial-profile-preview"),
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(preview.serial_profiles_count, 1);
+
+        let mut target = temp_store("serial-profile-target");
+        let imported = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(imported.imported_serial_profiles, 1);
+        assert_eq!(target.serial_profiles(), &[profile]);
+
+        let mut skipped_target = temp_store("serial-profile-skip-target");
+        let skipped = apply_oxide_import_with_options(
+            &mut skipped_target,
+            &bytes,
+            "secret!",
+            OxideImportOptions {
+                import_serial_profiles: false,
+                ..OxideImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(skipped.imported_serial_profiles, 0);
+        assert_eq!(skipped.skipped_serial_profiles, 1);
+        assert!(skipped_target.serial_profiles().is_empty());
     }
 
     #[test]

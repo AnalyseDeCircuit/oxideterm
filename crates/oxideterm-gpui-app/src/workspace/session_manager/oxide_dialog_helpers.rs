@@ -183,6 +183,7 @@ fn oxide_export_has_selected_content(dialog: &OxideExportDialogState) -> bool {
     oxide_export_connection_count(dialog) > 0
         || (dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty())
         || dialog.include_quick_commands
+        || dialog.include_serial_profiles
         || (dialog.include_plugin_settings && oxide_export_selected_plugin_setting_count(dialog) > 0)
         || dialog.include_portable_secrets
 }
@@ -196,6 +197,7 @@ fn oxide_import_has_selected_content(dialog: &OxideImportDialogState) -> bool {
             && dialog.import_app_settings
             && !dialog.selected_app_settings_sections.is_empty())
         || (preview.has_quick_commands && dialog.import_quick_commands)
+        || (preview.serial_profiles_count > 0 && dialog.import_serial_profiles)
         || (preview.plugin_settings_count > 0
             && dialog.import_plugin_settings
             && !dialog.selected_plugin_ids.is_empty())
