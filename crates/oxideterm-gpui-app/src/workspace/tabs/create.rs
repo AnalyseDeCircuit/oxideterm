@@ -514,6 +514,28 @@ impl WorkspaceApp {
         Ok(session_id)
     }
 
+    pub(crate) fn open_temporary_ssh_launch(
+        &mut self,
+        launch: TemporarySshLaunch,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
+        let title = launch.title();
+        let auth = match launch.password {
+            Some(password) => AuthMethod::password_secret(password),
+            None => AuthMethod::Agent,
+        };
+        let config = SshConfig {
+            host: launch.host,
+            port: launch.port,
+            username: launch.username,
+            auth,
+            strict_host_key_checking: true,
+            ..SshConfig::default()
+        };
+        self.create_ssh_terminal_tab_for_node(None, config, title, None, None, None, window, cx)
+    }
+
     pub(super) fn expand_saved_connection_tree(
         &mut self,
         saved_connection_id: &str,

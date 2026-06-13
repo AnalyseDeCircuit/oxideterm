@@ -27,6 +27,7 @@ mod quick_commands;
 mod report;
 mod secrets;
 mod settings;
+mod ssh;
 mod write_guard;
 
 use clap::Parser;
@@ -62,6 +63,7 @@ fn run(cli: Cli) -> CliResult<i32> {
     match cli.command {
         Command::Settings(command) => settings::run(command),
         Command::Connections(command) => connections::run(command),
+        Command::Ssh(args) => ssh::run(args),
         Command::Forwards(command) => forwards::run(command),
         Command::QuickCommands(command) => quick_commands::run(command),
         Command::Plugins(command) => plugins::run(command),

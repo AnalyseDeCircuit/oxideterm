@@ -47,6 +47,7 @@ oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
 oxideterm-session-adapter = { path = "../oxideterm-session-adapter" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
+oxideterm-ssh-launch = { path = "../oxideterm-ssh-launch" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }

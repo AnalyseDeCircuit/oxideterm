@@ -7381,6 +7381,7 @@ dependencies = [
  "oxideterm-portable-runtime",
  "oxideterm-quick-commands",
  "oxideterm-settings",
+ "oxideterm-ssh-launch",
  "serde",
  "serde_json",
  "tokio",
@@ -7582,6 +7583,7 @@ dependencies = [
  "oxideterm-settings-model",
  "oxideterm-sftp",
  "oxideterm-ssh",
+ "oxideterm-ssh-launch",
  "oxideterm-terminal",
  "oxideterm-terminal-recording",
  "oxideterm-theme",
@@ -7979,6 +7981,14 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "oxideterm-ssh-launch"
+version = "2.0.0-gpui-preview.7"
+dependencies = [
+ "serde",
  "zeroize",
 ]
 

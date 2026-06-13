@@ -132,6 +132,7 @@ use oxideterm_ssh::{
     ReconnectPhase, ReconnectSnapshot, ReconnectTiming, SshConfig, SshConnectionRegistry,
     SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
 };
+use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{
     LocalPtyConfig, SerialSessionConfig, ShellInfo, SshSessionConfig, TelnetSessionConfig,
     TerminalCommandMarkDetectionSource, TerminalCursorShape,

@@ -36,6 +36,19 @@ fn parses_connections_show_json() {
 }
 
 #[test]
+fn parses_temporary_ssh_launch() {
+    let cli = Cli::parse_from(["oxideterm", "ssh", "alice@example.com", "-p", "2222"]);
+    match cli.command {
+        Command::Ssh(args) => {
+            assert_eq!(args.target, "alice@example.com");
+            assert_eq!(args.port, 2222);
+            assert!(!args.password_stdin);
+        }
+        _ => panic!("expected ssh command"),
+    }
+}
+
+#[test]
 fn parses_cloud_sync_status() {
     let cli = Cli::parse_from(["oxideterm", "cloud-sync", "status", "--json"]);
     match cli.command {

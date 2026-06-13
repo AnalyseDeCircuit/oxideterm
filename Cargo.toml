@@ -41,6 +41,7 @@ members = [
   "crates/oxideterm-settings-model",
   "crates/oxideterm-session-adapter",
   "crates/oxideterm-sftp",
+  "crates/oxideterm-ssh-launch",
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",
   "crates/oxideterm-terminal-recording",

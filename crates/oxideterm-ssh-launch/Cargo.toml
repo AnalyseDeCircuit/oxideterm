@@ -1,0 +1,9 @@
+[package]
+name = "oxideterm-ssh-launch"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+zeroize.workspace = true

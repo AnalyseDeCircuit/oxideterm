@@ -36,6 +36,8 @@ pub use quick_commands::*;
 pub use secrets::*;
 pub use settings::*;
 
+use crate::ssh::SshLaunchArgs;
+
 // Root CLI parsing stays UI-free. Domain-specific argument DTOs live in
 // sibling modules so each command surface owns its own schema.
 #[derive(Debug, Parser)]
@@ -225,6 +227,8 @@ pub enum Command {
     Settings(SettingsCommand),
     #[command(about = "Inspect and manage saved SSH connections and groups")]
     Connections(ConnectionsCommand),
+    #[command(about = "Open a temporary SSH terminal in the native GUI")]
+    Ssh(SshLaunchArgs),
     #[command(about = "Inspect and manage saved SSH port forwards")]
     Forwards(ForwardsCommand),
     #[command(name = "quick-commands")]

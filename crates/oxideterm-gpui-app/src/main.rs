@@ -10,7 +10,7 @@ mod keybindings;
 mod platform;
 mod workspace;
 
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use gpui::{App, AppContext, Application, Bounds, Timer, actions, px, size};
 use gpui_component::Root;
@@ -92,6 +92,10 @@ actions!(
 
 fn main() {
     oxideterm_acp_adapter::run_from_env_if_requested();
+    let ssh_launch_path = ssh_launch_path_arg().unwrap_or_else(|error| {
+        eprintln!("failed to read SSH launch argument: {error}");
+        std::process::exit(2);
+    });
 
     // Match Tauri's startup ordering: portable detection and instance locking
     // happen before any settings or connection stores choose their data path.
@@ -101,10 +105,14 @@ fn main() {
         eprintln!("failed to initialize OxideTerm portable runtime: {error}");
         std::process::exit(1);
     }
+    let ssh_launch = read_ssh_launch_file(ssh_launch_path).unwrap_or_else(|error| {
+        eprintln!("failed to read SSH launch request: {error}");
+        std::process::exit(2);
+    });
 
     Application::new()
         .with_assets(NativeAssets)
-        .run(|cx: &mut App| {
+        .run(move |cx: &mut App| {
             app_icon::install_runtime_app_icon();
 
             let startup_settings = SettingsStore::load_default()
@@ -168,6 +176,13 @@ fn main() {
                         )
                     })
                 });
+                if let Some(launch) = ssh_launch.clone()
+                    && let Err(error) = workspace.update(cx, |workspace, cx| {
+                        workspace.open_temporary_ssh_launch(launch, window, cx)
+                    })
+                {
+                    eprintln!("failed to open temporary SSH launch: {error}");
+                }
                 cx.new(|cx| Root::new(workspace, window, cx))
             }) {
                 eprintln!(
@@ -179,6 +194,38 @@ fn main() {
                 cx.quit();
             }
         });
+}
+
+fn ssh_launch_path_arg() -> Result<Option<PathBuf>, String> {
+    let mut args = std::env::args_os();
+    let _program = args.next();
+    while let Some(arg) = args.next() {
+        if arg == "--ssh-launch-file" {
+            return args
+                .next()
+                .map(PathBuf::from)
+                .map(Some)
+                .ok_or_else(|| "--ssh-launch-file requires a path".to_string());
+        }
+    }
+    Ok(None)
+}
+
+fn read_ssh_launch_file(
+    path: Option<PathBuf>,
+) -> Result<Option<oxideterm_ssh_launch::TemporarySshLaunch>, String> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    // The CLI handoff file may contain a stdin password. Delete it only after
+    // the app owns the single-instance lock, otherwise a second process would
+    // discard a request that it cannot open.
+    let _ = std::fs::remove_file(&path);
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| format!("invalid SSH launch request: {error}"))
 }
 
 fn quit(_: &Quit, cx: &mut App) {
